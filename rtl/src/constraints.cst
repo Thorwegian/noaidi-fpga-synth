@@ -1,0 +1,71 @@
+//
+// clock
+//
+IO_LOC  "clk" 4; // PIN04_SYS_CLK: 27 MHz (generates warning PR1014)
+IO_PORT "clk" IO_TYPE=LVCMOS33;
+
+// see https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/example/unbox.html#pll_clk
+// note: when using rPLL IP to scale up frequency then the 'lock' signal does not get asserted
+//       when the clock is used of these pins
+//IO_LOC  "clk" 10; // PIN10_5351CKP: pll_clock 0: 27 MHz (does not generate warning PR1014)
+//IO_LOC  "clk" 11; // PIN10_5351CKN: pll_clock 1: 27 MHz (generates warning PR1014)
+//IO_LOC  "clk" 13; // PIN13_HSPI_SCLK: pll_clock 2: 27 MHz (generates warning PR1014)
+
+//
+// buttons
+//
+IO_LOC  "rst" 87; // PIN87_MODE1_KEY2
+IO_PORT "rst" IO_TYPE=LVCMOS33;
+
+//IO_LOC  "btn1" 88; // PIN88_MODE0_KEY1
+//IO_PORT "btn1" IO_TYPE=LVCMOS33;
+
+//
+// LEDs
+//
+IO_LOC "led[5]" 20;
+IO_PORT "led[5]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "led[4]" 19;
+IO_PORT "led[4]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "led[3]" 18;
+IO_PORT "led[3]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "led[2]" 17;
+IO_PORT "led[2]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "led[1]" 16;
+IO_PORT "led[1]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC "led[0]" 15;
+IO_PORT "led[0]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+
+//
+// UART
+//
+IO_LOC  "uart_tx" 69; // PIN69_SYS_TX
+IO_LOC  "uart_rx" 70; // PIN70_SYS_RX
+
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
+IO_PORT "uart_rx" IO_TYPE=LVCMOS33;
+
+//
+// SPI flash
+//
+//IO_LOC  "flash_cs_n" 60; // MSPI_CS
+//IO_PORT "flash_cs_n" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+//IO_LOC  "flash_clk" 59; // MSPI_CLK
+//IO_PORT "flash_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+//IO_LOC  "flash_miso" 62; // MSPI_DO
+//IO_PORT "flash_miso" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+//IO_LOC  "flash_mosi" 61; // MSPI_DI
+//IO_PORT "flash_mosi" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+//
+// SD card
+//
+//IO_LOC "sd_clk" 83; // PIN83_SDIO_CLK
+//IO_LOC "sd_cmd" 82; // PIN82_SDIO_CMD (MOSI)
+//IO_LOC "sd_dat[0]" 84; // PIN84_SDIO_D0 (MISO)
+//IO_LOC "sd_dat[1]" 85; // IN85_SDIO_D1
+//IO_LOC "sd_dat[2]" 80; // PIN80_SDIO_D2
+//IO_LOC "sd_dat[3]" 81; // PIN81_SDIO_D3
