@@ -97,7 +97,7 @@ module top (
     // Frequency control word for A4 = 440 Hz
     // freq_word = 440 * 2^32 / 96000 ≈ 19,685,000
     localparam FREQ_440HZ = 32'd19685000;
-    localparam WAVE_SAW    = 2'b00;
+    localparam WAVE_SAW    = 3'b000;
 
     logic [31:0] osc_phase;
     logic [15:0] osc_out;
