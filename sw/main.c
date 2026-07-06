@@ -1,56 +1,77 @@
 // ================================================================================ //
-// The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
-// Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
-// Licensed under the BSD-3-Clause license, see LICENSE for details.                //
-// SPDX-License-Identifier: BSD-3-Clause                                            //
+// Tang Nano 20K Synthesizer — NEORV32 Application Firmware
+//
+// UART0: Console interface (19200 baud) — debug output, configuration
+// UART1: MIDI input (31250 baud) — receives MIDI from external keyboard
+//
+// Currently: echo test — MIDI bytes received on UART1 are printed to UART0.
+// Future: MIDI parser, voice allocator, coefficient engine, patch management.
 // ================================================================================ //
-
-
-/**********************************************************************//**
- * @file hello_world/main.c
- * @author Stephan Nolting
- * @brief Classic 'hello world' demo program.
- **************************************************************************/
 
 #include <neorv32.h>
 
+//--------------------------------------------------------------------
+// Configuration
+//--------------------------------------------------------------------
+#define CONSOLE_BAUD  19200
+#define MIDI_BAUD     31250
 
-/**********************************************************************//**
- * @name User configuration
- **************************************************************************/
-/**@{*/
-/** UART BAUD rate */
-#define BAUD_RATE 19200
-/**@}*/
-
-
-
-/**********************************************************************//**
- * Main function; prints some fancy stuff via UART.
- *
- * @note This program requires the UART interface to be synthesized.
- *
- * @return 0 if execution was successful
- **************************************************************************/
+//--------------------------------------------------------------------
+// Main
+//--------------------------------------------------------------------
 int main() {
 
-  // capture all exceptions and give debug info via UART
-  // this is not required, but keeps us safe
-  neorv32_rte_setup();
+    // Capture exceptions with debug info via UART
+    neorv32_rte_setup();
 
-  // setup UART at default baud rate, no interrupts
-  neorv32_uart0_setup(BAUD_RATE, 0);
+    // Setup UART0 as console
+    neorv32_uart0_setup(CONSOLE_BAUD, 0);
 
-  while(1) {
-    // print project logo via UART
-    neorv32_aux_print_logo();
+    // Setup UART1 for MIDI input (RX only, no interrupts initially)
+    neorv32_uart1_setup(MIDI_BAUD, 0);
 
-    // say hello
-    neorv32_uart0_puts("Hello world! :)\n");
+    // Print banner
+    neorv32_uart0_puts("\n========================================\n");
+    neorv32_uart0_puts(" Tang Nano 20K — Polyphonic Synthesizer\n");
+    neorv32_uart0_puts("========================================\n");
+    neorv32_uart0_puts("UART0 (console): 19200 baud\n");
+    neorv32_uart0_puts("UART1 (MIDI in): 31250 baud\n");
+    neorv32_uart0_puts("\nReady. Waiting for MIDI...\n\n");
 
-    neorv32_aux_delay_ms(27000000, 3000);
-  }
+    // Main loop: echo MIDI bytes to console
+    while (1) {
+        // Check if a byte is available on UART1 (MIDI)
+        if (neorv32_uart1_char_received()) {
+            char midi_byte = neorv32_uart1_char_get();
+            neorv32_uart0_puts("MIDI: 0x");
+            neorv32_aux_print_hex_byte((uint8_t)midi_byte);
+            neorv32_uart0_puts("\n");
+        }
 
-  return 0;
+        // Check console for commands
+        if (neorv32_uart0_char_received()) {
+            char cmd = neorv32_uart0_char_get();
+
+            switch (cmd) {
+                case '?':
+                case 'h':
+                    neorv32_uart0_puts("Commands:\n");
+                    neorv32_uart0_puts("  h / ?  — this help\n");
+                    neorv32_uart0_puts("  i      — system info\n");
+                    break;
+
+                case 'i':
+                    neorv32_uart0_puts("System clock: 98.304 MHz (MS5351)\n");
+                    neorv32_uart0_puts("IMEM: 16 KB, DMEM: 8 KB\n");
+                    neorv32_uart0_puts("UART0: console, UART1: MIDI\n");
+                    break;
+
+                default:
+                    neorv32_uart0_puts("Unknown command. 'h' for help.\n");
+                    break;
+            }
+        }
+    }
+
+    return 0;
 }
