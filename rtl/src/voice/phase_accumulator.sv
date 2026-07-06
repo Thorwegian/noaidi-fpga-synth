@@ -1,19 +1,18 @@
 //--------------------------------------------------------------------
-// phase_accumulator.sv — 32-bit DDS phase accumulator
+// phase_accumulator.sv — 24-bit Q0.24 DDS phase accumulator
 //
-// Simple direct digital synthesis core. On each sample_strobe,
-// accumulates freq_word into phase. 32-bit width gives ~0.011 Hz
-// resolution at 48 kHz sample rate (2^32 / 48000).
+// Phase wraps on overflow → phase ∈ [0, 1) naturally.
+// freq_word is Q0.24: f * 2^24 / fs
 //
-// Phase wraps naturally at 2^32 — no explicit wrap logic needed.
+// 24 bits gives 0.20 cents resolution at 50 Hz.
 //--------------------------------------------------------------------
 
 module phase_accumulator (
-    input  wire        clk,
-    input  wire        rst_n,
-    input  wire        strobe,       // sample rate strobe (~48 kHz)
-    input  wire [31:0] freq_word,    // Q32.0 frequency control word
-    output reg  [31:0] phase         // Q32.0 current phase
+    input  wire            clk,
+    input  wire            rst_n,
+    input  wire            strobe,
+    input  wire [23:0]     freq_word,
+    output logic [23:0]    phase
 );
 
     always @(posedge clk or negedge rst_n) begin

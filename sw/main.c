@@ -42,15 +42,13 @@ int main() {
     while (1) {
         // Check if a byte is available on UART1 (MIDI)
         if (neorv32_uart1_char_received()) {
-            char midi_byte = neorv32_uart1_char_get();
-            neorv32_uart0_puts("MIDI: 0x");
-            neorv32_aux_print_hex_byte((uint8_t)midi_byte);
-            neorv32_uart0_puts("\n");
+            char midi_byte = neorv32_uart1_getc();
+            neorv32_uart0_printf("MIDI: 0x%02x\n", (uint8_t)midi_byte);
         }
 
         // Check console for commands
         if (neorv32_uart0_char_received()) {
-            char cmd = neorv32_uart0_char_get();
+            char cmd = neorv32_uart0_getc();
 
             switch (cmd) {
                 case '?':

@@ -1,38 +1,40 @@
 //--------------------------------------------------------------------
 // osc_bank.sv — Multi-waveform oscillator bank
 //
-// Currently: Sawtooth from phase accumulator top bits.
-// Future: Pulse, triangle, sine, supersaw mixer.
+// Fixed-point: phase Q0.24 (24-bit, [0,1)), audio Q3.14 (18-bit signed)
 //
-// Waveform selection (per-voice parameter):
-//   000 = sawtooth
+// Waveform selection:
+//   000 = sawtooth (full-scale ±1.0)
 //   001 = pulse    (future)
-//   010 = triangle (future, integrated pulse)
-//   011 = sine (future, approximate from integrated triangle)
+//   010 = triangle (future)
+//   011 = sine     (future)
 //   100 = supersaw (future)
 //--------------------------------------------------------------------
 
 module osc_bank (
-    input  wire        clk,
-    input  wire        strobe,
-    input  wire [31:0] phase_in,     // from phase accumulator
-    input  wire [2:0]  waveform,     // waveform select
-    input  wire [15:0] pwm_width,    // pulse width (for pulse waveform)
-    output wire [15:0] osc_out       // Q1.15 signed (-32768 to +32767)
+    input  wire            clk,
+    input  wire            strobe,
+    input  wire [23:0]     phase_in,
+    input  wire [2:0]      waveform,
+    input  wire [15:0]     pwm_width,
+    output logic signed [17:0] osc_out   // Q3.14
 );
 
     //----------------------------------------------------------------
-    // Naive sawtooth: top 16 bits of phase, converted to signed
+    // Sawtooth: 2*phase - 1  →  full-scale ±1.0 in Q3.14
     //
-    // phase[31:16] ranges 0 to 65535 (unsigned)
-    // Output: subtract 32768 to center around 0 → signed [-32768, +32767]
+    //   offset  = phase_fp - 2^23          (25-bit signed, [-2^23, 2^23-1])
+    //   osc_out = offset >>> 9             (Q3.14, [-2^14, 2^14-1])
     //----------------------------------------------------------------
-    wire [15:0] naive_saw = phase_in[31:16];
-    wire signed [15:0] saw_signed = naive_saw - 16'd32768;
+    wire signed [24:0] phase_ofs;
+    assign phase_ofs = {1'b0, phase_in} - 25'sh800000;
+
+    wire signed [17:0] saw_q14;
+    assign saw_q14 = phase_ofs >>> 9;   // truncates to 18-bit Q3.14
 
     //----------------------------------------------------------------
-    // Waveform mux (saw only for Milestone 1)
+    // Waveform mux (saw only for now)
     //----------------------------------------------------------------
-    assign osc_out = saw_signed;
+    assign osc_out = saw_q14;
 
 endmodule

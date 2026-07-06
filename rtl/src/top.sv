@@ -87,20 +87,18 @@ module top (
     );
 
     //================================================================
-    // Voice Pipeline — Phase Accumulator + Oscillator
+    // Voice Pipeline — Phase Accumulator + Oscillator + SVF
     //
-    // Single-voice, hardcoded 440 Hz sawtooth (Milestone 1).
-    // 96 kHz sample rate makes PolyBLEP unnecessary —
-    // aliasing folds above 38 kHz, inaudible behind the SVF.
+    // Fixed-point: phase Q0.24, audio Q3.14 throughout.
+    // Saw full-scale ±1.0, SVF lowpass 500 Hz Q=1.0.
     //================================================================
 
-    // Frequency control word for A4 = 440 Hz
-    // freq_word = 440 * 2^32 / 96000 ≈ 19,685,000
-    localparam FREQ_440HZ = 32'd19685000;
-    localparam WAVE_SAW    = 3'b000;
+    localparam [23:0] FREQ_440HZ = 24'd76896;  // 440 Hz, Q0.24
+    localparam WAVE_SAW   = 3'b000;
 
-    logic [31:0] osc_phase;
-    logic [15:0] osc_out;
+    logic [23:0]        osc_phase;
+    logic signed [17:0] osc_out;     // Q3.14 sawtooth
+    logic signed [17:0] svf_out;     // Q3.14 lowpass
 
     phase_accumulator u_phase (
         .clk       (sys_clk),
@@ -119,9 +117,28 @@ module top (
         .osc_out   (osc_out)
     );
 
-    // Sign-extend 16-bit oscillator to 24-bit, then attenuate -18 dB
-    wire signed [23:0] audio_full = {osc_out[15], osc_out, 7'd0};
-    wire [23:0] audio_sample = audio_full >>> 3;
+    // Bilinear SVF — fc=500 Hz, Q=1.0
+    // K:         Q0.24 unsigned, tan(pi*500/96000) * 2^24
+    // inv_res_K: Q3.14 signed,   (1/Q+K) * 2^14
+    // inv_div:   Q3.14 signed,   1/(1+K/Q+K²) * 2^14
+    localparam [23:0] SVF_K          = 24'd274541;
+    localparam signed [17:0] SVF_INV_RES_K = 18'sd16652;
+    localparam signed [17:0] SVF_INV_DIV   = 18'sd16116;
+
+    svf u_svf (
+        .clk        (sys_clk),
+        .rst_n      (sys_rst_n),
+        .strobe     (sample_strobe),
+        .sample_in  (osc_out),
+        .K          (SVF_K),
+        .inv_res_K  (SVF_INV_RES_K),
+        .inv_div    (SVF_INV_DIV),
+        .sample_out (svf_out)
+    );
+
+    // Convert Q3.14 (18-bit) → 24-bit I2S: sign-extend, −18 dBFS
+    wire signed [23:0] tmp = svf_out;          // sign-extend 18→24
+    wire signed [23:0] audio_sample = tmp <<< 6;
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
@@ -140,13 +157,14 @@ module top (
     //================================================================
 
     // Remote reset via UART Break condition
-    // Detects if console RX line is held low continuously (~1.66ms)
+    // RX low > 8 bit-times at 4800 baud (~1.67 ms) — soft BREAK workaround
+    // since the USB-to-serial chip can't send a hard BREAK.
     reg [24:0] break_timer = 0;
     reg break_rst_n = 1'b1;
 
     always @(posedge sys_clk) begin
         if (uart_rx == 1'b0) begin
-            if (break_timer < 'd45000) begin
+            if (break_timer < 'd163840) begin
                 break_timer <= break_timer + 1'b1;
                 break_rst_n <= 1'b1;
             end else begin

@@ -55,11 +55,11 @@ soc/
 │   ├── Makefile              # Build invocation
 │   ├── build.tcl             # Gowin synthesis script
 │   └── src/
-│       ├── top.v             # Top-level: I2S, NEORV32, voice pipeline
+│       ├── top.sv            # Top-level: I2S, NEORV32, voice pipeline
 │       ├── i2s_clock_gen.sv  # BCLK, LRCLK, sample_strobe generator
 │       ├── constraints.cst   # Physical pin constraints
 │       ├── constraints.sdc   # Timing constraints
-│       ├── i2s/i2s_tx.v      # I2S transmitter (24-bit)
+│       ├── i2s/i2s_tx.sv     # I2S transmitter (24-bit)
 │       └── voice/            # Voice pipeline modules
 ├── sw/
 │   ├── Makefile              # Firmware build
@@ -71,7 +71,7 @@ soc/
 
 ```bash
 git clone git@github.com:Thorwegian/tang32-neorv32-soc.git soc
-git clone https://github.com/stnolting/neorv32.git
+git clone git@github.com:Thorwegian/neorv32.git
 
 # Configure MS5351 (one-time)
 # Connect to BL616 CLI at 115200 baud before loading FPGA bitstream:
@@ -82,7 +82,8 @@ make synth               # Synthesize + place & route
 make write-sram          # Program FPGA (SRAM)
 
 cd ../sw
-make                     # Build NEORV32 application
+make exe                 # Build NEORV32 application
+make upload              # Upload via serial port
 ```
 
 ## Implementation Status
@@ -98,17 +99,24 @@ make                     # Build NEORV32 application
 - [ ] Voice pipeline: pulse/triangle/supersaw waveforms
 - [ ] Voice pipeline: bilinear SVF (12 dB/oct)
 - [ ] Voice pipeline: ADSR envelopes
+- [ ] Voice pipeline: filter key tracking
+- [ ] Voice pipeline: filter envelope amount
+- [ ] Voice pipeline: velocity sensitivity
+- [ ] Voice pipeline: LFO (pitch, filter, amplitude)
 - [ ] TDM sequencer + BRAM banking
 - [ ] Wishbone peripheral integration
 - [ ] Firmware: MIDI parser + voice allocation
-- [ ] Firmware: coefficient engine
+- [ ] Firmware: coefficient engine (K, Q, envelope params)
+- [ ] Firmware: parameter smoothing / slew limiting
 - [ ] Polyphony (4 then 16 voices)
 - [ ] Stereo output with per-voice pan
 - [ ] 24 dB/oct filter cascade
 - [ ] Supersaw
+- [ ] Pitch bend, mod wheel
+- [ ] Portamento / glide
 
 ## References
 
 - Lazzarini & Timoney, "Improving the Chamberlin Digital State Variable Filter"
-- NEORV32: https://github.com/stnolting/neorv32
+- NEORV32: git@github.com:Thorwegian/neorv32.git
 - Tang Nano 20K: https://wiki.sipeed.com/tang-nano-20k

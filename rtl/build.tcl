@@ -19,10 +19,10 @@ foreach file [lsort [glob ../../neorv32/rtl/core/*.vhd]] {
 #--------------------------------------------------------------------
 
 # Top level
-add_file src/top.v
+add_file src/top.sv
 
 # I2S
-add_file src/i2s/i2s_tx.v
+add_file src/i2s/i2s_tx.sv
 add_file src/i2s_clock_gen.sv
 
 # Synthesizer core
@@ -32,7 +32,7 @@ add_file src/voice/osc_bank.sv
 # add_file src/voice/polyblep_saw.sv
 # add_file src/voice/polyblep_pulse.sv
 # add_file src/voice/triangle_gen.sv
-# add_file src/voice/svf.sv
+add_file src/voice/svf.sv
 # add_file src/voice/envelope.sv
 # add_file src/voice/vca.sv
 # add_file src/voice/voice_top.sv
