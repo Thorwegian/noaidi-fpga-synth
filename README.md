@@ -61,6 +61,11 @@ soc/
 │       ├── constraints.sdc   # Timing constraints
 │       ├── i2s/i2s_tx.sv     # I2S transmitter (24-bit)
 │       └── voice/            # Voice pipeline modules
+│           ├── phase_accumulator.sv
+│           ├── osc_bank.sv
+│           ├── svf.sv        # Bilinear SVF (Lazzarini-Timoney)
+│           ├── k_sweep.sv    # Coefficient LUT sweep
+│           └── k_lut.hex     # Precomputed tan() LUT (320 entries)
 ├── sw/
 │   ├── Makefile              # Firmware build
 │   └── main.c                # Application firmware
@@ -97,7 +102,7 @@ make upload              # Upload via serial port
 - [x] Voice pipeline: phase accumulator
 - [x] Voice pipeline: naive sawtooth oscillator
 - [ ] Voice pipeline: pulse/triangle/supersaw waveforms
-- [ ] Voice pipeline: bilinear SVF (12 dB/oct)
+- [x] Voice pipeline: bilinear SVF (12 dB/oct)
 - [ ] Voice pipeline: ADSR envelopes
 - [ ] Voice pipeline: filter key tracking
 - [ ] Voice pipeline: filter envelope amount
