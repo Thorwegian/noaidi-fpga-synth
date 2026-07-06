@@ -26,13 +26,11 @@ add_file src/i2s/i2s_tx.sv
 add_file src/i2s_clock_gen.sv
 
 # Synthesizer core
-# add_file src/synth_core.sv
 add_file src/voice/phase_accumulator.sv
 add_file src/voice/osc_bank.sv
-# add_file src/voice/polyblep_saw.sv
-# add_file src/voice/polyblep_pulse.sv
-# add_file src/voice/triangle_gen.sv
 add_file src/voice/svf.sv
+add_file src/voice/k_sweep.sv
+# add_file src/voice/triangle_gen.sv
 # add_file src/voice/envelope.sv
 # add_file src/voice/vca.sv
 # add_file src/voice/voice_top.sv

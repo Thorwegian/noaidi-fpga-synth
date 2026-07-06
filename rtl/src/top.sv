@@ -5,7 +5,7 @@
 //   98.304 MHz MS5351 → sys_clk (pin 10, no FPGA PLL)
 //   sys_clk → NEORV32 SoC (UART0=console, UART1=MIDI)
 //   sys_clk → i2s_clock_gen (→ BCLK, 96 kHz LRCLK, sample_strobe)
-//   I2S TX ← phase_accumulator → osc_bank (naive saw, no PolyBLEP)
+//   I2S TX ← phase_accumulator → osc_bank (naive saw)
 //
 // Audio output: MAX98357A I2S amplifier on Tang Nano 20K
 //   HP_BCK  (pin 56), HP_WS  (pin 55), HP_DIN (pin 54), PA_EN (pin 51)
@@ -117,28 +117,35 @@ module top (
         .osc_out   (osc_out)
     );
 
-    // Bilinear SVF — fc=500 Hz, Q=1.0
-    // K:         Q0.24 unsigned, tan(pi*500/96000) * 2^24
-    // inv_res_K: Q3.14 signed,   (1/Q+K) * 2^14
-    // inv_div:   Q3.14 signed,   1/(1+K/Q+K²) * 2^14
-    localparam [23:0] SVF_K          = 24'd274541;
-    localparam signed [17:0] SVF_INV_RES_K = 18'sd16652;
-    localparam signed [17:0] SVF_INV_DIV   = 18'sd16116;
+    // Bilinear SVF — fc sweeps via k_sweep LUT, Q=1.0
+    // All three coefficients come from the LUT.
+    logic [23:0]        svf_K;          // Q0.24 unsigned
+    logic signed [17:0] svf_inv_res_K;  // Q3.14 signed
+    logic signed [17:0] svf_inv_div;    // Q3.14 signed
+
+    k_sweep u_sweep (
+        .clk       (sys_clk),
+        .rst_n     (sys_rst_n),
+        .strobe    (sample_strobe),
+        .K_out     (svf_K),
+        .inv_res_K (svf_inv_res_K),
+        .inv_div   (svf_inv_div)
+    );
 
     svf u_svf (
         .clk        (sys_clk),
         .rst_n      (sys_rst_n),
         .strobe     (sample_strobe),
         .sample_in  (osc_out),
-        .K          (SVF_K),
-        .inv_res_K  (SVF_INV_RES_K),
-        .inv_div    (SVF_INV_DIV),
+        .K          (svf_K),
+        .inv_res_K  (svf_inv_res_K),
+        .inv_div    (svf_inv_div),
         .sample_out (svf_out)
     );
 
-    // Convert Q3.14 (18-bit) → 24-bit I2S: sign-extend, −18 dBFS
+    // Convert Q3.14 (18-bit) → 24-bit I2S: sign-extend, −24 dBFS
     wire signed [23:0] tmp = svf_out;          // sign-extend 18→24
-    wire signed [23:0] audio_sample = tmp <<< 6;
+    wire signed [23:0] audio_sample = tmp <<< 4;
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin

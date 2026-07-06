@@ -13,7 +13,7 @@ A time-division multiplexed polyphonic synthesizer running on the Sipeed Tang Na
   │
   └── TDM Voice Pipeline (one pipeline, N voices, time-multiplexed)
         ├── Phase Accumulator (32-bit DDS)
-        ├── Oscillator (saw/pulse/tri/supersaw — no PolyBLEP at 96 kHz)
+        ├── Oscillator (saw/pulse/tri/supersaw)
         ├── Bilinear SVF × 2 (12 or 24 dB/oct)
         ├── ADSR Envelope × 2 (amp + filter mod)
         ├── Stereo VCA with per-voice pan
