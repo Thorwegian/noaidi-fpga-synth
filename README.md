@@ -11,14 +11,15 @@ A time-division multiplexed polyphonic synthesizer running on the Sipeed Tang Na
   │     ├── UART1 (MIDI input, 31250 baud)
   │     └── Wishbone Bus → Synth Peripheral (param/state BRAMs)
   │
-  └── TDM Voice Pipeline (one pipeline, N voices, time-multiplexed)
-        ├── Phase Accumulator (32-bit DDS)
-        ├── Oscillator (saw/pulse/tri/supersaw)
-        ├── Bilinear SVF × 2 (12 or 24 dB/oct)
-        ├── ADSR Envelope × 2 (amp + filter mod)
-        ├── Stereo VCA with per-voice pan
+  └── Voice Pipeline (single voice for now, TDM to come)
+        ├── Phase Accumulator (24-bit Q0.24 DDS)
+        ├── Oscillator (sawtooth, Q3.14)
+        ├── Coefficient Computer (cents → K, K², inv_res_K, inv_div)
+        │     ├── k_lut     — 2560-entry K+K² LUT, 256/oct, linear interp
+        │     ├── DSP       — K/Q multiply (1 DSP)
+        │     └── NR recip  — Newton-Raphson 1/(1+K²+K/Q), 4-cycle pipeline
+        ├── Bilinear SVF (12 dB/oct, Lazzarini-Timoney)
         └── I2S TX → MAX98357A DAC → Audio Out
-```
 
 ## Pinout
 
@@ -64,8 +65,14 @@ soc/
 │           ├── phase_accumulator.sv
 │           ├── osc_bank.sv
 │           ├── svf.sv        # Bilinear SVF (Lazzarini-Timoney)
-│           ├── k_sweep.sv    # Coefficient LUT sweep
-│           └── k_lut.hex     # Precomputed tan() LUT (320 entries)
+│           ├── k_lut.sv      # K+K² LUT with linear interpolation
+│           ├── k_lut.hex     # Precomputed LUT (2560 entries, 256/octave)
+│           ├── coeff_computer.sv  # Top-level coefficient pipeline
+│           ├── nr_reciprocal.sv   # Newton-Raphson reciprocal (Q3.14)
+│           ├── recip_seed.hex     # NR seed LUT (256 entries)
+│           ├── tb_nr_reciprocal.sv
+│           ├── tb_coeff_computer.sv
+│           └── tb_svf_stability.sv
 ├── sw/
 │   ├── Makefile              # Firmware build
 │   └── main.c                # Application firmware
@@ -83,7 +90,9 @@ git clone git@github.com:Thorwegian/neorv32.git
 #   pll_clk O0=98.304M -s
 
 cd soc/rtl
-make synth               # Synthesize + place & route
+# Headless Gowin requires offscreen Qt (SSH, no X11)
+make synth QT_QPA_PLATFORM=offscreen
+# Or just: make synth   (on desktop with display)
 make write-sram          # Program FPGA (SRAM)
 
 cd ../sw
@@ -103,6 +112,7 @@ make upload              # Upload via serial port
 - [x] Voice pipeline: naive sawtooth oscillator
 - [ ] Voice pipeline: pulse/triangle/supersaw waveforms
 - [x] Voice pipeline: bilinear SVF (12 dB/oct)
+- [x] Coefficient computer (K LUT + NR reciprocal, Q0.24, Q3.14)
 - [ ] Voice pipeline: ADSR envelopes
 - [ ] Voice pipeline: filter key tracking
 - [ ] Voice pipeline: filter envelope amount
