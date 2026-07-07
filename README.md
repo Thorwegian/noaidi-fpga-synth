@@ -20,6 +20,16 @@ A time-division multiplexed polyphonic synthesizer running on the Sipeed Tang Na
         │     └── NR recip  — Newton-Raphson 1/(1+K²+K/Q), 4-cycle pipeline
         ├── Bilinear SVF (12 dB/oct, Lazzarini-Timoney)
         └── I2S TX → MAX98357A DAC → Audio Out
+```
+
+## Scripts
+
+```
+scripts/
+├── gen_k_lut.py              # K+K² LUT hex generator (2560 entries, 256/oct)
+├── coeff_computer_proto.py   # Full pipeline accuracy model (Python)
+└── gen_nr_testvecs.py        # NR reciprocal test vector generator
+```
 
 ## Pinout
 
