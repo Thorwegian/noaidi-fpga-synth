@@ -113,7 +113,7 @@ module top (
         .clk       (sys_clk),
         .strobe    (sample_strobe),
         .phase_in  (osc_phase),
-        .waveform  (WAVE_SAW),
+        .waveform  (WAVE_PULSE),
         .pwm_width (16'd32768),
         .osc_out   (osc_out)
     );
