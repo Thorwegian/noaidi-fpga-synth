@@ -132,8 +132,8 @@ module top (
     localparam [31:0] SWEEP_STEP = 32'd1748;
     reg [31:0] sweep_phase;   // [31:8] = cents, [7:0] = fractional
 
-    // one_over_Q for Q=6.0: 1/6 × 16384 = 2730
-    localparam signed [17:0] ONE_OVER_Q_Q6 = 18'sd2730;
+    // one_over_Q for Q=1.0: 1/1 × 16384 = 16384
+    localparam signed [17:0] ONE_OVER_Q_Q1 = 18'sd16384;
 
     always @(posedge sys_clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
@@ -148,7 +148,7 @@ module top (
         .rst_n         (sys_rst_n),
         .valid_in      (sample_strobe),
         .cents_in      (sweep_phase[31:8]),
-        .one_over_Q_in (ONE_OVER_Q_Q6),
+        .one_over_Q_in (ONE_OVER_Q_Q1),
         .K_out         (svf_K),
         .inv_res_K_out (svf_inv_res_K),
         .inv_div_out   (svf_inv_div),
