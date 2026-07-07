@@ -182,10 +182,11 @@ module top (
     end
 
     //================================================================
-    // NEORV32 SoC
-    // UART0 = Console (19200 baud), UART1 = MIDI (31250 baud)
+    // NEORV32 SoC — disabled during RTL-only iverilog testing.
+    //
+    // Re-enable with Gowin synthesis by removing `ifndef IVERILOG`.
     //================================================================
-
+`ifndef IVERILOG
     // Remote reset via UART Break condition
     // RX low > 8 bit-times at 4800 baud (~1.67 ms) — soft BREAK workaround
     // since the USB-to-serial chip can't send a hard BREAK.
@@ -247,5 +248,10 @@ module top (
         .slink_rx_src_i ('0),
         .xbus_dat_i     ('0)
     );
+`else
+    // Iverilog stubs — hold outputs at safe inactive levels
+    assign uart_tx = 1'b1;
+    assign led     = {4'b1111, pll_locked, sample_strobe};
+`endif
 
 endmodule
