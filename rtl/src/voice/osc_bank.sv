@@ -51,12 +51,33 @@ module osc_bank (
     assign pulse_q14 = (phase_in < pulse_threshold) ? 18'sd16384 : -18'sd16384;
 
     //----------------------------------------------------------------
+    // Triangle: integrate pulse → 100% linear triangle
+    //
+    // One increment per cycle of a bipolar square wave into an
+    // integrator produces a triangle. The 18-bit pulse (±16384) is
+    // sign-extended to 27 bits and accumulated on each strobe.
+    //
+    // Amplitude scales inversely with frequency — textbook behaviour.
+    // At 50 Hz / 50% duty: peak ≈ 15.7M; >>9 → Q3.14 ≈ 0.94.
+    // At 18 Hz / 50% duty: peak ≈ 43.7M; >>9 → Q3.14 ≈ 2.6 (overdrive).
+    //----------------------------------------------------------------
+    logic signed [26:0] tri_acc = 27'sd0;  // 27-bit signed integrator
+
+    always @(posedge clk) begin
+        if (strobe)
+            tri_acc <= tri_acc + $signed({{9{pulse_q14[17]}}, pulse_q14});
+    end
+
+    wire signed [17:0] tri_q14;
+    assign tri_q14 = tri_acc[26:9];  // shift by 9 → 18-bit Q3.14
+    //----------------------------------------------------------------
     // Waveform mux
     //----------------------------------------------------------------
     always @(*) begin
         case (waveform)
             3'b000:  osc_out = saw_q14;
             3'b001:  osc_out = pulse_q14;
+            3'b010:  osc_out = tri_q14;
             default: osc_out = saw_q14;
         endcase
     end
