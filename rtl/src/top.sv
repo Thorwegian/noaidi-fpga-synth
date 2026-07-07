@@ -158,16 +158,10 @@ module top (
         .valid_out     (cc_valid)
     );
 
-    // SVF strobe: rising edge of cc_valid (coefficients ready).
-    // cc_valid is a 1-cycle pulse ~13 cycles after sample_strobe.
-    reg cc_valid_r;
-    always @(posedge sys_clk) cc_valid_r <= cc_valid;
-    wire svf_strobe = cc_valid && !cc_valid_r;
-
     svf u_svf (
         .clk        (sys_clk),
         .rst_n      (sys_rst_n),
-        .strobe     (svf_strobe),
+        .strobe     (sample_strobe),
         .sample_in  (osc_out),
         .K          (svf_K),
         .inv_res_K  (svf_inv_res_K),
