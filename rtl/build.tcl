@@ -3,9 +3,8 @@
 #--------------------------------------------------------------------
 
 set_option -verilog_std sysv2017
-# Note: Gowin Synplify uses "sysv2017" for its SV 2012+ parser.
-# Iverilog uses -g2012. Both support the same SV subset we use
-# (packed structs, typedef, logic, $clog2).
+# Gowin's gw_sh only accepts "sysv2017" — rejects sv2012/sysv/sv2009.
+# This is Synplify's SV 2012+ parser, same feature set as iverilog -g2012.
 set_option -top_module top
 set_device GW2AR-LV18QN88C8/I7 -device_version C
 
