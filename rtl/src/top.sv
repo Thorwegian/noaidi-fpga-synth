@@ -155,10 +155,14 @@ module top (
         .valid_out     (cc_valid)
     );
 
+    // SVF strobe: sample_strobe gated by coeff_computer valid.
+    // Keeps original timing alignment with DSP pipeline.
+    wire svf_strobe = sample_strobe & cc_valid;
+
     svf u_svf (
         .clk        (sys_clk),
         .rst_n      (sys_rst_n),
-        .strobe     (cc_valid),       // coeff_computer valid = SVF strobe
+        .strobe     (svf_strobe),
         .sample_in  (osc_out),
         .K          (svf_K),
         .inv_res_K  (svf_inv_res_K),
