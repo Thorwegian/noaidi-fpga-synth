@@ -1,70 +1,35 @@
 #!/usr/bin/env python3
 """
-Generate the K LUT for the SVF coefficient computer.
-
-K = tan(pi * fc / fs)  where fc = F_MIN * 2^(i / STEPS_PER_OCTAVE)
-
-LUT: 256 entries per octave, 10 octaves (18 Hz – 18.4 kHz).
-Each entry: 24-bit Q0.24 unsigned.
-Linear interpolation between entries for sub-cent accuracy.
-
-Output: src/voice/k_lut.hex — one 24-bit hex value per line.
+Generate K+K² LUT anchored at MIDI D0 (note 14, 18.354 Hz).
+cents = (midi_note - 14) * 100 → LUT index = cents / 256.
 """
-
 import math
 
 FS = 96000.0
-F_MIN = 18.0
+MIDI_ANCHOR = 14     # D0
+F_ANCHOR = 440.0 * (2 ** ((MIDI_ANCHOR - 69) / 12))  # 18.354 Hz
 STEPS_PER_OCTAVE = 256
-OCTAVES = 10
-Q24_SCALE = 1 << 24
+Q14 = 1 << 14
+Q24 = 1 << 24
 
+entries = []
+for i in range(2560):
+    fc = F_ANCHOR * (2 ** (i / STEPS_PER_OCTAVE))
+    K = math.tan(math.pi * fc / FS)
+    K_q24 = round(K * Q24)
+    if K_q24 >= Q24 - 1:
+        break
+    K_q14 = K_q24 >> 10
+    K2_q14 = (K_q14 * K_q14) >> 14
+    packed = (K_q24 << 19) | (K2_q14 & 0x7FFFF)
+    entries.append(packed)
 
-def main():
-    total = STEPS_PER_OCTAVE * OCTAVES
-    lut = []
-    freqs = []
+with open("src/voice/k_lut.hex", "w") as f:
+    for v in entries:
+        f.write(f"{v:011x}\n")
 
-    for i in range(total):
-        fc = F_MIN * (2 ** (i / STEPS_PER_OCTAVE))
-        if fc >= FS / 4:  # K exceeds Q0.24 range
-            break
-        freqs.append(fc)
-        K = math.tan(math.pi * fc / FS)
-        K_q24 = round(K * Q24_SCALE)
-        if K_q24 > Q24_SCALE - 1:
-            break
-        lut.append(K_q24)
-
-    # Write hex file
-    with open("src/voice/k_lut.hex", "w") as f:
-        for val in lut:
-            f.write(f"{val:06x}\n")
-
-    # Interpolation accuracy check
-    worst_cents = 0.0
-    worst_fc = 0.0
-    test_points = 10000
-    for j in range(test_points):
-        fc = F_MIN * (2 ** (j / (test_points / OCTAVES)))
-        if fc >= freqs[-1]:
-            break
-        # Interpolate
-        frac = math.log2(fc / F_MIN) * STEPS_PER_OCTAVE
-        idx = int(frac)
-        t = frac - idx
-        K_interp = lut[idx] + t * (lut[min(idx + 1, len(lut) - 1)] - lut[idx])
-        K_exact = math.tan(math.pi * fc / FS)
-        K_exact_q24 = K_exact * Q24_SCALE
-        error_cents = abs(1200 * math.log2(K_exact_q24 / K_interp)) if K_interp > 0 else float("inf")
-        if error_cents > worst_cents:
-            worst_cents = error_cents
-            worst_fc = fc
-
-    print(f"K LUT: {len(lut)} entries × 24-bit = {len(lut) * 3} bytes ({len(lut) * 3 // 1024} KB)")
-    print(f"Range: {freqs[0]:.1f} Hz – {freqs[-1]:.1f} Hz")
-    print(f"Linear interp worst error: {worst_cents:.3f} cents at {worst_fc:.1f} Hz")
-
-
-if __name__ == "__main__":
-    main()
+octaves = len(entries) / STEPS_PER_OCTAVE
+midi_top = MIDI_ANCHOR + octaves * 12
+print(f"{len(entries)} entries, cent=0 → MIDI {MIDI_ANCHOR} ({F_ANCHOR:.1f} Hz)")
+print(f"Top: MIDI {midi_top:.0f} ({F_ANCHOR*2**octaves:.0f} Hz, {octaves:.1f} octaves)")
+print(f"Size: {len(entries)*43//8} bytes (~{len(entries)*43//18432+1} BRAMs)")
