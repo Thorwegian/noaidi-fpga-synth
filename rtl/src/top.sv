@@ -95,6 +95,7 @@ module top (
 
     localparam [23:0] FREQ_440HZ = 24'd76896;  // 440 Hz, Q0.24
     localparam WAVE_SAW   = 3'b000;
+    localparam WAVE_PULSE = 3'b001;
 
     logic [23:0]        osc_phase;
     logic signed [17:0] osc_out;     // Q3.14 sawtooth
