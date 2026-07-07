@@ -139,7 +139,10 @@ module top (
         if (!sys_rst_n) begin
             sweep_phase <= 0;
         end else if (sample_strobe) begin
-            sweep_phase <= sweep_phase + SWEEP_STEP;
+            if (sweep_phase[31:8] >= 24'd655200)  // near end of sweep
+                sweep_phase <= 0;
+            else
+                sweep_phase <= sweep_phase + SWEEP_STEP;
         end
     end
 
