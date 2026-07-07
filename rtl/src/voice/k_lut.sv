@@ -1,73 +1,75 @@
 //--------------------------------------------------------------------
-// k_lut.sv — K coefficient LUT with linear interpolation
+// k_lut.sv — K+K² LUT with linear interpolation
 //
-// Maps cents (note × 100, 262144 steps/10 octaves) to K in Q0.24.
+// Maps cents (note×100, 262144 steps/10 octaves) to K and K².
+// Uses SystemVerilog packed struct for clean access.
 //
-// LUT: 2560 entries × 24-bit = 7.5 KB (~4 BRAM blocks)
-// Interpolation: linear between adjacent entries, ~0.08 cents error.
+// Entry: {K[23:0] Q0.24, K2[17:0] Q3.14}
+// 2560 entries × 42 bits = 13.4 KB (~6 BRAM blocks)
+// Linear interp between entries: ~0.08 cents error.
 //
-// Throughput: 1 read per cycle (BRAM read + 1-cycle interp).
-//
-// Input:  24-bit cents value (0 = 18 Hz, max = 2560 × 256 = top of range)
-// Output: 24-bit K in Q0.24 unsigned
+// Throughput: 1 read per cycle (BRAM read + interp in next cycle).
 //--------------------------------------------------------------------
 
 module k_lut (
     input  logic                clk,
     input  logic                valid_in,
-    input  logic [23:0]         cents_in,    // 0 = 18 Hz, linearly scaled
+    input  logic [23:0]         cents_in,
     output logic [23:0]         K_out,       // Q0.24 unsigned
+    output logic signed [17:0]  K2_out,      // Q3.14 signed
     output logic                valid_out
 );
 
-    localparam LUT_ENTRIES = 2560;
-    localparam STEPS_PER_OCTAVE = 256;
-    localparam IDX_BITS = $clog2(LUT_ENTRIES);  // 12 bits
+    localparam ENTRIES = 2560;
+    localparam IDX_BITS = $clog2(ENTRIES);
 
-    // LUT ROM
-    logic [23:0] lut [0:LUT_ENTRIES-1];
+    // Packed struct: one BRAM word per entry
+    typedef struct packed {
+        logic [17:0] K2;   // Q3.14 signed
+        logic [23:0] K;    // Q0.24 unsigned
+    } k_entry_t;
+
+    k_entry_t lut [0:ENTRIES-1];
+
+    // Load from hex. File format: {K[23:0], K2[18:0]} packed into
+    // {K2[18:0], K[23:0]} = 42 bits = 11 hex chars per line.
+    // $readmemh loads into packed struct MSB-first.
     initial $readmemh("src/voice/k_lut.hex", lut);
 
-    // Interpolation: cents_in = idx × STEPS_PER_OCTAVE + frac
-    // K = lut[idx] + frac × (lut[idx+1] - lut[idx]) / STEPS_PER_OCTAVE
-    //
-    // In hardware: K = lut[idx] + ((lut[idx+1] - lut[idx]) × frac) >> 8
-    // (since STEPS_PER_OCTAVE = 256 = 2^8)
+    // Interpolation: cents_in = {idx, frac} where frac is 8 bits
+    logic [IDX_BITS-1:0] idx;
+    logic [7:0]          frac;
+    assign idx  = cents_in[23:8];
+    assign frac = cents_in[7:0];
 
-    logic [IDX_BITS-1:0]        idx;
-    logic [7:0]                 frac;    // fractional part, 0–255
+    // Pipeline: stage 1 reads two adjacent entries, stage 2 interpolates
+    k_entry_t e0, e1;
+    logic     valid_r1, valid_r2;
+    logic [7:0] frac_r;
 
-    assign idx  = cents_in[23:8];  // upper bits = LUT index
-    assign frac = cents_in[7:0];   // lower 8 bits = interpolation fraction
-
-    // Pipeline registers
-    logic [23:0]                K0, K1;
-    logic [7:0]                 frac_r;
-    logic                       valid_r1, valid_r2;
-
-    // Stage 1: read two adjacent LUT entries
     always @(posedge clk) begin
         valid_r1 <= valid_in;
         if (valid_in) begin
-            K0 <= lut[idx];
-            K1 <= lut[idx + 1'd1];  // adjacent entry (wraps at end via next line...)
+            e0     <= lut[idx];
+            e1     <= lut[idx + 1'd1];
             frac_r <= frac;
         end
     end
 
-    // Stage 2: linear interpolation
-    // K = K0 + (K1 - K0) × frac >> 8
+    // Linear interpolation: val = e0 + (e1 − e0) × frac / 256
+    // Since frac/256 = frac >> 8 and K is monotonic (e1 >= e0):
+    //   K  = e0.K  + ((e1.K  − e0.K)  * frac) >> 8
+    //   K2 = e0.K2 + ((e1.K2 − e0.K2) * frac) >> 8
+
     always @(posedge clk) begin
         valid_r2 <= valid_r1;
         if (valid_r1) begin
-            // K1 - K0: unsigned delta (K is monotonic increasing so K1 >= K0)
-            K_out <= K0 + (((K1 - K0) * {16'd0, frac_r}) >> 8);
+            K_out  <= e0.K  + (((e1.K  - e0.K)  * {16'd0, frac_r}) >> 8);
+            K2_out <= e0.K2 + (((e1.K2 - e0.K2) * {16'd0, frac_r}) >> 8);
         end
     end
 
-    // Stage 3: output valid
-    always @(posedge clk) begin
+    always @(posedge clk)
         valid_out <= valid_r2;
-    end
 
 endmodule
