@@ -2,7 +2,7 @@
 # Gowin Build Script — Tang Nano 20K Synthesizer
 #--------------------------------------------------------------------
 
-set_option -verilog_std sysv2017
+set_option -verilog_std sv2012
 set_option -top_module top
 set_device GW2AR-LV18QN88C8/I7 -device_version C
 
@@ -25,12 +25,17 @@ add_file src/top.sv
 add_file src/i2s/i2s_tx.sv
 add_file src/i2s_clock_gen.sv
 
-# Synthesizer core
+# Synthesizer core — voice pipeline
 add_file src/voice/phase_accumulator.sv
 add_file src/voice/osc_bank.sv
 add_file src/voice/svf.sv
-add_file src/voice/k_sweep.sv
-# add_file src/voice/triangle_gen.sv
+
+# Coefficient computer
+add_file src/voice/k_lut.sv
+add_file src/voice/nr_reciprocal.sv
+add_file src/voice/coeff_computer.sv
+
+# Future modules (uncomment when ready)
 # add_file src/voice/envelope.sv
 # add_file src/voice/vca.sv
 # add_file src/voice/voice_top.sv
