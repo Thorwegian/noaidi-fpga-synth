@@ -117,25 +117,48 @@ module top (
         .osc_out   (osc_out)
     );
 
-    // Bilinear SVF — fc sweeps via k_sweep LUT, Q=1.0
-    // All three coefficients come from the LUT.
+    // Bilinear SVF — full-range sweep via coeff_computer, Q=6.0
+    //
+    // Sweep: 10 octaves (D0–D10) in ~1 second (96000 samples).
+    // Uses a 32-bit phase accumulator for smooth fractional stepping.
     logic [23:0]        svf_K;          // Q0.24 unsigned
     logic signed [17:0] svf_inv_res_K;  // Q3.14 signed
     logic signed [17:0] svf_inv_div;    // Q3.14 signed
+    logic               cc_valid;
 
-    k_sweep u_sweep (
-        .clk       (sys_clk),
-        .rst_n     (sys_rst_n),
-        .strobe    (sample_strobe),
-        .K_out     (svf_K),
-        .inv_res_K (svf_inv_res_K),
-        .inv_div   (svf_inv_div)
+    // Cents sweep: 10 octaves = 2560 LUT entries × 256 = 655360 units.
+    // 655360 / 96000 ≈ 6.827 units/sample.
+    // With 8 fractional bits: step = round(6.827 × 256) = 1748.
+    localparam [31:0] SWEEP_STEP = 32'd1748;
+    reg [31:0] sweep_phase;   // [31:8] = cents, [7:0] = fractional
+
+    // one_over_Q for Q=6.0: 1/6 × 16384 = 2730
+    localparam signed [17:0] ONE_OVER_Q_Q6 = 18'sd2730;
+
+    always @(posedge sys_clk or negedge sys_rst_n) begin
+        if (!sys_rst_n) begin
+            sweep_phase <= 0;
+        end else if (sample_strobe) begin
+            sweep_phase <= sweep_phase + SWEEP_STEP;
+        end
+    end
+
+    coeff_computer u_coeff (
+        .clk           (sys_clk),
+        .rst_n         (sys_rst_n),
+        .valid_in      (sample_strobe),
+        .cents_in      (sweep_phase[31:8]),
+        .one_over_Q_in (ONE_OVER_Q_Q6),
+        .K_out         (svf_K),
+        .inv_res_K_out (svf_inv_res_K),
+        .inv_div_out   (svf_inv_div),
+        .valid_out     (cc_valid)
     );
 
     svf u_svf (
         .clk        (sys_clk),
         .rst_n      (sys_rst_n),
-        .strobe     (sample_strobe),
+        .strobe     (cc_valid),       // coeff_computer valid = SVF strobe
         .sample_in  (osc_out),
         .K          (svf_K),
         .inv_res_K  (svf_inv_res_K),
