@@ -93,7 +93,7 @@ module top (
     // Saw full-scale ±1.0, SVF lowpass 500 Hz Q=1.0.
     //================================================================
 
-    localparam [23:0] FREQ_500HZ = 24'd87381;  // 500 Hz, Q0.24
+    localparam [23:0] FREQ_1000HZ = 24'd174762; // 1 kHz, Q0.24
     localparam WAVE_SAW   = 3'b000;
     localparam WAVE_PULSE = 3'b001;
     localparam WAVE_TRI   = 3'b010;
@@ -107,7 +107,7 @@ module top (
         .clk       (sys_clk),
         .rst_n     (sys_rst_n),
         .strobe    (sample_strobe),
-        .freq_word (FREQ_500HZ),
+        .freq_word (FREQ_1000HZ),
         .phase     (osc_phase)
     );
 
@@ -115,8 +115,8 @@ module top (
         .clk       (sys_clk),
         .strobe    (sample_strobe),
         .phase_in  (osc_phase),
-        .freq_word (FREQ_500HZ),
-        .waveform  (WAVE_TRI),
+        .freq_word (FREQ_1000HZ),
+        .waveform  (WAVE_SIN),
         .pwm_width (16'd32768),
         .osc_out   (osc_out)
     );
