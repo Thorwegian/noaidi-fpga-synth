@@ -1,4 +1,4 @@
-# Tang Nano 20K — Polyphonic Subtractive Synthesizer
+# Noaidi — FPGA Polyphonic Synthesizer
 
 A time-division multiplexed polyphonic synthesizer running on the Sipeed Tang Nano 20K FPGA (GW2AR-LV18QN88C8/I7). Subtractive synthesis with Lazzarini-Timoney bilinear state-variable filters, 96 kHz oversampled oscillators, and a NEORV32 RISC-V soft core for application logic.
 
@@ -92,7 +92,7 @@ soc/
 ## Build & Flash
 
 ```bash
-git clone git@github.com:Thorwegian/tang32-neorv32-soc.git soc
+git clone git@github.com:Thorwegian/noaidi-fpga-synth.git
 git clone git@github.com:Thorwegian/neorv32.git
 
 # Configure MS5351 (one-time)

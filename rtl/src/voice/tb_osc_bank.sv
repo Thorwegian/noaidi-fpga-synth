@@ -114,6 +114,29 @@ module tb_osc_bank;
             cycles = cycles + 1;
         end
 
+        // --- Sine check: also monotonic (integrator never stalls) ---
+        $display("=== Sine (011) ===");
+        waveform  = 3'b011;
+        phase     = 0;
+        pwm_width = 16'd32768;
+
+        @(negedge strobe);
+        prev   = out;
+        cycles = 0;
+
+        repeat (250) begin
+            @(negedge strobe);
+            if (out > prev)       slope_sign = 1;
+            else if (out < prev)  slope_sign = -1;
+            else                  slope_sign = 0;
+            if (slope_sign == 0) begin
+                $display("  ERROR: flat at sample %0d, out=%d", cycles, out);
+                errors = errors + 1;
+            end
+            prev   = out;
+            cycles = cycles + 1;
+        end
+
         // --- Summary ---
         if (errors == 0)
             $display("PASS: all checks passed");

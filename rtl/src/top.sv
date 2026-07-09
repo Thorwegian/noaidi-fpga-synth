@@ -93,9 +93,11 @@ module top (
     // Saw full-scale ±1.0, SVF lowpass 500 Hz Q=1.0.
     //================================================================
 
-    localparam [23:0] FREQ_440HZ = 24'd76896;  // 440 Hz, Q0.24
+    localparam [23:0] FREQ_500HZ = 24'd87381;  // 500 Hz, Q0.24
     localparam WAVE_SAW   = 3'b000;
     localparam WAVE_PULSE = 3'b001;
+    localparam WAVE_TRI   = 3'b010;
+    localparam WAVE_SIN   = 3'b011;
 
     logic [23:0]        osc_phase;
     logic signed [17:0] osc_out;     // Q3.14 sawtooth
@@ -105,7 +107,7 @@ module top (
         .clk       (sys_clk),
         .rst_n     (sys_rst_n),
         .strobe    (sample_strobe),
-        .freq_word (FREQ_440HZ),
+        .freq_word (FREQ_500HZ),
         .phase     (osc_phase)
     );
 
@@ -113,7 +115,8 @@ module top (
         .clk       (sys_clk),
         .strobe    (sample_strobe),
         .phase_in  (osc_phase),
-        .waveform  (WAVE_PULSE),
+        .freq_word (FREQ_500HZ),
+        .waveform  (WAVE_TRI),
         .pwm_width (16'd32768),
         .osc_out   (osc_out)
     );
@@ -170,9 +173,11 @@ module top (
         .sample_out (svf_out)
     );
 
-    // Convert Q3.14 (18-bit) → 24-bit I2S: sign-extend, −24 dBFS
-    wire signed [23:0] tmp = svf_out;          // sign-extend 18→24
-    wire signed [23:0] audio_sample = tmp <<< 4;
+    // Registered audio_sample — prevents Gowin bit-map mis-optimisation
+    wire signed [23:0] tmp = {{6{osc_out[17]}}, osc_out};
+    reg  signed [23:0] audio_sample;
+    always @(posedge sys_clk)
+        audio_sample <= {tmp[19:0], 4'd0};
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
@@ -215,7 +220,7 @@ module top (
     logic [31:0] gpio_o;
 
     // LEDs: led[5:2]=high, led[1]=on, led[0]=sample strobe
-    assign led = {4'b1111, pll_locked, sample_strobe};
+    assign led = {4'b1111, pll_locked, pll_locked};
 
     neorv32_top #(
         .CLOCK_FREQUENCY(98304000),      // 98.304 MHz from MS5351
@@ -255,7 +260,7 @@ module top (
 `else
     // Iverilog stubs — hold outputs at safe inactive levels
     assign uart_tx = 1'b1;
-    assign led     = {4'b1111, pll_locked, sample_strobe};
+    assign led     = {4'b1111, pll_locked, pll_locked};
 `endif
 
 endmodule

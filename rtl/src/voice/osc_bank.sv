@@ -19,6 +19,7 @@ module osc_bank (
     input  wire                 clk,
     input  wire                 strobe,
     input  wire        [23:0]   phase_in,
+    input  wire        [23:0]   freq_word,    // Q0.24 f*2^24/fs
     input  wire        [2:0]    waveform,
     input  wire        [15:0]   pwm_width,    // Q0.16: 32768 = 50%
     output logic signed [17:0]  osc_out       // Q3.14
@@ -53,23 +54,42 @@ module osc_bank (
     //----------------------------------------------------------------
     // Triangle: integrate pulse → 100% linear triangle
     //
-    // One increment per cycle of a bipolar square wave into an
-    // integrator produces a triangle. The 18-bit pulse (±16384) is
-    // sign-extended to 27 bits and accumulated on each strobe.
+    // Normalised amplitude: tri_step = sign(pulse) × freq_word.
+    // Peak tri_acc ≈ 2^23 independent of frequency → tri_q14 full-scale.
     //
-    // Amplitude scales inversely with frequency — textbook behaviour.
-    // At 50 Hz / 50% duty: peak ≈ 15.7M; >>9 → Q3.14 ≈ 0.94.
-    // At 18 Hz / 50% duty: peak ≈ 43.7M; >>9 → Q3.14 ≈ 2.6 (overdrive).
+    // Latch strobe into a stable enable flag — Gowin doesn't infer
+    // DFFE from a single-cycle `if (strobe)` gate.
     //----------------------------------------------------------------
-    logic signed [26:0] tri_acc = 27'sd0;  // 27-bit signed integrator
+    logic signed [26:0] tri_acc = 27'sd0;
+    logic               tri_en  = 1'b0;
 
-    always @(posedge clk) begin
-        if (strobe)
-            tri_acc <= tri_acc + $signed({{9{pulse_q14[17]}}, pulse_q14});
-    end
+    always @(posedge clk)
+        tri_en <= strobe;
+
+    // tri_step = +freq_word when pulse high, -freq_word when pulse low
+    wire signed [24:0] tri_step;
+    assign tri_step = pulse_q14[17] ? -$signed({1'b0, freq_word})
+                                    :  $signed({1'b0, freq_word});
+
+    always @(posedge clk)
+        if (tri_en)
+            tri_acc <= tri_acc + {{2{tri_step[24]}}, tri_step};  // extend 25→27
 
     wire signed [17:0] tri_q14;
     assign tri_q14 = tri_acc[26:9];  // shift by 9 → 18-bit Q3.14
+
+    //----------------------------------------------------------------
+    // Sine: integrate triangle → parabolic approximation of sine
+    //----------------------------------------------------------------
+    logic signed [29:0] sin_acc = 30'sd0;
+
+    always @(posedge clk)
+        if (tri_en)  // same strobe gate as triangle
+            sin_acc <= sin_acc + $signed({{12{tri_q14[17]}}, tri_q14});
+
+    wire signed [17:0] sin_q14;
+    assign sin_q14 = sin_acc[29:10];  // shift by 10 → 18-bit Q3.14
+
     //----------------------------------------------------------------
     // Waveform mux
     //----------------------------------------------------------------
@@ -78,6 +98,7 @@ module osc_bank (
             3'b000:  osc_out = saw_q14;
             3'b001:  osc_out = pulse_q14;
             3'b010:  osc_out = tri_q14;
+            3'b011:  osc_out = sin_q14;
             default: osc_out = saw_q14;
         endcase
     end
