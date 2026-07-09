@@ -121,7 +121,7 @@ make upload              # Upload via serial port
 - [x] Voice pipeline: phase accumulator
 - [x] Voice pipeline: naive sawtooth oscillator
 - [x] Voice pipeline: pulse waveform
-- [ ] Voice pipeline: triangle waveform
+- [x] Voice pipeline: triangle waveform
 - [x] Voice pipeline: bilinear SVF (12 dB/oct)
 - [x] Coefficient computer (K LUT + NR reciprocal, Q0.24, Q3.14)
 - [ ] Voice pipeline: ADSR envelopes
