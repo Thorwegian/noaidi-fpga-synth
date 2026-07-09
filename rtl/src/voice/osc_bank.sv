@@ -54,9 +54,22 @@ module osc_bank (
     //----------------------------------------------------------------
     // Sine: ¼-wave LUT with quadrant decoding
     //
-    // TODO: 4096-entry × 14-bit LUT, quadrant-mirrored.
-    // Placeholder — outputs zero.
+    // 4096 entries × 14-bit unsigned, covering [0, π/2].
+    // phase[23:22] = quadrant, phase[21:10] = address.
+    // Odd quadrants mirror the address; Q2/Q3 negate the output.
+    // Output scaled to Q0.24: {raw, 10'd0} → signed, then ±.
     //----------------------------------------------------------------
-    assign out_sin = 24'sd0;
+    reg [13:0] sine_lut [0:4095];
+
+    initial
+        $readmemh("src/voice/sine_lut.hex", sine_lut);
+
+    wire [1:0]  q    = phase[23:22];
+    wire [11:0] addr = q[0] ? ~phase[21:10] : phase[21:10];
+    wire [13:0] raw  = sine_lut[addr];
+
+    wire signed [23:0] mag = $signed({raw, 10'd0});
+
+    assign out_sin = q[1] ? -mag : mag;
 
 endmodule

@@ -164,7 +164,7 @@ module top (
     // osc_* signals are Q0.24; >>> 4 = −24 dBFS (permanent — speaker amp too loud)
     reg  signed [23:0] audio_sample;
     always @(posedge sys_clk)
-        audio_sample <= osc_pul >>> 4;
+        audio_sample <= osc_sin >>> 4;
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
