@@ -61,32 +61,31 @@ pll_clk O0=98.304M -s
 ### Directory Layout
 
 ```
-soc/
-├── rtl/
-│   ├── Makefile              # Build invocation
-│   ├── build.tcl             # Gowin synthesis script
-│   └── src/
-│       ├── top.sv            # Top-level: I2S, NEORV32, voice pipeline
-│       ├── i2s_clock_gen.sv  # BCLK, LRCLK, sample_strobe generator
-│       ├── constraints.cst   # Physical pin constraints
-│       ├── constraints.sdc   # Timing constraints
-│       ├── i2s/i2s_tx.sv     # I2S transmitter (24-bit)
-│       └── voice/            # Voice pipeline modules
-│           ├── phase_accumulator.sv
-│           ├── osc_bank.sv
-│           ├── svf.sv        # Bilinear SVF (Lazzarini-Timoney)
-│           ├── k_lut.sv      # K+K² LUT with linear interpolation
-│           ├── k_lut.hex     # Precomputed LUT (2560 entries, 256/octave)
-│           ├── coeff_computer.sv  # Top-level coefficient pipeline
-│           ├── nr_reciprocal.sv   # Newton-Raphson reciprocal (Q3.14)
-│           ├── recip_seed.hex     # NR seed LUT (256 entries)
-│           ├── tb_nr_reciprocal.sv
-│           ├── tb_coeff_computer.sv
-│           └── tb_svf_stability.sv
-├── sw/
-│   ├── Makefile              # Firmware build
-│   └── main.c                # Application firmware
-└── neorv32/                  # NEORV32 source (sibling directory)
+noaidi-fpga-synth/
+├── rtl/                       # HDL source
+│   ├── Makefile               # Build invocation
+│   ├── build.tcl              # Gowin synthesis script
+│   ├── src/
+│   │   ├── top.sv             # Top-level: I2S, NEORV32, voice pipeline
+│   │   ├── i2s_clock_gen.sv   # BCLK, LRCLK, sample_strobe generator
+│   │   ├── constraints.cst    # Physical pin constraints
+│   │   ├── constraints.sdc    # Timing constraints
+│   │   ├── i2s/i2s_tx.sv      # I2S transmitter (24-bit)
+│   │   └── voice/             # Voice pipeline modules
+│   │       ├── phase_accumulator.sv
+│   │       ├── osc_bank.sv
+│   │       ├── svf.sv         # Bilinear SVF (Lazzarini-Timoney)
+│   │       ├── k_lut.sv       # K LUT with linear interpolation
+│   │       ├── k_lut.hex      # Precomputed LUT (2560 entries)
+│   │       ├── nr_reciprocal.sv
+│   │       └── coeff_computer.sv
+│   └── impl/                  # Synthesis output (gitignored)
+├── sw/                        # NEORV32 firmware
+│   ├── Makefile
+│   └── main.c
+├── scripts/                   # Helper scripts
+├── README.md
+└── .gitignore
 ```
 
 ## Build & Flash
@@ -99,10 +98,8 @@ git clone git@github.com:Thorwegian/neorv32.git
 # Connect to BL616 CLI at 115200 baud before loading FPGA bitstream:
 #   pll_clk O0=98.304M -s
 
-cd soc/rtl
-# Headless Gowin requires offscreen Qt (SSH, no X11)
-make synth QT_QPA_PLATFORM=offscreen
-# Or just: make synth   (on desktop with display)
+cd rtl
+make synth               # Synthesize + place & route
 make write-sram          # Program FPGA (SRAM)
 
 cd ../sw

@@ -11,10 +11,11 @@ set_device GW2AR-LV18QN88C8/I7 -device_version C
 #--------------------------------------------------------------------
 # NEORV32 RTL (VHDL)
 #--------------------------------------------------------------------
-foreach file [lsort [glob ../../neorv32/rtl/core/*.vhd]] {
-    add_file $file
-    set_file_prop -lib neorv32 $file
-}
+# NEORV32 disabled for osc dev — uncomment when needed
+# foreach file [lsort [glob ../../neorv32/rtl/core/*.vhd]] {
+#     add_file $file
+#     set_file_prop -lib neorv32 $file
+# }
 
 #--------------------------------------------------------------------
 # Project HDL sources (SystemVerilog)

@@ -101,7 +101,9 @@ module top (
 
     logic [23:0]        osc_phase;
     logic signed [17:0] osc_out;     // Q3.14 sawtooth
+`ifdef INCLUDE_SVF
     logic signed [17:0] svf_out;     // Q3.14 lowpass
+`endif
 
     phase_accumulator u_phase (
         .clk       (sys_clk),
@@ -116,7 +118,7 @@ module top (
         .strobe    (sample_strobe),
         .phase_in  (osc_phase),
         .freq_word (FREQ_1000HZ),
-        .waveform  (WAVE_SIN),
+        .waveform  (WAVE_TRI),   // verify still works
         .pwm_width (16'd32768),
         .osc_out   (osc_out)
     );
@@ -125,25 +127,22 @@ module top (
     //
     // Sweep: 10 octaves (D0–D10) in ~1 second (96000 samples).
     // Uses a 32-bit phase accumulator for smooth fractional stepping.
-    logic [23:0]        svf_K;          // Q0.24 unsigned
-    logic signed [17:0] svf_inv_res_K;  // Q3.14 signed
-    logic signed [17:0] svf_inv_div;    // Q3.14 signed
+    // SVF + coeff_computer disabled for sine debug
+`ifdef INCLUDE_SVF
+    logic [23:0]        svf_K;
+    logic signed [17:0] svf_inv_res_K;
+    logic signed [17:0] svf_inv_div;
     logic               cc_valid;
 
-    // Cents sweep: 10 octaves = 2560 LUT entries × 256 = 655360 units.
-    // 655360 / 96000 ≈ 6.827 units/sample.
-    // With 8 fractional bits: step = round(6.827 × 256) = 1748.
     localparam [31:0] SWEEP_STEP = 32'd1748;
-    reg [31:0] sweep_phase;   // [31:8] = cents, [7:0] = fractional
-
-    // one_over_Q for Q=1.0: 1/1 × 16384 = 16384
+    reg [31:0] sweep_phase;
     localparam signed [17:0] ONE_OVER_Q_Q1 = 18'sd16384;
 
     always @(posedge sys_clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
             sweep_phase <= 0;
         end else if (sample_strobe) begin
-            if (sweep_phase[31:8] >= 24'd655200)  // near end of sweep
+            if (sweep_phase[31:8] >= 24'd655200)
                 sweep_phase <= 0;
             else
                 sweep_phase <= sweep_phase + SWEEP_STEP;
@@ -151,27 +150,18 @@ module top (
     end
 
     coeff_computer u_coeff (
-        .clk           (sys_clk),
-        .rst_n         (sys_rst_n),
-        .valid_in      (sample_strobe),
-        .cents_in      (sweep_phase[31:8]),
-        .one_over_Q_in (ONE_OVER_Q_Q1),
-        .K_out         (svf_K),
-        .inv_res_K_out (svf_inv_res_K),
-        .inv_div_out   (svf_inv_div),
-        .valid_out     (cc_valid)
+        .clk(sys_clk), .rst_n(sys_rst_n), .valid_in(sample_strobe),
+        .cents_in(sweep_phase[31:8]), .one_over_Q_in(ONE_OVER_Q_Q1),
+        .K_out(svf_K), .inv_res_K_out(svf_inv_res_K),
+        .inv_div_out(svf_inv_div), .valid_out(cc_valid)
     );
 
     svf u_svf (
-        .clk        (sys_clk),
-        .rst_n      (sys_rst_n),
-        .strobe     (sample_strobe),
-        .sample_in  (osc_out),
-        .K          (svf_K),
-        .inv_res_K  (svf_inv_res_K),
-        .inv_div    (svf_inv_div),
-        .sample_out (svf_out)
+        .clk(sys_clk), .rst_n(sys_rst_n), .strobe(sample_strobe),
+        .sample_in(osc_out), .K(svf_K), .inv_res_K(svf_inv_res_K),
+        .inv_div(svf_inv_div), .sample_out(svf_out)
     );
+`endif
 
     // Registered audio_sample — prevents Gowin bit-map mis-optimisation
     wire signed [23:0] tmp = {{6{osc_out[17]}}, osc_out};
@@ -195,7 +185,7 @@ module top (
     //
     // Re-enable with Gowin synthesis by removing `ifndef IVERILOG`.
     //================================================================
-`ifndef IVERILOG
+`ifdef INCLUDE_NEORV32
     // Remote reset via UART Break condition
     // RX low > 8 bit-times at 4800 baud (~1.67 ms) — soft BREAK workaround
     // since the USB-to-serial chip can't send a hard BREAK.
@@ -258,7 +248,7 @@ module top (
         .xbus_dat_i     ('0)
     );
 `else
-    // Iverilog stubs — hold outputs at safe inactive levels
+    // NEORV32 disabled — synth-time stubs
     assign uart_tx = 1'b1;
     assign led     = {4'b1111, pll_locked, pll_locked};
 `endif

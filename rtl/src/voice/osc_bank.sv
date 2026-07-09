@@ -80,20 +80,16 @@ module osc_bank (
     assign tri_q14 = {tri_acc[25], tri_acc[25:8]} - 18'sd16384;  // 0→2^23 → ±16384
 
     //----------------------------------------------------------------
-    // Sine: integrate bipolar triangle → parabolic approx
-    // Normalised: sin_step = tri_q14 * freq_word >>> 15
+    // Sine: simple integrator, wider 35‑bit acc — overflow test
     //----------------------------------------------------------------
-    logic signed [29:0] sin_acc = 30'sd0;
+    logic signed [34:0] sin_acc = 35'sd0;
 
-    wire signed [41:0] sin_product = tri_q14 * $signed({1'b0, freq_word});
-    wire signed [27:0] sin_step = sin_product >>> 10;
-
+    // Bypass sine — wire tri_q14 direct to verify
     always @(posedge clk)
         if (tri_en)
-            sin_acc <= sin_acc + {{2{sin_step[27]}}, sin_step};
+            sin_acc <= 0;  // dummy, unused
 
-    wire signed [17:0] sin_q14;
-    assign sin_q14 = sin_acc[29:11];  // >>11 → Q3.14
+    assign sin_q14 = tri_q14;  // pass-through test
 
     //----------------------------------------------------------------
     // Waveform mux
