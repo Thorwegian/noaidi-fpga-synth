@@ -93,21 +93,19 @@ module top (
     // Saw full-scale ±1.0, SVF lowpass 500 Hz Q=1.0.
     //================================================================
 
-    localparam [23:0] FREQ_1000HZ = 24'd174762; // 1 kHz, Q0.24
+    localparam [23:0] FREQ_440HZ = 24'd76896;  // 440 Hz, Q0.24
 
     logic [23:0]        osc_phase;
     logic signed [23:0] osc_saw;      // Q0.24 sawtooth
     logic signed [23:0] osc_pul;      // Q0.24 pulse
     logic signed [23:0] osc_tri;      // Q0.24 triangle
     logic signed [23:0] osc_sin;      // Q0.24 sine
-`ifdef INCLUDE_SVF
     logic signed [17:0] svf_out;      // Q3.14 lowpass
-`endif
 
     phase_accumulator u_phase (
         .clk       (sys_clk),
         .strobe    (sample_strobe),
-        .freq_word (FREQ_1000HZ),
+        .freq_word (FREQ_440HZ),
         .phase     (osc_phase)
     );
 
@@ -120,51 +118,22 @@ module top (
         .out_sin (osc_sin)
     );
 
-    // Bilinear SVF — full-range sweep via coeff_computer, Q=6.0
-    //
-    // Sweep: 10 octaves (D0–D10) in ~1 second (96000 samples).
-    // Uses a 32-bit phase accumulator for smooth fractional stepping.
-    // SVF + coeff_computer disabled for sine debug
-`ifdef INCLUDE_SVF
-    logic [23:0]        svf_K;
-    logic signed [17:0] svf_inv_res_K;
-    logic signed [17:0] svf_inv_div;
-    logic               cc_valid;
-
-    localparam [31:0] SWEEP_STEP = 32'd1748;
-    reg [31:0] sweep_phase;
-    localparam signed [17:0] ONE_OVER_Q_Q1 = 18'sd16384;
-
-    always @(posedge sys_clk or negedge sys_rst_n) begin
-        if (!sys_rst_n) begin
-            sweep_phase <= 0;
-        end else if (sample_strobe) begin
-            if (sweep_phase[31:8] >= 24'd655200)
-                sweep_phase <= 0;
-            else
-                sweep_phase <= sweep_phase + SWEEP_STEP;
-        end
-    end
-
-    coeff_computer u_coeff (
-        .clk(sys_clk), .rst_n(sys_rst_n), .valid_in(sample_strobe),
-        .cents_in(sweep_phase[31:8]), .one_over_Q_in(ONE_OVER_Q_Q1),
-        .K_out(svf_K), .inv_res_K_out(svf_inv_res_K),
-        .inv_div_out(svf_inv_div), .valid_out(cc_valid)
-    );
+    // Bilinear SVF — 500 Hz static coefficients, Q=1.0
+    localparam [23:0]       SVF_K          = 24'd274541;
+    localparam signed [17:0] SVF_INV_RES_K  = 18'sd16652;
+    localparam signed [17:0] SVF_INV_DIV    = 18'sd16116;
 
     svf u_svf (
         .clk(sys_clk), .rst_n(sys_rst_n), .strobe(sample_strobe),
-        .sample_in(osc_saw[23:6]), .K(svf_K), .inv_res_K(svf_inv_res_K),
-        .inv_div(svf_inv_div), .sample_out(svf_out)
+        .sample_in($signed(osc_saw) >>> 9), .K(SVF_K), .inv_res_K(SVF_INV_RES_K),
+        .inv_div(SVF_INV_DIV), .sample_out(svf_out)
     );
-`endif
 
-    // Registered audio_sample — prevents Gowin bit-map mis-optimisation
-    // osc_* signals are Q0.24; >>> 4 = −24 dBFS (permanent — speaker amp too loud)
+    // SVF output is Q3.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
+    wire signed [23:0] svf_scaled = $signed({svf_out}) <<< 6;
     reg  signed [23:0] audio_sample;
     always @(posedge sys_clk)
-        audio_sample <= osc_sin >>> 4;
+        audio_sample <= svf_scaled;
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
