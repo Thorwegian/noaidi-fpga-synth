@@ -1,26 +1,27 @@
 //--------------------------------------------------------------------
-// phase_accumulator.sv — 24-bit Q0.24 DDS phase accumulator
+// phase_accumulator.sv — 24-bit phase accumulator, Q0.24 signed
 //
-// Phase wraps on overflow → phase ∈ [0, 1) naturally.
-// freq_word is Q0.24: f * 2^24 / fs
+// Accumulates freq_word on every sample_strobe.  Wraps naturally
+// at 2^24.  No reset — initial phase is arbitrary and irrelevant
+// for a free-running audio oscillator.
 //
-// 24 bits gives 0.20 cents resolution at 50 Hz.
+// freq_word = f_out / f_sample × 2^24
+//   1 kHz at 96 kHz:  1000/96000 × 2^24 ≈ 174,762
 //--------------------------------------------------------------------
 
 module phase_accumulator (
-    input  wire            clk,
-    input  wire            rst_n,
-    input  wire            strobe,
-    input  wire [23:0]     freq_word,
-    output logic [23:0]    phase
+    input  logic                 clk,
+    input  logic                 strobe,        // sample rate strobe (96 kHz)
+    input  logic signed [23:0]   freq_word,     // Q0.24 frequency word
+    output logic signed [23:0]   phase          // Q0.24 phase output
 );
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            phase <= 0;
-        end else if (strobe) begin
-            phase <= phase + freq_word;
-        end
-    end
+    logic signed [23:0] acc = 24'sd0;
+
+    always @(posedge clk)
+        if (strobe)
+            acc <= acc + freq_word;
+
+    assign phase = acc;
 
 endmodule

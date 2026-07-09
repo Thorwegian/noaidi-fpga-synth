@@ -10,9 +10,10 @@ all: synth
 synth:
 	LD_LIBRARY_PATH="$(GOWIN_PATH)/IDE/lib" $(GOWIN_PATH)/IDE/bin/gw_sh $(TCL_SCRIPT)
 
-# Instant silence — flash pre-built silent bitstream
+# Instant silence — minimal build (no I2S, no DSP, no CPU), then flash
 silence:
-	openFPGALoader -b tangnano20k impl/pnr/silence.fs
+	LD_LIBRARY_PATH="$(GOWIN_PATH)/IDE/lib" $(GOWIN_PATH)/IDE/bin/gw_sh build_silence.tcl
+	openFPGALoader -b tangnano20k impl/pnr/project.fs
 
 # Program Tang Nano 20K (SRAM)
 write-sram:

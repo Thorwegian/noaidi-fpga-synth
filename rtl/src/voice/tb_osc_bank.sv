@@ -1,148 +1,171 @@
 //--------------------------------------------------------------------
-// tb_osc_bank.sv — verify saw, pulse, triangle waveforms
+// tb_osc_bank.sv -- Full boundary verification
 //--------------------------------------------------------------------
-`timescale 1ns / 1ps
 
 module tb_osc_bank;
 
-    reg               clk = 0;
-    reg               strobe = 0;
-    reg  [23:0]       phase;
-    reg  [2:0]        waveform;
-    reg  [15:0]       pwm_width;
-    wire signed [17:0] out;
-
-    // 98.304 MHz clock
-    always #5.086 clk = ~clk;
-
-    // Phase ramp: 1 kHz at 96 kHz strobe → increment = 1000/96000 × 2^24 ≈ 174763
-    localparam PHASE_INC = 24'd174763;
-    localparam STROBE_PERIOD = 10417;  // ~96 kHz
-
-    integer strobe_count = 0;
-
-    always @(posedge clk) begin
-        strobe_count <= strobe_count + 1;
-        if (strobe_count == STROBE_PERIOD - 1) begin
-            strobe_count <= 0;
-            strobe <= 1;
-            phase <= phase + PHASE_INC;
-        end else begin
-            strobe <= 0;
-        end
-    end
+    reg  [23:0] phase;
+    reg  [23:0] duty;
+    wire [23:0] saw;
+    wire [23:0] pul;
+    wire [23:0] tri_out;
+    wire [23:0] sin_out;
 
     osc_bank dut (
-        .clk      (clk),
-        .strobe   (strobe),
-        .phase_in (phase),
-        .waveform (waveform),
-        .pwm_width(pwm_width),
-        .osc_out  (out)
+        .phase(phase), .duty(duty),
+        .out_saw(saw), .out_pul(pul),
+        .out_tri(tri_out), .out_sin(sin_out)
     );
 
-    //----------------------------------------------------------------
-    // Test sequence
-    //----------------------------------------------------------------
-    integer     prev, slope, slope_sign;
-    integer     cycles;
-    reg [31:0]  errors = 0;
+    localparam MIN_N = 24'h800000;
+    localparam MAX_P = 24'h7FFFFF;
+    localparam MID   = 24'h800000;
+    localparam END   = 24'hFFFFFF;
+
+    integer i, fail;
+    integer high_cnt, total_cnt;
+    reg [23:0] p;
 
     initial begin
-        phase      = 0;
-        waveform   = 3'b000;
-        pwm_width  = 16'd32768;  // 50%
+        fail = 0;
+        duty = 24'd0;
 
-        // Wait for initialisation
-        repeat (5) @(posedge clk);
+        $display("===================================================");
+        $display(" osc_bank full verification");
+        $display("===================================================");
 
-        // --- Sawtooth check: should ramp down ---
-        $display("=== Sawtooth (000) ===");
-        waveform = 3'b000;
-        @(negedge strobe);  // catch first sample
-        prev = out;
-        repeat (50) begin
-            @(negedge strobe);
-            if (out <= prev) begin
-                // Saw ramps up then wraps — check decreasing after wrap
-            end
-            prev = out;
+        //===========================================================
+        // SAWTOOTH
+        //===========================================================
+        $display("\n--- Sawtooth ---");
+        phase = 24'd0;      #1; $display("  start:  phase=%h  saw=%h", phase, saw);
+        phase = 24'h400000; #1; $display("  25%%:    phase=%h  saw=%h", phase, saw);
+        phase = MID;        #1; $display("  mid:    phase=%h  saw=%h", phase, saw);
+        phase = 24'hC00000; #1; $display("  75%%:    phase=%h  saw=%h", phase, saw);
+        phase = END;        #1; $display("  end:    phase=%h  saw=%h", phase, saw);
+
+        if (saw !== phase) begin
+            $display("  FAIL: saw != phase"); fail = 1;
         end
 
-        // --- Pulse check: only ±16384 ---
-        $display("=== Pulse (001) 50%% ===");
-        waveform = 3'b001;
-        repeat (10) begin
-            @(negedge strobe);
-            if (out !== 18'sd16384 && out !== -18'sd16384) begin
-                $display("  ERROR: pulse out = %d (expected ±16384)", out);
-                errors = errors + 1;
-            end
+        //===========================================================
+        // TRIANGLE
+        //===========================================================
+        $display("\n--- Triangle ---");
+
+        phase = 24'd0; #1;
+        $display("  start:     phase=%h  tri=%h (expect %h)", phase, tri_out, MIN_N);
+        if (tri_out !== MIN_N) begin
+            $display("  FAIL: start tri=%h", tri_out); fail = 1;
         end
 
-        // --- Triangle check: monotonic slope each half-cycle ---
-        $display("=== Triangle (010) ===");
-        waveform  = 3'b010;
-        phase     = 0;           // reset phase to get clean ramp start
-        pwm_width = 16'd32768;   // 50% duty
-
-        // Wait for first strobe to settle
-        @(negedge strobe);
-        prev       = out;
-        slope      = 0;
-        slope_sign = 0;
-        cycles     = 0;
-
-        // Monitor 200+ samples (covers multiple 1 kHz cycles)
-        repeat (250) begin
-            @(negedge strobe);
-
-            if (out > prev)
-                slope_sign = 1;
-            else if (out < prev)
-                slope_sign = -1;
-            else
-                slope_sign = 0;
-
-            // Should never be flat within a half-cycle
-            if (slope_sign == 0) begin
-                $display("  ERROR: flat at sample %0d, out=%d", cycles, out);
-                errors = errors + 1;
-            end
-
-            prev   = out;
-            cycles = cycles + 1;
+        phase = MID; #1;
+        $display("  mid:       phase=%h  tri=%h (expect %h)", phase, tri_out, MAX_P);
+        if (tri_out !== MAX_P) begin
+            $display("  FAIL: mid tri=%h", tri_out); fail = 1;
         end
 
-        // --- Sine check: also monotonic (integrator never stalls) ---
-        $display("=== Sine (011) ===");
-        waveform  = 3'b011;
-        phase     = 0;
-        pwm_width = 16'd32768;
+        phase = END; #1;
+        $display("  end:       phase=%h  tri=%h (should ~%h)", phase, tri_out, MIN_N);
 
-        @(negedge strobe);
-        prev   = out;
-        cycles = 0;
+        // Rise/fall symmetry: tri at X and 2^24-X should match
+        phase = 24'h200000; #1;
+        $display("  rise-25%%:  phase=%h  tri=%h", phase, tri_out);
+        phase = 24'hE00000; #1;
+        $display("  fall-25%%:  phase=%h  tri=%h (should ~match rise)", phase, tri_out);
 
-        repeat (250) begin
-            @(negedge strobe);
-            if (out > prev)       slope_sign = 1;
-            else if (out < prev)  slope_sign = -1;
-            else                  slope_sign = 0;
-            if (slope_sign == 0) begin
-                $display("  ERROR: flat at sample %0d, out=%d", cycles, out);
-                errors = errors + 1;
-            end
-            prev   = out;
-            cycles = cycles + 1;
+        // Pre/post fold smoothness
+        phase = MID - 24'd1; #1;
+        $display("  pre-fold:  phase=%h  tri=%h", phase, tri_out);
+        phase = MID + 24'd1; #1;
+        $display("  post-fold: phase=%h  tri=%h", phase, tri_out);
+
+        // Pre/post wrap
+        phase = END; #1;
+        $display("  pre-wrap:  phase=%h  tri=%h", phase, tri_out);
+        phase = 24'd0; #1;
+        $display("  post-wrap: phase=%h  tri=%h", phase, tri_out);
+
+        //===========================================================
+        // PULSE duty cycle
+        //===========================================================
+        $display("\n--- Pulse duty cycles ---");
+
+        // 0%
+        high_cnt = 0;
+        for (i = 0; i < 256; i = i + 1) begin
+            phase = i * 24'd65536;  // step 2^24/256
+            duty  = MIN_N;  // -1.0
+            #1;
+            if (pul == MAX_P) high_cnt = high_cnt + 1;
+        end
+        $display("  duty=-1.0  (%h): high=%3d/256 ~%0.1f%% (expect ~0%%)",
+                 MIN_N, high_cnt, 100.0*high_cnt/256.0);
+        if (high_cnt > 2) begin
+            $display("  FAIL"); fail = 1;
         end
 
-        // --- Summary ---
-        if (errors == 0)
-            $display("PASS: all checks passed");
+        // 50%
+        high_cnt = 0;
+        for (i = 0; i < 256; i = i + 1) begin
+            phase = i * 24'd65536;
+            duty  = 24'd0;
+            #1;
+            if (pul == MAX_P) high_cnt = high_cnt + 1;
+        end
+        $display("  duty= 0.0  (%h): high=%3d/256 ~%0.1f%% (expect ~50%%)",
+                 24'd0, high_cnt, 100.0*high_cnt/256.0);
+        if (high_cnt < 120 || high_cnt > 136) begin
+            $display("  FAIL"); fail = 1;
+        end
+
+        // ~33% — 33% most-negative phases fall below threshold
+        high_cnt = 0;
+        for (i = 0; i < 256; i = i + 1) begin
+            phase = i * 24'd65536;
+            duty  = 24'hD492E1;  // -2,852,127 = 33rd percentile (signed)
+            #1;
+            if (pul == MAX_P) high_cnt = high_cnt + 1;
+        end
+        $display("  duty~33%%  (%h): high=%3d/256 ~%0.1f%% (expect ~33%%)",
+                 24'hD492E1, high_cnt, 100.0*high_cnt/256.0);
+        if (high_cnt < 75 || high_cnt > 95) begin
+            $display("  FAIL"); fail = 1;
+        end
+
+        // ~66% — all negative + bottom 16% positive
+        high_cnt = 0;
+        for (i = 0; i < 256; i = i + 1) begin
+            phase = i * 24'd65536;
+            duty  = 24'h28F7C2;  // +2,684,354 = 66th percentile (signed)
+            #1;
+            if (pul == MAX_P) high_cnt = high_cnt + 1;
+        end
+        $display("  duty~66%%  (%h): high=%3d/256 ~%0.1f%% (expect ~66%%)",
+                 24'h28F7C2, high_cnt, 100.0*high_cnt/256.0);
+        if (high_cnt < 160 || high_cnt > 180) begin
+            $display("  FAIL"); fail = 1;
+        end
+
+        // 100%
+        high_cnt = 0;
+        for (i = 0; i < 256; i = i + 1) begin
+            phase = i * 24'd65536;
+            duty  = MAX_P;  // +1.0
+            #1;
+            if (pul == MAX_P) high_cnt = high_cnt + 1;
+        end
+        $display("  duty=+1.0  (%h): high=%3d/256 ~%0.1f%% (expect ~100%%)",
+                 MAX_P, high_cnt, 100.0*high_cnt/256.0);
+        if (high_cnt < 254) begin
+            $display("  FAIL"); fail = 1;
+        end
+
+        //===========================================================
+        if (fail)
+            $display("\n*** FAIL ***");
         else
-            $display("FAIL: %0d errors", errors);
-
+            $display("\nPASS");
         $finish;
     end
 

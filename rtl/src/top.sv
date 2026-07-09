@@ -5,7 +5,7 @@
 //   98.304 MHz MS5351 → sys_clk (pin 10, no FPGA PLL)
 //   sys_clk → NEORV32 SoC (UART0=console, UART1=MIDI)
 //   sys_clk → i2s_clock_gen (→ BCLK, 96 kHz LRCLK, sample_strobe)
-//   I2S TX ← phase_accumulator → osc_bank (naive saw)
+//   I2S TX ← osc_bank (saw, pulse, triangle, sine — stateless)
 //
 // Audio output: MAX98357A I2S amplifier on Tang Nano 20K
 //   HP_BCK  (pin 56), HP_WS  (pin 55), HP_DIN (pin 54), PA_EN (pin 51)
@@ -94,33 +94,30 @@ module top (
     //================================================================
 
     localparam [23:0] FREQ_1000HZ = 24'd174762; // 1 kHz, Q0.24
-    localparam WAVE_SAW   = 3'b000;
-    localparam WAVE_PULSE = 3'b001;
-    localparam WAVE_TRI   = 3'b010;
-    localparam WAVE_SIN   = 3'b011;
 
     logic [23:0]        osc_phase;
-    logic signed [17:0] osc_out;     // Q3.14 sawtooth
+    logic signed [23:0] osc_saw;      // Q0.24 sawtooth
+    logic signed [23:0] osc_pul;      // Q0.24 pulse
+    logic signed [23:0] osc_tri;      // Q0.24 triangle
+    logic signed [23:0] osc_sin;      // Q0.24 sine
 `ifdef INCLUDE_SVF
-    logic signed [17:0] svf_out;     // Q3.14 lowpass
+    logic signed [17:0] svf_out;      // Q3.14 lowpass
 `endif
 
     phase_accumulator u_phase (
         .clk       (sys_clk),
-        .rst_n     (sys_rst_n),
         .strobe    (sample_strobe),
         .freq_word (FREQ_1000HZ),
         .phase     (osc_phase)
     );
 
     osc_bank u_osc (
-        .clk       (sys_clk),
-        .strobe    (sample_strobe),
-        .phase_in  (osc_phase),
-        .freq_word (FREQ_1000HZ),
-        .waveform  (WAVE_TRI),   // verify still works
-        .pwm_width (16'd32768),
-        .osc_out   (osc_out)
+        .phase   (osc_phase),
+        .duty    (24'sd0),            // 50% PWM
+        .out_saw (osc_saw),
+        .out_pul (osc_pul),
+        .out_tri (osc_tri),
+        .out_sin (osc_sin)
     );
 
     // Bilinear SVF — full-range sweep via coeff_computer, Q=6.0
@@ -158,16 +155,16 @@ module top (
 
     svf u_svf (
         .clk(sys_clk), .rst_n(sys_rst_n), .strobe(sample_strobe),
-        .sample_in(osc_out), .K(svf_K), .inv_res_K(svf_inv_res_K),
+        .sample_in(osc_saw[23:6]), .K(svf_K), .inv_res_K(svf_inv_res_K),
         .inv_div(svf_inv_div), .sample_out(svf_out)
     );
 `endif
 
     // Registered audio_sample — prevents Gowin bit-map mis-optimisation
-    wire signed [23:0] tmp = {{6{osc_out[17]}}, osc_out};
+    // osc_* signals are Q0.24; >>> 4 = −24 dBFS (permanent — speaker amp too loud)
     reg  signed [23:0] audio_sample;
     always @(posedge sys_clk)
-        audio_sample <= {tmp[19:0], 4'd0};
+        audio_sample <= osc_pul >>> 4;
 
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
