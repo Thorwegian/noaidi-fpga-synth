@@ -33,11 +33,6 @@ add_file src/voice/phase_accumulator.sv
 add_file src/voice/osc_bank.sv
 add_file src/voice/svf.sv
 
-# Coefficient computer
-add_file src/voice/k_lut.sv
-add_file src/voice/nr_reciprocal.sv
-add_file src/voice/coeff_computer.sv
-
 # Future modules (uncomment when ready)
 # add_file src/voice/envelope.sv
 # add_file src/voice/vca.sv
