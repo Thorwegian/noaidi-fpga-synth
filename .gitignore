@@ -3,3 +3,4 @@
 .DS_Store
 sw/build/**
 rtl/impl/**
+*.swp
