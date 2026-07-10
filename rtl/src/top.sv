@@ -118,13 +118,13 @@ module top (
         .out_sin (osc_sin)
     );
 
-    // Bilinear SVF — 18 kHz static coefficients, Q=1.0
-    localparam [23:0]       SVF_K          = 24'hAB0DC1;
-    localparam signed [17:0] SVF_INV_RES_K  = 18'h06AC3;
-    localparam signed [17:0] SVF_INV_DIV    = 18'h01E44;
+    // Bilinear SVF — 500 Hz static coefficients, Q=1.0
+    localparam [23:0]       SVF_K          = 24'd274541;
+    localparam signed [17:0] SVF_INV_RES_K  = 18'sd16652;
+    localparam signed [17:0] SVF_INV_DIV    = 18'sd16116;
 
     svf u_svf (
-        .clk(sys_clk), .rst_n(sys_rst_n), .strobe(sample_strobe),
+        .rst_n(sys_rst_n), .strobe(sample_strobe),
         .sample_in($signed(osc_saw) >>> 9), .K(SVF_K), .inv_res_K(SVF_INV_RES_K),
         .inv_div(SVF_INV_DIV), .sample_out(svf_out)
     );

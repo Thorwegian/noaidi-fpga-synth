@@ -48,9 +48,8 @@
 //--------------------------------------------------------------------
 
 module svf (
-    input  logic                    clk,
-    input  logic                    rst_n,
     input  logic                    strobe,        // sample rate strobe (96 kHz)
+    input  logic                    rst_n,
 
     input  logic signed [17:0]      sample_in,     // Q3.14 audio input
     input  logic        [23:0]      K,             // Q0.24 unsigned  tan(pi·fc/fs)
@@ -115,12 +114,12 @@ module svf (
     // Bilinear integrator:  state_new = input + output
     // Since output = input + state,  state_new = 2·input + state.
     //================================================================
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge strobe or negedge rst_n) begin
         if (!rst_n) begin
             s1 <= 0;
             s2 <= 0;
             sample_out <= 0;
-        end else if (strobe) begin
+        end else begin
             s1 <= u1 + bp;
             s2 <= u2 + lp;
             sample_out <= lp;
