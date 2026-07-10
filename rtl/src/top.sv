@@ -118,15 +118,35 @@ module top (
         .out_sin (osc_sin)
     );
 
-    // Bilinear SVF — 500 Hz static coefficients, Q=1.0
-    localparam [23:0]       SVF_K          = 24'd274541;
-    localparam signed [17:0] SVF_INV_RES_K  = 18'sd16652;
-    localparam signed [17:0] SVF_INV_DIV    = 18'sd16116;
+    // Bilinear SVF — internal 160×8 coefficient LUT
+    //
+    // Sweep: fc_in 0→159 in ~1 second.
+    // 96 kHz / 160 steps = 600 samples/step.
+    localparam [9:0] PRESCALE = 10'd599;
+    reg [9:0] prescale_cnt;
+    reg [7:0] fc_idx;
+
+    always @(posedge sys_clk or negedge sys_rst_n) begin
+        if (!sys_rst_n) begin
+            prescale_cnt <= 0;
+            fc_idx <= 0;
+        end else if (sample_strobe) begin
+            if (prescale_cnt == PRESCALE) begin
+                prescale_cnt <= 0;
+                if (fc_idx == 8'd159)
+                    fc_idx <= 0;
+                else
+                    fc_idx <= fc_idx + 8'd1;
+            end else begin
+                prescale_cnt <= prescale_cnt + 10'd1;
+            end
+        end
+    end
 
     svf u_svf (
         .rst_n(sys_rst_n), .strobe(sample_strobe),
-        .sample_in($signed(osc_saw) >>> 9), .K(SVF_K), .inv_res_K(SVF_INV_RES_K),
-        .inv_div(SVF_INV_DIV), .sample_out(svf_out)
+        .sample_in($signed(osc_saw) >>> 9), .fc_in(fc_idx),
+        .q_in(9'd64), .sample_out(svf_out)
     );
 
     // SVF output is Q3.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
