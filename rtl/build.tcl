@@ -25,7 +25,7 @@ set_device GW2AR-LV18QN88C8/I7 -device_version C
 add_file src/top.sv
 
 # I2S
-add_file src/i2s/i2s_tx.sv
+# add_file src/i2s/i2s_tx.sv   # uncomment with -D ENABLE_I2S for MAX98357A
 add_file src/i2s_clock_gen.sv
 
 # Synthesizer core — voice pipeline

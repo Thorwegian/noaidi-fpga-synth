@@ -64,6 +64,7 @@ module top (
         .sample_strobe (sample_strobe)
     );
 
+`ifdef ENABLE_I2S
     assign i2s_bclk  = i2s_bclk_int;
     assign i2s_lrclk = i2s_lrclk_int;
     assign pa_en     = 1'b1;   // amplifier always enabled
@@ -87,6 +88,13 @@ module top (
         .data_right (sample_right),
         .data_ready (i2s_data_ready)
     );
+`else
+    // I2S disabled — SPDIF is the primary audio output
+    assign i2s_bclk  = 1'b0;
+    assign i2s_lrclk = 1'b0;
+    assign i2s_data  = 1'b0;
+    assign pa_en     = 1'b0;   // amplifier disabled (MAX98357A disconnected)
+`endif
 
     //================================================================
     // Voice Pipeline — Phase Accumulator + Oscillator + SVF
@@ -158,6 +166,7 @@ module top (
     always @(posedge sys_clk)
         audio_sample <= svf_scaled;
 
+`ifdef ENABLE_I2S
     // Latch samples on I2S data_ready strobe
     always @(posedge sys_clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
@@ -168,6 +177,7 @@ module top (
             sample_right <= audio_sample;
         end
     end
+`endif
 
     //================================================================
     // SPDIF Transmitter — digital audio output (pin 27)
