@@ -55,11 +55,11 @@ module lut_interp (
     wire signed [18:0] d_div  = {inv_div_hi[17],   inv_div_hi}   - {inv_div_lo[17],   inv_div_lo};     // 19-bit
 
     // frac × delta — 3 DSP multiplies
-    //   {1'b0, fc_frac} = 9-bit signed, dK = 25-bit signed → 34-bit
-    //   {1'b0, fc_frac} = 9-bit signed, d_* = 19-bit signed → 28-bit
-    wire signed [33:0] mK    = $signed({1'b0, fc_frac}) * dK;     // 9 × 25 = 34-bit
-    wire signed [27:0] m_res = $signed({1'b0, fc_frac}) * d_res;  // 9 × 19 = 28-bit
-    wire signed [27:0] m_div = $signed({1'b0, fc_frac}) * d_div;  // 9 × 19 = 28-bit
+    //   fc_frac (unsigned 8) × dK   (signed 25) → signed [33:0]
+    //   fc_frac (unsigned 8) × d_*  (signed 19) → signed [27:0]
+    wire signed [33:0] mK    = fc_frac * dK;
+    wire signed [27:0] m_res = fc_frac * d_res;
+    wire signed [27:0] m_div = fc_frac * d_div;
 
     // Interpolated outputs: lo + (frac × delta) >> 8
     // K: dK >= 0 always (monotonic), part-select is safe
