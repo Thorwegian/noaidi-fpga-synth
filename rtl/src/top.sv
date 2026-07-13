@@ -2,10 +2,10 @@
 // top.v — Tang Nano 20K Synthesizer Top Level
 //
 // Architecture:
-//   98.304 MHz MS5351 → sys_clk (pin 10, no FPGA PLL)
+//   98.304 MHz MS5351 → sys_clk (pin 10)
 //   sys_clk → NEORV32 SoC (UART0=console, UART1=MIDI)
 //   sys_clk → i2s_clock_gen (→ BCLK, 96 kHz LRCLK, sample_strobe)
-//   I2S TX ← osc_bank (saw, pulse, triangle, sine — stateless)
+//   I2S TX ← SVF ← Osc bank ← Phase acc 
 //
 // Audio output: MAX98357A I2S amplifier on Tang Nano 20K
 //   HP_BCK  (pin 56), HP_WS  (pin 55), HP_DIN (pin 54), PA_EN (pin 51)
@@ -41,10 +41,9 @@ module top (
 );
 
     //================================================================
-    // Clock — 98.304 MHz from MS5351 on pin 10 (no FPGA PLL needed)
+    // Clock — 98.304 MHz from MS5351
     //================================================================
     wire sys_clk    = clk;
-    wire pll_locked = 1'b1;      // MS5351 is always stable
     wire sys_rst_n  = ~rst;     // external reset only
 
     //================================================================
@@ -168,9 +167,7 @@ module top (
     end
 
     //================================================================
-    // NEORV32 SoC — disabled during RTL-only iverilog testing.
-    //
-    // Re-enable with Gowin synthesis by removing `ifndef IVERILOG`.
+    // NEORV32 SoC — disabled during RTL-only testing.
     //================================================================
 `ifdef INCLUDE_NEORV32
     // Remote reset via UART Break condition
@@ -197,7 +194,7 @@ module top (
     logic [31:0] gpio_o;
 
     // LEDs: led[5:2]=high, led[1]=on, led[0]=sample strobe
-    assign led = {4'b1111, pll_locked, pll_locked};
+    assign led = 4'b111111;
 
     neorv32_top #(
         .CLOCK_FREQUENCY(98304000),      // 98.304 MHz from MS5351
@@ -237,7 +234,7 @@ module top (
 `else
     // NEORV32 disabled — synth-time stubs
     assign uart_tx = 1'b1;
-    assign led     = {4'b1111, pll_locked, pll_locked};
+    assign led     = 6'b111111;
 `endif
 
 endmodule
