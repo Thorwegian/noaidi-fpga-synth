@@ -156,7 +156,7 @@ module top (
     svf u_svf (
         .rst_n(sys_rst_n), .strobe(sample_strobe),
         .sample_in($signed(osc_saw) >>> 9), .fc_in(fc_idx),
-        .q_in(9'd64), .sample_out(svf_out)
+        .q_in(3'd1), .sample_out(svf_out)
     );
 
     // SVF output is Q3.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
