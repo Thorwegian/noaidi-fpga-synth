@@ -62,8 +62,10 @@ module lut_interp (
     wire signed [27:0] m_div = $signed({1'b0, fc_frac}) * d_div;  // 9 × 19 = 28-bit
 
     // Interpolated outputs: lo + (frac × delta) >> 8
-    assign K         = K_lo         + mK[31:8];    // 24-bit
-    assign inv_res_K = inv_res_K_lo + m_res[25:8]; // 18-bit
-    assign inv_div   = inv_div_lo   + m_div[25:8]; // 18-bit
+    // K: dK >= 0 always (monotonic), part-select is safe
+    // Signed fields: must use arithmetic shift — part-select drops sign
+    assign K         = K_lo         + mK[31:8];              // 24-bit
+    assign inv_res_K = inv_res_K_lo + ($signed(m_res) >>> 8); // 18-bit signed
+    assign inv_div   = inv_div_lo   + ($signed(m_div) >>> 8); // 18-bit signed
 
 endmodule

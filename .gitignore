@@ -4,3 +4,4 @@
 sw/build/**
 rtl/impl/**
 *.swp
+rtl/obj_dir/
