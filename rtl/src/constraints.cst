@@ -60,6 +60,12 @@ IO_PORT "i2s_data"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 IO_PORT "pa_en"     PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 //--------------------------------------------------------------------
+// SPDIF Digital Audio Output
+//--------------------------------------------------------------------
+IO_LOC  "spdif_out" 27;
+IO_PORT "spdif_out" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+
+//--------------------------------------------------------------------
 // Unused / Reserved — uncomment as needed
 //--------------------------------------------------------------------
 

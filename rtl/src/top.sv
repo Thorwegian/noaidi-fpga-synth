@@ -36,6 +36,9 @@ module top (
     output logic       i2s_data,       // serial data (pin 54)
     output logic       pa_en,          // amplifier enable (pin 51)
 
+    // SPDIF digital audio output
+    output logic       spdif_out,      // biphase-mark encoded (pin 27, LCD_B7)
+
     // Status LEDs
     output logic [5:0] led             // (pins 20,19,18,17,16,15)
 );
@@ -165,6 +168,19 @@ module top (
             sample_right <= audio_sample;
         end
     end
+
+    //================================================================
+    // SPDIF Transmitter — digital audio output (pin 27)
+    //================================================================
+    spdif_tx u_spdif (
+        .clk           (sys_clk),
+        .rst_n         (sys_rst_n),
+        .sample_strobe (sample_strobe),
+        .audio_l       (audio_sample),
+        .audio_r       (audio_sample),   // mono: same signal on both channels
+        .c_bit         (1'b0),
+        .spdif_out     (spdif_out)
+    );
 
     //================================================================
     // NEORV32 SoC — disabled during RTL-only testing.

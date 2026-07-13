@@ -33,6 +33,9 @@ add_file src/voice/phase_accumulator.sv
 add_file src/voice/osc_bank.sv
 add_file src/voice/svf.sv
 
+# SPDIF
+add_file src/spdif/spdif_tx.sv
+
 # Future modules (uncomment when ready)
 # add_file src/voice/envelope.sv
 # add_file src/voice/vca.sv
