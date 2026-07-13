@@ -1,6 +1,6 @@
 //--------------------------------------------------------------------
 // tb_lut_interp_math.sv — Exact interpolation math verification
-// Verilator cycle-mode: module tb(input clk).
+// Cycle-mode: module tb(input clk), no #delays.
 //--------------------------------------------------------------------
 
 module tb_lut_interp_math(input clk);
