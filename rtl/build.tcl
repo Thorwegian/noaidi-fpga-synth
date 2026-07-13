@@ -31,6 +31,7 @@ add_file src/i2s_clock_gen.sv
 # Synthesizer core — voice pipeline
 add_file src/voice/phase_accumulator.sv
 add_file src/voice/osc_bank.sv
+add_file src/voice/lut_interp.sv
 add_file src/voice/svf.sv
 
 # SPDIF
