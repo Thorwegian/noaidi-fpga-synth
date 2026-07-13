@@ -14,21 +14,17 @@ A time-division multiplexed polyphonic synthesizer running on the Sipeed Tang Na
   └── Voice Pipeline (single voice for now, TDM to come)
         ├── Phase Accumulator (24-bit Q0.24 DDS)
         ├── Oscillator (sawtooth, Q3.14)
-        ├── Coefficient Computer (cents → K, K², inv_res_K, inv_div)
-        │     ├── k_lut     — 2560-entry K+K² LUT, 256/oct, linear interp
-        │     ├── DSP       — K/Q multiply (1 DSP)
-        │     └── NR recip  — Newton-Raphson 1/(1+K²+K/Q), 4-cycle pipeline
-        ├── Bilinear SVF (12 dB/oct, Lazzarini-Timoney)
-        └── I2S TX → MAX98357A DAC → Audio Out
+        ├── Bilinear SVF (12 dB/oct, Lazzarini-Timoney, 160×8 LUT)
+        ├── SPDIF TX (96 kHz, 24-bit) → consumer digital audio out (pin 27)
+        └── I2S TX → MAX98357A DAC (disabled — `ifdef ENABLE_I2S`)
 ```
 
 ## Scripts
 
 ```
 scripts/
-├── gen_k_lut.py              # K+K² LUT hex generator (2560 entries, 256/oct)
-├── coeff_computer_proto.py   # Full pipeline accuracy model (Python)
-└── gen_nr_testvecs.py        # NR reciprocal test vector generator
+├── gen_coeff_lut.py           # SVF coefficient LUT hex generator (160×8 entries)
+└── gen_sine_lut.py            # Sine ¼-wave LUT hex generator (4096×14)
 ```
 
 ## Pinout
@@ -45,6 +41,7 @@ scripts/
 | i2s_lrclk | 55  | I2S word select / LRCLK        |
 | i2s_data  | 54  | I2S serial data                |
 | pa_en     | 51  | Amplifier enable (active high) |
+| spdif_out | 27  | SPDIF digital audio (BMC, 0.5V p-p via ext. divider) |
 
 MS5351 clock generator configured once via BL616 CLI (persists with `-s`):
 ```
@@ -70,15 +67,12 @@ noaidi-fpga-synth/
 │   │   ├── i2s_clock_gen.sv   # BCLK, LRCLK, sample_strobe generator
 │   │   ├── constraints.cst    # Physical pin constraints
 │   │   ├── constraints.sdc    # Timing constraints
-│   │   ├── i2s/i2s_tx.sv      # I2S transmitter (24-bit)
+│   │   ├── i2s/i2s_tx.sv      # I2S transmitter (24-bit, disabled)
+│   │   ├── spdif/spdif_tx.sv   # SPDIF transmitter (IEC 60958, 96 kHz)
 │   │   └── voice/             # Voice pipeline modules
 │   │       ├── phase_accumulator.sv
 │   │       ├── osc_bank.sv
-│   │       ├── svf.sv         # Bilinear SVF (Lazzarini-Timoney)
-│   │       ├── k_lut.sv       # K LUT with linear interpolation
-│   │       ├── k_lut.hex      # Precomputed LUT (2560 entries)
-│   │       ├── nr_reciprocal.sv
-│   │       └── coeff_computer.sv
+│   │       └── svf.sv         # Bilinear SVF (Lazzarini-Timoney, 160×8 LUT)
 │   └── impl/                  # Synthesis output (gitignored)
 ├── sw/                        # NEORV32 firmware
 │   ├── Makefile
@@ -120,7 +114,8 @@ make upload              # Upload via serial port
 - [x] Voice pipeline: pulse waveform
 - [x] Voice pipeline: triangle waveform
 - [x] Voice pipeline: bilinear SVF (12 dB/oct)
-- [x] Coefficient computer (K LUT + NR reciprocal, Q0.24, Q3.14)
+- [x] SPDIF transmitter (IEC 60958, 96 kHz, 24-bit, hardware-verified)
+- [x] Coefficient computer (K LUT + NR reciprocal, Q0.24, Q3.14) — retired, replaced by LUT
 - [ ] Voice pipeline: ADSR envelopes
 - [ ] Voice pipeline: filter key tracking
 - [ ] Voice pipeline: filter envelope amount
