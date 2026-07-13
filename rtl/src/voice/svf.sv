@@ -1,26 +1,19 @@
 //--------------------------------------------------------------------
-// svf.sv — Bilinear SVF with internal 160×8 coefficient LUT
-// Nearest-neighbor lookup, combinational reads.
+// svf.sv — Bilinear SVF with external coefficient input
+//
+// Coefficients (K, inv_res_K, inv_div) are provided externally
+// (e.g., from lut_interp). No internal LUT.
 //--------------------------------------------------------------------
 
 module svf (
     input  logic                    strobe,
     input  logic                    rst_n,
     input  logic signed [17:0]      sample_in,
-    input  logic        [7:0]       fc_in,
-    input  logic        [2:0]       q_in,
+    input  logic        [23:0]      K,          // Q0.24 unsigned
+    input  logic signed [17:0]      inv_res_K,  // Q3.14 signed
+    input  logic signed [17:0]      inv_div,    // Q3.14 signed
     output logic signed [17:0]      sample_out
 );
-
-    reg [59:0] coeff_lut [0:1279];
-    initial $readmemh("src/voice/svf_coeff_lut.hex", coeff_lut);
-
-    localparam Q_STRIDE = 8;
-    wire [10:0] addr = fc_in * Q_STRIDE + q_in;
-
-    wire        [23:0] K         = coeff_lut[addr][59:36];
-    wire signed [17:0] inv_res_K = coeff_lut[addr][35:18];
-    wire signed [17:0] inv_div   = coeff_lut[addr][17:0];
 
     logic signed [17:0] s1, s2;
 

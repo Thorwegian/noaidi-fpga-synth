@@ -128,35 +128,50 @@ module top (
         .out_sin (osc_sin)
     );
 
-    // Bilinear SVF — internal 160×8 coefficient LUT
+    // SVF with interpolated coefficient LUT
     //
-    // Sweep: fc_in 0→159 in ~1 second.
-    // 96 kHz / 160 steps = 600 samples/step.
+    // Sweep: 16-bit 8.8 fixed-point, steps by 1/256 per 600 samples.
+    // 160 × 256 = 40,960 steps in ~1 second.
+    // Auto-wraps at 16-bit overflow.
     localparam [9:0] PRESCALE = 10'd599;
     reg [9:0] prescale_cnt;
-    reg [7:0] fc_idx;
+    reg [15:0] fc_sweep;  // {int[15:8], frac[7:0]}
 
     always @(posedge sys_clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
             prescale_cnt <= 0;
-            fc_idx <= 0;
+            fc_sweep <= 0;
         end else if (sample_strobe) begin
             if (prescale_cnt == PRESCALE) begin
                 prescale_cnt <= 0;
-                if (fc_idx == 8'd159)
-                    fc_idx <= 0;
-                else
-                    fc_idx <= fc_idx + 8'd1;
+                fc_sweep <= fc_sweep + 16'd1;
             end else begin
                 prescale_cnt <= prescale_cnt + 10'd1;
             end
         end
     end
 
+    wire [7:0] fc_int  = fc_sweep[15:8];
+    wire [7:0] fc_frac = fc_sweep[7:0];
+
+    wire        [23:0] lut_K;
+    wire signed [17:0] lut_inv_res_K;
+    wire signed [17:0] lut_inv_div;
+
+    lut_interp u_lut (
+        .fc_int(fc_int),
+        .fc_frac(fc_frac),
+        .q_in(3'd1),
+        .K(lut_K),
+        .inv_res_K(lut_inv_res_K),
+        .inv_div(lut_inv_div)
+    );
+
     svf u_svf (
         .rst_n(sys_rst_n), .strobe(sample_strobe),
-        .sample_in($signed(osc_saw) >>> 9), .fc_in(fc_idx),
-        .q_in(3'd1), .sample_out(svf_out)
+        .sample_in($signed(osc_saw) >>> 9),
+        .K(lut_K), .inv_res_K(lut_inv_res_K), .inv_div(lut_inv_div),
+        .sample_out(svf_out)
     );
 
     // SVF output is Q3.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
