@@ -115,7 +115,6 @@ make upload              # Upload via serial port
 - [x] Voice pipeline: triangle waveform
 - [x] Voice pipeline: bilinear SVF (12 dB/oct)
 - [x] SPDIF transmitter (IEC 60958, 96 kHz, 24-bit, hardware-verified)
-- [x] Coefficient computer (K LUT + NR reciprocal, Q0.24, Q3.14) — retired, replaced by LUT
 - [ ] Voice pipeline: ADSR envelopes
 - [ ] Voice pipeline: filter key tracking
 - [ ] Voice pipeline: filter envelope amount
