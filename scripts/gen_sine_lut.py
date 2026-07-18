@@ -13,13 +13,12 @@ Output: sine_lut.hex — one hex value per line, $readmemh-ready.
 import math
 
 ENTRIES = 4096
-BITS    = 14
-MAX_VAL = (1 << (BITS - 1)) - 1  # 8191 — max positive for signed output
+BITS    = 16
+MAX_VAL = (1 << (BITS - 1)) - 1
 
 def main():
     values = []
     for i in range(ENTRIES):
-        # i/4095 maps [0, π/2] — last entry is exactly π/2
         angle = (math.pi / 2) * i / (ENTRIES - 1)
         val = round(math.sin(angle) * MAX_VAL)
         values.append(val)

@@ -58,17 +58,22 @@ module osc_bank (
     // phase[23:22] = quadrant, phase[21:10] = address.
     // Odd quadrants mirror the address; Q2/Q3 negate the output.
     // Output scaled to Q0.24: {raw, 10'd0} → signed, then ±.
+    //
+    // TODO: Reimplement as y=4x(1-x). It's a parabolic half-wave, so
+    // just start over and invert at phase 0x800000 like with the
+    // triangle wave. 
+    //
     //----------------------------------------------------------------
-    reg [13:0] sine_lut [0:4095];
+    reg [15:0] sine_lut [0:4095];
 
     initial
         $readmemh("src/voice/sine_lut.hex", sine_lut);
 
     wire [1:0]  q    = phase[23:22];
     wire [11:0] addr = q[0] ? ~phase[21:10] : phase[21:10];
-    wire [13:0] raw  = sine_lut[addr];
+    wire [15:0] raw  = sine_lut[addr];
 
-    wire signed [23:0] mag = $signed({raw, 10'd0});
+    wire signed [23:0] mag = $signed({raw, 8'd0});
 
     assign out_sin = q[1] ? -mag : mag;
 
