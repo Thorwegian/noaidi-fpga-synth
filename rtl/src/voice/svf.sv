@@ -3,24 +3,64 @@
 // Nearest-neighbor lookup, combinational reads.
 //--------------------------------------------------------------------
 
+// CERN-OHL-S v2
+
+localparam int SAMPLE_RATE   = 96000;
+
+localparam real FC_MIN   = 440.0 * 2.0**(-69.0/12.0);  // MIDI 0 (~8.18 Hz)
+localparam real FC_OCTAVES  = 11.25;
+localparam real M_PI = 3.141592653589793;
+
+localparam int FC_STEPS  = 512;
+localparam int Q_STEPS   = 8;
+localparam real Q_MIN    = 0.5;
+localparam real Q_MAX    = 16.0;
+
+typedef struct packed {
+    logic [17:0]    res;
+    logic [17:0]    div; 
+} coeff_inv_t;
+
+typedef struct packed {
+    logic [24:0]    kK;
+    coeff_inv_t [Q_STEPS-1:0] kInv;
+} coeff_t;
+
+
 module svf (
     input  logic                    strobe,
     input  logic                    rst_n,
     input  logic signed [17:0]      sample_in,
-    input  logic        [7:0]       fc_in,
-    input  logic        [2:0]       q_in,
-    output logic signed [17:0]      sample_out
+    input  logic        [10:0]      fc_in,
+    input  logic        [4:0]       q_in,
+    output logic signed [17:0]      lp_out,
+    output logic signed [17:0]      bp_out,
+    output logic signed [17:0]      hp_out
 );
 
-    reg [59:0] coeff_lut [0:1279];
-    initial $readmemh("src/voice/svf_coeff_lut.hex", coeff_lut);
+    coeff_t coeff_lut[FC_STEPS];
+    initial begin
+        int f, q;
+        real fc, kK, kQ, kInvRes, kInvDiv;
+        for (f = 0; f < FC_STEPS; f++) begin
+            fc = FC_MIN * $exp($ln(2.0) * FC_OCTAVES * real'(f) / real'(FC_STEPS - 1));
+            kK = $tan(M_PI * fc / SAMPLE_RATE);
+            coeff_lut[f].kK = 24'($rtoi(kK * (1 << 24)));
 
-    localparam Q_STRIDE = 8;
-    wire [10:0] addr = fc_in * Q_STRIDE + q_in;
+            for (q = 0; q < Q_STEPS; q++) begin
+                kQ = Q_MIN + (Q_MAX - Q_MIN) * real'(q) / real'(Q_STEPS - 1);
+                kInvRes = 1.0 / kQ + kK;
+                kInvDiv = 1.0 / (1.0 + kK/kQ + kK*kK);
 
-    wire        [23:0] K         = coeff_lut[addr][59:36];
-    wire signed [17:0] inv_res_K = coeff_lut[addr][35:18];
-    wire signed [17:0] inv_div   = coeff_lut[addr][17:0];
+                coeff_lut[f].kInv[q].res = 18'($rtoi(kInvRes * (1 << 14)));
+                coeff_lut[f].kInv[q].div = 18'($rtoi(kInvDiv * (1 << 14)));
+            end
+        end
+    end
+
+    wire signed [24:0] K         = $signed({1'b0, coeff_lut[fc_in].kK});
+    wire signed [17:0] inv_res_K = coeff_lut[fc_in].kInv[q_in].res;
+    wire signed [17:0] inv_div   = coeff_lut[fc_in].kInv[q_in].div;
 
     logic signed [17:0] s1, s2;
 
@@ -32,25 +72,25 @@ module svf (
     assign m_hp = inv_div * (sample_in - fb1 - s2);
     wire signed [17:0] hp = $signed(m_hp[31:14]);
 
-    wire signed [24:0] K_s = $signed({1'b0, K});
-
-    wire signed [49:0] m_u1 /* synthesis syn_dspstyle = "dsp" */;
-    assign m_u1 = K_s * hp;
-    wire signed [17:0] u1 = $signed(m_u1[49:24]);
+    wire signed [41:0] m_u1 /* synthesis syn_dspstyle = "dsp" */;
+    assign m_u1 = K * hp;
+    wire signed [17:0] u1 = $signed(m_u1[41:24]);
     wire signed [17:0] bp = u1 + s1;
 
-    wire signed [49:0] m_u2 /* synthesis syn_dspstyle = "dsp" */;
-    assign m_u2 = K_s * bp;
-    wire signed [17:0] u2 = $signed(m_u2[49:24]);
+    wire signed [41:0] m_u2 /* synthesis syn_dspstyle = "dsp" */;
+    assign m_u2 = K * bp;
+    wire signed [17:0] u2 = $signed(m_u2[41:24]);
     wire signed [17:0] lp = u2 + s2;
 
     always @(posedge strobe or negedge rst_n) begin
         if (!rst_n) begin
-            s1 <= 0; s2 <= 0; sample_out <= 0;
+            s1 <= 0; s2 <= 0; lp_out <= 0; bp_out <= 0; hp_out <= 0;
         end else begin
             s1 <= u1 + bp;
             s2 <= u2 + lp;
-            sample_out <= lp;
+            lp_out <= lp;
+            bp_out <= bp;
+            hp_out <= hp;
         end
     end
 
