@@ -1,0 +1,38 @@
+# SVF reference implementation
+https://www.musicdsp.org/en/latest/Filters/142-state-variable-filter-chamberlin-version.html
+
+Fs := 96000                             # Sample rate
+
+Fmidi(n) = 440 * exp2((n - 69) / 12)    # MIDI note frequency function
+
+Fmin := Fmidi(0) → 8,17579892 Hz        # MIDI note 0 is minimum filter frequency
+
+Fnext := Fmidi(0.01) → 8,18052281 Hz    # MIDI note 0 + 1 cent
+
+Fcent := Fnext - Fmin → 0,00472389 Hz   # Minimum resolvable step in hertz
+
+F1(F) = 2*pi*F/Fs                       # Simplified Chamberlin SVF frequency function
+
+F1min := F1(Fcent) → 0,00000031         # Minimum step in F1 coefficient units
+
+F1frac := clog2(1 / F1min) → ~22        # Binary digits of precision for LUT values
+
+F1max := F1(Fmidi(11)) → 0,00016077     # All semitones of one octave
+F1int := clog2(F1max) → 0               # Integer range for LUT values
+
+# LUT FORMAT
+#
+# 1024 entries encoding ONE octave (1200/1024=1,172 cents per entry)
+#
+# Entry format:
+# QU0.25 value masked to 16 LSB (4 hex digits)
+#
+# Encodes F1() for MIDI notes 0-11
+
+# LUT usage:
+#
+# Input: 14-bit frequency (QU4.10)
+#
+# 1. Extract 4 MSB as octave number
+# 2. Extract 10 LSB as LUT index
+# 3. Barrel-shift LUT value left by octave number to get F1 value

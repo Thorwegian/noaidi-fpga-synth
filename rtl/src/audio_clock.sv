@@ -1,5 +1,5 @@
 //--------------------------------------------------------------------
-// i2s_clock_gen.sv — I2S master clock generator for Tang Nano 20K
+// audio_clock.sv — I2S master clock generator for Tang Nano 20K
 //
 // Generates BCLK (bit clock), LRCLK (word select), and a
 // sample_strobe pulse from the system clock using simple counters.
@@ -15,7 +15,7 @@
 //   PA_EN   — pin 51 — amplifier enable (active high)
 //--------------------------------------------------------------------
 
-module i2s_clock_gen #(
+module audio_clock #(
     parameter SYS_CLK_HZ  = 98_304_000,   // system clock (MS5351)
     parameter BCLK_DIV    = 16,            // 98.304 / 16 = 6.144 MHz BCLK
     parameter BCLK_PER_WS = 64             // 96,000 Hz exactly

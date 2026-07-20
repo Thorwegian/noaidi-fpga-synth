@@ -64,7 +64,7 @@ noaidi-fpga-synth/
 │   ├── build.tcl              # Gowin synthesis script
 │   ├── src/
 │   │   ├── top.sv             # Top-level: I2S, NEORV32, voice pipeline
-│   │   ├── i2s_clock_gen.sv   # BCLK, LRCLK, sample_strobe generator
+│   │   ├── audio_clock.sv   # BCLK, LRCLK, sample_strobe generator
 │   │   ├── constraints.cst    # Physical pin constraints
 │   │   ├── constraints.sdc    # Timing constraints
 │   │   ├── i2s/i2s_tx.sv      # I2S transmitter (24-bit, disabled)

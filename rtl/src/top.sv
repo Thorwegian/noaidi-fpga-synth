@@ -4,7 +4,7 @@
 // Architecture:
 //   98.304 MHz MS5351 → sys_clk (pin 10)
 //   sys_clk → NEORV32 SoC (UART0=console, UART1=MIDI)
-//   sys_clk → i2s_clock_gen (→ BCLK, 96 kHz LRCLK, sample_strobe)
+//   sys_clk → audio_clock (→ BCLK, 96 kHz LRCLK, sample_strobe)
 //   I2S TX ← SVF ← Osc bank ← Phase acc 
 //
 // Audio output: MAX98357A I2S amplifier on Tang Nano 20K
@@ -18,6 +18,7 @@
 //   pll_clk O0=98.304M -s
 //--------------------------------------------------------------------
 
+(* top *)
 module top (
     // Clocks and reset
     input  logic       clk,            // 98.304 MHz from MS5351 (pin 10)
@@ -56,7 +57,7 @@ module top (
     logic i2s_lrclk_int;
     logic sample_strobe;
 
-    i2s_clock_gen u_i2s_clk (
+    audio_clock u_i2s_clk (
         .clk           (sys_clk),
         .rst_n         (sys_rst_n),
         .i2s_bclk      (i2s_bclk_int),
@@ -103,7 +104,7 @@ module top (
     // Saw full-scale ±1.0, SVF lowpass 500 Hz Q=1.0.
     //================================================================
 
-    localparam [23:0] FREQ_440HZ = 24'd76896;  // 440 Hz, Q0.24
+    localparam [23:0] FREQ_440HZ = 24'd7689;  // 440 Hz, Q0.24
 
     logic [23:0]        osc_phase;
     logic signed [23:0] osc_saw;      // Sawtooth
@@ -132,41 +133,39 @@ module top (
 
     // Bilinear SVF — internal 160×8 coefficient LUT
     //
-    // Sweep: fc_in 0→512 in ~1 second.
-    // 96 kHz / 512 steps = 187.5 samples/step.
-    localparam [9:0] PRESCALE = 10'd188;
-    reg [9:0] prescale_cnt;
-    reg [10:0] fc_idx;
+    // Sweep: fc_in 0→11263 in ~1 second.
+    // 96 kHz / 11264 steps = 52 samples/step.
+    localparam [13:0] PRESCALE = 18;
+    reg [13:0] prescale_cnt;
+    reg [13:0] fc_idx;
 
     always @(posedge sys_clk or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
             prescale_cnt <= 0;
-            fc_idx <= 0;
+            fc_idx <= 11263;
         end else if (sample_strobe) begin
             if (prescale_cnt == PRESCALE) begin
                 prescale_cnt <= 0;
-                if (fc_idx == 9'd511)
-                    fc_idx <= 0;
+                if (fc_idx == 0)
+                    fc_idx <= 11263;
                 else
-                    fc_idx <= fc_idx + 9'd1;
+                    fc_idx <= fc_idx - 1;
             end else begin
-                prescale_cnt <= prescale_cnt + 10'd1;
+                prescale_cnt <= prescale_cnt + 1;
             end
         end
     end
 
     svf u_svf (
         .rst_n(sys_rst_n), .strobe(sample_strobe),
-        .sample_in($signed(osc_saw) >>> 9), .fc_in(fc_idx),
+        .sample_in(osc_saw >>> 10), .fc_in(fc_idx),
         .q_in(3'd1), .lp_out(svf_lp), .bp_out(svf_bp), .hp_out(svf_hp)
     );
 
-    // SVF output is Q3.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
-    wire signed [23:0] svf_ext = svf_lp;  // auto sign-extend 18→24
-    wire signed [23:0] svf_scaled = svf_ext <<< 6;
-    reg  signed [23:0] audio_sample;
+    // SVF output is Q4.14 → sign-extend to 24-bit, <<< 6 = −18 dBFS
+    reg signed [24:0] audio_sample;
     always @(posedge sys_clk)
-        audio_sample <= svf_scaled;
+        audio_sample <= {svf_lp, 8'b0};
 
 `ifdef ENABLE_I2S
     // Latch samples on I2S data_ready strobe

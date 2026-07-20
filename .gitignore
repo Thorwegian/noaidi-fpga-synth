@@ -1,6 +1,6 @@
-*.bin
-*.elf
 .DS_Store
-sw/build/**
-rtl/impl/**
 *.swp
+*.hex
+*.log
+*.json
+*.fs
