@@ -1,6 +1,5 @@
 //--------------------------------------------------------------------
-// svf.sv — Bilinear SVF with internal 160×8 coefficient LUT
-// Nearest-neighbor lookup, combinational reads.
+// svf.sv — Chamberlin State-Variable Filter
 //--------------------------------------------------------------------
 
 // CERN-OHL-S v2
@@ -58,19 +57,6 @@ module svf (
         .DOUT(f1Xhp),
         .A(f1),
         .B(hp),
-        .ASIGN(1'b0),
-        .BSIGN(1'b1),
-        .CE(1'b1),
-        .CLK(strobe),
-        .RESET(~rst_n)
-    );
-
-    logic signed [35:0] x = sample_in <<< 18;
-    logic signed [71:0] multest;
-    MULT36X36 u_m4(
-        .DOUT(multest),
-        .A(36'h10000000),
-        .B(x),
         .ASIGN(1'b0),
         .BSIGN(1'b1),
         .CE(1'b1),
