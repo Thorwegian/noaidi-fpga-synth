@@ -19,14 +19,14 @@ voice/svf_k_lut.hex:
 	../../scripts/gen_svf_lut.py >voice/svf_k_lut.hex
 
 yosys.json: $(SRC) voice/svf_k_lut.hex Makefile
-	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee synth.log
+	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
 
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
-		--vopt cst=constraints.cst | tee pnr.log
+		--vopt cst=constraints.cst 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $< | tee pack.log
