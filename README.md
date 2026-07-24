@@ -1,5 +1,7 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
+https://discord.gg/rcvabz6n8
+
 A polyphonic synthesizer running on the [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k) FPGA (GW2AR-LV18QN88C8/I7). Subtractive synthesis with Chamberlin SVF filters, 96 kHz audio output to I2S and SPDIF, and a NEORV32 RISC-V soft core for application logic.
 
 ## Architecture
