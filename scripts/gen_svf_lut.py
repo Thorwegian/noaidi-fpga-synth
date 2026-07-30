@@ -2,6 +2,7 @@
 
 import math
 import numpy
+from pathlib import Path
 
 Fs = 96000
 ENTRIES = 1024
@@ -12,11 +13,16 @@ def midiToHz(note):
 def fcToK(Fc):
     return 2 * math.pi * Fc / Fs
 
-for note in numpy.arange(0, 12, 12 / 1024):
-    Fc = midiToHz(note)
-    K = fcToK(Fc)
-    value = round(K * (1 << 25))
-    print(f"{value:04x}") # Keep 16 non-zero bits (i.e. strip 9 bits)
+script_dir = Path(__file__).resolve().parent
+
+file_path = script_dir / "../rtl/voice/svf_k_lut.hex"
+
+with open(file_path, "w") as file:
+    for note in numpy.arange(0, 12, 12 / 1024):
+        Fc = midiToHz(note)
+        K = fcToK(Fc)
+        value = round(K * (1 << 25))
+        file.write(f"{value:04x}\n") # Keep 16 non-zero bits (i.e. strip 9 bits)
 
 # LUT FORMAT
 

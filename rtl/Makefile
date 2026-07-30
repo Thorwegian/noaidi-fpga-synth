@@ -16,7 +16,7 @@ SRC = $(PKG) $(MOD)
 all: pack.fs
 
 voice/svf_k_lut.hex:
-	../scripts/gen_svf_lut.py >voice/svf_k_lut.hex
+	../scripts/gen_svf_lut.py 
 
 yosys.json: $(SRC) voice/svf_k_lut.hex Makefile
 	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
@@ -38,4 +38,4 @@ flash: pack.fs
 	openFPGALoader -b tangnano20k -f $<
 
 clean:
-	rm -rf impl/
+	rm -rf *.log *.json *.fs voice/svf_k_lut.hex
