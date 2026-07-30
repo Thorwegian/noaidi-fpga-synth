@@ -1,4 +1,4 @@
-#SHELL = sh -xv
+export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
 TOP = top
 PKG = synth_pkg.sv
@@ -8,15 +8,15 @@ MOD = \
 	voice/phase_accumulator.sv \
 	voice/osc_bank.sv \
 	voice/svf.sv \
-	spdif/spdif_tx.sv
-#	i2s/i2s_tx.sv   # uncomment with -D ENABLE_I2S for MAX98357A
+	spdif/spdif_tx.sv \
+	i2s/i2s_tx.sv
 
-SRC = $(PKG) $(FUN) $(MOD)
+SRC = $(PKG) $(MOD)
 
 all: pack.fs
 
 voice/svf_k_lut.hex:
-	../../scripts/gen_svf_lut.py >voice/svf_k_lut.hex
+	../scripts/gen_svf_lut.py >voice/svf_k_lut.hex
 
 yosys.json: $(SRC) voice/svf_k_lut.hex Makefile
 	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
