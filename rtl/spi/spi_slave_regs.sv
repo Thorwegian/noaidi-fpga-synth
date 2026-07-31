@@ -17,7 +17,7 @@
 // CDC:
 //   Writes: toggle synchroniser  (SPI → sysclk)
 //   Reads:  2-FF address → sysclk, 2-FF data → SPI
-
+`default_nettype none
 module spi_slave_regs #(
     parameter ADDR_WIDTH = 7,
     parameter DATA_WIDTH = 8
@@ -149,6 +149,7 @@ module spi_slave_regs #(
 
     always @(posedge i_sysclk or negedge i_rstn) begin
         if (!i_rstn) begin
+            cs_n_d     <= 1'b1;
             wr_sync    <= 2'b00;
             wr_sync_d  <= 1'b0;
             o_reg_we   <= 1'b0;

@@ -8,7 +8,7 @@
 // freq_word = f_out / f_sample × 2^24
 //   1 kHz at 96 kHz:  1000/96000 × 2^24 ≈ 174,762
 //--------------------------------------------------------------------
-
+`default_nettype none
 module phase_accumulator (
     input  logic                 clk,
     input  logic                 strobe,        // sample rate strobe (96 kHz)

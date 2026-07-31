@@ -3,7 +3,7 @@
 //--------------------------------------------------------------------
 
 // CERN-OHL-S v2
-
+`default_nettype none
 module svf (
     input  logic                    strobe,
     input  logic                    rst_n,

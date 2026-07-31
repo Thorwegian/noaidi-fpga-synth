@@ -4,7 +4,7 @@
 //
 // Audio:  phase_accumulator → osc_bank → SVF → SPDIF + I2S
 //--------------------------------------------------------------------
-
+`default_nettype none
 module top (
     input  wire         sysclk,
     input  wire         rst,
@@ -12,7 +12,7 @@ module top (
     output wire [5:0]   led,
 
     input wire          sclk,
-    input wire          ce_n,
+    input wire          cs_n,
     input wire          mosi,
     output wire         miso,
 
@@ -48,6 +48,9 @@ module top (
         .i_reg_rdata(reg_rdata)
     );
 
+
+    assign led = {~rst, cs_n, ~sclk, ~mosi, ~miso, 1'b1};
+    
     // Audio clock — 96 kHz sample strobe from 98.304 MHz
     
     logic sample_strobe;
@@ -155,6 +158,5 @@ module top (
         .spdif_out     (spdif_out)
     );
 
-    assign led = 6'b010101;
 
 endmodule

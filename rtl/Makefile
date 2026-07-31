@@ -12,7 +12,7 @@ MOD = \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
 
-SRC = $(PKG) $(MOD)
+SRC = $(PKG) $(MOD) constraints.cst
 
 all: pack.fs
 

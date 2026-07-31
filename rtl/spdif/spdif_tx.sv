@@ -16,7 +16,7 @@
 // The junction (~0.72V p-p) is close enough for most receivers.
 // Connect to RCA center pin via 75Ω coax; shield to GND.
 // ────────────────────────────────────────────────────────────────
-
+`default_nettype none
 module spdif_tx (
     input  wire             clk,            // 98.304 MHz
     input  wire             rst_n,

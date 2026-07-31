@@ -14,7 +14,7 @@
 //   HP_DIN  — pin 54 — serial data output
 //   PA_EN   — pin 51 — amplifier enable (active high)
 //--------------------------------------------------------------------
-
+`default_nettype none
 module audio_clock #(
     parameter SYS_CLK_HZ  = 98_304_000,   // system clock (MS5351)
     parameter BCLK_DIV    = 16,            // 98.304 / 16 = 6.144 MHz BCLK

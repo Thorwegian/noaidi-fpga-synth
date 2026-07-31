@@ -8,7 +8,7 @@
 //
 // Outputs: out_saw, out_pul, out_tri, out_sin — all Q0.24 signed.
 //--------------------------------------------------------------------
-
+`default_nettype none
 module osc_bank (
     input logic signed  [23:0]  phase,          // Phase angle (Q0.24)
     input logic signed  [23:0]  duty,           // PWM duty cycle (Q0.24, signed)

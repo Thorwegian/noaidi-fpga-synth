@@ -1,3 +1,4 @@
+`default_nettype none
 module i2s_rx #(
     parameter BITS = 24
 )(

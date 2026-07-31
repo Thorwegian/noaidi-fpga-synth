@@ -959,7 +959,7 @@ CONFIG_ESP_ERR_TO_NAME_LOOKUP=y
 # GDMA Configurations
 #
 # default:
-# CONFIG_GDMA_CTRL_FUNC_IN_IRAM is not set
+CONFIG_GDMA_CTRL_FUNC_IN_IRAM=y
 # default:
 CONFIG_GDMA_ISR_HANDLER_IN_IRAM=y
 # default:
@@ -974,6 +974,17 @@ CONFIG_GDMA_OBJ_DRAM_SAFE=y
 # default:
 # CONFIG_GPIO_CTRL_FUNC_IN_IRAM is not set
 # end of ESP-Driver:GPIO Configurations
+
+#
+# ESP-Driver:SPI Configurations
+#
+# default:
+CONFIG_SPI_MASTER_ISR_IN_IRAM=y
+# default:
+# CONFIG_SPI_SLAVE_IN_IRAM is not set
+# default:
+CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
+# end of ESP-Driver:SPI Configurations
 
 #
 # Hardware Settings
@@ -1130,6 +1141,8 @@ CONFIG_ESP_BROWNOUT_USE_INTR=y
 # end of Power Supplier
 
 # default:
+CONFIG_ESP_SPI_BUS_LOCK_ISR_FUNCS_IN_IRAM=y
+# default:
 CONFIG_ESP_INTR_IN_IRAM=y
 # end of Hardware Settings
 
@@ -1184,6 +1197,10 @@ CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=y
 # default:
 CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU=y
 # end of Power Management
+
+#
+# ESP PSRAM
+#
 
 #
 # ESP-ROM

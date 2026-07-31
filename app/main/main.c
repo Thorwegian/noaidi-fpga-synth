@@ -7,6 +7,8 @@
 #include "esp_flash.h"
 #include "esp_system.h"
 
+#include "spi_regs.h"
+
 void app_main(void)
 {
     /* Print chip information */
@@ -34,7 +36,16 @@ void app_main(void)
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
+    fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
+
     for(int uptime = 0; ; uptime++) {
-    	printf("%d\n", uptime);
+        int value;
+        for(int i = 0; i < 16; i++) {
+            for(int reg = 0; reg < 0x80; reg++) {
+                value = fpga_reg_read(reg);
+    	    }
+        }
+        printf("%d fpga=%d\n", uptime, value);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }
