@@ -3,22 +3,19 @@
 // Target: GW2AR-LV18QN88C8/I7
 //
 
-//--------------------------------------------------------------------
 // Clock — 98.304 MHz from MS5351 (pin 10, configured via BL616 CLI)
 //   pll_clk O0=98.304M -s   (one-time setup, persists in MS5351 NVM)
-//--------------------------------------------------------------------
-IO_LOC  "clk" 10;
-IO_PORT "clk" IO_TYPE=LVCMOS33;
 
-//--------------------------------------------------------------------
+IO_LOC  "sysclk" 10;
+IO_PORT "sysclk" IO_TYPE=LVCMOS33;
+
 // Reset button
-//--------------------------------------------------------------------
+
 IO_LOC  "rst" 87;
 IO_PORT "rst" IO_TYPE=LVCMOS33;
 
-//--------------------------------------------------------------------
 // Status LEDs (active low — pull-up, LED on when pin driven low)
-//--------------------------------------------------------------------
+
 IO_LOC "led[5]" 20;
 IO_PORT "led[5]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 IO_LOC "led[4]" 19;
@@ -32,28 +29,32 @@ IO_PORT "led[1]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 IO_LOC "led[0]" 15;
 IO_PORT "led[0]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
-//--------------------------------------------------------------------
-// I2S Audio Interface (MAX98357A amplifier via built-in DAC)
-//--------------------------------------------------------------------
+// SPI slave with register bank
+
+IO_LOC "ce_n" 28;
+IO_PORT "ce_n" IO_TYPE=LVCMOS33;
+IO_LOC "sclk" 25;
+IO_PORT "sclk" IO_TYPE=LVCMOS33;
+IO_LOC "mosi" 26;
+IO_PORT "mosi" IO_TYPE=LVCMOS33;
+IO_LOC "miso" 29;
+IO_PORT "miso"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+
+// I2S audio output
+
 IO_LOC  "i2s_bclk"  56;  // HP_BCK  — bit clock
-IO_LOC  "i2s_lrclk" 55;  // HP_WS   — word select / left-right clock
-IO_LOC  "i2s_data"  54;  // HP_DIN  — serial data
-IO_LOC  "pa_en"     51;  // PA_EN   — amplifier enable (active high)
-
 IO_PORT "i2s_bclk"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC  "i2s_lrclk" 55;  // HP_WS   — word select / left-right clock
 IO_PORT "i2s_lrclk" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC  "i2s_data"  54;  // HP_DIN  — serial data
 IO_PORT "i2s_data"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
-IO_PORT "pa_en"     PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
-//--------------------------------------------------------------------
-// SPDIF Digital Audio Output
-//--------------------------------------------------------------------
+// SPDIF audio output
+
 IO_LOC  "spdif_out" 27;
 IO_PORT "spdif_out" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
-//--------------------------------------------------------------------
 // Unused / Reserved — uncomment as needed
-//--------------------------------------------------------------------
 
 // SPI Flash (for patch storage — future)
 // IO_LOC  "flash_cs_n"  60;
