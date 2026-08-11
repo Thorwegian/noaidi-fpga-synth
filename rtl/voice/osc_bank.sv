@@ -9,14 +9,33 @@
 // Outputs: out_saw, out_pul, out_tri, out_sin — all Q0.24 signed.
 //--------------------------------------------------------------------
 `default_nettype none
-module osc_bank (
-    input logic signed  [23:0]  phase,          // Phase angle (Q0.24)
+module osc_bank #(
+    parameter PHASE = 0
+) (
+    input logic                 strobe,         // Sample strobe
+    input logic         [13:0]  pitch,          // Pitch (UQ4.10)
     input logic signed  [23:0]  duty,           // PWM duty cycle (Q0.24, signed)
     output logic signed [23:0]  out_saw,        // Saw output (Q0.24)
     output logic signed [23:0]  out_pul,        // Pulse output (Q0.24)
     output logic signed [23:0]  out_tri,        // Triangle output (Q0.24)
     output logic signed [23:0]  out_sin         // Sine output (Q0.24)
 );
+
+    logic [23:0] phase_lut[1024];
+    initial begin
+        $readmemh("phase_lut.hex", phase_lut);
+    end
+
+    logic signed [23:0] phase = PHASE;
+
+    logic [3:0] octave = pitch[13:10];
+    logic [9:0] index  = pitch[9:0];
+    logic [22:0] delta = 0;
+
+    always @(posedge strobe) begin
+        phase <= phase + delta;
+        delta <= phase_lut[index] >>> (11 - octave);
+    end
 
     //----------------------------------------------------------------
     // Sawtooth: phase passthrough

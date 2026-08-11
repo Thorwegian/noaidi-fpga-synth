@@ -4,9 +4,9 @@ TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
-	spi/spi_slave_regs.sv \
+    spi/spi_slave_bare.sv \
 	audio_clock.sv \
-	voice/phase_accumulator.sv \
+	voice/voice.sv \
 	voice/osc_bank.sv \
 	voice/svf.sv \
 	spdif/spdif_tx.sv \
@@ -30,7 +30,7 @@ pnr.json: yosys.json
 		--vopt cst=constraints.cst 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
-	gowin_pack -d GW2A-18C -o $@ $< | tee pack.log
+	gowin_pack -d GW2A-18C -o $@ $<
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<

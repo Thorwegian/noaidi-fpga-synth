@@ -38,6 +38,7 @@ void app_main(void)
 
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     for(int uptime = 0; ; uptime++) {
         int value;
         for(int i = 0; i < 16; i++) {

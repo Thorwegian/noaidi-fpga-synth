@@ -23,6 +23,7 @@ with open(file_path, "w") as file:
         K = fcToK(Fc)
         value = round(K * (1 << 25))
         file.write(f"{value:04x}\n") # Keep 16 non-zero bits (i.e. strip 9 bits)
+        print(f"Note: {note:.3f}, Freq: {Fc:.3f}, K: {K:.6f}, Value: {value:04x}")
 
 # LUT FORMAT
 
