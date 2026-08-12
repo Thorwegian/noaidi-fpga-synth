@@ -12,7 +12,7 @@ module voice (
     logic [6:0][13:0] ssaw_pitches;
     always @(posedge strobe) begin
         for (int i = 0; i < 7; i++) begin
-            ssaw_pitches[i] = pitch_in + ((i - 3) * 14'sd32);
+            ssaw_pitches[i] = pitch_in + ((i - 3) * 14'sd12);
         end
     end
     logic signed [6:0][23:0] ssaw_oscs;

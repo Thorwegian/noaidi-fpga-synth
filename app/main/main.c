@@ -40,13 +40,8 @@ void app_main(void)
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     for(int uptime = 0; ; uptime++) {
-        int value;
-        for(int i = 0; i < 16; i++) {
-            for(int reg = 0; reg < 0x80; reg++) {
-                value = fpga_reg_read(reg);
-    	    }
-        }
-        printf("%d fpga=%d\n", uptime, value);
+        int value = fpga_reg_read(0x7F);
+        printf("uptime=%d\n", uptime);
         vTaskDelay(500 / portTICK_PERIOD_MS);
     }
 }

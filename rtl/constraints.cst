@@ -31,14 +31,14 @@ IO_PORT "led[0]" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 // SPI slave with register bank
 
-IO_LOC "cs_n" 28;
-IO_PORT "cs_n" IO_TYPE=LVCMOS33;
+IO_LOC "cs" 28;
+IO_PORT "cs" IO_TYPE=LVCMOS33;
 IO_LOC "sclk" 25;
 IO_PORT "sclk" IO_TYPE=LVCMOS33;
 IO_LOC "mosi" 26;
 IO_PORT "mosi" IO_TYPE=LVCMOS33;
 IO_LOC "miso" 29;
-IO_PORT "miso"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_PORT "miso" IO_TYPE=LVCMOS33;
 
 // I2S audio output
 

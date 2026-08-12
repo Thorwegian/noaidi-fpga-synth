@@ -6,37 +6,37 @@
 //--------------------------------------------------------------------
 `default_nettype none
 module top (
-    input  wire         sysclk,
-    input  wire         rst,
+    input  logic        sysclk,
+    input  logic        rst,
 
-    output wire [5:0]   led,
+    output logic [5:0]  led,
 
-    input wire          sclk,
-    input wire          cs_n,
-    input wire          mosi,
+    input logic         sclk,
+    input logic         cs,
+    input logic         mosi,
     output logic        miso,
 
-    output wire         i2s_bclk,
-    output wire         i2s_lrclk,
-    output wire         i2s_data,
+    output logic        i2s_bclk,
+    output logic        i2s_lrclk,
+    output logic        i2s_data,
     
-    output wire         spdif_out
+    output logic        spdif_out
 );
 
     // Clock and reset
 
-    wire rst_n = ~rst;
+    logic rst_n = ~rst;
 
     /*
+    // This one appears completely dead
     // SPI slave with register bank
-    
     wire reg_we;
     wire [6:0] reg_addr;
     wire [7:0] reg_wdata;
     logic [7:0] reg_rdata = 8'b10101010;
     spi_slave_regs u_spi_slave_regs (
         .i_sclk(sclk),
-        .i_cs_n(cs_n),
+        .i_cs_n(cs),
         .i_mosi(mosi),
         .o_miso(miso),
 
@@ -48,18 +48,23 @@ module top (
         .o_reg_wdata(reg_wdata),
         .i_reg_rdata(reg_rdata)
     );
-
-    spi_slave_bare u_spi_slave_bare (
-        .i_sclk(sclk),
-        .i_cs_n(cs_n),
-        .i_mosi(mosi),
-        .o_miso(miso)
-    );
     */
+
+    // Confirmed to respond on MISO but appears to be broken
+    spi_slave u_spi_slave (
+        .sclk(sclk),
+        .cs(cs),
+        .mosi(mosi),
+        .miso(miso),
+        .done(),
+        .received_data()
+    );
+
+    //assign miso = mosi;
 
     // Proven: cs_n and sclk reaches the chip
     //assign led = {~rst, cs_n, ~sclk, ~mosi, ~miso, 1'b1};
-    assign led = {~rst, 1'b1, 1'b1, ~mosi, ~miso, 1'b1};
+    assign led = {~rst, cs, ~sclk, ~mosi, ~miso, 1'b1};
     
     // Audio clock — 96 kHz sample strobe from 98.304 MHz
     
@@ -75,19 +80,19 @@ module top (
 
     // Pitch test sweep
     
-    localparam [13:0] PRESCALE = 18;
-    logic [13:0] prescale_cnt;
+    localparam [18:0] PRESCALE = 36000;
+    logic [18:0] prescale_cnt;
     logic [13:0] pitch;
     logic signed [17:0] svf_lp, svf_bp, svf_hp;
 
     always @(posedge sample_strobe or negedge rst_n) begin
         if (!rst_n) begin   
             prescale_cnt <= 0;
-            pitch        <= 11093;
+            pitch        <= 6144;
         end else begin
             if (prescale_cnt == PRESCALE) begin
                 prescale_cnt <= 0;
-                pitch <= (pitch == 0) ? 11093 : pitch - 1;
+                pitch <= (pitch < 3072) ? 6144 : pitch - 85;
             end else begin
                 prescale_cnt <= prescale_cnt + 1;
             end
@@ -98,8 +103,8 @@ module top (
     voice u_voice (
         .rst_n       (rst_n),
         .strobe      (sample_strobe),
-        .pitch_in    (pitch >>> 1),
-        .cutoff_in   (pitch),
+        .pitch_in    (pitch),
+        .cutoff_in   (pitch + 4096),
         .sample_out  (voice_sample)
     );
 

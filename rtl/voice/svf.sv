@@ -37,7 +37,7 @@ module svf (
         .BSIGN(1'b1),
         .CE(0),
         .CLK(0),
-        .RESET(0)
+        .RESET(!rst_n)
     );
 
     logic signed [71:0] q1Xd1;
@@ -49,7 +49,7 @@ module svf (
         .BSIGN(1'b1),
         .CE(0),
         .CLK(0),
-        .RESET(0)
+        .RESET(!rst_n)
     );
 
     logic signed [71:0] f1Xhp;
@@ -61,7 +61,7 @@ module svf (
         .BSIGN(1'b1),
         .CE(0),
         .CLK(0),
-        .RESET(0)
+        .RESET(!rst_n)
     );
 
     logic signed [35:0] lp = d2 + (f1Xd1 >>> 28);
