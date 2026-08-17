@@ -56,6 +56,7 @@ module top (
         .cs(cs),
         .mosi(mosi),
         .miso(miso),
+        .send_data(8'hA5),
         .done(),
         .received_data()
     );

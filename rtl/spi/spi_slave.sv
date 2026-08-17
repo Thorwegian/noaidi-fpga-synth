@@ -1,9 +1,11 @@
 //--------------------------------------------------------------------
-// spi_slave.sv — minimal dummy SPI slave (Mode 0, CPOL=0, CPHA=0)
+// spi_slave.sv — minimal SPI slave (Mode 0, CPOL=0, CPHA=0)
 //
-// Always returns the fixed byte 0xA5 on MISO.  No protocol, no
+// Returns the byte on `send_data` back on MISO.  No protocol, no
 // register file — this is a bring-up/test slave to prove the physical
 // SPI link (CS/SCLK/MOSI/MISO) works before adding the register bank.
+// `send_data` is latched while CS is high (idle) and shifted out
+// MSB-first on the next transaction.
 //
 // SPI Mode 0 timing:
 //   - MOSI is sampled by the master on the RISING edge of SCLK.
@@ -22,12 +24,12 @@ module spi_slave (
     input  logic mosi,
     output logic miso,
 
+    input  logic [7:0] send_data,  // byte to return on MISO
+
     // optional bring-up outputs (kept for compatibility)
     output logic done,
     output logic [7:0] received_data
 );
-
-    localparam DUMMY_BYTE = 8'hA5;
 
     logic [7:0] shift_out;
     logic [7:0] shift_in;
@@ -48,7 +50,7 @@ module spi_slave (
     // is on MISO before the very first rising edge.
     always_ff @(negedge sclk, posedge cs) begin
         if (cs) begin
-            shift_out <= DUMMY_BYTE;
+            shift_out <= send_data;   // latch the byte to send while idle
             shift_in  <= 8'd0;
             bit_count <= 3'd0;
         end else begin

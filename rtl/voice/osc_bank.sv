@@ -71,18 +71,11 @@ module osc_bank #(
         : 24'h7FFFFF - ((phase - 24'h800000) << 1);
 
     //----------------------------------------------------------------
-    // Sine: ¼-wave LUT with quadrant decoding
-    //
-    // 4096 entries × 14-bit unsigned, covering [0, π/2].
-    // phase[23:22] = quadrant, phase[21:10] = address.
-    // Odd quadrants mirror the address; Q2/Q3 negate the output.
-    // Output scaled to Q0.24: {raw, 10'd0} → signed, then ±.
-    //
-    // TODO: Reimplement as y=4x(1-x). It's a parabolic half-wave with
-    // peak 1 at 0<x<1, so just start over and invert at phase 0x800000
-    // like with the triangle wave. 
+    // Sine: y=4x(1-x) parabolic half-wave
     //
     //----------------------------------------------------------------
-    assign out_sin = 0;
+    logic [22:0] x_abs = phase[23] ? -phase : phase;            // |phase|
+    logic [45:0] product = x_abs * (24'h7FFFFF - x_abs);        // 23×23
+    assign out_sin = phase[23] ? -product[45:22] : product[45:22];
 
 endmodule

@@ -4,7 +4,6 @@ TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
-    spi/spi_slave_regs.sv \
 	spi/spi_slave.sv \
 	audio_clock.sv \
 	voice/voice.sv \
