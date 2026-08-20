@@ -20,7 +20,7 @@
 module spdif_tx (
     input  wire             clk,            // 98.304 MHz
     input  wire             rst_n,
-    input  wire             sample_strobe,  // 96 kHz pulse
+    input  wire             sample_tick,    // drum sample boundary ("sample ready")
     input  wire signed [23:0] audio_l,
     input  wire signed [23:0] audio_r,
     input  wire             c_bit,          // channel status (tie to 0)
@@ -46,7 +46,7 @@ module spdif_tx (
     reg [5:0]  cell_cnt;       // 0..63, current cell in subframe
     reg [31:0] subframe;       // current 32-bit subframe
 
-    // Audio holding registers (latched on sample_strobe)
+    // Audio holding registers (latched on sample_tick)
     reg signed [23:0] audio_l_held;
     reg signed [23:0] audio_r_held;
 
@@ -101,20 +101,26 @@ module spdif_tx (
             subframe     <= 32'd0;
         end else begin
             // ── Audio capture (any cycle) ──
-            if (sample_strobe) begin
+            if (sample_tick) begin
                 audio_l_held <= audio_l;
                 audio_r_held <= audio_r;
             end
 
-            // ── IDLE → LEFT: start transmission on sample_strobe ──
-            if (sample_strobe && state == STATE_IDLE) begin
-                subframe <= subframe_l;
-                cell_cnt <= 6'd0;
-                state    <= STATE_LEFT;
+            // ── IDLE → LEFT: start on sample_tick and emit preamble
+            //    cell 0 immediately.  The tick can coincide with a
+            //    cell_tick (both divide sysclk from the same reset),
+            //    so waiting for the next cell_tick would stretch the
+            //    frame by one extra cell period and break the
+            //    receiver's clock recovery. ──
+            if (sample_tick && state == STATE_IDLE) begin
+                subframe  <= subframe_l;
+                cell_cnt  <= 6'd1;            // next cell is cell 1
+                state     <= STATE_LEFT;
+                spdif_out <= PREAMBLE_M[7];   // preamble cell 0
             end
 
             // ── Cell processing: on cell_tick during transmission ──
-            if (cell_tick && state != STATE_IDLE) begin
+            else if (cell_tick && state != STATE_IDLE) begin
                 // --- 1. Output decision for this cell ---
                 if (cell_cnt < 6'd8) begin
                     // Preamble: output fixed pattern

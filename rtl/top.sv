@@ -2,7 +2,10 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// Audio:  phase_accumulator → osc_bank → SVF → SPDIF + I2S
+// Audio:  256-voice SCMO pipeline ("the drum") → SPDIF + I2S
+// Timing: drum.sv owns the sample boundary (1024 sysclk = 1 sample).
+//         The output transmitters are sample_tick consumers; the I2S
+//         transmitter generates its own BCLK/LRCLK.
 //--------------------------------------------------------------------
 `default_nettype none
 module top (
@@ -27,30 +30,9 @@ module top (
 
     logic rst_n = ~rst;
 
-    /*
-    // This one appears completely dead
-    // SPI slave with register bank
-    wire reg_we;
-    wire [6:0] reg_addr;
-    wire [7:0] reg_wdata;
-    logic [7:0] reg_rdata = 8'b10101010;
-    spi_slave_regs u_spi_slave_regs (
-        .i_sclk(sclk),
-        .i_cs_n(cs),
-        .i_mosi(mosi),
-        .o_miso(miso),
-
-        .i_sysclk(sysclk),
-        .i_rstn(rst_n),
-
-        .o_reg_we(reg_we),
-        .o_reg_addr(reg_addr),
-        .o_reg_wdata(reg_wdata),
-        .i_reg_rdata(reg_rdata)
-    );
-    */
-
-    // Confirmed to respond on MISO but appears to be broken
+    //----------------------------------------------------------------
+    // SPI slave — bring-up only (echoes 0xA5), no register bank yet
+    //----------------------------------------------------------------
     spi_slave u_spi_slave (
         .sclk(sclk),
         .cs(cs),
@@ -61,80 +43,64 @@ module top (
         .received_data()
     );
 
-    //assign miso = mosi;
-
     // Proven: cs_n and sclk reaches the chip
-    //assign led = {~rst, cs_n, ~sclk, ~mosi, ~miso, 1'b1};
     assign led = {~rst, cs, ~sclk, ~mosi, ~miso, 1'b1};
     
-    // Audio clock — 96 kHz sample strobe from 98.304 MHz
-    
-    logic sample_strobe;
+    //----------------------------------------------------------------
+    // Drum — single timebase (98.304 MHz / 1024 = 96 kHz)
+    //----------------------------------------------------------------
+    logic        sample_tick;
+    logic        voice_enter;
+    logic [9:0]  slot;
 
-    audio_clock u_audio_clk (
-        .clk           (sysclk),
-        .rst_n         (rst_n),
-        .i2s_bclk      (i2s_bclk),
-        .i2s_lrclk     (i2s_lrclk),
-        .sample_strobe (sample_strobe)
-    );
-
-    // Pitch test sweep
-    
-    localparam [18:0] PRESCALE = 36000;
-    logic [18:0] prescale_cnt;
-    logic [13:0] pitch;
-    logic signed [17:0] svf_lp, svf_bp, svf_hp;
-
-    always @(posedge sample_strobe or negedge rst_n) begin
-        if (!rst_n) begin   
-            prescale_cnt <= 0;
-            pitch        <= 6144;
-        end else begin
-            if (prescale_cnt == PRESCALE) begin
-                prescale_cnt <= 0;
-                pitch <= (pitch < 3072) ? 6144 : pitch - 85;
-            end else begin
-                prescale_cnt <= prescale_cnt + 1;
-            end
-        end
-    end
-
-    logic signed [17:0] voice_sample;
-    voice u_voice (
+    drum u_drum (
+        .clk         (sysclk),
         .rst_n       (rst_n),
-        .strobe      (sample_strobe),
-        .pitch_in    (pitch),
-        .cutoff_in   (pitch + 4096),
-        .sample_out  (voice_sample)
+        .sample_tick (sample_tick),
+        .voice_enter (voice_enter),
+        .slot        (slot)
     );
 
-    logic signed [23:0] sample_left, sample_right;
+    //----------------------------------------------------------------
+    // 256-voice pipeline
+    //----------------------------------------------------------------
+    logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    assign sample_left = 24'(voice_sample) * (256 / 4); // Scale Q2.16 → Q0.24 and divide by 4 to avoid clipping
-    assign sample_right = 24'(voice_sample) * (256 / 4);
+    voice_pipeline u_voice_pipeline (
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .slot        (slot),
+        .voice_enter (voice_enter),
+        .sample_tick (sample_tick),
+        .mix_left    (sample_left),
+        .mix_right   (sample_right)
+    );
 
-    // I2S transmitter
-    logic i2s_data_ready;
+    //----------------------------------------------------------------
+    // I2S master transmitter (generates its own BCLK/LRCLK)
+    //----------------------------------------------------------------
     i2s_tx #(.BITS(24)) u_i2s_tx (
-        .sck        (i2s_bclk),
-        .ws         (i2s_lrclk),
-        .sd         (i2s_data),
-        .data_left  (sample_left),
-        .data_right (sample_right),
-        .data_ready (i2s_data_ready)
+        .sysclk      (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .data_left   (sample_left),
+        .data_right  (sample_right),
+        .i2s_bclk    (i2s_bclk),
+        .i2s_lrclk   (i2s_lrclk),
+        .sd          (i2s_data)
     );
 
+    //----------------------------------------------------------------
     // SPDIF transmitter
+    //----------------------------------------------------------------
     spdif_tx u_spdif (
-        .clk           (sysclk),
-        .rst_n         (rst_n),
-        .sample_strobe (sample_strobe),
-        .audio_l       (sample_left),
-        .audio_r       (sample_right),
-        .c_bit         (1'b0),
-        .spdif_out     (spdif_out)
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .audio_l     (sample_left),
+        .audio_r     (sample_right),
+        .c_bit       (1'b0),
+        .spdif_out   (spdif_out)
     );
-
 
 endmodule

@@ -5,3 +5,5 @@ app/build
 *.log
 *.json
 *.fs
+*.vvp
+*.vcd

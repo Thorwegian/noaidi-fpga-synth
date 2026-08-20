@@ -4,22 +4,40 @@ TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
+	drum.sv \
+	voice/voice_pipeline.sv \
+	voice/osc_core.sv \
 	spi/spi_slave.sv \
-	audio_clock.sv \
-	voice/voice.sv \
-	voice/osc_bank.sv \
-	voice/svf.sv \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
 
+# Generated LUTs / patch init
+LUTS = \
+	voice/phase_lut.hex \
+	voice/svf_k_lut.hex \
+	voice/att_lut.hex \
+	voice/test_patch_p0.hex \
+	voice/test_patch_p1.hex \
+	voice/test_patch_p2.hex \
+	voice/test_patch_p3.hex
+
 all: pack.fs
 
-voice/svf_k_lut.hex:
-	../scripts/gen_svf_lut.py 
+voice/phase_lut.hex: ../scripts/gen_phase_lut.py
+	python3 $<
 
-yosys.json: $(SRC) voice/svf_k_lut.hex Makefile
+voice/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+	python3 $<
+
+voice/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+voice/test_patch_p%.hex: ../scripts/gen_test_patch.py
+	python3 $<
+
+yosys.json: $(SRC) $(LUTS) Makefile
 	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
 
 pnr.json: yosys.json
@@ -27,7 +45,8 @@ pnr.json: yosys.json
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
-		--vopt cst=constraints.cst 2>&1 | tee pnr.log
+		--vopt cst=constraints.cst \
+		--freq 98.304 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<
@@ -37,6 +56,29 @@ sram: pack.fs
 
 flash: pack.fs
 	openFPGALoader -b tangnano20k -f $<
+
+#----------------------------------------------------------------------
+# Simulation (iverilog)
+#----------------------------------------------------------------------
+SIM_MOD = $(PKG) drum.sv voice/voice_pipeline.sv voice/osc_core.sv
+TB = tb/tb_voice_pipeline.sv
+
+tb/tb_voice_pipeline.vvp: $(SIM_MOD) $(TB) $(LUTS) Makefile
+	iverilog -g2012 -o $@ $(SIM_MOD) $(TB)
+
+SIM_OUT_MOD = $(PKG) drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
+TB_OUT = tb/tb_outputs.sv
+
+tb/tb_outputs.vvp: $(SIM_OUT_MOD) $(TB_OUT) Makefile
+	iverilog -g2012 -o $@ $(SIM_OUT_MOD) $(TB_OUT)
+
+sim-voice: tb/tb_voice_pipeline.vvp
+	vvp tb/tb_voice_pipeline.vvp
+
+sim-outputs: tb/tb_outputs.vvp
+	vvp tb/tb_outputs.vvp
+
+sim: sim-voice sim-outputs
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex
