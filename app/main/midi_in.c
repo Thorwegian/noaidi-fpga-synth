@@ -1,12 +1,10 @@
 // midi_in.c — MIDI input process (UART1)
 //
 // Owns UART1 at 31250 baud 8N1 on the configured RX pin, feeds the
-// byte stream through the MIDI parser and logs complete messages to
-// the console. The only consumer of UART1.
+// byte stream through the MIDI parser and publishes complete messages
+// to the event bus. Never prints and never blocks on a consumer.
 
 #include "midi_in.h"
-
-#include <stdio.h>
 
 #include "driver/uart.h"
 #include "esp_err.h"
@@ -14,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "event_bus.h"
 #include "midi_parser.h"
 
 #define MIDI_UART_PORT   UART_NUM_1
@@ -28,42 +27,18 @@
 #define MIDI_PARTIAL_TIMEOUT_MS 50
 #define MIDI_SOURCE_TIMEOUT_MS  500
 
-// ── Console decode ─────────────────────────────────────────────────
-// Temporary: log parsed messages so the parser can be verified against
-// the keyboard. Later this callback is where messages get pushed to
-// the synth control / SPI command queue instead.
+// ── Parser callback ────────────────────────────────────────────────
+// Runs in the context of the midi_in task. Fan-out to consumers
+// happens through the event bus (non-blocking), so a slow consumer
+// can never stall MIDI reception.
 
-static void log_midi_msg(const midi_message_t *m, void *user)
+static void midi_msg_to_bus(const midi_message_t *m, void *user)
 {
-    uint8_t type = m->status & 0xF0;
-    uint8_t ch   = (m->status & 0x0F) + 1;
-
-    switch (type) {
-    case 0x80:
-        printf("note_off  ch=%2d note=%3d vel=%3d\n", ch, m->data[0], m->data[1]);
-        break;
-    case 0x90:
-        printf("note_on   ch=%2d note=%3d vel=%3d\n", ch, m->data[0], m->data[1]);
-        break;
-    case 0xA0:
-        printf("poly_at   ch=%2d note=%3d val=%3d\n", ch, m->data[0], m->data[1]);
-        break;
-    case 0xB0:
-        printf("cc        ch=%2d num=%3d val=%3d\n", ch, m->data[0], m->data[1]);
-        break;
-    case 0xC0:
-        printf("program   ch=%2d num=%3d\n", ch, m->data[0]);
-        break;
-    case 0xD0:
-        printf("ch_at     ch=%2d val=%3d\n", ch, m->data[0]);
-        break;
-    case 0xE0:
-        printf("pitch     ch=%2d val=%5d\n", ch, (m->data[1] << 7) | m->data[0]);
-        break;
-    default:
-        printf("unknown   status=0x%02X\n", m->status);
-        break;
-    }
+    evt_t evt = {
+        .kind = EVT_MIDI,
+        .midi = *m,
+    };
+    event_bus_publish(&evt);
 }
 
 static midi_parser_t g_parser;
@@ -91,9 +66,14 @@ static void midi_in_task(void *arg)
 
         idle_ms += MIDI_PARTIAL_TIMEOUT_MS;
         if (idle_ms >= MIDI_SOURCE_TIMEOUT_MS) {
-            // Source gone (powered off / cable pulled): full reset and
-            // dump whatever the line glitch may have left in the FIFO.
-            // Note panic belongs here too once voices exist.
+            // Source silent: full transport reset and dump whatever the
+            // line glitch may have left in the FIFO.
+            //
+            // Note panic belongs here too once voices exist — but only
+            // if Active Sensing had been observed: a source that never
+            // sends 0xFE must never be silenced by silence alone. Further,
+            // after such a silence, Active Sensing must be observed again
+            // before panic is re-enabled.
             midi_parser_reset(&g_parser);
             uart_flush_input(MIDI_UART_PORT);
             idle_ms = 0;
@@ -107,7 +87,7 @@ static void midi_in_task(void *arg)
 
 void midi_in_init(int rx_pin)
 {
-    midi_parser_init(&g_parser, log_midi_msg, NULL);
+    midi_parser_init(&g_parser, midi_msg_to_bus, NULL);
 
     uart_config_t cfg = {
         .baud_rate  = MIDI_BAUD,

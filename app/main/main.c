@@ -9,6 +9,8 @@
 
 #include "spi_regs.h"
 #include "midi_in.h"
+#include "midi_log.h"
+#include "event_bus.h"
 
 void app_main(void)
 {
@@ -36,6 +38,10 @@ void app_main(void)
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
+
+    // Event bus first, then the consumers that subscribe to it.
+    event_bus_init();
+    midi_log_init();
 
     // UART1 RX must init before SPI: UART1's default TX pin (GPIO7) is
     // the SPI CS pin, so the SPI init must run last and re-claim it.
