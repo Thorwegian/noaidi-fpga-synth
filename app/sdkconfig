@@ -987,6 +987,24 @@ CONFIG_SPI_SLAVE_ISR_IN_IRAM=y
 # end of ESP-Driver:SPI Configurations
 
 #
+# ESP-Driver:UART Configurations
+#
+# default:
+# CONFIG_UART_ISR_IN_IRAM is not set
+# end of ESP-Driver:UART Configurations
+
+#
+# ESP-Driver:UHCI Configurations
+#
+# default:
+# CONFIG_UHCI_ISR_HANDLER_IN_IRAM is not set
+# default:
+# CONFIG_UHCI_ISR_CACHE_SAFE is not set
+# default:
+# CONFIG_UHCI_ENABLE_DEBUG_LOG is not set
+# end of ESP-Driver:UHCI Configurations
+
+#
 # Hardware Settings
 #
 # default:
@@ -1201,6 +1219,15 @@ CONFIG_PM_ESP_SLEEP_POWER_DOWN_CPU=y
 #
 # ESP PSRAM
 #
+
+#
+# ESP Ringbuf
+#
+# default:
+# CONFIG_RINGBUF_IN_IRAM is not set
+# default:
+# CONFIG_RINGBUF_PLACE_ISR_FUNCTIONS_INTO_FLASH is not set
+# end of ESP Ringbuf
 
 #
 # ESP-ROM

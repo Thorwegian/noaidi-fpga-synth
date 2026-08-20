@@ -66,12 +66,10 @@ void fpga_reg_write(uint8_t addr, uint8_t data)
 uint8_t fpga_reg_read(uint8_t addr)
 {
     uint8_t cmd = (1 << 7) | (addr & 0x7F);
-    uint8_t rx1 = fpga_xfer_byte(cmd);      // send command, receive pre-XFER byte (ignore)
-    uint8_t rx2 = fpga_xfer_byte(0xAA);     // send dummy, receive status byte (ignore)
-    uint8_t rx3 = fpga_xfer_byte(0x55);  // send dummy, receive register data
-    printf("fpga_reg_read: addr=0x%02X cmd=0x%02X rx1=0x%02X rx2=0x%02X rx3=0x%02X\n",
-           addr, cmd, rx1, rx2, rx3);
-    return rx3;
+    fpga_xfer_byte(cmd);      // send command, receive pre-XFER byte (ignore)
+    fpga_xfer_byte(0xAA);     // send dummy, receive status byte (ignore)
+    uint8_t rx = fpga_xfer_byte(0x55);  // send dummy, receive register data
+    return rx;
 }
 
 // ── Burst write ────────────────────────────────────────────────────

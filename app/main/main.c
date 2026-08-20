@@ -8,6 +8,7 @@
 #include "esp_system.h"
 
 #include "spi_regs.h"
+#include "midi_in.h"
 
 void app_main(void)
 {
@@ -36,12 +37,16 @@ void app_main(void)
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
+    // UART1 RX must init before SPI: UART1's default TX pin (GPIO7) is
+    // the SPI CS pin, so the SPI init must run last and re-claim it.
+    midi_in_init(0);
+
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    for(int uptime = 0; ; uptime++) {
-        int value = fpga_reg_read(0x7F);
-        printf("uptime=%d\n", uptime);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+    int spi_value = fpga_reg_read(0x7F);
+    if(spi_value == 0xA5) {
+        printf("SPI slave returned expected value 0xA5\n");
+    } else {
+        printf("SPI slave returned unexpected value 0x%02X\n", spi_value);
     }
 }
