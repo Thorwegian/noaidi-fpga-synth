@@ -8,6 +8,7 @@ MOD = \
 	voice/voice_pipeline.sv \
 	voice/osc_core.sv \
 	spi/spi_slave.sv \
+	spi/reg_banks.sv \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
 
@@ -78,7 +79,21 @@ sim-voice: tb/tb_voice_pipeline.vvp
 sim-outputs: tb/tb_outputs.vvp
 	vvp tb/tb_outputs.vvp
 
-sim: sim-voice sim-outputs
+TB_SPI = tb/tb_spi_basic.sv
+tb/tb_spi_basic.vvp: spi/spi_slave.sv $(TB_SPI) Makefile
+	iverilog -g2012 -o $@ spi/spi_slave.sv $(TB_SPI)
+
+TB_BANKS = tb/tb_reg_banks.sv
+tb/tb_reg_banks.vvp: spi/spi_slave.sv spi/reg_banks.sv $(TB_BANKS) Makefile
+	iverilog -g2012 -o $@ spi/spi_slave.sv spi/reg_banks.sv $(TB_BANKS)
+
+sim-spi: tb/tb_spi_basic.vvp
+	vvp tb/tb_spi_basic.vvp
+
+sim-banks: tb/tb_reg_banks.vvp
+	vvp tb/tb_reg_banks.vvp
+
+sim: sim-voice sim-outputs sim-spi sim-banks
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex

@@ -31,16 +31,32 @@ module top (
     logic rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // SPI slave — bring-up only (echoes 0xA5), no register bank yet
+    // SPI slave + register bank decoder
+    // spi_slave is proven hardware (TX+RX); reg_banks layers a BSRAM
+    // register store on top of its done/received_data handshake.
     //----------------------------------------------------------------
+    logic        spi_done;
+    logic [7:0]  spi_rx;
+
     spi_slave u_spi_slave (
         .sclk(sclk),
         .cs(cs),
         .mosi(mosi),
         .miso(miso),
         .send_data(8'hA5),
-        .done(),
-        .received_data()
+        .done(spi_done),
+        .received_data(spi_rx)
+    );
+
+    reg_banks u_reg_banks (
+        .sclk      (sclk),
+        .cs        (cs),
+        .rx_byte   (spi_rx),
+        .rx_done   (spi_done),
+        .sysclk    (sysclk),
+        .rst_n     (rst_n),
+        .read_addr (4'd0),       // Step 1: STATUS only
+        .read_data ()            // not consumed yet
     );
 
     // Proven: cs_n and sclk reaches the chip
