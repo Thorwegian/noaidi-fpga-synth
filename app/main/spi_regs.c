@@ -40,53 +40,57 @@ void fpga_spi_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
              mosi_pin, miso_pin, sclk_pin, cs_pin, freq_hz);
 }
 
-// ── Low-level: exchange a single byte ───────────────────────────────
-static uint8_t fpga_xfer_byte(uint8_t tx)
+// ── Low-level: transmit N bytes in ONE CS-framed transaction ────────
+// A single spi_device_transmit asserts CS, clocks all `length` bits, then
+// deasserts CS — so CS stays LOW across every byte in `buf`.  This is the
+// native burst mode: do NOT call this once per byte (that would raise CS
+// between bytes and break the FPGA's command/data framing).
+static void fpga_xfer_bytes(const uint8_t *tx, size_t nbytes)
 {
     spi_transaction_t t = {
-        .length    = 8,
-        .tx_buffer = &tx,
+        .length    = nbytes * 8,
+        .tx_buffer = tx,
         .rx_buffer = NULL,
     };
-    uint8_t rx;
-    t.rx_buffer = &rx;
     ESP_ERROR_CHECK(spi_device_transmit(g_spi, &t));
-    return rx;
 }
 
 // ── Single-register write ──────────────────────────────────────────
+// Command byte + data byte go out in ONE CS-framed transaction (16 bits).
 void fpga_reg_write(uint8_t addr, uint8_t data)
 {
-    uint8_t cmd = (0 << 7) | (addr & 0x7F);
-    fpga_xfer_byte(cmd);      // send command
-    fpga_xfer_byte(data);     // send data
+    uint8_t frame[2] = { (0 << 7) | (addr & 0x7F), data };
+    fpga_xfer_bytes(frame, 2);
 }
 
 // ── Single-register read ───────────────────────────────────────────
 uint8_t fpga_reg_read(uint8_t addr)
 {
     uint8_t cmd = (1 << 7) | (addr & 0x7F);
-    fpga_xfer_byte(cmd);      // send command, receive pre-XFER byte (ignore)
-    fpga_xfer_byte(0xAA);     // send dummy, receive status byte (ignore)
-    uint8_t rx = fpga_xfer_byte(0x55);  // send dummy, receive register data
-    return rx;
+    // TODO Step 3: real read-back over MISO.  For now the register bank
+    // does not yet return data, so this is a stub.
+    fpga_xfer_bytes(&cmd, 1);
+    return 0;
 }
 
 // ── Burst write ────────────────────────────────────────────────────
+// Command byte + N data bytes in ONE CS-framed transaction.
 void fpga_reg_write_burst(uint8_t addr, const uint8_t *data, size_t len)
 {
-    uint8_t cmd = (0 << 7) | (addr & 0x7F);
-    fpga_xfer_byte(cmd);
-    for (size_t i = 0; i < len; i++)
-        fpga_xfer_byte(data[i]);
+    // Small local buffer for the command + data; registers use short bursts.
+    uint8_t frame[33];   // 1 cmd + up to 32 data bytes
+    frame[0] = (0 << 7) | (addr & 0x7F);
+    for (size_t i = 0; i < len && i < 32; i++)
+        frame[1 + i] = data[i];
+    fpga_xfer_bytes(frame, 1 + (len < 32 ? len : 32));
 }
 
 // ── Burst read ─────────────────────────────────────────────────────
 void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len)
 {
+    // TODO Step 3: real burst read-back over MISO.
     uint8_t cmd = (1 << 7) | (addr & 0x7F);
-    fpga_xfer_byte(cmd);          // pre-XFER byte (discard)
-    fpga_xfer_byte(0x00);         // status byte (discard)
+    fpga_xfer_bytes(&cmd, 1);
     for (size_t i = 0; i < len; i++)
-        buf[i] = fpga_xfer_byte(0x00);
+        buf[i] = 0;
 }

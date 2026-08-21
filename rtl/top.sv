@@ -55,12 +55,31 @@ module top (
         .rx_done   (spi_done),
         .sysclk    (sysclk),
         .rst_n     (rst_n),
-        .read_addr (4'd0),       // Step 1: STATUS only
-        .read_data ()            // not consumed yet
+        .read_addr (4'd0),       // STATUS at word 0
+        .read_data (status_reg)  // 36-bit, data byte in [7:0]
     );
 
-    // Proven: cs_n and sclk reaches the chip
-    assign led = {~rst, cs, ~sclk, ~mosi, ~miso, 1'b1};
+    //----------------------------------------------------------------
+    // LED blink test: when STATUS[7:0] == 0x55 (magic written by ESP32),
+    // blink led[0] at sysclk/2^26 (~1.5 Hz).  Confirms the full SPI →
+    // BSRAM → FPGA loop on real hardware.
+    //----------------------------------------------------------------
+    logic [35:0] status_reg;
+    logic [25:0] blink_cnt;      // 2^26 = 67,108,864 cycles ~ 683 ms
+    logic        blink_half;     // toggles at the divide rate
+
+    always_ff @(posedge sysclk or negedge rst_n) begin
+        if (!rst_n)
+            blink_cnt <= '0;
+        else
+            blink_cnt <= blink_cnt + 1'b1;
+    end
+    assign blink_half = blink_cnt[25];
+
+    // led[0]: blink when magic matches, else off (active-low LED).
+    // Keep the other 5 LEDs as the debug pattern.
+    assign led = {~rst, cs, ~sclk, ~mosi, ~miso,
+                  ~( (status_reg[7:0] == 8'h55) ? blink_half : 1'b0 )};
     
     //----------------------------------------------------------------
     // Drum — single timebase (98.304 MHz / 1024 = 96 kHz)

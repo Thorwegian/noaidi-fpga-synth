@@ -49,10 +49,13 @@ void app_main(void)
 
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
-    int spi_value = fpga_reg_read(0x7F);
-    if(spi_value == 0xA5) {
-        printf("SPI slave returned expected value 0xA5\n");
-    } else {
-        printf("SPI slave returned unexpected value 0x%02X\n", spi_value);
-    }
+    // LED blink test: write the magic value 0x55 to STATUS (addr 0).
+    // When the FPGA receives it verbatim, led[0] blinks at ~1.5 Hz.
+    fpga_reg_write(0x00, 0x55);
+    printf("Wrote 0x55 to STATUS — FPGA led[0] should now blink ~1.5 Hz\n");
+
+    // Verify the write back over the link (read-back is TODO in Step 3;
+    // for now the physical LED is the human-visible confirmation).
+    int spi_value = fpga_reg_read(0x00);
+    printf("STATUS read-back = 0x%02X\n", spi_value);
 }
