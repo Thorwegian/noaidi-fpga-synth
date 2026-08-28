@@ -116,6 +116,25 @@ two failure modes that look identical:
 - both advancing → clock and reset healthy; measure the rate and compare to
   98.304 MHz
 
+## SPDIF debug toolkit (proven 2026-08-28)
+
+- The refactored drum-based SPDIF stream is BIT-IDENTICAL to the
+  audio_clock-era stream that was confirmed working on hardware
+  (A/B cell comparison, tb_spdif_old.sv vs tb_spdif_block.sv). The drum
+  and audio_clock produce the same 1024-cycle tick; only the derivation
+  differed.
+- The FPGA can capture its own SPDIF output: sample the encoder output
+  mid-cell (a 3-bit counter reset by the same rst_n replicates the cell
+  divider phase) into a 64-bit shift register wired to the SPI STATUS
+  window — every CS assert snapshots 64 live cells. Decode rule:
+  biphase-mark data never contains a run of 3 equal cells, so any run
+  >= 3 is a preamble; match it against M/W/B. This verifies the real
+  stream at the pin driver with no scope.
+- The Hantek 6022BE driven via raw pyusb (stock-firmware guesses) gives
+  trustworthy AMPLITUDE but garbage TIMING — fine for "is the pin
+  driven", useless above audio rates. Install sigrok + fx2lafw firmware
+  for real captures.
+
 ## Gotchas
 
 - Yosys: an async reset in the same `always_ff` as RAM reads/writes blocks BSRAM
