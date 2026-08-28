@@ -172,6 +172,12 @@ module tb_spdif_block;
     initial begin
         rst_n = 0;
         repeat (8) @(posedge clk);
+        // Release reset on the FALLING edge: a blocking release at a
+        // posedge races the DUT's always blocks — the DUT can start
+        // frame 0 on that very edge while this bench misses the first
+        // sample_tick and begins at frame 1, shifting every absolute
+        // check (B cadence, channel-status bit index) off by one.
+        @(negedge clk);
         rst_n = 1;
 
         wait (frames_done == NFRAMES);
