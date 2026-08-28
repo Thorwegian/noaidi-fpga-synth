@@ -112,6 +112,22 @@ module spi_slave_regs #(
     logic          is_read;
     logic [AW-1:0] addr;
 
+    // Power-up state.  Every reset in this module is `posedge cs`, and at
+    // power-up CS is already high — it goes 1->0 for the first transaction,
+    // so that edge never occurs and nothing here is ever reset before the
+    // first frame.  Gowin FFs come out of configuration at 0, so hardware
+    // is fine, but a simulator starts them at X and the first transaction
+    // decodes to garbage.  Declaring the power-up state explicitly makes
+    // simulation and hardware agree and pins the value gowin_pack encodes,
+    // instead of leaving the first frame dependent on vendor defaults.
+    initial begin
+        rx_sh    = 8'd0;
+        bit_cnt  = 3'd0;
+        have_cmd = 1'b0;
+        is_read  = 1'b0;
+        addr     = '0;
+    end
+
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
             have_cmd <= 1'b0;         // CS framing: every transaction

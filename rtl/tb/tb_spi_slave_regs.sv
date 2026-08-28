@@ -53,7 +53,7 @@ module tb_spi_slave_regs;
 
     integer errors = 0;
 
-    task check8(input [8*24:1] what, input [7:0] got, input [7:0] want);
+    task check8(input string what, input [7:0] got, input [7:0] want);
         begin
             if (got !== want) begin
                 $display("FAIL: %0s = 0x%02h, expected 0x%02h", what, got, want);
