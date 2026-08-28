@@ -44,6 +44,9 @@ repo. Keep this file updated when the architecture changes.
   auto-increments, all inside one CS frame. MISO byte 0 is always the ID byte
   0xA5 (free link check); register data starts at MISO byte 1. Driver:
   `app/main/spi_regs.c`. Simulate with `make sim-spi`.
+- SPI link speed: measured clean 1–40 MHz on hardware (40 MHz is the ESP32-C3
+  GPIO-matrix ceiling, not a link limit). Firmware default is still 1 MHz in
+  `main.c` — raise it freely when traffic justifies it.
 - SPI edge discipline (do not "simplify" this): MOSI is sampled on the RISING
   edge of SCLK and MISO is driven on the FALLING edge, and the protocol decode
   runs on the same rising edge as the shift register — so a byte completes at

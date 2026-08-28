@@ -270,9 +270,19 @@ Notes:
 
 ## SPI speed budget
 
-- Current: 1 MHz, 8-bit addressing, per-byte CS — bring-up only.
-- ESP32-C3 SPI master max: 40 MHz (APB/2). FPGA slave timing is trivial.
-  Propose 10–20 MHz to start; jumper wiring is the likely limiter.
+- Current firmware default: 1 MHz, 8-bit addressing, one CS frame per
+  transaction — bring-up only, and now unnecessarily conservative.
+- **Measured on hardware (2026-08-28): clean at every rate from 1 MHz to
+  40 MHz.** 88/88 transactions correct — write four registers, burst-read
+  them back, check the ID byte and all four values, ×8 repetitions at each
+  of 11 rates. 40 MHz is the ESP32-C3's ceiling for SPI2 through the GPIO
+  matrix (the configured pins are not the IOMUX ones), not a limit of the
+  link: nothing had started to degrade. The jumper wiring, suspected here
+  as the likely limiter, is not one.
+- nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
+  slave has enormous margin; the master is the constraint at every rate.
+- Raising the firmware default is therefore a free change whenever the
+  traffic justifies it.
 - Traffic model with firmware-side MIDI semantics:
   - Note-on/off: `GATE` + patch writes for ≤ 8 voices ≈ 30–60 words per
     key — a few ms at 1 MHz, sub-ms at 10 MHz.
@@ -281,8 +291,11 @@ Notes:
     number of voices, on any channel, all arrangement long.
   - Direct per-voice parameter writes (rare, discrete changes): cheap.
   - Envelopes and LFOs run inside the FPGA — zero SPI traffic.
-- Conclusion: firmware-side MIDI is comfortable at 10–20 MHz; 1 MHz is
-  marginal for full-voice CC sweeps but fine for everything else.
+- Conclusion: with 40 MHz measured good, the speed budget is a solved
+  problem. Even the CV-table fallback — firmware writing per-voice
+  parameters directly, ~2.9 Mbit/s for a 200 Hz pedal sweep across 256
+  voices — fits inside 10% of the link. 1 MHz remains marginal for
+  full-voice CC sweeps, so that is the number to raise, not the design.
 
 ## Known limits vs a full polysynth
 
@@ -314,8 +327,9 @@ Notes:
    Implemented for the 8-bit bring-up registers: one `spi_device_transmit`
    per transaction, address auto-increments on the FPGA side
    (`rtl/spi/spi_slave_regs.sv`). Still to do at 32-bit width.
-6. **Integrity**: no CRC — trust the short link; tune the SPI clock to
-   what the wiring tolerates (implementation TBD, target 10–20 MHz).
+6. **Integrity**: no CRC — trust the short link. Justified: the wiring
+   was measured error-free at 40 MHz, the ESP32-C3's maximum, so the
+   link has margin to spare at any rate the design would actually use.
 7. **Ping-pong**: from the start for patch data, swapped at the sample
    boundary in an idle slot; live data single-banked. (Risk note: if
    yosys cannot infer dual-clock BSRAM, fall back to an inbox/commit
