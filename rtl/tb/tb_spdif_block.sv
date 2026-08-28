@@ -137,11 +137,21 @@ module tb_spdif_block;
     endtask
 
     // capture at the last sysclk of each cell (cell_div == 7), realigned
-    // on sample_tick so cells[0] is always preamble cell 0
+    // on sample_tick so cells[0] is always preamble cell 0.
+    //
+    // The decode fires the cycle after cell 127 is captured — which is
+    // the SAME cycle as the next frame's sample_tick.  ci must therefore
+    // be reset only by sample_tick, never by the decode path: an earlier
+    // version also wrote ci in the decode branch, the two non-blocking
+    // writes collided, and the bench silently decoded every OTHER frame
+    // (all block-start frames landed in the skipped half, so it reported
+    // the B preamble missing from a stream that carried it).
+    reg do_check = 0;
     always @(posedge clk) begin
         if (!rst_n) begin
-            ci      <= 0;
-            started <= 0;
+            ci       <= 0;
+            started  <= 0;
+            do_check <= 0;
         end else begin
             if (sample_tick) begin
                 started <= 1;
@@ -149,11 +159,12 @@ module tb_spdif_block;
             end else if (started && u_spdif.cell_div == 3'd7 && ci < 128) begin
                 cells[ci] <= {7'd0, spdif_out};
                 ci        <= ci + 1;
+                if (ci == 127) do_check <= 1;
             end
-            if (started && ci == 128) begin
+            if (do_check) begin
+                do_check <= 0;
                 check_frame(frames_done);
                 frames_done <= frames_done + 1;
-                ci          <= 129;      // wait for next sample_tick
             end
         end
     end
