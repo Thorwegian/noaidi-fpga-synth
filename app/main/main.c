@@ -49,13 +49,26 @@ void app_main(void)
 
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
-    // LED blink test: write the magic value 0x55 to STATUS (addr 0).
-    // When the FPGA receives it verbatim, led[0] blinks at ~1.5 Hz.
-    fpga_reg_write(0x00, 0x55);
-    printf("Wrote 0x55 to STATUS — FPGA led[0] should now blink ~1.5 Hz\n");
+    // RAW loopback probe: send bytes and print every MISO byte returned,
+    // to isolate whether the FPGA RX + MISO TX path works at all.
+    printf("=== raw loopback (send_data = rx_byte on FPGA) ===\n");
+    fpga_raw_loopback();
 
-    // Verify the write back over the link (read-back is TODO in Step 3;
-    // for now the physical LED is the human-visible confirmation).
-    int spi_value = fpga_reg_read(0x00);
-    printf("STATUS read-back = 0x%02X\n", spi_value);
+    // Read-back test: write distinct values, dump burst read.
+    fpga_reg_write(0x00, 0x11);
+    fpga_reg_write(0x01, 0x22);
+    fpga_reg_write(0x02, 0x33);
+    fpga_reg_write(0x03, 0x44);
+
+    uint8_t mem[8];
+    fpga_reg_read_burst(0x00, mem, 8);
+    printf("mem: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+           mem[0], mem[1], mem[2], mem[3], mem[4], mem[5], mem[6], mem[7]);
+
+    uint8_t back = fpga_reg_read(0x00);
+    printf("read addr0 = 0x%02X\n", back);
+    if (back == 0x11)
+        printf("OK\n");
+    else
+        printf("FAIL\n");
 }

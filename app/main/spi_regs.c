@@ -55,6 +55,19 @@ static void fpga_xfer_bytes(const uint8_t *tx, size_t nbytes)
     ESP_ERROR_CHECK(spi_device_transmit(g_spi, &t));
 }
 
+// ── Low-level: full-duplex N bytes in ONE CS-framed transaction ─────
+// Like fpga_xfer_bytes, but also captures MISO into `rx`.  `tx` and `rx`
+// must each hold nbytes.  Used for reads.
+static void fpga_xfer_bytes_duplex(const uint8_t *tx, uint8_t *rx, size_t nbytes)
+{
+    spi_transaction_t t = {
+        .length    = nbytes * 8,
+        .tx_buffer = tx,
+        .rx_buffer = rx,
+    };
+    ESP_ERROR_CHECK(spi_device_transmit(g_spi, &t));
+}
+
 // ── Single-register write ──────────────────────────────────────────
 // Command byte + data byte go out in ONE CS-framed transaction (16 bits).
 void fpga_reg_write(uint8_t addr, uint8_t data)
@@ -63,14 +76,35 @@ void fpga_reg_write(uint8_t addr, uint8_t data)
     fpga_xfer_bytes(frame, 2);
 }
 
+// ── Raw loopback probe (diagnostic) ───────────────────────────────
+// Sends 5 bytes and prints the MISO bytes returned.  With the FPGA in
+// loopback mode (send_data = rx_byte), MISO[i] should echo tx[i-1].
+void fpga_raw_loopback(void)
+{
+    uint8_t tx[5] = {0xAA, 0x55, 0x11, 0x22, 0x33};
+    uint8_t rx[5] = {0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
+    fpga_xfer_bytes_duplex(tx, rx, 5);
+    printf("MISO: %02X %02X %02X %02X %02X\n",
+           rx[0], rx[1], rx[2], rx[3], rx[4]);
+}
+
 // ── Single-register read ───────────────────────────────────────────
+// Read protocol (matches spi_bram.sv): command byte (R/W=1, addr) + 1
+// dummy byte + data bytes, all in ONE CS-framed transaction.  The read
+// data for mem[addr] appears on MISO at byte index 1 (the byte after the
+// command), because send_data is a combinational mem[addr] and addr is
+// latched once the command byte is decoded.
 uint8_t fpga_reg_read(uint8_t addr)
 {
-    uint8_t cmd = (1 << 7) | (addr & 0x7F);
-    // TODO Step 3: real read-back over MISO.  For now the register bank
-    // does not yet return data, so this is a stub.
-    fpga_xfer_bytes(&cmd, 1);
-    return 0;
+    uint8_t frame[3];   // cmd + 1 dummy + 1 data = 3 bytes
+    uint8_t rxb[3];
+
+    frame[0] = (1 << 7) | (addr & 0x7F);   // command: read
+    frame[1] = 0x00;                       // dummy
+    frame[2] = 0x00;                       // data (MISO carries mem[addr])
+
+    fpga_xfer_bytes_duplex(frame, rxb, 3);
+    return rxb[1];   // data is at byte index 1 (after the command byte)
 }
 
 // ── Burst write ────────────────────────────────────────────────────
@@ -86,11 +120,22 @@ void fpga_reg_write_burst(uint8_t addr, const uint8_t *data, size_t len)
 }
 
 // ── Burst read ─────────────────────────────────────────────────────
+// Read `len` bytes starting at `addr` (auto-increment on the FPGA side).
+// One CS-framed transaction: cmd + 1 dummy + len data bytes.  Data starts
+// at rxb index 1.
 void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len)
 {
-    // TODO Step 3: real burst read-back over MISO.
-    uint8_t cmd = (1 << 7) | (addr & 0x7F);
-    fpga_xfer_bytes(&cmd, 1);
-    for (size_t i = 0; i < len; i++)
-        buf[i] = 0;
+    // cmd + 1 dummy + up to 32 data bytes
+    uint8_t tx[34];
+    uint8_t rx[34];
+
+    tx[0] = (1 << 7) | (addr & 0x7F);
+    tx[1] = 0x00;   // dummy
+    for (size_t i = 0; i < len && i < 32; i++)
+        tx[2 + i] = 0x00;
+
+    fpga_xfer_bytes_duplex(tx, rx, 2 + (len < 32 ? len : 32));
+
+    for (size_t i = 0; i < len && i < 32; i++)
+        buf[i] = rx[1 + i];   // data starts at byte index 1 (after 1 dummy)
 }
