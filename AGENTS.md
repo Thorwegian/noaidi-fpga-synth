@@ -47,8 +47,13 @@ repo. Keep this file updated when the architecture changes.
 - SPI link speed: measured clean 1–40 MHz on hardware (40 MHz is the ESP32-C3
   GPIO-matrix ceiling, not a link limit). Firmware default is still 1 MHz in
   `main.c` — raise it freely when traffic justifies it.
-- Dual-clock BSRAM CDC is confirmed working on this toolchain (write on one
-  clock, read on another, sync read → `DPX9B`, packs and builds). Two rules
+- Dual-clock BSRAM CDC infers and builds on this toolchain (write on one clock,
+  read on another, sync read → `DPX9B`, packs, bitstream emitted, netlist
+  structurally correct) but is **NOT functionally verified**: oss-cad-suite
+  ships every Gowin BSRAM primitive as a blackbox with no behavioural body, so
+  post-synthesis simulation cannot even elaborate. Do not write your own model
+  — that validates the design against our own assumptions. Either install the
+  vendor Gowin IDE for real models, or validate on hardware. Two further rules
   fall out: (1) **true** dual-port with read+write on both ports does NOT map
   — yosys errors — so SPI-side read-back must be serviced by the drum, not by
   a second RAM port; (2) yosys picks LUT-RAM below roughly one block's worth,

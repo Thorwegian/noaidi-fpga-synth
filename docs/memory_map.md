@@ -84,9 +84,11 @@ flowchart LR
 - **CDC via BSRAM ports**: the SPI side writes on the sclk-clocked port
   and the drum reads on the sysclk-clocked port — the dual-clock,
   dual-port BSRAM *is* the entire clock-domain crossing. No FIFOs, no
-  handshakes, no inbox. **Verified 2026-08-28** (see "BSRAM CDC —
-  measured" below): yosys infers it, nextpnr packs it, gowin_pack emits
-  a bitstream. The fallback in decision 7 is not needed.
+  handshakes, no inbox. **Builds cleanly, but is NOT yet functionally
+  verified** — see "BSRAM CDC — measured" below. yosys infers it,
+  nextpnr packs it, gowin_pack emits a bitstream, and the netlist is
+  structurally correct; but the open-source flow ships no simulation
+  model for the primitive, so nothing has confirmed it *behaves*.
 - What BSRAM does and does not buy you. It solves the *structural*
   crossing: each port is fully synchronous to its own clock, no
   combinational path runs between domains, and there is no metastability
@@ -342,12 +344,13 @@ Notes:
    was measured error-free at 40 MHz, the ESP32-C3's maximum, so the
    link has margin to spare at any rate the design would actually use.
 7. **Ping-pong**: from the start for patch data, swapped at the sample
-   boundary in an idle slot; live data single-banked. ~~Risk note: if
-   yosys cannot infer dual-clock BSRAM, fall back to an inbox/commit
-   design.~~ **Resolved 2026-08-28 — it infers. No fallback needed.**
-   The bank-select bit folded into the address does not disturb
-   inference; the ping-pong variant maps to the same 4 blocks as the
-   plain one.
+   boundary in an idle slot; live data single-banked. Risk note (2026-08-28,
+   partially retired): yosys *does* infer dual-clock BSRAM and the
+   ping-pong bank-select bit does not disturb it — the variant maps to
+   the same 4 blocks. What remains open is not inference but
+   **verification**: the toolchain cannot simulate what it generates, so
+   the inbox/commit fallback should not be discarded until the BSRAM path
+   has been exercised on real silicon.
 
 ## BSRAM CDC — measured
 
@@ -365,6 +368,47 @@ assumption nobody had checked.
 Place-and-route on the real part: `BSRAM 4/46`, the two clock domains
 closing at 549 MHz and 495 MHz against the 98.304 MHz constraint. The
 memory is nowhere near being the timing limit.
+
+Netlist audit (what can be checked statically): `CLKA` is driven by the
+write clock and `CLKB` by the read clock — genuinely distinct nets, not
+a collapsed single domain. Write-enable appears only on the A port.
+Four instances at `BIT_WIDTH 9` compose the 36-bit word. The structure
+is right.
+
+### The limitation that matters
+
+**The open-source flow cannot simulate the BSRAM it generates.** Every
+Gowin BSRAM primitive in oss-cad-suite — `SP`, `SPX9`, `SDPB`,
+`SDPX9B`, `DPB`, `DPX9B`, `pROM` — is a blackbox in
+`cells_xtra_gw2a.v`: ports and parameters, zero behavioural lines. A
+post-synthesis simulation does not merely fail to match, it will not
+elaborate:
+
+```
+post_synth.v:203: error: Unknown module type: DPX9B
+```
+
+So for BSRAM specifically, "it builds" is the *entire* strength of the
+evidence available in this flow. That is a weaker position than it first
+appears, and it is worth being blunt about: a behavioural simulation of
+the source RTL passes trivially, because a plain array is not what gets
+built.
+
+Three ways out, in order of preference:
+
+1. **Install the Gowin IDE for its simulation models.** The vendor ships
+   real behavioural models for these primitives. This is the
+   delegate-to-the-specialist answer: the models come from whoever built
+   the silicon, and post-synthesis simulation becomes possible.
+2. **A hardware self-test.** A BSRAM CDC checker on the FPGA — pattern
+   written from one clock domain, verified continuously from the other,
+   result reported over the (now working) SPI link. Validates the real
+   silicon rather than a model of it, and is worth having permanently
+   as a bring-up check.
+3. ~~Write our own `DPX9B` model.~~ **Don't.** It would validate the
+   design against our own assumptions about the primitive, which is the
+   exact technical debt this architecture exists to avoid. A model we
+   wrote proves only that we are self-consistent.
 
 Two consequences worth carrying forward:
 
