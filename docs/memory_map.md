@@ -311,8 +311,9 @@ Notes:
    → 8-bit log2 time mapping lives in firmware.
 4. **Per-voice stride**: 64 words — 15 used, 49 reserved.
 5. **Bursts**: stream words until CS goes high (no length field).
-   Implementation TBD: the ESP32 driver currently raises CS between
-   bytes — it needs real burst transactions.
+   Implemented for the 8-bit bring-up registers: one `spi_device_transmit`
+   per transaction, address auto-increments on the FPGA side
+   (`rtl/spi/spi_slave_regs.sv`). Still to do at 32-bit width.
 6. **Integrity**: no CRC — trust the short link; tune the SPI clock to
    what the wiring tolerates (implementation TBD, target 10–20 MHz).
 7. **Ping-pong**: from the start for patch data, swapped at the sample

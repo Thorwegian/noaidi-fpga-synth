@@ -49,13 +49,33 @@ void app_main(void)
 
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
-    // LED blink test: write the magic value 0x55 to STATUS (addr 0).
-    // When the FPGA receives it verbatim, led[0] blinks at ~1.5 Hz.
-    fpga_reg_write(0x00, 0x55);
-    printf("Wrote 0x55 to STATUS — FPGA led[0] should now blink ~1.5 Hz\n");
+    // ── 1. Link probe ───────────────────────────────────────────────
+    // Byte 0 of MISO is the slave's ID on every transaction.  If this is
+    // not A5, stop here: the problem is physical (wiring, pin
+    // constraints, clock), not protocol.
+    printf("=== 1. link probe ===\n");
+    fpga_raw_link_probe();
 
-    // Verify the write back over the link (read-back is TODO in Step 3;
-    // for now the physical LED is the human-visible confirmation).
-    int spi_value = fpga_reg_read(0x00);
-    printf("STATUS read-back = 0x%02X\n", spi_value);
+    // ── 2. Read-back test ───────────────────────────────────────────
+    printf("=== 2. write/read-back ===\n");
+    fpga_reg_write(0x00, 0x11);
+    fpga_reg_write(0x01, 0x22);
+    fpga_reg_write(0x02, 0x33);
+    fpga_reg_write(0x03, 0x44);
+
+    uint8_t mem[8];
+    fpga_reg_read_burst(0x00, mem, 8);
+    printf("mem: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+           mem[0], mem[1], mem[2], mem[3], mem[4], mem[5], mem[6], mem[7]);
+    printf("expected: 11 22 33 44 00 00 00 00\n");
+
+    uint8_t back = fpga_reg_read(0x00);
+    printf("read addr0 = 0x%02X — %s\n", back, back == 0x11 ? "OK" : "FAIL");
+
+    // ── 3. LED blink test ───────────────────────────────────────────
+    // Leave STATUS holding the magic value: the FPGA blinks led[0] at
+    // ~1.5 Hz while it reads 0x55, which confirms the SPI → register →
+    // drum-domain path without needing the console.
+    fpga_reg_write(0x00, 0x55);
+    printf("=== 3. wrote 0x55 to STATUS — led[0] should blink ~1.5 Hz ===\n");
 }

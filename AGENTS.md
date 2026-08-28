@@ -39,8 +39,17 @@ repo. Keep this file updated when the architecture changes.
 - `midi_parser.c/h`: running status, sysex, real-time, vel-0 note-off. Idle handling:
   50 ms partial reset (keeps running status), 500 ms silence → full reset +
   `uart_flush_input`.
-- FPGA SPI slave (`rtl/spi/spi_slave.sv`) is bring-up only (echoes 0xA5) — no
-  register bank yet.
+- FPGA SPI slave: `rtl/spi/spi_slave_regs.sv` — Mode 0 slave + 16-word register
+  file in one module. Command byte (`[7]` R/W, `[6:0]` addr) then data, address
+  auto-increments, all inside one CS frame. MISO byte 0 is always the ID byte
+  0xA5 (free link check); register data starts at MISO byte 1. Driver:
+  `app/main/spi_regs.c`. Simulate with `make sim-spi`.
+- SPI edge discipline (do not "simplify" this): MOSI is sampled on the RISING
+  edge of SCLK and MISO is driven on the FALLING edge, and the protocol decode
+  runs on the same rising edge as the shift register — so a byte completes at
+  the 8th rising edge, which always exists. The predecessor split the slave and
+  the decoder across opposite edges and lost the last byte of every transaction,
+  because a real Mode 0 master's final edge is a falling one.
 
 ## FPGA synth core — SCMO "drum"
 
@@ -83,3 +92,11 @@ repo. Keep this file updated when the architecture changes.
   stretched by one cell period and receivers never lock.
 - iverilog TBs: the drum sits at slot 0 during reset, so tick counters in
   testbenches must be guarded with `rst_n`.
+- SPI testbenches must model the master's *edge order*, not just its bit order.
+  The deleted `tb_reg_banks.sv` clocked each bit as `@(negedge)` then
+  `@(posedge)` — a falling-edge-first master that emits a trailing rising edge
+  after the last data bit. No Mode 0 master does that, and the DUT needed
+  exactly that phantom edge to commit its final byte, so the bench passed while
+  the hardware dropped every write. `tb_spi_slave_regs.sv` drives CS/SCLK/MOSI
+  the way `spi_device_transmit()` actually does: SCLK idles low, and CS
+  deasserts after the last falling edge with no further clock activity.

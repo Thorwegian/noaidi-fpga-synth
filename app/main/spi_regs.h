@@ -5,9 +5,9 @@
 //   Byte 1+: data bytes, address auto-increments after each byte
 //
 //   Write: 2+N bytes (cmd + N data bytes)
-//   Read:  3+N bytes (cmd + 2 dummy + N data bytes)
-//          The first 2 response bytes are overhead (pre-XFER garbage
-//          + status byte); register data starts at byte 2.
+//   Read:  2+N bytes (cmd + 1 dummy + N data bytes)
+//          The first response byte is the dummy; register data starts
+//          at byte 1 (mem[addr] is combinational, auto-increments).
 //
 // SPI Mode 0 (CPOL=0, CPHA=0), MSB-first, up to ~20 MHz.
 
@@ -41,8 +41,14 @@ uint8_t fpga_reg_read(uint8_t addr);
 void fpga_reg_write_burst(uint8_t addr, const uint8_t *data, size_t len);
 
 // Read len bytes starting at addr into buf.
-// Internally reads len+2 bytes and discards the first 2.
+// Internally reads len+1 bytes and discards the first 1.
 void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len);
+
+// Diagnostic: send 5 bytes, print the raw MISO bytes returned.
+// MISO byte 0 is the slave's ID byte (0xA5) on every transaction — if it
+// is not 0xA5 the physical MISO path is broken, and nothing else here
+// will work.  Check that first.
+void fpga_raw_link_probe(void);
 
 #ifdef __cplusplus
 }

@@ -27,32 +27,29 @@ module top (
 );
 
     // Clock and reset
+    // NOTE: `wire`, not `logic`.  `logic rst_n = ~rst;` is a variable
+    // declaration *initializer* (evaluated once at time zero), not a
+    // continuous assignment — it does not track `rst`.
 
-    logic rst_n = ~rst;
+    wire rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // SPI slave + register bank decoder
-    // spi_slave is proven hardware (TX+RX); reg_banks layers a BSRAM
-    // register store on top of its done/received_data handshake.
+    // SPI slave with register file
+    // One module: shift registers, protocol decode and the register
+    // store all share the same byte boundary.  See spi_slave_regs.sv
+    // for why the previous spi_slave + reg_banks split could not work.
     //----------------------------------------------------------------
-    logic        spi_done;
-    logic [7:0]  spi_rx;
+    logic [35:0] status_reg;
 
-    spi_slave u_spi_slave (
-        .sclk(sclk),
-        .cs(cs),
-        .mosi(mosi),
-        .miso(miso),
-        .send_data(8'hA5),
-        .done(spi_done),
-        .received_data(spi_rx)
-    );
-
-    reg_banks u_reg_banks (
+    spi_slave_regs #(
+        .NWORDS  (16),
+        .DATA_W  (36),
+        .ID_BYTE (8'hA5)
+    ) u_spi (
         .sclk      (sclk),
         .cs        (cs),
-        .rx_byte   (spi_rx),
-        .rx_done   (spi_done),
+        .mosi      (mosi),
+        .miso      (miso),
         .sysclk    (sysclk),
         .rst_n     (rst_n),
         .read_addr (4'd0),       // STATUS at word 0
@@ -62,9 +59,8 @@ module top (
     //----------------------------------------------------------------
     // LED blink test: when STATUS[7:0] == 0x55 (magic written by ESP32),
     // blink led[0] at sysclk/2^26 (~1.5 Hz).  Confirms the full SPI →
-    // BSRAM → FPGA loop on real hardware.
+    // register → drum-domain loop on real hardware.
     //----------------------------------------------------------------
-    logic [35:0] status_reg;
     logic [25:0] blink_cnt;      // 2^26 = 67,108,864 cycles ~ 683 ms
     logic        blink_half;     // toggles at the divide rate
 
