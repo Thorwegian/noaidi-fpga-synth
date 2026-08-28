@@ -45,6 +45,13 @@ tb/tb_spdif_block.vvp: drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp
 
+TB_DDS = tb/tb_spdif_dds.sv
+tb/tb_spdif_dds.vvp: spdif/cell_dds.sv spdif/spdif_tx.sv $(TB_DDS) Makefile
+	iverilog -g2012 -o $@ spdif/cell_dds.sv spdif/spdif_tx.sv $(TB_DDS)
+
+sim-dds: tb/tb_spdif_dds.vvp
+	vvp tb/tb_spdif_dds.vvp
+
 TB_SPI = tb/tb_spi_slave_regs.sv
 tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 	iverilog -g2012 -o $@ spi/spi_slave_regs.sv $(TB_SPI)
@@ -52,7 +59,7 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
-sim: sim-spdif sim-spi
+sim: sim-spdif sim-dds sim-spi
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex

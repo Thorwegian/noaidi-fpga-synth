@@ -56,32 +56,14 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // Fractional cell DDS: 512/4125 of 99 MHz = 12.288 MHz exact
+    // Fractional cell DDS: 512/4125 of 99 MHz = 12.288 MHz exact.
+    // Same module tb_spdif_dds.sv verifies — one source, one truth.
     //----------------------------------------------------------------
-    logic [12:0] acc;          // modulus 4125 needs 13 bits
-    logic        cell_tick;
-
-    always_ff @(posedge sysclk or negedge rst_n) begin
-        if (!rst_n) begin
-            acc       <= '0;
-            cell_tick <= 1'b0;
-        end else if (acc + 13'd512 >= 13'd4125) begin
-            acc       <= acc + 13'd512 - 13'd4125;
-            cell_tick <= 1'b1;
-        end else begin
-            acc       <= acc + 13'd512;
-            cell_tick <= 1'b0;
-        end
-    end
-
-    // 128 cells per frame — the frame tick coincides with a cell_tick,
-    // as spdif_tx requires
-    logic [6:0] ccnt;
-    always_ff @(posedge sysclk or negedge rst_n) begin
-        if (!rst_n)         ccnt <= '0;
-        else if (cell_tick) ccnt <= ccnt + 1'b1;   // wraps at 127
-    end
-    wire sample_tick = cell_tick && (ccnt == 7'd127);
+    wire cell_tick, sample_tick;
+    cell_dds u_dds (
+        .clk(sysclk), .rst_n(rst_n),
+        .cell_tick(cell_tick), .sample_tick(sample_tick)
+    );
 
     //----------------------------------------------------------------
     // Tone: square at Fs/64 = 1.5 kHz, −18 dBFS
