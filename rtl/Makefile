@@ -9,6 +9,7 @@ MOD = \
 	$(TOP).sv \
 	drum.sv \
 	spi/spi_slave_regs.sv \
+	spdif/cell_dds.sv \
 	spdif/spdif_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
