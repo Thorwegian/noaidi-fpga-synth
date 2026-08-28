@@ -50,7 +50,12 @@ IO_PORT "mosi" IO_TYPE=LVCMOS33;
 IO_LOC "miso" 29;
 IO_PORT "miso" IO_TYPE=LVCMOS33;
 
-// I2S audio output — not in the spdif-minimal top; restore with it
+// I2S audio output — not in the spdif-minimal top; restore with it.
+// Pin 56 temporarily carries a mirror of the SPDIF stream instead, so
+// the signal is probeable even if pin 27's path is bad on this board.
+
+IO_LOC  "spdif_mirror" 56;
+IO_PORT "spdif_mirror" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 // IO_LOC  "i2s_bclk"  56;  // HP_BCK  — bit clock
 // IO_PORT "i2s_bclk"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;

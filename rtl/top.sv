@@ -31,7 +31,10 @@ module top (
     input  logic        cs,
     input  logic        mosi,
     output logic        miso,
-    output logic        spdif_out
+    output logic        spdif_out,
+    output logic        spdif_mirror    // same stream on pkg pin 56:
+                                        // if 27 is dead on this board,
+                                        // the signal is still probeable
 );
     wire rst_n = ~rst;
 
@@ -116,6 +119,7 @@ module top (
         .audio_l(sample), .audio_r(sample),
         .spdif_out(spdif_out)
     );
+    assign spdif_mirror = spdif_out;
 
     //----------------------------------------------------------------
     // SPI slave + counter instrument: regs 8..11 = sysclk counter,
