@@ -32,23 +32,22 @@
 // ────────────────────────────────────────────────────────────────
 `default_nettype none
 module spdif_tx (
-    input  wire             clk,            // 98.304 MHz
+    input  wire             clk,            // sysclk
     input  wire             rst_n,
-    input  wire             sample_tick,    // drum sample boundary ("sample ready")
+    input  wire             sample_tick,    // frame boundary ("sample ready")
+    input  wire             cell_tick,      // cell boundary strobe
     input  wire signed [23:0] audio_l,
     input  wire signed [23:0] audio_r,
     output reg              spdif_out
 );
-    // ── Cell Clock Divider ──
-    // 98.304 MHz / 8 = 12.288 MHz cell rate (exact integer)
-    reg [2:0] cell_div;
-    wire      cell_tick;
-
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) cell_div <= 3'd0;
-        else        cell_div <= cell_div + 3'd1;
-    end
-    assign cell_tick = (cell_div == 3'd0);
+    // The cell timebase is provided by the caller, so the same encoder
+    // serves both clocking schemes:
+    //   integer:    sysclk = 98.304 MHz, cell_tick = /8 (12.288 MHz)
+    //   fractional: any sysclk, cell_tick from a DDS accumulator whose
+    //               AVERAGE is the exact cell rate (cells then jitter
+    //               ±1 sysclk — within the IEC 60958 receiver mask)
+    // Requirements: sample_tick must coincide with a cell_tick, and
+    // there must be exactly 128 cell periods per sample period.
 
     // ── Transmission State ──
     localparam [1:0] STATE_IDLE  = 2'd0;

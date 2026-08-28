@@ -20,9 +20,17 @@ module tb_outputs;
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
         .voice_enter(voice_enter), .slot(slot));
 
+    // integer cell timebase: /8, reset-aligned so sample_tick coincides
+    // with a cell_tick (1024 = 128 x 8)
+    logic [2:0] cd;
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
+    wire cell_tick = (cd == 3'd0);
+
     logic spdif_out;
     spdif_tx u_spdif (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
+        .cell_tick(cell_tick),
         .audio_l(audio_l), .audio_r(audio_r),
         .spdif_out(spdif_out));
 
@@ -53,7 +61,7 @@ module tb_outputs;
         // cell_div==7 during the last cycle of each cell → capture.
         // No state gate: the IDLE window still carries the final cell's
         // level, and tick realignment discards any pre-tick garbage.
-        if (u_spdif.cell_div == 3'd7) begin
+        if (cd == 3'd7) begin
             cells = {cells[126:0], spdif_out};
             cell_idx = cell_idx + 1;
             if (cell_idx == 128 && frame_valid) begin

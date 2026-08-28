@@ -31,8 +31,16 @@ module tb_spdif_block;
     logic signed [23:0] ar = 24'sh654321;
     wire  spdif_out;
 
+    // integer cell timebase: /8, reset-aligned with the drum so
+    // sample_tick coincides with a cell_tick (1024 = 128 x 8)
+    logic [2:0] cd;
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
+    wire cell_tick = (cd == 3'd0);
+
     spdif_tx u_spdif (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
+        .cell_tick(cell_tick),
         .audio_l(al), .audio_r(ar), .spdif_out(spdif_out)
     );
 
@@ -165,7 +173,7 @@ module tb_spdif_block;
             if (sample_tick) begin
                 started <= 1;
                 ci      <= 0;
-            end else if (started && u_spdif.cell_div == 3'd7 && ci < 128) begin
+            end else if (started && cd == 3'd7 && ci < 128) begin
                 cells[ci] <= {7'd0, spdif_out};
                 ci        <= ci + 1;
                 if (ci == 127) do_check <= 1;
