@@ -92,6 +92,30 @@ repo. Keep this file updated when the architecture changes.
 - The pipeline has NO concept of notes/unison — 256 interchangeable voice slots;
   unison/note assignment is a patch convention (and later, voice allocation).
 
+## Bring-up on a NEW Tang board — read this first
+
+The 98.304 MHz on pin 10 comes from the MS5351, whose configuration lives in
+**the board's NVM, not the bitstream** (`pll_clk O0=98.304M -s` via the BL616
+CLI). A fresh board therefore has *no sysclk*, and every audio symptom follows
+from that: the drum never ticks, `spdif_tx` never runs, `spdif_out` sits at its
+reset level, and a scope on the SPDIF pin sees nothing at all.
+
+This is easy to misdiagnose as an RTL bug, because **SPI keeps working** — it is
+clocked by the ESP32's SCLK, a completely separate domain — so every register
+test passes while the audio side is dead.
+
+Measure it instead of guessing. `spi_slave_regs` exposes a read-only STATUS
+window (`RO_BASE`), and a diagnostic top can wire free-running counters into it
+so the FPGA reports its own clock rates over SPI. Two counters distinguish the
+two failure modes that look identical:
+
+- one reset by `rst_n`, one with **no reset at all**
+- both zero → no clock on pin 10
+- free-running one advances, reset-able one frozen → clock fine, `rst` pin high
+  (note `constraints.cst` sets no `PULL_MODE` on `rst`)
+- both advancing → clock and reset healthy; measure the rate and compare to
+  98.304 MHz
+
 ## Gotchas
 
 - Yosys: an async reset in the same `always_ff` as RAM reads/writes blocks BSRAM

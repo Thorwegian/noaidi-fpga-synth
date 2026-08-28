@@ -34,10 +34,16 @@ module tb_spi_slave_regs;
     logic [3:0]  read_addr = 4'd0;
     wire  [35:0] read_data;
 
+    // RO_BASE = 12: registers 0..11 stay writable (the tests below use
+    // 0..3 and 8..11), while 12..15 report status_in.  Byte selected is
+    // status_in[8*addr[2:0] +: 8], so regs 12..15 read bytes 4..7.
+    localparam [63:0] STATUS_VAL = 64'hDEADBEEF_CAFEBABE;
+
     spi_slave_regs #(
         .NWORDS  (16),
         .DATA_W  (36),
-        .ID_BYTE (ID_BYTE)
+        .ID_BYTE (ID_BYTE),
+        .RO_BASE (12)
     ) dut (
         .sclk      (sclk),
         .cs        (cs),
@@ -46,7 +52,8 @@ module tb_spi_slave_regs;
         .sysclk    (sysclk),
         .rst_n     (rst_n),
         .read_addr (read_addr),
-        .read_data (read_data)
+        .read_data (read_data),
+        .status_in (STATUS_VAL)
     );
 
     always #5 sysclk = ~sysclk;   // 100 MHz, asynchronous to sclk
@@ -197,6 +204,25 @@ module tb_spi_slave_regs;
             repeat (3) @(posedge sysclk);
             check8($sformatf("read_data[%0d]", j), read_data[7:0], (j + 1) * 17);
         end
+
+        // -- 8. read-only STATUS window ---------------------------------
+        // regs 12..15 must report status_in bytes 4..7, and must ignore
+        // writes rather than silently corrupting the store.
+        $display("--- 8. read-only STATUS window (regs 12..15) ---");
+        read_regs(7'd12, 4);
+        check8("STATUS reg12", rx_buf[1], STATUS_VAL[39:32]);
+        check8("STATUS reg13", rx_buf[2], STATUS_VAL[47:40]);
+        check8("STATUS reg14", rx_buf[3], STATUS_VAL[55:48]);
+        check8("STATUS reg15", rx_buf[4], STATUS_VAL[63:56]);
+
+        write_reg(7'd12, 8'h5A);          // must be ignored
+        read_regs(7'd12, 1);
+        check8("STATUS still read-only after a write attempt",
+               rx_buf[1], STATUS_VAL[39:32]);
+
+        // a writable register must be unaffected by all of the above
+        read_regs(7'd0, 1);
+        check8("writable store untouched", rx_buf[1], 8'h11);
 
         $display("");
         if (errors == 0) $display("ALL PASS");

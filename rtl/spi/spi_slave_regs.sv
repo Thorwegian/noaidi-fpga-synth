@@ -66,7 +66,11 @@
 module spi_slave_regs #(
     parameter int       NWORDS  = 16,
     parameter int       DATA_W  = 36,      // native BSRAM word
-    parameter [7:0]     ID_BYTE = 8'hA5    // returned as MISO byte 0
+    parameter [7:0]     ID_BYTE = 8'hA5,   // returned as MISO byte 0
+    parameter int       RO_BASE = NWORDS   // addresses >= this are read-only
+                                           // and sourced from status_in.
+                                           // Default NWORDS = no read-only
+                                           // window; the whole store is RAM.
 ) (
     // ---- SPI side — clocked by the master's SCLK ----
     input  logic                      sclk,
@@ -78,10 +82,20 @@ module spi_slave_regs #(
     input  logic                      sysclk,
     input  logic                      rst_n,
     input  logic [$clog2(NWORDS)-1:0] read_addr,
-    output logic [DATA_W-1:0]         read_data
+    output logic [DATA_W-1:0]         read_data,
+
+    // ---- STATUS: fabric -> host, read-only -------------------------
+    // Addresses RO_BASE..NWORDS-1 read a byte of this word instead of the
+    // register store, so the FPGA can report its own state (clock rates,
+    // counters, flags) without the host having written anything first.
+    // Byte selected is status_in[8*addr[2:0] +: 8].  Fixed 64 bits so the
+    // port exists regardless of RO_BASE; tie it to '0 when unused.
+    // See the capture note below for why this is CDC-safe.
+    input  logic [63:0]               status_in
 );
 
-    localparam int AW = $clog2(NWORDS);
+    localparam int  AW     = $clog2(NWORDS);
+    localparam bit  HAS_RO = (RO_BASE < NWORDS);
 
     //--------------------------------------------------------------------
     // Receive — MOSI sampled on the rising edge of SCLK
@@ -169,10 +183,45 @@ module spi_slave_regs #(
     integer i0;
     initial for (i0 = 0; i0 < NWORDS; i0 = i0 + 1) mem[i0] = '0;
 
+    // HAS_RO is a compile-time constant, so with the default RO_BASE the
+    // whole read-only path optimises away and the store behaves exactly
+    // as it did before this feature existed.
+    wire is_ro = HAS_RO && (addr >= RO_BASE[AW-1:0]);
+
     always_ff @(posedge sclk) begin
-        if (byte_end && have_cmd && !is_read)
+        if (byte_end && have_cmd && !is_read && !is_ro)
             mem[addr] <= {{(DATA_W-8){1'b0}}, rx_byte};
     end
+
+    //--------------------------------------------------------------------
+    // STATUS capture (sysclk -> sclk)
+    //
+    // status_in changes continuously in the sysclk domain, so sampling it
+    // byte-by-byte from the sclk side would tear a multi-byte value across
+    // the read.  Instead it is captured once, on the CS falling edge, and
+    // held for the whole transaction: CS stays low from the command byte
+    // to the last data byte, so every byte the host reads comes from the
+    // same instant.  A burst read of the STATUS window is therefore
+    // atomic — which is the entire point, since these are counters.
+    //
+    // Timing: the capture fires ~3 sysclk after CS falls, while the first
+    // STATUS byte cannot leave before the 8th SCLK falling edge.  At the
+    // measured 40 MHz ceiling that is 200 ns ≈ 20 sysclk of margin.
+    //--------------------------------------------------------------------
+    logic cs_meta, cs_sync, cs_sync_d;
+    always_ff @(posedge sysclk) begin
+        cs_meta   <= cs;
+        cs_sync   <= cs_meta;
+        cs_sync_d <= cs_sync;
+    end
+    wire cs_fell = cs_sync_d & ~cs_sync;
+
+    logic [63:0] status_hold;
+    always_ff @(posedge sysclk)
+        if (cs_fell) status_hold <= status_in;
+
+    wire [2:0] ro_idx  = addr[2:0];
+    wire [7:0] ro_byte = status_hold[{ro_idx, 3'b000} +: 8];
 
     //--------------------------------------------------------------------
     // Transmit — MISO driven on the falling edge of SCLK
@@ -188,7 +237,9 @@ module spi_slave_regs #(
     // longer holds — the read would need its own clock edge, and the
     // protocol grows a second dummy byte, putting data at MISO index 2.
     //--------------------------------------------------------------------
-    wire [7:0] tx_byte = have_cmd ? mem[addr][7:0] : ID_BYTE;
+    wire [7:0] tx_byte = !have_cmd ? ID_BYTE
+                       : is_ro     ? ro_byte
+                                   : mem[addr][7:0];
 
     logic [7:0] tx_sh;
     initial tx_sh = ID_BYTE;   // first-ever transaction: no posedge cs yet
