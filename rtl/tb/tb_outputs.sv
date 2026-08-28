@@ -24,7 +24,7 @@ module tb_outputs;
     spdif_tx u_spdif (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
         .audio_l(audio_l), .audio_r(audio_r),
-        .c_bit(1'b0), .spdif_out(spdif_out));
+        .spdif_out(spdif_out));
 
     logic i2s_bclk, i2s_lrclk, i2s_data;
     i2s_tx #(.BITS(24)) u_i2s (
@@ -77,7 +77,10 @@ module tb_outputs;
         for (i = 0; i < 28; i = i + 1)
             bits[i] = (f[119 - 2*i] != f[118 - 2*i]);   // mid-transition = 1
         data = bits[23:0];                              // data bits 0..23
-        if (pre != 8'b11100010) begin
+        // B (11101000) replaces M on frame 0 of each 192-frame block;
+        // this bench decodes only a handful of frames, so accept either.
+        // Full block-cadence checking lives in tb_spdif_block.sv.
+        if (pre != 8'b11100010 && pre != 8'b11101000) begin
             $display("BAD preamble L: %b", pre);
             errors = errors + 1;
         end
