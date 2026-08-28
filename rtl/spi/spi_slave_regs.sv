@@ -213,11 +213,19 @@ module spi_slave_regs #(
     // read_data itself, but keeping the whole file to one convention
     // avoids re-introducing the inference problem by accident.
     //
-    // CDC caveat: a word written from the sclk side while sysclk reads
-    // it can be sampled torn.  Harmless for the 8-bit values written
-    // today (one byte, one write, settled long before it is read), but
-    // multi-byte registers will need either a write-then-commit
-    // discipline or genuine dual-clock BSRAM.
+    // CDC caveat — read this before widening the registers.  This store
+    // is distributed LUT-RAM with an asynchronous read, so it does NOT
+    // have the structural CDC safety a real dual-clock BSRAM gives you:
+    // a word written from the sclk side while sysclk reads it can be
+    // sampled torn.  Harmless for the 8-bit values written today (one
+    // byte, one write, settled long before it is read), and unavoidable
+    // here because the read-back protocol needs a combinational read.
+    //
+    // The BSRAM path is proven for when this scales: write on one clock,
+    // read on another, synchronous read, and yosys infers DPX9B which
+    // packs and builds (see docs/memory_map.md, "BSRAM CDC — measured").
+    // Moving to it costs one extra dummy byte in the read protocol,
+    // because a synchronous read needs its own clock edge.
     //--------------------------------------------------------------------
     always_ff @(posedge sysclk) begin
         if (!rst_n)

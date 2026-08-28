@@ -81,10 +81,21 @@ flowchart LR
 - **Register width: 32 bits, uniform.** One register = one parameter (or
   one small related group). Native BSRAM words are 36-bit; a 32-bit
   register occupies one word with 4 spare bits reserved.
-- **CDC via BSRAM ports** (design doc): the SPI side writes on the
-  sclk-clocked port and the drum reads on the sysclk-clocked port — the
-  dual-clock, dual-port BSRAM *is* the entire clock-domain crossing. No
-  FIFOs, no handshakes, no inbox.
+- **CDC via BSRAM ports**: the SPI side writes on the sclk-clocked port
+  and the drum reads on the sysclk-clocked port — the dual-clock,
+  dual-port BSRAM *is* the entire clock-domain crossing. No FIFOs, no
+  handshakes, no inbox. **Verified 2026-08-28** (see "BSRAM CDC —
+  measured" below): yosys infers it, nextpnr packs it, gowin_pack emits
+  a bitstream. The fallback in decision 7 is not needed.
+- What BSRAM does and does not buy you. It solves the *structural*
+  crossing: each port is fully synchronous to its own clock, no
+  combinational path runs between domains, and there is no metastability
+  on the data path. It does **not** make a read-during-write coherent —
+  a word read on sysclk while it is being written on sclk can return old
+  or new data for that access. That is precisely why patch data is
+  ping-ponged (atomicity is the bank swap's job, not the RAM's), and why
+  the bank-select bit is the one signal in the whole scheme that genuinely
+  has to be synchronised.
 - **Address width: 16 bits** (65,536 words = 256 KB logical space).
 - **Section sizing**: power-of-two units, at least 50% spare per unit or
   block, and 0x100-aligned only where that doesn't waste most of the
@@ -331,7 +342,43 @@ Notes:
    was measured error-free at 40 MHz, the ESP32-C3's maximum, so the
    link has margin to spare at any rate the design would actually use.
 7. **Ping-pong**: from the start for patch data, swapped at the sample
-   boundary in an idle slot; live data single-banked. (Risk note: if
+   boundary in an idle slot; live data single-banked. ~~Risk note: if
    yosys cannot infer dual-clock BSRAM, fall back to an inbox/commit
-   design.)
+   design.~~ **Resolved 2026-08-28 — it infers. No fallback needed.**
+   The bank-select bit folded into the address does not disturb
+   inference; the ping-pong variant maps to the same 4 blocks as the
+   plain one.
+
+## BSRAM CDC — measured
+
+Tested on the real toolchain (yosys 0.67, nextpnr-himbaechel,
+gowin_pack, GW2AR-LV18QN88C8/I7), because decision 7 rested on an
+assumption nobody had checked.
+
+| Pattern | Result |
+|---|---|
+| Semi dual-port, 2 clocks (write sclk / read sysclk), 2048 × 36 | **4 × `DPX9B`** — inferred, packed, bitstream emitted |
+| Same + ping-pong bank-select bit in the address | **4 × `DPX9B`** — inference unaffected |
+| True dual-port, 2 clocks, both ports read **and** write | **fails**: `ERROR: no valid mapping found for memory` |
+| 256 × 36 | 0 blocks — yosys picks LUT-RAM below roughly a block's worth |
+
+Place-and-route on the real part: `BSRAM 4/46`, the two clock domains
+closing at 549 MHz and 495 MHz against the 98.304 MHz constraint. The
+memory is nowhere near being the timing limit.
+
+Two consequences worth carrying forward:
+
+- **Drum-serviced read-back is mandatory, not an optimisation.** Because
+  true dual-port does not map, the SPI side cannot both write and read
+  the same BSRAM. The CV-table plan already says reads are serviced by
+  the drum in an idle slot — that is now a hard requirement, not a
+  preference.
+- **The 64-word per-voice stride is address space, not RAM.** Measured
+  cost is 18,432 bits per block, linear: 1024 words × 36 → 2 blocks,
+  4096 → 8, 16384 → 32. Instantiating the *full* 256 × 64 stride would
+  consume 32 of 46 blocks — 70% of the part's BSRAM — for parameters
+  alone, before LUTs, voice state, the CV table or the LFO bank. Only
+  the 15 used words per voice should ever be instantiated (256 × 16 =
+  8 blocks). The address map's generous reservations cost nothing as
+  long as nobody builds an array to match them.
 

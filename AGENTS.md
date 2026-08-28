@@ -47,6 +47,13 @@ repo. Keep this file updated when the architecture changes.
 - SPI link speed: measured clean 1–40 MHz on hardware (40 MHz is the ESP32-C3
   GPIO-matrix ceiling, not a link limit). Firmware default is still 1 MHz in
   `main.c` — raise it freely when traffic justifies it.
+- Dual-clock BSRAM CDC is confirmed working on this toolchain (write on one
+  clock, read on another, sync read → `DPX9B`, packs and builds). Two rules
+  fall out: (1) **true** dual-port with read+write on both ports does NOT map
+  — yosys errors — so SPI-side read-back must be serviced by the drum, not by
+  a second RAM port; (2) yosys picks LUT-RAM below roughly one block's worth,
+  which is why the 16-word `spi_slave_regs` store is `RAM16SDP4`. Details and
+  block costs in `docs/memory_map.md`.
 - SPI edge discipline (do not "simplify" this): MOSI is sampled on the RISING
   edge of SCLK and MISO is driven on the FALLING edge, and the protocol decode
   runs on the same rising edge as the shift register — so a byte completes at
