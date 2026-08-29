@@ -4,7 +4,7 @@
 // One voice enters the pipeline every sysclk cycle for 256 cycles of
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different voice: stage Sk at drum slot t holds the voice
-// that entered at slot t-k.  The pipeline occupies 256 + 12 - 1 = 267
+// that entered at slot t-k.  The pipeline occupies 256 + 14 - 1 = 269
 // contiguous slots (~26% of the 1024-slot drum rotation).
 //
 // Stage map:
@@ -12,13 +12,21 @@
 //   S2  issue phase-delta + SVF-K LUT reads
 //   S3  LUT data → delta, K, q1; phase_next; oscillator waveform
 //   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
-//   S5  SVF1 B:  lp1/hp1,        m3 = K*hp1          (DSP)
+//   S5  SVF1 B1: lp1/hp1 adder tree
+//   S5B SVF1 B2: m3 = K*hp1 on registered hp1        (DSP)
 //   S6  SVF1 C:  bp1, new states, filter-1 output
 //   S7  SVF2 A:  m4 = K*ic1eq2,  m5 = q1*ic1eq2     (DSP)
-//   S8  SVF2 B:  lp2/hp2,        m6 = K*hp2          (DSP)
+//   S8  SVF2 B1: lp2/hp2 adder tree
+//   S8B SVF2 B2: m6 = K*hp2 on registered hp2        (DSP)
 //   S9  SVF2 C:  bp2, new states, filter-2 output, voice output
 //   S10 attenuation: log-gain decode + stereo multiply   (DSP)
 //   S11 mix accumulate + state writeback
+//
+// S5B/S8B exist because chaining the adder tree into the 36x36 multiply
+// violated setup on real silicon at 98.304 MHz for long-carry operand
+// patterns (low cutoffs) — sparse single-sample corruption, gone at
+// half clock — which nextpnr's approximate timing model did not flag.
+// Rule: a stage is adds-only or multiply-only, never both chained.
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
@@ -28,7 +36,7 @@
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
 // State RAM is semi dual-port: read address is issued with the voice
-// entering at S0, writeback happens 11 cycles later at S11 — the read
+// entering at S0, writeback happens 13 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
@@ -63,7 +71,7 @@ module voice_pipeline #(
 
     //----------------------------------------------------------------
     // Per-voice internal state RAM — semi dual-port
-    // read address: entering voice (S0), write: S11 (11 cycles later)
+    // read address: entering voice (S0), write: 13 cycles later
     //----------------------------------------------------------------
     reg signed [23:0] phase_ram  [0:NUM_VOICES-1];
     reg signed [35:0] ic1eq1_ram [0:NUM_VOICES-1];
@@ -363,7 +371,6 @@ module voice_pipeline #(
     logic        s5_act;
     logic [VW-1:0] s5_idx;
     logic signed [35:0] s5_lp1, s5_hp1;
-    logic signed [71:0] s5_m3;
     logic signed [35:0] s5_ic1eq1;         // old ic1eq1, for bp1
     logic signed [35:0] s5_ic1eq2, s5_ic2eq2;
     logic signed [35:0] s5_k;
@@ -391,7 +398,6 @@ module voice_pipeline #(
             s5_idx  <= '0;
             s5_lp1  <= '0;
             s5_hp1  <= '0;
-            s5_m3   <= '0;
             s5_ic1eq1 <= '0;
             s5_ic1eq2 <= '0;
             s5_ic2eq2 <= '0;
@@ -407,7 +413,6 @@ module voice_pipeline #(
             s5_idx  <= s4_idx;
             s5_lp1  <= lp1;
             s5_hp1  <= hp1;
-            s5_m3   <= s4_k * hp1;
             s5_ic1eq1 <= s4_ic1eq1;
             s5_ic1eq2 <= s4_ic1eq2;
             s5_ic2eq2 <= s4_ic2eq2;
@@ -418,6 +423,66 @@ module voice_pipeline #(
             s5_gr   <= s4_gr;
             s5_dual <= s4_dual;
             s5_ftype <= s4_ftype;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S5B — SVF1 stage B2: m3 = K*hp1, on REGISTERED hp1  (DSP)
+    //
+    // This stage exists because chaining the S5 adder tree straight
+    // into the 36×36 multiply violated setup on real silicon at
+    // 98.304 MHz for the long-carry operand patterns low cutoffs
+    // produce (nextpnr's timing model passed it; the bench disagreed:
+    // sparse single-sample corruption — "rain on a metal roof" — that
+    // vanished at half clock). One register between adds and multiply
+    // makes every stage adds-only or multiply-only.
+    //----------------------------------------------------------------
+    logic        s5b_act;
+    logic [VW-1:0] s5b_idx;
+    logic signed [35:0] s5b_lp1, s5b_hp1;
+    logic signed [71:0] s5b_m3;
+    logic signed [35:0] s5b_ic1eq1;
+    logic signed [35:0] s5b_ic1eq2, s5b_ic2eq2;
+    logic signed [35:0] s5b_k;
+    logic signed [17:0] s5b_q1;
+    logic signed [23:0] s5b_phase;
+    logic [7:0]  s5b_gl, s5b_gr;
+    logic        s5b_dual;
+    logic [1:0]  s5b_ftype;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s5b_act  <= 1'b0;
+            s5b_idx  <= '0;
+            s5b_lp1  <= '0;
+            s5b_hp1  <= '0;
+            s5b_m3   <= '0;
+            s5b_ic1eq1 <= '0;
+            s5b_ic1eq2 <= '0;
+            s5b_ic2eq2 <= '0;
+            s5b_k    <= '0;
+            s5b_q1   <= '0;
+            s5b_phase <= '0;
+            s5b_gl   <= '0;
+            s5b_gr   <= '0;
+            s5b_dual <= 1'b0;
+            s5b_ftype <= '0;
+        end else begin
+            s5b_act  <= s5_act;
+            s5b_idx  <= s5_idx;
+            s5b_lp1  <= s5_lp1;
+            s5b_hp1  <= s5_hp1;
+            s5b_m3   <= s5_k * s5_hp1;
+            s5b_ic1eq1 <= s5_ic1eq1;
+            s5b_ic1eq2 <= s5_ic1eq2;
+            s5b_ic2eq2 <= s5_ic2eq2;
+            s5b_k    <= s5_k;
+            s5b_q1   <= s5_q1;
+            s5b_phase <= s5_phase;
+            s5b_gl   <= s5_gl;
+            s5b_gr   <= s5_gr;
+            s5b_dual <= s5_dual;
+            s5b_ftype <= s5_ftype;
         end
     end
 
@@ -452,8 +517,8 @@ module voice_pipeline #(
     logic signed [35:0] bp1;
     logic signed [35:0] f1_36;
     always_comb begin
-        bp1 = (s5_m3 >>> 28) + s5_ic1eq1;
-        case (s5_ftype)
+        bp1 = (s5b_m3 >>> 28) + s5b_ic1eq1;
+        case (s5b_ftype)
             2'd1:    f1_36 = bp1;
             2'd2:    f1_36 = s5_hp1;
             default: f1_36 = s5_lp1;
@@ -551,7 +616,7 @@ module voice_pipeline #(
     logic        s8_act;
     logic [VW-1:0] s8_idx;
     logic signed [35:0] s8_lp2, s8_hp2;
-    logic signed [71:0] s8_m6;
+    logic signed [35:0] s8_k;
     logic signed [35:0] s8_ic1eq2;         // old ic1eq2, for bp2
     logic signed [35:0] s8_ic1eq1n, s8_ic2eq1n;
     logic signed [17:0] s8_f1;
@@ -572,7 +637,7 @@ module voice_pipeline #(
             s8_idx  <= '0;
             s8_lp2  <= '0;
             s8_hp2  <= '0;
-            s8_m6   <= '0;
+            s8_k    <= '0;
             s8_ic1eq2 <= '0;
             s8_ic1eq1n <= '0;
             s8_ic2eq1n <= '0;
@@ -587,7 +652,7 @@ module voice_pipeline #(
             s8_idx  <= s7_idx;
             s8_lp2  <= lp2;
             s8_hp2  <= hp2;
-            s8_m6   <= s7_k * hp2;
+            s8_k    <= s7_k;
             s8_ic1eq2 <= s7_ic1eq2;
             s8_ic1eq1n <= s7_ic1eq1n;
             s8_ic2eq1n <= s7_ic2eq1n;
@@ -597,6 +662,56 @@ module voice_pipeline #(
             s8_gr   <= s7_gr;
             s8_dual <= s7_dual;
             s8_ftype <= s7_ftype;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S8B — SVF2 stage B2: m6 = K*hp2, on REGISTERED hp2  (DSP)
+    // Same setup-timing reasoning as S5B.
+    //----------------------------------------------------------------
+    logic        s8b_act;
+    logic [VW-1:0] s8b_idx;
+    logic signed [35:0] s8b_lp2, s8b_hp2;
+    logic signed [71:0] s8b_m6;
+    logic signed [35:0] s8b_ic1eq2;
+    logic signed [35:0] s8b_ic1eq1n, s8b_ic2eq1n;
+    logic signed [17:0] s8b_f1;
+    logic signed [23:0] s8b_phase;
+    logic [7:0]  s8b_gl, s8b_gr;
+    logic        s8b_dual;
+    logic [1:0]  s8b_ftype;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s8b_act  <= 1'b0;
+            s8b_idx  <= '0;
+            s8b_lp2  <= '0;
+            s8b_hp2  <= '0;
+            s8b_m6   <= '0;
+            s8b_ic1eq2 <= '0;
+            s8b_ic1eq1n <= '0;
+            s8b_ic2eq1n <= '0;
+            s8b_f1   <= '0;
+            s8b_phase <= '0;
+            s8b_gl   <= '0;
+            s8b_gr   <= '0;
+            s8b_dual <= 1'b0;
+            s8b_ftype <= '0;
+        end else begin
+            s8b_act  <= s8_act;
+            s8b_idx  <= s8_idx;
+            s8b_lp2  <= s8_lp2;
+            s8b_hp2  <= s8_hp2;
+            s8b_m6   <= s8_k * s8_hp2;
+            s8b_ic1eq2 <= s8_ic1eq2;
+            s8b_ic1eq1n <= s8_ic1eq1n;
+            s8b_ic2eq1n <= s8_ic2eq1n;
+            s8b_f1   <= s8_f1;
+            s8b_phase <= s8_phase;
+            s8b_gl   <= s8_gl;
+            s8b_gr   <= s8_gr;
+            s8b_dual <= s8_dual;
+            s8b_ftype <= s8_ftype;
         end
     end
 
@@ -614,11 +729,11 @@ module voice_pipeline #(
     logic signed [35:0] bp2;
     logic signed [35:0] f2_36;
     always_comb begin
-        bp2 = (s8_m6 >>> 28) + s8_ic1eq2;
-        case (s8_ftype)
+        bp2 = (s8b_m6 >>> 28) + s8b_ic1eq2;
+        case (s8b_ftype)
             2'd1:    f2_36 = bp2;
-            2'd2:    f2_36 = s8_hp2;
-            default: f2_36 = s8_lp2;
+            2'd2:    f2_36 = s8b_hp2;
+            default: f2_36 = s8b_lp2;
         endcase
     end
 
@@ -635,16 +750,16 @@ module voice_pipeline #(
             s9_gl   <= '0;
             s9_gr   <= '0;
         end else begin
-            s9_act  <= s8_act;
-            s9_idx  <= s8_idx;
-            s9_voice <= s8_dual ? sat_q216(f2_36) : s8_f1;
-            s9_phase <= s8_phase;
-            s9_ic1eq1n <= s8_ic1eq1n;
-            s9_ic2eq1n <= s8_ic2eq1n;
+            s9_act  <= s8b_act;
+            s9_idx  <= s8b_idx;
+            s9_voice <= s8b_dual ? sat_q216(f2_36) : s8b_f1;
+            s9_phase <= s8b_phase;
+            s9_ic1eq1n <= s8b_ic1eq1n;
+            s9_ic2eq1n <= s8b_ic2eq1n;
             s9_ic1eq2n <= bp2;
-            s9_ic2eq2n <= s8_lp2;
-            s9_gl   <= s8_gl;
-            s9_gr   <= s8_gr;
+            s9_ic2eq2n <= s8b_lp2;
+            s9_gl   <= s8b_gl;
+            s9_gr   <= s8b_gr;
         end
     end
 
@@ -740,8 +855,8 @@ module voice_pipeline #(
     end
 
     // State writeback — sync-only process (BSRAM write port).
-    // S11 is 11 cycles after the read, so read and write addresses
-    // can never collide.
+    // Writeback lands 13 cycles after the read (S5B/S8B added), so
+    // read and write addresses can never collide (13 < 256).
     always_ff @(posedge clk) begin
         if (s10_act) begin
             phase_ram[s10_idx]  <= s10_phase;
