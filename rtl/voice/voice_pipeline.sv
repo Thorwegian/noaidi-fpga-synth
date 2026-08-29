@@ -4,7 +4,7 @@
 // One voice enters the pipeline every sysclk cycle for 256 cycles of
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different voice: stage Sk at drum slot t holds the voice
-// that entered at slot t-k.  The pipeline occupies 256 + 14 - 1 = 269
+// that entered at slot t-k.  The pipeline occupies 256 + 15 - 1 = 270
 // contiguous slots (~26% of the 1024-slot drum rotation).
 //
 // Stage map:
@@ -19,14 +19,18 @@
 //   S8  SVF2 B1: lp2/hp2 adder tree
 //   S8B SVF2 B2: m6 = K*hp2 on registered hp2        (DSP)
 //   S9  SVF2 C:  bp2, new states, filter-2 output, voice output
-//   S10 attenuation: log-gain decode + stereo multiply   (DSP)
+//   S9B attenuation decode: lin gains via LUT + barrel shift
+//   S10 attenuation multiply on registered operands      (DSP)
 //   S11 mix accumulate + state writeback
 //
-// S5B/S8B exist because chaining the adder tree into the 36x36 multiply
-// violated setup on real silicon at 98.304 MHz for long-carry operand
-// patterns (low cutoffs) — sparse single-sample corruption, gone at
-// half clock — which nextpnr's approximate timing model did not flag.
-// Rule: a stage is adds-only or multiply-only, never both chained.
+// S5B/S8B/S9B exist because chaining adder trees or LUT+barrel-shift
+// decodes into a DSP multiply in one cycle violated setup on real
+// silicon at 98.304 MHz (audible corruption, clean at half clock) —
+// paths nextpnr's approximate timing model passes. Rule: a stage is
+// adds/decode-only or multiply-only, never both chained. Known
+// same-class residual: S3's k barrel shift feeds the S4 multiplies
+// combinationally; it has not audibly failed, and is the next split if
+// any artifact survives.
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
@@ -36,7 +40,7 @@
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
 // State RAM is semi dual-port: read address is issued with the voice
-// entering at S0, writeback happens 13 cycles later — the read
+// entering at S0, writeback happens 14 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
@@ -71,7 +75,7 @@ module voice_pipeline #(
 
     //----------------------------------------------------------------
     // Per-voice internal state RAM — semi dual-port
-    // read address: entering voice (S0), write: 13 cycles later
+    // read address: entering voice (S0), write: 14 cycles later
     //----------------------------------------------------------------
     reg signed [23:0] phase_ram  [0:NUM_VOICES-1];
     reg signed [35:0] ic1eq1_ram [0:NUM_VOICES-1];
@@ -764,17 +768,24 @@ module voice_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // S10 — attenuation: log-gain decode + stereo multiply  (DSP)
+    // S9B — attenuation decode: lin = att_lut[frac] >>> int, REGISTERED
     //
-    //   gain UQ4.4: lin = att_lut[frac] >>> int
-    //   att_lut[i] = 2^(-i/16) in UQ0.16 → 6 dB per int step,
-    //   0.375 dB per frac step.
+    //   gain UQ4.4: att_lut[i] = 2^(-i/16) in UQ0.16 → 6 dB per int
+    //   step, 0.375 dB per frac step.
+    //
+    // Split from the multiply for the same silicon-timing reason as
+    // S5B/S8B: LUT read + 16-position barrel shift chained into a DSP
+    // multiply in one cycle violated setup at 98.304 MHz — audibly, on
+    // whichever channel drew the longer route (the right, on this
+    // build), and clean at half clock. Decode and multiply are now
+    // separate stages.
     //----------------------------------------------------------------
-    logic        s10_act;
-    logic [VW-1:0] s10_idx;
-    logic signed [17:0] s10_outl, s10_outr;
-    logic signed [23:0] s10_phase;
-    logic signed [35:0] s10_ic1eq1n, s10_ic2eq1n, s10_ic1eq2n, s10_ic2eq2n;
+    logic        s9b_act;
+    logic [VW-1:0] s9b_idx;
+    logic signed [17:0] s9b_voice;
+    logic signed [17:0] s9b_lin_l, s9b_lin_r;
+    logic signed [23:0] s9b_phase;
+    logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
 
     logic signed [17:0] lin_l, lin_r;
     always_comb begin
@@ -782,10 +793,45 @@ module voice_pipeline #(
         lin_r = 18'($signed({1'b0, att_lut[s9_gr[3:0]]})) >>> s9_gr[7:4];
     end
 
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s9b_act  <= 1'b0;
+            s9b_idx  <= '0;
+            s9b_voice <= '0;
+            s9b_lin_l <= '0;
+            s9b_lin_r <= '0;
+            s9b_phase <= '0;
+            s9b_ic1eq1n <= '0;
+            s9b_ic2eq1n <= '0;
+            s9b_ic1eq2n <= '0;
+            s9b_ic2eq2n <= '0;
+        end else begin
+            s9b_act  <= s9_act;
+            s9b_idx  <= s9_idx;
+            s9b_voice <= s9_voice;
+            s9b_lin_l <= lin_l;
+            s9b_lin_r <= lin_r;
+            s9b_phase <= s9_phase;
+            s9b_ic1eq1n <= s9_ic1eq1n;
+            s9b_ic2eq1n <= s9_ic2eq1n;
+            s9b_ic1eq2n <= s9_ic1eq2n;
+            s9b_ic2eq2n <= s9_ic2eq2n;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S10 — attenuation multiply on REGISTERED operands  (DSP)
+    //----------------------------------------------------------------
+    logic        s10_act;
+    logic [VW-1:0] s10_idx;
+    logic signed [17:0] s10_outl, s10_outr;
+    logic signed [23:0] s10_phase;
+    logic signed [35:0] s10_ic1eq1n, s10_ic2eq1n, s10_ic1eq2n, s10_ic2eq2n;
+
     logic signed [34:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9_voice * lin_l;
-        prod_r = s9_voice * lin_r;
+        prod_l = s9b_voice * s9b_lin_l;
+        prod_r = s9b_voice * s9b_lin_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -800,15 +846,15 @@ module voice_pipeline #(
             s10_ic1eq2n <= '0;
             s10_ic2eq2n <= '0;
         end else begin
-            s10_act  <= s9_act;
-            s10_idx  <= s9_idx;
+            s10_act  <= s9b_act;
+            s10_idx  <= s9b_idx;
             s10_outl <= prod_l >>> 16;
             s10_outr <= prod_r >>> 16;
-            s10_phase <= s9_phase;
-            s10_ic1eq1n <= s9_ic1eq1n;
-            s10_ic2eq1n <= s9_ic2eq1n;
-            s10_ic1eq2n <= s9_ic1eq2n;
-            s10_ic2eq2n <= s9_ic2eq2n;
+            s10_phase <= s9b_phase;
+            s10_ic1eq1n <= s9b_ic1eq1n;
+            s10_ic2eq1n <= s9b_ic2eq1n;
+            s10_ic1eq2n <= s9b_ic1eq2n;
+            s10_ic2eq2n <= s9b_ic2eq2n;
         end
     end
 
