@@ -145,6 +145,24 @@ two failure modes that look identical:
   drives a UART (none of the diagnostic tops do; silence there is not a
   fault). Do not diagnose the BL616 from that port.
 
+## Silicon timing rule (learned by ear, 2026-08-29)
+
+On this part at 98.304 MHz, a pipeline stage may be decode/adds-only or
+DSP-multiply-only — NEVER chain an adder tree or a LUT+barrel-shift
+decode into a multiply in one cycle. Three such chains passed nextpnr's
+approximate timing model and failed on silicon as data-dependent,
+clock-speed-dependent audio corruption (S5B/S8B: SVF 'rain' crackle;
+S9B: one-channel attenuation distortion). Diagnosis method that worked:
+sim-vs-silicon A/B (identical RTL+hexes rendered clean in iverilog) plus
+the half-clock listen (pll_clk O0=49.152M, no -s — corruption vanishing
+at half clock proves setup timing). Do not trust an STA PASS on such
+paths; split them.
+
+**VERIFIED 2026-08-29 (bench)**: working SVF at low cutoff (fc=0x1000,
+muffled chord, both channels clean) and clean SPDIF, confirmed at full
+SYSCLK and at SYSCLK/2; ESP32 SPI test still OK/PASS. Pipeline depth 15,
+span 270/1024 slots.
+
 ## Gotchas
 
 - Yosys: an async reset in the same `always_ff` as RAM reads/writes blocks BSRAM
