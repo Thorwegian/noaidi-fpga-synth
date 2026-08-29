@@ -92,6 +92,7 @@ module spi_bus #(
     // same pattern as spi_slave_regs' hardware-proven STATUS capture)
     logic        req;
     logic [15:0] fetch_addr;
+    logic [31:0] resp;         // fetched word (sysclk domain, see below)
     logic [31:0] tx_word;      // the word streaming out NOW — latched at
                                // each word boundary so prefetches into
                                // resp cannot clip the tail bytes
@@ -187,7 +188,6 @@ module spi_bus #(
     logic req_m, req_s, req_d;
     logic        f_pending;
     logic [35:0] mem_q;
-    logic [31:0] resp;
 
     initial begin
         {req_m, req_s, req_d} = '0;
