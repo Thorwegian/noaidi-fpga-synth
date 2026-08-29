@@ -35,7 +35,12 @@ module tb_voice_pipeline;
         .slot(slot)
     );
 
-    voice_pipeline #(.NUM_VOICES(256)) u_pipe (
+    voice_pipeline #(.NUM_VOICES(256),
+        // committed reference fixtures — immune to bench-local edits
+        // of scripts/gen_test_patch.py regenerating the tree hexes
+        .P0_HEX("tb/ref_patch_p0.hex"), .P1_HEX("tb/ref_patch_p1.hex"),
+        .P2_HEX("tb/ref_patch_p2.hex"), .P3_HEX("tb/ref_patch_p3.hex")
+    ) u_pipe (
         .clk(clk), .rst_n(rst_n),
         .slot(slot), .voice_enter(voice_enter), .sample_tick(sample_tick),
         .mix_left(mix_left), .mix_right(mix_right)
@@ -51,9 +56,9 @@ module tb_voice_pipeline;
     reg [16:0] al [0:15];
 
     initial begin
-        $readmemh("voice/test_patch_p0.hex", p0);
-        $readmemh("voice/test_patch_p2.hex", p2);
-        $readmemh("voice/test_patch_p3.hex", p3);
+        $readmemh("tb/ref_patch_p0.hex", p0);
+        $readmemh("tb/ref_patch_p2.hex", p2);
+        $readmemh("tb/ref_patch_p3.hex", p3);
         $readmemh("voice/phase_lut.hex", pl);
         $readmemh("voice/att_lut.hex", al);
     end

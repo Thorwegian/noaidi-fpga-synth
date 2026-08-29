@@ -45,7 +45,15 @@
 //--------------------------------------------------------------------
 `default_nettype none
 module voice_pipeline #(
-    parameter int NUM_VOICES = 256
+    parameter int NUM_VOICES = 256,
+    // Patch ROM init files. Synthesis uses the tree's generated patch;
+    // testbenches override with rtl/tb/ref_patch_* (committed fixtures)
+    // so bench expectations never depend on bench-local experiments in
+    // scripts/gen_test_patch.py.
+    parameter P0_HEX = "voice/test_patch_p0.hex",
+    parameter P1_HEX = "voice/test_patch_p1.hex",
+    parameter P2_HEX = "voice/test_patch_p2.hex",
+    parameter P3_HEX = "voice/test_patch_p3.hex"
 ) (
     input  logic           clk,
     input  logic           rst_n,
@@ -99,10 +107,10 @@ module voice_pipeline #(
     reg [35:0] p3_ram [0:NUM_VOICES-1];
 
     initial begin
-        $readmemh("voice/test_patch_p0.hex", p0_ram);
-        $readmemh("voice/test_patch_p1.hex", p1_ram);
-        $readmemh("voice/test_patch_p2.hex", p2_ram);
-        $readmemh("voice/test_patch_p3.hex", p3_ram);
+        $readmemh(P0_HEX, p0_ram);
+        $readmemh(P1_HEX, p1_ram);
+        $readmemh(P2_HEX, p2_ram);
+        $readmemh(P3_HEX, p3_ram);
     end
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
