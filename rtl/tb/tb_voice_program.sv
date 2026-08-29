@@ -33,12 +33,14 @@ module tb_voice_program;
     wire [1:0]  pv_bank;
     wire [7:0]  pv_voice;
     wire [31:0] pv_wdata;
+    wire        swap_req;
 
     spi_bus #(.AW_BACKED(11)) u_bus (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
         .sysclk(clk), .rst_n(rst_n),
         .pv_we(pv_we), .pv_bank(pv_bank),
-        .pv_voice(pv_voice), .pv_wdata(pv_wdata)
+        .pv_voice(pv_voice), .pv_wdata(pv_wdata),
+        .swap_req(swap_req)
     );
 
     logic signed [23:0] ml, mr;
@@ -49,7 +51,7 @@ module tb_voice_program;
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .voice_enter(voice_enter), .sample_tick(sample_tick),
         .sclk(sclk), .pv_we(pv_we), .pv_bank(pv_bank),
-        .pv_voice(pv_voice), .pv_wdata(pv_wdata),
+        .pv_voice(pv_voice), .pv_wdata(pv_wdata), .swap_req(swap_req),
         .mix_left(ml), .mix_right(mr)
     );
 
@@ -72,18 +74,22 @@ module tb_voice_program;
     endtask
 
     // ---- mix observer --------------------------------------------------
-    longint peak; integer nsamp;
+    longint peak, maxstep; integer nsamp;
     logic signed [23:0] prev;
     integer rises;
+    longint dstep;
     task automatic observe(input integer n);
         begin
-            peak = 0; nsamp = 0; rises = 0; prev = 0;
+            peak = 0; nsamp = 0; rises = 0; maxstep = 0;
+            prev = ml;                      // seed: no false first step
             while (nsamp < n) begin
                 @(posedge clk);
                 if (sample_tick) begin
                     if (ml >  peak) peak =  ml;
                     if (-ml > peak) peak = -ml;
                     if (prev < 0 && ml >= 0) rises = rises + 1;
+                    dstep = ml - prev; if (dstep < 0) dstep = -dstep;
+                    if (dstep > maxstep) maxstep = dstep;
                     prev = ml;
                     nsamp = nsamp + 1;
                 end
@@ -91,7 +97,29 @@ module tb_voice_program;
         end
     endtask
 
-    integer v;
+    // request a bank flip and wait for it to take effect (slot 512 of
+    // some rotation within the next two sample periods)
+    task automatic flip;
+        begin
+            spi_word_write(16'h0002, 32'h00000001);   // CTRL: swap request
+            observe(2);
+        end
+    endtask
+
+    // program voice 0 into the CURRENT shadow: A4 SINE (sine, not saw:
+    // the sweep's continuity assertion needs a waveform without its own
+    // discontinuities), open LP, -12 dB per channel
+    task automatic program_v0;
+        begin
+            spi_word_write(16'h2000, 32'h0000D700);   // OSC: A4, sine
+            spi_word_write(16'h2001, 32'h00000000);   // DUTY
+            spi_word_write(16'h2002, 32'h40002AF8);   // FILTER: q1=1.0, open
+            spi_word_write(16'h2003, 32'h00002020);   // GAIN L/R -12 dB
+        end
+    endtask
+
+    integer v, step;
+    longint worst;
     initial begin
         rst_n = 0;
         repeat (8) @(posedge clk);
@@ -105,15 +133,15 @@ module tb_voice_program;
         end else
             $display("boot patch playing, peak=%0d", peak);
 
-        // mute all: GAIN word (offset 3) = both sides 0xFF
+        // mute all into the shadow, flip, then mute the other bank too
+        // (a flip swaps the WHOLE bank — firmware keeps both populated)
+        for (v = 0; v < 256; v = v + 1)
+            spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
+        flip;
         for (v = 0; v < 256; v = v + 1)
             spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
 
-        // flush the in-flight sample: the last gain write can race the
-        // drum rotation, so the sample being accumulated when the frame
-        // ends still carries pre-mute contributions
-        observe(4);
-
+        observe(4);                        // flush the in-flight sample
         observe(50);
         if (peak > 4000) begin
             $display("FAIL: not silent after mute-all (peak=%0d)", peak);
@@ -121,13 +149,12 @@ module tb_voice_program;
         end else
             $display("mute-all OK, residual peak=%0d", peak);
 
-        // program voice 0: A4 saw, open LP, -12 dB per channel
-        spi_word_write(16'h2000, 32'h00001700);            // OSC: A4, saw
-        spi_word_write(16'h2001, 32'h00000000);            // DUTY
-        spi_word_write(16'h2002, 32'h40002AF8);            // FILTER: q1=1.0, open LP
-        spi_word_write(16'h2003, 32'h00002020);            // GAIN L/R -12 dB
+        // program voice 0 into shadow, flip live, mirror into new shadow
+        program_v0;
+        flip;
+        program_v0;
 
-        observe(60);                       // let it settle
+        observe(60);                       // settle
         observe(2182);                     // ~10 periods of 440 Hz
         $display("tone: peak=%0d rises=%0d over 2182 samples", peak, rises);
         if (peak < 1000000 || peak > 7000000) begin
@@ -139,13 +166,31 @@ module tb_voice_program;
             errors = errors + 1;
         end
 
+        // the click hunt as an assertion: the bench-reported bug was a
+        // cutoff sweep clicking from read-during-write collisions.
+        // Sweep fc via write-shadow + flip; a sine at 440 Hz moves at
+        // most ~66k counts/sample, so any collision garbage or flip
+        // glitch shows as a huge sample step.
+        worst = 0;
+        for (step = 0; step < 40; step = step + 1) begin
+            spi_word_write(16'h2002, 32'h40002800 + 32'(step) * 4);
+            spi_word_write(16'h0002, 32'h00000001);
+            observe(3);
+            if (maxstep > worst) worst = maxstep;
+        end
+        $display("sweep-with-flips: worst sample step = %0d", worst);
+        if (worst > 300000) begin
+            $display("FAIL: click during swept flips");
+            errors = errors + 1;
+        end
+
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
         $finish;
     end
 
     initial begin
-        #80_000_000;
+        #200_000_000;
         $display("TIMEOUT");
         $finish;
     end

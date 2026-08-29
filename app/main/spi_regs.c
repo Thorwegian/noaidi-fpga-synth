@@ -214,3 +214,14 @@ uint32_t fpga_word_read(uint16_t addr)
     fpga_word_read_burst(addr, &v, 1);
     return v;
 }
+
+// ── Patch bank flip (ping-pong) ─────────────────────────────────────
+#include "esp_rom_sys.h"
+
+void fpga_patch_flip(void)
+{
+    fpga_word_write(0x0002, 0x00000001);   // CTRL: swap request
+    // flip executes at drum slot 512; one sample period is 10.42 us at
+    // 96 kHz — wait two to be safely on the other side
+    esp_rom_delay_us(21);
+}

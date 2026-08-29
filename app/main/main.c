@@ -89,24 +89,36 @@ void app_main(void)
     // Mute the boot patch (256 GAIN writes — also a burst stress test),
     // then program voice 0 as a constant A4 saw. The organ should cut
     // to silence, then one steady 440 Hz tone.
-    printf("=== programming: mute all, then voice 0 = A4 saw ===\n");
+    // Ping-pong discipline: writes land in the SHADOW bank. Mute both
+    // banks (write + flip + write), program voice 0 into both, then
+    // sweep by write-shadow + flip per step — the collision-free path.
+    printf("=== programming (ping-pong): mute all, voice 0 = A4 saw ===\n");
     for (int v = 0; v < 256; v++)
-        fpga_word_write(0x2000 + v * 64 + 3, 0x0000FFFF);   // GAIN: mute L+R
-    printf("all 256 voices muted (organ should be silent)\n");
+        fpga_word_write(0x2000 + v * 64 + 3, 0x0000FFFF);   // mute shadow
+    fpga_patch_flip();
+    for (int v = 0; v < 256; v++)
+        fpga_word_write(0x2000 + v * 64 + 3, 0x0000FFFF);   // mute other bank
+    printf("both banks muted (organ should be silent)\n");
 
-    fpga_word_write(0x2000, 0x00001700);   // OSC: A4 (UQ4.10 0x1700), saw
-    fpga_word_write(0x2001, 0x00000000);   // DUTY
-    fpga_word_write(0x2002, 0x40002000);   // FILTER: q1=1.0, open LP
-    fpga_word_write(0x2003, 0x00002020);   // GAIN: -12 dB both channels
+    for (int b = 0; b < 2; b++) {          // program voice 0 into BOTH banks
+        fpga_word_write(0x2000, 0x00001700);   // OSC: A4 (UQ4.10 0x1700), saw
+        fpga_word_write(0x2001, 0x00000000);   // DUTY
+        fpga_word_write(0x2002, 0x40002000);   // FILTER: q1=1.0
+        fpga_word_write(0x2003, 0x00002020);   // GAIN: -12 dB both channels
+        fpga_patch_flip();
+    }
     printf("voice 0 programmed — constant 440 Hz saw should be audible\n");
 
+    printf("cutoff sweep via write-shadow + flip (click-free expected)\n");
     while(1) {
         for(int i = 0x1000; i < 0x2AF8; i++) {
-            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER: q1=1.0, open LP
+            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER into shadow
+            fpga_patch_flip();
             vTaskDelay(pdMS_TO_TICKS(1));
         }
         for(int i = 0x2AF8; i >= 0x1000; i--) {
-            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER: q1=1.0, open LP
+            fpga_word_write(0x2002, 0x40000000 | i);
+            fpga_patch_flip();
             vTaskDelay(pdMS_TO_TICKS(1));
         }
     }

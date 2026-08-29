@@ -56,6 +56,7 @@ module top (
     logic [1:0]  pv_bank;
     logic [7:0]  pv_voice;
     logic [31:0] pv_wdata;
+    logic        swap_req;
 
     voice_pipeline u_voice_pipeline (
         .clk         (sysclk),
@@ -68,6 +69,7 @@ module top (
         .pv_bank     (pv_bank),
         .pv_voice    (pv_voice),
         .pv_wdata    (pv_wdata),
+        .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right)
     );
@@ -117,7 +119,8 @@ module top (
         .pv_we    (pv_we),
         .pv_bank  (pv_bank),
         .pv_voice (pv_voice),
-        .pv_wdata (pv_wdata)
+        .pv_wdata (pv_wdata),
+        .swap_req (swap_req)
     );
 
     //----------------------------------------------------------------

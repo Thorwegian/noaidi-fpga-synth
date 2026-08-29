@@ -44,7 +44,7 @@ module tb_voice_pipeline;
         .clk(clk), .rst_n(rst_n),
         .slot(slot), .voice_enter(voice_enter), .sample_tick(sample_tick),
         .sclk(1'b0), .pv_we(1'b0), .pv_bank(2'b0),   // no SPI writes in
-        .pv_voice(8'b0), .pv_wdata(32'b0),           // this bench
+        .pv_voice(8'b0), .pv_wdata(32'b0), .swap_req(1'b0),
         .mix_left(mix_left), .mix_right(mix_right)
     );
 

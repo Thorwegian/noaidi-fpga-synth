@@ -65,11 +65,20 @@ module voice_pipeline #(
     // Per-voice parameter writes from the SPI control plane.
     // sclk-domain write port on the param RAMs; the pipeline reads on
     // clk (sysclk) — the dual-clock BSRAM is the CDC (design doc).
+    //
+    // PING-PONG (memory map decision 7): the banks are doubled —
+    // reads always hit the ACTIVE half, writes always the SHADOW half,
+    // so a read and a write can never collide on one address (the
+    // click-on-sweep bug). swap_req (an sclk-domain toggle from
+    // CTRL@0x0002) flips the active half at drum slot 512: the
+    // pipeline is drained there (span ends ~270), so every sample's
+    // 256 voices read one consistent bank generation.
     input  logic           sclk,
     input  logic           pv_we,
     input  logic [1:0]     pv_bank,     // 0..3 = p0..p3
     input  logic [7:0]     pv_voice,
     input  logic [31:0]    pv_wdata,
+    input  logic           swap_req,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, updated at sample_tick
     output logic signed [23:0] mix_right
@@ -110,17 +119,66 @@ module voice_pipeline #(
     //   p3[7:0]   gain L UQ4.4     p3[15:8] gain R UQ4.4
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
-    reg [35:0] p0_ram [0:NUM_VOICES-1];
-    reg [35:0] p1_ram [0:NUM_VOICES-1];
-    reg [35:0] p2_ram [0:NUM_VOICES-1];
-    reg [35:0] p3_ram [0:NUM_VOICES-1];
+    // Doubled for ping-pong: {bank, voice} addressing, both halves
+    // initialized to the boot patch so an unwritten shadow is sane
+    // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
+    reg [35:0] p0_ram [0:2*NUM_VOICES-1];
+    reg [35:0] p1_ram [0:2*NUM_VOICES-1];
+    reg [35:0] p2_ram [0:2*NUM_VOICES-1];
+    reg [35:0] p3_ram [0:2*NUM_VOICES-1];
 
     initial begin
-        $readmemh(P0_HEX, p0_ram);
-        $readmemh(P1_HEX, p1_ram);
-        $readmemh(P2_HEX, p2_ram);
-        $readmemh(P3_HEX, p3_ram);
+        $readmemh(P0_HEX, p0_ram, 0, NUM_VOICES-1);
+        $readmemh(P1_HEX, p1_ram, 0, NUM_VOICES-1);
+        $readmemh(P2_HEX, p2_ram, 0, NUM_VOICES-1);
+        $readmemh(P3_HEX, p3_ram, 0, NUM_VOICES-1);
+        $readmemh(P0_HEX, p0_ram, NUM_VOICES, 2*NUM_VOICES-1);
+        $readmemh(P1_HEX, p1_ram, NUM_VOICES, 2*NUM_VOICES-1);
+        $readmemh(P2_HEX, p2_ram, NUM_VOICES, 2*NUM_VOICES-1);
+        $readmemh(P3_HEX, p3_ram, NUM_VOICES, 2*NUM_VOICES-1);
     end
+
+    //----------------------------------------------------------------
+    // Bank control: active half (sysclk) flips at drum slot 512 when a
+    // swap is pending; the sclk write side steers by a synced
+    // complement of the active bank (memory map wording, literally).
+    //----------------------------------------------------------------
+    logic bank_active;
+    logic sr_m, sr_s, sr_d;          // swap_req toggle sync (sysclk)
+    logic swap_pending;
+
+    initial begin
+        bank_active  = 1'b0;
+        {sr_m, sr_s, sr_d} = '0;
+        swap_pending = 1'b0;
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            bank_active  <= 1'b0;
+            sr_m <= 1'b0; sr_s <= 1'b0; sr_d <= 1'b0;
+            swap_pending <= 1'b0;
+        end else begin
+            sr_m <= swap_req;
+            sr_s <= sr_m;
+            sr_d <= sr_s;
+            if (sr_s != sr_d)
+                swap_pending <= 1'b1;
+            else if (swap_pending && slot == 10'd512) begin
+                bank_active  <= ~bank_active;
+                swap_pending <= 1'b0;
+            end
+        end
+    end
+
+    // write side: shadow = complement of active, synced into sclk
+    logic ba_m, ba_s;
+    initial {ba_m, ba_s} = '0;
+    always_ff @(posedge sclk) begin
+        ba_m <= bank_active;
+        ba_s <= ba_m;
+    end
+    wire bank_shadow = ~ba_s;
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
@@ -162,10 +220,10 @@ module voice_pipeline #(
     // process, per the AGENTS.md inference gotcha; validity is act-gated.
     logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
     always_ff @(posedge clk) begin
-        s1_p0     <= p0_ram[raddr];
-        s1_p1     <= p1_ram[raddr];
-        s1_p2     <= p2_ram[raddr];
-        s1_p3     <= p3_ram[raddr];
+        s1_p0     <= p0_ram[{bank_active, raddr}];
+        s1_p1     <= p1_ram[{bank_active, raddr}];
+        s1_p2     <= p2_ram[{bank_active, raddr}];
+        s1_p3     <= p3_ram[{bank_active, raddr}];
         s1_phase  <= phase_ram[raddr];
         s1_ic1eq1 <= ic1eq1_ram[raddr];
         s1_ic2eq1 <= ic2eq1_ram[raddr];
@@ -175,13 +233,13 @@ module voice_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd0) p0_ram[pv_voice] <= {4'b0, pv_wdata};
+        if (pv_we && pv_bank == 2'd0) p0_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd1) p1_ram[pv_voice] <= {4'b0, pv_wdata};
+        if (pv_we && pv_bank == 2'd1) p1_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd2) p2_ram[pv_voice] <= {4'b0, pv_wdata};
+        if (pv_we && pv_bank == 2'd2) p2_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd3) p3_ram[pv_voice] <= {4'b0, pv_wdata};
+        if (pv_we && pv_bank == 2'd3) p3_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];

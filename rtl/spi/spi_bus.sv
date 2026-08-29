@@ -58,7 +58,13 @@ module spi_bus #(
     output logic        pv_we,
     output logic [1:0]  pv_bank,     // 0..3 = p0..p3
     output logic [7:0]  pv_voice,
-    output logic [31:0] pv_wdata
+    output logic [31:0] pv_wdata,
+
+    // CTRL@0x0002 bit 0: patch-bank swap request. Toggle semantics
+    // (sclk domain); the consumer syncs the toggle and flips its
+    // active bank at the next drum slot 512. The write also lands in
+    // the plain window RAM, so reading CTRL back shows the last value.
+    output logic        swap_req
 );
 
     localparam int NWORDS = 1 << AW_BACKED;
@@ -202,6 +208,15 @@ module spi_bus #(
     always_ff @(posedge sclk) begin
         if (mem_we)
             mem[addr[AW_BACKED-1:0]] <= {4'b0, wbuf, rx_byte};
+    end
+
+    // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_req.
+    // Registered on the committing edge itself — no later edge is
+    // guaranteed (framing rule).
+    initial swap_req = 1'b0;
+    always_ff @(posedge sclk) begin
+        if (mem_we && (addr == 16'h0002) && rx_byte[0])
+            swap_req <= ~swap_req;
     end
 
     //--------------------------------------------------------------------
