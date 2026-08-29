@@ -109,6 +109,11 @@ module tb_voice_program;
         for (v = 0; v < 256; v = v + 1)
             spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
 
+        // flush the in-flight sample: the last gain write can race the
+        // drum rotation, so the sample being accumulated when the frame
+        // ends still carries pre-mute contributions
+        observe(4);
+
         observe(50);
         if (peak > 4000) begin
             $display("FAIL: not silent after mute-all (peak=%0d)", peak);
