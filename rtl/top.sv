@@ -2,15 +2,15 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// Audio:  256-voice SCMO pipeline ("the drum") → SPDIF
+// Audio:  256-voice SCMO pipeline ("the drum") → SPDIF + I2S
 // Timing: drum.sv owns every timebase — the sample boundary
 //         (1024 sysclk = 1 sample) and the SPDIF cell boundary
 //         (8 sysclk = 1 cell), decoded from one counter.
 // Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 98.304 MHz
 //         (per-board setup: pll_clk O0=98.304M -s on the BL616).
 //
-// I2S is disconnected pending confirmation of pins 54–56 wiring.
 //--------------------------------------------------------------------
+
 `default_nettype none
 module top (
     input  logic        sysclk,
@@ -22,6 +22,10 @@ module top (
     input  logic        cs,
     input  logic        mosi,
     output logic        miso,
+
+    output logic        i2s_bclk,
+    output logic        i2s_lrclk,
+    output logic        i2s_data,
 
     output logic        spdif_out
 );
@@ -69,6 +73,20 @@ module top (
         .audio_l     (sample_left),
         .audio_r     (sample_right),
         .spdif_out   (spdif_out)
+    );
+
+    //----------------------------------------------------------------
+    // I2S master transmitter (generates its own BCLK/LRCLK)
+    //----------------------------------------------------------------
+    i2s_tx #(.BITS(24)) u_i2s_tx (
+        .sysclk      (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .data_left   (sample_left),
+        .data_right  (sample_right),
+        .i2s_bclk    (i2s_bclk),
+        .i2s_lrclk   (i2s_lrclk),
+        .sd          (i2s_data)
     );
 
     //----------------------------------------------------------------

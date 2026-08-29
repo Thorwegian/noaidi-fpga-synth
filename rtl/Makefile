@@ -1,7 +1,6 @@
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
-# Mainline return: 256-voice pipeline → SPDIF at 98.304 MHz (pin 10).
-# I2S still disconnected pending pin-wiring confirmation.
+# Mainline: 256-voice pipeline → SPDIF + I2S at 98.304 MHz (pin 10).
 # cell_dds.sv stays in the tree as the crystal-clock fallback module but
 # is not in this build.
 TOP = top
@@ -12,7 +11,8 @@ MOD = \
 	voice/voice_pipeline.sv \
 	voice/osc_core.sv \
 	spi/spi_slave_regs.sv \
-	spdif/spdif_tx.sv
+	spdif/spdif_tx.sv \
+	i2s/i2s_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
 
@@ -72,6 +72,15 @@ tb/tb_voice_pipeline.vvp: $(SIM_MOD) $(TB_VOICE) $(LUTS) Makefile
 sim-voice: tb/tb_voice_pipeline.vvp
 	vvp tb/tb_voice_pipeline.vvp
 
+SIM_OUT_MOD = $(PKG) drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
+TB_OUT = tb/tb_outputs.sv
+
+tb/tb_outputs.vvp: $(SIM_OUT_MOD) $(TB_OUT) Makefile
+	iverilog -g2012 -o $@ $(SIM_OUT_MOD) $(TB_OUT)
+
+sim-outputs: tb/tb_outputs.vvp
+	vvp tb/tb_outputs.vvp
+
 TB_SPDIF = tb/tb_spdif_block.sv
 tb/tb_spdif_block.vvp: drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 	iverilog -g2012 -o $@ drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
@@ -93,7 +102,7 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
-sim: sim-voice sim-spdif sim-dds sim-spi
+sim: sim-voice sim-outputs sim-spdif sim-dds sim-spi
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex

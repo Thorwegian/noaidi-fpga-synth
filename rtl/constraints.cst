@@ -47,16 +47,14 @@ IO_PORT "mosi" IO_TYPE=LVCMOS33;
 IO_LOC "miso" 29;
 IO_PORT "miso" IO_TYPE=LVCMOS33;
 
-// I2S audio output — still disconnected on this branch, pending word on
-// what is physically wired to pins 54–56. (The diagnostic SPDIF mirror
-// that briefly occupied pin 56 is retired.)
+// I2S audio output — same veroboard wiring as the old board
 
-// IO_LOC  "i2s_bclk"  56;  // HP_BCK  — bit clock
-// IO_PORT "i2s_bclk"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
-// IO_LOC  "i2s_lrclk" 55;  // HP_WS   — word select / left-right clock
-// IO_PORT "i2s_lrclk" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
-// IO_LOC  "i2s_data"  54;  // HP_DIN  — serial data
-// IO_PORT "i2s_data"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC  "i2s_bclk"  56;  // HP_BCK  — bit clock
+IO_PORT "i2s_bclk"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC  "i2s_lrclk" 55;  // HP_WS   — word select / left-right clock
+IO_PORT "i2s_lrclk" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+IO_LOC  "i2s_data"  54;  // HP_DIN  — serial data
+IO_PORT "i2s_data"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 // SPDIF audio output
 
