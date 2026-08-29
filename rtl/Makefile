@@ -1,22 +1,46 @@
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
-# spdif-minimal branch: drum + spdif + SPI instrument only.
-# No voice pipeline, no I2S, no LUTs — the point is the smallest thing
-# that puts a valid SPDIF stream on the coax.
+# Mainline return: 256-voice pipeline → SPDIF at 98.304 MHz (pin 10).
+# I2S still disconnected pending pin-wiring confirmation.
+# cell_dds.sv stays in the tree as the crystal-clock fallback module but
+# is not in this build.
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
 	drum.sv \
+	voice/voice_pipeline.sv \
+	voice/osc_core.sv \
 	spi/spi_slave_regs.sv \
-	spdif/cell_dds.sv \
 	spdif/spdif_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
 
+# Generated LUTs / patch init
+LUTS = \
+	voice/phase_lut.hex \
+	voice/svf_k_lut.hex \
+	voice/att_lut.hex \
+	voice/test_patch_p0.hex \
+	voice/test_patch_p1.hex \
+	voice/test_patch_p2.hex \
+	voice/test_patch_p3.hex
+
 all: pack.fs
 
-yosys.json: $(SRC) Makefile
+voice/phase_lut.hex: ../scripts/gen_phase_lut.py
+	python3 $<
+
+voice/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+	python3 $<
+
+voice/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+voice/test_patch_p%.hex: ../scripts/gen_test_patch.py
+	python3 $<
+
+yosys.json: $(SRC) $(LUTS) Makefile
 	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
 
 pnr.json: yosys.json
@@ -39,6 +63,15 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
+SIM_MOD = $(PKG) drum.sv voice/voice_pipeline.sv voice/osc_core.sv
+TB_VOICE = tb/tb_voice_pipeline.sv
+
+tb/tb_voice_pipeline.vvp: $(SIM_MOD) $(TB_VOICE) $(LUTS) Makefile
+	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_VOICE)
+
+sim-voice: tb/tb_voice_pipeline.vvp
+	vvp tb/tb_voice_pipeline.vvp
+
 TB_SPDIF = tb/tb_spdif_block.sv
 tb/tb_spdif_block.vvp: drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 	iverilog -g2012 -o $@ drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
@@ -60,7 +93,7 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
-sim: sim-spdif sim-dds sim-spi
+sim: sim-voice sim-spdif sim-dds sim-spi
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex

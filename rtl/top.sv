@@ -1,110 +1,87 @@
 //--------------------------------------------------------------------
-// top.sv (spdif-minimal branch) — SPDIF at EXACTLY 96.000 kHz from the
-// 27 MHz crystal, no MS5351 needed.
+// top.sv — mainline return: 256 voices → SPDIF at exactly 96.000 kHz.
 //
-// The integer path can't get there: 98.304/27 = 4096/1125, unreachable
-// by any in-spec rPLL ratio.  So the cell timebase is fractional:
+// sysclk is the MS5351's 98.304 MHz on pkg pin 10, configured on this
+// board 2026-08-29 (`pll_clk O0=98.304M -s` via the BL616 console).
+// With the real clock back there is nothing to work around:
 //
-//   rPLL: 27 MHz × 11/3 = 99.0 MHz sysclk
-//   DDS:  acc += 512 (mod 4125) per sysclk → cell_tick avg
-//         = 99 MHz × 512/4125 = 12.288000 MHz EXACT
-//   128 cells per frame → Fs = 96,000.000 Hz (to the crystal's ppm)
+//   drum: free-running /1024 → Fs = 96,000.000 Hz
+//   cells: /8 → 12.288 MHz, uniform, zero jitter
+//   voice_pipeline: the 256-voice SCMO drum, unchanged
+//   spdif_tx: B preambles + channel status (branch fixes kept)
 //
-// Cells are 8 or 9 sysclk long (jitter ±½ sysclk ≈ 10 ns p-p =
-// 0.125 UI), inside the IEC 60958 receiver tolerance mask of 0.25 UI.
-// A receiver that rejects the +0.7% integer-PLL rate but accepts this
-// confirms rate-window validation; one that rejects both points at
-// signal integrity instead.  Either result is decisive.
+// The crystal/rPLL/fractional-DDS variant (git history of this branch)
+// remains the documented fallback for a board whose MS5351 is not yet
+// configured — it is scaffolding, not mainline.
 //
-// LEDs (active low): 5=PLL lock, 4=~rst, 1=frame tick alive, 0=cells.
+// I2S is still disconnected on this branch (pins 54–56 unconstrained)
+// pending word on what is physically wired there.
+//
+// LEDs (active low): 4=~rst, 2=spdif alive, 1=drum alive, 0=sysclk.
 //--------------------------------------------------------------------
 `default_nettype none
 module top (
-    input  logic        clk27,       // pkg pin 4 — 27 MHz crystal
+    input  logic        sysclk,      // pkg pin 10 — MS5351, 98.304 MHz
     input  logic        rst,
     output logic [5:0]  led,
     input  logic        sclk,
     input  logic        cs,
     input  logic        mosi,
     output logic        miso,
-    output logic        spdif_out,
-    output logic        spdif_mirror
+    output logic        spdif_out
 );
     wire rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // rPLL: 27 × 11/3 = 99.0 MHz (PFD 9 MHz, VCO 792 MHz)
+    // Drum — the single timebase, as designed
     //----------------------------------------------------------------
-    wire sysclk;
-    wire pll_lock;
-
-    rPLL #(
-        .FCLKIN("27"), .IDIV_SEL(2), .FBDIV_SEL(10), .ODIV_SEL(8),
-        .DYN_IDIV_SEL("false"), .DYN_FBDIV_SEL("false"), .DYN_ODIV_SEL("false"),
-        .PSDA_SEL("0000"), .DYN_DA_EN("false"), .DUTYDA_SEL("1000"),
-        .CLKOUT_FT_DIR(1'b1), .CLKOUTP_FT_DIR(1'b1),
-        .CLKOUT_DLY_STEP(0), .CLKOUTP_DLY_STEP(0),
-        .CLKFB_SEL("internal"), .CLKOUT_BYPASS("false"),
-        .CLKOUTP_BYPASS("false"), .CLKOUTD_BYPASS("false"),
-        .CLKOUTD_SRC("CLKOUT"), .CLKOUTD3_SRC("CLKOUT"),
-        .DEVICE("GW2AR-18C")
-    ) u_pll (
-        .CLKIN(clk27), .CLKOUT(sysclk), .CLKOUTP(), .CLKOUTD(), .CLKOUTD3(),
-        .LOCK(pll_lock), .RESET(1'b0), .RESET_P(1'b0), .CLKFB(1'b0),
-        .FBDSEL(6'b0), .IDSEL(6'b0), .ODSEL(6'b0),
-        .PSDA(4'b0), .DUTYDA(4'b0), .FDLY(4'b0)
-    );
-
-    //----------------------------------------------------------------
-    // Fractional cell DDS: 512/4125 of 99 MHz = 12.288 MHz exact.
-    // Same module tb_spdif_dds.sv verifies — one source, one truth.
-    //----------------------------------------------------------------
-    wire cell_tick, sample_tick;
-    cell_dds u_dds (
+    logic       sample_tick, voice_enter;
+    logic [9:0] slot;
+    drum u_drum (
         .clk(sysclk), .rst_n(rst_n),
-        .cell_tick(cell_tick), .sample_tick(sample_tick)
+        .sample_tick(sample_tick), .voice_enter(voice_enter), .slot(slot)
     );
 
     //----------------------------------------------------------------
-    // Tone: square at Fs/64 = 1.5 kHz, −18 dBFS
+    // 256-voice pipeline — the C-major test patch lives in its ROMs
     //----------------------------------------------------------------
-    logic [4:0] tone_cnt;
-    logic       tone;
-    always_ff @(posedge sysclk or negedge rst_n) begin
-        if (!rst_n) begin
-            tone_cnt <= '0;
-            tone     <= 1'b0;
-        end else if (sample_tick) begin
-            tone_cnt <= tone_cnt + 1'b1;
-            if (tone_cnt == 5'd31) tone <= ~tone;
-        end
-    end
-    wire signed [23:0] sample = tone ? 24'sh100000 : -24'sh100000;
+    logic signed [23:0] sample_left, sample_right;
+    voice_pipeline u_voice_pipeline (
+        .clk(sysclk), .rst_n(rst_n), .slot(slot),
+        .voice_enter(voice_enter), .sample_tick(sample_tick),
+        .mix_left(sample_left), .mix_right(sample_right)
+    );
 
     //----------------------------------------------------------------
-    // SPDIF encoder on the fractional timebase
+    // Uniform /8 cell tick, reset-aligned with the drum so sample_tick
+    // coincides with a cell boundary (1024 = 128 × 8) — the original
+    // integer scheme, expressed through spdif_tx's cell_tick port.
+    // Same pattern tb_spdif_block.sv verifies.
     //----------------------------------------------------------------
-    logic spdif_core;
+    logic [2:0] cd;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
+    wire cell_tick = (cd == 3'd0);
+
     spdif_tx u_spdif (
         .clk(sysclk), .rst_n(rst_n),
         .sample_tick(sample_tick), .cell_tick(cell_tick),
-        .audio_l(sample), .audio_r(sample),
-        .spdif_out(spdif_core)
+        .audio_l(sample_left), .audio_r(sample_right),
+        .spdif_out(spdif_out)
     );
-    assign spdif_out    = spdif_core;
-    assign spdif_mirror = spdif_core;
 
     //----------------------------------------------------------------
-    // SPI + instrument: regs 8..11 = cell counter, 12..15 = frame ticks.
-    // Expected on hardware: cells/s = 12,288,000.0, ticks/s = 96,000.0.
+    // SPI + instrument: regs 8..11 = sysclk cycles, 12..15 = sample
+    // ticks.  Expected: 98.304 MHz and 96,000.00 Hz — verify the
+    // MS5351 configuration by measurement, not assumption.
     //----------------------------------------------------------------
-    logic [31:0] cell32, tick32;
+    logic [31:0] sys32, tick32;
     always_ff @(posedge sysclk or negedge rst_n) begin
         if (!rst_n) begin
-            cell32 <= '0;
+            sys32  <= '0;
             tick32 <= '0;
         end else begin
-            if (cell_tick)   cell32 <= cell32 + 1'b1;
+            sys32 <= sys32 + 1'b1;
             if (sample_tick) tick32 <= tick32 + 1'b1;
         end
     end
@@ -116,11 +93,29 @@ module top (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
         .sysclk(sysclk), .rst_n(rst_n),
         .read_addr(4'd0), .read_data(status_reg),
-        .status_in({tick32, cell32})
+        .status_in({tick32, sys32})
     );
 
-    assign led = { ~pll_lock, ~rst, 1'b1, 1'b1,
-                   ~tick32[16],     // led[1] frames flowing
-                   ~cell32[23] };   // led[0] cells flowing
+    //----------------------------------------------------------------
+    // Liveness LEDs (active low)
+    //----------------------------------------------------------------
+    logic spdif_d;
+    logic [19:0] edge_cnt;
+    always_ff @(posedge sysclk or negedge rst_n) begin
+        if (!rst_n) begin
+            spdif_d  <= 1'b0;
+            edge_cnt <= '0;
+        end else begin
+            spdif_d <= spdif_out;
+            if (spdif_out != spdif_d) edge_cnt <= edge_cnt + 1'b1;
+        end
+    end
+
+    assign led = { 1'b1,
+                   ~rst,             // led[4] lit = reset held
+                   1'b1,
+                   ~edge_cnt[19],    // led[2] spdif alive
+                   ~tick32[16],      // led[1] drum alive
+                   ~sys32[25] };     // led[0] sysclk alive
 endmodule
 `default_nettype wire

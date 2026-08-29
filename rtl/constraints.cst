@@ -3,21 +3,18 @@
 // Target: GW2AR-LV18QN88C8/I7
 //
 
-// Clock (spdif-minimal branch) — 27 MHz crystal on FPGA package pin 4:
-// factory copper, present and running on every board with no setup.
-// The rPLL in top.sv multiplies it ×11/3 to ~99 MHz.
-//
-// The mainline clock is the MS5351 at 98.304 MHz on package pin 10 —
-// but that output must be configured per board (BL616 CLI:
+// Clock — MS5351 CLK0 at 98.304 MHz on FPGA package pin 10.
+// Per-board one-time setup via the BL616 console:
 //   pll_clk O0=98.304M -s
-// one-time, persists). Measured 2026-08-28: on the new board pin 10 is
-// dead until that is done.
+// (done on this board 2026-08-29). A board without that setup has a
+// dead pin 10 — the crystal/rPLL fallback lives in this branch's git
+// history if ever needed again.
 
-IO_LOC  "clk27" 4;
-IO_PORT "clk27" IO_TYPE=LVCMOS33;
+IO_LOC  "sysclk" 10;
+IO_PORT "sysclk" IO_TYPE=LVCMOS33;
 
-// IO_LOC  "sysclk" 10;                 // MS5351 — mainline clock input
-// IO_PORT "sysclk" IO_TYPE=LVCMOS33;
+// IO_LOC  "clk27" 4;                   // 27 MHz crystal — fallback only
+// IO_PORT "clk27" IO_TYPE=LVCMOS33;
 
 // Reset button
 
@@ -50,12 +47,9 @@ IO_PORT "mosi" IO_TYPE=LVCMOS33;
 IO_LOC "miso" 29;
 IO_PORT "miso" IO_TYPE=LVCMOS33;
 
-// I2S audio output — not in the spdif-minimal top; restore with it.
-// Pin 56 temporarily carries a mirror of the SPDIF stream instead, so
-// the signal is probeable even if pin 27's path is bad on this board.
-
-IO_LOC  "spdif_mirror" 56;
-IO_PORT "spdif_mirror" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
+// I2S audio output — still disconnected on this branch, pending word on
+// what is physically wired to pins 54–56. (The diagnostic SPDIF mirror
+// that briefly occupied pin 56 is retired.)
 
 // IO_LOC  "i2s_bclk"  56;  // HP_BCK  — bit clock
 // IO_PORT "i2s_bclk"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
