@@ -134,9 +134,12 @@ two failure modes that look identical:
   trustworthy AMPLITUDE but garbage TIMING — fine for "is the pin
   driven", useless above audio rates. Install sigrok + fx2lafw firmware
   for real captures.
-- **SPDIF CONFIRMED AUDIBLE 2026-08-29** on the Focusrite via the
-  fractional-DDS exact-96k stream (27 MHz crystal + rPLL 99 MHz +
-  cell_dds 512/4125). Some distortion reported, unresolved.
+- **FULL MAINLINE VERIFIED 2026-08-29**: the 256-voice C-major patch is
+  audible over SPDIF (church organ), liveness LED blinks 1.5 Hz, ESP32
+  SPI test passes — on the new board with its MS5351 configured. The
+  earlier distortion report was made against the fractional-DDS build's
+  square-wave tone and is superseded. cell_dds stays as the fallback
+  for boards whose MS5351 is not yet configured.
 - USB serial map on the dev host: /dev/ttyACM0 = ESP32-C3 console;
   /dev/ttyUSB1 = FPGA UART bridge — SILENT unless the loaded bitstream
   drives a UART (none of the diagnostic tops do; silence there is not a
