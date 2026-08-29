@@ -1,121 +1,106 @@
 //--------------------------------------------------------------------
-// top.sv — mainline return: 256 voices → SPDIF at exactly 96.000 kHz.
+// top.sv — Noaidi Flex Synthesizer Top Level
+// Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// sysclk is the MS5351's 98.304 MHz on pkg pin 10, configured on this
-// board 2026-08-29 (`pll_clk O0=98.304M -s` via the BL616 console).
-// With the real clock back there is nothing to work around:
+// Audio:  256-voice SCMO pipeline ("the drum") → SPDIF
+// Timing: drum.sv owns every timebase — the sample boundary
+//         (1024 sysclk = 1 sample) and the SPDIF cell boundary
+//         (8 sysclk = 1 cell), decoded from one counter.
+// Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 98.304 MHz
+//         (per-board setup: pll_clk O0=98.304M -s on the BL616).
 //
-//   drum: free-running /1024 → Fs = 96,000.000 Hz
-//   cells: /8 → 12.288 MHz, uniform, zero jitter
-//   voice_pipeline: the 256-voice SCMO drum, unchanged
-//   spdif_tx: B preambles + channel status (branch fixes kept)
-//
-// The crystal/rPLL/fractional-DDS variant (git history of this branch)
-// remains the documented fallback for a board whose MS5351 is not yet
-// configured — it is scaffolding, not mainline.
-//
-// I2S is still disconnected on this branch (pins 54–56 unconstrained)
-// pending word on what is physically wired there.
-//
-// LEDs (active low): 4=~rst, 2=spdif alive, 1=drum alive, 0=sysclk.
+// I2S is disconnected pending confirmation of pins 54–56 wiring.
 //--------------------------------------------------------------------
 `default_nettype none
 module top (
-    input  logic        sysclk,      // pkg pin 10 — MS5351, 98.304 MHz
+    input  logic        sysclk,
     input  logic        rst,
+
     output logic [5:0]  led,
+
     input  logic        sclk,
     input  logic        cs,
     input  logic        mosi,
     output logic        miso,
+
     output logic        spdif_out
 );
+
     wire rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // Drum — the single timebase, as designed
+    // Drum — the sole timebase
     //----------------------------------------------------------------
-    logic       sample_tick, voice_enter;
+    logic       sample_tick, voice_enter, cell_tick;
     logic [9:0] slot;
+
     drum u_drum (
-        .clk(sysclk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .voice_enter(voice_enter), .slot(slot)
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .voice_enter (voice_enter),
+        .cell_tick   (cell_tick),
+        .slot        (slot)
     );
 
     //----------------------------------------------------------------
-    // 256-voice pipeline — the C-major test patch lives in its ROMs
+    // 256-voice pipeline
     //----------------------------------------------------------------
-    logic signed [23:0] sample_left, sample_right;
+    logic signed [23:0] sample_left, sample_right;   // Q0.24
+
     voice_pipeline u_voice_pipeline (
-        .clk(sysclk), .rst_n(rst_n), .slot(slot),
-        .voice_enter(voice_enter), .sample_tick(sample_tick),
-        .mix_left(sample_left), .mix_right(sample_right)
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .slot        (slot),
+        .voice_enter (voice_enter),
+        .sample_tick (sample_tick),
+        .mix_left    (sample_left),
+        .mix_right   (sample_right)
     );
 
     //----------------------------------------------------------------
-    // Uniform /8 cell tick, reset-aligned with the drum so sample_tick
-    // coincides with a cell boundary (1024 = 128 × 8) — the original
-    // integer scheme, expressed through spdif_tx's cell_tick port.
-    // Same pattern tb_spdif_block.sv verifies.
+    // SPDIF transmitter
     //----------------------------------------------------------------
-    logic [2:0] cd;
-    always_ff @(posedge sysclk or negedge rst_n)
-        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
-    wire cell_tick = (cd == 3'd0);
-
     spdif_tx u_spdif (
-        .clk(sysclk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .cell_tick(cell_tick),
-        .audio_l(sample_left), .audio_r(sample_right),
-        .spdif_out(spdif_out)
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .cell_tick   (cell_tick),
+        .audio_l     (sample_left),
+        .audio_r     (sample_right),
+        .spdif_out   (spdif_out)
     );
 
     //----------------------------------------------------------------
-    // SPI + instrument: regs 8..11 = sysclk cycles, 12..15 = sample
-    // ticks.  Expected: 98.304 MHz and 96,000.00 Hz — verify the
-    // MS5351 configuration by measurement, not assumption.
+    // SPI slave + register file (control plane; register map is the
+    // bring-up subset of docs/memory_map.md for now)
     //----------------------------------------------------------------
-    logic [31:0] sys32, tick32;
-    always_ff @(posedge sysclk or negedge rst_n) begin
-        if (!rst_n) begin
-            sys32  <= '0;
-            tick32 <= '0;
-        end else begin
-            sys32 <= sys32 + 1'b1;
-            if (sample_tick) tick32 <= tick32 + 1'b1;
-        end
-    end
-
     logic [35:0] status_reg;
+
     spi_slave_regs #(
-        .NWORDS(16), .DATA_W(36), .ID_BYTE(8'hA5), .RO_BASE(8)
+        .NWORDS(16), .DATA_W(36), .ID_BYTE(8'hA5)
     ) u_spi (
-        .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
-        .sysclk(sysclk), .rst_n(rst_n),
-        .read_addr(4'd0), .read_data(status_reg),
-        .status_in({tick32, sys32})
+        .sclk      (sclk),
+        .cs        (cs),
+        .mosi      (mosi),
+        .miso      (miso),
+        .sysclk    (sysclk),
+        .rst_n     (rst_n),
+        .read_addr (4'd0),
+        .read_data (status_reg),
+        .status_in ('0)
     );
 
     //----------------------------------------------------------------
-    // Liveness LEDs (active low)
+    // led[0]: ~1.4 Hz liveness blink derived from sample ticks —
+    // proves clock + drum with one flop chain. Others off.
     //----------------------------------------------------------------
-    logic spdif_d;
-    logic [19:0] edge_cnt;
-    always_ff @(posedge sysclk or negedge rst_n) begin
-        if (!rst_n) begin
-            spdif_d  <= 1'b0;
-            edge_cnt <= '0;
-        end else begin
-            spdif_d <= spdif_out;
-            if (spdif_out != spdif_d) edge_cnt <= edge_cnt + 1'b1;
-        end
-    end
+    logic [16:0] beat;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n)           beat <= '0;
+        else if (sample_tick) beat <= beat + 1'b1;
 
-    assign led = { 1'b1,
-                   ~rst,             // led[4] lit = reset held
-                   1'b1,
-                   ~edge_cnt[19],    // led[2] spdif alive
-                   ~tick32[16],      // led[1] drum alive
-                   ~sys32[25] };     // led[0] sysclk alive
+    assign led = {4'b1111, ~rst, ~beat[16]};
+
 endmodule
 `default_nettype wire
