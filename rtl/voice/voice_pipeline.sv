@@ -520,8 +520,8 @@ module voice_pipeline #(
         bp1 = (s5b_m3 >>> 28) + s5b_ic1eq1;
         case (s5b_ftype)
             2'd1:    f1_36 = bp1;
-            2'd2:    f1_36 = s5_hp1;
-            default: f1_36 = s5_lp1;
+            2'd2:    f1_36 = s5b_hp1;
+            default: f1_36 = s5b_lp1;
         endcase
     end
 
@@ -542,20 +542,20 @@ module voice_pipeline #(
             s6_dual <= 1'b0;
             s6_ftype <= '0;
         end else begin
-            s6_act  <= s5_act;
-            s6_idx  <= s5_idx;
+            s6_act  <= s5b_act;
+            s6_idx  <= s5b_idx;
             s6_f1   <= sat_q216(f1_36);
             s6_ic1eq1n <= bp1;
-            s6_ic2eq1n <= s5_lp1;
-            s6_ic1eq2 <= s5_ic1eq2;
-            s6_ic2eq2 <= s5_ic2eq2;
-            s6_k    <= s5_k;
-            s6_q1   <= s5_q1;
-            s6_phase <= s5_phase;
-            s6_gl   <= s5_gl;
-            s6_gr   <= s5_gr;
-            s6_dual <= s5_dual;
-            s6_ftype <= s5_ftype;
+            s6_ic2eq1n <= s5b_lp1;
+            s6_ic1eq2 <= s5b_ic1eq2;
+            s6_ic2eq2 <= s5b_ic2eq2;
+            s6_k    <= s5b_k;
+            s6_q1   <= s5b_q1;
+            s6_phase <= s5b_phase;
+            s6_gl   <= s5b_gl;
+            s6_gr   <= s5b_gr;
+            s6_dual <= s5b_dual;
+            s6_ftype <= s5b_ftype;
         end
     end
 
