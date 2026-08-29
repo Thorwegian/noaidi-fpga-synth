@@ -373,10 +373,16 @@ module voice_pipeline #(
     logic        s5_dual;
     logic [1:0]  s5_ftype;
 
+    // Audio enters the filter at TRUE Q8.28: Q2.16 <<< 12, leaving the
+    // 8 integer bits (±128 vs a ±1 signal) as overshoot headroom.  The
+    // original <<< 18 injected the signal 64× hot, so at any cutoff
+    // below the input's energy the hp sum (in − lp − q·bp, three
+    // near-full-scale terms) wrapped the 36-bit state and the wrap fed
+    // back — noise for every FC below ~14 kHz, stable only wide open.
     logic signed [35:0] lp1, hp1;
     always_comb begin
         lp1 = s4_ic2eq1 + (s4_m1 >>> 28);
-        hp1 = (s4_osc <<< 18) - lp1 - (s4_m2 >>> 28);
+        hp1 = (s4_osc <<< 12) - lp1 - (s4_m2 >>> 28);
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -430,6 +436,19 @@ module voice_pipeline #(
     logic        s6_dual;
     logic [1:0]  s6_ftype;
 
+    // Q8.28 → Q2.16 with saturation: with real state headroom, resonant
+    // peaks can legitimately exceed the ±2 output range and must clamp,
+    // not wrap.
+    function automatic logic signed [17:0] sat_q216(input logic signed [35:0] x);
+        logic signed [35:0] s;
+        begin
+            s = x >>> 12;                       // Q8.28 → Q8.16
+            if (s > 36'sd131071)        sat_q216 = 18'sd131071;
+            else if (s < -36'sd131072)  sat_q216 = -18'sd131072;
+            else                        sat_q216 = s[17:0];
+        end
+    endfunction
+
     logic signed [35:0] bp1;
     logic signed [35:0] f1_36;
     always_comb begin
@@ -460,7 +479,7 @@ module voice_pipeline #(
         end else begin
             s6_act  <= s5_act;
             s6_idx  <= s5_idx;
-            s6_f1   <= f1_36 >>> 18;
+            s6_f1   <= sat_q216(f1_36);
             s6_ic1eq1n <= bp1;
             s6_ic2eq1n <= s5_lp1;
             s6_ic1eq2 <= s5_ic1eq2;
@@ -544,7 +563,7 @@ module voice_pipeline #(
     logic signed [35:0] lp2, hp2;
     always_comb begin
         lp2 = s7_ic2eq2 + (s7_m4 >>> 28);
-        hp2 = (s7_f1 <<< 18) - lp2 - (s7_m5 >>> 28);
+        hp2 = (s7_f1 <<< 12) - lp2 - (s7_m5 >>> 28);   // true Q8.28, as SVF1
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -618,7 +637,7 @@ module voice_pipeline #(
         end else begin
             s9_act  <= s8_act;
             s9_idx  <= s8_idx;
-            s9_voice <= s8_dual ? (f2_36 >>> 18) : s8_f1;
+            s9_voice <= s8_dual ? sat_q216(f2_36) : s8_f1;
             s9_phase <= s8_phase;
             s9_ic1eq1n <= s8_ic1eq1n;
             s9_ic2eq1n <= s8_ic2eq1n;
