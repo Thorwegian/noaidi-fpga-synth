@@ -70,15 +70,16 @@ repo. Keep this file updated when the architecture changes.
 
 - `rtl/drum.sv`: the sole timebase. 10-bit slot counter, 1024 sysclk = 1 sample
   (96 kHz at 98.304 MHz). `sample_tick` at slot 0, `voice_enter` for slots 0..255.
-- `rtl/voice/voice_pipeline.sv`: 12-stage pipeline × 256 voices, one voice enters
-  per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator → S4–S6 SVF1 →
-  S7–S9 SVF2 → S10 attenuation → S11 mix accumulate + state writeback.
+- `rtl/voice/voice_pipeline.sv`: 15-stage pipeline × 256 voices, one voice enters
+  per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator → S4–S6 SVF1
+  (S5B timing split) → S7–S9 SVF2 (S8B) → S9B gain decode → S10 attenuation
+  multiply → S11 mix accumulate + state writeback.
 - Number formats: phase UQ0.24, audio Q2.16 (18-bit), SVF states Q8.28 (36-bit),
   pitch/cutoff UQ4.10 (14-bit), gain UQ4.4 (log: 6 dB per int step, 0.375 dB per
   frac step; 0xFF ≈ −96 dB ≈ mute).
-- Memories (BSRAM): per-voice state RAMs are semi dual-port — read at S0, write at
-  S11 (11 cycles apart, addresses never collide). Param RAMs are read-only ROMs this
-  milestone. LUT ROMs: `phase_lut.hex`, `svf_k_lut.hex`, `att_lut.hex`.
+- Memories (BSRAM): per-voice state RAMs are semi dual-port — read at S0,
+  writeback 14 cycles later (addresses never collide). Param RAMs are read-only
+  ROMs this milestone. LUT ROMs: `phase_lut.hex`, `svf_k_lut.hex`, `att_lut.hex`.
 - Mixdown: 26-bit accumulator (8 guard bits = 256× coherent headroom) + `sat24`
   limiter to Q0.24. Loudness set by per-voice gains.
 - Outputs: `i2s_tx.sv` is a self-contained I2S master (BCLK = sysclk/16,
