@@ -92,6 +92,9 @@ module spi_bus #(
     // same pattern as spi_slave_regs' hardware-proven STATUS capture)
     logic        req;
     logic [15:0] fetch_addr;
+    logic [31:0] tx_word;      // the word streaming out NOW — latched at
+                               // each word boundary so prefetches into
+                               // resp cannot clip the tail bytes
 
     initial begin
         phase      = '0;
@@ -103,6 +106,7 @@ module spi_bus #(
         wbuf       = '0;
         req        = 1'b0;
         fetch_addr = '0;
+        tx_word    = '0;
     end
 
     always_ff @(posedge sclk or posedge cs) begin
@@ -131,8 +135,11 @@ module spi_bus #(
                 end
                 3'd3: begin                       // read turnaround (2 bytes)
                     dummy2 <= 1'b1;
-                    if (dummy2)
-                        phase <= 3'd4;
+                    if (dummy2) begin
+                        phase   <= 3'd4;
+                        tx_word <= resp;          // word 0, fetched >=2
+                                                  // byte-slots ago
+                    end
                 end
                 3'd4: begin                       // data words
                     wbuf  <= {wbuf[15:0], rx_byte};
@@ -143,8 +150,14 @@ module spi_bus #(
                         fetch_addr <= auto_inc ? addr + 16'd1 : addr;
                         req        <= ~req;
                     end
-                    if (wbyte == 2'd3 && auto_inc)
-                        addr <= addr + 16'd1;
+                    if (wbyte == 2'd3) begin
+                        tx_word <= resp;          // latch the prefetched
+                                                  // next word; resp is
+                                                  // free to change under
+                                                  // later prefetches
+                        if (auto_inc)
+                            addr <= addr + 16'd1;
+                    end
                 end
                 default: ;
             endcase
@@ -202,10 +215,10 @@ module spi_bus #(
         (phase == 3'd0) ? ID_BYTE :
         (phase != 3'd4) ? 8'h00   :
         !is_read        ? 8'h00   :
-        (wbyte == 2'd0) ? resp[31:24] :
-        (wbyte == 2'd1) ? resp[23:16] :
-        (wbyte == 2'd2) ? resp[15:8]  :
-                          resp[7:0];
+        (wbyte == 2'd0) ? tx_word[31:24] :
+        (wbyte == 2'd1) ? tx_word[23:16] :
+        (wbyte == 2'd2) ? tx_word[15:8]  :
+                          tx_word[7:0];
 
     logic [7:0] tx_sh;
     initial tx_sh = ID_BYTE;
