@@ -164,6 +164,10 @@ muffled chord, both channels clean) and clean SPDIF, confirmed at full
 SYSCLK and at SYSCLK/2; ESP32 SPI test still OK/PASS. Pipeline depth 15,
 span 270/1024 slots.
 
+**NOT verified**: I2S. It builds and its clock-rate sim passes, but no
+ear or scope has checked it in a long while — regression state unknown.
+Not needed until an external DAC is attached; verify it then.
+
 ## Gotchas
 
 - Yosys: an async reset in the same `always_ff` as RAM reads/writes blocks BSRAM
