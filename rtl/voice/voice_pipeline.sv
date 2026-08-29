@@ -808,10 +808,16 @@ module voice_pipeline #(
     logic signed [23:0] s9b_phase;
     logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
 
+    // Gain 0xFF is EXACT mute, not -96 dB: the log decode bottoms out at
+    // lin = 1 LSB, and 256 correlated muted voices sum 48 dB of that
+    // right back (measured: -48 dBFS of ghost organ). A muted voice
+    // must contribute zero.
     logic signed [17:0] lin_l, lin_r;
     always_comb begin
-        lin_l = 18'($signed({1'b0, att_lut[s9_gl[3:0]]})) >>> s9_gl[7:4];
-        lin_r = 18'($signed({1'b0, att_lut[s9_gr[3:0]]})) >>> s9_gr[7:4];
+        lin_l = (s9_gl == 8'hFF) ? 18'sd0
+              : 18'($signed({1'b0, att_lut[s9_gl[3:0]]})) >>> s9_gl[7:4];
+        lin_r = (s9_gr == 8'hFF) ? 18'sd0
+              : 18'($signed({1'b0, att_lut[s9_gr[3:0]]})) >>> s9_gr[7:4];
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
