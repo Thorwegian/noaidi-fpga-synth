@@ -62,6 +62,15 @@ module voice_pipeline #(
     input  logic           voice_enter,
     input  logic           sample_tick,
 
+    // Per-voice parameter writes from the SPI control plane.
+    // sclk-domain write port on the param RAMs; the pipeline reads on
+    // clk (sysclk) — the dual-clock BSRAM is the CDC (design doc).
+    input  logic           sclk,
+    input  logic           pv_we,
+    input  logic [1:0]     pv_bank,     // 0..3 = p0..p3
+    input  logic [7:0]     pv_voice,
+    input  logic [31:0]    pv_wdata,
+
     output logic signed [23:0] mix_left,    // Q0.24, updated at sample_tick
     output logic signed [23:0] mix_right
 );
@@ -92,8 +101,8 @@ module voice_pipeline #(
     reg signed [35:0] ic2eq2_ram [0:NUM_VOICES-1];
 
     //----------------------------------------------------------------
-    // Per-voice parameter RAM — read-only this milestone
-    // (SPI write port arrives with the control banks; init below)
+    // Per-voice parameter RAM — SPI-writable (sclk write port below),
+    // hex init is the boot patch
     //
     //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
     //   p1[23:0]  duty  Q0.24 signed
@@ -147,15 +156,16 @@ module voice_pipeline #(
     logic signed [23:0] s1_phase;
     logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
 
-    logic [35:0] p0_rd, p1_rd, p2_rd, p3_rd;
-    always_comb begin
-        p0_rd = p0_ram[raddr];
-        p1_rd = p1_ram[raddr];
-        p2_rd = p2_ram[raddr];
-        p3_rd = p3_ram[raddr];
-    end
-
+    // Param RAM reads are SYNCHRONOUS on clk (was a comb read into the
+    // same registers — identical timing, but sync-read + separate-clock
+    // write is the shape yosys infers as dual-clock BSRAM). Sync-only
+    // process, per the AGENTS.md inference gotcha; validity is act-gated.
+    logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
     always_ff @(posedge clk) begin
+        s1_p0     <= p0_ram[raddr];
+        s1_p1     <= p1_ram[raddr];
+        s1_p2     <= p2_ram[raddr];
+        s1_p3     <= p3_ram[raddr];
         s1_phase  <= phase_ram[raddr];
         s1_ic1eq1 <= ic1eq1_ram[raddr];
         s1_ic2eq1 <= ic2eq1_ram[raddr];
@@ -163,31 +173,34 @@ module voice_pipeline #(
         s1_ic2eq2 <= ic2eq2_ram[raddr];
     end
 
+    // SPI-side write ports (sclk domain) — sync-only, one per bank
+    always_ff @(posedge sclk)
+        if (pv_we && pv_bank == 2'd0) p0_ram[pv_voice] <= {4'b0, pv_wdata};
+    always_ff @(posedge sclk)
+        if (pv_we && pv_bank == 2'd1) p1_ram[pv_voice] <= {4'b0, pv_wdata};
+    always_ff @(posedge sclk)
+        if (pv_we && pv_bank == 2'd2) p2_ram[pv_voice] <= {4'b0, pv_wdata};
+    always_ff @(posedge sclk)
+        if (pv_we && pv_bank == 2'd3) p3_ram[pv_voice] <= {4'b0, pv_wdata};
+
+    // field views of the registered param words
+    assign s1_pitch = s1_p0[13:0];
+    assign s1_wave  = s1_p0[15:14];
+    assign s1_duty  = s1_p1[23:0];
+    assign s1_fc    = s1_p2[13:0];
+    assign s1_q1    = s1_p2[31:14];
+    assign s1_gl    = s1_p3[7:0];
+    assign s1_gr    = s1_p3[15:8];
+    assign s1_dual  = s1_p3[16];
+    assign s1_ftype = s1_p3[18:17];
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s1_act   <= 1'b0;
             s1_idx   <= '0;
-            s1_pitch <= '0;
-            s1_wave  <= '0;
-            s1_duty  <= '0;
-            s1_fc    <= '0;
-            s1_q1    <= '0;
-            s1_gl    <= '0;
-            s1_gr    <= '0;
-            s1_dual  <= 1'b0;
-            s1_ftype <= '0;
         end else begin
             s1_act   <= voice_enter;
             s1_idx   <= slot[VW-1:0];
-            s1_pitch <= p0_rd[13:0];
-            s1_wave  <= p0_rd[15:14];
-            s1_duty  <= p1_rd[23:0];
-            s1_fc    <= p2_rd[13:0];
-            s1_q1    <= p2_rd[31:14];
-            s1_gl    <= p3_rd[7:0];
-            s1_gr    <= p3_rd[15:8];
-            s1_dual  <= p3_rd[16];
-            s1_ftype <= p3_rd[18:17];
         end
     end
 

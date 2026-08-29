@@ -46,7 +46,19 @@ module spi_bus #(
 
     // ---- fabric side ----
     input  logic        sysclk,
-    input  logic        rst_n
+    input  logic        rst_n,
+
+    // ---- per-voice parameter writes (sclk domain) ------------------
+    // The memory map's 0x2000 + v*64 range, offsets 0..3 (OSC, DUTY,
+    // FILTER, GAIN). Combinational decode, valid exactly on the sclk
+    // edge that completes a data word — the consumer writes its RAM on
+    // that same edge (there may be no further edges: a master stops
+    // clocking after the last bit). Offsets 4..63 are dropped for now;
+    // per-voice read-back is TBD (reads in this range return zero).
+    output logic        pv_we,
+    output logic [1:0]  pv_bank,     // 0..3 = p0..p3
+    output logic [7:0]  pv_voice,
+    output logic [31:0] pv_wdata
 );
 
     localparam int NWORDS = 1 << AW_BACKED;
@@ -176,6 +188,16 @@ module spi_bus #(
 
     wire mem_we = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                   && !is_read && in_window;
+
+    // ---- per-voice write decode (0x2000..0x5FFF, offsets 0..3) -----
+    wire        in_pv   = (addr >= 16'h2000) && (addr < 16'h6000);
+    wire [15:0] pv_rel  = addr - 16'h2000;      // 0..0x3FFF within range
+    wire [13:0] pv_off  = pv_rel[13:0];
+    assign pv_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
+                      && !is_read && in_pv && (pv_off[5:2] == 4'd0);
+    assign pv_bank  = pv_off[1:0];
+    assign pv_voice = pv_off[13:6];
+    assign pv_wdata = {wbuf, rx_byte};
 
     always_ff @(posedge sclk) begin
         if (mem_we)

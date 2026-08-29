@@ -52,12 +52,22 @@ module top (
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
+    logic        pv_we;
+    logic [1:0]  pv_bank;
+    logic [7:0]  pv_voice;
+    logic [31:0] pv_wdata;
+
     voice_pipeline u_voice_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .slot        (slot),
         .voice_enter (voice_enter),
         .sample_tick (sample_tick),
+        .sclk        (sclk),
+        .pv_we       (pv_we),
+        .pv_bank     (pv_bank),
+        .pv_voice    (pv_voice),
+        .pv_wdata    (pv_wdata),
         .mix_left    (sample_left),
         .mix_right   (sample_right)
     );
@@ -98,12 +108,16 @@ module top (
     spi_bus #(
         .AW_BACKED(11), .ID_BYTE(8'hA5)
     ) u_spi (
-        .sclk   (sclk),
-        .cs     (cs),
-        .mosi   (mosi),
-        .miso   (miso),
-        .sysclk (sysclk),
-        .rst_n  (rst_n)
+        .sclk     (sclk),
+        .cs       (cs),
+        .mosi     (mosi),
+        .miso     (miso),
+        .sysclk   (sysclk),
+        .rst_n    (rst_n),
+        .pv_we    (pv_we),
+        .pv_bank  (pv_bank),
+        .pv_voice (pv_voice),
+        .pv_wdata (pv_wdata)
     );
 
     //----------------------------------------------------------------
