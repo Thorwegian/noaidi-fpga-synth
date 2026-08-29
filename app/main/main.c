@@ -96,7 +96,18 @@ void app_main(void)
 
     fpga_word_write(0x2000, 0x00001700);   // OSC: A4 (UQ4.10 0x1700), saw
     fpga_word_write(0x2001, 0x00000000);   // DUTY
-    fpga_word_write(0x2002, 0x40002AF8);   // FILTER: q1=1.0, open LP
+    fpga_word_write(0x2002, 0x40002000);   // FILTER: q1=1.0, open LP
     fpga_word_write(0x2003, 0x00002020);   // GAIN: -12 dB both channels
     printf("voice 0 programmed — constant 440 Hz saw should be audible\n");
+
+    while(1) {
+        for(int i = 0x1000; i < 0x2AF8; i++) {
+            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER: q1=1.0, open LP
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+        for(int i = 0x2AF8; i >= 0x1000; i--) {
+            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER: q1=1.0, open LP
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
+    }
 }

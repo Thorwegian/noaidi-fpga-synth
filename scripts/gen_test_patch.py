@@ -40,7 +40,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 # ---------------------------------------------------------------
 WAVE_SAW = 0x0
 
-FC = 0x2AF8          # UQ4.10 ≈ 14 kHz, open LP
+#FC = 0x2AF8          # UQ4.10 ≈ 14 kHz, open LP
 Q1 = 0x10000         # Q2.16 = 1.0 (matches old 36'h10000000 Q8.28)
 GAIN = 0x60          # UQ4.4: -36 dB (1/64) — mixdown headroom, see above
 FTYPE_LP = 0x0
@@ -89,10 +89,11 @@ for v in range(NUM_VOICES):
     left  = unison < (UNISON // 2)          # first 4 unisons → left
     detune = UNISON_DETUNE[unison]
     pitch = midi_to_pitch(note) + detune
+    fc = 0x1000
 
     p0.append(pitch_word(pitch) | (WAVE_SAW << 14))
     p1.append(0)                       # duty: saw ignores it
-    p2.append((Q1 << 14) | FC)
+    p2.append((Q1 << 14) | fc)   # Q1 + pitch
     if left:
         p3.append((FTYPE_LP << 17) | (DUAL << 16) | (MUTE << 8) | GAIN)
     else:
