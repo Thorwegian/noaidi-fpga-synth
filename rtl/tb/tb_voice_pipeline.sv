@@ -76,9 +76,11 @@ module tb_voice_pipeline;
     integer phase_v100_p2 = 0;
     integer phase_v100_p3 = 0;
 
-    // attenuation cross-check pipeline
-    integer prev_s9_voice = 0;
-    integer prev_s9_gl    = 0;
+    // attenuation cross-check pipeline — two-deep history: S9B sits
+    // between S9 and S10 (timing split), so s10 registers are driven by
+    // s9 values from TWO cycles back
+    integer prev_s9_voice = 0,  prev_s9_gl = 0;
+    integer prev2_s9_voice = 0, prev2_s9_gl = 0;
 
     function automatic integer sat24_impl(input integer x);
         // x: Q0.24-ish (unbounded); clamp to signed 24-bit
@@ -110,19 +112,21 @@ module tb_voice_pipeline;
     // Main monitor
     //----------------------------------------------------------------
     always @(posedge clk) begin
-        // attenuation cross-check: compare against previous cycle's
-        // s9_voice / gain (they drive this cycle's s10 registers)
+        // attenuation cross-check: s10 registers are driven by s9
+        // values from two cycles back (S9B decode stage in between)
         if (u_pipe.s10_act) begin
             integer expect_out;
-            expect_out = (prev_s9_voice * lin_of(prev_s9_gl)) >>> 16;
+            expect_out = (prev2_s9_voice * lin_of(prev2_s9_gl)) >>> 16;
             if (u_pipe.s10_outl !== expect_out[17:0]) begin
                 $display("FAIL atten: voice %0d s10_outl=%h expect=%h",
                          u_pipe.s10_idx, u_pipe.s10_outl, expect_out[17:0]);
                 errors = errors + 1;
             end
         end
-        prev_s9_voice = $signed(u_pipe.s9_voice);
-        prev_s9_gl    = u_pipe.s9_gl;
+        prev2_s9_voice = prev_s9_voice;
+        prev2_s9_gl    = prev_s9_gl;
+        prev_s9_voice  = $signed(u_pipe.s9_voice);
+        prev_s9_gl     = u_pipe.s9_gl;
 
         // drum cadence + span accounting at the sample boundary
         // (guard with rst_n: the drum sits at slot 0 while held in reset)
