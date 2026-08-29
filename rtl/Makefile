@@ -10,7 +10,7 @@ MOD = \
 	drum.sv \
 	voice/voice_pipeline.sv \
 	voice/osc_core.sv \
-	spi/spi_slave_regs.sv \
+	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
 

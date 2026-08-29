@@ -49,33 +49,39 @@ void app_main(void)
 
     fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
 
-    // ── 1. Link probe ───────────────────────────────────────────────
-    // Byte 0 of MISO is the slave's ID on every transaction.  If this is
-    // not A5, stop here: the problem is physical (wiring, pin
-    // constraints, clock), not protocol.
-    printf("=== 1. link probe ===\n");
-    fpga_raw_link_probe();
+    // Word-protocol self-test (spi_bus.sv / docs/memory_map.md format).
+    // Mirrors tb_spi_bus.sv's cases so firmware and RTL agree on the
+    // same evidence.
+    int fails = 0;
 
-    // ── 2. Read-back test ───────────────────────────────────────────
-    printf("=== 2. write/read-back ===\n");
-    fpga_reg_write(0x00, 0x11);
-    fpga_reg_write(0x01, 0x22);
-    fpga_reg_write(0x02, 0x33);
-    fpga_reg_write(0x03, 0x44);
+    printf("=== 1. single word write/read ===\n");
+    fpga_word_write(0x0005, 0xDEADBEEF);
+    uint32_t v = fpga_word_read(0x0005);
+    printf("word[0x0005] = %08lX %s\n", (unsigned long)v,
+           v == 0xDEADBEEF ? "OK" : "FAIL");
+    fails += (v != 0xDEADBEEF);
 
-    uint8_t mem[8];
-    fpga_reg_read_burst(0x00, mem, 8);
-    printf("mem: %02X %02X %02X %02X %02X %02X %02X %02X\n",
-           mem[0], mem[1], mem[2], mem[3], mem[4], mem[5], mem[6], mem[7]);
-    printf("expected: 11 22 33 44 00 00 00 00\n");
+    printf("=== 2. burst auto-increment (LFO region) ===\n");
+    uint32_t wq[4] = {0x11111111, 0x22222222, 0x33333333, 0x44444444};
+    uint32_t rq[4] = {0};
+    fpga_word_write_burst(0x0100, wq, 4);
+    bool id_ok = fpga_word_read_burst(0x0100, rq, 4);
+    for (int i = 0; i < 4; i++) {
+        printf("word[0x%04X] = %08lX %s\n", 0x0100 + i, (unsigned long)rq[i],
+               rq[i] == wq[i] ? "OK" : "FAIL");
+        fails += (rq[i] != wq[i]);
+    }
+    printf("ID byte on read frame: %s\n", id_ok ? "OK (A5)" : "FAIL");
+    fails += !id_ok;
 
-    uint8_t back = fpga_reg_read(0x00);
-    printf("read addr0 = 0x%02X — %s\n", back, back == 0x11 ? "OK" : "FAIL");
+    printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
+    fpga_word_write(0x0805, 0xBAD0BAD0);      // would alias 0x0005 if broken
+    uint32_t z = fpga_word_read(0x0805);
+    uint32_t keep = fpga_word_read(0x0005);
+    printf("word[0x0805] = %08lX %s, word[0x0005] = %08lX %s\n",
+           (unsigned long)z, z == 0 ? "OK" : "FAIL",
+           (unsigned long)keep, keep == 0xDEADBEEF ? "OK" : "FAIL");
+    fails += (z != 0) + (keep != 0xDEADBEEF);
 
-    // ── 3. LED blink test ───────────────────────────────────────────
-    // Leave STATUS holding the magic value: the FPGA blinks led[0] at
-    // ~1.5 Hz while it reads 0x55, which confirms the SPI → register →
-    // drum-domain path without needing the console.
-    fpga_reg_write(0x00, 0x55);
-    printf("=== 3. wrote 0x55 to STATUS — led[0] should blink ~1.5 Hz ===\n");
+    printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
 }

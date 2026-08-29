@@ -90,23 +90,20 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // SPI slave + register file (control plane; register map is the
-    // bring-up subset of docs/memory_map.md for now)
+    // SPI control plane — the docs/memory_map.md wire protocol:
+    // 16-bit word addresses, 32-bit data, 11-bit backed global window.
+    // (The byte-protocol bring-up slave spi_slave_regs.sv remains in
+    // the tree as reference; this is its successor.)
     //----------------------------------------------------------------
-    logic [35:0] status_reg;
-
-    spi_slave_regs #(
-        .NWORDS(16), .DATA_W(36), .ID_BYTE(8'hA5)
+    spi_bus #(
+        .AW_BACKED(11), .ID_BYTE(8'hA5)
     ) u_spi (
-        .sclk      (sclk),
-        .cs        (cs),
-        .mosi      (mosi),
-        .miso      (miso),
-        .sysclk    (sysclk),
-        .rst_n     (rst_n),
-        .read_addr (4'd0),
-        .read_data (status_reg),
-        .status_in ('0)
+        .sclk   (sclk),
+        .cs     (cs),
+        .mosi   (mosi),
+        .miso   (miso),
+        .sysclk (sysclk),
+        .rst_n  (rst_n)
     );
 
     //----------------------------------------------------------------
