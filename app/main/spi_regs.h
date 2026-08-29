@@ -50,6 +50,16 @@ void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len);
 // will work.  Check that first.
 void fpga_raw_link_probe(void);
 
+// ── Word protocol (spi_bus.sv / docs/memory_map.md) ─────────────────
+// 16-bit word addresses, 32-bit data, MSB first on the wire.
+// Live only when the loaded bitstream contains spi_bus (not the
+// byte-protocol spi_slave_regs).
+#include <stdbool.h>
+void     fpga_word_write(uint16_t addr, uint32_t value);
+void     fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
+uint32_t fpga_word_read(uint16_t addr);
+bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
+
 #ifdef __cplusplus
 }
 #endif

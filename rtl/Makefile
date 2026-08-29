@@ -95,6 +95,13 @@ tb/tb_spdif_dds.vvp: spdif/cell_dds.sv spdif/spdif_tx.sv $(TB_DDS) Makefile
 sim-dds: tb/tb_spdif_dds.vvp
 	vvp tb/tb_spdif_dds.vvp
 
+TB_BUS = tb/tb_spi_bus.sv
+tb/tb_spi_bus.vvp: spi/spi_bus.sv $(TB_BUS) Makefile
+	iverilog -g2012 -o $@ spi/spi_bus.sv $(TB_BUS)
+
+sim-bus: tb/tb_spi_bus.vvp
+	vvp tb/tb_spi_bus.vvp
+
 TB_SPI = tb/tb_spi_slave_regs.sv
 tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 	iverilog -g2012 -o $@ spi/spi_slave_regs.sv $(TB_SPI)
@@ -102,7 +109,7 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
-sim: sim-voice sim-outputs sim-spdif sim-dds sim-spi
+sim: sim-voice sim-outputs sim-spdif sim-dds sim-spi sim-bus
 
 clean:
 	rm -rf *.log *.json *.fs voice/svf_k_lut.hex

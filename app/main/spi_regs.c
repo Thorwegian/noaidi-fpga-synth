@@ -152,3 +152,65 @@ void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len)
     for (size_t i = 0; i < len && i < 32; i++)
         buf[i] = rx[1 + i];   // data starts at byte index 1 (after 1 dummy)
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Word protocol (rtl/spi/spi_bus.sv — the docs/memory_map.md format)
+//
+//   byte 0      command: [7] R/W (1=read), [6] auto-increment
+//   bytes 1..2  16-bit word address, MSB first
+//   write:      + 4N data bytes (32-bit words, MSB first)
+//   read:       + 2 dummy bytes (fetch turnaround) + 4N data bytes
+//
+// MISO byte 0 is always 0xA5. These functions coexist with the byte
+// protocol above; which one is live depends on the loaded bitstream
+// (spi_slave_regs = bytes, spi_bus = words).
+// ═══════════════════════════════════════════════════════════════════
+
+#define WORDS_MAX 8   // per transaction, sized for the local frame buffer
+
+void fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n)
+{
+    uint8_t frame[3 + 4 * WORDS_MAX];
+    if (n > WORDS_MAX) n = WORDS_MAX;
+    frame[0] = 0x40;                    // write, auto-increment
+    frame[1] = (uint8_t)(addr >> 8);
+    frame[2] = (uint8_t)(addr & 0xFF);
+    for (size_t i = 0; i < n; i++) {
+        frame[3 + 4*i] = (uint8_t)(words[i] >> 24);
+        frame[4 + 4*i] = (uint8_t)(words[i] >> 16);
+        frame[5 + 4*i] = (uint8_t)(words[i] >> 8);
+        frame[6 + 4*i] = (uint8_t)(words[i]);
+    }
+    fpga_xfer_bytes(frame, 3 + 4 * n);
+}
+
+void fpga_word_write(uint16_t addr, uint32_t value)
+{
+    fpga_word_write_burst(addr, &value, 1);
+}
+
+// Returns false if the ID byte is missing (link fault).
+bool fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n)
+{
+    uint8_t tx[5 + 4 * WORDS_MAX] = {0};
+    uint8_t rx[5 + 4 * WORDS_MAX] = {0};
+    if (n > WORDS_MAX) n = WORDS_MAX;
+    tx[0] = 0xC0;                       // read, auto-increment
+    tx[1] = (uint8_t)(addr >> 8);
+    tx[2] = (uint8_t)(addr & 0xFF);
+    fpga_xfer_bytes_duplex(tx, rx, 5 + 4 * n);
+    for (size_t i = 0; i < n; i++) {
+        words[i] = ((uint32_t)rx[5 + 4*i] << 24)
+                 | ((uint32_t)rx[6 + 4*i] << 16)
+                 | ((uint32_t)rx[7 + 4*i] << 8)
+                 |  (uint32_t)rx[8 + 4*i];
+    }
+    return rx[0] == 0xA5;
+}
+
+uint32_t fpga_word_read(uint16_t addr)
+{
+    uint32_t v = 0;
+    fpga_word_read_burst(addr, &v, 1);
+    return v;
+}
