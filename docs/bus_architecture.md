@@ -40,10 +40,15 @@ conventions the FPGA never sees.
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are live and single-banked — each pipeline read is one word, so
    there is no multi-word tear to protect against.
-5. **Buses are sink-typed.** Separate memories per sink class (pitch,
-   duty, cutoff, Q, gain L, gain R). Fixes units (a pitch bus holds
-   UQ4.10 log₂ offsets, period) and read-port bandwidth (one read per
-   element per cycle per class) in one stroke.
+5. **One bus type; sinks strip bits.** (Thor, replacing an earlier
+   sink-typed design.) All buses are signed 18-bit words in UQ4.10-
+   fraction log₂ units (1 LSB ≈ 1.17 cents). Each sink applies a
+   FIXED bit-slice: pitch/cutoff add the word as-is; gain adds
+   `bus >> 6` (0.375 dB = 64 units); linear sinks (duty, Q) take
+   their documented slice. Fixed shifts are wiring, not logic. Read
+   bandwidth comes from replicas of one uniform pool (broadcast
+   writes), not typed memories — same block count, one shared
+   allocation space, and a bus may feed different sink types.
 
 ## Why this scheme (constraints → consequences)
 
@@ -78,11 +83,13 @@ conventions the FPGA never sees.
 Derivations use the drum budget (768 slots, 271 used by lanes, ~497
 idle) and the BSRAM geometry (18-bit-wide blocks).
 
-- **Bus word**: signed 18-bit — native BSRAM width; covers UQ4.10
-  pitch/cutoff offsets (±8 octaves) and gain-domain offsets with room.
-- **Buses per class**: 256 (one per element is the degenerate worst
-  case, so nothing can ever run out). 6 classes × 256 × 18 b ≈ 1.5
-  blocks. Bus 0 of every class is hardwired zero.
+- **Bus word**: signed 18-bit — native BSRAM width; UQ4.10-fraction
+  log₂ units cover ±8 octaves of pitch/cutoff offset and the full
+  gain range through the `>> 6` slice.
+- **Bus pool**: one uniform pool of 1024 buses, replicated once per
+  sink read port (6 replicas ≈ 6 blocks, broadcast writes). Shared
+  allocation across all sinks — no per-class exhaustion. Bus 0 is
+  hardwired zero.
 - **Pointers**: 8 bits per parameter; packed into two new per-element
   words (map offsets +5, +6). Detune: static per-element offset in the
   OSC word (agent's lean, halves note-on traffic — Thor to confirm; the
