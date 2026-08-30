@@ -143,8 +143,10 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 ## Modulation 📋
 
-Being redesigned (2026-08-30, planning with Thor). The generic
-8-cables-to-any-sink matrix is **superseded by mod buses**:
+**Codified as [bus_architecture.md](bus_architecture.md)**
+(2026-08-30) — the spec with justifications, rejected alternatives,
+sizing and build milestones B0–B6. Awaiting Thor's sign-off (B0).
+The planning notes below record how the design was reached:
 
 - **Governing balance** (Thor): SPI bandwidth saved vs FPGA complexity
   added. Every bus feature has a firmware fallback whose cost is SPI
@@ -268,12 +270,15 @@ bench-verified) milestone. One rung in flight at a time.
    pitch wheel (±2 st) live, firmware-computed. Verified by ear.
    Random per-element phase still pending (Thor: "no rush"); retrig
    reserved.
-4. **Afterwards, order TBD**: ADSR (amp first; needs GATE settled —
-   and its design must resolve the smoothing dilemma above), 36-bit
-   summing (bench-verified rung, pending approval), per-element
-   routes/CV, LFO bank, per-element SPI read-back. Smoothing is
-   deliberately unscheduled until the ADSR/modulation work settles
-   where it can live (see Parameter smoothing).
+4. **The bus architecture** — the agreed forward path, spec and
+   milestone ladder B0–B6 in
+   [bus_architecture.md](bus_architecture.md): spec sign-off →
+   cutoff-class pilot → all sinks → producer walker + LFOs → ADSR
+   producers (where note clicks die, absorbing the old smoothing
+   rung's goal) → per-note cells → deferred tier on measured traffic.
+   ADSR/LFO/routes/smoothing rungs from earlier drafts fold into it.
+   Still separate: 36-bit summing (bench-verified rung, pending
+   approval), per-element SPI read-back (B6 diagnostics candidate).
 5. **Experiment, some point later (Thor)**: try removing the pipeline
    stage splits (S3B/S5B/S8B/S9B) now that SYSCLK is 73.728 MHz — they
    may be unnecessary waits at the lower clock. One split at a time,

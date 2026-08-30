@@ -152,7 +152,12 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-## LFO bank — `0x0100–0x02FF` (TBD)
+> **SUPERSEDED (2026-08-30):** the LFO bank, CV table and per-element
+> routing sections below are replaced by the bus architecture —
+> see [bus_architecture.md](bus_architecture.md). They remain here as
+> design history until the map is redrawn at milestone B1.
+
+## LFO bank — `0x0100–0x02FF` (superseded, see above)
 
 32 LFOs — 2 per patch/channel, so 16-channel multi-timbral arrangements
 each get their own LFOs. The FPGA sees only an anonymous bank; firmware
