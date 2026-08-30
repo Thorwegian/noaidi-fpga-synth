@@ -25,10 +25,10 @@
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
 #define Q1_ONE     0x40000000u        // q1 = 1.0 (Q2.16) in FILTER[31:14]
-#define GAIN_BASE  0x40               // UQ4.4: -24 dB (ear-tuned up from
-                                      // -36 in two steps; watch sat24 on
-                                      // big chords — 8 aligned elements
-                                      // now reach 1/2 FS per voice)
+#define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
+                                      // -36 in three steps; Thor measured
+                                      // full-smash chords at -12 dBFS one
+                                      // step below this, so headroom holds.
 #define GAIN_MUTE  0xFF               // exact mute (special-cased in RTL)
 
 // Church-organ unison detune per element index, in UQ4.10 fraction
@@ -45,6 +45,7 @@ typedef struct {
 
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
+static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
@@ -62,11 +63,25 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
         ESP_LOGW(TAG, "engine queue full, elem %d word %d lost", elem, word);
 }
 
+// Cutoff offset above the note, in UQ4.10 log2: +1 octave at wheel 0,
+// rising to ~+4 octaves at wheel 127 (24 LSB ≈ 0.28 semitone per CC
+// step). Firmware-computed for now; the FPGA CV/route machinery is
+// the real home for this later.
+static uint16_t fc_offset(void)
+{
+    return (uint16_t)(0x400 + (uint16_t)s_wheel * 24);
+}
+
+static uint16_t voice_fc(uint8_t note)
+{
+    uint32_t fc = (uint32_t)midi_to_pitch(note) + fc_offset();
+    return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
+}
+
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t base = midi_to_pitch(note);
-    uint16_t fc   = base + 0x400;             // cutoff one octave above
-    if (fc > 0x3FFF) fc = 0x3FFF;
+    uint16_t fc   = voice_fc(note);
 
     // Velocity → gain: vel 127 = GAIN_BASE, softer notes attenuate in
     // 0.375 dB steps, up to ~23.6 dB at vel 1. Crude but audible;
@@ -123,6 +138,24 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     voice_program(pick, note, vel);
 }
 
+// Mod wheel → cutoff: rewrite the FILTER word of every active voice.
+// Worst case (32 voices held) is 256 words per event; duplicate CC
+// values are skipped so idle wheel chatter costs nothing. Zipper
+// noise on fast sweeps is expected until smoothing exists.
+static void wheel_update(uint8_t val)
+{
+    if (val == s_wheel)
+        return;
+    s_wheel = val;
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (!s_voices[v].active)
+            continue;
+        uint16_t fc = voice_fc(s_voices[v].note);
+        for (int u = 0; u < ELEMS_PER_VOICE; u++)
+            send((uint8_t)(v * ELEMS_PER_VOICE + u), 2, Q1_ONE | fc);
+    }
+}
+
 static void note_off(uint8_t note)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
@@ -145,7 +178,11 @@ static void handle_midi(const midi_message_t *m)
     case 0x80:
         note_off(m->data[0]);
         break;
-    default:                          // CCs etc.: nothing yet
+    case 0xB0:
+        if (m->data[0] == 1)          // CC1: mod wheel → cutoff
+            wheel_update(m->data[1]);
+        break;
+    default:
         break;
     }
 }
