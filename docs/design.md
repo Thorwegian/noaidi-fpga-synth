@@ -143,20 +143,29 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 ## Modulation 📋
 
-The architecture sketch's N+M toggle-bit matrix is **superseded** by
-the memory map's model:
+Being redesigned (2026-08-30, planning with Thor). The generic
+8-cables-to-any-sink matrix is **superseded by mod buses**:
 
-- **CV table**: 256 anonymous 16-bit control voltages — the FPGA's only
-  notion of external input. Firmware patches MIDI streams to cells once
-  per program; each event is then one cell write.
-- **Routes**: 8 cables per voice — source (CV / LFO / ADSR1 / ADSR2) →
-  sink (pitch, duty, cutoff, Q, gain L/R) with a signed amount.
-- **ADSRs**: 2 per voice (amp + filter), envelope math in the FPGA.
-- **LFO bank**: 32 (2 per MIDI channel), time-multiplexed through idle
-  drum slots, reusing the oscillator core.
-- Note-on-static quantities (velocity, key tracking, detune, pan) are
-  baked by firmware into base parameters; only things that *change
-  during a note* are FPGA modulation sources.
+- **Mod buses** (Thor): every element's sinks are known and fixed —
+  pitch, duty, cutoff, Q, gain L, gain R — so each sink is a summing
+  bus with a small fixed number of slots (working sizing: pitch 2,
+  cutoff 3, gains 1+1, duty 1, Q 1 ≈ 9 multiply-adds per element).
+  Each slot = (source select, signed amount). No crossbar, no
+  variable summing, self-documenting map (`CUTOFF_MOD0`). Slot counts
+  to be derived from a written worst-case patch, not asserted.
+- **Sources**: CV cell / LFO / ADSR1 / ADSR2. Anything firmware puts
+  in a cell is a source — velocity rides a per-note cell written at
+  note-on (Thor: velocity and LFO are both valid cable sources).
+  When a patch wants more sources on one bus than it has slots, the
+  ESP32 pre-sums controllers into a single cell.
+- **CV table**: 256 anonymous control voltages — the FPGA's only
+  notion of external input; one cell write per event.
+- **ADSRs**: 2 per element (amp + filter), envelope math in the FPGA.
+- **Open question**: evaluate buses inside the audio pipeline vs a
+  decoupled control-rate mod engine in the drum's idle slots that
+  writes effective parameters (agent's lean: decoupled — never grow
+  the timing-fragile pipeline; five STA-blessed silicon failures say
+  so). LFO bank shape (shared 32 vs per-voice phase) also open.
 
 ## Outputs ✅
 
