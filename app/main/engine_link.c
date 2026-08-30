@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -17,7 +18,10 @@
 #define ENGINE_QUEUE_LEN   512
 #define ENGINE_TASK_STACK  3072
 #define ENGINE_TASK_PRIO   6          // above midi_log, below midi_in
-#define ENGINE_TICK_MS     1          // 1 kHz control rate (Thor)
+// 1 kHz control rate (Thor). Paced by an esp_timer notifying the
+// task, NOT vTaskDelayUntil: the FreeRTOS tick is 100 Hz, so a 1 ms
+// delay would round to 0 ticks and assert.
+#define ENGINE_TICK_US     1000
 
 #define PV_BASE            0x2000
 #define PV_STRIDE          64
@@ -50,13 +54,19 @@ static void write_full_image(void)
                               ENGINE_WORDS_PER_ELEMENT);
 }
 
+static TaskHandle_t s_task;
+
+static void tick_cb(void *arg)
+{
+    xTaskNotifyGive(s_task);   // runs in the esp_timer task
+}
+
 static void engine_task(void *arg)
 {
     engine_cmd_t cmd;
-    TickType_t wake = xTaskGetTickCount();
 
     while (1) {
-        vTaskDelayUntil(&wake, pdMS_TO_TICKS(ENGINE_TICK_MS));
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         // Drain the queue into the image.
         bool changed = false;
@@ -125,10 +135,17 @@ void engine_link_init(void)
     }
 
     if (xTaskCreate(engine_task, "engine_link", ENGINE_TASK_STACK, NULL,
-                    ENGINE_TASK_PRIO, NULL) != pdPASS) {
+                    ENGINE_TASK_PRIO, &s_task) != pdPASS) {
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
+
+    const esp_timer_create_args_t targs = {
+        .callback = tick_cb, .name = "engine_tick",
+    };
+    esp_timer_handle_t timer;
+    ESP_ERROR_CHECK(esp_timer_create(&targs, &timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, ENGINE_TICK_US));
     ESP_LOGI(TAG, "1 kHz tick running");
 }
 
