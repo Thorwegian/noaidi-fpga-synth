@@ -146,6 +146,15 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 Being redesigned (2026-08-30, planning with Thor). The generic
 8-cables-to-any-sink matrix is **superseded by mod buses**:
 
+- **Governing balance** (Thor): SPI bandwidth saved vs FPGA complexity
+  added. Every bus feature has a firmware fallback whose cost is SPI
+  traffic, so the line is tunable — and it moves on *measured* link
+  utilization (engine_link counts words/s), not assumptions. Tier the
+  build: bus memories + pointers + base registers and LFO producers
+  first (cheap silicon, biggest observed traffic wins); ADSR producers
+  come with envelopes anyway; combiner/chaining and stop tables are
+  deferred until measurements demand them.
+
 - **Mod buses** (Thor): every element's sinks are known and fixed —
   pitch, duty, cutoff, Q, gain L, gain R — so each sink is a summing
   bus with a small fixed number of slots (working sizing: pitch 2,
