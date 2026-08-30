@@ -5,7 +5,13 @@ Supersedes the modulation half of [memory_map.md](memory_map.md)
 (generic cable matrix, shared LFO bank, per-element ADSR registers).
 The verified wire protocol and per-element parameter ABI stand.
 
-Status: **SPEC — awaiting Thor's sign-off (milestone B0)**.
+Status: **SPEC — B0 review in progress (as of 2026-08-30 evening)**.
+Settled during review: one bus format (signed Q8.10,
+octaves.fraction — law 5), detune stays a per-element static offset,
+producer pool raised to 128. Still open before sign-off: Q's
+fraction→resonance convention (deferred to B2 by design), the
+worst-case performance that finalizes sizing, and Thor's read of the
+remainder of this document.
 
 ## The model in one paragraph
 
@@ -93,18 +99,23 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   sink read port (6 replicas ≈ 6 blocks, broadcast writes). Shared
   allocation across all sinks — no per-class exhaustion. Bus 0 is
   hardwired zero.
-- **Pointers**: 8 bits per parameter; packed into two new per-element
-  words (map offsets +5, +6). Detune: static per-element offset in the
-  OSC word (agent's lean, halves note-on traffic — Thor to confirm; the
-  alternative is 8 pitch buses per voice).
-- **Producer pool**: 64 table entries initially (32 voices × 2 ADSRs
-  is the known worst case; LFOs and combiners share the pool). One
-  entry = type + config + state. Walker budget: ≤2 idle slots per
-  entry per sample → 128 of ~497 idle slots.
-- **Producer multiplies**: ≤150/sample on one 18×18 DSP lane (LFO
-  depths ~32, per-note envelope scaling ~64, combiner terms ~32,
-  margin ~20). Escape hatches: shift-add amounts (~1.5 dB steps, zero
-  DSP) or half-rate producer updates (still 48 kHz effective).
+- **Pointers**: 8 bits per parameter (1024-bus pool needs 10 —
+  pointer fields reserve 10, low 8 used until the pool grows past
+  256); packed into two new per-element words (map offsets +5, +6).
+- **Detune** (Thor, decided): a static per-element offset — detune is
+  conceptually a bus fed by a base and a source, but it is so common
+  that a dedicated per-element offset is the pragmatic form. All 8
+  elements of a voice share one pitch bus; note-on writes one base,
+  not eight.
+- **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
+  polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
+  to 32 LFOs + combiners + margin. One entry = type + config + state.
+  Walker budget: ≤2 idle slots per entry per sample → 256 of ~497
+  idle slots. If the pool ever grows again, half-rate updates double
+  the headroom (still 48 kHz effective).
+- **Producer multiplies**: ≤200/sample on one 18×18 DSP lane
+  (envelope scaling ~64, LFO depths ~32, combiner terms, margin).
+  Escape hatch: shift-add amounts (~1.5 dB steps, zero DSP).
 - **The worst-case performance** that finalizes these numbers is
   still to be written (Thor's "derive, don't assert"); the above are
   buildable initials, not final claims.
