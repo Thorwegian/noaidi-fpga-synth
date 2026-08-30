@@ -385,6 +385,9 @@ module voice_pipeline #(
     logic signed [17:0] osc_sample;
 
     assign delta = $signed(s3_delta_lut) >>> (11 - s3_pitch_oct);
+    // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
+    // LUT+shift expands to ~22+ bits of real precision, needed later
+    // for the noise oscillator and whistling-filter melodies (Thor).
     assign k     = $signed({20'd0, s3_k_lut}) <<< (3 + s3_fc_oct);
 
     osc_core u_osc (

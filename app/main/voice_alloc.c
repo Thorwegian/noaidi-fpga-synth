@@ -25,7 +25,10 @@
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
 #define Q1_ONE     0x40000000u        // q1 = 1.0 (Q2.16) in FILTER[31:14]
-#define GAIN_BASE  0x60               // UQ4.4: -36 dB — organ-test headroom
+#define GAIN_BASE  0x50               // UQ4.4: -30 dB (was -36: too quiet
+                                      // for played chords; raise again by
+                                      // ear if needed — watch sat24 on
+                                      // big chords)
 #define GAIN_MUTE  0xFF               // exact mute (special-cased in RTL)
 
 // Church-organ unison detune per element index, in UQ4.10 fraction
