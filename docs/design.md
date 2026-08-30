@@ -158,8 +158,20 @@ Being redesigned (2026-08-30, planning with Thor). The generic
   note-on (Thor: velocity and LFO are both valid cable sources).
   When a patch wants more sources on one bus than it has slots, the
   ESP32 pre-sums controllers into a single cell.
+- **One-to-many by construction** (Thor: SPI bandwidth demands it):
+  elements reference shared registers instead of owning copies. An
+  element carries a small **profile index**; bus slot configs (source
+  selects + amounts) live in a shared profile table, so a patch-wide
+  modulation change is one write reaching every element drawn to that
+  profile — not 256 rewrites (cf. the firmware mod wheel: 256 FILTER
+  writes ≈ 2 ms of SPI per CC tick). Per-note variation stays in
+  per-note CV cells. Candidate name for the profile: **stop** (the
+  organ term — the drawn configuration many pipes sound through).
 - **CV table**: 256 anonymous control voltages — the FPGA's only
-  notion of external input; one cell write per event.
+  notion of external input; one cell write per event. A cell
+  referenced by many slots is the first rung of the one-to-many
+  ladder: cell → slots, profile → elements, base params → truly
+  per-element.
 - **ADSRs**: 2 per element (amp + filter), envelope math in the FPGA.
 - **Open question**: evaluate buses inside the audio pipeline vs a
   decoupled control-rate mod engine in the drum's idle slots that
