@@ -6,6 +6,23 @@ authoritative, more recent word on the SPI/BSRAM control plane and the
 modulation model. Status marks: ✅ implemented & hardware-verified,
 🔨 in progress, 📋 planned.
 
+## Terminology (settled 2026-08-30)
+
+- **Element** — what the FPGA *generates*: one oscillator→filter→gain
+  sound unit. The FPGA has 256 of them and no opinion about how they
+  are used.
+- **Lane** — how it generates them, technically: one of 256
+  time-multiplexed passes through the drum's pipeline. One lane
+  computes one element; "lane" speaks about hardware, "element" about
+  sound.
+- **Voice** — a firmware-side *grouping* of elements (e.g. 8 detuned
+  elements sounding one keystroke). Grouping is entirely the ESP32's
+  business; a voice is one possible grouping, not the only one.
+- The user's scope of action via MIDI/control surfaces is **not yet
+  nailed down** — firmware vocabulary above voice level stays open.
+- Banned: "patch" for parameter data (everything is live; see
+  Corrections). "Patch panel" survives only as the CV-routing metaphor.
+
 ## Vision
 
 A hardware synthesizer with a **house sound** — a characteristic,
