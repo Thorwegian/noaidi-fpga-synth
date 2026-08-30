@@ -186,6 +186,15 @@ Being redesigned (2026-08-30, planning with Thor). The generic
   sinks. Bus 0 = hardwired zero. The CV table and the buses unify into
   one bus memory; per-note modulation = a per-note bus. The pointers
   live in the shared profile (stop), not per element.
+- **ADSR is a producer too** (Thor): envelopes come from a producer
+  pool firmware instantiates — typically one pair per voice, shared by
+  the element group via its buses; per-element is just a bigger
+  allocation. Triggering can ride a gate bus the producer watches
+  (one write per voice, not eight). End-state goal: **very little
+  intelligence lives in elements** — waveform, filter type, static
+  detune, bus pointers, nothing else. The audio pipeline freezes
+  permanently once the pointer-fetch stage lands; every future
+  feature is a new producer type in the idle-slot table.
 - **Chaining** (Thor raised, agent's proposed discipline): a combiner
   is a producer that reads buses and writes a bus, so chains already
   exist. One rule bounds the complexity: producers execute in table
