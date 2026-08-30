@@ -1,6 +1,6 @@
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
-# Mainline: 256-voice pipeline → SPDIF + I2S at 98.304 MHz (pin 10).
+# Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
@@ -47,7 +47,7 @@ pnr.json: yosys.json
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
-		--freq 98.304 2>&1 | tee pnr.log
+		--freq 73.728 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<

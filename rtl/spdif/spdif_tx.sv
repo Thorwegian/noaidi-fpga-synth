@@ -3,7 +3,7 @@
 // Biphase-mark encoded, 96 kHz stereo, 24-bit audio.
 // sysclk / 8 = cell rate; 2 cells/bit × 64 bits/frame = 128 cells per
 // sample period — so the stream is internally consistent at ANY sysclk
-// (Fs = sysclk/1024), and a receiver locks to the actual bit rate.
+// (Fs = sysclk/768), and a receiver locks to the actual bit rate.
 //
 // What a receiver needs from this module (all four, not just the first
 // two — the earlier version stopped after 2 and pro interfaces refused
@@ -41,7 +41,7 @@ module spdif_tx (
     output reg              spdif_out
 );
     // The cell timebase is provided by the caller:
-    //   sysclk = 98.304 MHz, cell_tick = /8 (12.288 MHz), from drum.sv.
+    //   sysclk = 73.728 MHz, cell_tick = /6 (12.288 MHz), from drum.sv.
     // Requirements: sample_tick must coincide with a cell_tick, and
     // there must be exactly 128 cell periods per sample period.
 

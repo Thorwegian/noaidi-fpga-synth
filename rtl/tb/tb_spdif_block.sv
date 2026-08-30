@@ -9,7 +9,7 @@
 //      consumer PCM, 96 kHz, 24-bit — identical on both subframes
 //   5. audio payload intact (LSB-first, bits 4..27)
 //
-// The drum is exactly the "counter of 1024 per sample" — this bench is
+// The drum is exactly the "counter of 768 per sample" — this bench is
 // the minimal drum→spdif pairing with nothing else in the way.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -31,11 +31,11 @@ module tb_spdif_block;
     logic signed [23:0] ar = 24'sh654321;
     wire  spdif_out;
 
-    // integer cell timebase: /8, reset-aligned with the drum so
-    // sample_tick coincides with a cell_tick (1024 = 128 x 8)
+    // integer cell timebase: /6, reset-aligned with the drum so
+    // sample_tick coincides with a cell_tick (768 = 128 x 6)
     logic [2:0] cd;
     always @(posedge clk or negedge rst_n)
-        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
+        if (!rst_n) cd <= 3'd0; else cd <= (cd == 3'd5) ? 3'd0 : cd + 3'd1;
     wire cell_tick = (cd == 3'd0);
 
     spdif_tx u_spdif (
@@ -153,7 +153,7 @@ module tb_spdif_block;
         end
     endtask
 
-    // capture at the last sysclk of each cell (cell_div == 7), realigned
+    // capture at the last sysclk of each cell (cell_div == 5), realigned
     // on sample_tick so cells[0] is always preamble cell 0.
     //
     // The decode fires the cycle after cell 127 is captured — which is
@@ -173,7 +173,7 @@ module tb_spdif_block;
             if (sample_tick) begin
                 started <= 1;
                 ci      <= 0;
-            end else if (started && cd == 3'd7 && ci < 128) begin
+            end else if (started && cd == 3'd5 && ci < 128) begin
                 cells[ci] <= {7'd0, spdif_out};
                 ci        <= ci + 1;
                 if (ci == 127) do_check <= 1;

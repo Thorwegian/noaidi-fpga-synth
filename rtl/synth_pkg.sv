@@ -3,11 +3,16 @@
 package synth_pkg;
 
     parameter int SAMPLE_RATE = 96000;
-    parameter int SYS_CLK_HZ  = 98_304_000;
+    // 768 x 96 kHz. Stepped down from 98.304 MHz (1024 slots) after
+    // five ear-verified silicon timing failures that STA passed: the
+    // fabric has no margin for our 36x36 DSP cascades at ~100 MHz,
+    // and 25% more slack protects the paths we haven't found yet.
+    parameter int SYS_CLK_HZ  = 73_728_000;
 
     //--- Drum (SCMO) scheduling -------------------------------------
-    parameter int DRUM_CYCLES  = 1024;   // SYS_CLK_HZ / SAMPLE_RATE
+    parameter int DRUM_CYCLES  = 768;    // SYS_CLK_HZ / SAMPLE_RATE
     parameter int DRUM_W       = 10;     // $clog2(DRUM_CYCLES)
+    parameter int CELL_DIV     = 6;      // SPDIF cell = 6 sysclk (768 = 128 x 6)
 
     parameter int NUM_VOICES   = 256;    // 32-note polyphony × 8 unison
     parameter int VOICE_W      = 8;      // $clog2(NUM_VOICES)
@@ -16,8 +21,8 @@ package synth_pkg;
 
     // Drum slot where voice 0 enters the pipeline
     parameter int VOICE_BASE   = 0;
-    // Pipeline stages per voice (S0..S11)
-    parameter int VOICE_STAGES = 12;
+    // Pipeline stages per element (S0..S11 + S3B/S5B/S8B/S9B splits)
+    parameter int VOICE_STAGES = 16;
     // Contiguous drum span occupied by the voice pipeline
     parameter int VOICE_SPAN   = NUM_VOICES + VOICE_STAGES - 1;
 

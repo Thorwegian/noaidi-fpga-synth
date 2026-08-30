@@ -8,7 +8,7 @@ module tb_outputs;
 
     logic clk = 0;
     logic rst_n = 0;
-    always #5.086 clk = ~clk;
+    always #6.781 clk = ~clk;   // ~73.728 MHz
 
     logic sample_tick, voice_enter;
     logic [9:0] slot;
@@ -16,15 +16,15 @@ module tb_outputs;
     logic signed [23:0] audio_l = 24'h123456;
     logic signed [23:0] audio_r = 24'h654321;
 
-    drum #(.CYCLES(1024), .NUM_VOICES(256)) u_drum (
+    drum #(.CYCLES(768), .NUM_VOICES(256)) u_drum (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
         .voice_enter(voice_enter), .slot(slot));
 
-    // integer cell timebase: /8, reset-aligned so sample_tick coincides
-    // with a cell_tick (1024 = 128 x 8)
+    // integer cell timebase: /6, reset-aligned so sample_tick coincides
+    // with a cell_tick (768 = 128 x 6)
     logic [2:0] cd;
     always @(posedge clk or negedge rst_n)
-        if (!rst_n) cd <= 3'd0; else cd <= cd + 3'd1;
+        if (!rst_n) cd <= 3'd0; else cd <= (cd == 3'd5) ? 3'd0 : cd + 3'd1;
     wire cell_tick = (cd == 3'd0);
 
     logic spdif_out;
@@ -58,10 +58,10 @@ module tb_outputs;
             cell_idx = 0;
             frame_valid = 1'b1;
         end
-        // cell_div==7 during the last cycle of each cell → capture.
+        // cell_div==5 during the last cycle of each cell → capture.
         // No state gate: the IDLE window still carries the final cell's
         // level, and tick realignment discards any pre-tick garbage.
-        if (cd == 3'd7) begin
+        if (cd == 3'd5) begin
             cells = {cells[126:0], spdif_out};
             cell_idx = cell_idx + 1;
             if (cell_idx == 128 && frame_valid) begin
@@ -107,7 +107,7 @@ module tb_outputs;
         if (i2s_bclk != prev_bclk) begin bclk_toggles = bclk_toggles + 1; prev_bclk = i2s_bclk; end
         if (i2s_lrclk != prev_lr) begin lr_toggles = lr_toggles + 1; prev_lr = i2s_lrclk; end
         if (cyc > 4200) begin
-            $display("bclk toggles over 4200 cyc: %0d (expect ~525 for 6.144MHz)", bclk_toggles);
+            $display("bclk toggles over 4200 cyc: %0d (expect ~700 for 6.144MHz at /12)", bclk_toggles);
             $display("lrclk toggles over 4200 cyc: %0d (expect ~8 for 96kHz)", lr_toggles);
             if (bclk_toggles < 400) begin $display("FAIL bclk"); errors = errors + 1; end
             if (lr_toggles < 4)  begin $display("FAIL lrclk"); errors = errors + 1; end

@@ -16,7 +16,7 @@
 module tb_voice_program;
 
     logic clk = 0, rst_n = 0;
-    always #5.086 clk = ~clk;               // ~98.3 MHz
+    always #6.781 clk = ~clk;               // ~73.728 MHz
 
     logic sclk = 0, cs = 1, mosi = 0;
     wire  miso;

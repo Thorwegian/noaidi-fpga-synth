@@ -2,7 +2,7 @@
 // tb_voice_pipeline.sv — 256-voice SCMO pipeline testbench (iverilog)
 //
 // Checks:
-//   1. drum cadence: sample_tick every 1024 cycles, high 1 cycle
+//   1. drum cadence: sample_tick every 768 cycles, high 1 cycle
 //   2. voice span: exactly 256 voices enter per sample period
 //   3. oscillator: per-voice phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
@@ -22,13 +22,13 @@ module tb_voice_pipeline;
     //----------------------------------------------------------------
     logic clk   = 1'b0;
     logic rst_n = 1'b0;
-    always #5.086 clk = ~clk;          // ~98.304 MHz
+    always #6.781 clk = ~clk;          // ~73.728 MHz
 
     logic        sample_tick, voice_enter;
     logic [9:0]  slot;
     logic signed [23:0] mix_left, mix_right;
 
-    drum #(.CYCLES(1024), .NUM_VOICES(256)) u_drum (
+    drum #(.CYCLES(768), .NUM_VOICES(256)) u_drum (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick),
         .voice_enter(voice_enter),

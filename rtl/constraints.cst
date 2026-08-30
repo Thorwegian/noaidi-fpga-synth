@@ -3,12 +3,12 @@
 // Target: GW2AR-LV18QN88C8/I7
 //
 
-// Clock — MS5351 CLK0 at 98.304 MHz on FPGA package pin 10.
-// Per-board one-time setup via the BL616 console:
-//   pll_clk O0=98.304M -s
-// (done on this board 2026-08-29). A board without that setup has a
-// dead pin 10 — that is a setup error: program the clock chip.
-// A gateware PLL is never a valid workaround.
+// Clock — MS5351 CLK0 at 73.728 MHz (768 × 96 kHz) on FPGA package
+// pin 10. Per-board one-time setup via the BL616 console:
+//   pll_clk O0=73.728M -s
+// A board without that setup has a dead pin 10 — that is a setup
+// error: program the clock chip. A gateware PLL is never a valid
+// workaround.
 
 IO_LOC  "sysclk" 10;
 IO_PORT "sysclk" IO_TYPE=LVCMOS33;

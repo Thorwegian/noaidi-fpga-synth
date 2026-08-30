@@ -5,7 +5,7 @@
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different voice: stage Sk at drum slot t holds the voice
 // that entered at slot t-k.  The pipeline occupies 256 + 15 - 1 = 270
-// contiguous slots (~26% of the 1024-slot drum rotation).
+// contiguous slots (~35% of the 768-slot drum rotation).
 //
 // Stage map:
 //   S1  state/param RAM read data available (address issued at S0)

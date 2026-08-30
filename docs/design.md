@@ -47,18 +47,25 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 ## Clocking ✅
 
-- Sample rate **96 kHz**; SYSCLK **98.304 MHz = 1024 × 96 kHz**, from
+- Sample rate **96 kHz**; SYSCLK **73.728 MHz = 768 × 96 kHz**, from
   the board's MS5351 CLK0 on FPGA package pin 10.
-- Per-board one-time setup: `pll_clk O0=98.304M -s` on the BL616
+- Per-board one-time setup: `pll_clk O0=73.728M -s` on the BL616
   console (Ctrl+X Ctrl+C Enter at 115200). A board without this has a
   dead pin 10 — see AGENTS.md bring-up notes.
+- **Why not ~100 MHz** (decision 2026-08-30, Thor): five ear-verified
+  silicon timing failures that STA passed — the fabric has no margin
+  for the filter's 36×36 DSP cascades at 98.304 MHz, and each fix
+  found a new marginal path. 768 slots at 73.728 MHz keeps 96 kHz
+  exactly, gives every path 33% more settling time, and still leaves
+  ~500 idle slots per sample.
 - **A gateware PLL is never a valid workaround.** A dead pin 10 means
   the clock chip wasn't programmed — fix the board setup, not the
   gateware. (An earlier crystal+rPLL+DDS fallback was removed; it lives
   only in git history.)
-- **The drum is the sole timebase**: one 1024-slot counter yields the
-  sample tick, the 256 voice-entry slots, and the SPDIF cell tick
-  (slot[2:0]==0). No other audio-rate counter exists in the design.
+- **The drum is the sole timebase**: one 768-slot counter yields the
+  sample tick, the 256 element-entry slots, and the SPDIF cell tick
+  (every 6 slots; 768 = 128 cells × 6). No other audio-rate counter
+  exists in the design.
 
 ## Number formats ✅
 

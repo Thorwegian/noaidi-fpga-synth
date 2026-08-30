@@ -7,7 +7,7 @@
 // "sample ready" pulse) into holding registers; the shift register is
 // loaded from those holds on each LRCLK edge, exactly as before.
 //
-//   sysclk = 98.304 MHz → BCLK = 98.304 / 16 = 6.144 MHz
+//   sysclk = 73.728 MHz → BCLK = 73.728 / 12 = 6.144 MHz
 //   sample rate = 6.144 MHz / 64 = 96,000 Hz exactly
 //
 // I2S pinout (Tang Nano 20K):
@@ -18,7 +18,7 @@
 `default_nettype none
 module i2s_tx #(
     parameter BITS        = 24,
-    parameter BCLK_DIV    = 16,    // 98.304 / 16 = 6.144 MHz BCLK
+    parameter BCLK_DIV    = 12,    // 73.728 / 12 = 6.144 MHz BCLK
     parameter BCLK_PER_WS = 64     // 96,000 Hz exactly
 ) (
     input  logic                    sysclk,

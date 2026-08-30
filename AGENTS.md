@@ -15,7 +15,7 @@ repo. Keep this file updated when the architecture changes.
 - ESP32-C3 firmware in `app/`: `cd app && idf.py build`;
   flash/monitor: `idf.py -p /dev/ttyACM0 flash monitor`.
 - FPGA (Tang Nano 20K, GW2AR-LV18QN88C8/I7): `cd rtl && make`
-  (yosys `synth_gowin` → nextpnr-himbaechel `--freq 98.304` → gowin_pack);
+  (yosys `synth_gowin` → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
 - Simulation: `cd rtl && make sim` runs the iverilog testbenches:
   `sim-voice` (voice pipeline: drum cadence, phase-delta math, SVF dynamics,
@@ -28,7 +28,7 @@ repo. Keep this file updated when the architecture changes.
 - MIDI in: UART1 RX on GPIO0, 31250 baud 8N1 (`app/main/midi_in.c`, task "midi_in").
 - UART1 default pins TX=7/RX=6 clash with SPI CS/MOSI → `midi_in_init()` must run
   before `fpga_spi_init()`.
-- Audio pins in `rtl/constraints.cst`: I2S 54–56, SPDIF 27, sysclk 10 (98.304 MHz).
+- Audio pins in `rtl/constraints.cst`: I2S 54–56, SPDIF 27, sysclk 10 (73.728 MHz).
 
 ## Firmware (`app/`)
 
@@ -68,8 +68,9 @@ repo. Keep this file updated when the architecture changes.
 
 ## FPGA synth core — SCMO "drum"
 
-- `rtl/drum.sv`: the sole timebase. 10-bit slot counter, 1024 sysclk = 1 sample
-  (96 kHz at 98.304 MHz). `sample_tick` at slot 0, `voice_enter` for slots 0..255.
+- `rtl/drum.sv`: the sole timebase. 10-bit slot counter, 768 sysclk = 1 sample
+  (96 kHz at 73.728 MHz), SPDIF cell every 6 slots. `sample_tick` at slot 0,
+  `voice_enter` for slots 0..255.
 - `rtl/voice/voice_pipeline.sv`: 16-stage pipeline × 256 elements, one element
   enters per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator →
   S3B K-shift register (timing split) → S4–S6 SVF1 (S5B) → S7–S9 SVF2 (S8B) →
@@ -95,8 +96,8 @@ repo. Keep this file updated when the architecture changes.
 
 ## Bring-up on a NEW Tang board — read this first
 
-The 98.304 MHz on pin 10 comes from the MS5351, whose configuration lives in
-**the board's NVM, not the bitstream** (`pll_clk O0=98.304M -s` via the BL616
+The 73.728 MHz on pin 10 comes from the MS5351, whose configuration lives in
+**the board's NVM, not the bitstream** (`pll_clk O0=73.728M -s` via the BL616
 CLI). A fresh board therefore has *no sysclk*, and every audio symptom follows
 from that: the drum never ticks, `spdif_tx` never runs, `spdif_out` sits at its
 reset level, and a scope on the SPDIF pin sees nothing at all.
@@ -115,7 +116,7 @@ two failure modes that look identical:
 - free-running one advances, reset-able one frozen → clock fine, `rst` pin high
   (note `constraints.cst` sets no `PULL_MODE` on `rst`)
 - both advancing → clock and reset healthy; measure the rate and compare to
-  98.304 MHz
+  73.728 MHz
 
 ## SPDIF debug toolkit (proven 2026-08-28)
 
@@ -153,24 +154,32 @@ two failure modes that look identical:
 
 ## Silicon timing rule (learned by ear, 2026-08-29)
 
-On this part at 98.304 MHz, a pipeline stage may be decode/adds-only or
+On this part near 100 MHz, a pipeline stage may be decode/adds-only or
 DSP-multiply-only — NEVER chain an adder tree or a LUT+barrel-shift
-decode into a multiply in one cycle. Four such chains passed nextpnr's
+decode into a multiply in one cycle. FIVE instances passed nextpnr's
 approximate timing model and failed on silicon as data-dependent,
 clock-speed-dependent audio corruption (S5B/S8B: SVF 'rain' crackle;
 S9B: one-channel attenuation distortion; S3B: left-channel chord
-"screaming" — the K barrel shift into the S4 multiply, exposed only
-when per-voice fc gave consecutive lanes different shift amounts,
-2026-08-30). Diagnosis method that worked: sim-vs-silicon A/B
-(identical RTL+hexes rendered clean in iverilog) plus the half-clock
-listen (pll_clk O0=49.152M, no -s — corruption vanishing at half clock
-proves setup timing). Do not trust an STA PASS on such paths; split
-them. No known chain of this class remains.
+"screaming" — the K barrel shift into the S4 multiply, exposed when
+per-voice fc gave consecutive lanes different shift amounts; fifth:
+soft filtered crackle on chords even after S3B — the 36×36 MULT
+cascade itself, register-to-register, once varied K toggled its whole
+partial-product tree). Diagnosis method that worked: sim-vs-silicon
+A/B (identical RTL+hexes rendered clean in iverilog) plus the
+half-clock listen (halve the pll_clk value, no -s — corruption
+vanishing at half clock proves setup timing). Do not trust an STA PASS
+on such paths.
 
-**VERIFIED 2026-08-29 (bench)**: working SVF at low cutoff (fc=0x1000,
-muffled chord, both channels clean) and clean SPDIF, confirmed at full
-SYSCLK and at SYSCLK/2; ESP32 SPI test still OK/PASS. Pipeline depth 16,
-span 271/1024 slots.
+**Resolution of the fifth instance (2026-08-30, Thor's call): SYSCLK
+stepped down to 73.728 MHz = 768 × 96 kHz.** Splitting six 36×36
+multiplies into multi-cycle partials was judged worse than giving
+every path — known and unknown — 33% more slack. Sample rate stays
+96 kHz exactly; SPDIF cell = 6 sysclk, I2S BCLK = /12. The stage-split
+rule above still applies at the new clock.
+
+**VERIFIED 2026-08-29 (bench, at the old 98.304 MHz)**: working SVF at
+low cutoff, clean SPDIF, ESP32 SPI OK/PASS. Pipeline depth 16, span
+271/768 slots.
 
 **NOT verified**: I2S. It builds and its clock-rate sim passes, but no
 ear or scope has checked it in a long while — regression state unknown.

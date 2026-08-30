@@ -4,10 +4,12 @@
 //
 // Audio:  256-voice SCMO pipeline ("the drum") → SPDIF + I2S
 // Timing: drum.sv owns every timebase — the sample boundary
-//         (1024 sysclk = 1 sample) and the SPDIF cell boundary
-//         (8 sysclk = 1 cell), decoded from one counter.
-// Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 98.304 MHz
-//         (per-board setup: pll_clk O0=98.304M -s on the BL616).
+//         (768 sysclk = 1 sample) and the SPDIF cell boundary
+//         (6 sysclk = 1 cell), counted from one reset.
+// Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 73.728 MHz = 768×96 kHz
+//         (per-board setup: pll_clk O0=73.728M -s on the BL616).
+//         Stepped down from 98.304 MHz after five ear-verified timing
+//         failures STA missed — margin for the 36×36 DSP cascades.
 //
 //--------------------------------------------------------------------
 

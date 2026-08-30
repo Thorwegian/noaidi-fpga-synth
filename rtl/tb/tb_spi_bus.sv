@@ -20,7 +20,7 @@ module tb_spi_bus;
     logic sysclk = 0;
     logic rst_n  = 0;
 
-    always #5.086 sysclk = ~sysclk;    // ~98.3 MHz, async to sclk
+    always #6.781 sysclk = ~sysclk;    // ~73.728 MHz, async to sclk
 
     spi_bus #(.AW_BACKED(11), .ID_BYTE(ID)) dut (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
