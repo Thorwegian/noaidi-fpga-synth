@@ -100,17 +100,21 @@ accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 **State banks**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, 11 slots apart — no address collision.
 
-**Parameter smoothing** 📋 (design approved 2026-08-30): first-order
-LPF `out <= out + ((in - out) >>> coeff)` applied **after** the LUT
-lookups, per voice, in the linear domain — interpolation between the
-log-domain LUT steps falls out for free, and add/shift-only fits the
-silicon timing rule. Smoother state carries ~10 fractional guard bits
-so `>>> 10` (τ ≈ 960 samples ≈ 10 ms at 96 kHz, matching MIDI's ~1k
-events/s ceiling) never deadbands short of the target. GATE events
-reset smoother state to the target (snap) so keystrokes are instant.
-The bank swap provides atomicity; the smoother provides continuity on
-top. Also the glide mechanism (smooth the base pitch, add modulation
-after).
+**Parameter smoothing** 📋 (deferred — unresolved dilemma, Thor
+2026-08-30): the attractive design is a first-order LPF
+`out <= out + ((in - out) >>> coeff)` applied **after** the LUT
+lookups, per element, in the linear domain — interpolation between
+log-domain LUT steps falls out for free; ~10 fractional guard bits so
+`>>> 10` (τ ≈ 960 samples ≈ 10 ms, matching MIDI's ~1k events/s
+ceiling) never deadbands; GATE resets smoother state to target (snap).
+**The dilemma**: ADSR modulation sums in the log domain *before* the
+LUT, so a post-LUT smoother would low-pass the envelope as well —
+capping how snappy attacks/decays can ever be at the smoother's
+settling time. Smoothing therefore waits until the modulation
+architecture settles it (candidate direction: smooth only SPI-written
+base values, sum FPGA-generated modulators after the smoother — the
+glide principle — but that forfeits free LUT interpolation for
+modulated parameters). Not scheduled; revisit around ADSR design.
 
 ## Control plane — SPI + BSRAM 🔨
 
@@ -195,11 +199,17 @@ bench-verified) milestone. One rung in flight at a time.
 3. **GATE** — per-element gate bit, written through the swap like
    every other parameter. Hard on/off. Random per-element phase
    configured by the ESP32 would be nice here (Thor: "no rush").
-4. **Smoothing** — the approved post-LUT smoothers + snap-on-GATE.
-   Verification: the gate clicks from rungs 1/3 disappear, by ear.
-5. **Afterwards, order TBD**: ADSR (amp first; needs GATE + smoothing
-   settled), 36-bit summing (bench-verified rung, pending approval),
-   per-element routes/CV, LFO bank, per-element SPI read-back.
+4. **Afterwards, order TBD**: ADSR (amp first; needs GATE settled —
+   and its design must resolve the smoothing dilemma above), 36-bit
+   summing (bench-verified rung, pending approval), per-element
+   routes/CV, LFO bank, per-element SPI read-back. Smoothing is
+   deliberately unscheduled until the ADSR/modulation work settles
+   where it can live (see Parameter smoothing).
+5. **Experiment, some point later (Thor)**: try removing the pipeline
+   stage splits (S3B/S5B/S8B/S9B) now that SYSCLK is 73.728 MHz — they
+   may be unnecessary waits at the lower clock. One split at a time,
+   each behind an ear-verified chord torture at full clock; S3B is the
+   cheap first probe (ten-line revert + Fmax delta before any listen).
 
 ## Corrections and thoughts from Thor
 
