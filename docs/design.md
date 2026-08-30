@@ -173,20 +173,24 @@ ALL OK, all testbenches green, timing closed at 98.304 MHz.
 Each rung is a branch, merged at an ear-verified (or, where marked,
 bench-verified) milestone. One rung in flight at a time.
 
-1. **Housekeeping** — all types/constants into `synth_pkg.sv`; rename
-   the `*patch*` files (`test_patch_*`, `ref_patch_*`,
-   `gen_test_patch.py`). Zero behavior change: benches must print
-   identical numbers.
-2. **GATE** — per-voice gate bit, written through the swap like every
-   other parameter. Hard on/off; clicks expected and documented.
-3. **Smoothing** — the approved post-LUT smoothers + snap-on-GATE.
-   Verification: rung 2's gate test loses its clicks, by ear.
-4. **ESP32 firmware** — the three-module structure
-   ([firmware_architecture.md](firmware_architecture.md)) + MIDI voice
-   allocator: playable synth from a keyboard.
+1. **Voice concept on the ESP32** (pulled ahead by Thor, in progress
+   on `feat/voice-concept`) — engine link (sole SPI owner, 1 kHz tick)
+   + voice allocator per
+   [firmware_architecture.md](firmware_architecture.md). 32 voices ×
+   8 elements, church-organ detune, cutoff one octave above the note,
+   velocity → gain, omni, steal-oldest. Gate-by-gain (no FPGA GATE bit
+   yet): clicks expected. No stop/program structure yet.
+2. **Housekeeping** — all types/constants into `synth_pkg.sv`; rename
+   the `*patch*` files and voice→element/lane identifiers. Zero
+   behavior change: benches must print identical numbers.
+3. **GATE** — per-element gate bit, written through the swap like
+   every other parameter. Hard on/off. Random per-element phase
+   configured by the ESP32 would be nice here (Thor: "no rush").
+4. **Smoothing** — the approved post-LUT smoothers + snap-on-GATE.
+   Verification: the gate clicks from rungs 1/3 disappear, by ear.
 5. **Afterwards, order TBD**: ADSR (amp first; needs GATE + smoothing
    settled), 36-bit summing (bench-verified rung, pending approval),
-   per-voice routes/CV, LFO bank, per-voice SPI read-back.
+   per-element routes/CV, LFO bank, per-element SPI read-back.
 
 ## Corrections and thoughts from Thor
 

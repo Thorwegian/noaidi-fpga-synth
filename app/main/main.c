@@ -11,6 +11,8 @@
 #include "midi_in.h"
 #include "midi_log.h"
 #include "event_bus.h"
+#include "engine_link.h"
+#include "voice_alloc.h"
 
 void app_main(void)
 {
@@ -47,7 +49,9 @@ void app_main(void)
     // the SPI CS pin, so the SPI init must run last and re-claim it.
     midi_in_init(0);
 
-    fpga_spi_init(6, 5, 4, 7, 1000000); // MOSI, MISO, SCLK, CS
+    // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
+    // 32 words (~60 us each) would blow the engine's 1 ms tick.
+    fpga_spi_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
 
     // Word-protocol self-test (spi_bus.sv / docs/memory_map.md format).
     // Mirrors tb_spi_bus.sv's cases so firmware and RTL agree on the
@@ -85,41 +89,12 @@ void app_main(void)
 
     printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
 
-    // ── Single voice over SPI ───────────────────────────────────────
-    // Mute the boot image (256 GAIN writes — also a burst stress test),
-    // then program voice 0 as a constant A4 saw. The organ should cut
-    // to silence, then one steady 440 Hz tone.
-    // Ping-pong discipline: writes land in the SHADOW bank. Mute both
-    // banks (write + swap + write), program voice 0 into both, then
-    // sweep by write-shadow + swap per step — the collision-free path.
-    printf("=== programming (ping-pong): mute all, voice 0 = A4 saw ===\n");
-    for (int v = 0; v < 256; v++)
-        fpga_word_write(0x2000 + v * 64 + 3, 0x0000FFFF);   // mute shadow
-    fpga_swap();
-    for (int v = 0; v < 256; v++)
-        fpga_word_write(0x2000 + v * 64 + 3, 0x0000FFFF);   // mute other bank
-    printf("both banks muted (organ should be silent)\n");
-
-    for (int b = 0; b < 2; b++) {          // program voice 0 into BOTH banks
-        fpga_word_write(0x2000, 0x00001700);   // OSC: A4 (UQ4.10 0x1700), saw
-        fpga_word_write(0x2001, 0x00000000);   // DUTY
-        fpga_word_write(0x2002, 0x40002000);   // FILTER: q1=1.0
-        fpga_word_write(0x2003, 0x00002020);   // GAIN: -12 dB both channels
-        fpga_swap();
-    }
-    printf("voice 0 programmed — constant 440 Hz saw should be audible\n");
-
-    printf("cutoff sweep via write-shadow + swap (click-free expected)\n");
-    while(1) {
-        for(int i = 0x1000; i < 0x2AF8; i++) {
-            fpga_word_write(0x2002, 0x40000000 | i);   // FILTER into shadow
-            fpga_swap();
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
-        for(int i = 0x2AF8; i >= 0x1000; i--) {
-            fpga_word_write(0x2002, 0x40000000 | i);
-            fpga_swap();
-            vTaskDelay(pdMS_TO_TICKS(1));
-        }
-    }
+    // ── The synth proper ────────────────────────────────────────────
+    // engine_link takes sole ownership of the SPI link from here on
+    // (mutes both banks at init — the boot organ goes silent), then
+    // voice_alloc turns MIDI into voices of 8 elements.
+    printf("=== voice concept: 32 voices x 8 elements, MIDI omni ===\n");
+    engine_link_init();
+    voice_alloc_init();
+    printf("play the keyboard — gate-by-gain, clicks expected\n");
 }
