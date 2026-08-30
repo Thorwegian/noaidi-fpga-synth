@@ -40,15 +40,17 @@ conventions the FPGA never sees.
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are live and single-banked — each pipeline read is one word, so
    there is no multi-word tear to protect against.
-5. **One bus type; sinks strip bits.** (Thor, replacing an earlier
-   sink-typed design.) All buses are signed 18-bit words in UQ4.10-
-   fraction log₂ units (1 LSB ≈ 1.17 cents). Each sink applies a
-   FIXED bit-slice: pitch/cutoff add the word as-is; gain adds
-   `bus >> 6` (0.375 dB = 64 units); linear sinks (duty, Q) take
-   their documented slice. Fixed shifts are wiring, not logic. Read
-   bandwidth comes from replicas of one uniform pool (broadcast
-   writes), not typed memories — same block count, one shared
-   allocation space, and a bus may feed different sink types.
+5. **One bus format: signed Q8.10** (Thor). 8 integer bits (sign
+   included) + 10 fraction = 18 bits; integer = octaves, fraction =
+   position within the octave. The same number means the same musical thing on every
+   log₂ sink — pitch, cutoff, AND attenuation (gain octave = 6 dB) —
+   so a producer needn't know its consumer; sinks take what they
+   need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
+   resolution — accepted; revisit on audible evidence only). Q needs
+   a declared fraction→resonance convention (TBD at B2). Consumers
+   use SATURATING adds into each parameter's legal range (adds-only,
+   timing-clean). Read bandwidth via replicas of one uniform pool
+   (broadcast writes); a bus may feed different sink types.
 
 ## Why this scheme (constraints → consequences)
 
@@ -83,9 +85,10 @@ conventions the FPGA never sees.
 Derivations use the drum budget (768 slots, 271 used by lanes, ~497
 idle) and the BSRAM geometry (18-bit-wide blocks).
 
-- **Bus word**: signed 18-bit — native BSRAM width; UQ4.10-fraction
-  log₂ units cover ±8 octaves of pitch/cutoff offset and the full
-  gain range through the `>> 6` slice.
+- **Bus word**: signed Q8.10 — 18 bits, native BSRAM width; ±128
+  octaves of range, 1 LSB ≈ 1.17 cents. Gain consumes the top
+  fraction bits (0.375 dB decode grid today; buses already carry the
+  precision if the grid ever refines).
 - **Bus pool**: one uniform pool of 1024 buses, replicated once per
   sink read port (6 replicas ≈ 6 blocks, broadcast writes). Shared
   allocation across all sinks — no per-class exhaustion. Bus 0 is
