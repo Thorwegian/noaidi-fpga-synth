@@ -7,4 +7,4 @@ app/build
 *.fs
 *.vvp
 *.vcd
-!rtl/tb/ref_patch_*.hex
+!rtl/tb/ref_boot_*.hex

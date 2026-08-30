@@ -11,10 +11,10 @@ MIDI or CCs — all of that is ESP32 firmware territory (think 256 Minimoog
 voice cards behind a MIDI-to-CV converter). Consequences:
 
 - ESP32 does voice allocation, unison grouping, CC→parameter mapping and
-  velocity scaling; it expresses results as plain per-voice register writes.
-- **Per-voice ADSRs live in the FPGA (256 of them)** — envelopes are
+  velocity scaling; it expresses results as plain per-element register writes.
+- **Per-element ADSRs live in the FPGA (256 of them)** — envelopes are
   per-sample math, far too expensive to stream from firmware.
-- The only "event" interface is a per-voice `GATE` register (gate /
+- The only "event" interface is a per-element `GATE` register (gate /
   retrig), written directly by the firmware allocator. Quantities fixed
   at note-on — key tracking, velocity scaling, detune, pan — are baked
   by firmware into base parameters and route amounts; the FPGA's
@@ -30,7 +30,7 @@ voice cards behind a MIDI-to-CV converter). Consequences:
   whole pedal sweep costs one cell write. Key tracking that must follow
   extreme pitch bends just rides a CV cell updated by firmware — no
   special path.
-- **Multi-timbrality is free for per-voice parameters**: every voice
+- **Multi-timbrality is free for per-element parameters**: every voice
   carries its own params, so 16 channels can each run a different patch
   at no extra cost. Only genuinely global resources need per-channel
   instances — the LFO bank covers that; master volume stays global.
@@ -45,10 +45,10 @@ flowchart TD
     ESP -- "SPI (10–40 MHz)" --> SLAVE["SPI slave register bank"]
     subgraph FG["Tang Nano 20K"]
         SLAVE --> GLOB["Global registers<br/>system · LFO bank ×32 · CV table<br/>(256 anonymous control voltages)"]
-        SLAVE --> PV["Per-voice registers ×256<br/>OSC · DUTY · FILTER · GAIN · GATE<br/>ADSR ×2 · ROUTE ×8"]
+        SLAVE --> PV["Per-element registers ×256<br/>OSC · DUTY · FILTER · GAIN · GATE<br/>ADSR ×2 · ROUTE ×8"]
         GLOB --> SRC["Modulation sources<br/>LFO · CV cells"]
-        PV --> ADSR["Per-voice ADSR ×2"]
-        PV --> RT["Per-voice patch routing<br/>source + amount per sink"]
+        PV --> ADSR["Per-element ADSR ×2"]
+        PV --> RT["Per-element patch routing<br/>source + amount per sink"]
         SRC --> RT
         ADSR --> RT
         RT --> PIPE["Drum pipeline — 256 voices,<br/>one per cycle:<br/>osc → SVF → SVF → atten → mix"]
@@ -102,12 +102,12 @@ flowchart LR
 - **Section sizing**: power-of-two units, at least 50% spare per unit or
   block, and 0x100-aligned only where that doesn't waste most of the
   block (no oversized reservations like 256 words for two LFOs).
-- **Per-voice stride: 64 words (2^6)** — 15 used, 49 reserved (76%
+- **Per-element stride: 64 words (2^6)** — 15 used, 49 reserved (76%
   headroom per voice).
 - **Transaction format** (proposal): 1 command byte + 2 address bytes +
   4 data bytes per word. Command: `[7] R/W`, `[6] auto-increment (burst)`,
   `[5:0] reserved`. A burst streams words while CS is low.
-- **Atomicity**: per-voice register writes are independent; multi-word
+- **Atomicity**: per-element register writes are independent; multi-word
   atomicity comes from the ping-pong bank swap, not from locking registers.
 - **Ping-pong**: parameter data (OSC, DUTY, FILTER, GAIN, ADSR, ROUTE,
   LFO params) is double-buffered, half-active/half-shadow; the map
@@ -133,7 +133,7 @@ flowchart LR
 | `0x0300–0x03FF`  | Reserved (global)             | 256 words | — |
 | `0x0400–0x04FF`  | CV table (anonymous control voltages) | 256 words | TBD |
 | `0x0500–0x1FFF`  | Reserved (global)             | ~11K words | — |
-| `0x2000–0x5FFF`  | Per-voice parameters (256 × 64) | 16K words | partial |
+| `0x2000–0x5FFF`  | Per-element parameters (256 × 64) | 16K words | partial |
 | `0x6000–0xFFFF`  | Reserved (effects, wavetables, samples) | 40K words | — |
 
 ## System / housekeeping — `0x0000–0x00FF` (TBD)
@@ -146,7 +146,7 @@ flowchart LR
 | `0x003` | `MASTER` | `[7:0]` vol L UQ4.4, `[15:8]` vol R UQ4.4, `[23:16]` smoothing coeff |
 | `0x004–0x0FF` | — | reserved |
 
-No command FIFO: note-on/off is just the allocator writing per-voice
+No command FIFO: note-on/off is just the allocator writing per-element
 `GATE` registers — nothing else in the FPGA needs to know a "note" exists.
 No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
@@ -156,7 +156,7 @@ and every mapping stays in firmware.
 
 32 LFOs — 2 per patch/channel, so 16-channel multi-timbral arrangements
 each get their own LFOs. The FPGA sees only an anonymous bank; firmware
-maps LFO number ↔ (channel, slot) at patch setup, and per-voice route
+maps LFO number ↔ (channel, slot) at patch setup, and per-element route
 words reference LFOs by index (0..31). The LFOs are time-multiplexed
 through the drum's idle slots (32 cycles per sample, ~740 available) and
 present their current outputs as registers for the cable mux.
@@ -167,7 +167,7 @@ LFO k base address: `0x100 + k × 16` (16 words each; 5 used, 11 reserved):
 |---|---|---|
 | `+0` | `RATE` | `[23:0]` phase increment UQ0.24, `[31:24]` rate divider — effective rate = delta / (div + 1); the divider gives smooth very-slow LFOs without widening the accumulator |
 | `+1` | `SHAPE` | `[3:0]` waveform (sine, tri, saw, ramp, S&H, ...), `[7:4]` reserved |
-| `+2` | `DEPTH` | `[23:0]` Q0.24 — live patch-level scalar: per-voice route amounts set the static part, DEPTH is what a mod wheel/CC scales at run time (firmware writes it once per event) |
+| `+2` | `DEPTH` | `[23:0]` Q0.24 — live patch-level scalar: per-element route amounts set the static part, DEPTH is what a mod wheel/CC scales at run time (firmware writes it once per event) |
 | `+3` | `PHASE` | `[23:0]` UQ0.24 (set/sync: firmware writes it to retrigger) |
 | `+4` | `SYNC` | retrig mode (free-run vs on-PHASE-write) |
 | `+5..+15` | — | reserved |
@@ -188,7 +188,7 @@ per cell. The FPGA knows nothing of wheels, pedals or CC numbers.
 - 256 cells cover the simultaneously-active continuous streams of a full
   arrangement (16 wheels + a handful of pedals/mod wheels ≈ 40) with
   room to spare; a patch that never uses a cell costs nothing.
-- **Global vs per-voice is not an FPGA concept**: a cell referenced by
+- **Global vs per-element is not an FPGA concept**: a cell referenced by
   many voices' routes is "global"; a cell referenced by one note's
   routes is per-note (poly pressure). The ESP32 allocates cells as it
   pleases — the hardware never knows the difference.
@@ -202,7 +202,7 @@ per cell. The FPGA knows nothing of wheels, pedals or CC numbers.
   layer returns it with the status byte. A write is live the instant it
   lands; a read costs one idle slot.
 
-## Per-voice routing — the patch panel (TBD)
+## Per-element routing — the patch panel (TBD)
 
 - **Eight generic cables per voice** (`ROUTE[0..7]`), each connecting any
   source to any sink with a signed amount. Multiple cables may target the
@@ -236,12 +236,12 @@ per cell. The FPGA knows nothing of wheels, pedals or CC numbers.
   double to 16, split route reads across two cycles to halve the ports.
 
 A fallback without the CV table exists: firmware computes target values
-and writes per-voice parameters directly (viable: a 200 Hz pedal sweep
+and writes per-element parameters directly (viable: a 200 Hz pedal sweep
 over 256 voices ≈ 2.9 Mbit/s). The table wins for dense multi-channel
 arrangements by keeping SPI traffic near zero and removing the
 firmware-side routing bookkeeping entirely.
 
-## Per-voice parameters — `0x2000–0x5FFF`
+## Per-element parameters — `0x2000–0x5FFF`
 
 Voice v base address: `0x2000 + v × 64`.
 
@@ -256,13 +256,13 @@ Voice v base address: `0x2000 + v × 64`.
 | `+6` | `ADSR2` | same layout (amp + filter) | TBD |
 | `+7..+15` | — | envelope curve, sustain shape, ... | reserved |
 | `+16..+23` | `ROUTE[0..7]` | patch cables: `[3:0]` source type, `[14:4]` source index, `[17:15]` sink (0 pitch, 1 duty, 2 cutoff, 3 Q, 4 gain L, 5 gain R, 6–7 reserved), `[31:18]` amount sQ2.12 | TBD |
-| `+24..+63` | — | per-voice LFO, glide, FM amount, sample position, ... | reserved |
+| `+24..+63` | — | per-element LFO, glide, FM amount, sample position, ... | reserved |
 
 Notes:
 - 256 voices, each with its own ADSR(s) — grouping into notes/unison is
   firmware's business and invisible here.
 - Values are consumed once per sample per voice (S1 stage); writes to a
-  running voice take effect the next sample, smoothed by the per-voice
+  running voice take effect the next sample, smoothed by the per-element
   first-order LPF where enabled.
 - `FILTER` resonance is stored Q2.14 (16-bit) and widened internally to
   the pipeline's Q8.28.
@@ -277,13 +277,13 @@ Notes:
   values arrive as anonymous CV cells. Future oscillator types may need
   extra data words (wavetable index, sample pointer) — they take
   reserved words in this block.
-- Glide/portamento: firmware writes the target pitch once; per-voice
-  base-parameter smoothing (per-voice coefficient, reserved word) does
+- Glide/portamento: firmware writes the target pitch once; per-element
+  base-parameter smoothing (per-element coefficient, reserved word) does
   the glide. Order matters: smoothing applies to the base parameter,
   modulation cables add on top of the smoothed value.
 - Controllers affecting *global* parameters (mod wheel → LFO depth,
   master volume) are computed by firmware: one global register write per
-  event. Per-voice modulation is CV cells + routes; "global" CVs are
+  event. Per-element modulation is CV cells + routes; "global" CVs are
   simply cells many voices reference.
 
 ## SPI speed budget
@@ -307,10 +307,10 @@ Notes:
   - Any dense continuous source (expression pedal, wheel, CC sweep):
     **1 CV-cell write per event** — effectively free, for any
     number of voices, on any channel, all arrangement long.
-  - Direct per-voice parameter writes (rare, discrete changes): cheap.
+  - Direct per-element parameter writes (rare, discrete changes): cheap.
   - Envelopes and LFOs run inside the FPGA — zero SPI traffic.
 - Conclusion: with 40 MHz measured good, the speed budget is a solved
-  problem. Even the CV-table fallback — firmware writing per-voice
+  problem. Even the CV-table fallback — firmware writing per-element
   parameters directly, ~2.9 Mbit/s for a 200 Hz pedal sweep across 256
   voices — fits inside 10% of the link. 1 MHz remains marginal for
   full-voice CC sweeps, so that is the number to raise, not the design.
@@ -340,7 +340,7 @@ Notes:
 2. **Routes**: 8 generic cables per voice.
 3. **ADSRs**: 2 per voice (amp + filter), 2 words total; the 7-bit MIDI
    → 8-bit log2 time mapping lives in firmware.
-4. **Per-voice stride**: 64 words — 15 used, 49 reserved.
+4. **Per-element stride**: 64 words — 15 used, 49 reserved.
 5. **Bursts**: stream words until CS goes high (no length field).
    Implemented for the 8-bit bring-up registers: one `spi_device_transmit`
    per transaction, address auto-increments on the FPGA side
@@ -422,7 +422,7 @@ Two consequences worth carrying forward:
   the same BSRAM. The CV-table plan already says reads are serviced by
   the drum in an idle slot — that is now a hard requirement, not a
   preference.
-- **The 64-word per-voice stride is address space, not RAM.** Measured
+- **The 64-word per-element stride is address space, not RAM.** Measured
   cost is 18,432 bits per block, linear: 1024 words × 36 → 2 blocks,
   4096 → 8, 16384 → 32. Instantiating the *full* 256 × 64 stride would
   consume 32 of 46 blocks — 70% of the part's BSRAM — for parameters

@@ -15,7 +15,7 @@ def fcToK(Fc):
 
 script_dir = Path(__file__).resolve().parent
 
-file_path = script_dir / "../rtl/voice/svf_k_lut.hex"
+file_path = script_dir / "../rtl/element/svf_k_lut.hex"
 
 with open(file_path, "w") as file:
     for note in numpy.arange(0, 12, 12 / 1024):

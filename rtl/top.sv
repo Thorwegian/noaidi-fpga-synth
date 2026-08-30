@@ -2,7 +2,7 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// Audio:  256-voice SCMO pipeline ("the drum") → SPDIF + I2S
+// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S
 // Timing: drum.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample) and the SPDIF cell boundary
 //         (6 sysclk = 1 cell), counted from one reset.
@@ -37,40 +37,40 @@ module top (
     //----------------------------------------------------------------
     // Drum — the sole timebase
     //----------------------------------------------------------------
-    logic       sample_tick, voice_enter, cell_tick;
+    logic       sample_tick, lane_enter, cell_tick;
     logic [9:0] slot;
 
     drum u_drum (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .sample_tick (sample_tick),
-        .voice_enter (voice_enter),
+        .lane_enter  (lane_enter),
         .cell_tick   (cell_tick),
         .slot        (slot)
     );
 
     //----------------------------------------------------------------
-    // 256-voice pipeline
+    // 256-element pipeline
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    logic        pv_we;
-    logic [1:0]  pv_bank;
-    logic [7:0]  pv_voice;
-    logic [31:0] pv_wdata;
+    logic        pe_we;
+    logic [1:0]  pe_bank;
+    logic [7:0]  pe_elem;
+    logic [31:0] pe_wdata;
     logic        swap_req;
 
-    voice_pipeline u_voice_pipeline (
+    element_pipeline u_elem_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .slot        (slot),
-        .voice_enter (voice_enter),
+        .lane_enter  (lane_enter),
         .sample_tick (sample_tick),
         .sclk        (sclk),
-        .pv_we       (pv_we),
-        .pv_bank     (pv_bank),
-        .pv_voice    (pv_voice),
-        .pv_wdata    (pv_wdata),
+        .pe_we       (pe_we),
+        .pe_bank     (pe_bank),
+        .pe_elem     (pe_elem),
+        .pe_wdata    (pe_wdata),
         .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right)
@@ -109,19 +109,17 @@ module top (
     // (The byte-protocol bring-up slave spi_slave_regs.sv remains in
     // the tree as reference; this is its successor.)
     //----------------------------------------------------------------
-    spi_bus #(
-        .AW_BACKED(11), .ID_BYTE(8'hA5)
-    ) u_spi (
+    spi_bus u_spi (
         .sclk     (sclk),
         .cs       (cs),
         .mosi     (mosi),
         .miso     (miso),
         .sysclk   (sysclk),
         .rst_n    (rst_n),
-        .pv_we    (pv_we),
-        .pv_bank  (pv_bank),
-        .pv_voice (pv_voice),
-        .pv_wdata (pv_wdata),
+        .pe_we    (pe_we),
+        .pe_bank  (pe_bank),
+        .pe_elem  (pe_elem),
+        .pe_wdata (pe_wdata),
         .swap_req (swap_req)
     );
 

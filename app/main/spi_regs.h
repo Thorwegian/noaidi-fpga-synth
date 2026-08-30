@@ -61,7 +61,7 @@ uint32_t fpga_word_read(uint16_t addr);
 bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 
 // ── Bank swap (ping-pong) ───────────────────────────────────────────
-// Per-voice writes land in the SHADOW bank; this requests the swap
+// Per-element writes land in the SHADOW bank; this requests the swap
 // (CTRL@0x0002 bit 0) and busy-waits one sample period so the swap
 // (executed at drum slot 512) has taken effect on return. Every
 // parameter change is effected through a swap — swaps are cheap

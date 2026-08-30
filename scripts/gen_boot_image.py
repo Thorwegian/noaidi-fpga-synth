@@ -1,8 +1,8 @@
 #!/usr/bin/python3
-# gen_test_patch.py — generate the FPGA bring-up test patch
+# gen_boot_image.py — generate the boot parameter image
 #
-# Writes (into rtl/voice/):
-#   test_patch_p0.hex .. test_patch_p3.hex — per-voice parameter RAM init
+# Writes (into rtl/element/):
+#   boot_p0.hex .. boot_p3.hex — per-element parameter RAM init
 #
 # (The attenuation LUT lives in gen_att_lut.py — it is a fixed synth
 # resource, not test-patch data.)
@@ -28,11 +28,11 @@
 import math
 from pathlib import Path
 
-NUM_VOICES = 256
+NUM_ELEMENTS = 256
 UNISON = 8
 POLYPHONY = 32
 
-out_dir = Path(__file__).resolve().parent.parent / "rtl" / "voice"
+out_dir = Path(__file__).resolve().parent.parent / "rtl" / "element"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------
@@ -83,7 +83,7 @@ p0 = []
 p1 = []
 p2 = []
 p3 = []
-for v in range(NUM_VOICES):
+for v in range(NUM_ELEMENTS):
     note = notes[v // UNISON]
     unison = v % UNISON
     left  = unison < (UNISON // 2)          # first 4 unisons → left
@@ -99,10 +99,10 @@ for v in range(NUM_VOICES):
     else:
         p3.append((FTYPE_LP << 17) | (DUAL << 16) | (GAIN << 8) | MUTE)
 
-for name, words in [("test_patch_p0", p0),
-                    ("test_patch_p1", p1),
-                    ("test_patch_p2", p2),
-                    ("test_patch_p3", p3)]:
+for name, words in [("boot_p0", p0),
+                    ("boot_p1", p1),
+                    ("boot_p2", p2),
+                    ("boot_p3", p3)]:
     with open(out_dir / f"{name}.hex", "w") as f:
         for w in words:
             f.write(unpack_36(w) + "\n")

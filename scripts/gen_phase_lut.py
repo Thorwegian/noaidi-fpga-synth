@@ -14,7 +14,7 @@ def midiToHz(note):
 
 script_dir = Path(__file__).resolve().parent
 
-file_path = script_dir / "../rtl/voice/phase_lut.hex"
+file_path = script_dir / "../rtl/element/phase_lut.hex"
 
 with open(file_path, "w") as file:
     for note in numpy.arange(BASE_NOTE, BASE_NOTE + 12, 12 / 1024):

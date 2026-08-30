@@ -10,15 +10,15 @@ module tb_outputs;
     logic rst_n = 0;
     always #6.781 clk = ~clk;   // ~73.728 MHz
 
-    logic sample_tick, voice_enter;
+    logic sample_tick, lane_enter;
     logic [9:0] slot;
 
     logic signed [23:0] audio_l = 24'h123456;
     logic signed [23:0] audio_r = 24'h654321;
 
-    drum #(.CYCLES(768), .NUM_VOICES(256)) u_drum (
+    drum #(.CYCLES(768), .NUM_LANES(256)) u_drum (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
-        .voice_enter(voice_enter), .slot(slot));
+        .lane_enter(lane_enter), .slot(slot));
 
     // integer cell timebase: /6, reset-aligned so sample_tick coincides
     // with a cell_tick (768 = 128 x 6)

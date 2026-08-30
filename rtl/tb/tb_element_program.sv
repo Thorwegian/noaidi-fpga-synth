@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_voice_program.sv — program a single voice OVER SPI, hear a tone.
+// tb_element_program.sv — program elements OVER SPI, hear a tone.
 //
 // The full control path under test: Mode 0 master → spi_bus per-voice
 // decode (0x2000 + v*64) → sclk write ports on the param RAMs →
@@ -13,7 +13,7 @@
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
-module tb_voice_program;
+module tb_element_program;
 
     logic clk = 0, rst_n = 0;
     always #6.781 clk = ~clk;               // ~73.728 MHz
@@ -21,37 +21,37 @@ module tb_voice_program;
     logic sclk = 0, cs = 1, mosi = 0;
     wire  miso;
 
-    logic       sample_tick, voice_enter;
+    logic       sample_tick, lane_enter;
     logic [9:0] slot;
     drum u_drum (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .voice_enter(voice_enter),
+        .sample_tick(sample_tick), .lane_enter(lane_enter),
         .cell_tick(), .slot(slot)
     );
 
-    wire        pv_we;
-    wire [1:0]  pv_bank;
-    wire [7:0]  pv_voice;
-    wire [31:0] pv_wdata;
+    wire        pe_we;
+    wire [1:0]  pe_bank;
+    wire [7:0]  pe_elem;
+    wire [31:0] pe_wdata;
     wire        swap_req;
 
     spi_bus #(.AW_BACKED(11)) u_bus (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
         .sysclk(clk), .rst_n(rst_n),
-        .pv_we(pv_we), .pv_bank(pv_bank),
-        .pv_voice(pv_voice), .pv_wdata(pv_wdata),
+        .pe_we(pe_we), .pe_bank(pe_bank),
+        .pe_elem(pe_elem), .pe_wdata(pe_wdata),
         .swap_req(swap_req)
     );
 
     logic signed [23:0] ml, mr;
-    voice_pipeline #(
-        .P0_HEX("tb/ref_patch_p0.hex"), .P1_HEX("tb/ref_patch_p1.hex"),
-        .P2_HEX("tb/ref_patch_p2.hex"), .P3_HEX("tb/ref_patch_p3.hex")
+    element_pipeline #(
+        .P0_HEX("tb/ref_boot_p0.hex"), .P1_HEX("tb/ref_boot_p1.hex"),
+        .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
     ) u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
-        .voice_enter(voice_enter), .sample_tick(sample_tick),
-        .sclk(sclk), .pv_we(pv_we), .pv_bank(pv_bank),
-        .pv_voice(pv_voice), .pv_wdata(pv_wdata), .swap_req(swap_req),
+        .lane_enter(lane_enter), .sample_tick(sample_tick),
+        .sclk(sclk), .pe_we(pe_we), .pe_bank(pe_bank),
+        .pe_elem(pe_elem), .pe_wdata(pe_wdata), .swap_req(swap_req),
         .mix_left(ml), .mix_right(mr)
     );
 

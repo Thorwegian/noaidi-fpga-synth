@@ -23,8 +23,8 @@
 // delay would round to 0 ticks and assert.
 #define ENGINE_TICK_US     1000
 
-#define PV_BASE            0x2000
-#define PV_STRIDE          64
+#define ELEM_BASE            0x2000
+#define ELEM_STRIDE          64
 
 // GAIN word with both channels at 0xFF = exact mute (0x00000000 is
 // 0 dB full volume — the classic footgun).
@@ -50,7 +50,7 @@ static inline void mark_dirty(int elem, int word)
 static void write_full_image(void)
 {
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++)
-        fpga_word_write_burst(PV_BASE + e * PV_STRIDE, s_image[e],
+        fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE, s_image[e],
                               ENGINE_WORDS_PER_ELEMENT);
 }
 
@@ -95,7 +95,7 @@ static void engine_task(void *arg)
                 int idx  = i * 32 + b;
                 int elem = idx / ENGINE_WORDS_PER_ELEMENT;
                 int word = idx % ENGINE_WORDS_PER_ELEMENT;
-                fpga_word_write(PV_BASE + elem * PV_STRIDE + word,
+                fpga_word_write(ELEM_BASE + elem * ELEM_STRIDE + word,
                                 s_image[elem][word]);
             }
         }

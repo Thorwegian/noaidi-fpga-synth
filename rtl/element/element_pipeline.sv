@@ -1,11 +1,12 @@
 //--------------------------------------------------------------------
-// voice_pipeline.sv — 256-voice SCMO pipeline ("the drum" voice section)
+// element_pipeline.sv — 256-element SCMO pipeline (the drum's lanes)
 //
-// One voice enters the pipeline every sysclk cycle for 256 cycles of
+// One element enters a lane every sysclk cycle for 256 cycles of
 // each sample period (drum slot 0..255).  Every cycle, every stage
-// processes a different voice: stage Sk at drum slot t holds the voice
-// that entered at slot t-k.  The pipeline occupies 256 + 15 - 1 = 270
-// contiguous slots (~35% of the 768-slot drum rotation).
+// processes a different element: stage Sk at drum slot t holds the
+// element that entered at slot t-k.  The pipeline occupies
+// 256 + 16 - 1 = 271 contiguous slots (~35% of the 768-slot drum
+// rotation).
 //
 // Stage map:
 //   S1  state/param RAM read data available (address issued at S0)
@@ -19,7 +20,7 @@
 //   S7  SVF2 A:  m4 = K*ic1eq2,  m5 = q1*ic1eq2     (DSP)
 //   S8  SVF2 B1: lp2/hp2 adder tree
 //   S8B SVF2 B2: m6 = K*hp2 on registered hp2        (DSP)
-//   S9  SVF2 C:  bp2, new states, filter-2 output, voice output
+//   S9  SVF2 C:  bp2, new states, filter-2 output, element output
 //   S9B attenuation decode: lin gains via LUT + barrel shift
 //   S10 attenuation multiply on registered operands      (DSP)
 //   S11 mix accumulate + state writeback
@@ -29,9 +30,9 @@
 // real silicon at 98.304 MHz (audible corruption, clean at half
 // clock) — paths nextpnr's approximate timing model passes. Rule: a
 // stage is adds/decode-only or multiply-only, never both chained.
-// S3B was the last of the class (2026-08-30): once per-voice fc gave
+// S3B was the last of the class (2026-08-30): once per-element fc gave
 // consecutive lanes different K shift amounts, chords screamed in the
-// left channel — the glitched lane after a voice boundary is a
+// left channel — the glitched lane after a group boundary is a
 // left-panned element. No known residual of this class remains.
 //
 // Number formats (design doc):
@@ -41,30 +42,30 @@
 //   pitch/fc   UQ4.10  (14-bit)
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
-// State RAM is semi dual-port: read address is issued with the voice
+// State RAM is semi dual-port: read address is issued with the element
 // entering at S0, writeback happens 15 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
-module voice_pipeline #(
-    parameter int NUM_VOICES = 256,
+module element_pipeline #(
+    parameter int NUM_ELEMENTS = synth_pkg::NUM_ELEMENTS,
     // Boot parameter images. Synthesis uses the tree's generated
-    // images; testbenches override with rtl/tb/ref_patch_* (committed
+    // images; testbenches override with rtl/tb/ref_boot_* (committed
     // fixtures) so bench expectations never depend on bench-local
-    // experiments in scripts/gen_test_patch.py.
-    parameter P0_HEX = "voice/test_patch_p0.hex",
-    parameter P1_HEX = "voice/test_patch_p1.hex",
-    parameter P2_HEX = "voice/test_patch_p2.hex",
-    parameter P3_HEX = "voice/test_patch_p3.hex"
+    // experiments in scripts/gen_boot_image.py.
+    parameter P0_HEX = "element/boot_p0.hex",
+    parameter P1_HEX = "element/boot_p1.hex",
+    parameter P2_HEX = "element/boot_p2.hex",
+    parameter P3_HEX = "element/boot_p3.hex"
 ) (
     input  logic           clk,
     input  logic           rst_n,
 
     input  logic [9:0]     slot,
-    input  logic           voice_enter,
+    input  logic           lane_enter,
     input  logic           sample_tick,
 
-    // Per-voice parameter writes from the SPI control plane.
+    // Per-element parameter writes from the SPI control plane.
     // sclk-domain write port on the param RAMs; the pipeline reads on
     // clk (sysclk) — the dual-clock BSRAM is the CDC (design doc).
     //
@@ -74,19 +75,19 @@ module voice_pipeline #(
     // click-on-sweep bug). swap_req (an sclk-domain toggle from
     // CTRL@0x0002) flips the active half at drum slot 512: the
     // pipeline is drained there (span ends ~271), so every sample's
-    // 256 voices read one consistent bank generation.
+    // 256 elements read one consistent bank generation.
     input  logic           sclk,
-    input  logic           pv_we,
-    input  logic [1:0]     pv_bank,     // 0..3 = p0..p3
-    input  logic [7:0]     pv_voice,
-    input  logic [31:0]    pv_wdata,
+    input  logic           pe_we,
+    input  logic [1:0]     pe_bank,     // 0..3 = p0..p3
+    input  logic [7:0]     pe_elem,
+    input  logic [31:0]    pe_wdata,
     input  logic           swap_req,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, updated at sample_tick
     output logic signed [23:0] mix_right
 );
 
-    localparam int VW = $clog2(NUM_VOICES);   // voice index width
+    localparam int VW = $clog2(NUM_ELEMENTS);   // element index width
 
     //----------------------------------------------------------------
     // LUT ROMs (combinational reads)
@@ -96,23 +97,23 @@ module voice_pipeline #(
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
 
     initial begin
-        $readmemh("voice/phase_lut.hex", phase_lut);
-        $readmemh("voice/svf_k_lut.hex", k_lut);
-        $readmemh("voice/att_lut.hex", att_lut);
+        $readmemh("element/phase_lut.hex", phase_lut);
+        $readmemh("element/svf_k_lut.hex", k_lut);
+        $readmemh("element/att_lut.hex", att_lut);
     end
 
     //----------------------------------------------------------------
-    // Per-voice internal state RAM — semi dual-port
-    // read address: entering voice (S0), write: 14 cycles later
+    // Per-element internal state RAM — semi dual-port
+    // read address: entering element (S0), write: 15 cycles later
     //----------------------------------------------------------------
-    reg signed [23:0] phase_ram  [0:NUM_VOICES-1];
-    reg signed [35:0] ic1eq1_ram [0:NUM_VOICES-1];
-    reg signed [35:0] ic2eq1_ram [0:NUM_VOICES-1];
-    reg signed [35:0] ic1eq2_ram [0:NUM_VOICES-1];
-    reg signed [35:0] ic2eq2_ram [0:NUM_VOICES-1];
+    reg signed [23:0] phase_ram  [0:NUM_ELEMENTS-1];
+    reg signed [35:0] ic1eq1_ram [0:NUM_ELEMENTS-1];
+    reg signed [35:0] ic2eq1_ram [0:NUM_ELEMENTS-1];
+    reg signed [35:0] ic1eq2_ram [0:NUM_ELEMENTS-1];
+    reg signed [35:0] ic2eq2_ram [0:NUM_ELEMENTS-1];
 
     //----------------------------------------------------------------
-    // Per-voice parameter RAM — SPI-writable (sclk write port below),
+    // Per-element parameter RAM — SPI-writable (sclk write port below),
     // hex init is the boot image
     //
     //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
@@ -124,20 +125,20 @@ module voice_pipeline #(
     // Doubled for ping-pong: {bank, voice} addressing, both halves
     // initialized to the boot image so an unwritten shadow is sane
     // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
-    reg [35:0] p0_ram [0:2*NUM_VOICES-1];
-    reg [35:0] p1_ram [0:2*NUM_VOICES-1];
-    reg [35:0] p2_ram [0:2*NUM_VOICES-1];
-    reg [35:0] p3_ram [0:2*NUM_VOICES-1];
+    reg [35:0] p0_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] p1_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] p2_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] p3_ram [0:2*NUM_ELEMENTS-1];
 
     initial begin
-        $readmemh(P0_HEX, p0_ram, 0, NUM_VOICES-1);
-        $readmemh(P1_HEX, p1_ram, 0, NUM_VOICES-1);
-        $readmemh(P2_HEX, p2_ram, 0, NUM_VOICES-1);
-        $readmemh(P3_HEX, p3_ram, 0, NUM_VOICES-1);
-        $readmemh(P0_HEX, p0_ram, NUM_VOICES, 2*NUM_VOICES-1);
-        $readmemh(P1_HEX, p1_ram, NUM_VOICES, 2*NUM_VOICES-1);
-        $readmemh(P2_HEX, p2_ram, NUM_VOICES, 2*NUM_VOICES-1);
-        $readmemh(P3_HEX, p3_ram, NUM_VOICES, 2*NUM_VOICES-1);
+        $readmemh(P0_HEX, p0_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P1_HEX, p1_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P2_HEX, p2_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P3_HEX, p3_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P0_HEX, p0_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P1_HEX, p1_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P2_HEX, p2_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P3_HEX, p3_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
     end
 
     //----------------------------------------------------------------
@@ -166,7 +167,7 @@ module voice_pipeline #(
             sr_d <= sr_s;
             if (sr_s != sr_d)
                 swap_pending <= 1'b1;
-            else if (swap_pending && slot == 10'd512) begin
+            else if (swap_pending && slot == synth_pkg::SWAP_SLOT[9:0]) begin
                 bank_active  <= ~bank_active;
                 swap_pending <= 1'b0;
             end
@@ -185,7 +186,7 @@ module voice_pipeline #(
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
     initial begin
-        for (i0 = 0; i0 < NUM_VOICES; i0 = i0 + 1) begin
+        for (i0 = 0; i0 < NUM_ELEMENTS; i0 = i0 + 1) begin
             phase_ram[i0]  = '0;
             ic1eq1_ram[i0] = '0;
             ic2eq1_ram[i0] = '0;
@@ -195,13 +196,13 @@ module voice_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // S0/S1 — RAM reads (address = voice entering this cycle)
+    // S0/S1 — RAM reads (address = element entering this cycle)
     //
     // Sync-only process: yosys memory inference (BSRAM read port).
     // Read data validity is gated by s1_act, so no reset is needed.
     //----------------------------------------------------------------
     logic [VW-1:0] raddr;
-    assign raddr = voice_enter ? slot[VW-1:0] : '0;
+    assign raddr = lane_enter ? slot[VW-1:0] : '0;
 
     logic        s1_act;
     logic [VW-1:0] s1_idx;
@@ -235,13 +236,13 @@ module voice_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd0) p0_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
+        if (pe_we && pe_bank == 2'd0) p0_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd1) p1_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
+        if (pe_we && pe_bank == 2'd1) p1_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd2) p2_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
+        if (pe_we && pe_bank == 2'd2) p2_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pv_we && pv_bank == 2'd3) p3_ram[{bank_shadow, pv_voice}] <= {4'b0, pv_wdata};
+        if (pe_we && pe_bank == 2'd3) p3_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];
@@ -259,7 +260,7 @@ module voice_pipeline #(
             s1_act   <= 1'b0;
             s1_idx   <= '0;
         end else begin
-            s1_act   <= voice_enter;
+            s1_act   <= lane_enter;
             s1_idx   <= slot[VW-1:0];
         end
     end
@@ -854,11 +855,11 @@ module voice_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // S9 — SVF2 stage C: bp2, new states, filter-2 output, voice out
+    // S9 — SVF2 stage C: bp2, new states, filter-2 output, element out
     //----------------------------------------------------------------
     logic        s9_act;
     logic [VW-1:0] s9_idx;
-    logic signed [17:0] s9_voice;          // Q2.16
+    logic signed [17:0] s9_elem;          // Q2.16
     logic signed [23:0] s9_phase;
     logic signed [35:0] s9_ic1eq1n, s9_ic2eq1n;
     logic signed [35:0] s9_ic1eq2n, s9_ic2eq2n;
@@ -879,7 +880,7 @@ module voice_pipeline #(
         if (!rst_n) begin
             s9_act  <= 1'b0;
             s9_idx  <= '0;
-            s9_voice <= '0;
+            s9_elem <= '0;
             s9_phase <= '0;
             s9_ic1eq1n <= '0;
             s9_ic2eq1n <= '0;
@@ -890,7 +891,7 @@ module voice_pipeline #(
         end else begin
             s9_act  <= s8b_act;
             s9_idx  <= s8b_idx;
-            s9_voice <= s8b_dual ? sat_q216(f2_36) : s8b_f1;
+            s9_elem <= s8b_dual ? sat_q216(f2_36) : s8b_f1;
             s9_phase <= s8b_phase;
             s9_ic1eq1n <= s8b_ic1eq1n;
             s9_ic2eq1n <= s8b_ic2eq1n;
@@ -916,13 +917,13 @@ module voice_pipeline #(
     //----------------------------------------------------------------
     logic        s9b_act;
     logic [VW-1:0] s9b_idx;
-    logic signed [17:0] s9b_voice;
+    logic signed [17:0] s9b_elem;
     logic signed [17:0] s9b_lin_l, s9b_lin_r;
     logic signed [23:0] s9b_phase;
     logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
 
     // Gain 0xFF is EXACT mute, not -96 dB: the log decode bottoms out at
-    // lin = 1 LSB, and 256 correlated muted voices sum 48 dB of that
+    // lin = 1 LSB, and 256 correlated muted elements sum 48 dB of that
     // right back (measured: -48 dBFS of ghost organ). A muted voice
     // must contribute zero.
     logic signed [17:0] lin_l, lin_r;
@@ -937,7 +938,7 @@ module voice_pipeline #(
         if (!rst_n) begin
             s9b_act  <= 1'b0;
             s9b_idx  <= '0;
-            s9b_voice <= '0;
+            s9b_elem <= '0;
             s9b_lin_l <= '0;
             s9b_lin_r <= '0;
             s9b_phase <= '0;
@@ -948,7 +949,7 @@ module voice_pipeline #(
         end else begin
             s9b_act  <= s9_act;
             s9b_idx  <= s9_idx;
-            s9b_voice <= s9_voice;
+            s9b_elem <= s9_elem;
             s9b_lin_l <= lin_l;
             s9b_lin_r <= lin_r;
             s9b_phase <= s9_phase;
@@ -970,8 +971,8 @@ module voice_pipeline #(
 
     logic signed [34:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9b_voice * s9b_lin_l;
-        prod_r = s9b_voice * s9b_lin_r;
+        prod_l = s9b_elem * s9b_lin_l;
+        prod_r = s9b_elem * s9b_lin_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1001,12 +1002,12 @@ module voice_pipeline #(
     //----------------------------------------------------------------
     // S11 — mix accumulate + state writeback
     //
-    // Mixdown headroom: 256 voices × Q2.16 (±2.0) needs 8 guard bits,
+    // Mixdown headroom: 256 elements × Q2.16 (±2.0) needs 8 guard bits,
     // so the accumulator is 26-bit and can never overflow even with
-    // all voices coherent and full-scale.  The output limiter (sat24)
+    // all elements coherent and full-scale.  The output limiter (sat24)
     // converts Q2.16 → Q0.24 (<< 8) and clips only in the pathological
-    // all-256-voices-aligned case; overall loudness is set by the
-    // per-voice UQ4.4 gains (boot image: -36 dB/voice → 8 unison voices
+    // all-256-elements-aligned case; overall loudness is set by the
+    // per-element UQ4.4 gains (boot image: -36 dB/element → 8 unison elements
     // aligned reach exactly 1/8 FS per note).
     //----------------------------------------------------------------
     function automatic logic signed [23:0] sat24(input logic signed [33:0] x);

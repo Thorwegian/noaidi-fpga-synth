@@ -20,11 +20,11 @@ module tb_spdif_block;
     logic rst_n = 0;
     always #5 clk = ~clk;    // ratios are all internal; absolute rate is moot
 
-    logic       sample_tick, voice_enter;
+    logic       sample_tick, lane_enter;
     logic [9:0] slot;
     drum u_drum (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .voice_enter(voice_enter), .slot(slot)
+        .sample_tick(sample_tick), .lane_enter(lane_enter), .slot(slot)
     );
 
     logic signed [23:0] al = 24'sh123456;

@@ -35,8 +35,8 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module spi_bus #(
-    parameter int   AW_BACKED = 11,          // 2048 words backed today
-    parameter [7:0] ID_BYTE   = 8'hA5
+    parameter int   AW_BACKED = synth_pkg::MAP_AW_BACKED,  // 2048 words backed
+    parameter [7:0] ID_BYTE   = synth_pkg::SPI_ID_BYTE
 ) (
     // ---- SPI side (master's clock) ----
     input  logic        sclk,
@@ -48,17 +48,17 @@ module spi_bus #(
     input  logic        sysclk,
     input  logic        rst_n,
 
-    // ---- per-voice parameter writes (sclk domain) ------------------
+    // ---- per-element parameter writes (sclk domain) ----------------
     // The memory map's 0x2000 + v*64 range, offsets 0..3 (OSC, DUTY,
     // FILTER, GAIN). Combinational decode, valid exactly on the sclk
     // edge that completes a data word — the consumer writes its RAM on
     // that same edge (there may be no further edges: a master stops
     // clocking after the last bit). Offsets 4..63 are dropped for now;
-    // per-voice read-back is TBD (reads in this range return zero).
-    output logic        pv_we,
-    output logic [1:0]  pv_bank,     // 0..3 = p0..p3
-    output logic [7:0]  pv_voice,
-    output logic [31:0] pv_wdata,
+    // per-element read-back is TBD (reads in this range return zero).
+    output logic        pe_we,
+    output logic [1:0]  pe_bank,     // 0..3 = p0..p3
+    output logic [7:0]  pe_elem,
+    output logic [31:0] pe_wdata,
 
     // CTRL@0x0002 bit 0: bank swap request. Toggle semantics
     // (sclk domain); the consumer syncs the toggle and flips its
@@ -195,15 +195,20 @@ module spi_bus #(
     wire mem_we = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                   && !is_read && in_window;
 
-    // ---- per-voice write decode (0x2000..0x5FFF, offsets 0..3) -----
-    wire        in_pv   = (addr >= 16'h2000) && (addr < 16'h6000);
-    wire [15:0] pv_rel  = addr - 16'h2000;      // 0..0x3FFF within range
-    wire [13:0] pv_off  = pv_rel[13:0];
-    assign pv_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-                      && !is_read && in_pv && (pv_off[5:2] == 4'd0);
-    assign pv_bank  = pv_off[1:0];
-    assign pv_voice = pv_off[13:6];
-    assign pv_wdata = {wbuf, rx_byte};
+    // ---- per-element write decode (MAP_ELEM_BASE + 256×64 words,
+    //      offsets 0..3) -------------------------------------------
+    localparam [15:0] ELEM_BASE = synth_pkg::MAP_ELEM_BASE;
+    localparam [15:0] ELEM_END  = synth_pkg::MAP_ELEM_BASE
+                                + 16'(synth_pkg::NUM_ELEMENTS
+                                      * synth_pkg::MAP_ELEM_STRIDE);
+    wire        in_pe   = (addr >= ELEM_BASE) && (addr < ELEM_END);
+    wire [15:0] pe_rel  = addr - ELEM_BASE;     // 0..0x3FFF within range
+    wire [13:0] pe_off  = pe_rel[13:0];
+    assign pe_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
+                      && !is_read && in_pe && (pe_off[5:2] == 4'd0);
+    assign pe_bank  = pe_off[1:0];
+    assign pe_elem  = pe_off[13:6];
+    assign pe_wdata = {wbuf, rx_byte};
 
     always_ff @(posedge sclk) begin
         if (mem_we)
@@ -215,7 +220,7 @@ module spi_bus #(
     // guaranteed (framing rule).
     initial swap_req = 1'b0;
     always_ff @(posedge sclk) begin
-        if (mem_we && (addr == 16'h0002) && rx_byte[0])
+        if (mem_we && (addr == synth_pkg::MAP_CTRL_ADDR) && rx_byte[0])
             swap_req <= ~swap_req;
     end
 

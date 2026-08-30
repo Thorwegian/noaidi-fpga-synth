@@ -1,12 +1,12 @@
 //--------------------------------------------------------------------
-// tb_voice_pipeline.sv — 256-voice SCMO pipeline testbench (iverilog)
+// tb_element_pipeline.sv — 256-element SCMO pipeline testbench (iverilog)
 //
 // Checks:
 //   1. drum cadence: sample_tick every 768 cycles, high 1 cycle
 //   2. voice span: exactly 256 voices enter per sample period
 //   3. oscillator: per-voice phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
-//   5. attenuation: s10_out == (s9_voice * lin) >>> 16, exact
+//   5. attenuation: s10_out == (s9_elem * lin) >>> 16, exact
 //   6. mixer: mix_left/right == sat24(sum of s10 outputs << 8),
 //      exactly, over a full sample period; L == R (equal gains)
 //   7. signal energy: the mix is not silent
@@ -15,7 +15,7 @@
 //--------------------------------------------------------------------
 `timescale 1ns / 1ps
 
-module tb_voice_pipeline;
+module tb_element_pipeline;
 
     //----------------------------------------------------------------
     // Clocks and reset
@@ -24,27 +24,27 @@ module tb_voice_pipeline;
     logic rst_n = 1'b0;
     always #6.781 clk = ~clk;          // ~73.728 MHz
 
-    logic        sample_tick, voice_enter;
+    logic        sample_tick, lane_enter;
     logic [9:0]  slot;
     logic signed [23:0] mix_left, mix_right;
 
-    drum #(.CYCLES(768), .NUM_VOICES(256)) u_drum (
+    drum #(.CYCLES(768), .NUM_LANES(256)) u_drum (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick),
-        .voice_enter(voice_enter),
+        .lane_enter(lane_enter),
         .slot(slot)
     );
 
-    voice_pipeline #(.NUM_VOICES(256),
+    element_pipeline #(.NUM_ELEMENTS(256),
         // committed reference fixtures — immune to bench-local edits
-        // of scripts/gen_test_patch.py regenerating the tree hexes
-        .P0_HEX("tb/ref_patch_p0.hex"), .P1_HEX("tb/ref_patch_p1.hex"),
-        .P2_HEX("tb/ref_patch_p2.hex"), .P3_HEX("tb/ref_patch_p3.hex")
+        // of scripts/gen_boot_image.py regenerating the tree hexes
+        .P0_HEX("tb/ref_boot_p0.hex"), .P1_HEX("tb/ref_boot_p1.hex"),
+        .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
     ) u_pipe (
         .clk(clk), .rst_n(rst_n),
-        .slot(slot), .voice_enter(voice_enter), .sample_tick(sample_tick),
-        .sclk(1'b0), .pv_we(1'b0), .pv_bank(2'b0),   // no SPI writes in
-        .pv_voice(8'b0), .pv_wdata(32'b0), .swap_req(1'b0),
+        .slot(slot), .lane_enter(lane_enter), .sample_tick(sample_tick),
+        .sclk(1'b0), .pe_we(1'b0), .pe_bank(2'b0),   // no SPI writes in
+        .pe_elem(8'b0), .pe_wdata(32'b0), .swap_req(1'b0),
         .mix_left(mix_left), .mix_right(mix_right)
     );
 
@@ -58,11 +58,11 @@ module tb_voice_pipeline;
     reg [16:0] al [0:15];
 
     initial begin
-        $readmemh("tb/ref_patch_p0.hex", p0);
-        $readmemh("tb/ref_patch_p2.hex", p2);
-        $readmemh("tb/ref_patch_p3.hex", p3);
-        $readmemh("voice/phase_lut.hex", pl);
-        $readmemh("voice/att_lut.hex", al);
+        $readmemh("tb/ref_boot_p0.hex", p0);
+        $readmemh("tb/ref_boot_p2.hex", p2);
+        $readmemh("tb/ref_boot_p3.hex", p3);
+        $readmemh("element/phase_lut.hex", pl);
+        $readmemh("element/att_lut.hex", al);
     end
 
     //----------------------------------------------------------------
@@ -86,8 +86,8 @@ module tb_voice_pipeline;
     // attenuation cross-check pipeline — two-deep history: S9B sits
     // between S9 and S10 (timing split), so s10 registers are driven by
     // s9 values from TWO cycles back
-    integer prev_s9_voice = 0,  prev_s9_gl = 0;
-    integer prev2_s9_voice = 0, prev2_s9_gl = 0;
+    integer prev_s9_elem = 0,  prev_s9_gl = 0;
+    integer prev2_s9_elem = 0, prev2_s9_gl = 0;
 
     function automatic integer sat24_impl(input integer x);
         // x: Q0.24-ish (unbounded); clamp to signed 24-bit
@@ -123,16 +123,16 @@ module tb_voice_pipeline;
         // values from two cycles back (S9B decode stage in between)
         if (u_pipe.s10_act) begin
             integer expect_out;
-            expect_out = (prev2_s9_voice * lin_of(prev2_s9_gl)) >>> 16;
+            expect_out = (prev2_s9_elem * lin_of(prev2_s9_gl)) >>> 16;
             if (u_pipe.s10_outl !== expect_out[17:0]) begin
                 $display("FAIL atten: voice %0d s10_outl=%h expect=%h",
                          u_pipe.s10_idx, u_pipe.s10_outl, expect_out[17:0]);
                 errors = errors + 1;
             end
         end
-        prev2_s9_voice = prev_s9_voice;
+        prev2_s9_elem = prev_s9_elem;
         prev2_s9_gl    = prev_s9_gl;
-        prev_s9_voice  = $signed(u_pipe.s9_voice);
+        prev_s9_elem  = $signed(u_pipe.s9_elem);
         prev_s9_gl     = u_pipe.s9_gl;
 
         // drum cadence + span accounting at the sample boundary
@@ -244,8 +244,8 @@ module tb_voice_pipeline;
 
     initial begin
         #40 rst_n = 1'b1;
-        $dumpfile("tb_voice_pipeline.vcd");
-        $dumpvars(0, tb_voice_pipeline);
+        $dumpfile("tb_element_pipeline.vcd");
+        $dumpvars(0, tb_element_pipeline);
     end
 
 endmodule

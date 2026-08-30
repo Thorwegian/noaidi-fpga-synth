@@ -6,36 +6,36 @@ PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
 	drum.sv \
-	voice/voice_pipeline.sv \
-	voice/osc_core.sv \
+	element/element_pipeline.sv \
+	element/osc_core.sv \
 	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
 
-# Generated LUTs / patch init
+# Generated LUTs / boot image
 LUTS = \
-	voice/phase_lut.hex \
-	voice/svf_k_lut.hex \
-	voice/att_lut.hex \
-	voice/test_patch_p0.hex \
-	voice/test_patch_p1.hex \
-	voice/test_patch_p2.hex \
-	voice/test_patch_p3.hex
+	element/phase_lut.hex \
+	element/svf_k_lut.hex \
+	element/att_lut.hex \
+	element/boot_p0.hex \
+	element/boot_p1.hex \
+	element/boot_p2.hex \
+	element/boot_p3.hex
 
 all: pack.fs
 
-voice/phase_lut.hex: ../scripts/gen_phase_lut.py
+element/phase_lut.hex: ../scripts/gen_phase_lut.py
 	python3 $<
 
-voice/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+element/svf_k_lut.hex: ../scripts/gen_svf_lut.py
 	python3 $<
 
-voice/att_lut.hex: ../scripts/gen_att_lut.py
+element/att_lut.hex: ../scripts/gen_att_lut.py
 	python3 $<
 
-voice/test_patch_p%.hex: ../scripts/gen_test_patch.py
+element/boot_p%.hex: ../scripts/gen_boot_image.py
 	python3 $<
 
 yosys.json: $(SRC) $(LUTS) Makefile
@@ -61,14 +61,14 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv voice/voice_pipeline.sv voice/osc_core.sv
-TB_VOICE = tb/tb_voice_pipeline.sv
+SIM_MOD = $(PKG) drum.sv element/element_pipeline.sv element/osc_core.sv
+TB_ELEM = tb/tb_element_pipeline.sv
 
-tb/tb_voice_pipeline.vvp: $(SIM_MOD) $(TB_VOICE) $(LUTS) Makefile
-	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_VOICE)
+tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
+	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_ELEM)
 
-sim-voice: tb/tb_voice_pipeline.vvp
-	vvp tb/tb_voice_pipeline.vvp
+sim-elem: tb/tb_element_pipeline.vvp
+	vvp tb/tb_element_pipeline.vvp
 
 SIM_OUT_MOD = $(PKG) drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
 TB_OUT = tb/tb_outputs.sv
@@ -80,22 +80,22 @@ sim-outputs: tb/tb_outputs.vvp
 	vvp tb/tb_outputs.vvp
 
 TB_SPDIF = tb/tb_spdif_block.sv
-tb/tb_spdif_block.vvp: drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	iverilog -g2012 -o $@ drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
+tb/tb_spdif_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
+	iverilog -g2012 -o $@ $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp
 
-TB_PROG = tb/tb_voice_program.sv
-tb/tb_voice_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(LUTS) Makefile
+TB_PROG = tb/tb_element_program.sv
+tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(LUTS) Makefile
 	iverilog -g2012 -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
 
-sim-prog: tb/tb_voice_program.vvp
-	vvp tb/tb_voice_program.vvp
+sim-prog: tb/tb_element_program.vvp
+	vvp tb/tb_element_program.vvp
 
 TB_BUS = tb/tb_spi_bus.sv
-tb/tb_spi_bus.vvp: spi/spi_bus.sv $(TB_BUS) Makefile
-	iverilog -g2012 -o $@ spi/spi_bus.sv $(TB_BUS)
+tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
+	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
 
 sim-bus: tb/tb_spi_bus.vvp
 	vvp tb/tb_spi_bus.vvp
@@ -107,7 +107,7 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
-sim: sim-voice sim-outputs sim-spdif sim-spi sim-bus sim-prog
+sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus sim-prog
 
 clean:
-	rm -rf *.log *.json *.fs voice/svf_k_lut.hex
+	rm -rf *.log *.json *.fs element/svf_k_lut.hex

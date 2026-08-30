@@ -18,7 +18,7 @@ repo. Keep this file updated when the architecture changes.
   (yosys `synth_gowin` → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
 - Simulation: `cd rtl && make sim` runs the iverilog testbenches:
-  `sim-voice` (voice pipeline: drum cadence, phase-delta math, SVF dynamics,
+  `sim-elem` (element pipeline: drum cadence, phase-delta math, SVF dynamics,
   attenuation math, mix == sum of voices, energy) and `sim-outputs` (decodes the
   SPDIF cell stream for preamble/biphase validity and checks I2S clock rates).
 
@@ -70,25 +70,25 @@ repo. Keep this file updated when the architecture changes.
 
 - `rtl/drum.sv`: the sole timebase. 10-bit slot counter, 768 sysclk = 1 sample
   (96 kHz at 73.728 MHz), SPDIF cell every 6 slots. `sample_tick` at slot 0,
-  `voice_enter` for slots 0..255.
-- `rtl/voice/voice_pipeline.sv`: 16-stage pipeline × 256 elements, one element
+  `lane_enter` for slots 0..255.
+- `rtl/element/element_pipeline.sv`: 16-stage pipeline × 256 elements, one element
   enters per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator →
   S3B K-shift register (timing split) → S4–S6 SVF1 (S5B) → S7–S9 SVF2 (S8B) →
   S9B gain decode → S10 attenuation multiply → S11 mix accumulate + writeback.
 - Number formats: phase UQ0.24, audio Q2.16 (18-bit), SVF states Q8.28 (36-bit),
   pitch/cutoff UQ4.10 (14-bit), gain UQ4.4 (log: 6 dB per int step, 0.375 dB per
   frac step; 0xFF ≈ −96 dB ≈ mute).
-- Memories (BSRAM): per-voice state RAMs are semi dual-port — read at S0,
+- Memories (BSRAM): per-element state RAMs are semi dual-port — read at S0,
   writeback 15 cycles later (addresses never collide). Param RAMs are read-only
   ROMs this milestone. LUT ROMs: `phase_lut.hex`, `svf_k_lut.hex`, `att_lut.hex`.
 - Mixdown: 26-bit accumulator (8 guard bits = 256× coherent headroom) + `sat24`
-  limiter to Q0.24. Loudness set by per-voice gains.
+  limiter to Q0.24. Loudness set by per-element gains.
 - Outputs: `i2s_tx.sv` is a self-contained I2S master (BCLK = sysclk/16,
   LRCLK = /64) that latches audio on `sample_tick`. `spdif_tx.sv` consumes
   `sample_tick`. `audio_clock.sv` was deleted (its timing now lives in drum +
   i2s_tx).
-- The boot parameter image is generated (`scripts/gen_test_patch.py` →
-  `voice/test_patch_p{0..3}.hex`; C-major chord across octaves, 32 notes × 8
+- The boot parameter image is generated (`scripts/gen_boot_image.py` →
+  `element/boot_p{0..3}.hex`; C-major chord across octaves, 32 notes × 8
   unison, hard-panned by unison index with inter-channel detune, −36 dB/voice);
   parameters are then live over SPI (write-shadow + bank swap).
 - The pipeline has NO concept of notes/unison — 256 interchangeable voice slots;
@@ -161,7 +161,7 @@ approximate timing model and failed on silicon as data-dependent,
 clock-speed-dependent audio corruption (S5B/S8B: SVF 'rain' crackle;
 S9B: one-channel attenuation distortion; S3B: left-channel chord
 "screaming" — the K barrel shift into the S4 multiply, exposed when
-per-voice fc gave consecutive lanes different shift amounts; fifth:
+per-element fc gave consecutive lanes different shift amounts; fifth:
 soft filtered crackle on chords even after S3B — the 36×36 MULT
 cascade itself, register-to-register, once varied K toggled its whole
 partial-product tree). Diagnosis method that worked: sim-vs-silicon
