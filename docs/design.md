@@ -177,6 +177,14 @@ Being redesigned (2026-08-30, planning with Thor). The generic
   sinks. Bus 0 = hardwired zero. The CV table and the buses unify into
   one bus memory; per-note modulation = a per-note bus. The pointers
   live in the shared profile (stop), not per element.
+- **Chaining** (Thor raised, agent's proposed discipline): a combiner
+  is a producer that reads buses and writes a bus, so chains already
+  exist. One rule bounds the complexity: producers execute in table
+  order once per sample and read whatever their sources hold at their
+  slot. Ordered chains are zero-lag; unordered or cyclic ones get a
+  well-defined one-sample (10 µs) delay — no hardware graph
+  validation. Graph bookkeeping is firmware's. Shared subexpressions
+  computed once = the optimization, for free.
 - **One-to-many by construction** (Thor: SPI bandwidth demands it):
   elements reference shared registers instead of owning copies. An
   element carries a small **profile index**; bus slot configs (source
