@@ -46,6 +46,7 @@ typedef struct {
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
+static int16_t  s_bend;    // pitch bend as UQ4.10 LSB offset, ±2 semitones
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
@@ -78,10 +79,19 @@ static uint16_t voice_fc(uint8_t note)
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
+// One element's OSC word: note + church-organ detune + pitch bend,
+// clamped to the 14-bit UQ4.10 range.
+static uint32_t elem_osc_word(uint8_t note, int u)
+{
+    int32_t pitch = (int32_t)midi_to_pitch(note) + DETUNE[u] + s_bend;
+    if (pitch < 0)      pitch = 0;
+    if (pitch > 0x3FFF) pitch = 0x3FFF;
+    return (uint32_t)pitch | (WAVE_SAW << 14);
+}
+
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
-    uint16_t base = midi_to_pitch(note);
-    uint16_t fc   = voice_fc(note);
+    uint16_t fc = voice_fc(note);
 
     // Velocity → gain: vel 127 = GAIN_BASE, softer notes attenuate in
     // 0.375 dB steps, up to ~23.6 dB at vel 1. Crude but audible;
@@ -91,14 +101,11 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
         uint8_t  elem  = (uint8_t)(v * ELEMS_PER_VOICE + u);
-        int32_t  pitch = (int32_t)base + DETUNE[u];
-        if (pitch < 0)      pitch = 0;
-        if (pitch > 0x3FFF) pitch = 0x3FFF;
         bool left = u < (ELEMS_PER_VOICE / 2);
         uint32_t l = left ? gain : GAIN_MUTE;
         uint32_t r = left ? GAIN_MUTE : gain;
 
-        send(elem, 0, (uint32_t)pitch | (WAVE_SAW << 14));
+        send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
         send(elem, 2, Q1_ONE | fc);
         send(elem, 3, (r << 8) | l);
@@ -156,6 +163,26 @@ static void wheel_update(uint8_t val)
     }
 }
 
+// Pitch wheel → OSC words of every active voice. ±2 semitones: the
+// UQ4.10 fraction has 1024/12 ≈ 85.3 LSB per semitone, so the 14-bit
+// bend (center 8192) maps via (bend-8192)/48 → ±170 LSB. Cutoff stays
+// keyed to the unbent note for now (key tracking that must follow
+// bends rides a CV cell later, per the memory map).
+static void bend_update(uint16_t bend14)
+{
+    int16_t off = (int16_t)(((int32_t)bend14 - 8192) / 48);
+    if (off == s_bend)
+        return;
+    s_bend = off;
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (!s_voices[v].active)
+            continue;
+        for (int u = 0; u < ELEMS_PER_VOICE; u++)
+            send((uint8_t)(v * ELEMS_PER_VOICE + u), 0,
+                 elem_osc_word(s_voices[v].note, u));
+    }
+}
+
 static void note_off(uint8_t note)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
@@ -181,6 +208,9 @@ static void handle_midi(const midi_message_t *m)
     case 0xB0:
         if (m->data[0] == 1)          // CC1: mod wheel → cutoff
             wheel_update(m->data[1]);
+        break;
+    case 0xE0:                        // pitch wheel, 14-bit
+        bend_update((uint16_t)(((uint16_t)m->data[1] << 7) | m->data[0]));
         break;
     default:
         break;
