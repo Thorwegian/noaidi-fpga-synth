@@ -83,7 +83,7 @@ slots are reserved for LFOs, CV read-back and future work).
 keystroke = 256. The pipeline knows nothing of that grouping — 256
 interchangeable voice slots; unison is a firmware convention.
 
-**Per-voice chain** (12 stages today): state/param RAM read → LUT reads
+**Per-element chain** (16 stages today): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12/24 dB via single/dual
 mode — a separate filter per unison voice costs nothing in cycles) →

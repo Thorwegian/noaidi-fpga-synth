@@ -11,6 +11,7 @@
 //   S1  state/param RAM read data available (address issued at S0)
 //   S2  issue phase-delta + SVF-K LUT reads
 //   S3  LUT data → delta, K, q1; phase_next; oscillator waveform
+//   S3B register the barrel-shifted K / osc sample / phase_next
 //   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
 //   S5  SVF1 B1: lp1/hp1 adder tree
 //   S5B SVF1 B2: m3 = K*hp1 on registered hp1        (DSP)
@@ -23,14 +24,15 @@
 //   S10 attenuation multiply on registered operands      (DSP)
 //   S11 mix accumulate + state writeback
 //
-// S5B/S8B/S9B exist because chaining adder trees or LUT+barrel-shift
-// decodes into a DSP multiply in one cycle violated setup on real
-// silicon at 98.304 MHz (audible corruption, clean at half clock) —
-// paths nextpnr's approximate timing model passes. Rule: a stage is
-// adds/decode-only or multiply-only, never both chained. Known
-// same-class residual: S3's k barrel shift feeds the S4 multiplies
-// combinationally; it has not audibly failed, and is the next split if
-// any artifact survives.
+// S3B/S5B/S8B/S9B exist because chaining adder trees or LUT+barrel-
+// shift decodes into a DSP multiply in one cycle violated setup on
+// real silicon at 98.304 MHz (audible corruption, clean at half
+// clock) — paths nextpnr's approximate timing model passes. Rule: a
+// stage is adds/decode-only or multiply-only, never both chained.
+// S3B was the last of the class (2026-08-30): once per-voice fc gave
+// consecutive lanes different K shift amounts, chords screamed in the
+// left channel — the glitched lane after a voice boundary is a
+// left-panned element. No known residual of this class remains.
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
@@ -40,7 +42,7 @@
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
 // State RAM is semi dual-port: read address is issued with the voice
-// entering at S0, writeback happens 14 cycles later — the read
+// entering at S0, writeback happens 15 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
@@ -71,7 +73,7 @@ module voice_pipeline #(
     // so a read and a write can never collide on one address (the
     // click-on-sweep bug). swap_req (an sclk-domain toggle from
     // CTRL@0x0002) flips the active half at drum slot 512: the
-    // pipeline is drained there (span ends ~270), so every sample's
+    // pipeline is drained there (span ends ~271), so every sample's
     // 256 voices read one consistent bank generation.
     input  logic           sclk,
     input  logic           pv_we,
@@ -395,6 +397,56 @@ module voice_pipeline #(
     );
 
     //----------------------------------------------------------------
+    // S3B — register the shifted K, oscillator sample and phase add,
+    // so S4's multiplies see registered operands only (the silicon
+    // timing rule: never chain a barrel shift into a DSP multiply)
+    //----------------------------------------------------------------
+    logic        s3b_act;
+    logic [VW-1:0] s3b_idx;
+    logic signed [35:0] s3b_k;
+    logic signed [17:0] s3b_osc;
+    logic signed [23:0] s3b_phase;        // phase_next (writeback)
+    logic signed [17:0] s3b_q1;
+    logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
+    logic [7:0]  s3b_gl, s3b_gr;
+    logic        s3b_dual;
+    logic [1:0]  s3b_ftype;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s3b_act  <= 1'b0;
+            s3b_idx  <= '0;
+            s3b_k    <= '0;
+            s3b_osc  <= '0;
+            s3b_phase <= '0;
+            s3b_q1   <= '0;
+            s3b_ic1eq1 <= '0;
+            s3b_ic2eq1 <= '0;
+            s3b_ic1eq2 <= '0;
+            s3b_ic2eq2 <= '0;
+            s3b_gl   <= '0;
+            s3b_gr   <= '0;
+            s3b_dual <= 1'b0;
+            s3b_ftype <= '0;
+        end else begin
+            s3b_act  <= s3_act;
+            s3b_idx  <= s3_idx;
+            s3b_k    <= k;
+            s3b_osc  <= osc_sample;
+            s3b_phase <= s3_phase + delta;
+            s3b_q1   <= s3_q1;
+            s3b_ic1eq1 <= s3_ic1eq1;
+            s3b_ic2eq1 <= s3_ic2eq1;
+            s3b_ic1eq2 <= s3_ic1eq2;
+            s3b_ic2eq2 <= s3_ic2eq2;
+            s3b_gl   <= s3_gl;
+            s3b_gr   <= s3_gr;
+            s3b_dual <= s3_dual;
+            s3b_ftype <= s3_ftype;
+        end
+    end
+
+    //----------------------------------------------------------------
     // S4 — SVF1 stage A: m1 = K*ic1eq1, m2 = q1*ic1eq1  (DSP)
     //----------------------------------------------------------------
     logic        s4_act;
@@ -429,22 +481,22 @@ module voice_pipeline #(
             s4_dual <= 1'b0;
             s4_ftype <= '0;
         end else begin
-            s4_act  <= s3_act;
-            s4_idx  <= s3_idx;
-            s4_m1   <= k * s3_ic1eq1;
-            s4_m2   <= (s3_q1 <<< 12) * s3_ic1eq1;   // Q2.16 → Q8.28
-            s4_osc  <= osc_sample;
-            s4_phase <= s3_phase + delta;
-            s4_k    <= k;
-            s4_q1   <= s3_q1;
-            s4_ic1eq1 <= s3_ic1eq1;
-            s4_ic2eq1 <= s3_ic2eq1;
-            s4_ic1eq2 <= s3_ic1eq2;
-            s4_ic2eq2 <= s3_ic2eq2;
-            s4_gl   <= s3_gl;
-            s4_gr   <= s3_gr;
-            s4_dual <= s3_dual;
-            s4_ftype <= s3_ftype;
+            s4_act  <= s3b_act;
+            s4_idx  <= s3b_idx;
+            s4_m1   <= s3b_k * s3b_ic1eq1;
+            s4_m2   <= (s3b_q1 <<< 12) * s3b_ic1eq1;   // Q2.16 → Q8.28
+            s4_osc  <= s3b_osc;
+            s4_phase <= s3b_phase;
+            s4_k    <= s3b_k;
+            s4_q1   <= s3b_q1;
+            s4_ic1eq1 <= s3b_ic1eq1;
+            s4_ic2eq1 <= s3b_ic2eq1;
+            s4_ic1eq2 <= s3b_ic1eq2;
+            s4_ic2eq2 <= s3b_ic2eq2;
+            s4_gl   <= s3b_gl;
+            s4_gr   <= s3b_gr;
+            s4_dual <= s3b_dual;
+            s4_ftype <= s3b_ftype;
         end
     end
 

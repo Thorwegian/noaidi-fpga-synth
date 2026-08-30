@@ -70,15 +70,15 @@ repo. Keep this file updated when the architecture changes.
 
 - `rtl/drum.sv`: the sole timebase. 10-bit slot counter, 1024 sysclk = 1 sample
   (96 kHz at 98.304 MHz). `sample_tick` at slot 0, `voice_enter` for slots 0..255.
-- `rtl/voice/voice_pipeline.sv`: 15-stage pipeline × 256 voices, one voice enters
-  per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator → S4–S6 SVF1
-  (S5B timing split) → S7–S9 SVF2 (S8B) → S9B gain decode → S10 attenuation
-  multiply → S11 mix accumulate + state writeback.
+- `rtl/voice/voice_pipeline.sv`: 16-stage pipeline × 256 elements, one element
+  enters per cycle: S1 state/param RAM read → S2 LUT reads → S3 oscillator →
+  S3B K-shift register (timing split) → S4–S6 SVF1 (S5B) → S7–S9 SVF2 (S8B) →
+  S9B gain decode → S10 attenuation multiply → S11 mix accumulate + writeback.
 - Number formats: phase UQ0.24, audio Q2.16 (18-bit), SVF states Q8.28 (36-bit),
   pitch/cutoff UQ4.10 (14-bit), gain UQ4.4 (log: 6 dB per int step, 0.375 dB per
   frac step; 0xFF ≈ −96 dB ≈ mute).
 - Memories (BSRAM): per-voice state RAMs are semi dual-port — read at S0,
-  writeback 14 cycles later (addresses never collide). Param RAMs are read-only
+  writeback 15 cycles later (addresses never collide). Param RAMs are read-only
   ROMs this milestone. LUT ROMs: `phase_lut.hex`, `svf_k_lut.hex`, `att_lut.hex`.
 - Mixdown: 26-bit accumulator (8 guard bits = 256× coherent headroom) + `sat24`
   limiter to Q0.24. Loudness set by per-voice gains.
@@ -155,19 +155,22 @@ two failure modes that look identical:
 
 On this part at 98.304 MHz, a pipeline stage may be decode/adds-only or
 DSP-multiply-only — NEVER chain an adder tree or a LUT+barrel-shift
-decode into a multiply in one cycle. Three such chains passed nextpnr's
+decode into a multiply in one cycle. Four such chains passed nextpnr's
 approximate timing model and failed on silicon as data-dependent,
 clock-speed-dependent audio corruption (S5B/S8B: SVF 'rain' crackle;
-S9B: one-channel attenuation distortion). Diagnosis method that worked:
-sim-vs-silicon A/B (identical RTL+hexes rendered clean in iverilog) plus
-the half-clock listen (pll_clk O0=49.152M, no -s — corruption vanishing
-at half clock proves setup timing). Do not trust an STA PASS on such
-paths; split them.
+S9B: one-channel attenuation distortion; S3B: left-channel chord
+"screaming" — the K barrel shift into the S4 multiply, exposed only
+when per-voice fc gave consecutive lanes different shift amounts,
+2026-08-30). Diagnosis method that worked: sim-vs-silicon A/B
+(identical RTL+hexes rendered clean in iverilog) plus the half-clock
+listen (pll_clk O0=49.152M, no -s — corruption vanishing at half clock
+proves setup timing). Do not trust an STA PASS on such paths; split
+them. No known chain of this class remains.
 
 **VERIFIED 2026-08-29 (bench)**: working SVF at low cutoff (fc=0x1000,
 muffled chord, both channels clean) and clean SPDIF, confirmed at full
-SYSCLK and at SYSCLK/2; ESP32 SPI test still OK/PASS. Pipeline depth 15,
-span 270/1024 slots.
+SYSCLK and at SYSCLK/2; ESP32 SPI test still OK/PASS. Pipeline depth 16,
+span 271/1024 slots.
 
 **NOT verified**: I2S. It builds and its clock-rate sim passes, but no
 ear or scope has checked it in a long while — regression state unknown.
