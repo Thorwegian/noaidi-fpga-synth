@@ -5,7 +5,7 @@
 // decode (0x2000 + v*64) → sclk write ports on the param RAMs →
 // sysclk pipeline reads → audible mix.
 //
-//   1. boot patch plays (fixtures) — mix is loud
+//   1. boot image plays (fixtures) — mix is loud
 //   2. mute all 256 voices via 256 GAIN writes  → mix ~silent
 //   3. program voice 0: A4 saw, open filter, −12 dB per side
 //   4. verify: stable peak in range, and ~440 Hz periodicity
@@ -128,10 +128,10 @@ module tb_voice_program;
 
         observe(50);
         if (peak < 100000) begin
-            $display("FAIL: boot patch silent (peak=%0d)", peak);
+            $display("FAIL: boot image silent (peak=%0d)", peak);
             errors = errors + 1;
         end else
-            $display("boot patch playing, peak=%0d", peak);
+            $display("boot image playing, peak=%0d", peak);
 
         // mute all into the shadow, flip, then mute the other bank too
         // (a flip swaps the WHOLE bank — firmware keeps both populated)

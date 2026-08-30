@@ -94,7 +94,7 @@ flowchart LR
   combinational path runs between domains, and there is no metastability
   on the data path. It does **not** make a read-during-write coherent —
   a word read on sysclk while it is being written on sclk can return old
-  or new data for that access. That is precisely why patch data is
+  or new data for that access. That is precisely why parameter data is
   ping-ponged (atomicity is the bank swap's job, not the RAM's), and why
   the bank-select bit is the one signal in the whole scheme that genuinely
   has to be synchronised.
@@ -107,17 +107,22 @@ flowchart LR
 - **Transaction format** (proposal): 1 command byte + 2 address bytes +
   4 data bytes per word. Command: `[7] R/W`, `[6] auto-increment (burst)`,
   `[5:0] reserved`. A burst streams words while CS is low.
-- **Atomicity**: per-voice register writes are independent; patch-level
+- **Atomicity**: per-voice register writes are independent; multi-word
   atomicity comes from the ping-pong bank swap, not from locking registers.
-- **Ping-pong** (design doc): *patch* data (OSC, DUTY, FILTER, GAIN,
-  ADSR, ROUTE, LFO params) is double-buffered, half-active/half-shadow;
-  the map exposes the active bank only. Writes always land in the shadow
-  half (the sclk-side bank select is a synced complement of the active
+- **Ping-pong**: parameter data (OSC, DUTY, FILTER, GAIN, ADSR, ROUTE,
+  LFO params) is double-buffered, half-active/half-shadow; the map
+  exposes the active bank only. Writes always land in the shadow half
+  (the sclk-side bank select is a synced complement of the active
   bank). A `CTRL` swap request executes once, at the next sample
   boundary, in an idle drum slot where no voice reads occur — that is
   the one critical cycle, and nothing but the bank pointer changes in
-  it. `STATUS` reports swap completion. *Live* data (GATE, CV cells,
-  system regs) is not ping-ponged.
+  it. `STATUS` reports swap completion. There is no "patch" vs "live"
+  parameter class (correction from Thor, design doc): swaps run
+  thousands of times per second, everything is live, and every change
+  is effected through a swap. Whether GATE and CV cells also route
+  through the banks or stay single-banked is an implementation choice
+  per section, made when each is built — the swap mechanism is not the
+  bottleneck.
 
 ## Top-level map
 
@@ -343,8 +348,8 @@ Notes:
 6. **Integrity**: no CRC — trust the short link. Justified: the wiring
    was measured error-free at 40 MHz, the ESP32-C3's maximum, so the
    link has margin to spare at any rate the design would actually use.
-7. **Ping-pong**: from the start for patch data, swapped at the sample
-   boundary in an idle slot; live data single-banked. Risk note (2026-08-28,
+7. **Ping-pong**: from the start for parameter data, swapped at the
+   sample boundary in an idle slot. Risk note (2026-08-28,
    partially retired): yosys *does* infer dual-clock BSRAM and the
    ping-pong bank-select bit does not disturb it — the variant maps to
    the same 4 blocks. What remains open is not inference but

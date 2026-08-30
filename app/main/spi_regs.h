@@ -60,14 +60,16 @@ void     fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
 uint32_t fpga_word_read(uint16_t addr);
 bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 
-// ── Patch bank flip (ping-pong) ─────────────────────────────────────
+// ── Bank swap (ping-pong) ───────────────────────────────────────────
 // Per-voice writes land in the SHADOW bank; this requests the swap
-// (CTRL@0x0002 bit 0) and busy-waits one sample period so the flip
-// (executed at drum slot 512) has taken effect on return.
-// Discipline: a flip swaps the WHOLE bank — keep both halves
-// populated. After a flip the new shadow holds the previous
-// generation; rewrite what you change before the next flip.
-void     fpga_patch_flip(void);
+// (CTRL@0x0002 bit 0) and busy-waits one sample period so the swap
+// (executed at drum slot 512) has taken effect on return. Every
+// parameter change is effected through a swap — swaps are cheap
+// (thousands per second), there is no "live" write path around them.
+// Discipline: a swap flips the WHOLE bank — keep both halves
+// populated. After a swap the new shadow holds the previous
+// generation; rewrite what you change before the next swap.
+void     fpga_swap(void);
 
 #ifdef __cplusplus
 }

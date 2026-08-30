@@ -7,8 +7,8 @@
 // Per-board one-time setup via the BL616 console:
 //   pll_clk O0=98.304M -s
 // (done on this board 2026-08-29). A board without that setup has a
-// dead pin 10 — the crystal/rPLL fallback lives in this branch's git
-// history if ever needed again.
+// dead pin 10 — that is a setup error: program the clock chip.
+// A gateware PLL is never a valid workaround.
 
 IO_LOC  "sysclk" 10;
 IO_PORT "sysclk" IO_TYPE=LVCMOS33;

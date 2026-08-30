@@ -46,10 +46,10 @@
 `default_nettype none
 module voice_pipeline #(
     parameter int NUM_VOICES = 256,
-    // Patch ROM init files. Synthesis uses the tree's generated patch;
-    // testbenches override with rtl/tb/ref_patch_* (committed fixtures)
-    // so bench expectations never depend on bench-local experiments in
-    // scripts/gen_test_patch.py.
+    // Boot parameter images. Synthesis uses the tree's generated
+    // images; testbenches override with rtl/tb/ref_patch_* (committed
+    // fixtures) so bench expectations never depend on bench-local
+    // experiments in scripts/gen_test_patch.py.
     parameter P0_HEX = "voice/test_patch_p0.hex",
     parameter P1_HEX = "voice/test_patch_p1.hex",
     parameter P2_HEX = "voice/test_patch_p2.hex",
@@ -111,7 +111,7 @@ module voice_pipeline #(
 
     //----------------------------------------------------------------
     // Per-voice parameter RAM — SPI-writable (sclk write port below),
-    // hex init is the boot patch
+    // hex init is the boot image
     //
     //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
     //   p1[23:0]  duty  Q0.24 signed
@@ -120,7 +120,7 @@ module voice_pipeline #(
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
     // Doubled for ping-pong: {bank, voice} addressing, both halves
-    // initialized to the boot patch so an unwritten shadow is sane
+    // initialized to the boot image so an unwritten shadow is sane
     // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
     reg [35:0] p0_ram [0:2*NUM_VOICES-1];
     reg [35:0] p1_ram [0:2*NUM_VOICES-1];
@@ -951,7 +951,7 @@ module voice_pipeline #(
     // all voices coherent and full-scale.  The output limiter (sat24)
     // converts Q2.16 → Q0.24 (<< 8) and clips only in the pathological
     // all-256-voices-aligned case; overall loudness is set by the
-    // per-voice UQ4.4 gains (test patch: -36 dB/voice → 8 unison voices
+    // per-voice UQ4.4 gains (boot image: -36 dB/voice → 8 unison voices
     // aligned reach exactly 1/8 FS per note).
     //----------------------------------------------------------------
     function automatic logic signed [23:0] sat24(input logic signed [33:0] x);

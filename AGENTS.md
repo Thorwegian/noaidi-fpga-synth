@@ -86,12 +86,12 @@ repo. Keep this file updated when the architecture changes.
   LRCLK = /64) that latches audio on `sample_tick`. `spdif_tx.sv` consumes
   `sample_tick`. `audio_clock.sv` was deleted (its timing now lives in drum +
   i2s_tx).
-- Parameters are a hardcoded test patch (`scripts/gen_test_patch.py` →
+- The boot parameter image is generated (`scripts/gen_test_patch.py` →
   `voice/test_patch_p{0..3}.hex`; C-major chord across octaves, 32 notes × 8
-  unison, hard-panned by unison index with inter-channel detune, −36 dB/voice).
-  SPI control banks are TBD.
+  unison, hard-panned by unison index with inter-channel detune, −36 dB/voice);
+  parameters are then live over SPI (write-shadow + bank swap).
 - The pipeline has NO concept of notes/unison — 256 interchangeable voice slots;
-  unison/note assignment is a patch convention (and later, voice allocation).
+  unison/note assignment is a firmware convention (voice allocation).
 
 ## Bring-up on a NEW Tang board — read this first
 
@@ -135,12 +135,13 @@ two failure modes that look identical:
   trustworthy AMPLITUDE but garbage TIMING — fine for "is the pin
   driven", useless above audio rates. Install sigrok + fx2lafw firmware
   for real captures.
-- **FULL MAINLINE VERIFIED 2026-08-29**: the 256-voice C-major patch is
-  audible over SPDIF (church organ), liveness LED blinks 1.5 Hz, ESP32
+- **FULL MAINLINE VERIFIED 2026-08-29**: the 256-voice C-major boot image
+  is audible over SPDIF (church organ), liveness LED blinks 1.5 Hz, ESP32
   SPI test passes — on the new board with its MS5351 configured. The
-  earlier distortion report was made against the fractional-DDS build's
-  square-wave tone and is superseded. cell_dds stays as the fallback
-  for boards whose MS5351 is not yet configured.
+  earlier distortion report was made against the (since removed)
+  fractional-DDS build's square-wave tone and is superseded. Per Thor:
+  a gateware PLL is never a valid workaround — an unconfigured MS5351 is
+  a setup error; program the clock chip.
 - USB serial map on the dev host: /dev/ttyACM0 = ESP32-C3 console;
   /dev/ttyUSB1 = FPGA UART bridge — SILENT unless the loaded bitstream
   drives a UART (none of the diagnostic tops do; silence there is not a

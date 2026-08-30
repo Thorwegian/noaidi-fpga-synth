@@ -35,9 +35,10 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 - Per-board one-time setup: `pll_clk O0=98.304M -s` on the BL616
   console (Ctrl+X Ctrl+C Enter at 115200). A board without this has a
   dead pin 10 — see AGENTS.md bring-up notes.
-- Fallback for an unconfigured board: 27 MHz crystal (pin 4) + rPLL +
-  `cell_dds` fractional cell timebase gives exact 96.000 kHz with
-  0.125 UI cell jitter. In-tree, sim-verified, out of the build.
+- **A gateware PLL is never a valid workaround.** A dead pin 10 means
+  the clock chip wasn't programmed — fix the board setup, not the
+  gateware. (An earlier crystal+rPLL+DDS fallback was removed; it lives
+  only in git history.)
 - **The drum is the sole timebase**: one 1024-slot counter yields the
   sample tick, the 256 voice-entry slots, and the SPDIF cell tick
   (slot[2:0]==0). No other audio-rate counter exists in the design.
@@ -95,10 +96,12 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   *semi* dual-port infers (`DPX9B`); **true** dual-port does not — so
   SPI read-back is serviced by the drum in an idle slot, never by a
   second RAM port.
-- Patch data is ping-pong double-buffered (half-active/half-shadow in
-  the same blocks), swapped at a sample boundary; live data (GATE, CV
-  cells) is single-banked. Atomicity is the swap's job — BSRAM does not
-  give read-during-write coherency.
+- Parameter data is ping-pong double-buffered (half-active/half-shadow
+  in the same blocks), swapped at a sample boundary on request. There
+  is no "patch" vs "live" class distinction: swaps are cheap (thousands
+  per second) and **every change is effected through a swap**.
+  Atomicity is the swap's job — BSRAM does not give read-during-write
+  coherency.
 - Bring-up today ✅: a 16-word byte-wide register file
   (`spi_slave_regs.sv`) with the byte-boundary lessons baked in; it is
   the protocol's ancestor, not its final form.
@@ -135,8 +138,8 @@ part's 828 kbit BSRAM and would need external memory.
 
 ## Verified state (2026-08-29)
 
-256-voice C-major test patch audible over SPDIF, LED liveness, ESP32
-SPI tests passing, all five testbenches green, timing closed at
+256-voice C-major boot image audible over SPDIF, LED liveness, ESP32
+SPI tests passing, all testbenches green, timing closed at
 98.304 MHz. Branch `spdif-minimal`.
 
 ## Corrections and thoughts from Thor

@@ -40,12 +40,8 @@ module spdif_tx (
     input  wire signed [23:0] audio_r,
     output reg              spdif_out
 );
-    // The cell timebase is provided by the caller, so the same encoder
-    // serves both clocking schemes:
-    //   integer:    sysclk = 98.304 MHz, cell_tick = /8 (12.288 MHz)
-    //   fractional: any sysclk, cell_tick from a DDS accumulator whose
-    //               AVERAGE is the exact cell rate (cells then jitter
-    //               ±1 sysclk — within the IEC 60958 receiver mask)
+    // The cell timebase is provided by the caller:
+    //   sysclk = 98.304 MHz, cell_tick = /8 (12.288 MHz), from drum.sv.
     // Requirements: sample_tick must coincide with a cell_tick, and
     // there must be exactly 128 cell periods per sample period.
 

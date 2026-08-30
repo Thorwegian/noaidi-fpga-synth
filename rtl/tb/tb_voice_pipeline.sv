@@ -49,7 +49,7 @@ module tb_voice_pipeline;
     );
 
     //----------------------------------------------------------------
-    // Patch/LUT images (mirror of the FPGA init files)
+    // Parameter/LUT images (mirror of the FPGA init files)
     //----------------------------------------------------------------
     reg [35:0] p0 [0:255];
     reg [35:0] p2 [0:255];
@@ -96,7 +96,7 @@ module tb_voice_pipeline;
         return x;
     endfunction
 
-    // delta for voice v from patch + LUT (mirror of S3 datapath)
+    // delta for voice v from params + LUT (mirror of S3 datapath)
     function automatic integer expect_delta(input integer v);
         integer pitch, oct, idx;
         integer d;
@@ -164,7 +164,7 @@ module tb_voice_pipeline;
         end
 
         // latch check: one cycle after the tick, mix regs hold the
-        // latched sums (L and R independently — the patch is hard-panned)
+        // latched sums (L and R independently — the boot image is hard-panned)
         if (slot == 1 && period >= 2) begin
             if (mix_left !== exp_lat_l[23:0]) begin
                 $display("FAIL mix L: period %0d mix=%h expect=%h",

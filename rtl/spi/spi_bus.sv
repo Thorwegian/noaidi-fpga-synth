@@ -60,7 +60,7 @@ module spi_bus #(
     output logic [7:0]  pv_voice,
     output logic [31:0] pv_wdata,
 
-    // CTRL@0x0002 bit 0: patch-bank swap request. Toggle semantics
+    // CTRL@0x0002 bit 0: bank swap request. Toggle semantics
     // (sclk domain); the consumer syncs the toggle and flips its
     // active bank at the next drum slot 512. The write also lands in
     // the plain window RAM, so reading CTRL back shows the last value.
