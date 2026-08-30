@@ -158,6 +158,16 @@ Being redesigned (2026-08-30, planning with Thor). The generic
   note-on (Thor: velocity and LFO are both valid cable sources).
   When a patch wants more sources on one bus than it has slots, the
   ESP32 pre-sums controllers into a single cell.
+- **Everything is a bus** (Thor): element parameters are not directly
+  register-controlled — they only point at buses, and each bus has a
+  register-settable BASE (the ESP32's contribution) summed with
+  producer contributions. Direct control is the degenerate allocation
+  (one private bus per parameter). Buses are sink-typed (separate
+  memories per sink class) — fixes units and read-port bandwidth at
+  once. Bus law: a bus only adds; a multiply may live only in a
+  producer. Open detail: pitch detune as per-element static offset
+  (agent's lean) vs 8 pitch buses per voice. Swap governs wiring
+  (pointer/stop tables); buses carry live signal, single-banked.
 - **Buses are memory; parameters hold pointers** (Thor): each element
   parameter points at a numbered bus — a memory location. Effective
   parameter = base + bus[index] (log domain), an add-only fetch in the
