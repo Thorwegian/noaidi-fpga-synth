@@ -76,10 +76,17 @@ accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 **State banks**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, 11 slots apart — no address collision.
 
-**Parameter smoothing** 📋: first-order LPF
-`out <= out + ((in - out) >>> coeff)` wherever we can get away with it,
-against zipper noise; also the glide mechanism (smooth the base pitch,
-add modulation after).
+**Parameter smoothing** 📋 (design approved 2026-08-30): first-order
+LPF `out <= out + ((in - out) >>> coeff)` applied **after** the LUT
+lookups, per voice, in the linear domain — interpolation between the
+log-domain LUT steps falls out for free, and add/shift-only fits the
+silicon timing rule. Smoother state carries ~10 fractional guard bits
+so `>>> 10` (τ ≈ 960 samples ≈ 10 ms at 96 kHz, matching MIDI's ~1k
+events/s ceiling) never deadbands short of the target. GATE events
+reset smoother state to the target (snap) so keystrokes are instant.
+The bank swap provides atomicity; the smoother provides continuity on
+top. Also the glide mechanism (smooth the base pitch, add modulation
+after).
 
 ## Control plane — SPI + BSRAM 🔨
 
@@ -143,6 +150,26 @@ programmable over SPI (steady 440 Hz, by ear); ping-pong bank swap
 live — the cutoff sweep that clicked against single-banked RAM is
 **click-free by ear** with write-shadow + swap. ESP32 SPI self-test
 ALL OK, all testbenches green, timing closed at 98.304 MHz.
+
+## Roadmap (order agreed 2026-08-30)
+
+Each rung is a branch, merged at an ear-verified (or, where marked,
+bench-verified) milestone. One rung in flight at a time.
+
+1. **Housekeeping** — all types/constants into `synth_pkg.sv`; rename
+   the `*patch*` files (`test_patch_*`, `ref_patch_*`,
+   `gen_test_patch.py`). Zero behavior change: benches must print
+   identical numbers.
+2. **GATE** — per-voice gate bit, written through the swap like every
+   other parameter. Hard on/off; clicks expected and documented.
+3. **Smoothing** — the approved post-LUT smoothers + snap-on-GATE.
+   Verification: rung 2's gate test loses its clicks, by ear.
+4. **ESP32 firmware** — the three-module structure
+   ([firmware_architecture.md](firmware_architecture.md)) + MIDI voice
+   allocator: playable synth from a keyboard.
+5. **Afterwards, order TBD**: ADSR (amp first; needs GATE + smoothing
+   settled), 36-bit summing (bench-verified rung, pending approval),
+   per-voice routes/CV, LFO bank, per-voice SPI read-back.
 
 ## Corrections and thoughts from Thor
 
