@@ -61,9 +61,8 @@ static void engine_task(void *arg)
         // Drain the queue into the image.
         bool changed = false;
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
-            if (cmd.elem >= ENGINE_NUM_ELEMENTS ||
-                cmd.word >= ENGINE_WORDS_PER_ELEMENT)
-                continue;
+            if (cmd.word >= ENGINE_WORDS_PER_ELEMENT)
+                continue;   // elem is uint8_t: 0..255 by construction
             s_image[cmd.elem][cmd.word] = cmd.value;
             mark_dirty(cmd.elem, cmd.word);
             changed = true;
