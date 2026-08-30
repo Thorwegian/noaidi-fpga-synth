@@ -158,6 +158,15 @@ Being redesigned (2026-08-30, planning with Thor). The generic
   note-on (Thor: velocity and LFO are both valid cable sources).
   When a patch wants more sources on one bus than it has slots, the
   ESP32 pre-sums controllers into a single cell.
+- **Buses are memory; parameters hold pointers** (Thor): each element
+  parameter points at a numbered bus — a memory location. Effective
+  parameter = base + bus[index] (log domain), an add-only fetch in the
+  audio pipeline (timing-rule-clean); ALL scaling happens producer-side
+  in idle-slot machinery. Producers: SPI (wheels/velocity), LFO engine,
+  ADSR engine, and a bus combiner (C = A×amt + B×amt) for multi-source
+  sinks. Bus 0 = hardwired zero. The CV table and the buses unify into
+  one bus memory; per-note modulation = a per-note bus. The pointers
+  live in the shared profile (stop), not per element.
 - **One-to-many by construction** (Thor: SPI bandwidth demands it):
   elements reference shared registers instead of owning copies. An
   element carries a small **profile index**; bus slot configs (source
