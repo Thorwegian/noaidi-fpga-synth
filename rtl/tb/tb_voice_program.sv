@@ -118,6 +118,45 @@ module tb_voice_program;
         end
     endtask
 
+    // firmware voice_program() mirror: C4/E4/G4/C5 on voices 0-3,
+    // church-organ detune, hard-panned, fc one octave above the note
+    function automatic [13:0] chord_pitch(input integer v);
+        case (v)
+            0: chord_pitch = 14'h1400;   // C4
+            1: chord_pitch = 14'h1555;   // E4
+            2: chord_pitch = 14'h1655;   // G4
+            default: chord_pitch = 14'h1800;   // C5
+        endcase
+    endfunction
+
+    function automatic signed [15:0] detune(input integer u);
+        case (u)
+            0: detune = 0;  1: detune = 2;  2: detune = 4;  3: detune = 6;
+            4: detune = -2; 5: detune = -4; 6: detune = -6; default: detune = -8;
+        endcase
+    endfunction
+
+    task automatic program_chord;
+        integer v, u;
+        reg signed [15:0] pit;
+        reg [13:0] fc;
+        begin
+            for (v = 0; v < 4; v = v + 1) begin
+                fc = chord_pitch(v) + 14'h0400;
+                for (u = 0; u < 8; u = u + 1) begin
+                    pit = $signed({2'b0, chord_pitch(v)}) + detune(u);
+                    spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd0,
+                                   {18'b0, pit[13:0]});          // saw
+                    spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd1, 32'h0);
+                    spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd2,
+                                   32'h40000000 | 32'(fc));
+                    spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd3,
+                                   (u < 4) ? 32'h0000FF60 : 32'h000060FF);
+                end
+            end
+        end
+    endtask
+
     integer v, step;
     longint worst;
     initial begin
@@ -184,10 +223,39 @@ module tb_voice_program;
             errors = errors + 1;
         end
 
+        // chord stress — the firmware's exact write pattern (voice
+        // concept, 2026-08-30 scream report): 4 voices x 8 saw
+        // elements around a C octave boundary, church-organ detune,
+        // hard-panned, fc one octave up, retriggered repeatedly.
+        // Screaming = sustained near-clip output; a healthy chord at
+        // -36 dB/element stays far from sat24 and its saw wraps step
+        // ~0.5M/element. Sim clean + hardware screaming => silicon
+        // timing, not logic (then: half-clock listen test).
+        spi_word_write(16'h2003, 32'h0000FFFF);   // silence the sine
+        flip; spi_word_write(16'h2003, 32'h0000FFFF); flip;
+        for (step = 0; step < 4; step = step + 1) begin
+            program_chord;                        // into shadow
+            flip;
+            program_chord;                        // mirror
+            observe(2400);                        // 25 ms of chord
+            if (peak > 8388000) begin
+                $display("FAIL: chord retrigger %0d near clip, peak=%0d",
+                         step, peak);
+                errors = errors + 1;
+            end
+            if (maxstep > 4000000) begin
+                $display("FAIL: chord retrigger %0d screaming, maxstep=%0d",
+                         step, maxstep);
+                errors = errors + 1;
+            end
+            $display("chord %0d: peak=%0d maxstep=%0d", step, peak, maxstep);
+        end
+
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
         $finish;
     end
+
 
     initial begin
         #200_000_000;
