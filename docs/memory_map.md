@@ -251,7 +251,7 @@ Voice v base address: `0x2000 + v × 64`.
 | `+1` | `DUTY` | `[23:0]` duty Q0.24 signed, `[31:24]` reserved | implemented |
 | `+2` | `FILTER` | `[15:0]` cutoff (UQ4.10 in `[13:0]`, `[15:14]` reserved), `[31:16]` resonance 1/Q Q2.14 | implemented |
 | `+3` | `GAIN` | `[7:0]` gain L UQ4.4, `[15:8]` gain R UQ4.4, `[23:16]` mode byte: `[16]` 12/24 dB, `[18:17]` filter type, `[19]` smoothing coeff select, `[23:20]` reserved | implemented |
-| `+4` | `GATE` | `[0]` gate, `[1]` retrig, `[31:2]` reserved | TBD |
+| `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run; later the ADSR trigger), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `ADSR1` | `[7:0]` A, `[15:8]` D, `[23:16]` S UQ4.4, `[31:24]` R — times are log2: 4-bit octave + 4-bit fraction (1/16 octave per LSB), decoded to linear via the LUT+barrel-shift pattern | TBD |
 | `+6` | `ADSR2` | same layout (amp + filter) | TBD |
 | `+7..+15` | — | envelope curve, sustain shape, ... | reserved |

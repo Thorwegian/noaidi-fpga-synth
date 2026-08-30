@@ -78,7 +78,7 @@ module element_pipeline #(
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
     input  logic           pe_we,
-    input  logic [1:0]     pe_bank,     // 0..3 = p0..p3
+    input  logic [2:0]     pe_bank,     // 0..4 = p0..p3, GATE
     input  logic [7:0]     pe_elem,
     input  logic [31:0]    pe_wdata,
     input  logic           swap_req,    // sclk-domain toggle
@@ -129,6 +129,16 @@ module element_pipeline #(
     reg [35:0] p1_ram [0:2*NUM_ELEMENTS-1];
     reg [35:0] p2_ram [0:2*NUM_ELEMENTS-1];
     reg [35:0] p3_ram [0:2*NUM_ELEMENTS-1];
+
+    // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
+    // Gate 0 silences the element (gain decode forced to exact mute);
+    // the oscillator and filters free-run regardless — later this
+    // edge becomes the ADSR trigger. Both banks boot gated ON so the
+    // boot image keeps sounding (the power-up liveness check).
+    reg [1:0] p4_ram [0:2*NUM_ELEMENTS-1];
+    integer gi;
+    initial for (gi = 0; gi < 2*NUM_ELEMENTS; gi = gi + 1)
+        p4_ram[gi] = 2'b01;
 
     initial begin
         $readmemh(P0_HEX, p0_ram, 0, NUM_ELEMENTS-1);
@@ -222,11 +232,13 @@ module element_pipeline #(
     // write is the shape yosys infers as dual-clock BSRAM). Sync-only
     // process, per the AGENTS.md inference gotcha; validity is act-gated.
     logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
+    logic [1:0]  s1_p4;
     always_ff @(posedge clk) begin
         s1_p0     <= p0_ram[{bank_active, raddr}];
         s1_p1     <= p1_ram[{bank_active, raddr}];
         s1_p2     <= p2_ram[{bank_active, raddr}];
         s1_p3     <= p3_ram[{bank_active, raddr}];
+        s1_p4     <= p4_ram[{bank_active, raddr}];
         s1_phase  <= phase_ram[raddr];
         s1_ic1eq1 <= ic1eq1_ram[raddr];
         s1_ic2eq1 <= ic2eq1_ram[raddr];
@@ -236,13 +248,15 @@ module element_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 2'd0) p0_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (pe_we && pe_bank == 3'd0) p0_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 2'd1) p1_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (pe_we && pe_bank == 3'd1) p1_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 2'd2) p2_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (pe_we && pe_bank == 3'd2) p2_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 2'd3) p3_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (pe_we && pe_bank == 3'd3) p3_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+    always_ff @(posedge sclk)
+        if (pe_we && pe_bank == 3'd4) p4_ram[{bank_shadow, pe_elem}] <= pe_wdata[1:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];
@@ -250,8 +264,10 @@ module element_pipeline #(
     assign s1_duty  = s1_p1[23:0];
     assign s1_fc    = s1_p2[13:0];
     assign s1_q1    = s1_p2[31:14];
-    assign s1_gl    = s1_p3[7:0];
-    assign s1_gr    = s1_p3[15:8];
+    // GATE off = exact-mute gain code into the existing mute machinery:
+    // one decode-stage mux, no new carry registers down the pipeline.
+    assign s1_gl    = s1_p4[0] ? s1_p3[7:0]  : 8'hFF;
+    assign s1_gr    = s1_p4[0] ? s1_p3[15:8] : 8'hFF;
     assign s1_dual  = s1_p3[16];
     assign s1_ftype = s1_p3[18:17];
 

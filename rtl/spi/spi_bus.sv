@@ -53,10 +53,10 @@ module spi_bus #(
     // FILTER, GAIN). Combinational decode, valid exactly on the sclk
     // edge that completes a data word — the consumer writes its RAM on
     // that same edge (there may be no further edges: a master stops
-    // clocking after the last bit). Offsets 4..63 are dropped for now;
+    // clocking after the last bit). Offsets 5..63 are dropped for now;
     // per-element read-back is TBD (reads in this range return zero).
     output logic        pe_we,
-    output logic [1:0]  pe_bank,     // 0..3 = p0..p3
+    output logic [2:0]  pe_bank,     // 0..4 = p0..p3, GATE
     output logic [7:0]  pe_elem,
     output logic [31:0] pe_wdata,
 
@@ -205,8 +205,9 @@ module spi_bus #(
     wire [15:0] pe_rel  = addr - ELEM_BASE;     // 0..0x3FFF within range
     wire [13:0] pe_off  = pe_rel[13:0];
     assign pe_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-                      && !is_read && in_pe && (pe_off[5:2] == 4'd0);
-    assign pe_bank  = pe_off[1:0];
+                      && !is_read && in_pe && (pe_off[5:3] == 3'd0)
+                      && (pe_off[2:0] < 3'd5);
+    assign pe_bank  = pe_off[2:0];
     assign pe_elem  = pe_off[13:6];
     assign pe_wdata = {wbuf, rx_byte};
 

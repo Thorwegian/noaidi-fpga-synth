@@ -113,12 +113,14 @@ static void engine_task(void *arg)
 
 void engine_link_init(void)
 {
-    // Image: every element muted, benign params otherwise.
+    // Image: every element gated off (and gain-muted for belt and
+    // braces at boot), benign params otherwise.
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;
         s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
         s_image[e][3] = P3_MUTE;
+        s_image[e][4] = 0;            // GATE off
     }
 
     // Both banks get the muted image before anything can play.

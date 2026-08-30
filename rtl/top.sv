@@ -55,7 +55,7 @@ module top (
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
     logic        pe_we;
-    logic [1:0]  pe_bank;
+    logic [2:0]  pe_bank;
     logic [7:0]  pe_elem;
     logic [31:0] pe_wdata;
     logic        swap_req;

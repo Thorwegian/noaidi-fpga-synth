@@ -30,7 +30,7 @@ module tb_element_program;
     );
 
     wire        pe_we;
-    wire [1:0]  pe_bank;
+    wire [2:0]  pe_bank;
     wire [7:0]  pe_elem;
     wire [31:0] pe_wdata;
     wire        swap_req;
@@ -250,6 +250,35 @@ module tb_element_program;
             end
             $display("chord %0d: peak=%0d maxstep=%0d", step, peak, maxstep);
         end
+
+        // GATE (map offset +4, bit 0): gate off silences the chord even
+        // though the GAIN words still hold live values — attenuation is
+        // settable while an element is silent. Gate back on: it returns.
+        for (v = 0; v < 32; v = v + 1)
+            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000000);
+        flip;
+        for (v = 0; v < 32; v = v + 1)
+            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000000);
+        observe(4);                        // flush in-flight samples
+        observe(50);
+        if (peak > 4000) begin
+            $display("FAIL: gate off not silent (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("gate off: silent, gains untouched (peak=%0d)", peak);
+
+        for (v = 0; v < 8; v = v + 1)      // regate voice 0's elements
+            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
+        flip;
+        for (v = 0; v < 8; v = v + 1)
+            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
+        observe(60);
+        observe(400);
+        if (peak < 200000) begin
+            $display("FAIL: gate on did not restore sound (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("gate on: sound restored (peak=%0d)", peak);
 
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);

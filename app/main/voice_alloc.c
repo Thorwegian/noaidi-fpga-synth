@@ -87,14 +87,17 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         send(elem, 1, 0);
         send(elem, 2, Q1_ONE | fc);
         send(elem, 3, (r << 8) | l);
+        send(elem, 4, 1);                  // GATE on
     }
 }
 
-static void voice_mute(int v)
+// Note-off is GATE off, nothing else: the GAIN words keep their live
+// values, so attenuation stays settable while the element is silent
+// (and the oscillator/filters free-run). Later: the ADSR release edge.
+static void voice_gate_off(int v)
 {
     for (int u = 0; u < ELEMS_PER_VOICE; u++)
-        send((uint8_t)(v * ELEMS_PER_VOICE + u), 3,
-             ((uint32_t)GAIN_MUTE << 8) | GAIN_MUTE);
+        send((uint8_t)(v * ELEMS_PER_VOICE + u), 4, 0);
 }
 
 static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
@@ -125,7 +128,7 @@ static void note_off(uint8_t note)
     for (int v = 0; v < NUM_VOICES; v++) {
         if (s_voices[v].active && s_voices[v].note == note) {
             s_voices[v].active = false;
-            voice_mute(v);
+            voice_gate_off(v);
         }
     }
 }
