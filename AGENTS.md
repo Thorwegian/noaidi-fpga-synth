@@ -177,9 +177,12 @@ every path — known and unknown — 33% more slack. Sample rate stays
 96 kHz exactly; SPDIF cell = 6 sysclk, I2S BCLK = /12. The stage-split
 rule above still applies at the new clock.
 
-**VERIFIED 2026-08-29 (bench, at the old 98.304 MHz)**: working SVF at
-low cutoff, clean SPDIF, ESP32 SPI OK/PASS. Pipeline depth 16, span
-271/768 slots.
+**VERIFIED 2026-08-30 (by ear, at 73.728 MHz)**: playable synth —
+MIDI chords, keys mashed, clean on both channels; no timing artifacts
+of any kind. Pipeline depth 16, span 271/768 slots. The four stage
+splits (S3B/S5B/S8B/S9B) are retained at the new clock: they encode
+the rule, and margin is the asset — do not recombine them without an
+ear-verified experiment and Thor's sign-off.
 
 **NOT verified**: I2S. It builds and its clock-rate sim passes, but no
 ear or scope has checked it in a long while — regression state unknown.

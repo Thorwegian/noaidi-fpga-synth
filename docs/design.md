@@ -169,11 +169,13 @@ part's 828 kbit BSRAM and would need external memory.
 
 ## Verified state (2026-08-30)
 
-256-voice C-major boot image audible over SPDIF; single voice
-programmable over SPI (steady 440 Hz, by ear); ping-pong bank swap
-live — the cutoff sweep that clicked against single-banked RAM is
-**click-free by ear** with write-shadow + swap. ESP32 SPI self-test
-ALL OK, all testbenches green, timing closed at 98.304 MHz.
+**Playable synth.** MIDI keyboard → 32 voices × 8 elements (saw,
+church-organ detune, cutoff tracking, velocity → gain), clean at the
+new 73.728 MHz SYSCLK **even with keys mashed** — no screaming, no
+crackle, no glitches, by ear. Note-edge clicks present and expected
+(gate-by-gain; the smoothing rung removes them). Ping-pong swap
+click-free; ESP32 SPI self-test ALL OK at 10 MHz; all testbenches
+green; timing closed with ~68% margin in the drum domain.
 
 ## Roadmap (order agreed 2026-08-30)
 
