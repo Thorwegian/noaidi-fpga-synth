@@ -142,6 +142,10 @@ two failure modes that look identical:
   fractional-DDS build's square-wave tone and is superseded. Per Thor:
   a gateware PLL is never a valid workaround — an unconfigured MS5351 is
   a setup error; program the clock chip.
+- **PING-PONG VERIFIED 2026-08-30**: the cutoff sweep that clicked
+  against single-banked param RAM (BSRAM read-during-write collisions)
+  is click-free by ear with write-shadow + bank swap. The sim-side
+  regression is tb_voice_program's sweep-with-flips assertion.
 - USB serial map on the dev host: /dev/ttyACM0 = ESP32-C3 console;
   /dev/ttyUSB1 = FPGA UART bridge — SILENT unless the loaded bitstream
   drives a UART (none of the diagnostic tops do; silence there is not a

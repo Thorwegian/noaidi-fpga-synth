@@ -136,11 +136,13 @@ the memory map's model:
 Potential feature; address space reserved. Note: long delays exceed the
 part's 828 kbit BSRAM and would need external memory.
 
-## Verified state (2026-08-29)
+## Verified state (2026-08-30)
 
-256-voice C-major boot image audible over SPDIF, LED liveness, ESP32
-SPI tests passing, all testbenches green, timing closed at
-98.304 MHz. Branch `spdif-minimal`.
+256-voice C-major boot image audible over SPDIF; single voice
+programmable over SPI (steady 440 Hz, by ear); ping-pong bank swap
+live — the cutoff sweep that clicked against single-banked RAM is
+**click-free by ear** with write-shadow + swap. ESP32 SPI self-test
+ALL OK, all testbenches green, timing closed at 98.304 MHz.
 
 ## Corrections and thoughts from Thor
 
