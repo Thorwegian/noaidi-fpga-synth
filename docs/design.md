@@ -193,9 +193,10 @@ bench-verified) milestone. One rung in flight at a time.
    8 elements, church-organ detune, cutoff one octave above the note,
    velocity → gain, omni, steal-oldest. Gate-by-gain (no FPGA GATE bit
    yet): clicks expected. No stop/program structure yet.
-2. **Housekeeping** — all types/constants into `synth_pkg.sv`; rename
-   the `*patch*` files and voice→element/lane identifiers. Zero
-   behavior change: benches must print identical numbers.
+2. **Housekeeping** ✅ (2026-08-30) — constants live in
+   `synth_pkg.sv`, `*patch*` file names and voice→element/lane
+   identifiers renamed. Verified zero-change: benches printed
+   identical numbers before and after.
 3. **GATE** — per-element gate bit, written through the swap like
    every other parameter. Hard on/off. Random per-element phase
    configured by the ESP32 would be nice here (Thor: "no rush").
