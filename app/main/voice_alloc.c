@@ -46,7 +46,30 @@ typedef struct {
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
-static int16_t  s_bend;    // pitch bend as UQ4.10 LSB offset, ±2 semitones
+static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
+static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
+
+// ── Bus plan (B3, firmware convention — bus_architecture.md) ────────
+// bus 2:      global pitch offset — the pitch wheel. Every element's
+//             pitch pointer references it.
+// bus 16+v:   voice v's gain offset — velocity (positive = quieter).
+// bus 48+v:   voice v's cutoff offset — velocity + wheel + bend summed
+//             by firmware (one pointer per sink, so the per-voice
+//             cutoff bus carries the global terms too; the combiner
+//             producer takes this job at B6).
+// Bend rides BOTH pitch and cutoff buses so filter key tracking
+// follows bends (Thor).
+#define BUS_PITCH_GLOBAL 2
+#define BUS_GAIN(v)  (16 + (v))
+#define BUS_CUT(v)   (48 + (v))
+
+// The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
+// bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
+static uint32_t cut_bus_value(int v)
+{
+    int32_t val = (int32_t)s_wheel * 24 + s_bend + s_vel_cut[v];
+    return (uint32_t)val;   // engine masks to 18 bits (Q8.10)
+}
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
@@ -74,31 +97,27 @@ static uint16_t voice_fc(uint8_t note)
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
-// One element's OSC word: note + church-organ detune + pitch bend,
-// clamped to the 14-bit UQ4.10 range.
+// One element's OSC word: note + church-organ detune. Pitch bend no
+// longer touches OSC words — it rides the global pitch bus.
 static uint32_t elem_osc_word(uint8_t note, int u)
 {
-    int32_t pitch = (int32_t)midi_to_pitch(note) + DETUNE[u] + s_bend;
+    int32_t pitch = (int32_t)midi_to_pitch(note) + DETUNE[u];
     if (pitch < 0)      pitch = 0;
     if (pitch > 0x3FFF) pitch = 0x3FFF;
     return (uint32_t)pitch | (WAVE_SAW << 14);
 }
 
-static void voice_program(int v, uint8_t note, uint8_t vel)
+// Base parameters only: pan lives in the GAIN word, velocity rides
+// the voice's gain bus (see note_on).
+static void voice_program(int v, uint8_t note)
 {
     uint16_t fc = voice_fc(note);
-
-    // Velocity → gain: vel 127 = GAIN_BASE, softer notes attenuate in
-    // 0.375 dB steps, up to ~23.6 dB at vel 1. Crude but audible;
-    // tune the curve by ear later. Clamp below 0xFF (exact mute).
-    uint32_t gain = GAIN_BASE + ((127 - vel) >> 1);
-    if (gain > 0xFE) gain = 0xFE;
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
         uint8_t  elem  = (uint8_t)(v * ELEMS_PER_VOICE + u);
         bool left = u < (ELEMS_PER_VOICE / 2);
-        uint32_t l = left ? gain : GAIN_MUTE;
-        uint32_t r = left ? GAIN_MUTE : gain;
+        uint32_t l = left ? (uint32_t)GAIN_BASE : GAIN_MUTE;
+        uint32_t r = left ? GAIN_MUTE : (uint32_t)GAIN_BASE;
 
         send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
@@ -137,39 +156,50 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 
     s_voices[pick] = (voice_t){.active = true, .note = note,
                                .channel = channel, .stamp = ++s_stamp};
-    voice_program(pick, note, vel);
+
+    // Velocity rides the voice's buses (B3): gain attenuation in
+    // 0.375 dB steps (64 Q8.10 LSB each, up to ~23.6 dB at vel 1),
+    // and a darkening cutoff term (up to ~-1 octave at vel 1).
+    s_vel_cut[pick] = -(int32_t)(127 - vel) * 8;
+    engine_link_bus_write(BUS_GAIN(pick),
+                          (uint32_t)(((127 - vel) >> 1) * 64));
+    engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
+
+    voice_program(pick, note);
 }
 
-// Mod wheel → cutoff, through the bus fabric (B1 pilot): ONE write
-// to cutoff bus 1's base register reaches every element, replacing
-// the old 256-FILTER-word rewrite storm. Offset 0 to ~+3 octaves in
-// Q8.10 (wheel*24 LSB, ≈0.28 semitone per CC step).
+// Refresh the cutoff buses of active voices — the wheel and bend
+// terms are shared, so both events land here. At most 32 bus writes,
+// no swaps, no parameter rewrites.
+static void refresh_cut_buses(void)
+{
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].active)
+            engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
+}
+
+// Mod wheel → cutoff term (0 to ~+3 octaves, wheel*24 Q8.10 LSB).
 static void wheel_update(uint8_t val)
 {
     if (val == s_wheel)
         return;
     s_wheel = val;
-    engine_link_bus_write(1, (uint32_t)val * 24);
+    refresh_cut_buses();
 }
 
-// Pitch wheel → OSC words of every active voice. ±2 semitones: the
-// UQ4.10 fraction has 1024/12 ≈ 85.3 LSB per semitone, so the 14-bit
-// bend (center 8192) maps via (bend-8192)/48 → ±170 LSB. Cutoff stays
-// keyed to the unbent note for now (key tracking that must follow
-// bends rides a CV cell later, per the memory map).
+// Pitch wheel: ±2 semitones. Q8.10 has 1024/12 ≈ 85.3 LSB per
+// semitone, so the 14-bit bend (center 8192) maps via (bend-8192)/48
+// → ±170 LSB. ONE write to the global pitch bus moves every element;
+// the cutoff buses get the same term so filter key tracking follows
+// the bend (Thor).
 static void bend_update(uint16_t bend14)
 {
     int16_t off = (int16_t)(((int32_t)bend14 - 8192) / 48);
     if (off == s_bend)
         return;
     s_bend = off;
-    for (int v = 0; v < NUM_VOICES; v++) {
-        if (!s_voices[v].active)
-            continue;
-        for (int u = 0; u < ELEMS_PER_VOICE; u++)
-            send((uint8_t)(v * ELEMS_PER_VOICE + u), 0,
-                 elem_osc_word(s_voices[v].note, u));
-    }
+    engine_link_bus_write(BUS_PITCH_GLOBAL, (uint32_t)(int32_t)off);
+    refresh_cut_buses();
 }
 
 static void note_off(uint8_t note)
@@ -217,6 +247,20 @@ static void voice_alloc_task(void *arg)
     }
 }
 
+// Push the bus plan into the pointer words: every element's pitch →
+// the global pitch bus, cutoff → its voice's cutoff bus, gains → its
+// voice's gain bus. Static wiring, written once, rides the swap.
+static void wire_pointers(void)
+{
+    for (int e = 0; e < NUM_VOICES * ELEMS_PER_VOICE; e++) {
+        int v = e / ELEMS_PER_VOICE;
+        send((uint8_t)e, 5,
+             (uint32_t)BUS_PITCH_GLOBAL | ((uint32_t)BUS_CUT(v) << 20));
+        send((uint8_t)e, 6,
+             ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
+    }
+}
+
 void voice_alloc_init(void)
 {
     s_queue = xQueueCreate(VA_QUEUE_LEN, sizeof(evt_t));
@@ -224,6 +268,8 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
+    wire_pointers();
+    engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");

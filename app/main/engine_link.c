@@ -15,7 +15,8 @@
 
 #define TAG "engine_link"
 
-#define ENGINE_QUEUE_LEN   512
+#define ENGINE_QUEUE_LEN   1024   // voice_alloc's boot-time pointer
+                                  // push alone is 512 commands
 #define ENGINE_TASK_STACK  3072
 #define ENGINE_TASK_PRIO   6          // above midi_log, below midi_in
 // 1 kHz control rate (Thor). Paced by an esp_timer notifying the
@@ -137,8 +138,8 @@ void engine_link_init(void)
         s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
         s_image[e][3] = P3_MUTE;
         s_image[e][4] = 0;            // GATE off
-        s_image[e][5] = 1u << 20;     // PTRS0: cutoff → bus 1
-        s_image[e][6] = 0;            // PTRS1: Q/gains → bus 0 (none)
+        s_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
+        s_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
     }
 
     // Both banks get the muted image before anything can play.

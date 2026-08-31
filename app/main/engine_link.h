@@ -32,6 +32,9 @@ typedef struct {
 // Mutes every element into the local image, writes both banks (two
 // full-image writes with a swap between), and starts the 1 kHz tick
 // task. Call after fpga_spi_init(). The boot image goes silent here.
+// Bus pointers initialize to 0 (no modulation); the bus plan — which
+// pointer targets which bus — is entirely voice_alloc's convention,
+// pushed as ordinary PTRS0/PTRS1 commands at its init.
 void engine_link_init(void);
 
 // Queue one parameter write. Non-blocking: returns false (and counts
