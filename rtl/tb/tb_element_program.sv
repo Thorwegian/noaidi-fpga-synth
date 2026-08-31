@@ -338,13 +338,19 @@ module tb_element_program;
         // fixed window). Gains: point L+R at bus 3, +2 octaves of
         // attenuation (+12 dB quieter) must cut the peak hard; the
         // hard-panned 0xFF channels must stay muted regardless.
+        // Rise-counting needs a waveform with ONE rising zero crossing
+        // per period — a filtered saw sum recrosses (the B2 rev-1 run
+        // measured 12 rises/2182 at C4 instead of ~6). Reprogram the
+        // sounding elements to an undetuned C4 SINE first.
         spi_word_write(16'h0801, 32'h00000000);   // cutoff bus 1 = 0
         for (v = 0; v < 8; v = v + 1) begin
+            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400); // sine C4
             spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002); // pitch→2
             spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00); // gl,gr→3
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
+            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400);
             spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002);
             spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00);
         end
