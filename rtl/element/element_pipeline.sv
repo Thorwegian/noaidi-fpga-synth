@@ -345,12 +345,15 @@ module element_pipeline #(
     // Per-entry phases (overlapped across entries):
     //   P0: read CFG + state
     //   P1: latch cfg/state; read RATES; read gate bus (bus_base)
-    //   P2: next-state (adds/compares/shifts only); read DEPTH;
-    //       source = LFO wave(old phase) | ADSR level (old);
-    //       state writeback
-    //   P3: source × depth (DSP, registered operands); read target
-    //       base (bus_base — port shared with P1 by phase mux)
-    //   P4: value = base + (product >>> 16), saturate, write replicas
+    //   P2: REGISTER rate decode + gate + source (each a short
+    //       RAM-output cone); read DEPTH
+    //   P3: state step from registers (adds/compares) + writeback;
+    //       source × depth (DSP, registered operands — a parallel,
+    //       independent path); read target base (bus_base — port
+    //       shared with P1 by phase mux)
+    //   P4: REGISTER value = base + (product >>> 16), saturated
+    //   P5: write replicas (the RAM→add→clamp→RAM chain carries a
+    //       register in the middle — the 76 MHz critical path fix)
     //
     // ADSR state word: [23:22] stage (0 idle, 1 attack, 2 decay/
     // sustain, 3 release), [21:0] level. Gate is LEVEL-sensitive on
@@ -416,6 +419,10 @@ module element_pipeline #(
     logic        eC_v;
     logic [9:0]  eC_tgt;
     logic signed [35:0] mC;
+    // E stage — the saturated sum, latched at the end of P4
+    logic        wkE_v;
+    logic [9:0]  wkE_bus;
+    logic signed [17:0] wkE_val;
 
     // LFO waveform on the OLD phase (registered stA → rule-clean).
     // Named intermediate wire: a $signed() cast directly in the port
@@ -431,17 +438,17 @@ module element_pipeline #(
         .sample_out (wk_wave)
     );
 
-    // next-state, computed at P2 (adds/compares/shifts only).
-    // During P2, wk_prod_q holds the RATES word and wk_busrd_q holds
-    // the gate-bus value (both read the cycle before).
-    wire        wk_gate  = (wk_busrd_q > 18'sd0);
-    wire [20:0] wk_ainc  = (21'd16 + 21'(wk_prod_q[3:0]))
-                           << wk_prod_q[7:4];
-    wire [20:0] wk_dinc  = (21'd16 + 21'(wk_prod_q[11:8]))
-                           << wk_prod_q[15:12];
-    wire [20:0] wk_rinc  = (21'd16 + 21'(wk_prod_q[19:16]))
-                           << wk_prod_q[23:20];
-    wire [21:0] wk_sus   = {wk_prod_q[31:24], 14'b0};
+    // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
+    // output through shifts or a compare — short); the state step
+    // then runs at P3 entirely from registers. This split exists
+    // because the un-split version made the RAM-output→state-write
+    // cone the critical path (76 MHz — 3.5% margin, on a timing
+    // model proven optimistic five times).
+    logic        gA_gate;
+    logic [20:0] gA_ainc, gA_dinc, gA_rinc;
+    logic [21:0] gA_sus;
+
+    // next-state, computed at P3 from registered inputs only
     wire [1:0]  a_stage  = stA[23:22];
     wire [21:0] a_level  = stA[21:0];
     logic [23:0] wk_nstate;
@@ -449,21 +456,21 @@ module element_pipeline #(
         if (eA_type == 4'd1) begin
             // LFO: free-running phase accumulator
             wk_nstate = stA + {8'b0, eA_rate};
-        end else if (!wk_gate) begin
+        end else if (!gA_gate) begin
             // ADSR, gate low: release toward zero
-            wk_nstate = (a_level > {1'b0, wk_rinc})
-                ? {AST_REL, a_level - 22'(wk_rinc)}
+            wk_nstate = (a_level > {1'b0, gA_rinc})
+                ? {AST_REL, a_level - 22'(gA_rinc)}
                 : {AST_IDLE, 22'd0};
         end else begin
             case (a_stage)
                 AST_ATT: wk_nstate =
-                    ({1'b0, a_level} + 23'(wk_ainc) > 23'h3FFFFF)
+                    ({1'b0, a_level} + 23'(gA_ainc) > 23'h3FFFFF)
                         ? {AST_DEC, 22'h3FFFFF}
-                        : {AST_ATT, a_level + 22'(wk_ainc)};
+                        : {AST_ATT, a_level + 22'(gA_ainc)};
                 AST_DEC: wk_nstate =
-                    (a_level > wk_sus + 22'(wk_dinc))
-                        ? {AST_DEC, a_level - 22'(wk_dinc)}
-                        : (a_level > wk_sus) ? {AST_DEC, wk_sus}
+                    (a_level > gA_sus + 22'(gA_dinc))
+                        ? {AST_DEC, a_level - 22'(gA_dinc)}
+                        : (a_level > gA_sus) ? {AST_DEC, gA_sus}
                                              : {AST_DEC, a_level};
                 default: wk_nstate = {AST_ATT, a_level};  // idle/release
             endcase
@@ -475,17 +482,19 @@ module element_pipeline #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             v0 <= 1'b0;
-            eA_v <= 1'b0; eB_v <= 1'b0; eC_v <= 1'b0;
+            eA_v <= 1'b0; eB_v <= 1'b0; eC_v <= 1'b0; wkE_v <= 1'b0;
             eA_e <= '0; eA_type <= '0; eA_shape <= '0;
             eA_tgt <= '0; eA_rate <= '0; stA <= '0;
             eB_tgt <= '0; srcB <= '0;
             eC_tgt <= '0; mC <= '0;
+            wkE_bus <= '0; wkE_val <= '0;
+            gA_gate <= 1'b0;
+            gA_ainc <= '0; gA_dinc <= '0; gA_rinc <= '0; gA_sus <= '0;
         end else begin
             v0 <= wk_p0;
 
             if (wcnt == 2'd1) begin
-                // end of P1: latch config (wk_prod_q = CFG) + state;
-                // the previous entry's P4 just consumed eC
+                // end of P1: latch config (wk_prod_q = CFG) + state
                 eA_v     <= v0;
                 eA_e     <= went[6:0];
                 eA_type  <= wk_prod_q[3:0];
@@ -493,34 +502,54 @@ module element_pipeline #(
                 eA_tgt   <= wk_prod_q[15:6];
                 eA_rate  <= wk_prod_q[31:16];
                 stA      <= wk_st_q;
-                eC_v     <= 1'b0;
+                // ...and register the previous entry's saturated sum
+                // (write happens next cycle, at P5)
+                wkE_v   <= eC_v && (eC_tgt != 10'd0);
+                wkE_bus <= eC_tgt;
+                wkE_val <= wk_val_c;
+                eC_v    <= 1'b0;
             end else if (wcnt == 2'd2) begin
-                // end of P2: source from OLD state; validity by type
+                // end of P2: register the rate decode + gate (short
+                // RAM-output cones) and the source from OLD state
+                gA_gate <= (wk_busrd_q > 18'sd0);
+                gA_ainc <= (21'd16 + 21'(wk_prod_q[3:0]))
+                           << wk_prod_q[7:4];
+                gA_dinc <= (21'd16 + 21'(wk_prod_q[11:8]))
+                           << wk_prod_q[15:12];
+                gA_rinc <= (21'd16 + 21'(wk_prod_q[19:16]))
+                           << wk_prod_q[23:20];
+                gA_sus  <= {wk_prod_q[31:24], 14'b0};
                 eB_v   <= eA_v && (eA_type == 4'd1 || eA_type == 4'd2);
                 eB_tgt <= eA_tgt;
                 srcB   <= (eA_type == 4'd1) ? wk_wave
                                             : $signed({2'b0, stA[21:6]});
-                eA_v   <= 1'b0;
+                wkE_v  <= 1'b0;              // P5 write just happened
             end else begin
                 // end of P3 (wcnt == 0): the producer multiply —
-                // registered operands (srcB, and wk_prod_q = DEPTH)
+                // registered operands (srcB, and wk_prod_q = DEPTH);
+                // state writeback happens here too (see below)
                 eC_v   <= eB_v;
                 eC_tgt <= eB_tgt;
                 mC     <= srcB * $signed(wk_prod_q[17:0]);
                 eB_v   <= 1'b0;
+                eA_v   <= 1'b0;
             end
         end
     end
 
-    // P4 (wcnt == 1): value = base + contribution, saturating.
-    // wk_busrd_q holds the target base (read issued at P3).
+    // P4 (wcnt == 1): value = base + contribution, saturating —
+    // REGISTERED at the end of P4, written to the replicas at P5
+    // (wcnt == 2). The RAM-output → add → clamp → RAM-write chain
+    // gets a register in the middle.
     wire signed [19:0] wk_contrib = mC[35:16];
     wire signed [20:0] wk_sum =
         {{3{wk_busrd_q[17]}}, wk_busrd_q} + {wk_contrib[19], wk_contrib};
-    assign wk_val = (wk_sum > 21'sd131071)  ? 18'sd131071  :
-                    (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
-    assign wk_bus = eC_tgt;
-    assign wk_wr  = eC_v && (wcnt == 2'd1) && (eC_tgt != 10'd0);
+    wire signed [17:0] wk_val_c =
+        (wk_sum > 21'sd131071)  ? 18'sd131071  :
+        (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
+    assign wk_val = wkE_val;
+    assign wk_bus = wkE_bus;
+    assign wk_wr  = wkE_v && (wcnt == 2'd2);
 
     // walker memory reads — sync-only, one register per RAM, address
     // muxed by phase: prod_ram serves CFG (P0) / RATES (P1) /
@@ -533,9 +562,9 @@ module element_pipeline #(
                                               : eB_tgt];
     end
     always_ff @(posedge clk)
-        if ((wcnt == 2'd2) && eA_v
+        if ((wcnt == 2'd0) && eA_v
             && (eA_type == 4'd1 || eA_type == 4'd2))
-            prod_state[eA_e] <= wk_nstate;                      // P2
+            prod_state[eA_e] <= wk_nstate;                      // P3
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
