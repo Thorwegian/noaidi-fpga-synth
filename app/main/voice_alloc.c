@@ -79,7 +79,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // A/D/R as 8-bit log2 rates ((16+low4) << high4 per sample on the
 // 22-bit level) + sustain fraction. Defaults: ~20 ms attack, gentle
 // decay to 75%, ~45 ms release. Thor tunes by ear.
-#define ADSR_RATES    (0x70u | (0x50u << 8) | (0x60u << 16) | (0xC0u << 24))
+#define ADSR_RATES    (0x40u | (0x20u << 8) | (0x04u << 16) | (0xC0u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
