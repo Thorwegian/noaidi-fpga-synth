@@ -37,7 +37,7 @@ module tb_element_program;
     wire [17:0] bw_data;
     wire        bw_req;
     wire        pw_we;
-    wire [7:0]  pw_addr;
+    wire [8:0]  pw_addr;
     wire [31:0] pw_data;
     wire        swap_req;
 

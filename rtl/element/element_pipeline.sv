@@ -417,10 +417,13 @@ module element_pipeline #(
     logic [9:0]  eC_tgt;
     logic signed [35:0] mC;
 
-    // LFO waveform on the OLD phase (registered stA → rule-clean)
+    // LFO waveform on the OLD phase (registered stA → rule-clean).
+    // Named intermediate wire: a $signed() cast directly in the port
+    // connection crashes yosys's genrtlil signedness assert.
+    wire signed [23:0] wk_osc_phase = $signed(stA);
     logic signed [17:0] wk_wave;
     osc_core u_wk_osc (
-        .phase      ($signed(stA)),
+        .phase      (wk_osc_phase),
         .delta      (24'sd0),
         .duty       (24'sd0),
         .wave       (eA_shape),
@@ -432,12 +435,12 @@ module element_pipeline #(
     // During P2, wk_prod_q holds the RATES word and wk_busrd_q holds
     // the gate-bus value (both read the cycle before).
     wire        wk_gate  = (wk_busrd_q > 18'sd0);
-    wire [20:0] wk_ainc  = 21'((5'd16 + 5'(wk_prod_q[3:0]))
-                               << wk_prod_q[7:4]);
-    wire [20:0] wk_dinc  = 21'((5'd16 + 5'(wk_prod_q[11:8]))
-                               << wk_prod_q[15:12]);
-    wire [20:0] wk_rinc  = 21'((5'd16 + 5'(wk_prod_q[19:16]))
-                               << wk_prod_q[23:20]);
+    wire [20:0] wk_ainc  = (21'd16 + 21'(wk_prod_q[3:0]))
+                           << wk_prod_q[7:4];
+    wire [20:0] wk_dinc  = (21'd16 + 21'(wk_prod_q[11:8]))
+                           << wk_prod_q[15:12];
+    wire [20:0] wk_rinc  = (21'd16 + 21'(wk_prod_q[19:16]))
+                           << wk_prod_q[23:20];
     wire [21:0] wk_sus   = {wk_prod_q[31:24], 14'b0};
     wire [1:0]  a_stage  = stA[23:22];
     wire [21:0] a_level  = stA[21:0];
