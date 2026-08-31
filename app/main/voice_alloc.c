@@ -49,19 +49,37 @@ static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 
-// ── Bus plan (B3, firmware convention — bus_architecture.md) ────────
+// ── Bus plan (B3/B5, firmware convention — bus_architecture.md) ─────
 // bus 2:      global pitch offset — the pitch wheel. Every element's
 //             pitch pointer references it.
-// bus 16+v:   voice v's gain offset — velocity (positive = quieter).
+// bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5):
+//             base = ENV_FLOOR (full attenuation), the ADSR producer
+//             adds level × (−ENV_FLOOR): silent at level 0, full at
+//             level 1. Velocity is note-static and bakes into the
+//             GAIN word instead.
 // bus 48+v:   voice v's cutoff offset — velocity + wheel + bend summed
-//             by firmware (one pointer per sink, so the per-voice
-//             cutoff bus carries the global terms too; the combiner
-//             producer takes this job at B6).
+//             by firmware (the combiner takes this job at B6).
+// bus 80+v:   voice v's GATE bus — the ADSR watches it (level-
+//             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
 // follows bends (Thor).
 #define BUS_PITCH_GLOBAL 2
-#define BUS_GAIN(v)  (16 + (v))
-#define BUS_CUT(v)   (48 + (v))
+#define BUS_GAIN(v)   (16 + (v))
+#define BUS_CUT(v)    (48 + (v))
+#define BUS_VGATE(v)  (80 + (v))
+
+// Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
+// entries 32..63 = per-voice amp ADSRs.
+#define PROD_ADSR(v)  (32 + (v))
+// Envelope attenuation span: 0x4000 Q8.10 = 16 octaves ≈ 96 dB —
+// level 0 clamps the gain word to max attenuation (essentially
+// silence), so elements stay GATE-on forever and the envelope owns
+// articulation. Depth is the NEGATIVE of this.
+#define ENV_FLOOR     0x4000
+// A/D/R as 8-bit log2 rates ((16+low4) << high4 per sample on the
+// 22-bit level) + sustain fraction. Defaults: ~20 ms attack, gentle
+// decay to 75%, ~45 ms release. Thor tunes by ear.
+#define ADSR_RATES    (0x70u | (0x50u << 8) | (0x60u << 16) | (0xC0u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
@@ -107,33 +125,27 @@ static uint32_t elem_osc_word(uint8_t note, int u)
     return (uint32_t)pitch | (WAVE_SAW << 14);
 }
 
-// Base parameters only: pan lives in the GAIN word, velocity rides
-// the voice's gain bus (see note_on).
-static void voice_program(int v, uint8_t note)
+// Base parameters: pan and velocity (note-static, B5) bake into the
+// GAIN word; the amp envelope articulates on the gain bus above it.
+// Elements stay GATE-on permanently — the envelope owns silence.
+static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
+    uint32_t gain = (uint32_t)GAIN_BASE + ((127u - vel) >> 1);
+    if (gain > 0xFE) gain = 0xFE;
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
         uint8_t  elem  = (uint8_t)(v * ELEMS_PER_VOICE + u);
         bool left = u < (ELEMS_PER_VOICE / 2);
-        uint32_t l = left ? (uint32_t)GAIN_BASE : GAIN_MUTE;
-        uint32_t r = left ? GAIN_MUTE : (uint32_t)GAIN_BASE;
+        uint32_t l = left ? gain : GAIN_MUTE;
+        uint32_t r = left ? GAIN_MUTE : gain;
 
         send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
         send(elem, 2, Q1_ONE | fc);
         send(elem, 3, (r << 8) | l);
-        send(elem, 4, 1);                  // GATE on
+        send(elem, 4, 1);                  // GATE on (stays on)
     }
-}
-
-// Note-off is GATE off, nothing else: the GAIN words keep their live
-// values, so attenuation stays settable while the element is silent
-// (and the oscillator/filters free-run). Later: the ADSR release edge.
-static void voice_gate_off(int v)
-{
-    for (int u = 0; u < ELEMS_PER_VOICE; u++)
-        send((uint8_t)(v * ELEMS_PER_VOICE + u), 4, 0);
 }
 
 static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
@@ -157,15 +169,15 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     s_voices[pick] = (voice_t){.active = true, .note = note,
                                .channel = channel, .stamp = ++s_stamp};
 
-    // Velocity rides the voice's buses (B3): gain attenuation in
-    // 0.375 dB steps (64 Q8.10 LSB each, up to ~23.6 dB at vel 1),
-    // and a brightening cutoff term (up to ~4 octaves at vel 127).
+    // Velocity → cutoff stays on the bus (brightening, up to ~4
+    // octaves at vel 127); velocity → gain bakes into the GAIN word
+    // (B5: the gain bus belongs to the amp envelope now). The gate
+    // bus write triggers the ADSR — one write, level-sensitive.
     s_vel_cut[pick] = (int32_t)vel * 32;
-    engine_link_bus_write(BUS_GAIN(pick),
-                          (uint32_t)(((127 - vel) >> 1) * 64));
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
+    engine_link_bus_write(BUS_VGATE(pick), 1);
 
-    voice_program(pick, note);
+    voice_program(pick, note, vel);
 }
 
 // Refresh the cutoff buses of active voices — the wheel and bend
@@ -202,12 +214,14 @@ static void bend_update(uint16_t bend14)
     refresh_cut_buses();
 }
 
+// Note-off is one gate-bus write: the ADSR sees the level drop and
+// releases. Element GATE words stay on; parameters stay live.
 static void note_off(uint8_t note)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
         if (s_voices[v].active && s_voices[v].note == note) {
             s_voices[v].active = false;
-            voice_gate_off(v);
+            engine_link_bus_write(BUS_VGATE(v), 0);
         }
     }
 }
@@ -271,17 +285,27 @@ void voice_alloc_init(void)
     wire_pointers();
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
 
-    // B4: the first self-running modulation — a global vibrato.
-    // Producer 0: triangle LFO at 1.0 Hz (rate16 = 175; Thor: LFOs
-    // are subsonic), ADDING to the global pitch bus — it coexists
-    // with the pitch wheel's base writes on the same bus. Zero SPI
-    // traffic once configured.
-    // Depth ±64 Q8.10 LSB ≈ ±75 cents: deliberately OBVIOUS for the
-    // ear verification — ±19 cents was masked by the ±9-cent unison
-    // detune. Tame it after the milestone.
+    // B4: producer 0 — the boot vibrato. Triangle LFO at 1.0 Hz
+    // (rate16 = 175; LFOs are subsonic), depth tamed to ±19 cents
+    // now that its existence is ear-verified. DEPTH moved to word 2
+    // in the B5 3-word entry layout.
     engine_link_prod_write(0, 0,
         1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6) | (175u << 16));
-    engine_link_prod_write(0, 1, 64);
+    engine_link_prod_write(0, 2, 16);
+
+    // B5: per-voice amp envelopes — producers 32..63. Each watches
+    // its voice's gate bus and drives its voice's gain bus from the
+    // ENV_FLOOR base with negative depth (envelope subtracts
+    // silence). Bases are live bus writes; config rides the swap.
+    for (int v = 0; v < NUM_VOICES; v++) {
+        engine_link_bus_write(BUS_GAIN(v), ENV_FLOOR);
+        engine_link_prod_write(PROD_ADSR(v), 0,
+            2u | ((uint32_t)BUS_GAIN(v) << 6)
+               | ((uint32_t)BUS_VGATE(v) << 16));
+        engine_link_prod_write(PROD_ADSR(v), 1, ADSR_RATES);
+        engine_link_prod_write(PROD_ADSR(v), 2,
+            (uint32_t)(-(int32_t)ENV_FLOOR) & 0x3FFFF);
+    }
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");

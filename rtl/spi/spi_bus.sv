@@ -75,7 +75,7 @@ module spi_bus #(
     // Producer config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
     output logic        pw_we,
-    output logic [7:0]  pw_addr,     // {entry[6:0], word[0]}
+    output logic [8:0]  pw_addr,     // {entry[6:0], word[1:0]}
     output logic [31:0] pw_data,
     output logic [7:0]  pe_elem,
     output logic [31:0] pe_wdata,
@@ -232,11 +232,12 @@ module spi_bus #(
     // ---- producer table write decode (0x0100..0x01FF) --------------
     localparam [15:0] PROD_BASE = synth_pkg::MAP_PROD_BASE;
     localparam [15:0] PROD_END  = synth_pkg::MAP_PROD_BASE
-                                + 16'(2 * synth_pkg::NUM_PRODUCERS);
-    wire in_pw = (addr >= PROD_BASE) && (addr < PROD_END);
+                                + 16'(4 * synth_pkg::NUM_PRODUCERS);
+    wire in_pw = (addr >= PROD_BASE) && (addr < PROD_END)
+                 && (addr[1:0] != 2'd3);          // word 3 reserved
     assign pw_we   = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                      && !is_read && in_pw;
-    assign pw_addr = addr[7:0];
+    assign pw_addr = addr[8:0];
     assign pw_data = {wbuf, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----

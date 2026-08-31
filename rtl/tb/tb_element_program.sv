@@ -406,10 +406,10 @@ module tb_element_program;
         // Producer config is wiring: written to the shadow, swapped,
         // mirrored, like every parameter.
         spi_word_write(16'h0100, 32'h400000D1);   // CFG: LFO,pulse,bus3,16384
-        spi_word_write(16'h0101, 32'h00000800);   // DEPTH: +2 oct
+        spi_word_write(16'h0102, 32'h00000800);   // DEPTH (word 2): +2 oct
         flip;
         spi_word_write(16'h0100, 32'h400000D1);
-        spi_word_write(16'h0101, 32'h00000800);
+        spi_word_write(16'h0102, 32'h00000800);
         observe(60);
         wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
         for (step = 0; step < 8; step = step + 1) begin
@@ -428,6 +428,46 @@ module tb_element_program;
             errors = errors + 1;
         end
 
+        // B5: ADSR producer + gate bus. Disable the LFO, refresh the
+        // gain bus base to the envelope floor (+0x2000 att = quiet),
+        // and configure producer 1 as an ADSR watching gate bus 5
+        // with depth -0x2000 (the envelope subtracts silence). Fast
+        // rates for sim: attack ~128 samples, release ~100.
+        spi_word_write(16'h0100, 32'h00000000);   // producer 0 off
+        spi_word_write(16'h0104, 32'h000500C2);   // ADSR, bus3, gate 5
+        spi_word_write(16'h0105, 32'hF0B400B0);   // A,D,R,SUS
+        spi_word_write(16'h0106, 32'h0003E000);   // depth -0x2000
+        flip;
+        spi_word_write(16'h0100, 32'h00000000);
+        spi_word_write(16'h0104, 32'h000500C2);
+        spi_word_write(16'h0105, 32'hF0B400B0);
+        spi_word_write(16'h0106, 32'h0003E000);
+        spi_word_write(16'h0803, 32'h00002000);   // bus 3 base = floor
+        observe(60);
+        observe(300);
+        worst = peak;
+        $display("ADSR floor: peak=%0d (quiet)", worst);
+
+        spi_word_write(16'h0805, 32'h00000001);   // gate on
+        observe(300);
+        observe(400);
+        $display("ADSR attack/sustain: peak=%0d", peak);
+        if (worst == 0) worst = 1;
+        if (peak < worst * 8) begin
+            $display("FAIL: envelope did not open on gate");
+            errors = errors + 1;
+        end
+        wmax = peak;
+
+        spi_word_write(16'h0805, 32'h00000000);   // gate off
+        observe(300);
+        observe(300);
+        $display("ADSR released: peak=%0d", peak);
+        if (peak > wmax / 4) begin
+            $display("FAIL: envelope did not release on gate off");
+            errors = errors + 1;
+        end
+
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
         $finish;
@@ -435,7 +475,7 @@ module tb_element_program;
 
 
     initial begin
-        #300_000_000;
+        #400_000_000;
         $display("TIMEOUT");
         $finish;
     end

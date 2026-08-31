@@ -332,129 +332,207 @@ module element_pipeline #(
         else if (wk_wr)   bus_ram_gr[wk_bus]   <= wk_val;
 
     //----------------------------------------------------------------
-    // Producer walker (B4, bus_architecture.md) — the idle-slot table
-    // executor. 128 entries, stride 2 slots, span 300..~560. Law 1:
-    // this is the ONLY place outside the audio pipeline's DSP stages
-    // where a multiply lives, and it sits alone in its own stage.
-    // Law 3: entries execute in table order, once per sample.
+    // Producer walker (B4/B5, bus_architecture.md) — the idle-slot
+    // table executor. 128 entries × 3 config words (stride 4 in the
+    // RAM), 3 slots per entry, span 300..~690. Law 1: the ONE
+    // producer multiply sits alone in its own stage with registered
+    // operands. Law 3: entries execute in table order, once per
+    // sample. A producer's OUTPUT uses the PREVIOUS sample's state —
+    // the one-sample lag is inaudible at control rates and it keeps
+    // the sine's internal multiply and the producer multiply fed by
+    // registers only.
     //
-    // Stage map (2-slot stride, stages overlap across entries):
-    //   c0: read CFG word + phase
-    //   c1: decode cfg; phase += rate; read DEPTH; phase writeback
-    //   c2: waveform (osc_core, decode-only) → register; read base
-    //   c3: wave × depth (registered operands, DSP)
-    //   c4: value = base + (product >>> 16), saturate, write replicas
+    // Per-entry phases (overlapped across entries):
+    //   P0: read CFG + state
+    //   P1: latch cfg/state; read RATES; read gate bus (bus_base)
+    //   P2: next-state (adds/compares/shifts only); read DEPTH;
+    //       source = LFO wave(old phase) | ADSR level (old);
+    //       state writeback
+    //   P3: source × depth (DSP, registered operands); read target
+    //       base (bus_base — port shared with P1 by phase mux)
+    //   P4: value = base + (product >>> 16), saturate, write replicas
+    //
+    // ADSR state word: [23:22] stage (0 idle, 1 attack, 2 decay/
+    // sustain, 3 release), [21:0] level. Gate is LEVEL-sensitive on
+    // the watched bus (> 0 = held): note-on/off is one live bus write.
     //----------------------------------------------------------------
-    reg [35:0] prod_ram [0:4*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word}
-    reg [23:0] prod_phase [0:synth_pkg::NUM_PRODUCERS-1];
+    localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
+                     AST_DEC  = 2'd2, AST_REL = 2'd3;
+
+    reg [35:0] prod_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word[1:0]}
+    reg [23:0] prod_state [0:synth_pkg::NUM_PRODUCERS-1];
     integer wi;
     initial begin
-        for (wi = 0; wi < 4*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
+        for (wi = 0; wi < 8*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
             prod_ram[wi] = 36'd0;                  // type 0 = off
         for (wi = 0; wi < synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            prod_phase[wi] = 24'd0;
+            prod_state[wi] = 24'd0;
     end
 
     always_ff @(posedge sclk)
         if (pw_we) prod_ram[{bank_shadow, pw_addr}] <= {4'b0, pw_data};
 
-    wire [9:0] wslot   = slot - 10'd300;
-    wire       wk_span = (slot >= 10'd300)
-                       && (wslot < 10'(2*synth_pkg::NUM_PRODUCERS));
-    wire [6:0] wk_entry = wslot[7:1];
+    // control: 3-slot stride via a small counter, armed at slot 299
+    logic [1:0] wcnt;
+    logic [7:0] went;
+    wire wk_run = (went < 8'(synth_pkg::NUM_PRODUCERS));
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            wcnt <= 2'd0; went <= 8'hFF;
+        end else if (slot == 10'd299) begin
+            wcnt <= 2'd0; went <= 8'd0;
+        end else if (wk_run) begin
+            if (wcnt == 2'd2) begin
+                wcnt <= 2'd0;
+                went <= went + 8'd1;
+            end else
+                wcnt <= wcnt + 2'd1;
+        end
+    end
+    wire wk_p0 = wk_run && (wcnt == 2'd0);
 
-    // c0 → c1 registers
-    logic        wkA_v;
-    logic [6:0]  wkA_e;
-    logic [35:0] wk_cfg_q;
-    logic [23:0] wk_ph_q;
-    // c1 → c2 registers
-    logic        wkB_v;
-    logic [6:0]  wkB_e;
-    logic [1:0]  wkB_shape;
-    logic [9:0]  wkB_tgt;
-    logic signed [23:0] wkB_phase;
-    // c2 → c3 registers
-    logic        wkC_v;
-    logic [9:0]  wkC_tgt;
-    logic signed [17:0] wkC_wave;
-    logic signed [17:0] wkC_depth;
-    // c3 → c4 registers
-    logic        wkD_v;
-    logic [9:0]  wkD_tgt;
-    logic signed [35:0] wkD_m;
-    logic signed [17:0] wkD_base;
+    // Sequential read registers: prod_ram serves CFG/RATES/DEPTH on
+    // consecutive cycles through ONE register (address muxed by
+    // phase); bus_base serves the gate read (P1) and the target-base
+    // read (P3) through one register the same way.
+    logic [35:0] wk_prod_q;
+    logic [23:0] wk_st_q;
+    logic signed [17:0] wk_busrd_q;
+    logic        v0;               // a P0 read was issued last cycle
 
-    logic [35:0] wk_depth_q;
-    logic signed [17:0] wk_base_q;
+    // A stage — latched at the end of P1, stable for 3 cycles
+    logic        eA_v;
+    logic [6:0]  eA_e;
+    logic [3:0]  eA_type;
+    logic [1:0]  eA_shape;
+    logic [9:0]  eA_tgt;
+    logic [15:0] eA_rate;
+    logic [23:0] stA;
+    // B stage — latched at the end of P2
+    logic        eB_v;
+    logic [9:0]  eB_tgt;
+    logic signed [17:0] srcB;
+    // C stage — latched at the end of P3
+    logic        eC_v;
+    logic [9:0]  eC_tgt;
+    logic signed [35:0] mC;
 
-    // waveform generator: osc_core on the advanced phase (delta 0 so
-    // phase_next = phase; duty 0 = square for the pulse shape)
+    // LFO waveform on the OLD phase (registered stA → rule-clean)
     logic signed [17:0] wk_wave;
     osc_core u_wk_osc (
-        .phase      (wkB_phase),
+        .phase      ($signed(stA)),
         .delta      (24'sd0),
         .duty       (24'sd0),
-        .wave       (wkB_shape),
+        .wave       (eA_shape),
         .phase_next (),
         .sample_out (wk_wave)
     );
 
-    wire wk_c0 = wk_span && !wslot[0];
-    wire [23:0] wk_ph_new = wk_ph_q + {8'b0, wk_cfg_q[31:16]};
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            wkA_v <= 1'b0; wkB_v <= 1'b0; wkC_v <= 1'b0; wkD_v <= 1'b0;
-            wkA_e <= '0; wkB_e <= '0;
-            wkB_shape <= '0; wkB_tgt <= '0; wkB_phase <= '0;
-            wkC_tgt <= '0; wkC_wave <= '0; wkC_depth <= '0;
-            wkD_tgt <= '0; wkD_m <= '0; wkD_base <= '0;
+    // next-state, computed at P2 (adds/compares/shifts only).
+    // During P2, wk_prod_q holds the RATES word and wk_busrd_q holds
+    // the gate-bus value (both read the cycle before).
+    wire        wk_gate  = (wk_busrd_q > 18'sd0);
+    wire [20:0] wk_ainc  = 21'((5'd16 + 5'(wk_prod_q[3:0]))
+                               << wk_prod_q[7:4]);
+    wire [20:0] wk_dinc  = 21'((5'd16 + 5'(wk_prod_q[11:8]))
+                               << wk_prod_q[15:12]);
+    wire [20:0] wk_rinc  = 21'((5'd16 + 5'(wk_prod_q[19:16]))
+                               << wk_prod_q[23:20]);
+    wire [21:0] wk_sus   = {wk_prod_q[31:24], 14'b0};
+    wire [1:0]  a_stage  = stA[23:22];
+    wire [21:0] a_level  = stA[21:0];
+    logic [23:0] wk_nstate;
+    always_comb begin
+        if (eA_type == 4'd1) begin
+            // LFO: free-running phase accumulator
+            wk_nstate = stA + {8'b0, eA_rate};
+        end else if (!wk_gate) begin
+            // ADSR, gate low: release toward zero
+            wk_nstate = (a_level > {1'b0, wk_rinc})
+                ? {AST_REL, a_level - 22'(wk_rinc)}
+                : {AST_IDLE, 22'd0};
         end else begin
-            // c0: reads issued below (sync-only processes); validity
-            wkA_v <= wk_c0;
-            wkA_e <= wk_entry;
-
-            // c1: decode + phase advance (adds only)
-            wkB_v     <= wkA_v && (wk_cfg_q[3:0] == 4'd1);   // type LFO
-            wkB_e     <= wkA_e;
-            wkB_shape <= wk_cfg_q[5:4];
-            wkB_tgt   <= wk_cfg_q[15:6];
-            wkB_phase <= $signed(wk_ph_new);
-
-            // c2: register the waveform (decode) and pass depth
-            wkC_v     <= wkB_v;
-            wkC_tgt   <= wkB_tgt;
-            wkC_wave  <= wk_wave;
-            wkC_depth <= $signed(wk_depth_q[17:0]);
-
-            // c3: the producer multiply — registered operands only
-            wkD_v    <= wkC_v;
-            wkD_tgt  <= wkC_tgt;
-            wkD_m    <= wkC_wave * wkC_depth;
-            wkD_base <= wk_base_q;
+            case (a_stage)
+                AST_ATT: wk_nstate =
+                    ({1'b0, a_level} + 23'(wk_ainc) > 23'h3FFFFF)
+                        ? {AST_DEC, 22'h3FFFFF}
+                        : {AST_ATT, a_level + 22'(wk_ainc)};
+                AST_DEC: wk_nstate =
+                    (a_level > wk_sus + 22'(wk_dinc))
+                        ? {AST_DEC, a_level - 22'(wk_dinc)}
+                        : (a_level > wk_sus) ? {AST_DEC, wk_sus}
+                                             : {AST_DEC, a_level};
+                default: wk_nstate = {AST_ATT, a_level};  // idle/release
+            endcase
         end
     end
 
-    // c4: value = base + contribution (product >>> 16), saturating
-    wire signed [19:0] wk_contrib = wkD_m[35:16];
+    // Phase-guarded stage latches: each stage latches only at its own
+    // phase edge and stays stable for the entry's three cycles.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            v0 <= 1'b0;
+            eA_v <= 1'b0; eB_v <= 1'b0; eC_v <= 1'b0;
+            eA_e <= '0; eA_type <= '0; eA_shape <= '0;
+            eA_tgt <= '0; eA_rate <= '0; stA <= '0;
+            eB_tgt <= '0; srcB <= '0;
+            eC_tgt <= '0; mC <= '0;
+        end else begin
+            v0 <= wk_p0;
+
+            if (wcnt == 2'd1) begin
+                // end of P1: latch config (wk_prod_q = CFG) + state;
+                // the previous entry's P4 just consumed eC
+                eA_v     <= v0;
+                eA_e     <= went[6:0];
+                eA_type  <= wk_prod_q[3:0];
+                eA_shape <= wk_prod_q[5:4];
+                eA_tgt   <= wk_prod_q[15:6];
+                eA_rate  <= wk_prod_q[31:16];
+                stA      <= wk_st_q;
+                eC_v     <= 1'b0;
+            end else if (wcnt == 2'd2) begin
+                // end of P2: source from OLD state; validity by type
+                eB_v   <= eA_v && (eA_type == 4'd1 || eA_type == 4'd2);
+                eB_tgt <= eA_tgt;
+                srcB   <= (eA_type == 4'd1) ? wk_wave
+                                            : $signed({2'b0, stA[21:6]});
+                eA_v   <= 1'b0;
+            end else begin
+                // end of P3 (wcnt == 0): the producer multiply —
+                // registered operands (srcB, and wk_prod_q = DEPTH)
+                eC_v   <= eB_v;
+                eC_tgt <= eB_tgt;
+                mC     <= srcB * $signed(wk_prod_q[17:0]);
+                eB_v   <= 1'b0;
+            end
+        end
+    end
+
+    // P4 (wcnt == 1): value = base + contribution, saturating.
+    // wk_busrd_q holds the target base (read issued at P3).
+    wire signed [19:0] wk_contrib = mC[35:16];
     wire signed [20:0] wk_sum =
-        {{3{wkD_base[17]}}, wkD_base} + {wk_contrib[19], wk_contrib};
+        {{3{wk_busrd_q[17]}}, wk_busrd_q} + {wk_contrib[19], wk_contrib};
     assign wk_val = (wk_sum > 21'sd131071)  ? 18'sd131071  :
                     (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
-    assign wk_bus = wkD_tgt;
-    assign wk_wr  = wkD_v && (wkD_tgt != 10'd0);
+    assign wk_bus = eC_tgt;
+    assign wk_wr  = eC_v && (wcnt == 2'd1) && (eC_tgt != 10'd0);
 
-    // walker memory reads/writes — sync-only processes
+    // walker memory reads — sync-only, one register per RAM, address
+    // muxed by phase: prod_ram serves CFG (P0) / RATES (P1) /
+    // DEPTH (P2); bus_base serves the gate bus (P1, address from the
+    // CFG word just read) / the target base (P3).
     always_ff @(posedge clk) begin
-        wk_cfg_q   <= prod_ram[{bank_active, wk_entry, 1'b0}];   // c0
-        wk_ph_q    <= prod_phase[wk_entry];                      // c0
-        wk_depth_q <= prod_ram[{bank_active, wkA_e, 1'b1}];      // c1
-        wk_base_q  <= bus_base[wkB_tgt];                         // c2
+        wk_prod_q  <= prod_ram[{bank_active, went[6:0], wcnt}];
+        wk_st_q    <= prod_state[went[6:0]];
+        wk_busrd_q <= bus_base[(wcnt == 2'd1) ? wk_prod_q[25:16]
+                                              : eB_tgt];
     end
     always_ff @(posedge clk)
-        if (wkA_v && (wk_cfg_q[3:0] == 4'd1))
-            prod_phase[wkA_e] <= wk_ph_new;                      // c1
+        if ((wcnt == 2'd2) && eA_v
+            && (eA_type == 4'd1 || eA_type == 4'd2))
+            prod_state[eA_e] <= wk_nstate;                      // P2
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)

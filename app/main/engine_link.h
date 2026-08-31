@@ -47,17 +47,24 @@ bool engine_link_send(const engine_cmd_t *cmd);
 // the low 18 bits. Bus 0 is hardwired zero and cannot be written.
 bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 
-// ── Producer table (B4) ─────────────────────────────────────────────
-// 128 producers x 2 words at 0x0100, banked like parameters (config
-// is wiring): writes land in the shadow and take effect at the swap,
-// with the same catch-up mirroring as the element image.
-//   word 0 CFG:   [3:0] type (0 off, 1 LFO), [5:4] shape
+// ── Producer table (B4/B5) ──────────────────────────────────────────
+// 128 producers x 3 words (stride 4) at 0x0100, banked like
+// parameters (config is wiring): writes land in the shadow and take
+// effect at the swap, with the same catch-up mirroring as the
+// element image.
+//   word 0 CFG:   [3:0] type (0 off, 1 LFO, 2 ADSR), [5:4] LFO shape
 //                 (saw/pulse/tri/sine), [15:6] target bus,
-//                 [31:16] rate (UQ0.24 increment low bits: 5.7 mHz
-//                 steps, 375 Hz max)
-//   word 1 DEPTH: [17:0] signed Q8.10 contribution amplitude
+//                 LFO:  [31:16] rate (UQ0.24 increment low bits:
+//                       5.7 mHz steps, 375 Hz max)
+//                 ADSR: [25:16] gate bus (level-sensitive: > 0 held)
+//   word 1 RATES (ADSR): [7:0] attack, [15:8] decay, [23:16] release
+//                 as 8-bit log2 rates (increment = (16+low4) << high4
+//                 on the 22-bit level), [31:24] sustain fraction
+//   word 2 DEPTH: [17:0] signed Q8.10 contribution amplitude
 // The producer ADDS to the bus base: firmware's base write and the
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
+// Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
+// envelope subtracts silence.
 #define ENGINE_NUM_PRODUCERS 128
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 

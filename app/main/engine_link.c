@@ -36,9 +36,10 @@ static QueueHandle_t s_bus_queue;
 static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
 #define BUS_BASE_ADDR      0x0800
-#define BUS_QUEUE_LEN      64
+#define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
+                                  // gates in one burst
 #define PROD_BASE_ADDR     0x0100
-#define PROD_QUEUE_LEN     64
+#define PROD_QUEUE_LEN     256    // 32 ADSRs x 3 words + LFOs at boot
 
 typedef struct {
     uint16_t bus;
@@ -52,8 +53,8 @@ typedef struct {
 } prod_cmd_t;
 
 static QueueHandle_t s_prod_queue;
-static uint32_t s_prod[ENGINE_NUM_PRODUCERS][2];
-#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 2 / 32)
+static uint32_t s_prod[ENGINE_NUM_PRODUCERS][3];
+#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 3 / 32)
 static uint32_t s_pdirty_now[PDIRTY_WORDS];
 static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 
@@ -109,10 +110,10 @@ static void engine_task(void *arg)
         }
         prod_cmd_t pc;
         while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
-            if (pc.entry >= ENGINE_NUM_PRODUCERS || pc.word >= 2)
+            if (pc.entry >= ENGINE_NUM_PRODUCERS || pc.word >= 3)
                 continue;
             s_prod[pc.entry][pc.word] = pc.value;
-            int bit = pc.entry * 2 + pc.word;
+            int bit = pc.entry * 3 + pc.word;
             s_pdirty_now[bit >> 5] |= 1u << (bit & 31);
             changed = true;
         }
@@ -145,9 +146,9 @@ static void engine_task(void *arg)
             while (bits) {
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
-                int idx = i * 32 + b;
-                fpga_word_write(PROD_BASE_ADDR + idx,
-                                s_prod[idx / 2][idx % 2]);
+                int idx = i * 32 + b;              // entry*3 + word
+                fpga_word_write(PROD_BASE_ADDR + (idx / 3) * 4 + idx % 3,
+                                s_prod[idx / 3][idx % 3]);
             }
         }
         fpga_swap();
@@ -235,7 +236,7 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
 {
-    if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 2)
+    if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 3)
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
     if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {

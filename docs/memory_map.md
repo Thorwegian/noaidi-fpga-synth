@@ -154,16 +154,19 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-## Producer table — `0x0100–0x01FF` (live, B4)
+## Producer table — `0x0100–0x02FF` (live, B4/B5)
 
-128 producers × 2 words, stride 2, banked like parameters (config is
-wiring — takes effect at the swap). See
-[bus_architecture.md](bus_architecture.md).
+128 producers × 3 words, stride 4 (word 3 reserved), banked like
+parameters (config is wiring — takes effect at the swap). See
+[bus_architecture.md](bus_architecture.md). A producer's output uses
+the previous sample's state (one-sample lag, keeps multiplies fed by
+registers).
 
 | Offset | Word | Contents |
 |---|---|---|
-| `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO), `[5:4]` shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus, `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max) |
-| `+1` | `DEPTH` | `[17:0]` signed Q8.10 contribution amplitude |
+| `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO, 2 ADSR), `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held) |
+| `+1` | `RATES` (ADSR) | `[7:0]` attack, `[15:8]` decay, `[23:16]` release — 8-bit log₂ rates, increment = (16+low4) << high4 on the 22-bit level (instant … ~2.7 s); `[31:24]` sustain fraction |
+| `+2` | `DEPTH` | `[17:0]` signed Q8.10 contribution amplitude (amp-envelope idiom: bus base = full attenuation, depth negative — the envelope subtracts silence) |
 
 A producer ADDS to its target bus's base register (bus value = base +
 contribution), so firmware writes and producer modulation coexist on
