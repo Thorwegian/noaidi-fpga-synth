@@ -237,7 +237,10 @@ module spi_bus #(
                  && (addr[1:0] != 2'd3);          // word 3 reserved
     assign pw_we   = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                      && !is_read && in_pw;
-    assign pw_addr = addr[8:0];
+    // Region-relative offset — addr[8:0] alone is WRONG here: the
+    // region starts at 0x0100, whose bit 8 is set, so a raw slice
+    // lands writes 64 entries off.
+    assign pw_addr = 9'(addr - synth_pkg::MAP_PROD_BASE);
     assign pw_data = {wbuf, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----
