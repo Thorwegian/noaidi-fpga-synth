@@ -392,12 +392,17 @@ module tb_element_program;
         end else
             $display("gain restored: peak=%0d", peak);
 
-        // B4: producer walker + LFO. Producer 0 becomes a square LFO
-        // (osc_core pulse, duty 0) at 93.75 Hz (rate16 = 16384, period
-        // 1024 samples) targeting gain bus 3, depth ±2 octaves of
-        // attenuation (±12 dB). The sounding sine's loudness must
-        // alternate — measured as max/min peak over 256-sample
-        // windows — with ZERO SPI traffic during the measurement.
+        // B4: producer walker + LFO. NOTE ON THE RATE: 93.75 Hz is a
+        // musically absurd LFO on purpose — a real 0.5-1 Hz LFO has a
+        // multi-second period, and simulating seconds of audio takes
+        // hours; the bench needs several full periods inside ~20 ms
+        // to assert the WALKER works. Same producer, same datapath;
+        // the firmware's boot vibrato runs at 1 Hz where ears live.
+        // Producer 0: square LFO (osc_core pulse, duty 0) at 93.75 Hz
+        // (rate16 = 16384, period 1024 samples) targeting gain bus 3,
+        // depth ±2 octaves of attenuation (±12 dB). The sounding
+        // sine's loudness must alternate — max/min peak over
+        // 256-sample windows — with ZERO SPI during the measurement.
         // Producer config is wiring: written to the shadow, swapped,
         // mirrored, like every parameter.
         spi_word_write(16'h0100, 32'h400000D1);   // CFG: LFO,pulse,bus3,16384
