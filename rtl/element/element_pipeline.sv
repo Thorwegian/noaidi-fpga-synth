@@ -89,7 +89,7 @@ module element_pipeline #(
 
     // Producer table writes (sclk domain, banked — wiring per law 4)
     input  logic           pw_we,
-    input  logic [7:0]     pw_addr,     // {entry[6:0], word[0]}
+    input  logic [8:0]     pw_addr,     // {entry[6:0], word[1:0]}
     input  logic [31:0]    pw_data,
     input  logic [7:0]     pe_elem,
     input  logic [31:0]    pe_wdata,
