@@ -13,6 +13,16 @@ fraction→resonance convention (deferred to B2 by design), the
 worst-case performance that finalizes sizing, and Thor's read of the
 remainder of this document.
 
+## Terminology used in this document
+
+**Firmware** means the C code running on the ESP32. **Gateware**
+means the SystemVerilog running on the FPGA. **Silicon** refers to
+the physical FPGA chip, and is used only when discussing its
+electrical or timing behavior. **Element**, **lane**, **voice** and
+**stop** are as defined in [design.md](design.md): the FPGA generates
+elements via lanes; firmware groups elements into voices; a stop is a
+drawn configuration.
+
 ## The model in one paragraph
 
 Elements are dumb: waveform select, filter type, a static detune
@@ -65,7 +75,7 @@ conventions the FPGA never sees.
 | SPI bandwidth: the firmware mod wheel costs 256 writes ≈ 2 ms per CC tick | One-to-many: parameters point at shared buses; a patch-wide change is one base-register write |
 | Five silicon timing failures in pipeline growth; STA untrustworthy | Pipeline gains one add-only stage, then freezes; all logic moves to idle slots (law 2) |
 | DSP cost of scaled bus sums (Thor) | Law 1: producers pre-scale, buses only add; ~150 small multiplies/sample fits one time-multiplexed 18×18 lane in a third of the idle budget |
-| Fixed, known sinks per element (Thor) | Sink-typed bus memories, static summing, no crossbar |
+| Fixed, known sinks per element (Thor) | One uniform Q8.10 bus pool; each sink takes a fixed bit-slice; static summing, no crossbar (an earlier sink-typed-memories draft was superseded by the uniform format) |
 | Envelope sharing across element groups (Thor) | ADSR is a producer from a pool; group sharing = allocation, not architecture |
 | ADSR snappiness vs smoothing dilemma | Smoothing is a per-producer property: firmware-written buses can be smoothed (producer-side), envelope buses never are |
 | FPGA complexity vs bandwidth balance (Thor) | Tiered build; every deferred feature has a firmware fallback costing only SPI traffic; the line moves on measured link utilization |
@@ -82,9 +92,14 @@ conventions the FPGA never sees.
 - **Direct-parameter control as a parallel mechanism** — rejected;
   it is the degenerate bus allocation (one private bus per parameter),
   so a second path would duplicate the first.
-- **Per-element envelopes in fixed registers** — rejected; 512
-  envelopes of silicon for a sharing pattern firmware can express with
-  a pool of ~64 producers.
+- **Per-element envelopes in fixed registers** — the old memory map
+  gave every one of the 256 elements its own two ADSR register sets
+  (offsets +5/+6), each configured individually over SPI: 512
+  envelope generators in gateware, most of them idle. Rejected: the
+  real requirement is 32-note polyphony × 2 envelopes = 64
+  simultaneously active envelopes, which the producer pool provides —
+  and the 8 elements of a voice share their pair through the buses
+  instead of each carrying a copy.
 
 ## Sizing (initial allocations; address space reserves ≥2×)
 
@@ -142,18 +157,26 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B2 — All sink classes.** Pitch (with the detune decision), duty,
   Q, gains on buses; voice_alloc rewired. *Verification: playable
   synth indistinguishable by ear from today; benches green.*
-- **B3 — Producer walker + LFO producer.** Idle-slot table executor,
-  LFO type with depth. *Verification: vibrato/tremolo/PWM by ear with
-  zero SPI traffic during the note; bench asserts bus waveforms.*
-- **B4 — ADSR producer + gate-bus triggering.** Amp envelope first —
-  this is where note clicks die (replacing the old smoothing rung's
-  goal) — then filter envelope. *Verification: click-free attack and
-  release by ear; envelope shape in bench.*
-- **B5 — Per-note cells.** Velocity and poly pressure as per-note
-  buses. *Verification: velocity-to-timbre by ear.*
+- **B3 — Firmware-routed buses** (Thor: basic routing before ADSR).
+  No producers yet — firmware writes bus bases to realize the first
+  real routes: velocity → gain and velocity → filter cutoff (a
+  per-voice bus each, allocated by firmware at note-on) and pitch
+  wheel → pitch offset (one shared bus every voice's pitch pointer
+  references). This replaces today's rewrite storms: a pitch bend
+  becomes one base write instead of 256 OSC-word writes.
+  *Verification: velocity-to-loudness and velocity-to-brightness by
+  ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
+- **B4 — Producer walker + LFO producer.** The idle-slot table
+  executor, and the LFO as its first producer type. *Verification:
+  vibrato/tremolo/PWM by ear with zero SPI traffic during the note;
+  bench asserts the bus waveforms.*
+- **B5 — ADSR producer + gate-bus triggering.** Amp envelope first —
+  this is where note clicks die (absorbing the old smoothing rung's
+  goal) — then the filter envelope. *Verification: click-free attack
+  and release by ear; envelope shape in bench.*
 - **B6+ (deferred until measured traffic demands them).** Combiner/
-  chaining, stop tables, producer-side smoothing for firmware buses,
-  bus read-back diagnostics.
+  chaining, stop tables, producer-side smoothing for firmware-written
+  buses, bus read-back diagnostics.
 
 Rungs keep the standing process: one side branch at a time, ear (or
 bench where marked) verification gates every merge, board matches tree.

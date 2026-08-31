@@ -273,9 +273,11 @@ bench-verified) milestone. One rung in flight at a time.
 4. **The bus architecture** — the agreed forward path, spec and
    milestone ladder B0–B6 in
    [bus_architecture.md](bus_architecture.md): spec sign-off →
-   cutoff-class pilot → all sinks → producer walker + LFOs → ADSR
-   producers (where note clicks die, absorbing the old smoothing
-   rung's goal) → per-note cells → deferred tier on measured traffic.
+   cutoff-class pilot → all sinks → firmware-routed buses (velocity →
+   gain/cutoff, bend → pitch; Thor: basic routing before ADSR) →
+   producer walker + LFOs → ADSR producers (where note clicks die,
+   absorbing the old smoothing rung's goal) → deferred tier on
+   measured traffic.
    ADSR/LFO/routes/smoothing rungs from earlier drafts fold into it.
    Still separate: 36-bit summing (bench-verified rung, pending
    approval), per-element SPI read-back (B6 diagnostics candidate).
