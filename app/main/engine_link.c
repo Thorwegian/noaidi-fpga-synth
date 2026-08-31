@@ -31,7 +31,16 @@
 #define P3_MUTE            0x0000FFFFu
 
 static QueueHandle_t s_queue;
+static QueueHandle_t s_bus_queue;
 static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
+
+#define BUS_BASE_ADDR      0x0800
+#define BUS_QUEUE_LEN      64
+
+typedef struct {
+    uint16_t bus;
+    uint32_t value;
+} bus_cmd_t;
 
 // Dirty bitmaps, one bit per (elem, word): 1024 bits.
 #define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
@@ -67,6 +76,11 @@ static void engine_task(void *arg)
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // Live bus writes first: no banking, no swap — straight out.
+        bus_cmd_t bc;
+        while (xQueueReceive(s_bus_queue, &bc, 0) == pdTRUE)
+            fpga_word_write(BUS_BASE_ADDR + bc.bus, bc.value & 0x3FFFF);
 
         // Drain the queue into the image.
         bool changed = false;
@@ -114,13 +128,16 @@ static void engine_task(void *arg)
 void engine_link_init(void)
 {
     // Image: every element gated off (and gain-muted for belt and
-    // braces at boot), benign params otherwise.
+    // braces at boot), benign params otherwise. Every element's
+    // cutoff pointer targets bus 1 (the global cutoff-offset bus the
+    // mod wheel drives); all other pointers stay on bus 0 (zero).
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;
         s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
         s_image[e][3] = P3_MUTE;
         s_image[e][4] = 0;            // GATE off
+        s_image[e][5] = 1u << 20;     // PTRS: cutoff → bus 1
     }
 
     // Both banks get the muted image before anything can play.
@@ -131,8 +148,9 @@ void engine_link_init(void)
     ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_ELEMENTS);
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_cmd_t));
-    if (s_queue == NULL) {
-        ESP_LOGE(TAG, "failed to create command queue");
+    s_bus_queue = xQueueCreate(BUS_QUEUE_LEN, sizeof(bus_cmd_t));
+    if (s_queue == NULL || s_bus_queue == NULL) {
+        ESP_LOGE(TAG, "failed to create command queues");
         return;
     }
 
@@ -156,6 +174,18 @@ bool engine_link_send(const engine_cmd_t *cmd)
     if (s_queue == NULL)
         return false;
     if (xQueueSend(s_queue, cmd, 0) != pdTRUE) {
+        s_drops++;
+        return false;
+    }
+    return true;
+}
+
+bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
+{
+    if (s_bus_queue == NULL || bus == 0 || bus >= 1024)
+        return false;
+    bus_cmd_t bc = {.bus = bus, .value = value_q810};
+    if (xQueueSend(s_bus_queue, &bc, 0) != pdTRUE) {
         s_drops++;
         return false;
     }

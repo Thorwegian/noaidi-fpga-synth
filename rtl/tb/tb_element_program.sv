@@ -33,6 +33,9 @@ module tb_element_program;
     wire [2:0]  pe_bank;
     wire [7:0]  pe_elem;
     wire [31:0] pe_wdata;
+    wire [9:0]  bw_addr;
+    wire [17:0] bw_data;
+    wire        bw_req;
     wire        swap_req;
 
     spi_bus #(.AW_BACKED(11)) u_bus (
@@ -40,6 +43,7 @@ module tb_element_program;
         .sysclk(clk), .rst_n(rst_n),
         .pe_we(pe_we), .pe_bank(pe_bank),
         .pe_elem(pe_elem), .pe_wdata(pe_wdata),
+        .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
         .swap_req(swap_req)
     );
 
@@ -52,6 +56,7 @@ module tb_element_program;
         .lane_enter(lane_enter), .sample_tick(sample_tick),
         .sclk(sclk), .pe_we(pe_we), .pe_bank(pe_bank),
         .pe_elem(pe_elem), .pe_wdata(pe_wdata), .swap_req(swap_req),
+        .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
         .mix_left(ml), .mix_right(mr)
     );
 
@@ -279,6 +284,54 @@ module tb_element_program;
             errors = errors + 1;
         end else
             $display("gate on: sound restored (peak=%0d)", peak);
+
+        // Bus pilot (B1): elements 0-7 still sound the C4 voice from
+        // the gate test. Point their cutoff at bus 1, then drive the
+        // bus base live (no swaps): a -2 octave offset muffles the
+        // saw (fundamental lands ~1.75 oct above cutoff, ≥ ~20 dB
+        // down); zeroing the bus restores it; sweeping the base must
+        // be click-free (the mailbox commit is collision-free by
+        // schedule, so no read-corruption steps may appear).
+        for (v = 0; v < 8; v = v + 1)
+            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100000); // fc ptr = 1
+        flip;
+        for (v = 0; v < 8; v = v + 1)
+            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100000);
+        observe(60);
+        observe(400);
+        worst = peak;                             // baseline loudness
+        $display("bus pilot: baseline peak=%0d", worst);
+
+        spi_word_write(16'h0801, 32'h0003E000);   // bus 1 = -0x2000 (-2 oct)
+        observe(60);
+        observe(400);
+        if (peak > worst / 3) begin
+            $display("FAIL: bus offset did not muffle (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("bus -2oct: muffled (peak=%0d)", peak);
+
+        spi_word_write(16'h0801, 32'h00000000);   // bus 1 = 0
+        observe(60);
+        observe(400);
+        if (peak < worst / 2) begin
+            $display("FAIL: bus zero did not restore (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("bus zero: restored (peak=%0d)", peak);
+
+        worst = 0;
+        for (step = 0; step < 40; step = step + 1) begin
+            spi_word_write(16'h0801,
+                           32'(($signed(-19'sd8192) + step * 205) & 32'h0003FFFF));
+            observe(3);
+            if (maxstep > worst) worst = maxstep;
+        end
+        $display("bus sweep (no swaps): worst sample step = %0d", worst);
+        if (worst > 300000) begin
+            $display("FAIL: click during live bus sweep");
+            errors = errors + 1;
+        end
 
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);

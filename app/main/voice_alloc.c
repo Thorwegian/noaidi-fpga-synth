@@ -64,18 +64,13 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
         ESP_LOGW(TAG, "engine queue full, elem %d word %d lost", elem, word);
 }
 
-// Cutoff offset above the note, in UQ4.10 log2: +1 octave at wheel 0,
-// rising to ~+4 octaves at wheel 127 (24 LSB ≈ 0.28 semitone per CC
-// step). Firmware-computed for now; the FPGA CV/route machinery is
-// the real home for this later.
-static uint16_t fc_offset(void)
-{
-    return (uint16_t)(0x400 + (uint16_t)s_wheel * 24);
-}
-
+// Base cutoff: one octave above the note (UQ4.10 log2). The mod
+// wheel's contribution no longer touches the FILTER words at all —
+// it rides cutoff bus 1, which every element's cutoff pointer
+// references (see engine_link_init).
 static uint16_t voice_fc(uint8_t note)
 {
-    uint32_t fc = (uint32_t)midi_to_pitch(note) + fc_offset();
+    uint32_t fc = (uint32_t)midi_to_pitch(note) + 0x400;
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
@@ -145,22 +140,16 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     voice_program(pick, note, vel);
 }
 
-// Mod wheel → cutoff: rewrite the FILTER word of every active voice.
-// Worst case (32 voices held) is 256 words per event; duplicate CC
-// values are skipped so idle wheel chatter costs nothing. Zipper
-// noise on fast sweeps is expected until smoothing exists.
+// Mod wheel → cutoff, through the bus fabric (B1 pilot): ONE write
+// to cutoff bus 1's base register reaches every element, replacing
+// the old 256-FILTER-word rewrite storm. Offset 0 to ~+3 octaves in
+// Q8.10 (wheel*24 LSB, ≈0.28 semitone per CC step).
 static void wheel_update(uint8_t val)
 {
     if (val == s_wheel)
         return;
     s_wheel = val;
-    for (int v = 0; v < NUM_VOICES; v++) {
-        if (!s_voices[v].active)
-            continue;
-        uint16_t fc = voice_fc(s_voices[v].note);
-        for (int u = 0; u < ELEMS_PER_VOICE; u++)
-            send((uint8_t)(v * ELEMS_PER_VOICE + u), 2, Q1_ONE | fc);
-    }
+    engine_link_bus_write(1, (uint32_t)val * 24);
 }
 
 // Pitch wheel → OSC words of every active voice. ±2 semitones: the

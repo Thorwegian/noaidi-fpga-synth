@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define ENGINE_NUM_ELEMENTS 256
-#define ENGINE_WORDS_PER_ELEMENT 5   // OSC, DUTY, FILTER, GAIN, GATE
+#define ENGINE_WORDS_PER_ELEMENT 6   // OSC, DUTY, FILTER, GAIN, GATE, PTRS
 
 typedef struct {
     uint8_t  elem;    // element index 0..255
@@ -37,6 +37,12 @@ void engine_link_init(void);
 // Queue one parameter write. Non-blocking: returns false (and counts
 // the drop) if the queue is full — the tick will log it.
 bool engine_link_send(const engine_cmd_t *cmd);
+
+// Queue one live bus-base write (bus_architecture.md). Buses are not
+// banked and need no swap: the write goes straight to the bus base
+// register (0x0800 + bus) on the next tick. Value is signed Q8.10 in
+// the low 18 bits. Bus 0 is hardwired zero and cannot be written.
+bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 
 #ifdef __cplusplus
 }

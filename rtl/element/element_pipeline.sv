@@ -78,7 +78,14 @@ module element_pipeline #(
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
     input  logic           pe_we,
-    input  logic [2:0]     pe_bank,     // 0..4 = p0..p3, GATE
+    input  logic [2:0]     pe_bank,     // 0..5 = p0..p3, GATE, PTRS
+
+    // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
+    // Synced here and committed to bus RAM only in an idle drum slot,
+    // so a commit never collides with a lane's bus read.
+    input  logic [9:0]     bw_addr,
+    input  logic [17:0]    bw_data,
+    input  logic           bw_req,
     input  logic [7:0]     pe_elem,
     input  logic [31:0]    pe_wdata,
     input  logic           swap_req,    // sclk-domain toggle
@@ -129,6 +136,18 @@ module element_pipeline #(
     reg [35:0] p1_ram [0:2*NUM_ELEMENTS-1];
     reg [35:0] p2_ram [0:2*NUM_ELEMENTS-1];
     reg [35:0] p3_ram [0:2*NUM_ELEMENTS-1];
+
+    // Pointer word (map offset +5): per-element bus pointers, three
+    // 10-bit fields — [9:0] pitch, [19:10] duty, [29:20] cutoff.
+    // Only cutoff is consumed in the B1 pilot; the others join at B2
+    // (with a second word at +6 for Q and the gains). Pointers are
+    // wiring, so they ride the ping-pong banks like every parameter.
+    // Init 0: every parameter points at bus 0 (hardwired zero), so
+    // boot behavior is exactly the pre-bus behavior.
+    reg [29:0] p5_ram [0:2*NUM_ELEMENTS-1];
+    integer pi;
+    initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1)
+        p5_ram[pi] = 30'd0;
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
     // Gate 0 silences the element (gain decode forced to exact mute);
@@ -206,6 +225,48 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
+    // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
+    // One replica in the B1 pilot (only cutoff reads it); replicas
+    // are added per sink at B2. Written ONLY on sysclk: SPI writes
+    // arrive through the toggle mailbox below and commit in an idle
+    // slot (lane bus reads issue during slots 1..~257, so a commit at
+    // slot >258 can never collide with a read — the BSRAM
+    // read-during-write corruption class is impossible by schedule).
+    // Bus 0 is hardwired zero (writes to it are ignored).
+    //----------------------------------------------------------------
+    reg signed [17:0] bus_ram [0:synth_pkg::NUM_BUSES-1];
+    integer bi;
+    initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1)
+        bus_ram[bi] = 18'sd0;
+
+    logic bwr_m, bwr_s, bwr_d;
+    logic bw_pending;
+    logic [9:0]  bwc_addr;
+    logic [17:0] bwc_data;
+    wire  bus_idle   = (slot > 10'd258) && (slot < 10'd760);
+    wire  bus_commit = bw_pending && bus_idle && (bwc_addr != 10'd0);
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            bwr_m <= 1'b0; bwr_s <= 1'b0; bwr_d <= 1'b0;
+            bw_pending <= 1'b0;
+            bwc_addr <= '0; bwc_data <= '0;
+        end else begin
+            bwr_m <= bw_req; bwr_s <= bwr_m; bwr_d <= bwr_s;
+            if (bwr_s != bwr_d) begin
+                bw_pending <= 1'b1;         // payload is stable: it was
+                bwc_addr   <= bw_addr;      // written before the toggle,
+                bwc_data   <= bw_data;      // 2 sync FFs ago
+            end else if (bw_pending && bus_idle) begin
+                bw_pending <= 1'b0;
+            end
+        end
+    end
+
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram[bwc_addr] <= $signed(bwc_data);
+
+    //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
     //
     // Sync-only process: yosys memory inference (BSRAM read port).
@@ -233,12 +294,14 @@ module element_pipeline #(
     // process, per the AGENTS.md inference gotcha; validity is act-gated.
     logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
     logic [1:0]  s1_p4;
+    logic [29:0] s1_p5;
     always_ff @(posedge clk) begin
         s1_p0     <= p0_ram[{bank_active, raddr}];
         s1_p1     <= p1_ram[{bank_active, raddr}];
         s1_p2     <= p2_ram[{bank_active, raddr}];
         s1_p3     <= p3_ram[{bank_active, raddr}];
         s1_p4     <= p4_ram[{bank_active, raddr}];
+        s1_p5     <= p5_ram[{bank_active, raddr}];
         s1_phase  <= phase_ram[raddr];
         s1_ic1eq1 <= ic1eq1_ram[raddr];
         s1_ic2eq1 <= ic2eq1_ram[raddr];
@@ -257,6 +320,8 @@ module element_pipeline #(
         if (pe_we && pe_bank == 3'd3) p3_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
     always_ff @(posedge sclk)
         if (pe_we && pe_bank == 3'd4) p4_ram[{bank_shadow, pe_elem}] <= pe_wdata[1:0];
+    always_ff @(posedge sclk)
+        if (pe_we && pe_bank == 3'd5) p5_ram[{bank_shadow, pe_elem}] <= pe_wdata[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];
@@ -297,6 +362,12 @@ module element_pipeline #(
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
+    // Bus fetch for the cutoff sink: read issued with the S1 pointer,
+    // data lands at S2 alongside s2_fc. Sync-only (BSRAM read port).
+    logic signed [17:0] s2_bus_fc;
+    always_ff @(posedge clk)
+        s2_bus_fc <= bus_ram[s1_p5[29:20]];
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s2_act   <= 1'b0;
@@ -334,6 +405,20 @@ module element_pipeline #(
             s2_ic2eq2 <= s1_ic2eq2;
         end
     end
+
+    //----------------------------------------------------------------
+    // Effective cutoff: base (UQ4.10, from the FILTER word) + cutoff
+    // bus (signed Q8.10 — same LSB, ~1.17 cents), SATURATING into the
+    // legal 14-bit range so an extreme bus value clamps instead of
+    // wrapping into the wrong octave. Adder + clamp feeding the K-LUT
+    // address register and the octave-shift register: adds/decode
+    // only, no multiply — within the silicon timing rule.
+    //----------------------------------------------------------------
+    wire signed [18:0] fc_sum =
+        $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
+    wire [13:0] eff_fc =
+        fc_sum[18]              ? 14'd0    :
+        (fc_sum > 19'sd16383)   ? 14'h3FFF : fc_sum[13:0];
 
     //----------------------------------------------------------------
     // S3 — LUT data, delta/K, phase_next, oscillator waveform
@@ -376,12 +461,12 @@ module element_pipeline #(
             s3_ic2eq2 <= '0;
         end else begin
             s3_delta_lut <= phase_lut[s2_pitch[9:0]];
-            s3_k_lut     <= k_lut[s2_fc[9:0]];
+            s3_k_lut     <= k_lut[eff_fc[9:0]];
             s3_act   <= s2_act;
             s3_idx   <= s2_idx;
             s3_phase <= s2_phase;
             s3_pitch_oct <= s2_pitch[13:10];
-            s3_fc_oct    <= s2_fc[13:10];
+            s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
             s3_duty  <= s2_duty;
             s3_q1    <= s2_q1;

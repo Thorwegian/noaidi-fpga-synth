@@ -46,6 +46,11 @@ package synth_pkg;
     parameter logic [15:0] MAP_ELEM_BASE   = 16'h2000; // per-element params
     parameter int          MAP_ELEM_STRIDE = 64;       // words per element
 
+    //--- Bus fabric (docs/bus_architecture.md) ----------------------
+    parameter logic [15:0] MAP_BUS_BASE = 16'h0800;    // bus base registers
+    parameter int          NUM_BUSES    = 1024;        // uniform pool
+    parameter int          BUS_W        = 18;          // signed Q8.10
+
     //--- Number formats (design doc) ---------------------------------
     parameter int OSC_W = 24;       // UQ0.24 phase accumulator
     typedef logic signed [OSC_W-1:0] osc_t;

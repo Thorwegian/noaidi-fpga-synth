@@ -56,7 +56,20 @@ module spi_bus #(
     // clocking after the last bit). Offsets 5..63 are dropped for now;
     // per-element read-back is TBD (reads in this range return zero).
     output logic        pe_we,
-    output logic [2:0]  pe_bank,     // 0..4 = p0..p3, GATE
+    output logic [2:0]  pe_bank,     // 0..5 = p0..p3, GATE, PTRS
+
+    // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
+    // Bus values are live (no ping-pong). The write crosses clock
+    // domains through this 1-deep toggle mailbox; the pipeline syncs
+    // bw_req and commits to bus RAM only in an idle drum slot, so a
+    // commit can never collide with a lane's bus read (the BSRAM
+    // read-during-write corruption class stays impossible by
+    // construction, not by probability). Overrun math: one SPI word
+    // takes >= ~5.6 us at 10 MHz; a commit waits at most one lane
+    // span (~3.7 us) — back-to-back writes cannot outrun the mailbox.
+    output logic [9:0]  bw_addr,
+    output logic [17:0] bw_data,
+    output logic        bw_req,      // toggles once per bus write
     output logic [7:0]  pe_elem,
     output logic [31:0] pe_wdata,
 
@@ -206,8 +219,22 @@ module spi_bus #(
     wire [13:0] pe_off  = pe_rel[13:0];
     assign pe_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                       && !is_read && in_pe && (pe_off[5:3] == 3'd0)
-                      && (pe_off[2:0] < 3'd5);
+                      && (pe_off[2:0] < 3'd6);
     assign pe_bank  = pe_off[2:0];
+
+    // ---- bus base write capture (see mailbox note at the ports) ----
+    wire in_bus = (addr >= synth_pkg::MAP_BUS_BASE)
+               && (addr <  synth_pkg::MAP_BUS_BASE
+                           + 16'(synth_pkg::NUM_BUSES));
+    initial bw_req = 1'b0;
+    always_ff @(posedge sclk) begin
+        if (byte_end && (phase == 3'd4) && (wbyte == 2'd3)
+            && !is_read && in_bus) begin
+            bw_addr <= addr[9:0];
+            bw_data <= {wbuf[9:0], rx_byte};   // low 18 bits of the word
+            bw_req  <= ~bw_req;
+        end
+    end
     assign pe_elem  = pe_off[13:6];
     assign pe_wdata = {wbuf, rx_byte};
 

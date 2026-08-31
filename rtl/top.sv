@@ -59,6 +59,9 @@ module top (
     logic [7:0]  pe_elem;
     logic [31:0] pe_wdata;
     logic        swap_req;
+    logic [9:0]  bw_addr;
+    logic [17:0] bw_data;
+    logic        bw_req;
 
     element_pipeline u_elem_pipeline (
         .clk         (sysclk),
@@ -71,6 +74,9 @@ module top (
         .pe_bank     (pe_bank),
         .pe_elem     (pe_elem),
         .pe_wdata    (pe_wdata),
+        .bw_addr     (bw_addr),
+        .bw_data     (bw_data),
+        .bw_req      (bw_req),
         .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right)
@@ -120,6 +126,9 @@ module top (
         .pe_bank  (pe_bank),
         .pe_elem  (pe_elem),
         .pe_wdata (pe_wdata),
+        .bw_addr  (bw_addr),
+        .bw_data  (bw_data),
+        .bw_req   (bw_req),
         .swap_req (swap_req)
     );
 
