@@ -458,11 +458,17 @@ module element_pipeline #(
     //          (exact mute — hard-panned channels, gated elements) is
     //          preserved regardless of the bus.
     //----------------------------------------------------------------
+    // Cutoff clamps to FC_MAX (~15.4 kHz), not just the encoding
+    // range: beyond fs/6 the SVF destabilizes at Q = 0.5 (see the
+    // synth_pkg::FC_MAX derivation). No base+bus combination can make
+    // the filter roar.
     wire signed [18:0] fc_sum =
         $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
     wire [13:0] eff_fc =
-        fc_sum[18]              ? 14'd0    :
-        (fc_sum > 19'sd16383)   ? 14'h3FFF : fc_sum[13:0];
+        fc_sum[18]                                    ? 14'd0 :
+        (fc_sum > 19'($signed({5'b0, synth_pkg::FC_MAX})))
+                                                      ? synth_pkg::FC_MAX :
+        fc_sum[13:0];
 
     wire signed [18:0] pitch_sum =
         $signed({5'b0, s2_pitch}) + {s2_bus_pitch[17], s2_bus_pitch};

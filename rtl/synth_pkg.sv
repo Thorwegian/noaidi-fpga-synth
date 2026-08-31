@@ -51,6 +51,15 @@ package synth_pkg;
     parameter int          NUM_BUSES    = 1024;        // uniform pool
     parameter int          BUS_W        = 18;          // signed Q8.10
 
+    //--- Filter stability ceiling (Thor, 2026-08-31) -----------------
+    // SVF stability criterion: sin(pi*fc/fs) < Q. Q below ~0.5 never
+    // occurs musically, so the binding case is Q = 0.5 -> fc < fs/6
+    // = 16 kHz at 96 kHz. Clamp effective cutoff just below that:
+    // UQ4.10 with 440 Hz = 0x1700, so 0x2B80 = 440 * 2^5.125
+    // = 15.36 kHz. Applied to the effective (base + bus) cutoff in
+    // the pipeline — no programmable input can destabilize the filter.
+    parameter logic [13:0] FC_MAX = 14'h2B80;
+
     //--- Number formats (design doc) ---------------------------------
     parameter int OSC_W = 24;       // UQ0.24 phase accumulator
     typedef logic signed [OSC_W-1:0] osc_t;

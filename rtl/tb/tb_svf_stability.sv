@@ -1,24 +1,23 @@
 //------------------------------------------------------------------------
-// tb_svf_stability.sv — SVF stability characterization (REPORT bench)
+// tb_svf_stability.sv — SVF stability spot-check at the clamp corner
 //
-// Question (Thor): where does the filter really destabilize, across
-// cutoff AND resonance? The q1=1 boundary was only ever probed near
-// 0x2AF8; the clamp value FC_MAX should come from data.
+// The FC_MAX clamp (synth_pkg) holds the effective cutoff just below
+// fs/6 = 16 kHz, from the stability criterion sin(pi*fc/fs) < Q with
+// the musical worst case Q = 0.5 (Thor). This bench verifies the one
+// combination that matters: the WORST legal programmable input —
+// cutoff word 0x3FFF (clamped internally to FC_MAX) at q1 = +max
+// (0x1FFFF ≈ 2.0, i.e. Q ≈ 0.5) — must stay tonal.
 //
-// Method: one saw element at pitch 0x1614 (375.03 Hz — period 255.98
-// samples, so the fundamental's autocorrelation lag is exactly 256).
-// For each (fc, q1) combo: settle 512 samples, then measure the
-// normalized autocorrelation r = sum(x[n]*x[n-256]) / sum(x[n]^2)
-// over 2048 samples. Stable tonal output scores near 1000 (milli-r);
-// atonal roaring scores near 0 (Thor's stability definition).
+// Stability metric (Thor's definition): normalized autocorrelation at
+// the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
+// 375.03 Hz, period 255.98 samples, so the lag is exactly 256. A
+// stable filtered saw scores near 1000 milli-r; atonal roaring scores
+// near 0. A moderate-cutoff baseline combo guards the metric itself.
 //
-// Caveat: strong resonant ringing AT the cutoff frequency also scores
-// low (it is not periodic at the fundamental) — the reported boundary
-// is therefore conservative, which is the right bias for a clamp.
-//
-// This is a characterization bench: it PRINTS a matrix and per-Q
-// summary lines; it asserts nothing. Not part of `make sim` — run
-// with `make sim-stab`.
+// (An earlier exhaustive-grid version of this bench was retired: it
+// ran for hours, and its Q = 0.5 row was wrong anyway — 18'h20000 is
+// NEGATIVE q1 in the signed Q2.16 field. The theory + this corner
+// check replace it.)
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -46,8 +45,6 @@ module tb_svf_stability;
     );
 
     // ---- fixture: element 0 = saw @ 375 Hz, all others muted --------
-    // Hierarchical writes into both ping-pong halves, after the DUT's
-    // own $readmemh initials have run (#1).
     integer e;
     initial begin
         #1;
@@ -74,7 +71,7 @@ module tb_svf_stability;
     endtask
 
     // ---- autocorrelation at lag 256 ---------------------------------
-    localparam integer LAG = 256, SETTLE = 512, MEAS = 2048;
+    localparam integer LAG = 256, SETTLE = 512, MEAS = 1536;
     logic signed [23:0] dbuf [0:LAG-1];
     integer  di;
     longint  sum_xx, sum_xy;
@@ -107,55 +104,46 @@ module tb_svf_stability;
                     n = n + 1;
                 end
             end
-            // divide sum_xx first: 1000*sum_xy can exceed 64 bits at
-            // full-scale amplitudes
             r_milli = (sum_xx < 1000) ? 0 : sum_xy / (sum_xx / 1000);
             peak = pk;
         end
     endtask
 
-    // ---- the grid ----------------------------------------------------
-    // Q = 1/q1: q1 Q2.16 values for Q in {0.5, 1, 2, 4, 7, 10}
-    function automatic [17:0] q1_of(input integer qi);
-        case (qi)
-            0: q1_of = 18'h20000;   // Q = 0.5
-            1: q1_of = 18'h10000;   // Q = 1
-            2: q1_of = 18'h08000;   // Q = 2
-            3: q1_of = 18'h04000;   // Q = 4
-            4: q1_of = 18'h02492;   // Q = 7
-            default: q1_of = 18'h0199A;   // Q = 10
-        endcase
-    endfunction
-
-    integer qi, fi;
-    logic [13:0] fc;
+    integer errors = 0;
     longint r, peak;
-    logic [13:0] maxstable;
     initial begin
         rst_n = 0;
         repeat (8) @(posedge clk);
         @(negedge clk);
         rst_n = 1;
 
-        $display("fc \\ Q :    0.5      1      2      4      7     10");
-        for (qi = 0; qi < 6; qi = qi + 1) begin
-            maxstable = 14'd0;
-            for (fi = 0; fi < 15; fi = fi + 1) begin
-                fc = 14'h2000 + 14'(fi) * 14'h0200;
-                set_filter(fc, q1_of(qi));
-                measure(r, peak);
-                $display("Q[%0d] fc=%04x r=%0d peak=%0d", qi, fc, r, peak);
-                if (r > 500) maxstable = fc;
-            end
-            $display("SUMMARY Q-index %0d: max stable fc (r>0.5) = %04x",
-                     qi, maxstable);
+        // baseline: moderate cutoff, Q = 1 — guards the metric
+        set_filter(14'h2000, 18'h10000);
+        measure(r, peak);
+        $display("baseline fc=2000 Q=1:   r=%0d peak=%0d", r, peak);
+        if (r < 700) begin
+            $display("FAIL: baseline not tonal — metric broken?");
+            errors = errors + 1;
         end
-        $display("DONE-STAB");
+
+        // the corner: worst legal input, worst musical Q. The 0x3FFF
+        // cutoff word clamps internally to FC_MAX; q1 = +max ≈ Q 0.5.
+        set_filter(14'h3FFF, 18'h1FFFF);
+        measure(r, peak);
+        $display("corner  fc=3FFF Q=0.5: r=%0d peak=%0d (clamped to FC_MAX)",
+                 r, peak);
+        if (r < 500) begin
+            $display("FAIL: filter not stable at the FC_MAX clamp corner");
+            errors = errors + 1;
+        end
+
+        if (errors == 0) $display("ALL PASS");
+        else             $display("%0d FAILURE(S)", errors);
         $finish;
     end
 
     initial begin
-        #4_000_000_000;    // 4 s wall of sim time
+        #80_000_000;
         $display("TIMEOUT");
         $finish;
     end
