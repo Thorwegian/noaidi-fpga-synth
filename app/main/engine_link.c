@@ -137,7 +137,8 @@ void engine_link_init(void)
         s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
         s_image[e][3] = P3_MUTE;
         s_image[e][4] = 0;            // GATE off
-        s_image[e][5] = 1u << 20;     // PTRS: cutoff → bus 1
+        s_image[e][5] = 1u << 20;     // PTRS0: cutoff → bus 1
+        s_image[e][6] = 0;            // PTRS1: Q/gains → bus 0 (none)
     }
 
     // Both banks get the muted image before anything can play.

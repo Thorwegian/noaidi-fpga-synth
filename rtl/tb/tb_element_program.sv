@@ -333,6 +333,54 @@ module tb_element_program;
             errors = errors + 1;
         end
 
+        // B2: remaining sinks. Pitch: point elements 0-7 at bus 2,
+        // +1 octave must double the fundamental (rise count in a
+        // fixed window). Gains: point L+R at bus 3, +2 octaves of
+        // attenuation (+12 dB quieter) must cut the peak hard; the
+        // hard-panned 0xFF channels must stay muted regardless.
+        spi_word_write(16'h0801, 32'h00000000);   // cutoff bus 1 = 0
+        for (v = 0; v < 8; v = v + 1) begin
+            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002); // pitch→2
+            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00); // gl,gr→3
+        end
+        flip;
+        for (v = 0; v < 8; v = v + 1) begin
+            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002);
+            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00);
+        end
+        observe(60);
+        observe(2182);
+        $display("B2 baseline: peak=%0d rises=%0d", peak, rises);
+        worst = peak;
+        v = rises;                                 // C4 fundamental count
+
+        spi_word_write(16'h0802, 32'h00000400);    // pitch bus 2 = +1 oct
+        observe(60);
+        observe(2182);
+        $display("pitch +1oct: rises=%0d (was %0d)", rises, v);
+        if (rises < (2*v - 3) || rises > (2*v + 4)) begin
+            $display("FAIL: pitch bus did not double the fundamental");
+            errors = errors + 1;
+        end
+        spi_word_write(16'h0802, 32'h00000000);    // pitch back
+
+        spi_word_write(16'h0803, 32'h00000800);    // gain bus 3 = +12 dB att
+        observe(60);
+        observe(400);
+        if (peak > worst * 2 / 5) begin
+            $display("FAIL: gain bus did not attenuate (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("gain +12dB att: peak=%0d (was %0d)", peak, worst);
+        spi_word_write(16'h0803, 32'h00000000);
+        observe(60);
+        observe(400);
+        if (peak < worst / 2) begin
+            $display("FAIL: gain bus zero did not restore (peak=%0d)", peak);
+            errors = errors + 1;
+        end else
+            $display("gain restored: peak=%0d", peak);
+
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
         $finish;
@@ -340,7 +388,7 @@ module tb_element_program;
 
 
     initial begin
-        #200_000_000;
+        #300_000_000;
         $display("TIMEOUT");
         $finish;
     end

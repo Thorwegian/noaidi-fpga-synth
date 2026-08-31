@@ -78,7 +78,7 @@ module element_pipeline #(
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
     input  logic           pe_we,
-    input  logic [2:0]     pe_bank,     // 0..5 = p0..p3, GATE, PTRS
+    input  logic [2:0]     pe_bank,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
 
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
@@ -137,17 +137,19 @@ module element_pipeline #(
     reg [35:0] p2_ram [0:2*NUM_ELEMENTS-1];
     reg [35:0] p3_ram [0:2*NUM_ELEMENTS-1];
 
-    // Pointer word (map offset +5): per-element bus pointers, three
-    // 10-bit fields — [9:0] pitch, [19:10] duty, [29:20] cutoff.
-    // Only cutoff is consumed in the B1 pilot; the others join at B2
-    // (with a second word at +6 for Q and the gains). Pointers are
-    // wiring, so they ride the ping-pong banks like every parameter.
-    // Init 0: every parameter points at bus 0 (hardwired zero), so
-    // boot behavior is exactly the pre-bus behavior.
+    // Pointer words: per-element bus pointers, three 10-bit fields
+    // each. +5 (PTRS0): [9:0] pitch, [19:10] duty, [29:20] cutoff.
+    // +6 (PTRS1): [9:0] Q, [19:10] gain L, [29:20] gain R. Pointers
+    // are wiring, so they ride the ping-pong banks like every
+    // parameter. Init 0: every parameter points at bus 0 (hardwired
+    // zero), so boot behavior is exactly the pre-bus behavior.
     reg [29:0] p5_ram [0:2*NUM_ELEMENTS-1];
+    reg [29:0] p6_ram [0:2*NUM_ELEMENTS-1];
     integer pi;
-    initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1)
+    initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1) begin
         p5_ram[pi] = 30'd0;
+        p6_ram[pi] = 30'd0;
+    end
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
     // Gate 0 silences the element (gain decode forced to exact mute);
@@ -234,10 +236,24 @@ module element_pipeline #(
     // read-during-write corruption class is impossible by schedule).
     // Bus 0 is hardwired zero (writes to it are ignored).
     //----------------------------------------------------------------
-    reg signed [17:0] bus_ram [0:synth_pkg::NUM_BUSES-1];
+    // Six replicas of the one uniform pool — one read port per sink
+    // (see bus_architecture.md "Why six replicas"). Broadcast writes
+    // keep them identical.
+    reg signed [17:0] bus_ram_pitch [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_duty  [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_fc    [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_q     [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_gl    [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_gr    [0:synth_pkg::NUM_BUSES-1];
     integer bi;
-    initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1)
-        bus_ram[bi] = 18'sd0;
+    initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1) begin
+        bus_ram_pitch[bi] = 18'sd0;
+        bus_ram_duty[bi]  = 18'sd0;
+        bus_ram_fc[bi]    = 18'sd0;
+        bus_ram_q[bi]     = 18'sd0;
+        bus_ram_gl[bi]    = 18'sd0;
+        bus_ram_gr[bi]    = 18'sd0;
+    end
 
     logic bwr_m, bwr_s, bwr_d;
     logic bw_pending;
@@ -264,7 +280,17 @@ module element_pipeline #(
     end
 
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit) bus_ram_pitch[bwc_addr] <= $signed(bwc_data);
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram_duty[bwc_addr] <= $signed(bwc_data);
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram_fc[bwc_addr] <= $signed(bwc_data);
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram_q[bwc_addr] <= $signed(bwc_data);
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram_gl[bwc_addr] <= $signed(bwc_data);
+    always_ff @(posedge clk)
+        if (bus_commit) bus_ram_gr[bwc_addr] <= $signed(bwc_data);
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
@@ -294,7 +320,7 @@ module element_pipeline #(
     // process, per the AGENTS.md inference gotcha; validity is act-gated.
     logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
     logic [1:0]  s1_p4;
-    logic [29:0] s1_p5;
+    logic [29:0] s1_p5, s1_p6;
     always_ff @(posedge clk) begin
         s1_p0     <= p0_ram[{bank_active, raddr}];
         s1_p1     <= p1_ram[{bank_active, raddr}];
@@ -302,6 +328,7 @@ module element_pipeline #(
         s1_p3     <= p3_ram[{bank_active, raddr}];
         s1_p4     <= p4_ram[{bank_active, raddr}];
         s1_p5     <= p5_ram[{bank_active, raddr}];
+        s1_p6     <= p6_ram[{bank_active, raddr}];
         s1_phase  <= phase_ram[raddr];
         s1_ic1eq1 <= ic1eq1_ram[raddr];
         s1_ic2eq1 <= ic2eq1_ram[raddr];
@@ -322,6 +349,8 @@ module element_pipeline #(
         if (pe_we && pe_bank == 3'd4) p4_ram[{bank_shadow, pe_elem}] <= pe_wdata[1:0];
     always_ff @(posedge sclk)
         if (pe_we && pe_bank == 3'd5) p5_ram[{bank_shadow, pe_elem}] <= pe_wdata[29:0];
+    always_ff @(posedge sclk)
+        if (pe_we && pe_bank == 3'd6) p6_ram[{bank_shadow, pe_elem}] <= pe_wdata[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];
@@ -362,11 +391,19 @@ module element_pipeline #(
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
-    // Bus fetch for the cutoff sink: read issued with the S1 pointer,
-    // data lands at S2 alongside s2_fc. Sync-only (BSRAM read port).
-    logic signed [17:0] s2_bus_fc;
-    always_ff @(posedge clk)
-        s2_bus_fc <= bus_ram[s1_p5[29:20]];
+    // Bus fetches, one per sink: reads issued with the S1 pointers,
+    // data lands at S2 alongside the base fields. Sync-only (one
+    // BSRAM read port per replica).
+    logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
+    logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
+    always_ff @(posedge clk) begin
+        s2_bus_pitch <= bus_ram_pitch[s1_p5[9:0]];
+        s2_bus_duty  <= bus_ram_duty[s1_p5[19:10]];
+        s2_bus_fc    <= bus_ram_fc[s1_p5[29:20]];
+        s2_bus_q     <= bus_ram_q[s1_p6[9:0]];
+        s2_bus_gl    <= bus_ram_gl[s1_p6[19:10]];
+        s2_bus_gr    <= bus_ram_gr[s1_p6[29:20]];
+    end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -407,18 +444,59 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // Effective cutoff: base (UQ4.10, from the FILTER word) + cutoff
-    // bus (signed Q8.10 — same LSB, ~1.17 cents), SATURATING into the
-    // legal 14-bit range so an extreme bus value clamps instead of
-    // wrapping into the wrong octave. Adder + clamp feeding the K-LUT
-    // address register and the octave-shift register: adds/decode
-    // only, no multiply — within the silicon timing rule.
+    // Effective parameters: base + bus[pointer], all SATURATING into
+    // each parameter's legal range so extreme bus values clamp
+    // instead of wrapping. Six parallel adders + clamps between S2
+    // registers and S3 registers: adds/decode only, no multiply —
+    // within the silicon timing rule. Per-sink slices of the Q8.10
+    // bus word (bus_architecture.md law 5):
+    //   pitch/cutoff: as-is (same LSB, ~1.17 cents)
+    //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
+    //   Q:     <<< 6  (bus ±1.0 → q1 ±1.0 in Q2.16)
+    //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
+    //          bus = more attenuation = quieter). A base of 0xFF
+    //          (exact mute — hard-panned channels, gated elements) is
+    //          preserved regardless of the bus.
     //----------------------------------------------------------------
     wire signed [18:0] fc_sum =
         $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
     wire [13:0] eff_fc =
         fc_sum[18]              ? 14'd0    :
         (fc_sum > 19'sd16383)   ? 14'h3FFF : fc_sum[13:0];
+
+    wire signed [18:0] pitch_sum =
+        $signed({5'b0, s2_pitch}) + {s2_bus_pitch[17], s2_bus_pitch};
+    wire [13:0] eff_pitch =
+        pitch_sum[18]            ? 14'd0    :
+        (pitch_sum > 19'sd16383) ? 14'h3FFF : pitch_sum[13:0];
+
+    wire signed [31:0] duty_sum =
+        {{8{s2_duty[23]}}, s2_duty}
+        + {{1{s2_bus_duty[17]}}, s2_bus_duty, 13'b0};
+    wire signed [23:0] eff_duty =
+        (duty_sum >  32'sd8388607) ? 24'sd8388607  :
+        (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
+
+    wire signed [24:0] q_sum =
+        {{7{s2_q1[17]}}, s2_q1} + {s2_bus_q[17], s2_bus_q, 6'b0};
+    wire signed [17:0] eff_q1 =
+        (q_sum >  25'sd131071) ? 18'sd131071  :
+        (q_sum < -25'sd131072) ? -18'sd131072 : q_sum[17:0];
+
+    wire signed [17:0] gbus_l = s2_bus_gl >>> 6;
+    wire signed [17:0] gbus_r = s2_bus_gr >>> 6;
+    wire signed [18:0] gl_sum =
+        $signed({11'b0, s2_gl}) + {gbus_l[17], gbus_l};
+    wire signed [18:0] gr_sum =
+        $signed({11'b0, s2_gr}) + {gbus_r[17], gbus_r};
+    wire [7:0] eff_gl =
+        (s2_gl == 8'hFF)      ? 8'hFF :
+        gl_sum[18]            ? 8'h00 :
+        (gl_sum > 19'sd254)   ? 8'hFE : gl_sum[7:0];
+    wire [7:0] eff_gr =
+        (s2_gr == 8'hFF)      ? 8'hFF :
+        gr_sum[18]            ? 8'h00 :
+        (gr_sum > 19'sd254)   ? 8'hFE : gr_sum[7:0];
 
     //----------------------------------------------------------------
     // S3 — LUT data, delta/K, phase_next, oscillator waveform
@@ -460,18 +538,18 @@ module element_pipeline #(
             s3_ic1eq2 <= '0;
             s3_ic2eq2 <= '0;
         end else begin
-            s3_delta_lut <= phase_lut[s2_pitch[9:0]];
+            s3_delta_lut <= phase_lut[eff_pitch[9:0]];
             s3_k_lut     <= k_lut[eff_fc[9:0]];
             s3_act   <= s2_act;
             s3_idx   <= s2_idx;
             s3_phase <= s2_phase;
-            s3_pitch_oct <= s2_pitch[13:10];
+            s3_pitch_oct <= eff_pitch[13:10];
             s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
-            s3_duty  <= s2_duty;
-            s3_q1    <= s2_q1;
-            s3_gl    <= s2_gl;
-            s3_gr    <= s2_gr;
+            s3_duty  <= eff_duty;
+            s3_q1    <= eff_q1;
+            s3_gl    <= eff_gl;
+            s3_gr    <= eff_gr;
             s3_dual  <= s2_dual;
             s3_ftype <= s2_ftype;
             s3_ic1eq1 <= s2_ic1eq1;

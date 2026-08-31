@@ -56,7 +56,7 @@ module spi_bus #(
     // clocking after the last bit). Offsets 5..63 are dropped for now;
     // per-element read-back is TBD (reads in this range return zero).
     output logic        pe_we,
-    output logic [2:0]  pe_bank,     // 0..5 = p0..p3, GATE, PTRS
+    output logic [2:0]  pe_bank,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
 
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
     // Bus values are live (no ping-pong). The write crosses clock
@@ -219,7 +219,7 @@ module spi_bus #(
     wire [13:0] pe_off  = pe_rel[13:0];
     assign pe_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
                       && !is_read && in_pe && (pe_off[5:3] == 3'd0)
-                      && (pe_off[2:0] < 3'd6);
+                      && (pe_off[2:0] < 3'd7);
     assign pe_bank  = pe_off[2:0];
 
     // ---- bus base write capture (see mailbox note at the ports) ----

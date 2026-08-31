@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #define ENGINE_NUM_ELEMENTS 256
-#define ENGINE_WORDS_PER_ELEMENT 6   // OSC, DUTY, FILTER, GAIN, GATE, PTRS
+#define ENGINE_WORDS_PER_ELEMENT 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
 
 typedef struct {
     uint8_t  elem;    // element index 0..255

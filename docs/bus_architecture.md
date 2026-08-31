@@ -64,8 +64,10 @@ conventions the FPGA never sees.
    log₂ sink — pitch, cutoff, AND attenuation (gain octave = 6 dB) —
    so a producer needn't know its consumer; sinks take what they
    need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
-   resolution — accepted; revisit on audible evidence only). Q needs
-   a declared fraction→resonance convention (TBD at B2). Consumers
+   resolution — accepted; revisit on audible evidence only). Q's
+   convention (declared at B2): bus `<<< 6` into the Q2.16 resonance
+   parameter — bus ±1.0 = q1 ±1.0, mirroring the gain slice in the
+   other direction. Consumers
    use SATURATING adds into each parameter's legal range (adds-only,
    timing-clean). Read bandwidth via replicas of one uniform pool
    (broadcast writes); a bus may feed different sink types.

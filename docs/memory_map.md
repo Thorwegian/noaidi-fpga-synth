@@ -260,7 +260,7 @@ Voice v base address: `0x2000 + v × 64`.
 | `+3` | `GAIN` | `[7:0]` gain L UQ4.4, `[15:8]` gain R UQ4.4, `[23:16]` mode byte: `[16]` 12/24 dB, `[18:17]` filter type, `[19]` smoothing coeff select, `[23:20]` reserved | implemented |
 | `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run; later the ADSR trigger), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `PTRS0` | bus pointers ([bus_architecture.md](bus_architecture.md)): `[9:0]` pitch, `[19:10]` duty, `[29:20]` cutoff — 0 = bus 0 = no modulation | cutoff live (B1) |
-| `+6` | `PTRS1` | bus pointers: `[9:0]` filter 1/Q, `[19:10]` gain L, `[29:20]` gain R | reserved until B2 |
+| `+6` | `PTRS1` | bus pointers: `[9:0]` filter 1/Q, `[19:10]` gain L, `[29:20]` gain R | live (B2) |
 | `+5` | `ADSR1` | `[7:0]` A, `[15:8]` D, `[23:16]` S UQ4.4, `[31:24]` R — times are log2: 4-bit octave + 4-bit fraction (1/16 octave per LSB), decoded to linear via the LUT+barrel-shift pattern | TBD |
 | `+6` | `ADSR2` | same layout (amp + filter) | TBD |
 | `+7..+15` | — | envelope curve, sustain shape, ... | reserved |
