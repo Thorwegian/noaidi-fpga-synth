@@ -458,16 +458,27 @@ module element_pipeline #(
     //          (exact mute — hard-panned channels, gated elements) is
     //          preserved regardless of the bus.
     //----------------------------------------------------------------
-    // Cutoff clamps to FC_MAX (~15.4 kHz), not just the encoding
-    // range: beyond fs/6 the SVF destabilizes at Q = 0.5 (see the
-    // synth_pkg::FC_MAX derivation). No base+bus combination can make
-    // the filter roar.
+    // Damping clamp, one end only (Thor): effective q1 in [0, Q1_MAX
+    // = sqrt(2)]. Heavier-than-Butterworth damping is unreachable —
+    // that is what makes FC_MAX safe. The floor is ZERO, not a
+    // minimum: infinite Q / self-oscillation stays reachable as a
+    // feature; only nonphysical negative damping is excluded.
+    wire signed [24:0] q_sum =
+        {{7{s2_q1[17]}}, s2_q1} + {s2_bus_q[17], s2_bus_q, 6'b0};
+    wire signed [17:0] eff_q1 =
+        q_sum[24] ? 18'sd0 :
+        (q_sum > 25'($signed({7'b0, synth_pkg::Q1_MAX})))
+            ? $signed(synth_pkg::Q1_MAX) :
+        q_sum[17:0];
+
+    // Cutoff clamps to the flat FC_MAX (14.4 kHz, measured clean at
+    // the Butterworth worst case — see synth_pkg).
     wire signed [18:0] fc_sum =
         $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
     wire [13:0] eff_fc =
-        fc_sum[18]                                    ? 14'd0 :
+        fc_sum[18] ? 14'd0 :
         (fc_sum > 19'($signed({5'b0, synth_pkg::FC_MAX})))
-                                                      ? synth_pkg::FC_MAX :
+            ? synth_pkg::FC_MAX :
         fc_sum[13:0];
 
     wire signed [18:0] pitch_sum =
@@ -482,12 +493,6 @@ module element_pipeline #(
     wire signed [23:0] eff_duty =
         (duty_sum >  32'sd8388607) ? 24'sd8388607  :
         (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
-
-    wire signed [24:0] q_sum =
-        {{7{s2_q1[17]}}, s2_q1} + {s2_bus_q[17], s2_bus_q, 6'b0};
-    wire signed [17:0] eff_q1 =
-        (q_sum >  25'sd131071) ? 18'sd131071  :
-        (q_sum < -25'sd131072) ? -18'sd131072 : q_sum[17:0];
 
     wire signed [17:0] gbus_l = s2_bus_gl >>> 6;
     wire signed [17:0] gbus_r = s2_bus_gr >>> 6;

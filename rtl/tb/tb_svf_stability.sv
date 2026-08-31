@@ -126,14 +126,28 @@ module tb_svf_stability;
             errors = errors + 1;
         end
 
-        // the corner: worst legal input, worst musical Q. The 0x3FFF
-        // cutoff word clamps internally to FC_MAX; q1 = +max ≈ Q 0.5.
+        // Corner 1 — worst legal damping: a q1 word beyond Q1_MAX
+        // clamps to sqrt(2) (Butterworth, the accepted heaviest), and
+        // the 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz). Must be
+        // tonal AND un-railed — the characterization runs showed a
+        // limit cycle can fake a perfect r while clipping at full
+        // scale, so both criteria are asserted.
         set_filter(14'h3FFF, 18'h1FFFF);
         measure(r, peak);
-        $display("corner  fc=3FFF Q=0.5: r=%0d peak=%0d (clamped to FC_MAX)",
+        $display("corner1 fc=3FFF q1=max: r=%0d peak=%0d (clamps: 2B20, sqrt2)",
                  r, peak);
-        if (r < 500) begin
-            $display("FAIL: filter not stable at the FC_MAX clamp corner");
+        if (r < 500 || peak > 6000000) begin
+            $display("FAIL: unstable or railed at the clamp corner");
+            errors = errors + 1;
+        end
+
+        // Corner 2 — q1 = 1.0 (no damping clamp engaged) at FC_MAX:
+        // measured clean far beyond; must be tonal and un-railed.
+        set_filter(14'h3FFF, 18'h10000);
+        measure(r, peak);
+        $display("corner2 fc=3FFF q1=1.0: r=%0d peak=%0d", r, peak);
+        if (r < 500 || peak > 6000000) begin
+            $display("FAIL: unstable or railed at q1=1.0 corner");
             errors = errors + 1;
         end
 

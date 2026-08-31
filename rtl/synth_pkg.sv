@@ -51,14 +51,26 @@ package synth_pkg;
     parameter int          NUM_BUSES    = 1024;        // uniform pool
     parameter int          BUS_W        = 18;          // signed Q8.10
 
-    //--- Filter stability ceiling (Thor, 2026-08-31) -----------------
-    // SVF stability criterion: sin(pi*fc/fs) < Q. Q below ~0.5 never
-    // occurs musically, so the binding case is Q = 0.5 -> fc < fs/6
-    // = 16 kHz at 96 kHz. Clamp effective cutoff just below that:
-    // UQ4.10 with 440 Hz = 0x1700, so 0x2B80 = 440 * 2^5.125
-    // = 15.36 kHz. Applied to the effective (base + bus) cutoff in
-    // the pipeline — no programmable input can destabilize the filter.
-    parameter logic [13:0] FC_MAX = 14'h2B80;
+    //--- Filter stability clamps (Thor's calls, 2026-08-31) ----------
+    // Instability comes from HEAVY DAMPING (low Q = high q1), not
+    // from resonance — theory and the autocorrelation bench agree.
+    // Two flat constant clamps, nothing coupled:
+    //
+    //   Q1_MAX = sqrt(2): Butterworth is the accepted heaviest
+    //   damping. Measured at q1 = sqrt(2) (our K is the linear
+    //   2*pi*fc/fs mapping): clean through 15.7 kHz, limit-cycles at
+    //   16.4 kHz, chaos at 19.5 kHz. Q = 1 is clean past 30 kHz.
+    //
+    //   FC_MAX = 0x2B20 = 14.4 kHz (Thor's pick): one measured-clean
+    //   step of margin below the resonance bloom that precedes the
+    //   16 kHz wall.
+    //
+    // The high-Q end is deliberately unclamped for now (Thor): the
+    // effective q1 floors at ZERO — infinite Q / self-oscillation is
+    // reachable as a feature; only nonphysical negative damping is
+    // excluded.
+    parameter logic [13:0] FC_MAX = 14'h2B20;
+    parameter logic [17:0] Q1_MAX = 18'h16A0A;   // sqrt(2), Q = 0.7071
 
     //--- Number formats (design doc) ---------------------------------
     parameter int OSC_W = 24;       // UQ0.24 phase accumulator
