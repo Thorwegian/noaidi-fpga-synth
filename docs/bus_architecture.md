@@ -203,7 +203,11 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (unnamed; "stop"
   was only an analogy candidate), producer-side smoothing for
-  firmware-written buses, bus read-back diagnostics.
+  firmware-written buses, bus read-back diagnostics. Also parked here
+  (Thor, 2026-08-31): when a proper q1 LUT is made, revisit high-Q
+  behavior — the current clamps leave the high-Q end open (eff_q1
+  floors at zero; self-oscillation reachable) and only bound the
+  heavy-damping end at Butterworth.
 
 Rungs keep the standing process: one side branch at a time, ear (or
 bench where marked) verification gates every merge, board matches tree.
