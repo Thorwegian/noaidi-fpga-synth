@@ -81,9 +81,10 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // level — rates, not durations, to avoid a 1/x on the FPGA), byte 2
 // is the SUSTAIN LEVEL. Sustain units: one LSB = 0.375 dB below peak
 // (the amp depth is 16 octaves = 96 dB over 256 steps), so
-// sustain = 256 − (dB_below_peak / 0.375). Defaults: ~20 ms attack,
-// gentle decay, sustain 12 dB below peak (0xE0), ~45 ms release.
-#define ADSR_RATES    (0x70u | (0x50u << 8) | (0xE0u << 16) | (0x60u << 24))
+// sustain = 256 − (dB_below_peak / 0.375).
+// Values: Thor's slower attack (0x40 ≈ 170 ms) and decay (0x20) kept
+// from his experiments; sustain 12 dB below peak; ~45 ms release.
+#define ADSR_RATES    (0x40u | (0x20u << 8) | (0xE0u << 16) | (0x60u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
