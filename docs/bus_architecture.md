@@ -179,7 +179,12 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B2 — All sink classes.** Pitch (with the detune decision), duty,
   Q, gains on buses; voice_alloc rewired. *Verification: playable
   synth indistinguishable by ear from today; benches green.*
-- **B3 — Firmware-routed buses** (Thor: basic routing before ADSR).
+- **B3 — Firmware-routed buses** ✅ (2026-08-31, Thor playing: "it
+  works. No problems, even at high pitches with a wide open filter").
+  Velocity → per-voice gain and cutoff buses (his tuning: brightening
+  up to +4 octaves at full velocity), pitch wheel → global pitch bus
+  AND the cutoff buses (key tracking follows bends), base cutoff at
+  +1/2 octave, q1 = 0.5 (Q = 2). Original design notes follow:
   No producers yet — firmware writes bus bases to realize the first
   real routes: velocity → gain and velocity → filter cutoff (a
   per-voice bus each, allocated by firmware at note-on) and pitch
@@ -208,6 +213,19 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   behavior — the current clamps leave the high-Q end open (eff_q1
   floors at zero; self-oscillation reachable) and only bound the
   heavy-damping end at Butterworth.
+  And (Thor, 2026-08-31): **Q-loss compensation** — by ear, the LP
+  output loses low-frequency energy as Q rises; the HP output is
+  expected to mirror this at the high end. Investigation order when
+  picked up: MEASURE first (extend the characterization bench: LP
+  gain at the fundamental vs q1 at fixed cutoff) to separate two
+  causes — a real passband droop in our fixed-point SVF (an ideal SVF
+  holds DC gain at 1 regardless of Q, so any measured droop is
+  implementation) vs the perceptual effect of the resonant peak
+  dominating the mix. Real droop → input pre-gain or output
+  compensation as a function of q1 (cheap in the gain path);
+  perceptual → loudness compensation in gain staging, possibly
+  firmware-side. Classic analog synths split exactly this way (Moog
+  ladders genuinely lose bass with resonance; SVFs mostly don't).
 
 Rungs keep the standing process: one side branch at a time, ear (or
 bench where marked) verification gates every merge, board matches tree.
