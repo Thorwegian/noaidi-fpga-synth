@@ -197,10 +197,16 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   OSC-word writes.
   *Verification: velocity-to-loudness and velocity-to-brightness by
   ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
-- **B4 — Producer walker + LFO producer.** The idle-slot table
-  executor, and the LFO as its first producer type. *Verification:
-  vibrato/tremolo/PWM by ear with zero SPI traffic during the note;
-  bench asserts the bus waveforms.*
+- **B4 — Producer walker + LFO producer.** ✅ (2026-08-31, Thor: "it
+  works"). The idle-slot table executor: 128 producers × 2 words at
+  0x0100 (banked — wiring), stride-2 walk in ~256 idle slots, five
+  overlapped stages with the one producer multiply in its own
+  registered stage; osc_core reused for shapes. Bus = base RAM +
+  producer contribution realized (bend and vibrato coexist on the
+  pitch bus). Boot demo: 1 Hz triangle vibrato, ±75 cents (depth is
+  a one-constant knob in voice_alloc — deliberately oversized for
+  the verification listen). Bench: 93.75 Hz square tremolo, ±12 dB,
+  zero SPI during measurement.
 - **B5 — ADSR producer + gate-bus triggering.** Amp envelope first —
   this is where note clicks die (absorbing the old smoothing rung's
   goal) — then the filter envelope. *Verification: click-free attack
