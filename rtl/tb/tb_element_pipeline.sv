@@ -46,7 +46,7 @@ module tb_element_pipeline;
         .sclk(1'b0), .pe_we(1'b0), .pe_bank(3'b0),   // no SPI writes in
         .pe_elem(8'b0), .pe_wdata(32'b0), .swap_req(1'b0),
         .bw_addr(10'b0), .bw_data(18'b0), .bw_req(1'b0),
-        .pw_we(1'b0), .pw_addr(8'b0), .pw_data(32'b0),
+        .pw_we(1'b0), .pw_addr(9'b0), .pw_data(32'b0),
         .mix_left(mix_left), .mix_right(mix_right)
     );
 

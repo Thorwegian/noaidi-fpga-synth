@@ -477,6 +477,19 @@ module element_pipeline #(
         end
     end
 
+    // P4 (wcnt == 1) combinational: value = base + contribution,
+    // saturating — REGISTERED into wkE_* at the end of P4, written to
+    // the replicas at P5 (wcnt == 2). The RAM-output → add → clamp →
+    // RAM-write chain carries a register in the middle (the 76 MHz
+    // critical-path fix). Declared before the stage block below
+    // (iverilog binds declaration-before-use at module scope).
+    wire signed [19:0] wk_contrib = mC[35:16];
+    wire signed [20:0] wk_sum =
+        {{3{wk_busrd_q[17]}}, wk_busrd_q} + {wk_contrib[19], wk_contrib};
+    wire signed [17:0] wk_val_c =
+        (wk_sum > 21'sd131071)  ? 18'sd131071  :
+        (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
+
     // Phase-guarded stage latches: each stage latches only at its own
     // phase edge and stays stable for the entry's three cycles.
     always_ff @(posedge clk or negedge rst_n) begin
@@ -537,16 +550,6 @@ module element_pipeline #(
         end
     end
 
-    // P4 (wcnt == 1): value = base + contribution, saturating —
-    // REGISTERED at the end of P4, written to the replicas at P5
-    // (wcnt == 2). The RAM-output → add → clamp → RAM-write chain
-    // gets a register in the middle.
-    wire signed [19:0] wk_contrib = mC[35:16];
-    wire signed [20:0] wk_sum =
-        {{3{wk_busrd_q[17]}}, wk_busrd_q} + {wk_contrib[19], wk_contrib};
-    wire signed [17:0] wk_val_c =
-        (wk_sum > 21'sd131071)  ? 18'sd131071  :
-        (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
     assign wk_val = wkE_val;
     assign wk_bus = wkE_bus;
     assign wk_wr  = wkE_v && (wcnt == 2'd2);
