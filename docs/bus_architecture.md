@@ -219,6 +219,15 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   behavior — the current clamps leave the high-Q end open (eff_q1
   floors at zero; self-oscillation reachable) and only bound the
   heavy-damping end at Butterworth.
+  And (Thor, 2026-08-31): **invert the GAIN word to volume
+  semantics** — 0x00 = silence/max attenuation, larger = louder, so
+  programming stops being backwards AND the p3 = 0x00000000 footgun
+  (currently FULL volume) becomes safe-by-default. Agreed as a small
+  bench-verified rung right after B5 merges: one subtract in the gain
+  decode, the exact-mute code moves to 0x00, the amp-envelope depth
+  turns positive (level ADDS volume — no negative-depth trick), plus
+  firmware bakes, benches and the boot image generator inverted
+  together. Deliberately NOT mixed into the in-flight ADSR debugging.
   And (Thor, 2026-08-31): **Q-loss compensation** — by ear, the LP
   output loses low-frequency energy as Q rises; the HP output is
   expected to mirror this at the high end. Investigation order when

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -94,9 +95,16 @@ static void engine_task(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         // Live bus writes first: no banking, no swap — straight out.
+        // PACED 10 us apart: the FPGA-side mailbox is 1-deep and
+        // commits in an idle slot (worst ~4 us); back-to-back writes
+        // at full SPI rate can overwrite it before the commit — a
+        // lost gate write is a stuck or missing note. A deeper
+        // FPGA-side FIFO is the eventual fix (bus_architecture B6+).
         bus_cmd_t bc;
-        while (xQueueReceive(s_bus_queue, &bc, 0) == pdTRUE)
+        while (xQueueReceive(s_bus_queue, &bc, 0) == pdTRUE) {
             fpga_word_write(BUS_BASE_ADDR + bc.bus, bc.value & 0x3FFFF);
+            esp_rom_delay_us(10);
+        }
 
         // Drain the queues into the images (elements + producers —
         // both banked, both covered by the same swap).

@@ -435,12 +435,12 @@ module tb_element_program;
         // rates for sim: attack ~128 samples, release ~100.
         spi_word_write(16'h0100, 32'h00000000);   // producer 0 off
         spi_word_write(16'h0104, 32'h000500C2);   // ADSR, bus3, gate 5
-        spi_word_write(16'h0105, 32'hF0B400B0);   // A,D,R,SUS
+        spi_word_write(16'h0105, 32'hB4F000B0);   // A,D,S,R order
         spi_word_write(16'h0106, 32'h0003E000);   // depth -0x2000
         flip;
         spi_word_write(16'h0100, 32'h00000000);
         spi_word_write(16'h0104, 32'h000500C2);
-        spi_word_write(16'h0105, 32'hF0B400B0);
+        spi_word_write(16'h0105, 32'hB4F000B0);
         spi_word_write(16'h0106, 32'h0003E000);
         spi_word_write(16'h0803, 32'h00002000);   // bus 3 base = floor
         observe(60);

@@ -57,9 +57,12 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 //                 LFO:  [31:16] rate (UQ0.24 increment low bits:
 //                       5.7 mHz steps, 375 Hz max)
 //                 ADSR: [25:16] gate bus (level-sensitive: > 0 held)
-//   word 1 RATES (ADSR): [7:0] attack, [15:8] decay, [23:16] release
-//                 as 8-bit log2 rates (increment = (16+low4) << high4
-//                 on the 22-bit level), [31:24] sustain fraction
+//   word 1 RATES (ADSR), in the universal A, D, S, R order:
+//                 [7:0] attack, [15:8] decay, [31:24] release as
+//                 8-bit log2 RATES (increment = (16+low4) << high4 on
+//                 the 22-bit level; rates, not durations — no 1/x in
+//                 gateware); [23:16] SUSTAIN LEVEL, one LSB
+//                 = 0.375 dB below peak at the 16-octave amp depth
 //   word 2 DEPTH: [17:0] signed Q8.10 contribution amplitude
 // The producer ADDS to the bus base: firmware's base write and the
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
