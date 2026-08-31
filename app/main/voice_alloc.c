@@ -270,6 +270,15 @@ void voice_alloc_init(void)
     }
     wire_pointers();
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
+
+    // B4: the first self-running modulation — a gentle global vibrato.
+    // Producer 0: sine LFO at 5.0 Hz (rate16 = 874), depth ±16 Q8.10
+    // LSB ≈ ±19 cents, ADDING to the global pitch bus — it coexists
+    // with the pitch wheel's base writes on the same bus. Zero SPI
+    // traffic once configured.
+    engine_link_prod_write(0, 0,
+        1u | (3u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6) | (874u << 16));
+    engine_link_prod_write(0, 1, 16);
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");

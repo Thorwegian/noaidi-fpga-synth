@@ -36,6 +36,9 @@ module tb_element_program;
     wire [9:0]  bw_addr;
     wire [17:0] bw_data;
     wire        bw_req;
+    wire        pw_we;
+    wire [7:0]  pw_addr;
+    wire [31:0] pw_data;
     wire        swap_req;
 
     spi_bus #(.AW_BACKED(11)) u_bus (
@@ -44,6 +47,7 @@ module tb_element_program;
         .pe_we(pe_we), .pe_bank(pe_bank),
         .pe_elem(pe_elem), .pe_wdata(pe_wdata),
         .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
+        .pw_we(pw_we), .pw_addr(pw_addr), .pw_data(pw_data),
         .swap_req(swap_req)
     );
 
@@ -57,6 +61,7 @@ module tb_element_program;
         .sclk(sclk), .pe_we(pe_we), .pe_bank(pe_bank),
         .pe_elem(pe_elem), .pe_wdata(pe_wdata), .swap_req(swap_req),
         .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
+        .pw_we(pw_we), .pw_addr(pw_addr), .pw_data(pw_data),
         .mix_left(ml), .mix_right(mr)
     );
 
@@ -163,7 +168,7 @@ module tb_element_program;
     endtask
 
     integer v, step;
-    longint worst;
+    longint worst, wmax, wmin;
     initial begin
         rst_n = 0;
         repeat (8) @(posedge clk);
@@ -386,6 +391,32 @@ module tb_element_program;
             errors = errors + 1;
         end else
             $display("gain restored: peak=%0d", peak);
+
+        // B4: producer walker + LFO. Producer 0 becomes a square LFO
+        // (osc_core pulse, duty 0) at 93.75 Hz (rate16 = 16384, period
+        // 1024 samples) targeting gain bus 3, depth ±2 octaves of
+        // attenuation (±12 dB). The sounding sine's loudness must
+        // alternate — measured as max/min peak over 256-sample
+        // windows — with ZERO SPI traffic during the measurement.
+        // Producer config is wiring: written to the shadow, swapped,
+        // mirrored, like every parameter.
+        spi_word_write(16'h0100, 32'h400000D1);   // CFG: LFO,pulse,bus3,16384
+        spi_word_write(16'h0101, 32'h00000800);   // DEPTH: +2 oct
+        flip;
+        spi_word_write(16'h0100, 32'h400000D1);
+        spi_word_write(16'h0101, 32'h00000800);
+        observe(60);
+        wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
+        for (step = 0; step < 8; step = step + 1) begin
+            observe(256);
+            if (peak > wmax) wmax = peak;
+            if (peak < wmin) wmin = peak;
+        end
+        $display("LFO tremolo: window peaks max=%0d min=%0d", wmax, wmin);
+        if (wmin == 0 || wmax / wmin < 4) begin
+            $display("FAIL: producer LFO not modulating the gain bus");
+            errors = errors + 1;
+        end
 
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);

@@ -51,6 +51,17 @@ package synth_pkg;
     parameter int          NUM_BUSES    = 1024;        // uniform pool
     parameter int          BUS_W        = 18;          // signed Q8.10
 
+    //--- Producer table (B4) ----------------------------------------
+    // 128 entries x 2 words at 0x0100 (the old LFO region). Config is
+    // wiring, so it rides the ping-pong banks (law 4).
+    //   +0 CFG:   [3:0] type (0 off, 1 LFO), [5:4] shape (osc_core:
+    //             saw/pulse/tri/sine), [15:6] target bus,
+    //             [31:16] rate — low 16 bits of the UQ0.24 phase
+    //             increment (5.7 mHz resolution, 375 Hz max)
+    //   +1 DEPTH: [17:0] signed Q8.10 contribution amplitude
+    parameter logic [15:0] MAP_PROD_BASE = 16'h0100;
+    parameter int          NUM_PRODUCERS = 128;
+
     //--- Filter stability clamps (Thor's calls, 2026-08-31) ----------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not
     // from resonance — theory and the autocorrelation bench agree.

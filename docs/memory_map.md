@@ -154,10 +154,26 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-> **SUPERSEDED (2026-08-30):** the LFO bank, CV table and per-element
-> routing sections below are replaced by the bus architecture —
-> see [bus_architecture.md](bus_architecture.md). They remain here as
-> design history until the map is redrawn at milestone B1.
+## Producer table — `0x0100–0x01FF` (live, B4)
+
+128 producers × 2 words, stride 2, banked like parameters (config is
+wiring — takes effect at the swap). See
+[bus_architecture.md](bus_architecture.md).
+
+| Offset | Word | Contents |
+|---|---|---|
+| `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO), `[5:4]` shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus, `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max) |
+| `+1` | `DEPTH` | `[17:0]` signed Q8.10 contribution amplitude |
+
+A producer ADDS to its target bus's base register (bus value = base +
+contribution), so firmware writes and producer modulation coexist on
+one bus. One producer per bus for now; summing multiple producers
+onto one bus is the combiner's job (B6). Disabling a producer leaves
+its last value on the bus until the next base write refreshes it.
+
+> **SUPERSEDED (2026-08-30):** the old LFO bank, CV table and
+> per-element routing sections below are replaced by the bus
+> architecture. They remain here as design history.
 
 ## LFO bank — `0x0100–0x02FF` (superseded, see above)
 

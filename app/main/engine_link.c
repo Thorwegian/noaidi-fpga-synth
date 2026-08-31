@@ -37,11 +37,25 @@ static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
 #define BUS_BASE_ADDR      0x0800
 #define BUS_QUEUE_LEN      64
+#define PROD_BASE_ADDR     0x0100
+#define PROD_QUEUE_LEN     64
 
 typedef struct {
     uint16_t bus;
     uint32_t value;
 } bus_cmd_t;
+
+typedef struct {
+    uint8_t  entry;
+    uint8_t  word;      // 0 CFG, 1 DEPTH
+    uint32_t value;
+} prod_cmd_t;
+
+static QueueHandle_t s_prod_queue;
+static uint32_t s_prod[ENGINE_NUM_PRODUCERS][2];
+#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 2 / 32)
+static uint32_t s_pdirty_now[PDIRTY_WORDS];
+static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 
 // Dirty bitmaps, one bit per (elem, word): 1024 bits.
 #define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
@@ -83,7 +97,8 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_bus_queue, &bc, 0) == pdTRUE)
             fpga_word_write(BUS_BASE_ADDR + bc.bus, bc.value & 0x3FFFF);
 
-        // Drain the queue into the image.
+        // Drain the queues into the images (elements + producers —
+        // both banked, both covered by the same swap).
         bool changed = false;
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
             if (cmd.word >= ENGINE_WORDS_PER_ELEMENT)
@@ -92,12 +107,23 @@ static void engine_task(void *arg)
             mark_dirty(cmd.elem, cmd.word);
             changed = true;
         }
+        prod_cmd_t pc;
+        while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
+            if (pc.entry >= ENGINE_NUM_PRODUCERS || pc.word >= 2)
+                continue;
+            s_prod[pc.entry][pc.word] = pc.value;
+            int bit = pc.entry * 2 + pc.word;
+            s_pdirty_now[bit >> 5] |= 1u << (bit & 31);
+            changed = true;
+        }
 
         // Nothing new this tick and the shadow is already current
         // (nothing was written last tick either): skip write + swap.
         bool prev_any = false;
         for (int i = 0; i < DIRTY_WORDS; i++)
             if (s_dirty_prev[i]) { prev_any = true; break; }
+        for (int i = 0; i < PDIRTY_WORDS; i++)
+            if (s_pdirty_prev[i]) { prev_any = true; break; }
         if (!changed && !prev_any)
             continue;
 
@@ -114,10 +140,22 @@ static void engine_task(void *arg)
                                 s_image[elem][word]);
             }
         }
+        for (int i = 0; i < PDIRTY_WORDS; i++) {
+            uint32_t bits = s_pdirty_now[i] | s_pdirty_prev[i];
+            while (bits) {
+                int b = __builtin_ctz(bits);
+                bits &= bits - 1;
+                int idx = i * 32 + b;
+                fpga_word_write(PROD_BASE_ADDR + idx,
+                                s_prod[idx / 2][idx % 2]);
+            }
+        }
         fpga_swap();
 
         memcpy(s_dirty_prev, s_dirty_now, sizeof(s_dirty_prev));
         memset(s_dirty_now, 0, sizeof(s_dirty_now));
+        memcpy(s_pdirty_prev, s_pdirty_now, sizeof(s_pdirty_prev));
+        memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
 
         if (s_drops) {
             ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
@@ -151,7 +189,8 @@ void engine_link_init(void)
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_cmd_t));
     s_bus_queue = xQueueCreate(BUS_QUEUE_LEN, sizeof(bus_cmd_t));
-    if (s_queue == NULL || s_bus_queue == NULL) {
+    s_prod_queue = xQueueCreate(PROD_QUEUE_LEN, sizeof(prod_cmd_t));
+    if (s_queue == NULL || s_bus_queue == NULL || s_prod_queue == NULL) {
         ESP_LOGE(TAG, "failed to create command queues");
         return;
     }
@@ -188,6 +227,18 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
         return false;
     bus_cmd_t bc = {.bus = bus, .value = value_q810};
     if (xQueueSend(s_bus_queue, &bc, 0) != pdTRUE) {
+        s_drops++;
+        return false;
+    }
+    return true;
+}
+
+bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
+{
+    if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 2)
+        return false;
+    prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
+    if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {
         s_drops++;
         return false;
     }

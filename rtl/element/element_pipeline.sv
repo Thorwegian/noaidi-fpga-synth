@@ -86,6 +86,11 @@ module element_pipeline #(
     input  logic [9:0]     bw_addr,
     input  logic [17:0]    bw_data,
     input  logic           bw_req,
+
+    // Producer table writes (sclk domain, banked — wiring per law 4)
+    input  logic           pw_we,
+    input  logic [7:0]     pw_addr,     // {entry[6:0], word[0]}
+    input  logic [31:0]    pw_data,
     input  logic [7:0]     pe_elem,
     input  logic [31:0]    pe_wdata,
     input  logic           swap_req,    // sclk-domain toggle
@@ -255,12 +260,35 @@ module element_pipeline #(
         bus_ram_gr[bi]    = 18'sd0;
     end
 
+    // SPI bus-base writes now land in a dedicated BASE RAM as well as
+    // the value replicas: sinks read the replicas, the producer walker
+    // reads the base and writes base + contribution into the replicas
+    // (the spec's "bus = base register + producer contributions",
+    // realized). A bus no producer targets keeps value = base via the
+    // mailbox's own replica write.
+    reg signed [17:0] bus_base [0:synth_pkg::NUM_BUSES-1];
+    integer bbi;
+    initial for (bbi = 0; bbi < synth_pkg::NUM_BUSES; bbi = bbi + 1)
+        bus_base[bbi] = 18'sd0;
+
+    // Producer walker replica-write strobes (driven below)
+    logic               wk_wr;
+    logic [9:0]         wk_bus;
+    logic signed [17:0] wk_val;
+
     logic bwr_m, bwr_s, bwr_d;
     logic bw_pending;
     logic [9:0]  bwc_addr;
     logic [17:0] bwc_data;
+    // Mailbox commits happen in any idle slot where the walker is not
+    // writing the replicas THIS cycle (wk_wr below): lane reads issue
+    // during slots 1..~257, and a commit colliding with a walker
+    // write simply defers one cycle. The window stays ~500 slots
+    // wide, so a 10 MHz SPI burst can never overrun the 1-deep
+    // mailbox (word period 5.6 us >> max wait).
     wire  bus_idle   = (slot > 10'd258) && (slot < 10'd760);
-    wire  bus_commit = bw_pending && bus_idle && (bwc_addr != 10'd0);
+    wire  bus_commit = bw_pending && bus_idle && !wk_wr
+                       && (bwc_addr != 10'd0);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -280,17 +308,153 @@ module element_pipeline #(
     end
 
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_pitch[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit) bus_base[bwc_addr] <= $signed(bwc_data);
+
+    // Replica writes: one physical port, two writers — the walker
+    // owns its cycle (wk_wr), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_duty[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit)   bus_ram_pitch[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_pitch[wk_bus]   <= wk_val;
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_fc[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit)   bus_ram_duty[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_duty[wk_bus]   <= wk_val;
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_q[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit)   bus_ram_fc[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_fc[wk_bus]   <= wk_val;
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_gl[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit)   bus_ram_q[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_q[wk_bus]   <= wk_val;
     always_ff @(posedge clk)
-        if (bus_commit) bus_ram_gr[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit)   bus_ram_gl[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_gl[wk_bus]   <= wk_val;
+    always_ff @(posedge clk)
+        if (bus_commit)   bus_ram_gr[bwc_addr] <= $signed(bwc_data);
+        else if (wk_wr)   bus_ram_gr[wk_bus]   <= wk_val;
+
+    //----------------------------------------------------------------
+    // Producer walker (B4, bus_architecture.md) — the idle-slot table
+    // executor. 128 entries, stride 2 slots, span 300..~560. Law 1:
+    // this is the ONLY place outside the audio pipeline's DSP stages
+    // where a multiply lives, and it sits alone in its own stage.
+    // Law 3: entries execute in table order, once per sample.
+    //
+    // Stage map (2-slot stride, stages overlap across entries):
+    //   c0: read CFG word + phase
+    //   c1: decode cfg; phase += rate; read DEPTH; phase writeback
+    //   c2: waveform (osc_core, decode-only) → register; read base
+    //   c3: wave × depth (registered operands, DSP)
+    //   c4: value = base + (product >>> 16), saturate, write replicas
+    //----------------------------------------------------------------
+    reg [35:0] prod_ram [0:4*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word}
+    reg [23:0] prod_phase [0:synth_pkg::NUM_PRODUCERS-1];
+    integer wi;
+    initial begin
+        for (wi = 0; wi < 4*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
+            prod_ram[wi] = 36'd0;                  // type 0 = off
+        for (wi = 0; wi < synth_pkg::NUM_PRODUCERS; wi = wi + 1)
+            prod_phase[wi] = 24'd0;
+    end
+
+    always_ff @(posedge sclk)
+        if (pw_we) prod_ram[{bank_shadow, pw_addr}] <= {4'b0, pw_data};
+
+    wire [9:0] wslot   = slot - 10'd300;
+    wire       wk_span = (slot >= 10'd300)
+                       && (wslot < 10'(2*synth_pkg::NUM_PRODUCERS));
+    wire [6:0] wk_entry = wslot[7:1];
+
+    // c0 → c1 registers
+    logic        wkA_v;
+    logic [6:0]  wkA_e;
+    logic [35:0] wk_cfg_q;
+    logic [23:0] wk_ph_q;
+    // c1 → c2 registers
+    logic        wkB_v;
+    logic [6:0]  wkB_e;
+    logic [1:0]  wkB_shape;
+    logic [9:0]  wkB_tgt;
+    logic signed [23:0] wkB_phase;
+    // c2 → c3 registers
+    logic        wkC_v;
+    logic [9:0]  wkC_tgt;
+    logic signed [17:0] wkC_wave;
+    logic signed [17:0] wkC_depth;
+    // c3 → c4 registers
+    logic        wkD_v;
+    logic [9:0]  wkD_tgt;
+    logic signed [35:0] wkD_m;
+    logic signed [17:0] wkD_base;
+
+    logic [35:0] wk_depth_q;
+    logic signed [17:0] wk_base_q;
+
+    // waveform generator: osc_core on the advanced phase (delta 0 so
+    // phase_next = phase; duty 0 = square for the pulse shape)
+    logic signed [17:0] wk_wave;
+    osc_core u_wk_osc (
+        .phase      (wkB_phase),
+        .delta      (24'sd0),
+        .duty       (24'sd0),
+        .wave       (wkB_shape),
+        .phase_next (),
+        .sample_out (wk_wave)
+    );
+
+    wire wk_c0 = wk_span && !wslot[0];
+    wire [23:0] wk_ph_new = wk_ph_q + {8'b0, wk_cfg_q[31:16]};
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            wkA_v <= 1'b0; wkB_v <= 1'b0; wkC_v <= 1'b0; wkD_v <= 1'b0;
+            wkA_e <= '0; wkB_e <= '0;
+            wkB_shape <= '0; wkB_tgt <= '0; wkB_phase <= '0;
+            wkC_tgt <= '0; wkC_wave <= '0; wkC_depth <= '0;
+            wkD_tgt <= '0; wkD_m <= '0; wkD_base <= '0;
+        end else begin
+            // c0: reads issued below (sync-only processes); validity
+            wkA_v <= wk_c0;
+            wkA_e <= wk_entry;
+
+            // c1: decode + phase advance (adds only)
+            wkB_v     <= wkA_v && (wk_cfg_q[3:0] == 4'd1);   // type LFO
+            wkB_e     <= wkA_e;
+            wkB_shape <= wk_cfg_q[5:4];
+            wkB_tgt   <= wk_cfg_q[15:6];
+            wkB_phase <= $signed(wk_ph_new);
+
+            // c2: register the waveform (decode) and pass depth
+            wkC_v     <= wkB_v;
+            wkC_tgt   <= wkB_tgt;
+            wkC_wave  <= wk_wave;
+            wkC_depth <= $signed(wk_depth_q[17:0]);
+
+            // c3: the producer multiply — registered operands only
+            wkD_v    <= wkC_v;
+            wkD_tgt  <= wkC_tgt;
+            wkD_m    <= wkC_wave * wkC_depth;
+            wkD_base <= wk_base_q;
+        end
+    end
+
+    // c4: value = base + contribution (product >>> 16), saturating
+    wire signed [19:0] wk_contrib = wkD_m[35:16];
+    wire signed [20:0] wk_sum =
+        {{3{wkD_base[17]}}, wkD_base} + {wk_contrib[19], wk_contrib};
+    assign wk_val = (wk_sum > 21'sd131071)  ? 18'sd131071  :
+                    (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
+    assign wk_bus = wkD_tgt;
+    assign wk_wr  = wkD_v && (wkD_tgt != 10'd0);
+
+    // walker memory reads/writes — sync-only processes
+    always_ff @(posedge clk) begin
+        wk_cfg_q   <= prod_ram[{bank_active, wk_entry, 1'b0}];   // c0
+        wk_ph_q    <= prod_phase[wk_entry];                      // c0
+        wk_depth_q <= prod_ram[{bank_active, wkA_e, 1'b1}];      // c1
+        wk_base_q  <= bus_base[wkB_tgt];                         // c2
+    end
+    always_ff @(posedge clk)
+        if (wkA_v && (wk_cfg_q[3:0] == 4'd1))
+            prod_phase[wkA_e] <= wk_ph_new;                      // c1
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
