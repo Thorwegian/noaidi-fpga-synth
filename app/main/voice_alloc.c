@@ -24,7 +24,7 @@
 
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
-#define Q1_ONE     0x40000000u        // q1 = 1.0 (Q2.16) in FILTER[31:14]
+#define Q1_ONE     0x20000000u        // q1 = 0.5 (Q2.16) in FILTER[31:14]
 #define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
                                       // -36 in three steps; Thor measured
                                       // full-smash chords at -12 dBFS one
@@ -87,13 +87,13 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
         ESP_LOGW(TAG, "engine queue full, elem %d word %d lost", elem, word);
 }
 
-// Base cutoff: one octave above the note (UQ4.10 log2). The mod
+// Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
 // wheel's contribution no longer touches the FILTER words at all —
 // it rides cutoff bus 1, which every element's cutoff pointer
 // references (see engine_link_init).
 static uint16_t voice_fc(uint8_t note)
 {
-    uint32_t fc = (uint32_t)midi_to_pitch(note) + 0x400;
+    uint32_t fc = (uint32_t)midi_to_pitch(note) + 0x200;
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
@@ -159,8 +159,8 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 
     // Velocity rides the voice's buses (B3): gain attenuation in
     // 0.375 dB steps (64 Q8.10 LSB each, up to ~23.6 dB at vel 1),
-    // and a darkening cutoff term (up to ~-1 octave at vel 1).
-    s_vel_cut[pick] = -(int32_t)(127 - vel) * 8;
+    // and a brightening cutoff term (up to ~4 octaves at vel 127).
+    s_vel_cut[pick] = (int32_t)vel * 32;
     engine_link_bus_write(BUS_GAIN(pick),
                           (uint32_t)(((127 - vel) >> 1) * 64));
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
