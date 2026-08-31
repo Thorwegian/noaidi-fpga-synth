@@ -271,14 +271,17 @@ void voice_alloc_init(void)
     wire_pointers();
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
 
-    // B4: the first self-running modulation — a gentle global vibrato.
+    // B4: the first self-running modulation — a global vibrato.
     // Producer 0: triangle LFO at 1.0 Hz (rate16 = 175; Thor: LFOs
-    // are subsonic), depth ±16 Q8.10 LSB ≈ ±19 cents, ADDING to the
-    // global pitch bus — it coexists with the pitch wheel's base
-    // writes on the same bus. Zero SPI traffic once configured.
+    // are subsonic), ADDING to the global pitch bus — it coexists
+    // with the pitch wheel's base writes on the same bus. Zero SPI
+    // traffic once configured.
+    // Depth ±64 Q8.10 LSB ≈ ±75 cents: deliberately OBVIOUS for the
+    // ear verification — ±19 cents was masked by the ±9-cent unison
+    // detune. Tame it after the milestone.
     engine_link_prod_write(0, 0,
         1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6) | (175u << 16));
-    engine_link_prod_write(0, 1, 16);
+    engine_link_prod_write(0, 1, 64);
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");
