@@ -165,12 +165,15 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 
 - **B0 — Spec sign-off.** Thor reviews this document; disagreements
   are edits, approval starts B1. *Verification: his word.*
-- **B1 — Bus fabric pilot, cutoff class only.** CUTOFF bus RAM + base
-  registers, pointer word, and the one pipeline add stage (the last
-  pipeline change ever, entering under full bench + chord-torture +
-  ear scrutiny). Firmware mod wheel rewired to one base write.
-  *Verification: wheel sounds identical by ear; benches green; measured
-  SPI traffic for a wheel sweep collapses ~256×.*
+- **B1 — Bus fabric pilot, cutoff class only.** ✅ (2026-08-31,
+  Thor's ears: "B1 works"). Bus RAM + base registers at 0x0800,
+  pointer word at +5, effective-cutoff saturating add — which cost
+  ZERO new pipeline stages (the pointer rides the S1 param read, the
+  bus fetch lands at S2). SPI bus writes cross via a toggle mailbox
+  committed only in idle slots — collision-free by schedule. The mod
+  wheel is one base write instead of 256 FILTER rewrites; the bench's
+  live bus sweep measured SMOOTHER than the swap sweep (worst step
+  10240 vs 38144) because commits land atomically between lane reads.
 - **B2 — All sink classes.** Pitch (with the detune decision), duty,
   Q, gains on buses; voice_alloc rewired. *Verification: playable
   synth indistinguishable by ear from today; benches green.*
