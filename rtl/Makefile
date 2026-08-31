@@ -107,6 +107,15 @@ tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 sim-spi: tb/tb_spi_slave_regs.vvp
 	vvp tb/tb_spi_slave_regs.vvp
 
+# Characterization (long-running, prints a report, asserts nothing):
+# SVF stability across cutoff x Q — data for the FC_MAX clamp.
+TB_STAB = tb/tb_svf_stability.sv
+tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
+	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_STAB)
+
+sim-stab: tb/tb_svf_stability.vvp
+	vvp tb/tb_svf_stability.vvp
+
 sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus sim-prog
 
 clean:

@@ -184,8 +184,12 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   real routes: velocity → gain and velocity → filter cutoff (a
   per-voice bus each, allocated by firmware at note-on) and pitch
   wheel → pitch offset (one shared bus every voice's pitch pointer
-  references). This replaces today's rewrite storms: a pitch bend
-  becomes one base write instead of 256 OSC-word writes.
+  references). Bend must also move filter key tracking (Thor): the
+  cutoff bus carries the same value as the pitch bus plus the wheel
+  contribution — firmware writes bend to the pitch bus and bend+wheel
+  to the cutoff bus, two writes per bend event. This replaces today's
+  rewrite storms: a pitch bend becomes two base writes instead of 256
+  OSC-word writes.
   *Verification: velocity-to-loudness and velocity-to-brightness by
   ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
 - **B4 — Producer walker + LFO producer.** The idle-slot table
