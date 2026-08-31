@@ -18,10 +18,12 @@ remainder of this document.
 **Firmware** means the C code running on the ESP32. **Gateware**
 means the SystemVerilog running on the FPGA. **Silicon** refers to
 the physical FPGA chip, and is used only when discussing its
-electrical or timing behavior. **Element**, **lane**, **voice** and
-**stop** are as defined in [design.md](design.md): the FPGA generates
-elements via lanes; firmware groups elements into voices; a stop is a
-drawn configuration.
+electrical or timing behavior. **Element**, **lane** and **voice**
+are as defined in [design.md](design.md): the FPGA generates elements
+via lanes; firmware groups elements into voices. The deferred shared
+configuration table (milestone B6) has no settled name — "stop" was
+an organ-analogy candidate from a side discussion, not design
+terminology.
 
 ## The model in one paragraph
 
@@ -33,7 +35,7 @@ dynamic value arrives on a **bus**: a memory cell holding
 table walked once per sample through the drum's idle slots and write
 buses. The audio pipeline's entire share is `effective = base_word +
 bus[pointer]`, an add. Firmware allocates everything: buses, producers,
-pointers, groupings. A voice, a stop, a channel — all firmware
+pointers, groupings. A voice, a program, a channel — all firmware
 conventions the FPGA never sees.
 
 ## Laws
@@ -110,13 +112,28 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   octaves of range, 1 LSB ≈ 1.17 cents. Gain consumes the top
   fraction bits (0.375 dB decode grid today; buses already carry the
   precision if the grid ever refines).
-- **Bus pool**: one uniform pool of 1024 buses, replicated once per
-  sink read port (6 replicas ≈ 6 blocks, broadcast writes). Shared
+- **Bus pool**: one uniform pool of 1024 buses. The six sinks are
+  oscillator pitch, oscillator duty cycle, filter cutoff, filter 1/Q,
+  gain L and gain R.
+  **Why six replicas**: the pool physically exists as six identical
+  BSRAM copies. An inferred dual-clock BSRAM has exactly one read
+  port (the other port is the write side), so one block can serve one
+  read per sysclk cycle — but the pipeline needs six bus reads every
+  cycle, one per sink, because every pipeline stage holds a
+  *different* element (the stage that fetches the pitch bus and the
+  stage that fetches the cutoff bus are always busy simultaneously,
+  just for different elements). Six concurrent reads therefore
+  require six read ports, which on this part means six copies. All
+  copies stay identical because every bus write is broadcast to all
+  six simultaneously (same address, same data, same write enable —
+  pure fan-out, no extra logic). Cost: ≈6 blocks of 46. Shared
   allocation across all sinks — no per-class exhaustion. Bus 0 is
   hardwired zero.
-- **Pointers**: 8 bits per parameter (1024-bus pool needs 10 —
-  pointer fields reserve 10, low 8 used until the pool grows past
-  256); packed into two new per-element words (map offsets +5, +6).
+- **Pointers**: 10 bits per parameter, full width from day one — the
+  pool is 1024, so pointers address 1024 (Thor: no held-back address
+  bits; partial widths create weird bugs later). Six pointers pack
+  three per word into two new per-element words (map offsets +5, +6;
+  3 × 10 bits + 2 spare per word).
 - **Detune** (Thor, decided): a static per-element offset — detune is
   conceptually a bus fed by a base and a source, but it is so common
   that a dedicated per-element offset is the pragmatic form. All 8
@@ -175,8 +192,9 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   goal) — then the filter envelope. *Verification: click-free attack
   and release by ear; envelope shape in bench.*
 - **B6+ (deferred until measured traffic demands them).** Combiner/
-  chaining, stop tables, producer-side smoothing for firmware-written
-  buses, bus read-back diagnostics.
+  chaining, shared per-element configuration tables (unnamed; "stop"
+  was only an analogy candidate), producer-side smoothing for
+  firmware-written buses, bus read-back diagnostics.
 
 Rungs keep the standing process: one side branch at a time, ear (or
 bench where marked) verification gates every merge, board matches tree.
