@@ -49,36 +49,37 @@ module spi_bus #(
     input  logic        rst_n,
 
     // ---- per-element parameter writes (sclk domain) ----------------
-    // The memory map's 0x2000 + v*64 range, offsets 0..3 (OSC, DUTY,
-    // FILTER, GAIN). Combinational decode, valid exactly on the sclk
-    // edge that completes a data word — the consumer writes its RAM on
-    // that same edge (there may be no further edges: a master stops
-    // clocking after the last bit). Offsets 5..63 are dropped for now;
-    // per-element read-back is TBD (reads in this range return zero).
-    output logic        pe_we,
-    output logic [2:0]  pe_bank,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
+    // The memory map's 0x2000 + v*64 range, offsets 0..6 (OSC, DUTY,
+    // FILTER, GAIN, GATE, PTRS0, PTRS1). Combinational decode, valid
+    // exactly on the sclk edge that completes a data word — the
+    // consumer writes its RAM on that same edge (there may be no
+    // further edges: a master stops clocking after the last bit).
+    // Offsets 7..63 are dropped for now; per-element read-back is TBD
+    // (reads in this range return zero).
+    output logic        elem_write_enable,
+    output logic [2:0]  elem_write_word,   // 0..6 = OSC..PTRS1 param RAM
 
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
     // Bus values are live (no ping-pong). The write crosses clock
     // domains through this 1-deep toggle mailbox; the pipeline syncs
-    // bw_req and commits to bus RAM only in an idle drum slot, so a
-    // commit can never collide with a lane's bus read (the BSRAM
-    // read-during-write corruption class stays impossible by
+    // bus_write_toggle and commits to bus RAM only in an idle drum
+    // slot, so a commit can never collide with a lane's bus read (the
+    // BSRAM read-during-write corruption class stays impossible by
     // construction, not by probability). Overrun math: one SPI word
     // takes >= ~5.6 us at 10 MHz; a commit waits at most one lane
     // span (~3.7 us) — back-to-back writes cannot outrun the mailbox.
-    output logic [9:0]  bw_addr,
-    output logic [17:0] bw_data,
-    output logic        bw_req,      // toggles once per bus write
+    output logic [9:0]  bus_write_addr,
+    output logic [17:0] bus_write_data,
+    output logic        bus_write_toggle,  // toggles once per bus write
 
     // ---- producer table writes (sclk domain, banked like params) ---
     // Producer config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
-    output logic        pw_we,
-    output logic [8:0]  pw_addr,     // {entry[6:0], word[1:0]}
-    output logic [31:0] pw_data,
-    output logic [7:0]  pe_elem,
-    output logic [31:0] pe_wdata,
+    output logic        producer_write_enable,
+    output logic [8:0]  producer_write_addr,   // {entry[6:0], word[1:0]}
+    output logic [31:0] producer_write_data,
+    output logic [7:0]  elem_write_index,
+    output logic [31:0] elem_write_data,
 
     // CTRL@0x0002 bit 0: bank swap request. Toggle semantics
     // (sclk domain); the consumer syncs the toggle and flips its
@@ -92,24 +93,24 @@ module spi_bus #(
     //--------------------------------------------------------------------
     // Receive — rising edge; a byte completes AT RE8
     //--------------------------------------------------------------------
-    logic [7:0] rx_sh;
-    logic [2:0] bit_cnt;
+    logic [7:0] rx_shift;
+    logic [2:0] bit_count;
 
-    wire [7:0] rx_byte  = {rx_sh[6:0], mosi};
-    wire       byte_end = (bit_cnt == 3'd7);
+    wire [7:0] rx_byte  = {rx_shift[6:0], mosi};
+    wire       byte_end = (bit_count == 3'd7);
 
     initial begin
-        rx_sh   = '0;
-        bit_cnt = '0;
+        rx_shift  = '0;
+        bit_count = '0;
     end
 
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
-            rx_sh   <= '0;
-            bit_cnt <= '0;
+            rx_shift  <= '0;
+            bit_count <= '0;
         end else begin
-            rx_sh   <= rx_byte;
-            bit_cnt <= bit_cnt + 3'd1;
+            rx_shift  <= rx_byte;
+            bit_count <= bit_count + 3'd1;
         end
     end
 
@@ -117,85 +118,88 @@ module spi_bus #(
     // Frame decode (sclk domain)
     //   phase 0 cmd · 1 addr-hi · 2 addr-lo · 3 read turnaround · 4 data
     //--------------------------------------------------------------------
-    logic [2:0]  phase;
-    logic        is_read, auto_inc;
-    logic [15:0] addr;
-    logic        dummy2;        // second turnaround byte pending
-    logic [1:0]  wbyte;         // byte index within the current word
-    logic [23:0] wbuf;          // first three data bytes of a word
+    logic [2:0]  frame_phase;
+    logic        is_read, auto_increment;
+    logic [15:0] word_addr;
+    logic        first_dummy_done;  // second turnaround byte pending
+    logic [1:0]  data_byte_index;   // byte index within the current word
+    logic [23:0] partial_word;      // first three data bytes of a word
 
-    wire in_window = (addr[15:AW_BACKED] == '0);
+    wire addr_in_backed = (word_addr[15:AW_BACKED] == '0);
 
     // fetch request: toggle + quasi-static address (settle-time CDC,
     // same pattern as spi_slave_regs' hardware-proven STATUS capture)
-    logic        req;
+    logic        fetch_toggle;
     logic [15:0] fetch_addr;
-    logic [31:0] resp;         // fetched word (sysclk domain, see below)
-    logic [31:0] tx_word;      // the word streaming out NOW — latched at
-                               // each word boundary so prefetches into
-                               // resp cannot clip the tail bytes
+    logic [31:0] fetch_result;  // fetched word (sysclk domain, see below)
+    logic [31:0] stream_word;   // the word streaming out NOW — latched at
+                                // each word boundary so prefetches into
+                                // fetch_result cannot clip the tail bytes
 
     initial begin
-        phase      = '0;
-        is_read    = 1'b0;
-        auto_inc   = 1'b0;
-        addr       = '0;
-        dummy2     = 1'b0;
-        wbyte      = '0;
-        wbuf       = '0;
-        req        = 1'b0;
-        fetch_addr = '0;
-        tx_word    = '0;
+        frame_phase      = '0;
+        is_read          = 1'b0;
+        auto_increment   = 1'b0;
+        word_addr        = '0;
+        first_dummy_done = 1'b0;
+        data_byte_index  = '0;
+        partial_word     = '0;
+        fetch_toggle     = 1'b0;
+        fetch_addr       = '0;
+        stream_word      = '0;
     end
 
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
-            phase  <= '0;
-            dummy2 <= 1'b0;
-            wbyte  <= '0;
+            frame_phase      <= '0;
+            first_dummy_done <= 1'b0;
+            data_byte_index  <= '0;
         end else if (byte_end) begin
-            case (phase)
+            case (frame_phase)
                 3'd0: begin                       // command
-                    is_read  <= rx_byte[7];
-                    auto_inc <= rx_byte[6];
-                    phase    <= 3'd1;
+                    is_read        <= rx_byte[7];
+                    auto_increment <= rx_byte[6];
+                    frame_phase    <= 3'd1;
                 end
                 3'd1: begin                       // address high
-                    addr[15:8] <= rx_byte;
-                    phase      <= 3'd2;
+                    word_addr[15:8] <= rx_byte;
+                    frame_phase     <= 3'd2;
                 end
                 3'd2: begin                       // address low
-                    addr[7:0]  <= rx_byte;
-                    fetch_addr <= {addr[15:8], rx_byte};
-                    req        <= ~req;           // fetch word 0
-                    wbyte      <= '0;
-                    dummy2     <= 1'b0;
-                    phase      <= is_read ? 3'd3 : 3'd4;
+                    word_addr[7:0]  <= rx_byte;
+                    fetch_addr      <= {word_addr[15:8], rx_byte};
+                    fetch_toggle    <= ~fetch_toggle;   // fetch word 0
+                    data_byte_index <= '0;
+                    first_dummy_done <= 1'b0;
+                    frame_phase     <= is_read ? 3'd3 : 3'd4;
                 end
                 3'd3: begin                       // read turnaround (2 bytes)
-                    dummy2 <= 1'b1;
-                    if (dummy2) begin
-                        phase   <= 3'd4;
-                        tx_word <= resp;          // word 0, fetched >=2
-                                                  // byte-slots ago
+                    first_dummy_done <= 1'b1;
+                    if (first_dummy_done) begin
+                        frame_phase <= 3'd4;
+                        stream_word <= fetch_result;  // word 0, fetched
+                                                      // >=2 byte-slots ago
                     end
                 end
                 3'd4: begin                       // data words
-                    wbuf  <= {wbuf[15:0], rx_byte};
-                    wbyte <= wbyte + 2'd1;
+                    partial_word    <= {partial_word[15:0], rx_byte};
+                    data_byte_index <= data_byte_index + 2'd1;
                     // prefetch the NEXT word two byte-slots before it
                     // streams (>=500 ns at 40 MHz against ~60 ns needed)
-                    if (wbyte == 2'd1) begin
-                        fetch_addr <= auto_inc ? addr + 16'd1 : addr;
-                        req        <= ~req;
+                    if (data_byte_index == 2'd1) begin
+                        fetch_addr   <= auto_increment ? word_addr + 16'd1
+                                                       : word_addr;
+                        fetch_toggle <= ~fetch_toggle;
                     end
-                    if (wbyte == 2'd3) begin
-                        tx_word <= resp;          // latch the prefetched
-                                                  // next word; resp is
-                                                  // free to change under
-                                                  // later prefetches
-                        if (auto_inc)
-                            addr <= addr + 16'd1;
+                    if (data_byte_index == 2'd3) begin
+                        stream_word <= fetch_result;  // latch the
+                                                      // prefetched next
+                                                      // word; fetch_result
+                                                      // is free to change
+                                                      // under later
+                                                      // prefetches
+                        if (auto_increment)
+                            word_addr <= word_addr + 16'd1;
                     end
                 end
                 default: ;
@@ -207,61 +211,67 @@ module spi_bus #(
     // Store — dual-clock semi dual-port BSRAM (write sclk, read sysclk).
     // Sync-only, reset-free processes so yosys infers DPX9B (AGENTS.md).
     //--------------------------------------------------------------------
-    logic [35:0] mem [0:NWORDS-1];
+    logic [35:0] store_ram [0:NWORDS-1];
 
     integer i0;
-    initial for (i0 = 0; i0 < NWORDS; i0 = i0 + 1) mem[i0] = '0;
+    initial for (i0 = 0; i0 < NWORDS; i0 = i0 + 1) store_ram[i0] = '0;
 
-    wire mem_we = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-                  && !is_read && in_window;
+    wire store_write_enable = byte_end && (frame_phase == 3'd4)
+                              && (data_byte_index == 2'd3)
+                              && !is_read && addr_in_backed;
 
     // ---- per-element write decode (MAP_ELEM_BASE + 256×64 words,
-    //      offsets 0..3) -------------------------------------------
+    //      offsets 0..6) -------------------------------------------
     localparam [15:0] ELEM_BASE = synth_pkg::MAP_ELEM_BASE;
     localparam [15:0] ELEM_END  = synth_pkg::MAP_ELEM_BASE
                                 + 16'(synth_pkg::NUM_ELEMENTS
                                       * synth_pkg::MAP_ELEM_STRIDE);
-    wire        in_pe   = (addr >= ELEM_BASE) && (addr < ELEM_END);
-    wire [15:0] pe_rel  = addr - ELEM_BASE;     // 0..0x3FFF within range
-    wire [13:0] pe_off  = pe_rel[13:0];
-    assign pe_we    = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-                      && !is_read && in_pe && (pe_off[5:3] == 3'd0)
-                      && (pe_off[2:0] < 3'd7);
-    assign pe_bank  = pe_off[2:0];
+    wire        in_elem_range = (word_addr >= ELEM_BASE)
+                             && (word_addr <  ELEM_END);
+    wire [15:0] elem_rel_addr = word_addr - ELEM_BASE; // 0..0x3FFF in range
+    wire [13:0] elem_offset   = elem_rel_addr[13:0];
+    assign elem_write_enable = byte_end && (frame_phase == 3'd4)
+                               && (data_byte_index == 2'd3)
+                               && !is_read && in_elem_range
+                               && (elem_offset[5:3] == 3'd0)
+                               && (elem_offset[2:0] < 3'd7);
+    assign elem_write_word   = elem_offset[2:0];
 
-    // ---- producer table write decode (0x0100..0x01FF) --------------
+    // ---- producer table write decode (0x0100..0x02FF) --------------
     localparam [15:0] PROD_BASE = synth_pkg::MAP_PROD_BASE;
     localparam [15:0] PROD_END  = synth_pkg::MAP_PROD_BASE
                                 + 16'(4 * synth_pkg::NUM_PRODUCERS);
-    wire in_pw = (addr >= PROD_BASE) && (addr < PROD_END)
-                 && (addr[1:0] != 2'd3);          // word 3 reserved
-    assign pw_we   = byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-                     && !is_read && in_pw;
-    // Region-relative offset — addr[8:0] alone is WRONG here: the
+    wire in_producer_range = (word_addr >= PROD_BASE)
+                          && (word_addr <  PROD_END)
+                          && (word_addr[1:0] != 2'd3);  // word 3 reserved
+    assign producer_write_enable = byte_end && (frame_phase == 3'd4)
+                                   && (data_byte_index == 2'd3)
+                                   && !is_read && in_producer_range;
+    // Region-relative offset — word_addr[8:0] alone is WRONG here: the
     // region starts at 0x0100, whose bit 8 is set, so a raw slice
     // lands writes 64 entries off.
-    assign pw_addr = 9'(addr - synth_pkg::MAP_PROD_BASE);
-    assign pw_data = {wbuf, rx_byte};
+    assign producer_write_addr = 9'(word_addr - synth_pkg::MAP_PROD_BASE);
+    assign producer_write_data = {partial_word, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----
-    wire in_bus = (addr >= synth_pkg::MAP_BUS_BASE)
-               && (addr <  synth_pkg::MAP_BUS_BASE
-                           + 16'(synth_pkg::NUM_BUSES));
-    initial bw_req = 1'b0;
+    wire in_bus_range = (word_addr >= synth_pkg::MAP_BUS_BASE)
+                     && (word_addr <  synth_pkg::MAP_BUS_BASE
+                                      + 16'(synth_pkg::NUM_BUSES));
+    initial bus_write_toggle = 1'b0;
     always_ff @(posedge sclk) begin
-        if (byte_end && (phase == 3'd4) && (wbyte == 2'd3)
-            && !is_read && in_bus) begin
-            bw_addr <= addr[9:0];
-            bw_data <= {wbuf[9:0], rx_byte};   // low 18 bits of the word
-            bw_req  <= ~bw_req;
+        if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
+            && !is_read && in_bus_range) begin
+            bus_write_addr   <= word_addr[9:0];
+            bus_write_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
+            bus_write_toggle <= ~bus_write_toggle;
         end
     end
-    assign pe_elem  = pe_off[13:6];
-    assign pe_wdata = {wbuf, rx_byte};
+    assign elem_write_index = elem_offset[13:6];
+    assign elem_write_data  = {partial_word, rx_byte};
 
     always_ff @(posedge sclk) begin
-        if (mem_we)
-            mem[addr[AW_BACKED-1:0]] <= {4'b0, wbuf, rx_byte};
+        if (store_write_enable)
+            store_ram[word_addr[AW_BACKED-1:0]] <= {4'b0, partial_word, rx_byte};
     end
 
     // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_req.
@@ -269,61 +279,64 @@ module spi_bus #(
     // guaranteed (framing rule).
     initial swap_req = 1'b0;
     always_ff @(posedge sclk) begin
-        if (mem_we && (addr == synth_pkg::MAP_CTRL_ADDR) && rx_byte[0])
+        if (store_write_enable && (word_addr == synth_pkg::MAP_CTRL_ADDR)
+            && rx_byte[0])
             swap_req <= ~swap_req;
     end
 
     //--------------------------------------------------------------------
     // Fetch service (sysclk domain)
     //--------------------------------------------------------------------
-    logic req_m, req_s, req_d;
-    logic        f_pending;
-    logic [35:0] mem_q;
+    logic fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev;
+    logic        fetch_pending;
+    logic [35:0] store_read_data;
 
     initial begin
-        {req_m, req_s, req_d} = '0;
-        f_pending = 1'b0;
-        mem_q     = '0;
-        resp      = '0;
+        {fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev} = '0;
+        fetch_pending   = 1'b0;
+        store_read_data = '0;
+        fetch_result    = '0;
     end
 
     always_ff @(posedge sysclk) begin
-        req_m <= req;
-        req_s <= req_m;
-        req_d <= req_s;
+        fetch_toggle_meta <= fetch_toggle;
+        fetch_toggle_sync <= fetch_toggle_meta;
+        fetch_toggle_prev <= fetch_toggle_sync;
 
-        mem_q     <= mem[fetch_addr[AW_BACKED-1:0]];   // BSRAM sync read
-        f_pending <= (req_s != req_d);
-        if (f_pending)
-            resp <= (fetch_addr[15:AW_BACKED] == '0) ? mem_q[31:0] : 32'd0;
+        store_read_data <= store_ram[fetch_addr[AW_BACKED-1:0]]; // BSRAM sync read
+        fetch_pending   <= (fetch_toggle_sync != fetch_toggle_prev);
+        if (fetch_pending)
+            fetch_result <= (fetch_addr[15:AW_BACKED] == '0)
+                          ? store_read_data[31:0] : 32'd0;
     end
 
     //--------------------------------------------------------------------
-    // Transmit — falling edge.  phase/wbyte have already advanced at the
-    // RE8 before this FE8 load, so they index the slot about to stream.
+    // Transmit — falling edge.  frame_phase/data_byte_index have already
+    // advanced at the RE8 before this FE8 load, so they index the slot
+    // about to stream.
     //--------------------------------------------------------------------
     wire [7:0] tx_byte =
-        (phase == 3'd0) ? ID_BYTE :
-        (phase != 3'd4) ? 8'h00   :
-        !is_read        ? 8'h00   :
-        (wbyte == 2'd0) ? tx_word[31:24] :
-        (wbyte == 2'd1) ? tx_word[23:16] :
-        (wbyte == 2'd2) ? tx_word[15:8]  :
-                          tx_word[7:0];
+        (frame_phase == 3'd0)      ? ID_BYTE :
+        (frame_phase != 3'd4)      ? 8'h00   :
+        !is_read                   ? 8'h00   :
+        (data_byte_index == 2'd0)  ? stream_word[31:24] :
+        (data_byte_index == 2'd1)  ? stream_word[23:16] :
+        (data_byte_index == 2'd2)  ? stream_word[15:8]  :
+                                     stream_word[7:0];
 
-    logic [7:0] tx_sh;
-    initial tx_sh = ID_BYTE;
+    logic [7:0] tx_shift;
+    initial tx_shift = ID_BYTE;
 
     always_ff @(negedge sclk or posedge cs) begin
         if (cs)
-            tx_sh <= ID_BYTE;
-        else if (bit_cnt == 3'd0)
-            tx_sh <= tx_byte;
+            tx_shift <= ID_BYTE;
+        else if (bit_count == 3'd0)
+            tx_shift <= tx_byte;
         else
-            tx_sh <= {tx_sh[6:0], 1'b0};
+            tx_shift <= {tx_shift[6:0], 1'b0};
     end
 
-    assign miso = cs ? 1'b0 : tx_sh[7];
+    assign miso = cs ? 1'b0 : tx_shift[7];
 
 endmodule
 `default_nettype wire

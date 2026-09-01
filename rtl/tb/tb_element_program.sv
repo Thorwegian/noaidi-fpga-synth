@@ -29,25 +29,25 @@ module tb_element_program;
         .cell_tick(), .slot(slot)
     );
 
-    wire        pe_we;
-    wire [2:0]  pe_bank;
-    wire [7:0]  pe_elem;
-    wire [31:0] pe_wdata;
-    wire [9:0]  bw_addr;
-    wire [17:0] bw_data;
-    wire        bw_req;
-    wire        pw_we;
-    wire [8:0]  pw_addr;
-    wire [31:0] pw_data;
+    wire        elem_write_enable;
+    wire [2:0]  elem_write_word;
+    wire [7:0]  elem_write_index;
+    wire [31:0] elem_write_data;
+    wire [9:0]  bus_write_addr;
+    wire [17:0] bus_write_data;
+    wire        bus_write_toggle;
+    wire        producer_write_enable;
+    wire [8:0]  producer_write_addr;
+    wire [31:0] producer_write_data;
     wire        swap_req;
 
     spi_bus #(.AW_BACKED(11)) u_bus (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
         .sysclk(clk), .rst_n(rst_n),
-        .pe_we(pe_we), .pe_bank(pe_bank),
-        .pe_elem(pe_elem), .pe_wdata(pe_wdata),
-        .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
-        .pw_we(pw_we), .pw_addr(pw_addr), .pw_data(pw_data),
+        .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
+        .elem_write_index(elem_write_index), .elem_write_data(elem_write_data),
+        .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data), .bus_write_toggle(bus_write_toggle),
+        .producer_write_enable(producer_write_enable), .producer_write_addr(producer_write_addr), .producer_write_data(producer_write_data),
         .swap_req(swap_req)
     );
 
@@ -58,10 +58,10 @@ module tb_element_program;
     ) u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .lane_enter(lane_enter), .sample_tick(sample_tick),
-        .sclk(sclk), .pe_we(pe_we), .pe_bank(pe_bank),
-        .pe_elem(pe_elem), .pe_wdata(pe_wdata), .swap_req(swap_req),
-        .bw_addr(bw_addr), .bw_data(bw_data), .bw_req(bw_req),
-        .pw_we(pw_we), .pw_addr(pw_addr), .pw_data(pw_data),
+        .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
+        .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_req(swap_req),
+        .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data), .bus_write_toggle(bus_write_toggle),
+        .producer_write_enable(producer_write_enable), .producer_write_addr(producer_write_addr), .producer_write_data(producer_write_data),
         .mix_left(ml), .mix_right(mr)
     );
 

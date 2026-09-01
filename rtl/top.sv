@@ -54,18 +54,18 @@ module top (
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    logic        pe_we;
-    logic [2:0]  pe_bank;
-    logic [7:0]  pe_elem;
-    logic [31:0] pe_wdata;
+    logic        elem_write_enable;
+    logic [2:0]  elem_write_word;
+    logic [7:0]  elem_write_index;
+    logic [31:0] elem_write_data;
     logic        swap_req;
-    logic [9:0]  bw_addr;
-    logic [17:0] bw_data;
-    logic        bw_req;
-    logic        pw_we;
-    logic [8:0]  pw_addr;   // {entry[6:0], word[1:0]} — 9 bits; an 8-bit
+    logic [9:0]  bus_write_addr;
+    logic [17:0] bus_write_data;
+    logic        bus_write_toggle;
+    logic        producer_write_enable;
+    logic [8:0]  producer_write_addr;   // {entry[6:0], word[1:0]} — 9 bits; an 8-bit
                             // wire here silently truncated entries >= 64
-    logic [31:0] pw_data;
+    logic [31:0] producer_write_data;
 
     element_pipeline u_elem_pipeline (
         .clk         (sysclk),
@@ -74,16 +74,16 @@ module top (
         .lane_enter  (lane_enter),
         .sample_tick (sample_tick),
         .sclk        (sclk),
-        .pe_we       (pe_we),
-        .pe_bank     (pe_bank),
-        .pe_elem     (pe_elem),
-        .pe_wdata    (pe_wdata),
-        .bw_addr     (bw_addr),
-        .bw_data     (bw_data),
-        .bw_req      (bw_req),
-        .pw_we       (pw_we),
-        .pw_addr     (pw_addr),
-        .pw_data     (pw_data),
+        .elem_write_enable       (elem_write_enable),
+        .elem_write_word     (elem_write_word),
+        .elem_write_index     (elem_write_index),
+        .elem_write_data    (elem_write_data),
+        .bus_write_addr     (bus_write_addr),
+        .bus_write_data     (bus_write_data),
+        .bus_write_toggle      (bus_write_toggle),
+        .producer_write_enable       (producer_write_enable),
+        .producer_write_addr     (producer_write_addr),
+        .producer_write_data     (producer_write_data),
         .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right)
@@ -129,16 +129,16 @@ module top (
         .miso     (miso),
         .sysclk   (sysclk),
         .rst_n    (rst_n),
-        .pe_we    (pe_we),
-        .pe_bank  (pe_bank),
-        .pe_elem  (pe_elem),
-        .pe_wdata (pe_wdata),
-        .bw_addr  (bw_addr),
-        .bw_data  (bw_data),
-        .bw_req   (bw_req),
-        .pw_we    (pw_we),
-        .pw_addr  (pw_addr),
-        .pw_data  (pw_data),
+        .elem_write_enable    (elem_write_enable),
+        .elem_write_word  (elem_write_word),
+        .elem_write_index  (elem_write_index),
+        .elem_write_data (elem_write_data),
+        .bus_write_addr  (bus_write_addr),
+        .bus_write_data  (bus_write_data),
+        .bus_write_toggle   (bus_write_toggle),
+        .producer_write_enable    (producer_write_enable),
+        .producer_write_addr  (producer_write_addr),
+        .producer_write_data  (producer_write_data),
         .swap_req (swap_req)
     );
 

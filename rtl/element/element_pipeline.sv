@@ -77,22 +77,22 @@ module element_pipeline #(
     // pipeline is drained there (span ends ~271), so every sample's
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
-    input  logic           pe_we,
-    input  logic [2:0]     pe_bank,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
+    input  logic           elem_write_enable,
+    input  logic [2:0]     elem_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
 
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
     // so a commit never collides with a lane's bus read.
-    input  logic [9:0]     bw_addr,
-    input  logic [17:0]    bw_data,
-    input  logic           bw_req,
+    input  logic [9:0]     bus_write_addr,
+    input  logic [17:0]    bus_write_data,
+    input  logic           bus_write_toggle,
 
     // Producer table writes (sclk domain, banked — wiring per law 4)
-    input  logic           pw_we,
-    input  logic [8:0]     pw_addr,     // {entry[6:0], word[1:0]}
-    input  logic [31:0]    pw_data,
-    input  logic [7:0]     pe_elem,
-    input  logic [31:0]    pe_wdata,
+    input  logic           producer_write_enable,
+    input  logic [8:0]     producer_write_addr,     // {entry[6:0], word[1:0]}
+    input  logic [31:0]    producer_write_data,
+    input  logic [7:0]     elem_write_index,
+    input  logic [31:0]    elem_write_data,
     input  logic           swap_req,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, updated at sample_tick
@@ -302,11 +302,11 @@ module element_pipeline #(
             bw_pending <= 1'b0;
             bwc_addr <= '0; bwc_data <= '0;
         end else begin
-            bwr_m <= bw_req; bwr_s <= bwr_m; bwr_d <= bwr_s;
+            bwr_m <= bus_write_toggle; bwr_s <= bwr_m; bwr_d <= bwr_s;
             if (bwr_s != bwr_d) begin
                 bw_pending <= 1'b1;         // payload is stable: it was
-                bwc_addr   <= bw_addr;      // written before the toggle,
-                bwc_data   <= bw_data;      // 2 sync FFs ago
+                bwc_addr   <= bus_write_addr;      // written before the toggle,
+                bwc_data   <= bus_write_data;      // 2 sync FFs ago
             end else if (bus_take) begin
                 bw_pending <= 1'b0;
             end
@@ -387,7 +387,7 @@ module element_pipeline #(
     end
 
     always_ff @(posedge sclk)
-        if (pw_we) prod_ram[{bank_shadow, pw_addr}] <= {4'b0, pw_data};
+        if (producer_write_enable) prod_ram[{bank_shadow, producer_write_addr}] <= {4'b0, producer_write_data};
 
     // control: 3-slot stride via a small counter, armed at slot 299
     logic [1:0] wcnt;
@@ -645,19 +645,19 @@ module element_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd0) p0_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (elem_write_enable && elem_write_word == 3'd0) p0_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd1) p1_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (elem_write_enable && elem_write_word == 3'd1) p1_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd2) p2_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (elem_write_enable && elem_write_word == 3'd2) p2_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd3) p3_ram[{bank_shadow, pe_elem}] <= {4'b0, pe_wdata};
+        if (elem_write_enable && elem_write_word == 3'd3) p3_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd4) p4_ram[{bank_shadow, pe_elem}] <= pe_wdata[1:0];
+        if (elem_write_enable && elem_write_word == 3'd4) p4_ram[{bank_shadow, elem_write_index}] <= elem_write_data[1:0];
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd5) p5_ram[{bank_shadow, pe_elem}] <= pe_wdata[29:0];
+        if (elem_write_enable && elem_write_word == 3'd5) p5_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
     always_ff @(posedge sclk)
-        if (pe_we && pe_bank == 3'd6) p6_ram[{bank_shadow, pe_elem}] <= pe_wdata[29:0];
+        if (elem_write_enable && elem_write_word == 3'd6) p6_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_p0[13:0];
