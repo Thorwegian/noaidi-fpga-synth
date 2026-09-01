@@ -241,6 +241,18 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   perceptual → loudness compensation in gain staging, possibly
   firmware-side. Classic analog synths split exactly this way (Moog
   ladders genuinely lose bass with resonance; SVFs mostly don't).
+  And (Thor, 2026-09-01): **revisit where the binary point of
+  attenuation values actually needs to be.** The envelope level's
+  four fractional bits (UQ22.4, the rate-ladder fix) were placed for
+  rate continuity, not from an analysis of what resolution the
+  attenuation path itself wants; when the GAIN inversion rung (above)
+  reworks the gain decode anyway, work out the right point position
+  from the attenuator's actual step size instead of inheriting it.
+  And (Thor, 2026-09-01): **consider an artificial noise floor — a
+  very quiet one.** Analog character and a graceful bottom for
+  envelope tails; would live somewhere in the output mix path.
+  Unscoped: level, spectrum (white/filtered), and whether it gates
+  with voice activity are all open.
 
 Rungs keep the standing process: one side branch at a time, ear (or
 bench where marked) verification gates every merge, board matches tree.
