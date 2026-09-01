@@ -72,14 +72,14 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
 // Envelope attenuation span: 0x2000 Q8.10 = 8 octaves = 48 dB.
-// Halved from 96 dB (Thor: an attack climbing linear-in-dB from
-// -96 dB spends most of its time inaudible — "a delayed short
-// attack"); from -48 dB the ramp starts where ears live, and the
-// release still bottoms ~66 dB below full scale with the element
-// base gains. The proper fix — an exponential-amplitude attack via
-// LUT — belongs to the future envelope-LUT work. Depth is the
-// NEGATIVE of this; sustain LSB = span/256 = 0.1875 dB at this
-// setting.
+// The linear level ramp into the log-encoded gain IS an
+// exponential-amplitude curve (Thor) — slow-then-fast, so from
+// -96 dB most of the attack sat below audibility ("a delayed short
+// attack"). Halving the span to 48 dB starts the ramp where ears
+// live; the real fix later is LINEARIZING the attack in amplitude
+// (classic RC-style fast-then-slow), which in this log-domain sink
+// means a logarithmic level ramp — future envelope-LUT work. Depth
+// is the NEGATIVE of this; sustain LSB = span/256 = 0.1875 dB here.
 #define ENV_FLOOR     0x2000
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES ((16+low4) << high4 per sample on the 22-bit

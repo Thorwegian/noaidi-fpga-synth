@@ -281,7 +281,14 @@ bench-verified) milestone. One rung in flight at a time.
    ADSR/LFO/routes/smoothing rungs from earlier drafts fold into it.
    Still separate: 36-bit summing (bench-verified rung, pending
    approval), per-element SPI read-back (B6 diagnostics candidate).
-5. **Experiment, some point later (Thor)**: try removing the pipeline
+5. **Identifier overhaul, some point later (Thor, 2026-09-01)**: a
+   naming pass over the code base — descriptive identifiers, not
+   letter-jumbles (pv_/pe_/bw_/wk_/eA_/gA_ and friends). "Write code
+   that even idiots can read — often the idiot who has to read it is
+   the same idiot who wrote it 6 months ago." Guideline applies to
+   all new code immediately; the sweep of existing names is its own
+   zero-behavior rung like the housekeeping one.
+6. **Experiment, some point later (Thor)**: try removing the pipeline
    stage splits (S3B/S5B/S8B/S9B) now that SYSCLK is 73.728 MHz — they
    may be unnecessary waits at the lower clock. One split at a time,
    each behind an ear-verified chord torture at full clock; S3B is the
