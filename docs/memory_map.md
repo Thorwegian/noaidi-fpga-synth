@@ -165,7 +165,7 @@ registers).
 | Offset | Word | Contents |
 |---|---|---|
 | `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO, 2 ADSR), `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held) |
-| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES (increment = (16+low4) << high4 on the 22-bit level, instant … ~2.7 s; rates, not durations — no 1/x in gateware); `[23:16]` **sustain level** — one LSB = 0.375 dB below peak at the 16-octave amp depth (sustain = 256 − dB_below_peak/0.375) |
+| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) shifted by (high4 − 4) on the 22-bit level (four-octave down-bias so gentle decays exist — decay only traverses peak→sustain; full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware); `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
 | `+2` | `DEPTH` | `[17:0]` signed Q8.10 contribution amplitude (amp-envelope idiom: bus base = full attenuation, depth negative — the envelope subtracts silence) |
 
 A producer ADDS to its target bus's base register (bus value = base +

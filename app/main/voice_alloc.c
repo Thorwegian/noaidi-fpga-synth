@@ -76,20 +76,21 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // exponential-amplitude curve (Thor) — slow-then-fast, so from
 // -96 dB most of the attack sat below audibility ("a delayed short
 // attack"). Halving the span to 48 dB starts the ramp where ears
-// live; the real fix later is LINEARIZING the attack in amplitude
-// (classic RC-style fast-then-slow), which in this log-domain sink
-// means a logarithmic level ramp — future envelope-LUT work. Depth
-// is the NEGATIVE of this; sustain LSB = span/256 = 0.1875 dB here.
+// live. Whether the attack should additionally be LINEARIZED in
+// amplitude (RC-style fast-then-slow) is an OPEN QUESTION for
+// discussion/testing — the agent's suggestion, not a decision (Thor:
+// the 48 dB floor sounds sufficient as-is). Depth is the NEGATIVE of
+// this; sustain LSB = span/256 = 0.1875 dB here.
 #define ENV_FLOOR     0x2000
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
-// 8-bit log2 RATES ((16+low4) << high4 per sample on the 22-bit
-// level — rates, not durations, to avoid a 1/x on the FPGA), byte 2
-// is the SUSTAIN LEVEL. Sustain units: one LSB = 0.375 dB below peak
-// (the amp depth is 16 octaves = 96 dB over 256 steps), so
-// sustain = 256 − (dB_below_peak / 0.375).
-// Values: Thor's slower attack (0x40 ≈ 170 ms) and decay (0x20) kept
-// from his experiments; sustain 12 dB below peak; ~45 ms release.
-#define ADSR_RATES    (0x50u | (0x01u << 8) | (0xD0u << 16) | (0x18u << 24))
+// 8-bit log2 RATES — increment = (16+low4) shifted by (high4 − 4) on
+// the 22-bit level (the four-octave down-bias exists because decay
+// only traverses peak→sustain; full-range times span ~44 s .. ~0.7
+// ms). Byte 2 is the SUSTAIN LEVEL, one LSB = span/256 below peak
+// (0.1875 dB at the 48 dB span).
+// Values: Thor's previous feel carried over (+0x40 per rate byte for
+// the re-bias), decay dropped into the newly opened gentle zone.
+#define ADSR_RATES    (0x90u | (0x30u << 8) | (0xD0u << 16) | (0x58u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
@@ -266,6 +267,16 @@ static void voice_alloc_task(void *arg)
     while (1) {
         if (xQueueReceive(s_queue, &evt, portMAX_DELAY) != pdTRUE)
             continue;
+        // Observability for the "mysteriously unresponsive" hunt:
+        // if events were evicted from this subscriber's queue (e.g.
+        // a CC flood crowding out note events), say so — otherwise a
+        // drop here is indistinguishable from a MIDI-side fault.
+        uint32_t dropped = event_bus_dropped(s_sub_id);
+        if (dropped > 0) {
+            ESP_LOGW(TAG, "event bus dropped %u events for voice_alloc",
+                     (unsigned)dropped);
+            event_bus_reset_dropped(s_sub_id);
+        }
         if (evt.kind == EVT_MIDI)
             handle_midi(&evt.midi);
     }

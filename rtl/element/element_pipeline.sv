@@ -535,14 +535,29 @@ module element_pipeline #(
                 // level, byte 3 = release rate (Thor: S is a level
                 // and sits third by convention). One sustain LSB
                 // = 0.375 dB below peak at the 16-octave amp depth.
+                // Rate decode is biased FOUR octaves down (shift
+                // −4..+11): decay only traverses peak→sustain — a
+                // fraction of the level range — so unbiased rates
+                // made every decay fast (Thor: "near useless when
+                // sustain is high"). Slowest full-range time ~44 s,
+                // fastest ~0.7 ms.
                 gA_gate <= (wk_busrd_q > 18'sd0);
-                gA_ainc <= (21'd16 + 21'(wk_prod_q[3:0]))
-                           << wk_prod_q[7:4];
-                gA_dinc <= (21'd16 + 21'(wk_prod_q[11:8]))
-                           << wk_prod_q[15:12];
+                gA_ainc <= (wk_prod_q[7:4] >= 4'd4)
+                    ? ((21'd16 + 21'(wk_prod_q[3:0]))
+                       << (wk_prod_q[7:4] - 4'd4))
+                    : ((21'd16 + 21'(wk_prod_q[3:0]))
+                       >> (4'd4 - wk_prod_q[7:4]));
+                gA_dinc <= (wk_prod_q[15:12] >= 4'd4)
+                    ? ((21'd16 + 21'(wk_prod_q[11:8]))
+                       << (wk_prod_q[15:12] - 4'd4))
+                    : ((21'd16 + 21'(wk_prod_q[11:8]))
+                       >> (4'd4 - wk_prod_q[15:12]));
                 gA_sus  <= {wk_prod_q[23:16], 14'b0};
-                gA_rinc <= (21'd16 + 21'(wk_prod_q[27:24]))
-                           << wk_prod_q[31:28];
+                gA_rinc <= (wk_prod_q[31:28] >= 4'd4)
+                    ? ((21'd16 + 21'(wk_prod_q[27:24]))
+                       << (wk_prod_q[31:28] - 4'd4))
+                    : ((21'd16 + 21'(wk_prod_q[27:24]))
+                       >> (4'd4 - wk_prod_q[31:28]));
                 eB_v   <= eA_v && (eA_type == 4'd1 || eA_type == 4'd2);
                 eB_tgt <= eA_tgt;
                 srcB   <= (eA_type == 4'd1) ? wk_wave
