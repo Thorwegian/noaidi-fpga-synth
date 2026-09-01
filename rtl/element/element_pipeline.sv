@@ -137,10 +137,10 @@ module element_pipeline #(
     // Doubled for ping-pong: {bank, voice} addressing, both halves
     // initialized to the boot image so an unwritten shadow is sane
     // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
-    reg [35:0] p0_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] p1_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] p2_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] p3_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] osc_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] duty_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] filter_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] gain_param_ram [0:2*NUM_ELEMENTS-1];
 
     // Pointer words: per-element bus pointers, three 10-bit fields
     // each. +5 (PTRS0): [9:0] pitch, [19:10] duty, [29:20] cutoff.
@@ -148,12 +148,12 @@ module element_pipeline #(
     // are wiring, so they ride the ping-pong banks like every
     // parameter. Init 0: every parameter points at bus 0 (hardwired
     // zero), so boot behavior is exactly the pre-bus behavior.
-    reg [29:0] p5_ram [0:2*NUM_ELEMENTS-1];
-    reg [29:0] p6_ram [0:2*NUM_ELEMENTS-1];
+    reg [29:0] ptrs0_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [29:0] ptrs1_param_ram [0:2*NUM_ELEMENTS-1];
     integer pi;
     initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1) begin
-        p5_ram[pi] = 30'd0;
-        p6_ram[pi] = 30'd0;
+        ptrs0_param_ram[pi] = 30'd0;
+        ptrs1_param_ram[pi] = 30'd0;
     end
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
@@ -161,20 +161,20 @@ module element_pipeline #(
     // the oscillator and filters free-run regardless — later this
     // edge becomes the ADSR trigger. Both banks boot gated ON so the
     // boot image keeps sounding (the power-up liveness check).
-    reg [1:0] p4_ram [0:2*NUM_ELEMENTS-1];
+    reg [1:0] gate_param_ram [0:2*NUM_ELEMENTS-1];
     integer gi;
     initial for (gi = 0; gi < 2*NUM_ELEMENTS; gi = gi + 1)
-        p4_ram[gi] = 2'b01;
+        gate_param_ram[gi] = 2'b01;
 
     initial begin
-        $readmemh(P0_HEX, p0_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, p1_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, p2_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, p3_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P0_HEX, p0_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, p1_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, p2_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, p3_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P0_HEX, osc_param_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P1_HEX, duty_param_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P2_HEX, filter_param_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P3_HEX, gain_param_ram, 0, NUM_ELEMENTS-1);
+        $readmemh(P0_HEX, osc_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P1_HEX, duty_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P2_HEX, filter_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P3_HEX, gain_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
     end
 
     //----------------------------------------------------------------
@@ -625,17 +625,17 @@ module element_pipeline #(
     // same registers — identical timing, but sync-read + separate-clock
     // write is the shape yosys infers as dual-clock BSRAM). Sync-only
     // process, per the AGENTS.md inference gotcha; validity is act-gated.
-    logic [35:0] s1_p0, s1_p1, s1_p2, s1_p3;
-    logic [1:0]  s1_p4;
-    logic [29:0] s1_p5, s1_p6;
+    logic [35:0] s1_osc_word, s1_duty_word, s1_filter_word, s1_gain_word;
+    logic [1:0]  s1_gate_word;
+    logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
     always_ff @(posedge clk) begin
-        s1_p0     <= p0_ram[{bank_active, elem_read_index}];
-        s1_p1     <= p1_ram[{bank_active, elem_read_index}];
-        s1_p2     <= p2_ram[{bank_active, elem_read_index}];
-        s1_p3     <= p3_ram[{bank_active, elem_read_index}];
-        s1_p4     <= p4_ram[{bank_active, elem_read_index}];
-        s1_p5     <= p5_ram[{bank_active, elem_read_index}];
-        s1_p6     <= p6_ram[{bank_active, elem_read_index}];
+        s1_osc_word     <= osc_param_ram[{bank_active, elem_read_index}];
+        s1_duty_word     <= duty_param_ram[{bank_active, elem_read_index}];
+        s1_filter_word     <= filter_param_ram[{bank_active, elem_read_index}];
+        s1_gain_word     <= gain_param_ram[{bank_active, elem_read_index}];
+        s1_gate_word     <= gate_param_ram[{bank_active, elem_read_index}];
+        s1_ptrs0_word     <= ptrs0_param_ram[{bank_active, elem_read_index}];
+        s1_ptrs1_word     <= ptrs1_param_ram[{bank_active, elem_read_index}];
         s1_phase  <= phase_ram[elem_read_index];
         s1_ic1eq1 <= ic1eq1_ram[elem_read_index];
         s1_ic2eq1 <= ic2eq1_ram[elem_read_index];
@@ -645,32 +645,32 @@ module element_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd0) p0_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd0) osc_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd1) p1_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd1) duty_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd2) p2_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd2) filter_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd3) p3_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd3) gain_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd4) p4_ram[{bank_shadow, elem_write_index}] <= elem_write_data[1:0];
+        if (elem_write_enable && elem_write_word == 3'd4) gate_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[1:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd5) p5_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd6) p6_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
 
     // field views of the registered param words
-    assign s1_pitch = s1_p0[13:0];
-    assign s1_wave  = s1_p0[15:14];
-    assign s1_duty  = s1_p1[23:0];
-    assign s1_fc    = s1_p2[13:0];
-    assign s1_q1    = s1_p2[31:14];
+    assign s1_pitch = s1_osc_word[13:0];
+    assign s1_wave  = s1_osc_word[15:14];
+    assign s1_duty  = s1_duty_word[23:0];
+    assign s1_fc    = s1_filter_word[13:0];
+    assign s1_q1    = s1_filter_word[31:14];
     // GATE off = exact-mute gain code into the existing mute machinery:
     // one decode-stage mux, no new carry registers down the pipeline.
-    assign s1_gl    = s1_p4[0] ? s1_p3[7:0]  : 8'hFF;
-    assign s1_gr    = s1_p4[0] ? s1_p3[15:8] : 8'hFF;
-    assign s1_dual  = s1_p3[16];
-    assign s1_ftype = s1_p3[18:17];
+    assign s1_gl    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'hFF;
+    assign s1_gr    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'hFF;
+    assign s1_dual  = s1_gain_word[16];
+    assign s1_ftype = s1_gain_word[18:17];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -704,12 +704,12 @@ module element_pipeline #(
     logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
     logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
     always_ff @(posedge clk) begin
-        s2_bus_pitch <= bus_ram_pitch[s1_p5[9:0]];
-        s2_bus_duty  <= bus_ram_duty[s1_p5[19:10]];
-        s2_bus_fc    <= bus_ram_fc[s1_p5[29:20]];
-        s2_bus_q     <= bus_ram_q[s1_p6[9:0]];
-        s2_bus_gl    <= bus_ram_gl[s1_p6[19:10]];
-        s2_bus_gr    <= bus_ram_gr[s1_p6[29:20]];
+        s2_bus_pitch <= bus_ram_pitch[s1_ptrs0_word[9:0]];
+        s2_bus_duty  <= bus_ram_duty[s1_ptrs0_word[19:10]];
+        s2_bus_fc    <= bus_ram_fc[s1_ptrs0_word[29:20]];
+        s2_bus_q     <= bus_ram_q[s1_ptrs1_word[9:0]];
+        s2_bus_gl    <= bus_ram_gl[s1_ptrs1_word[19:10]];
+        s2_bus_gr    <= bus_ram_gr[s1_ptrs1_word[29:20]];
     end
 
     always_ff @(posedge clk or negedge rst_n) begin

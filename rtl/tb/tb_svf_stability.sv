@@ -53,24 +53,24 @@ module tb_svf_stability;
     initial begin
         #1;
         for (e = 0; e < 512; e = e + 1) begin
-            u_pipe.p0_ram[e] = 36'h0;
-            u_pipe.p1_ram[e] = 36'h0;
-            u_pipe.p2_ram[e] = 36'h0;
-            u_pipe.p3_ram[e] = 36'h00000FFFF;      // mute L+R
-            u_pipe.p4_ram[e] = 2'b01;              // gate on
-            u_pipe.p5_ram[e] = 30'd0;
-            u_pipe.p6_ram[e] = 30'd0;
+            u_pipe.osc_param_ram[e] = 36'h0;
+            u_pipe.duty_param_ram[e] = 36'h0;
+            u_pipe.filter_param_ram[e] = 36'h0;
+            u_pipe.gain_param_ram[e] = 36'h00000FFFF;      // mute L+R
+            u_pipe.gate_param_ram[e] = 2'b01;              // gate on
+            u_pipe.ptrs0_param_ram[e] = 30'd0;
+            u_pipe.ptrs1_param_ram[e] = 30'd0;
         end
-        u_pipe.p0_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
-        u_pipe.p0_ram[256] = 36'h000001614;
-        u_pipe.p3_ram[0]   = 36'h00000FF20;        // L -12 dB, R mute
-        u_pipe.p3_ram[256] = 36'h00000FF20;
+        u_pipe.osc_param_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
+        u_pipe.osc_param_ram[256] = 36'h000001614;
+        u_pipe.gain_param_ram[0]   = 36'h00000FF20;        // L -12 dB, R mute
+        u_pipe.gain_param_ram[256] = 36'h00000FF20;
     end
 
     task automatic set_filter(input [13:0] fc, input [17:0] q1);
         begin
-            u_pipe.p2_ram[0]   = {4'b0, q1[17:0], fc};
-            u_pipe.p2_ram[256] = {4'b0, q1[17:0], fc};
+            u_pipe.filter_param_ram[0]   = {4'b0, q1[17:0], fc};
+            u_pipe.filter_param_ram[256] = {4'b0, q1[17:0], fc};
         end
     endtask
 
