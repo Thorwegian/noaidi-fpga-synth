@@ -89,7 +89,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // sustain = 256 − (dB_below_peak / 0.375).
 // Values: Thor's slower attack (0x40 ≈ 170 ms) and decay (0x20) kept
 // from his experiments; sustain 12 dB below peak; ~45 ms release.
-#define ADSR_RATES    (0x50u | (0x01u << 8) | (0xD0u << 16) | (0x18u << 24))
+#define ADSR_RATES    (0x48u | (0x01u << 8) | (0xD0u << 16) | (0x18u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
