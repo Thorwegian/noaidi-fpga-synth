@@ -183,25 +183,25 @@ module element_pipeline #(
     // complement of the active bank (memory map wording, literally).
     //----------------------------------------------------------------
     logic bank_active;
-    logic sr_m, sr_s, sr_d;          // swap_req toggle sync (sysclk)
+    logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_req toggle sync (sysclk)
     logic swap_pending;
 
     initial begin
         bank_active  = 1'b0;
-        {sr_m, sr_s, sr_d} = '0;
+        {swap_toggle_meta, swap_toggle_sync, swap_toggle_prev} = '0;
         swap_pending = 1'b0;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             bank_active  <= 1'b0;
-            sr_m <= 1'b0; sr_s <= 1'b0; sr_d <= 1'b0;
+            swap_toggle_meta <= 1'b0; swap_toggle_sync <= 1'b0; swap_toggle_prev <= 1'b0;
             swap_pending <= 1'b0;
         end else begin
-            sr_m <= swap_req;
-            sr_s <= sr_m;
-            sr_d <= sr_s;
-            if (sr_s != sr_d)
+            swap_toggle_meta <= swap_req;
+            swap_toggle_sync <= swap_toggle_meta;
+            swap_toggle_prev <= swap_toggle_sync;
+            if (swap_toggle_sync != swap_toggle_prev)
                 swap_pending <= 1'b1;
             else if (swap_pending && slot == synth_pkg::SWAP_SLOT[9:0]) begin
                 bank_active  <= ~bank_active;
@@ -211,13 +211,13 @@ module element_pipeline #(
     end
 
     // write side: shadow = complement of active, synced into sclk
-    logic ba_m, ba_s;
-    initial {ba_m, ba_s} = '0;
+    logic bank_active_meta, bank_active_sync;
+    initial {bank_active_meta, bank_active_sync} = '0;
     always_ff @(posedge sclk) begin
-        ba_m <= bank_active;
-        ba_s <= ba_m;
+        bank_active_meta <= bank_active;
+        bank_active_sync <= bank_active_meta;
     end
-    wire bank_shadow = ~ba_s;
+    wire bank_shadow = ~bank_active_sync;
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
@@ -272,70 +272,70 @@ module element_pipeline #(
         bus_base[bbi] = 18'sd0;
 
     // Producer walker replica-write strobes (driven below)
-    logic               wk_wr;
-    logic [9:0]         wk_bus;
-    logic signed [17:0] wk_val;
+    logic               walker_bus_write;
+    logic [9:0]         walker_bus_addr;
+    logic signed [17:0] walker_bus_value;
 
-    logic bwr_m, bwr_s, bwr_d;
-    logic bw_pending;
-    logic [9:0]  bwc_addr;
-    logic [17:0] bwc_data;
+    logic bus_write_toggle_meta, bus_write_toggle_sync, bus_write_toggle_prev;
+    logic bus_mailbox_pending;
+    logic [9:0]  bus_mailbox_addr;
+    logic [17:0] bus_mailbox_data;
     // Mailbox commits happen in any idle slot where the walker is not
-    // writing the replicas THIS cycle (wk_wr below): lane reads issue
+    // writing the replicas THIS cycle (walker_bus_write below): lane reads issue
     // during slots 1..~257, and a commit colliding with a walker
     // write simply defers one cycle. The window stays ~500 slots
     // wide, so a 10 MHz SPI burst can never overrun the 1-deep
     // mailbox (word period 5.6 us >> max wait).
-    // bus_take is the SINGLE condition for both committing and
+    // bus_mailbox_take is the SINGLE condition for both committing and
     // clearing pending. An earlier version cleared pending on
-    // bus_idle alone while the commit also required !wk_wr — when a
+    // bus_write_window alone while the commit also required !walker_bus_write — when a
     // write's first idle cycle coincided with a walker write (~1 in
     // 3 during the walker span), the write was silently dropped:
     // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    wire  bus_idle   = (slot > 10'd258) && (slot < 10'd760);
-    wire  bus_take   = bw_pending && bus_idle && !wk_wr;
-    wire  bus_commit = bus_take && (bwc_addr != 10'd0);
+    wire  bus_write_window   = (slot > 10'd258) && (slot < 10'd760);
+    wire  bus_mailbox_take   = bus_mailbox_pending && bus_write_window && !walker_bus_write;
+    wire  bus_commit = bus_mailbox_take && (bus_mailbox_addr != 10'd0);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            bwr_m <= 1'b0; bwr_s <= 1'b0; bwr_d <= 1'b0;
-            bw_pending <= 1'b0;
-            bwc_addr <= '0; bwc_data <= '0;
+            bus_write_toggle_meta <= 1'b0; bus_write_toggle_sync <= 1'b0; bus_write_toggle_prev <= 1'b0;
+            bus_mailbox_pending <= 1'b0;
+            bus_mailbox_addr <= '0; bus_mailbox_data <= '0;
         end else begin
-            bwr_m <= bus_write_toggle; bwr_s <= bwr_m; bwr_d <= bwr_s;
-            if (bwr_s != bwr_d) begin
-                bw_pending <= 1'b1;         // payload is stable: it was
-                bwc_addr   <= bus_write_addr;      // written before the toggle,
-                bwc_data   <= bus_write_data;      // 2 sync FFs ago
-            end else if (bus_take) begin
-                bw_pending <= 1'b0;
+            bus_write_toggle_meta <= bus_write_toggle; bus_write_toggle_sync <= bus_write_toggle_meta; bus_write_toggle_prev <= bus_write_toggle_sync;
+            if (bus_write_toggle_sync != bus_write_toggle_prev) begin
+                bus_mailbox_pending <= 1'b1;         // payload is stable: it was
+                bus_mailbox_addr   <= bus_write_addr;      // written before the toggle,
+                bus_mailbox_data   <= bus_write_data;      // 2 sync FFs ago
+            end else if (bus_mailbox_take) begin
+                bus_mailbox_pending <= 1'b0;
             end
         end
     end
 
     always_ff @(posedge clk)
-        if (bus_commit) bus_base[bwc_addr] <= $signed(bwc_data);
+        if (bus_commit) bus_base[bus_mailbox_addr] <= $signed(bus_mailbox_data);
 
     // Replica writes: one physical port, two writers — the walker
-    // owns its cycle (wk_wr), the mailbox defers around it.
+    // owns its cycle (walker_bus_write), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_pitch[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_pitch[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_pitch[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_pitch[walker_bus_addr]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_duty[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_duty[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_duty[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_duty[walker_bus_addr]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_fc[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_fc[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_fc[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_fc[walker_bus_addr]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_q[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_q[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_q[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_q[walker_bus_addr]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gl[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_gl[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_gl[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_gl[walker_bus_addr]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gr[bwc_addr] <= $signed(bwc_data);
-        else if (wk_wr)   bus_ram_gr[wk_bus]   <= wk_val;
+        if (bus_commit)   bus_ram_gr[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_gr[walker_bus_addr]   <= walker_bus_value;
 
     //----------------------------------------------------------------
     // Producer walker (B4/B5, bus_architecture.md) — the idle-slot
@@ -368,7 +368,7 @@ module element_pipeline #(
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    reg [35:0] prod_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word[1:0]}
+    reg [35:0] producer_table_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word[1:0]}
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
     // BITS, so rate increments are in 1/16-LSB units and the 8-bit
@@ -377,79 +377,79 @@ module element_pipeline #(
     // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
     // cc << 1). The fractional bits ARE the "binary point moved four
     // left" — in the accumulator, where it belongs.
-    reg [27:0] prod_state [0:synth_pkg::NUM_PRODUCERS-1];
+    reg [27:0] producer_state_ram [0:synth_pkg::NUM_PRODUCERS-1];
     integer wi;
     initial begin
         for (wi = 0; wi < 8*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            prod_ram[wi] = 36'd0;                  // type 0 = off
+            producer_table_ram[wi] = 36'd0;                  // type 0 = off
         for (wi = 0; wi < synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            prod_state[wi] = 28'd0;
+            producer_state_ram[wi] = 28'd0;
     end
 
     always_ff @(posedge sclk)
-        if (producer_write_enable) prod_ram[{bank_shadow, producer_write_addr}] <= {4'b0, producer_write_data};
+        if (producer_write_enable) producer_table_ram[{bank_shadow, producer_write_addr}] <= {4'b0, producer_write_data};
 
     // control: 3-slot stride via a small counter, armed at slot 299
-    logic [1:0] wcnt;
-    logic [7:0] went;
-    wire wk_run = (went < 8'(synth_pkg::NUM_PRODUCERS));
+    logic [1:0] walker_step;
+    logic [7:0] walker_entry;
+    wire walker_active = (walker_entry < 8'(synth_pkg::NUM_PRODUCERS));
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            wcnt <= 2'd0; went <= 8'hFF;
+            walker_step <= 2'd0; walker_entry <= 8'hFF;
         end else if (slot == 10'd299) begin
-            wcnt <= 2'd0; went <= 8'd0;
-        end else if (wk_run) begin
-            if (wcnt == 2'd2) begin
-                wcnt <= 2'd0;
-                went <= went + 8'd1;
+            walker_step <= 2'd0; walker_entry <= 8'd0;
+        end else if (walker_active) begin
+            if (walker_step == 2'd2) begin
+                walker_step <= 2'd0;
+                walker_entry <= walker_entry + 8'd1;
             end else
-                wcnt <= wcnt + 2'd1;
+                walker_step <= walker_step + 2'd1;
         end
     end
-    wire wk_p0 = wk_run && (wcnt == 2'd0);
+    wire walker_entry_start = walker_active && (walker_step == 2'd0);
 
-    // Sequential read registers: prod_ram serves CFG/RATES/DEPTH on
+    // Sequential read registers: producer_table_ram serves CFG/RATES/DEPTH on
     // consecutive cycles through ONE register (address muxed by
     // phase); bus_base serves the gate read (P1) and the target-base
     // read (P3) through one register the same way.
-    logic [35:0] wk_prod_q;
-    logic [27:0] wk_st_q;
-    logic signed [17:0] wk_busrd_q;
-    logic        v0;               // a P0 read was issued last cycle
+    logic [35:0] producer_table_readout;
+    logic [27:0] producer_state_readout;
+    logic signed [17:0] bus_base_readout;
+    logic        walker_read_valid; // a P0 read was issued last cycle
 
     // A stage — latched at the end of P1, stable for 3 cycles
-    logic        eA_v;
-    logic [6:0]  eA_e;
-    logic [3:0]  eA_type;
-    logic [1:0]  eA_shape;
-    logic [9:0]  eA_tgt;
-    logic [15:0] eA_rate;
-    logic [27:0] stA;
+    logic        producer_valid_a;
+    logic [6:0]  producer_index_a;
+    logic [3:0]  producer_type_a;
+    logic [1:0]  lfo_shape_a;
+    logic [9:0]  target_bus_a;
+    logic [15:0] lfo_rate_a;
+    logic [27:0] producer_state_prev;
     // B stage — latched at the end of P2
-    logic        eB_v;
-    logic [9:0]  eB_tgt;
-    logic signed [17:0] srcB;
+    logic        producer_valid_b;
+    logic [9:0]  target_bus_b;
+    logic signed [17:0] mod_source_value;
     // C stage — latched at the end of P3
-    logic        eC_v;
-    logic [9:0]  eC_tgt;
-    logic signed [35:0] mC;
+    logic        producer_valid_c;
+    logic [9:0]  target_bus_c;
+    logic signed [35:0] depth_product;
     // E stage — the saturated sum, latched at the end of P4
-    logic        wkE_v;
-    logic [9:0]  wkE_bus;
-    logic signed [17:0] wkE_val;
+    logic        walker_write_valid;
+    logic [9:0]  walker_write_bus;
+    logic signed [17:0] walker_write_value;
 
-    // LFO waveform on the OLD phase (registered stA → rule-clean).
+    // LFO waveform on the OLD phase (registered producer_state_prev → rule-clean).
     // Named intermediate wire: a $signed() cast directly in the port
     // connection crashes yosys's genrtlil signedness assert.
-    wire signed [23:0] wk_osc_phase = $signed(stA[23:0]);
-    logic signed [17:0] wk_wave;
+    wire signed [23:0] walker_lfo_phase = $signed(producer_state_prev[23:0]);
+    logic signed [17:0] walker_lfo_wave;
     osc_core u_wk_osc (
-        .phase      (wk_osc_phase),
+        .phase      (walker_lfo_phase),
         .delta      (24'sd0),
         .duty       (24'sd0),
-        .wave       (eA_shape),
+        .wave       (lfo_shape_a),
         .phase_next (),
-        .sample_out (wk_wave)
+        .sample_out (walker_lfo_wave)
     );
 
     // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
@@ -458,85 +458,85 @@ module element_pipeline #(
     // because the un-split version made the RAM-output→state-write
     // cone the critical path (76 MHz — 3.5% margin, on a timing
     // model proven optimistic five times).
-    logic        gA_gate;
-    logic [20:0] gA_ainc, gA_dinc, gA_rinc;   // 1/16-LSB units
-    logic [25:0] gA_sus;
+    logic        adsr_gate;
+    logic [20:0] adsr_attack_step, adswap_toggle_prevecay_step, adsr_release_step;   // 1/16-LSB units
+    logic [25:0] adswap_toggle_syncustain_target;
 
     // next-state, computed at P3 from registered inputs only.
     // ADSR level is UQ22.4 (26 bits).
-    wire [1:0]  a_stage  = stA[27:26];
-    wire [25:0] a_level  = stA[25:0];
-    logic [27:0] wk_nstate;
+    wire [1:0]  adswap_toggle_synctage_prev  = producer_state_prev[27:26];
+    wire [25:0] adsr_level_prev  = producer_state_prev[25:0];
+    logic [27:0] producer_state_next;
     always_comb begin
-        if (eA_type == 4'd1) begin
+        if (producer_type_a == 4'd1) begin
             // LFO: free-running phase accumulator in [23:0]
-            wk_nstate = {stA[27:24], stA[23:0] + {8'b0, eA_rate}};
-        end else if (!gA_gate) begin
+            producer_state_next = {producer_state_prev[27:24], producer_state_prev[23:0] + {8'b0, lfo_rate_a}};
+        end else if (!adsr_gate) begin
             // ADSR, gate low: release toward zero
-            wk_nstate = (a_level > {5'b0, gA_rinc})
-                ? {AST_REL, a_level - 26'(gA_rinc)}
+            producer_state_next = (adsr_level_prev > {5'b0, adsr_release_step})
+                ? {AST_REL, adsr_level_prev - 26'(adsr_release_step)}
                 : {AST_IDLE, 26'd0};
         end else begin
-            case (a_stage)
-                AST_ATT: wk_nstate =
-                    ({1'b0, a_level} + 27'(gA_ainc) > 27'h3FFFFFF)
+            case (adswap_toggle_synctage_prev)
+                AST_ATT: producer_state_next =
+                    ({1'b0, adsr_level_prev} + 27'(adsr_attack_step) > 27'h3FFFFFF)
                         ? {AST_DEC, 26'h3FFFFFF}
-                        : {AST_ATT, a_level + 26'(gA_ainc)};
-                AST_DEC: wk_nstate =
-                    (a_level > gA_sus + 26'(gA_dinc))
-                        ? {AST_DEC, a_level - 26'(gA_dinc)}
-                        : (a_level > gA_sus) ? {AST_DEC, gA_sus}
-                                             : {AST_DEC, a_level};
-                default: wk_nstate = {AST_ATT, a_level};  // idle/release
+                        : {AST_ATT, adsr_level_prev + 26'(adsr_attack_step)};
+                AST_DEC: producer_state_next =
+                    (adsr_level_prev > adswap_toggle_syncustain_target + 26'(adswap_toggle_prevecay_step))
+                        ? {AST_DEC, adsr_level_prev - 26'(adswap_toggle_prevecay_step)}
+                        : (adsr_level_prev > adswap_toggle_syncustain_target) ? {AST_DEC, adswap_toggle_syncustain_target}
+                                             : {AST_DEC, adsr_level_prev};
+                default: producer_state_next = {AST_ATT, adsr_level_prev};  // idle/release
             endcase
         end
     end
 
-    // P4 (wcnt == 1) combinational: value = base + contribution,
-    // saturating — REGISTERED into wkE_* at the end of P4, written to
-    // the replicas at P5 (wcnt == 2). The RAM-output → add → clamp →
+    // P4 (walker_step == 1) combinational: value = base + contribution,
+    // saturating — REGISTERED into walker_write_* at the end of P4, written to
+    // the replicas at P5 (walker_step == 2). The RAM-output → add → clamp →
     // RAM-write chain carries a register in the middle (the 76 MHz
     // critical-path fix). Declared before the stage block below
     // (iverilog binds declaration-before-use at module scope).
-    wire signed [19:0] wk_contrib = mC[35:16];
-    wire signed [20:0] wk_sum =
-        {{3{wk_busrd_q[17]}}, wk_busrd_q} + {wk_contrib[19], wk_contrib};
-    wire signed [17:0] wk_val_c =
-        (wk_sum > 21'sd131071)  ? 18'sd131071  :
-        (wk_sum < -21'sd131072) ? -18'sd131072 : wk_sum[17:0];
+    wire signed [19:0] walker_contribution = depth_product[35:16];
+    wire signed [20:0] walker_sum =
+        {{3{bus_base_readout[17]}}, bus_base_readout} + {walker_contribution[19], walker_contribution};
+    wire signed [17:0] walker_value_clamped =
+        (walker_sum > 21'sd131071)  ? 18'sd131071  :
+        (walker_sum < -21'sd131072) ? -18'sd131072 : walker_sum[17:0];
 
     // Phase-guarded stage latches: each stage latches only at its own
     // phase edge and stays stable for the entry's three cycles.
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            v0 <= 1'b0;
-            eA_v <= 1'b0; eB_v <= 1'b0; eC_v <= 1'b0; wkE_v <= 1'b0;
-            eA_e <= '0; eA_type <= '0; eA_shape <= '0;
-            eA_tgt <= '0; eA_rate <= '0; stA <= '0;
-            eB_tgt <= '0; srcB <= '0;
-            eC_tgt <= '0; mC <= '0;
-            wkE_bus <= '0; wkE_val <= '0;
-            gA_gate <= 1'b0;
-            gA_ainc <= '0; gA_dinc <= '0; gA_rinc <= '0; gA_sus <= '0;
+            walker_read_valid <= 1'b0;
+            producer_valid_a <= 1'b0; producer_valid_b <= 1'b0; producer_valid_c <= 1'b0; walker_write_valid <= 1'b0;
+            producer_index_a <= '0; producer_type_a <= '0; lfo_shape_a <= '0;
+            target_bus_a <= '0; lfo_rate_a <= '0; producer_state_prev <= '0;
+            target_bus_b <= '0; mod_source_value <= '0;
+            target_bus_c <= '0; depth_product <= '0;
+            walker_write_bus <= '0; walker_write_value <= '0;
+            adsr_gate <= 1'b0;
+            adsr_attack_step <= '0; adswap_toggle_prevecay_step <= '0; adsr_release_step <= '0; adswap_toggle_syncustain_target <= '0;
         end else begin
-            v0 <= wk_p0;
+            walker_read_valid <= walker_entry_start;
 
-            if (wcnt == 2'd1) begin
-                // end of P1: latch config (wk_prod_q = CFG) + state
-                eA_v     <= v0;
-                eA_e     <= went[6:0];
-                eA_type  <= wk_prod_q[3:0];
-                eA_shape <= wk_prod_q[5:4];
-                eA_tgt   <= wk_prod_q[15:6];
-                eA_rate  <= wk_prod_q[31:16];
-                stA      <= wk_st_q;
+            if (walker_step == 2'd1) begin
+                // end of P1: latch config (producer_table_readout = CFG) + state
+                producer_valid_a     <= walker_read_valid;
+                producer_index_a     <= walker_entry[6:0];
+                producer_type_a  <= producer_table_readout[3:0];
+                lfo_shape_a <= producer_table_readout[5:4];
+                target_bus_a   <= producer_table_readout[15:6];
+                lfo_rate_a  <= producer_table_readout[31:16];
+                producer_state_prev      <= producer_state_readout;
                 // ...and register the previous entry's saturated sum
                 // (write happens next cycle, at P5)
-                wkE_v   <= eC_v && (eC_tgt != 10'd0);
-                wkE_bus <= eC_tgt;
-                wkE_val <= wk_val_c;
-                eC_v    <= 1'b0;
-            end else if (wcnt == 2'd2) begin
+                walker_write_valid   <= producer_valid_c && (target_bus_c != 10'd0);
+                walker_write_bus <= target_bus_c;
+                walker_write_value <= walker_value_clamped;
+                producer_valid_c    <= 1'b0;
+            end else if (walker_step == 2'd2) begin
                 // end of P2: register the rate decode + gate (short
                 // RAM-output cones) and the source from OLD state
                 // RATES field order is the universal A, D, S, R —
@@ -554,50 +554,50 @@ module element_pipeline #(
                 // perceptual-linearity rule; a MIDI CC maps as
                 // cc << 1). Slowest full-range time ~44 s, fastest
                 // ~0.7 ms.
-                gA_gate <= (wk_busrd_q > 18'sd0);
-                gA_ainc <= (21'd16 + 21'(wk_prod_q[3:0]))
-                               << wk_prod_q[7:4];
-                gA_dinc <= (21'd16 + 21'(wk_prod_q[11:8]))
-                               << wk_prod_q[15:12];
-                gA_sus  <= {wk_prod_q[23:16], 18'b0};
-                gA_rinc <= (21'd16 + 21'(wk_prod_q[27:24]))
-                               << wk_prod_q[31:28];
-                eB_v   <= eA_v && (eA_type == 4'd1 || eA_type == 4'd2);
-                eB_tgt <= eA_tgt;
-                srcB   <= (eA_type == 4'd1) ? wk_wave
-                                            : $signed({2'b0, stA[25:10]});
-                wkE_v  <= 1'b0;              // P5 write just happened
+                adsr_gate <= (bus_base_readout > 18'sd0);
+                adsr_attack_step <= (21'd16 + 21'(producer_table_readout[3:0]))
+                               << producer_table_readout[7:4];
+                adswap_toggle_prevecay_step <= (21'd16 + 21'(producer_table_readout[11:8]))
+                               << producer_table_readout[15:12];
+                adswap_toggle_syncustain_target  <= {producer_table_readout[23:16], 18'b0};
+                adsr_release_step <= (21'd16 + 21'(producer_table_readout[27:24]))
+                               << producer_table_readout[31:28];
+                producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2);
+                target_bus_b <= target_bus_a;
+                mod_source_value   <= (producer_type_a == 4'd1) ? walker_lfo_wave
+                                            : $signed({2'b0, producer_state_prev[25:10]});
+                walker_write_valid  <= 1'b0;              // P5 write just happened
             end else begin
-                // end of P3 (wcnt == 0): the producer multiply —
-                // registered operands (srcB, and wk_prod_q = DEPTH);
+                // end of P3 (walker_step == 0): the producer multiply —
+                // registered operands (mod_source_value, and producer_table_readout = DEPTH);
                 // state writeback happens here too (see below)
-                eC_v   <= eB_v;
-                eC_tgt <= eB_tgt;
-                mC     <= srcB * $signed(wk_prod_q[17:0]);
-                eB_v   <= 1'b0;
-                eA_v   <= 1'b0;
+                producer_valid_c   <= producer_valid_b;
+                target_bus_c <= target_bus_b;
+                depth_product     <= mod_source_value * $signed(producer_table_readout[17:0]);
+                producer_valid_b   <= 1'b0;
+                producer_valid_a   <= 1'b0;
             end
         end
     end
 
-    assign wk_val = wkE_val;
-    assign wk_bus = wkE_bus;
-    assign wk_wr  = wkE_v && (wcnt == 2'd2);
+    assign walker_bus_value = walker_write_value;
+    assign walker_bus_addr = walker_write_bus;
+    assign walker_bus_write  = walker_write_valid && (walker_step == 2'd2);
 
     // walker memory reads — sync-only, one register per RAM, address
-    // muxed by phase: prod_ram serves CFG (P0) / RATES (P1) /
+    // muxed by phase: producer_table_ram serves CFG (P0) / RATES (P1) /
     // DEPTH (P2); bus_base serves the gate bus (P1, address from the
     // CFG word just read) / the target base (P3).
     always_ff @(posedge clk) begin
-        wk_prod_q  <= prod_ram[{bank_active, went[6:0], wcnt}];
-        wk_st_q    <= prod_state[went[6:0]];
-        wk_busrd_q <= bus_base[(wcnt == 2'd1) ? wk_prod_q[25:16]
-                                              : eB_tgt];
+        producer_table_readout  <= producer_table_ram[{bank_active, walker_entry[6:0], walker_step}];
+        producer_state_readout    <= producer_state_ram[walker_entry[6:0]];
+        bus_base_readout <= bus_base[(walker_step == 2'd1) ? producer_table_readout[25:16]
+                                              : target_bus_b];
     end
     always_ff @(posedge clk)
-        if ((wcnt == 2'd0) && eA_v
-            && (eA_type == 4'd1 || eA_type == 4'd2))
-            prod_state[eA_e] <= wk_nstate;                      // P3
+        if ((walker_step == 2'd0) && producer_valid_a
+            && (producer_type_a == 4'd1 || producer_type_a == 4'd2))
+            producer_state_ram[producer_index_a] <= producer_state_next;                      // P3
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
@@ -605,8 +605,8 @@ module element_pipeline #(
     // Sync-only process: yosys memory inference (BSRAM read port).
     // Read data validity is gated by s1_act, so no reset is needed.
     //----------------------------------------------------------------
-    logic [VW-1:0] raddr;
-    assign raddr = lane_enter ? slot[VW-1:0] : '0;
+    logic [VW-1:0] elem_read_index;
+    assign elem_read_index = lane_enter ? slot[VW-1:0] : '0;
 
     logic        s1_act;
     logic [VW-1:0] s1_idx;
@@ -629,18 +629,18 @@ module element_pipeline #(
     logic [1:0]  s1_p4;
     logic [29:0] s1_p5, s1_p6;
     always_ff @(posedge clk) begin
-        s1_p0     <= p0_ram[{bank_active, raddr}];
-        s1_p1     <= p1_ram[{bank_active, raddr}];
-        s1_p2     <= p2_ram[{bank_active, raddr}];
-        s1_p3     <= p3_ram[{bank_active, raddr}];
-        s1_p4     <= p4_ram[{bank_active, raddr}];
-        s1_p5     <= p5_ram[{bank_active, raddr}];
-        s1_p6     <= p6_ram[{bank_active, raddr}];
-        s1_phase  <= phase_ram[raddr];
-        s1_ic1eq1 <= ic1eq1_ram[raddr];
-        s1_ic2eq1 <= ic2eq1_ram[raddr];
-        s1_ic1eq2 <= ic1eq2_ram[raddr];
-        s1_ic2eq2 <= ic2eq2_ram[raddr];
+        s1_p0     <= p0_ram[{bank_active, elem_read_index}];
+        s1_p1     <= p1_ram[{bank_active, elem_read_index}];
+        s1_p2     <= p2_ram[{bank_active, elem_read_index}];
+        s1_p3     <= p3_ram[{bank_active, elem_read_index}];
+        s1_p4     <= p4_ram[{bank_active, elem_read_index}];
+        s1_p5     <= p5_ram[{bank_active, elem_read_index}];
+        s1_p6     <= p6_ram[{bank_active, elem_read_index}];
+        s1_phase  <= phase_ram[elem_read_index];
+        s1_ic1eq1 <= ic1eq1_ram[elem_read_index];
+        s1_ic2eq1 <= ic2eq1_ram[elem_read_index];
+        s1_ic1eq2 <= ic1eq2_ram[elem_read_index];
+        s1_ic2eq2 <= ic2eq2_ram[elem_read_index];
     end
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
