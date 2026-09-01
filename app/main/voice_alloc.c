@@ -86,17 +86,16 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
-// Envelope attenuation span: 0x2000 Q8.10 = 8 octaves = 48 dB.
-// The linear level ramp into the log-encoded gain IS an
-// exponential-amplitude curve (Thor) — slow-then-fast, so from
-// -96 dB most of the attack sat below audibility ("a delayed short
-// attack"). Halving the span to 48 dB starts the ramp where ears
-// live. Whether the attack should additionally be LINEARIZED in
-// amplitude (RC-style fast-then-slow) is an OPEN QUESTION for
-// discussion/testing — the agent's suggestion, not a decision (Thor:
-// the 48 dB floor sounds sufficient as-is). Depth is the NEGATIVE of
-// this; sustain LSB = span/256 = 0.1875 dB here.
-#define ENV_FLOOR     0x2000
+// Envelope attenuation span: 0x3000 Q8.10 = 12 octaves = 72 dB
+// (Thor, 2026-09-01 — settled by ear after living with 48 dB; the
+// original -96 dB made attacks sit below audibility, "a delayed
+// short attack"). The linear level ramp into the log-encoded gain IS
+// an exponential-amplitude curve (Thor) — slow-then-fast. Whether
+// the attack should additionally be LINEARIZED in amplitude
+// (RC-style fast-then-slow) is an OPEN QUESTION for discussion/
+// testing — the agent's suggestion, not a decision. Depth is the
+// NEGATIVE of this; sustain LSB = span/256 = 0.28125 dB here.
+#define ENV_FLOOR     0x3000
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
 // units (the envelope level carries 4 fractional bits: that IS the
