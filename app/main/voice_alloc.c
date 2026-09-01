@@ -34,7 +34,7 @@
 // Church-organ unison detune per element index, in UQ4.10 fraction
 // LSBs (≈1.17 cents each). Left half (0-3) and right half (4-7) use
 // different sets → inter-channel detune. Same table as the boot image.
-static const int8_t DETUNE[ELEMS_PER_VOICE] = {0, 2, 4, 6, -2, -4, -6, -8};
+static const int8_t DETUNE[ELEMS_PER_VOICE] = {2, 6, 10, 14, -2, -6, -10, -14};
 
 typedef struct {
     bool     active;
@@ -89,7 +89,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // sustain = 256 − (dB_below_peak / 0.375).
 // Values: Thor's slower attack (0x40 ≈ 170 ms) and decay (0x20) kept
 // from his experiments; sustain 12 dB below peak; ~45 ms release.
-#define ADSR_RATES    (0x40u | (0x20u << 8) | (0xE0u << 16) | (0x60u << 24))
+#define ADSR_RATES    (0x50u | (0x01u << 8) | (0xD0u << 16) | (0x18u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
