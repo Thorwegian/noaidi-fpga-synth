@@ -63,7 +63,8 @@ module top (
     logic [17:0] bw_data;
     logic        bw_req;
     logic        pw_we;
-    logic [7:0]  pw_addr;
+    logic [8:0]  pw_addr;   // {entry[6:0], word[1:0]} — 9 bits; an 8-bit
+                            // wire here silently truncated entries >= 64
     logic [31:0] pw_data;
 
     element_pipeline u_elem_pipeline (
