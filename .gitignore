@@ -8,3 +8,4 @@ app/build
 *.vvp
 *.vcd
 !rtl/tb/ref_boot_*.hex
+rtl/tb/sim-*.out
