@@ -109,7 +109,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Values: Thor's latest feel carried into the re-biased decode
 // (+0x40 per rate byte: his attack 0x48 → 0x88, release 0x18 →
 // 0x58), decay dropped into the newly opened gentle zone.
-#define ADSR_RATES    (0x68u | (0x20u << 8) | (0xD0u << 16) | (0x58u << 24))
+#define ADSR_RATES    (0x88u | (0x20u << 8) | (0xD0u << 16) | (0x28u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
