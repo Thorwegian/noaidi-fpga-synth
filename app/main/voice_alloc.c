@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -36,11 +37,25 @@
 // different sets → inter-channel detune. Same table as the boot image.
 static const int8_t DETUNE[ELEMS_PER_VOICE] = {2, 6, 10, 14, -2, -6, -10, -14};
 
+// Voice lifecycle (Thor, 2026-09-01: "hitting the same key does NOT
+// mean deallocating a voice with the same key"). A voice is an
+// instance of a KEYSTROKE, not a key: every note-on allocates a
+// fresh voice; the previous strike of the same key keeps ringing its
+// release tail underneath. Three states, because "key held" and
+// "voice in use" are different facts:
+//   V_HELD      key is down, envelope gated on
+//   V_RELEASING key is up, release tail still audible
+//   V_IDLE      tail done (or never started) — free for allocation
+// RELEASING promotes to IDLE lazily during allocation scans, once
+// esp_timer says the tail has run out — no timer task.
+typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
+
 typedef struct {
-    bool     active;
+    voice_state_t state;
     uint8_t  note;
-    uint8_t  channel;   // stored for later multi-timbrality; omni today
-    uint32_t stamp;     // allocation order, for oldest-steal
+    uint8_t  channel;       // stored for later multi-timbrality; omni today
+    uint32_t stamp;         // allocation order, for oldest-steal
+    int64_t  release_until; // esp_timer µs when the release tail is done
 } voice_t;
 
 static voice_t s_voices[NUM_VOICES];
@@ -106,6 +121,19 @@ static uint32_t cut_bus_value(int v)
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
+// How long a release tail stays audible, from the RATES release byte
+// using the gateware decode's own formula: the level spans 2^22 LSB
+// and drops (16+low4) << high4 sixteenths-of-an-LSB per 96 kHz
+// sample. Worst case (release from full level); recompute here if
+// rates ever become CC-driven.
+static int64_t release_tail_us(void)
+{
+    uint32_t r    = (ADSR_RATES >> 24) & 0xFF;
+    uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
+    uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
+    return (int64_t)(samples * 125u / 12u);           // µs at 96 kHz
+}
+
 // MIDI note → UQ4.10 log₂ pitch (octave [13:10], fraction [9:0]).
 // A4 = 69 → 0x1700, verified 440 Hz by ear.
 static uint16_t midi_to_pitch(uint8_t note)
@@ -163,25 +191,42 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     }
 }
 
+// Every note-on gets a FRESH voice — allocation never matches on the
+// note. Preference: least-recently-used IDLE voice; else the
+// most-decayed RELEASING voice (earliest tail end — the least
+// audible casualty); else steal the oldest HELD voice. Only the
+// steal cases start their attack from a non-silent level (the gate
+// is level-sensitive), and they only happen when all 32 voices are
+// genuinely in use.
 static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 {
+    int64_t now = esp_timer_get_time();
     int pick = -1;
 
-    // Same note already sounding → retrigger that voice.
+    // Lazily retire tails that have run out.
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].active && s_voices[v].note == note) { pick = v; break; }
+        if (s_voices[v].state == V_RELEASING && now >= s_voices[v].release_until)
+            s_voices[v].state = V_IDLE;
 
-    // Otherwise a free voice, otherwise steal the oldest.
-    if (pick < 0)
+    uint32_t best = UINT32_MAX;
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].state == V_IDLE && s_voices[v].stamp < best)
+            { best = s_voices[v].stamp; pick = v; }
+    if (pick < 0) {
+        int64_t soonest = INT64_MAX;
         for (int v = 0; v < NUM_VOICES; v++)
-            if (!s_voices[v].active) { pick = v; break; }
+            if (s_voices[v].state == V_RELEASING &&
+                s_voices[v].release_until < soonest)
+                { soonest = s_voices[v].release_until; pick = v; }
+    }
     if (pick < 0) {
         uint32_t oldest = UINT32_MAX;
         for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].stamp < oldest) { oldest = s_voices[v].stamp; pick = v; }
+            if (s_voices[v].stamp < oldest)
+                { oldest = s_voices[v].stamp; pick = v; }
     }
 
-    s_voices[pick] = (voice_t){.active = true, .note = note,
+    s_voices[pick] = (voice_t){.state = V_HELD, .note = note,
                                .channel = channel, .stamp = ++s_stamp};
 
     // Velocity → cutoff stays on the bus (brightening, up to ~4
@@ -201,7 +246,7 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 static void refresh_cut_buses(void)
 {
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].active)
+        if (s_voices[v].state != V_IDLE)   // releasing tails track too
             engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
 }
 
@@ -229,16 +274,24 @@ static void bend_update(uint16_t bend14)
     refresh_cut_buses();
 }
 
-// Note-off is one gate-bus write: the ADSR sees the level drop and
-// releases. Element GATE words stay on; parameters stay live.
+// Note-off releases the OLDEST HELD voice carrying that note — FIFO
+// pairing with note-ons, since MIDI guarantees one off per on. One
+// gate-bus write: the ADSR sees the level drop and releases. Element
+// GATE words stay on; parameters stay live. A voice whose key was
+// stolen carries a different note by now and is correctly skipped.
 static void note_off(uint8_t note)
 {
-    for (int v = 0; v < NUM_VOICES; v++) {
-        if (s_voices[v].active && s_voices[v].note == note) {
-            s_voices[v].active = false;
-            engine_link_bus_write(BUS_VGATE(v), 0);
-        }
-    }
+    int pick = -1;
+    uint32_t oldest = UINT32_MAX;
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].state == V_HELD && s_voices[v].note == note &&
+            s_voices[v].stamp < oldest)
+            { oldest = s_voices[v].stamp; pick = v; }
+    if (pick < 0)
+        return;   // off without a matching held on (steal ate it)
+    s_voices[pick].state = V_RELEASING;
+    s_voices[pick].release_until = esp_timer_get_time() + release_tail_us();
+    engine_link_bus_write(BUS_VGATE(pick), 0);
 }
 
 static void handle_midi(const midi_message_t *m)

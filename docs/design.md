@@ -306,4 +306,6 @@ bench-verified) milestone. One rung in flight at a time.
 
 - Can we get all our data types and constants moved to synth_pkg.sv? It's much easier to tune things if the individual modules don't have any hardcoded numbers.
 
+- (2026-09-01) Probing around the keyboard, I think this may be a firmware bug. It assumes that the same MIDI key can be recycled. Logical fallacy. Hitting the same key does NOT mean deallocating a voice with the same key. *(Resolved: the voice-lifecycle model in firmware_architecture.md — a voice is an instance of a keystroke, not a key.)*
+
 - On the ESP32 side, we need to start structuring things a bit for MIDI. I'm undecided on a few things and would like some input on them. We currently send SPI commands in main.c. We have a MIDI event queue that we need to subscribe to, and we need to track and allocate voices. At some point, we might need to run timed sequences of SPI commands for certain things, for things such as arpeggiators/sequences. What I'm undecided about is process/module layout and separation of concerns. It's all a bit of a jumble for me at te moment and we need a good plan/structure before we begin.

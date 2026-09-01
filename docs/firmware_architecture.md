@@ -43,6 +43,40 @@ once this exists (`main.c`'s direct writes migrate here).
   swap rate, natural batching; revisit event-driven only if the tick
   latency (≤1 ms) ever matters musically.
 
+## Voice lifecycle (settled 2026-09-01, Thor)
+
+**A voice is an instance of a keystroke, not a key.** Hitting the
+same key again does NOT deallocate or recycle the voice still
+sounding that key's previous strike — every note-on allocates a
+fresh voice and prior tails keep ringing underneath. The earlier
+allocator's same-note-reuse was a logical fallacy (and, combined with
+a lowest-index free scan, made 32 independent gateware envelopes
+sound like one).
+
+Three voice states, because "key held" and "voice in use" are
+different facts:
+
+| State | Meaning |
+|---|---|
+| `V_HELD` | key down, gate bus 1, envelope gated on |
+| `V_RELEASING` | key up, gate bus 0, release tail still audible |
+| `V_IDLE` | tail finished — free for allocation |
+
+- **Allocation preference** (note-on): least-recently-used IDLE →
+  most-decayed RELEASING (earliest tail end) → steal oldest HELD.
+  RELEASING promotes to IDLE lazily during the allocation scan when
+  `esp_timer` passes the tail deadline (computed from the RATES
+  release byte with the gateware decode's own formula) — no timer
+  task.
+- **Note-off pairing**: FIFO — release the oldest HELD voice carrying
+  that note. A stolen voice carries a new note and is skipped; its
+  orphaned note-off is ignored.
+- **Known limitation**: the ADSR gate is level-sensitive, so a voice
+  stolen while HELD keeps its envelope stage (no fresh attack), and
+  one stolen while RELEASING attacks from the tail's level. Both only
+  occur with all 32 voices in use; a true retrigger needs a gateware
+  edge/pulse mechanism ("retrig reserved" under the GATE rung).
+
 ## Sequencers / arpeggiators (later)
 
 Just another producer into the same command queue. Producers own their
