@@ -286,9 +286,15 @@ module element_pipeline #(
     // write simply defers one cycle. The window stays ~500 slots
     // wide, so a 10 MHz SPI burst can never overrun the 1-deep
     // mailbox (word period 5.6 us >> max wait).
+    // bus_take is the SINGLE condition for both committing and
+    // clearing pending. An earlier version cleared pending on
+    // bus_idle alone while the commit also required !wk_wr — when a
+    // write's first idle cycle coincided with a walker write (~1 in
+    // 3 during the walker span), the write was silently dropped:
+    // a lost gate-off was a stuck note, a lost gate-on a dead key.
     wire  bus_idle   = (slot > 10'd258) && (slot < 10'd760);
-    wire  bus_commit = bw_pending && bus_idle && !wk_wr
-                       && (bwc_addr != 10'd0);
+    wire  bus_take   = bw_pending && bus_idle && !wk_wr;
+    wire  bus_commit = bus_take && (bwc_addr != 10'd0);
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -301,7 +307,7 @@ module element_pipeline #(
                 bw_pending <= 1'b1;         // payload is stable: it was
                 bwc_addr   <= bw_addr;      // written before the toggle,
                 bwc_data   <= bw_data;      // 2 sync FFs ago
-            end else if (bw_pending && bus_idle) begin
+            end else if (bus_take) begin
                 bw_pending <= 1'b0;
             end
         end

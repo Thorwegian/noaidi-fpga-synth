@@ -71,11 +71,16 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
-// Envelope attenuation span: 0x4000 Q8.10 = 16 octaves ≈ 96 dB —
-// level 0 clamps the gain word to max attenuation (essentially
-// silence), so elements stay GATE-on forever and the envelope owns
-// articulation. Depth is the NEGATIVE of this.
-#define ENV_FLOOR     0x4000
+// Envelope attenuation span: 0x2000 Q8.10 = 8 octaves = 48 dB.
+// Halved from 96 dB (Thor: an attack climbing linear-in-dB from
+// -96 dB spends most of its time inaudible — "a delayed short
+// attack"); from -48 dB the ramp starts where ears live, and the
+// release still bottoms ~66 dB below full scale with the element
+// base gains. The proper fix — an exponential-amplitude attack via
+// LUT — belongs to the future envelope-LUT work. Depth is the
+// NEGATIVE of this; sustain LSB = span/256 = 0.1875 dB at this
+// setting.
+#define ENV_FLOOR     0x2000
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES ((16+low4) << high4 per sample on the 22-bit
 // level — rates, not durations, to avoid a 1/x on the FPGA), byte 2
