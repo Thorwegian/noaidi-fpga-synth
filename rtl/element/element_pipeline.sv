@@ -369,13 +369,21 @@ module element_pipeline #(
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
     reg [35:0] prod_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word[1:0]}
-    reg [23:0] prod_state [0:synth_pkg::NUM_PRODUCERS-1];
+    // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
+    // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
+    // BITS, so rate increments are in 1/16-LSB units and the 8-bit
+    // log2 rate byte decodes as ONE uniform expression with no
+    // truncation anywhere: all 256 codes are distinct equal-ratio
+    // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
+    // cc << 1). The fractional bits ARE the "binary point moved four
+    // left" — in the accumulator, where it belongs.
+    reg [27:0] prod_state [0:synth_pkg::NUM_PRODUCERS-1];
     integer wi;
     initial begin
         for (wi = 0; wi < 8*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
             prod_ram[wi] = 36'd0;                  // type 0 = off
         for (wi = 0; wi < synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            prod_state[wi] = 24'd0;
+            prod_state[wi] = 28'd0;
     end
 
     always_ff @(posedge sclk)
@@ -405,7 +413,7 @@ module element_pipeline #(
     // phase); bus_base serves the gate read (P1) and the target-base
     // read (P3) through one register the same way.
     logic [35:0] wk_prod_q;
-    logic [23:0] wk_st_q;
+    logic [27:0] wk_st_q;
     logic signed [17:0] wk_busrd_q;
     logic        v0;               // a P0 read was issued last cycle
 
@@ -416,7 +424,7 @@ module element_pipeline #(
     logic [1:0]  eA_shape;
     logic [9:0]  eA_tgt;
     logic [15:0] eA_rate;
-    logic [23:0] stA;
+    logic [27:0] stA;
     // B stage — latched at the end of P2
     logic        eB_v;
     logic [9:0]  eB_tgt;
@@ -433,7 +441,7 @@ module element_pipeline #(
     // LFO waveform on the OLD phase (registered stA → rule-clean).
     // Named intermediate wire: a $signed() cast directly in the port
     // connection crashes yosys's genrtlil signedness assert.
-    wire signed [23:0] wk_osc_phase = $signed(stA);
+    wire signed [23:0] wk_osc_phase = $signed(stA[23:0]);
     logic signed [17:0] wk_wave;
     osc_core u_wk_osc (
         .phase      (wk_osc_phase),
@@ -451,31 +459,32 @@ module element_pipeline #(
     // cone the critical path (76 MHz — 3.5% margin, on a timing
     // model proven optimistic five times).
     logic        gA_gate;
-    logic [20:0] gA_ainc, gA_dinc, gA_rinc;
-    logic [21:0] gA_sus;
+    logic [20:0] gA_ainc, gA_dinc, gA_rinc;   // 1/16-LSB units
+    logic [25:0] gA_sus;
 
-    // next-state, computed at P3 from registered inputs only
-    wire [1:0]  a_stage  = stA[23:22];
-    wire [21:0] a_level  = stA[21:0];
-    logic [23:0] wk_nstate;
+    // next-state, computed at P3 from registered inputs only.
+    // ADSR level is UQ22.4 (26 bits).
+    wire [1:0]  a_stage  = stA[27:26];
+    wire [25:0] a_level  = stA[25:0];
+    logic [27:0] wk_nstate;
     always_comb begin
         if (eA_type == 4'd1) begin
-            // LFO: free-running phase accumulator
-            wk_nstate = stA + {8'b0, eA_rate};
+            // LFO: free-running phase accumulator in [23:0]
+            wk_nstate = {stA[27:24], stA[23:0] + {8'b0, eA_rate}};
         end else if (!gA_gate) begin
             // ADSR, gate low: release toward zero
-            wk_nstate = (a_level > {1'b0, gA_rinc})
-                ? {AST_REL, a_level - 22'(gA_rinc)}
-                : {AST_IDLE, 22'd0};
+            wk_nstate = (a_level > {5'b0, gA_rinc})
+                ? {AST_REL, a_level - 26'(gA_rinc)}
+                : {AST_IDLE, 26'd0};
         end else begin
             case (a_stage)
                 AST_ATT: wk_nstate =
-                    ({1'b0, a_level} + 23'(gA_ainc) > 23'h3FFFFF)
-                        ? {AST_DEC, 22'h3FFFFF}
-                        : {AST_ATT, a_level + 22'(gA_ainc)};
+                    ({1'b0, a_level} + 27'(gA_ainc) > 27'h3FFFFFF)
+                        ? {AST_DEC, 26'h3FFFFFF}
+                        : {AST_ATT, a_level + 26'(gA_ainc)};
                 AST_DEC: wk_nstate =
-                    (a_level > gA_sus + 22'(gA_dinc))
-                        ? {AST_DEC, a_level - 22'(gA_dinc)}
+                    (a_level > gA_sus + 26'(gA_dinc))
+                        ? {AST_DEC, a_level - 26'(gA_dinc)}
                         : (a_level > gA_sus) ? {AST_DEC, gA_sus}
                                              : {AST_DEC, a_level};
                 default: wk_nstate = {AST_ATT, a_level};  // idle/release
@@ -535,33 +544,28 @@ module element_pipeline #(
                 // level, byte 3 = release rate (Thor: S is a level
                 // and sits third by convention). One sustain LSB
                 // = 0.375 dB below peak at the 16-octave amp depth.
-                // Rate decode is biased FOUR octaves down (shift
-                // −4..+11): decay only traverses peak→sustain — a
-                // fraction of the level range — so unbiased rates
-                // made every decay fast (Thor: "near useless when
-                // sustain is high"). Slowest full-range time ~44 s,
-                // fastest ~0.7 ms.
+                // Rate decode: increment = (16 + low4) << high4 in
+                // 1/16-LSB units — the level's four fractional bits
+                // carry the four-octave down-bias (decay only
+                // traverses peak→sustain, so unbiased rates made
+                // every decay fast). ONE uniform expression, no
+                // truncating right-shift: all 256 codes are distinct
+                // equal-ratio steps of a log2 ladder (Thor's
+                // perceptual-linearity rule; a MIDI CC maps as
+                // cc << 1). Slowest full-range time ~44 s, fastest
+                // ~0.7 ms.
                 gA_gate <= (wk_busrd_q > 18'sd0);
-                gA_ainc <= (wk_prod_q[7:4] >= 4'd4)
-                    ? ((21'd16 + 21'(wk_prod_q[3:0]))
-                       << (wk_prod_q[7:4] - 4'd4))
-                    : ((21'd16 + 21'(wk_prod_q[3:0]))
-                       >> (4'd4 - wk_prod_q[7:4]));
-                gA_dinc <= (wk_prod_q[15:12] >= 4'd4)
-                    ? ((21'd16 + 21'(wk_prod_q[11:8]))
-                       << (wk_prod_q[15:12] - 4'd4))
-                    : ((21'd16 + 21'(wk_prod_q[11:8]))
-                       >> (4'd4 - wk_prod_q[15:12]));
-                gA_sus  <= {wk_prod_q[23:16], 14'b0};
-                gA_rinc <= (wk_prod_q[31:28] >= 4'd4)
-                    ? ((21'd16 + 21'(wk_prod_q[27:24]))
-                       << (wk_prod_q[31:28] - 4'd4))
-                    : ((21'd16 + 21'(wk_prod_q[27:24]))
-                       >> (4'd4 - wk_prod_q[31:28]));
+                gA_ainc <= (21'd16 + 21'(wk_prod_q[3:0]))
+                               << wk_prod_q[7:4];
+                gA_dinc <= (21'd16 + 21'(wk_prod_q[11:8]))
+                               << wk_prod_q[15:12];
+                gA_sus  <= {wk_prod_q[23:16], 18'b0};
+                gA_rinc <= (21'd16 + 21'(wk_prod_q[27:24]))
+                               << wk_prod_q[31:28];
                 eB_v   <= eA_v && (eA_type == 4'd1 || eA_type == 4'd2);
                 eB_tgt <= eA_tgt;
                 srcB   <= (eA_type == 4'd1) ? wk_wave
-                                            : $signed({2'b0, stA[21:6]});
+                                            : $signed({2'b0, stA[25:10]});
                 wkE_v  <= 1'b0;              // P5 write just happened
             end else begin
                 // end of P3 (wcnt == 0): the producer multiply —

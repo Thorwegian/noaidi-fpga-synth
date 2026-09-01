@@ -67,8 +67,12 @@ TB_ELEM = tb/tb_element_pipeline.sv
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
 	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_ELEM)
 
+# Each bench logs to its own file so `make -j4 sim` can run them in
+# parallel without interleaving output; `sim` prints the logs in a
+# fixed order afterwards. Suite wall-clock collapses to the longest
+# bench. Read a single bench with: make sim-prog && cat tb/sim-prog.out
 sim-elem: tb/tb_element_pipeline.vvp
-	vvp tb/tb_element_pipeline.vvp
+	vvp tb/tb_element_pipeline.vvp > tb/sim-elem.out 2>&1
 
 SIM_OUT_MOD = $(PKG) drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
 TB_OUT = tb/tb_outputs.sv
@@ -77,35 +81,35 @@ tb/tb_outputs.vvp: $(SIM_OUT_MOD) $(TB_OUT) Makefile
 	iverilog -g2012 -o $@ $(SIM_OUT_MOD) $(TB_OUT)
 
 sim-outputs: tb/tb_outputs.vvp
-	vvp tb/tb_outputs.vvp
+	vvp tb/tb_outputs.vvp > tb/sim-outputs.out 2>&1
 
 TB_SPDIF = tb/tb_spdif_block.sv
 tb/tb_spdif_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 	iverilog -g2012 -o $@ $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
 sim-spdif: tb/tb_spdif_block.vvp
-	vvp tb/tb_spdif_block.vvp
+	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
 
 TB_PROG = tb/tb_element_program.sv
 tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(LUTS) Makefile
 	iverilog -g2012 -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
 
 sim-prog: tb/tb_element_program.vvp
-	vvp tb/tb_element_program.vvp
+	vvp tb/tb_element_program.vvp > tb/sim-prog.out 2>&1
 
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
 
 sim-bus: tb/tb_spi_bus.vvp
-	vvp tb/tb_spi_bus.vvp
+	vvp tb/tb_spi_bus.vvp > tb/sim-bus.out 2>&1
 
 TB_SPI = tb/tb_spi_slave_regs.sv
 tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
 	iverilog -g2012 -o $@ spi/spi_slave_regs.sv $(TB_SPI)
 
 sim-spi: tb/tb_spi_slave_regs.vvp
-	vvp tb/tb_spi_slave_regs.vvp
+	vvp tb/tb_spi_slave_regs.vvp > tb/sim-spi.out 2>&1
 
 # SVF stability spot-check at the FC_MAX clamp corner (fast assert
 # bench — part of the regular suite).
@@ -114,9 +118,11 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_STAB)
 
 sim-stab: tb/tb_svf_stability.vvp
-	vvp tb/tb_svf_stability.vvp
+	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
 sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus sim-prog sim-stab
+	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
+	     tb/sim-spi.out tb/sim-bus.out tb/sim-prog.out tb/sim-stab.out
 
 clean:
 	rm -rf *.log *.json *.fs element/svf_k_lut.hex

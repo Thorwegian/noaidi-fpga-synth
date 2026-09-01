@@ -59,12 +59,15 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 //                 ADSR: [25:16] gate bus (level-sensitive: > 0 held)
 //   word 1 RATES (ADSR), in the universal A, D, S, R order:
 //                 [7:0] attack, [15:8] decay, [31:24] release as
-//                 8-bit log2 RATES — increment = (16+low4) shifted by
-//                 (high4 − 4) on the 22-bit level (four-octave
-//                 down-bias so gentle decays exist; full-range ~44 s
-//                 .. ~0.7 ms; rates, not durations — no 1/x in
-//                 gateware); [23:16] SUSTAIN LEVEL, one LSB
-//                 = envelope span / 256 below peak
+//                 8-bit log2 RATES — increment = (16+low4) << high4
+//                 in 1/16-LSB units (the level carries 4 fractional
+//                 bits; that IS the four-octave down-bias, so gentle
+//                 decays exist). One uniform expression, no
+//                 truncation: all 256 codes are distinct equal-ratio
+//                 steps — perceptually linear, so a MIDI CC maps as
+//                 (cc << 1). Full-range ~44 s .. ~0.7 ms; rates, not
+//                 durations — no 1/x in gateware. [23:16] SUSTAIN
+//                 LEVEL, one LSB = envelope span / 256 below peak
 //   word 2 DEPTH: [17:0] signed Q8.10 contribution amplitude
 // The producer ADDS to the bus base: firmware's base write and the
 // producer's contribution coexist on one bus (e.g. bend + vibrato).

@@ -83,11 +83,14 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // this; sustain LSB = span/256 = 0.1875 dB here.
 #define ENV_FLOOR     0x2000
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
-// 8-bit log2 RATES — increment = (16+low4) shifted by (high4 − 4) on
-// the 22-bit level (the four-octave down-bias exists because decay
-// only traverses peak→sustain; full-range times span ~44 s .. ~0.7
-// ms). Byte 2 is the SUSTAIN LEVEL, one LSB = span/256 below peak
-// (0.1875 dB at the 48 dB span).
+// 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
+// units (the envelope level carries 4 fractional bits: that IS the
+// four-octave down-bias, needed because decay only traverses
+// peak→sustain; full-range times span ~44 s .. ~0.7 ms). All 256
+// codes are distinct equal-ratio steps of a log2 ladder, so a MIDI
+// CC maps perceptually linearly as (cc << 1). Byte 2 is the SUSTAIN
+// LEVEL, one LSB = span/256 below peak (0.1875 dB at the 48 dB
+// span).
 // Values: Thor's latest feel carried into the re-biased decode
 // (+0x40 per rate byte: his attack 0x48 → 0x88, release 0x18 →
 // 0x58), decay dropped into the newly opened gentle zone.
