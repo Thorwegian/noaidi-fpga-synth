@@ -175,7 +175,7 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 (2026-08-30) — the spec with justifications, rejected alternatives,
 sizing and build milestones B0–B6. **Built**: B1–B5 ear-verified and
 merged (buses, all sinks, firmware routes, LFO walker, per-voice
-ADSRs); log-domain Q implemented, in final verification.
+ADSRs), plus log-domain Q (approved 2026-09-03).
 The planning notes below record how the design was reached:
 
 - **Governing balance** (Thor): SPI bandwidth saved vs FPGA complexity
