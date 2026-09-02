@@ -24,24 +24,23 @@
 #define SLIDER_ADC_UNIT     ADC_UNIT_1
 #define SLIDER_ADC_CHANNEL  ADC_CHANNEL_1
 
-// 500 Hz single-sample polls: one CC step spans ~30 raw counts, so
-// ADC noise sits well under a step and averaging adds nothing but
-// lag at 7-bit resolution (Thor). Movement hysteresis replaces the
-// old debounce: instant while moving, silent while parked.
+// 500 Hz polls through a ROLLING 8-sample average: measured on the
+// board, single-sample ADC noise swings past half a CC step (637
+// spurious ±1 events in 20 s of idle), so filtering is required —
+// but a rolling window updated every poll keeps the event rate at
+// 500 Hz with only 8 ms of group delay, unlike the original
+// block-average-then-sleep shape that made a 50 Hz knob.
 // Pacing is an esp_timer notifying the task — same pattern and same
-// reason as engine_link's 1 kHz tick: the FreeRTOS tick is 100 Hz,
-// so a 2 ms vTaskDelay rounds to ZERO ticks and busy-spins (caught
-// by the task watchdog on the first hardware run).
+// reason as engine_link's 1 kHz tick (see engine_link.c: short
+// vTaskDelay rounds to zero ticks and busy-spins).
 #define POLL_US        2000   // slider poll period
+#define WIN_LEN        8      // rolling-average window (power of 2)
 // CC-step Schmitt hysteresis (Thor, hands-on: the value often
 // flickers by ±1 when parked on a step boundary). The current CC's
 // raw band is widened by step/GUARD_DIV on both sides; the value
 // changes only once the wiper sits clearly inside a neighboring
 // band. Slow travel still reaches every CC value exactly.
 #define GUARD_DIV      4      // guard = 1/4 of one CC step
-#define CAL_AVG        8      // calibration min/max tracks an
-                              // 8-sample average: single-sample noise
-                              // spikes were stretching the range
 #define CAL_MARGIN     4      // raw counts pulled inward on save so
                               // both endpoints stay reachable
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
@@ -136,24 +135,30 @@ static void slider_task(void *arg)
 {
     uint8_t last_cc  = 0xFF;       // force one send at boot
     int     cal_print = 0;
+    int     win[WIN_LEN] = {0};
+    int     win_idx = 0, win_sum = 0, win_fill = 0;
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        int raw = read_raw();
-        if (raw < 0)
+        int sample = read_raw();
+        if (sample < 0)
             continue;
 
+        // rolling average: updated every poll, ~8 ms group delay
+        win_sum += sample - win[win_idx];
+        win[win_idx] = sample;
+        win_idx = (win_idx + 1) % WIN_LEN;
+        if (win_fill < WIN_LEN) {          // warm-up: fill first
+            win_fill++;
+            continue;
+        }
+        int raw = win_sum / WIN_LEN;
+
         if (s_calibrating) {
-            // min/max over 8-sample averages (16 ms windows), not
-            // raw samples — outlier spikes don't extend the range
-            static int cal_sum = 0, cal_n = 0;
-            cal_sum += raw;
-            if (++cal_n >= CAL_AVG) {
-                int avg = cal_sum / CAL_AVG;
-                cal_sum = 0; cal_n = 0;
-                if (avg < s_cal_min) s_cal_min = (uint16_t)avg;
-                if (avg > s_cal_max) s_cal_max = (uint16_t)avg;
-            }
+            // min/max over the filtered value — spikes can't
+            // stretch the range
+            if (raw < s_cal_min) s_cal_min = (uint16_t)raw;
+            if (raw > s_cal_max) s_cal_max = (uint16_t)raw;
             if (++cal_print >= 100) {          // every ~200 ms
                 cal_print = 0;
                 ESP_LOGI(TAG, "CAL raw=%d seen %u..%u",
