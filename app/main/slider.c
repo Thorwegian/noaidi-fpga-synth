@@ -214,9 +214,12 @@ void slider_init(void)
 
     // Console keys arrive over the USB-Serial-JTAG the monitor is
     // already attached to; the driver gives us blocking reads.
+    // The driver insists on buffers STRICTLY larger than 64 bytes
+    // (install returns ESP_ERR_INVALID_ARG otherwise — found the
+    // hard way, panic at boot).
     usb_serial_jtag_driver_config_t usj_cfg = {
-        .rx_buffer_size = 64,
-        .tx_buffer_size = 64,
+        .rx_buffer_size = 256,
+        .tx_buffer_size = 256,
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
 
