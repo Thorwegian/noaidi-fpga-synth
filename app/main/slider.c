@@ -41,15 +41,20 @@
 // nothing, a candidate beyond it drags the sent value to the window
 // edge. Parked ±1 flicker is structurally silent; slow travel steps
 // by 1. Rails adopt exactly so 0 and 127 stay reachable.
-// Calibration margin: span/32 pulled inward from each captured end.
-// Measured on Thor's hardware: pressing the fader against an end
-// stop during calibration reads ~50 counts beyond where the same
-// end RESTS afterwards, so a token margin left cc 127 unreachable.
-// span/32 (~105 counts here) guarantees both rails with headroom;
-// the interior step size barely changes (~25 vs ~26 counts per CC).
-#define CAL_MARGIN_DIV 32
-#define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
-                              // clearly didn't see full travel
+// Two-point settled calibration (Thor's design: the continuous
+// min/max "seen" capture grabbed transients — pressure against an
+// end stop reads ~50 counts beyond where that end rests). Each end
+// is captured deliberately: park the fader, press the key, the
+// firmware averages a full second (500 raw samples — noise settles
+// to a fraction of a count), and that RESTING value becomes the
+// end. Ends persist independently, so either can be redone alone.
+#define CAPTURE_POLLS  500    // 1 s of settling average per end
+#define END_MARGIN_DIV 64     // span/64 pulled inward from each
+                              // settled end so the rails stay
+                              // reachable across drift (~1-2 CC of
+                              // plateau at each end of travel)
+#define MIN_CAL_SPAN   500    // raw counts; smaller span = the two
+                              // ends clearly aren't a full travel
 
 // Divider math defaults (680R / 10k pot / 3k6 at 3.3V, 12-bit ADC at
 // max attenuation): wiper ~0.16 V .. ~2.47 V -> roughly these counts.
@@ -58,16 +63,19 @@
 #define DEFAULT_RAW_MIN  260
 #define DEFAULT_RAW_MAX  4000
 
-#define NVS_NAMESPACE  "panel"
-#define NVS_KEY_MIN    "sl_min"
-#define NVS_KEY_MAX    "sl_max"
+#define NVS_NAMESPACE   "panel"
+#define NVS_KEY_END_MIN "end_min"     // settled resting end values
+#define NVS_KEY_END_MAX "end_max"
+#define NVS_KEY_MIN     "sl_min"      // legacy working-range keys,
+#define NVS_KEY_MAX     "sl_max"      // read as fallback only
 
 static adc_oneshot_unit_handle_t s_adc;
-static uint16_t s_raw_min = DEFAULT_RAW_MIN;
+static uint16_t s_raw_min = DEFAULT_RAW_MIN;   // working range
 static uint16_t s_raw_max = DEFAULT_RAW_MAX;
+static uint16_t s_end_min = DEFAULT_RAW_MIN;   // settled end values
+static uint16_t s_end_max = DEFAULT_RAW_MAX;
 
-static volatile bool s_calibrating = false;
-static uint16_t s_cal_min, s_cal_max;
+static volatile uint8_t s_capture_end = 0;     // 0 idle, 1 min, 2 max
 static TaskHandle_t s_poll_task;
 
 static void poll_timer_cb(void *arg)
@@ -102,6 +110,21 @@ static void publish_cc(uint8_t value)
     event_bus_publish(&evt);
 }
 
+// Working range = settled ends pulled inward by span/64.
+static void apply_ends(void)
+{
+    if (s_end_max <= s_end_min + MIN_CAL_SPAN) {
+        ESP_LOGW(TAG, "ends %u..%u too close, keeping range %u..%u",
+                 s_end_min, s_end_max, s_raw_min, s_raw_max);
+        return;
+    }
+    uint16_t margin = (uint16_t)((s_end_max - s_end_min) / END_MARGIN_DIV);
+    s_raw_min = s_end_min + margin;
+    s_raw_max = s_end_max - margin;
+    ESP_LOGI(TAG, "range: ends %u..%u -> working %u..%u",
+             s_end_min, s_end_max, s_raw_min, s_raw_max);
+}
+
 static void load_calibration(void)
 {
     nvs_handle_t h;
@@ -110,17 +133,27 @@ static void load_calibration(void)
         return;
     }
     uint16_t mn, mx;
-    if (nvs_get_u16(h, NVS_KEY_MIN, &mn) == ESP_OK &&
-        nvs_get_u16(h, NVS_KEY_MAX, &mx) == ESP_OK &&
-        mx > mn + MIN_CAL_SPAN) {
+    if (nvs_get_u16(h, NVS_KEY_END_MIN, &mn) == ESP_OK &&
+        nvs_get_u16(h, NVS_KEY_END_MAX, &mx) == ESP_OK) {
+        s_end_min = mn;
+        s_end_max = mx;
+        apply_ends();
+    } else if (nvs_get_u16(h, NVS_KEY_MIN, &mn) == ESP_OK &&
+               nvs_get_u16(h, NVS_KEY_MAX, &mx) == ESP_OK &&
+               mx > mn + MIN_CAL_SPAN) {
+        // legacy working range: use as provisional ends until the
+        // two-point capture replaces them
+        s_end_min = mn;
+        s_end_max = mx;
         s_raw_min = mn;
         s_raw_max = mx;
-        ESP_LOGI(TAG, "calibration loaded: raw %u..%u", mn, mx);
+        ESP_LOGI(TAG, "legacy calibration loaded: %u..%u "
+                      "(recapture ends with '1'/'2')", mn, mx);
     }
     nvs_close(h);
 }
 
-static void save_calibration(uint16_t mn, uint16_t mx)
+static void save_ends(void)
 {
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
@@ -128,26 +161,45 @@ static void save_calibration(uint16_t mn, uint16_t mx)
         ESP_LOGE(TAG, "NVS open failed: %s", esp_err_to_name(err));
         return;
     }
-    nvs_set_u16(h, NVS_KEY_MIN, mn);
-    nvs_set_u16(h, NVS_KEY_MAX, mx);
+    nvs_set_u16(h, NVS_KEY_END_MIN, s_end_min);
+    nvs_set_u16(h, NVS_KEY_END_MAX, s_end_max);
     err = nvs_commit(h);
     nvs_close(h);
-    ESP_LOGI(TAG, "calibration saved: raw %u..%u (%s)", mn, mx,
+    ESP_LOGI(TAG, "ends saved: %u..%u (%s)", s_end_min, s_end_max,
              err == ESP_OK ? "committed" : esp_err_to_name(err));
 }
 
 static void slider_task(void *arg)
 {
     uint8_t last_cc  = 0xFF;       // force one send at boot
-    int     cal_print = 0;
     int     win[WIN_LEN] = {0};
     int     win_idx = 0, win_sum = 0, win_fill = 0;
+    int32_t cap_sum = 0;
+    int     cap_n   = 0;
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         int sample = read_raw();
         if (sample < 0)
             continue;
+
+        if (s_capture_end) {
+            // settle one end: average raw samples for a full second
+            cap_sum += sample;
+            if (++cap_n >= CAPTURE_POLLS) {
+                int mean = cap_sum / cap_n;
+                cap_sum = 0; cap_n = 0;
+                if (s_capture_end == 1) s_end_min = (uint16_t)mean;
+                else                    s_end_max = (uint16_t)mean;
+                ESP_LOGI(TAG, "%s end settled: raw %d",
+                         s_capture_end == 1 ? "MIN" : "MAX", mean);
+                s_capture_end = 0;
+                apply_ends();
+                save_ends();
+            }
+            continue;
+        }
+        cap_sum = 0; cap_n = 0;
 
         // rolling average: updated every poll, ~8 ms group delay
         win_sum += sample - win[win_idx];
@@ -158,19 +210,6 @@ static void slider_task(void *arg)
             continue;
         }
         int raw = win_sum / WIN_LEN;
-
-        if (s_calibrating) {
-            // min/max over the filtered value — spikes can't
-            // stretch the range
-            if (raw < s_cal_min) s_cal_min = (uint16_t)raw;
-            if (raw > s_cal_max) s_cal_max = (uint16_t)raw;
-            if (++cal_print >= 100) {          // every ~200 ms
-                cal_print = 0;
-                ESP_LOGI(TAG, "CAL raw=%d seen %u..%u",
-                         raw, s_cal_min, s_cal_max);
-            }
-            continue;
-        }
 
         uint8_t cc = raw_to_cc(raw);
         uint8_t send;
@@ -199,32 +238,17 @@ static void console_task(void *arg)
         int n = usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY);
         if (n <= 0)
             continue;
-        if (ch == 'c' || ch == 'C') {
-            if (!s_calibrating) {
-                s_cal_min = UINT16_MAX;
-                s_cal_max = 0;
-                s_calibrating = true;
-                ESP_LOGI(TAG, "CAL START: run the slider end to end, "
-                              "then press 'c' to save");
-            } else {
-                s_calibrating = false;
-                if (s_cal_max > s_cal_min &&
-                    (uint16_t)(s_cal_max - s_cal_min) > MIN_CAL_SPAN) {
-                    uint16_t margin =
-                        (uint16_t)((s_cal_max - s_cal_min) / CAL_MARGIN_DIV);
-                    s_raw_min = s_cal_min + margin;
-                    s_raw_max = s_cal_max - margin;
-                    save_calibration(s_raw_min, s_raw_max);
-                } else {
-                    ESP_LOGW(TAG, "CAL ABORT: span %u..%u too small, "
-                                  "keeping %u..%u",
-                             s_cal_min, s_cal_max, s_raw_min, s_raw_max);
-                }
-            }
+        if (ch == '1' && !s_capture_end) {
+            ESP_LOGI(TAG, "park the fader at the MIN end - settling 1 s");
+            s_capture_end = 1;
+        } else if (ch == '2' && !s_capture_end) {
+            ESP_LOGI(TAG, "park the fader at the MAX end - settling 1 s");
+            s_capture_end = 2;
         } else if (ch == 'r' || ch == 'R') {
             int raw = read_raw();
-            ESP_LOGI(TAG, "raw=%d cc=%u cal=%u..%u",
-                     raw, raw_to_cc(raw), s_raw_min, s_raw_max);
+            ESP_LOGI(TAG, "raw=%d cc=%u ends=%u..%u working=%u..%u",
+                     raw, raw_to_cc(raw), s_end_min, s_end_max,
+                     s_raw_min, s_raw_max);
         }
     }
 }
@@ -264,6 +288,7 @@ void slider_init(void)
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
 
     xTaskCreate(slider_task, "slider", 3072, NULL, 4, &s_poll_task);
+    ESP_LOGI(TAG, "keys: 1=capture MIN end  2=capture MAX end  r=read");
     const esp_timer_create_args_t targs = {
         .callback = poll_timer_cb,
         .name     = "slider_poll",
@@ -272,5 +297,5 @@ void slider_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&targs, &timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, POLL_US));
     xTaskCreate(console_task, "slider_con", 3072, NULL, 3, NULL);
-    ESP_LOGI(TAG, "slider on GPIO1/ADC1_CH1 -> CC71; keys: c=cal r=read");
+    ESP_LOGI(TAG, "slider on GPIO1/ADC1_CH1 -> CC71");
 }
