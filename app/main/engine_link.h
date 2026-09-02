@@ -22,6 +22,10 @@ extern "C" {
 
 #define ENGINE_NUM_ELEMENTS 256
 #define ENGINE_WORDS_PER_ELEMENT 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
+// FILTER word: [13:0] cutoff UQ4.10 log2; [27:14] resonance UQ4.10
+// log2 — octaves of Q above Butterworth (0 = Butterworth, ~1 integer
+// = +6 dB of resonant peak, top of range = self-oscillation);
+// [31:28] reserved.
 
 typedef struct {
     uint8_t  elem;    // element index 0..255

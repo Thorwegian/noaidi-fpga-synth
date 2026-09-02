@@ -18,6 +18,7 @@ SRC = $(PKG) $(MOD) constraints.cst
 LUTS = \
 	element/phase_lut.hex \
 	element/svf_k_lut.hex \
+	element/q1_lut.hex \
 	element/att_lut.hex \
 	element/boot_p0.hex \
 	element/boot_p1.hex \
@@ -30,6 +31,9 @@ element/phase_lut.hex: ../scripts/gen_phase_lut.py
 	python3 $<
 
 element/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+	python3 $<
+
+element/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
 element/att_lut.hex: ../scripts/gen_att_lut.py

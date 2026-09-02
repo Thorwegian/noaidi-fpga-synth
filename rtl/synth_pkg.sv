@@ -70,26 +70,23 @@ package synth_pkg;
     parameter logic [15:0] MAP_PROD_BASE = 16'h0100;
     parameter int          NUM_PRODUCERS = 128;
 
-    //--- Filter stability clamps (Thor's calls, 2026-08-31) ----------
+    //--- Filter stability clamp (Thor's call, 2026-08-31) ------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not
     // from resonance — theory and the autocorrelation bench agree.
-    // Two flat constant clamps, nothing coupled:
-    //
-    //   Q1_MAX = sqrt(2): Butterworth is the accepted heaviest
-    //   damping. Measured at q1 = sqrt(2) (our K is the linear
-    //   2*pi*fc/fs mapping): clean through 15.7 kHz, limit-cycles at
-    //   16.4 kHz, chaos at 19.5 kHz. Q = 1 is clean past 30 kHz.
     //
     //   FC_MAX = 0x2B20 = 14.4 kHz (Thor's pick): one measured-clean
     //   step of margin below the resonance bloom that precedes the
-    //   16 kHz wall.
+    //   16 kHz wall. Measured at q1 = sqrt(2), the heaviest damping
+    //   any resonance code decodes to: clean through 15.7 kHz,
+    //   limit-cycles at 16.4 kHz, chaos at 19.5 kHz.
     //
-    // The high-Q end is deliberately unclamped for now (Thor): the
-    // effective q1 floors at ZERO — infinite Q / self-oscillation is
-    // reachable as a feature; only nonphysical negative damping is
-    // excluded.
+    // The old Q1_MAX = sqrt(2) clamp is retired (2026-09-02): with
+    // log2-encoded resonance (r octaves of Q above Butterworth,
+    // q1 = sqrt2 * 2^-r via q1_lut), r = 0 IS Butterworth and no
+    // code decodes heavier — the clamp became structural. The high-Q
+    // end stays open by design: at the top of the range the decode
+    // underflows q1 to zero — self-oscillation as a feature.
     parameter logic [13:0] FC_MAX = 14'h2B20;
-    parameter logic [17:0] Q1_MAX = 18'h16A0A;   // sqrt(2), Q = 0.7071
 
     //--- Number formats (design doc) ---------------------------------
     parameter int OSC_W = 24;       // UQ0.24 phase accumulator

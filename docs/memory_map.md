@@ -275,7 +275,7 @@ Voice v base address: `0x2000 + v × 64`.
 |--------|----------|----------|--------|
 | `+0` | `OSC` | `[15:0]` pitch (UQ4.10 in `[13:0]`, `[15:14]` reserved), `[19:16]` osc type (0 saw, 1 pulse, 2 tri, 3 sine, 4–15 reserved: noise, wavetable, sample, ...), `[20]` phase reset, `[31:21]` reserved | implemented |
 | `+1` | `DUTY` | `[23:0]` duty Q0.24 signed, `[31:24]` reserved | implemented |
-| `+2` | `FILTER` | `[15:0]` cutoff (UQ4.10 in `[13:0]`, `[15:14]` reserved), `[31:16]` resonance 1/Q Q2.14 | implemented |
+| `+2` | `FILTER` | `[13:0]` cutoff UQ4.10, `[27:14]` resonance UQ4.10 **log₂** — octaves of Q above Butterworth (0 = Butterworth = heaviest decodable damping; one integer ≈ +6 dB of resonant peak; top of range underflows the decode to q1 = 0 = self-oscillation), `[31:28]` reserved. Decided 2026-09-02 ("break with convention"); decodes via q1_lut + barrel shift, the cutoff-K pattern | implemented |
 | `+3` | `GAIN` | `[7:0]` gain L UQ4.4, `[15:8]` gain R UQ4.4, `[23:16]` mode byte: `[16]` 12/24 dB, `[18:17]` filter type, `[19]` smoothing coeff select, `[23:20]` reserved | implemented |
 | `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run; later the ADSR trigger), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `PTRS0` | bus pointers ([bus_architecture.md](bus_architecture.md)): `[9:0]` pitch, `[19:10]` duty, `[29:20]` cutoff — 0 = bus 0 = no modulation | cutoff live (B1) |
@@ -292,8 +292,9 @@ Notes:
 - Values are consumed once per sample per voice (S1 stage); writes to a
   running voice take effect the next sample, smoothed by the per-element
   first-order LPF where enabled.
-- `FILTER` resonance is stored Q2.14 (16-bit) and widened internally to
-  the pipeline's Q8.28.
+- `FILTER` resonance is the log₂ code above; the gateware decodes it
+  to linear q1 (Q2.16, then Q8.28 at the DSP) between the bus add and
+  the first filter multiply.
 - ADSR registers are deliberately narrow: MIDI controllers are 7-bit, so
   8-bit log2 time fields (4-bit octave + 4-bit 1/16-octave fraction) and
   an 8-bit UQ4.4 sustain match the sources' precision while keeping one

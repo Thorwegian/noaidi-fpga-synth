@@ -123,7 +123,8 @@ module tb_element_program;
         begin
             spi_word_write(16'h2000, 32'h0000D700);   // OSC: A4, sine
             spi_word_write(16'h2001, 32'h00000000);   // DUTY
-            spi_word_write(16'h2002, 32'h40002AF8);   // FILTER: q1=1.0, open
+            spi_word_write(16'h2002, 32'h00802AF8);   // FILTER: r=0x200
+                                                      // (q1=1.0), open
             spi_word_write(16'h2003, 32'h00002020);   // GAIN L/R -12 dB
         end
     endtask

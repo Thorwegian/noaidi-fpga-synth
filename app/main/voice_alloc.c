@@ -25,9 +25,13 @@
 
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
-#define Q1_ONE     0x40000000u        // q1 = 1.0 (Q2.16) in FILTER[31:14]
-                                      // — heavier damping, softer pad
-                                      // resonance (Thor, by ear)
+// Resonance is log2-encoded (Thor, 2026-09-02): FILTER[27:14] = r,
+// UQ4.10 octaves of Q above Butterworth (q1 = sqrt2 * 2^-r in
+// gateware). One integer = one octave of Q ≈ +6 dB of resonant
+// peak; 0 = Butterworth (softest), high values reach
+// self-oscillation. 0x200 = the q1 = 1.0 soft-pad damping Thor
+// tuned by ear in the old linear encoding.
+#define RESO       0x200u
 #define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
                                       // -36 in three steps; Thor measured
                                       // full-smash chords at -12 dBFS one
@@ -186,7 +190,7 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
 
         send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
-        send(elem, 2, Q1_ONE | fc);
+        send(elem, 2, (RESO << 14) | fc);
         send(elem, 3, (r << 8) | l);
         send(elem, 4, 1);                  // GATE on (stays on)
     }

@@ -106,11 +106,15 @@ module element_pipeline #(
     //----------------------------------------------------------------
     reg [23:0] phase_lut [0:1023];     // osc phase delta, one octave
     reg [15:0] k_lut     [0:1023];     // SVF K mantissa, one octave
+    reg [16:0] q1_lut    [0:1023];     // SVF damping mantissa, one
+                                       // octave of the log2 resonance
+                                       // code (q1 = sqrt2 * 2^-r)
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
 
     initial begin
         $readmemh("element/phase_lut.hex", phase_lut);
         $readmemh("element/svf_k_lut.hex", k_lut);
+        $readmemh("element/q1_lut.hex", q1_lut);
         $readmemh("element/att_lut.hex", att_lut);
     end
 
@@ -130,7 +134,9 @@ module element_pipeline #(
     //
     //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
     //   p1[23:0]  duty  Q0.24 signed
-    //   p2[13:0]  fc    UQ4.10     p2[31:14] q1 Q2.16 signed
+    //   p2[13:0]  fc    UQ4.10     p2[27:14] resonance UQ4.10 log2
+    //             (r octaves of Q above Butterworth; q1 = sqrt2*2^-r,
+    //              decoded via q1_lut like cutoff K; p2[31:28] reserved)
     //   p3[7:0]   gain L UQ4.4     p3[15:8] gain R UQ4.4
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
@@ -614,7 +620,7 @@ module element_pipeline #(
     logic [1:0]  s1_wave;
     logic signed [23:0] s1_duty;
     logic [13:0] s1_fc;
-    logic signed [17:0] s1_q1;
+    logic [13:0] s1_reso;   // log2 resonance code (UQ4.10)
     logic [7:0]  s1_gl, s1_gr;
     logic        s1_dual;
     logic [1:0]  s1_ftype;
@@ -664,7 +670,7 @@ module element_pipeline #(
     assign s1_wave  = s1_osc_word[15:14];
     assign s1_duty  = s1_duty_word[23:0];
     assign s1_fc    = s1_filter_word[13:0];
-    assign s1_q1    = s1_filter_word[31:14];
+    assign s1_reso  = s1_filter_word[27:14];
     // GATE off = exact-mute gain code into the existing mute machinery:
     // one decode-stage mux, no new carry registers down the pipeline.
     assign s1_gl    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'hFF;
@@ -691,7 +697,7 @@ module element_pipeline #(
     logic [1:0]  s2_wave;
     logic signed [23:0] s2_duty;
     logic [13:0] s2_fc;
-    logic signed [17:0] s2_q1;
+    logic [13:0] s2_reso;
     logic [7:0]  s2_gl, s2_gr;
     logic        s2_dual;
     logic [1:0]  s2_ftype;
@@ -720,7 +726,7 @@ module element_pipeline #(
             s2_wave  <= '0;
             s2_duty  <= '0;
             s2_fc    <= '0;
-            s2_q1    <= '0;
+            s2_reso  <= '0;
             s2_gl    <= '0;
             s2_gr    <= '0;
             s2_dual  <= 1'b0;
@@ -737,7 +743,7 @@ module element_pipeline #(
             s2_wave  <= s1_wave;
             s2_duty  <= s1_duty;
             s2_fc    <= s1_fc;
-            s2_q1    <= s1_q1;
+            s2_reso  <= s1_reso;
             s2_gl    <= s1_gl;
             s2_gr    <= s1_gr;
             s2_dual  <= s1_dual;
@@ -757,26 +763,27 @@ module element_pipeline #(
     // registers and S3 registers: adds/decode only, no multiply —
     // within the silicon timing rule. Per-sink slices of the Q8.10
     // bus word (bus_architecture.md law 5):
-    //   pitch/cutoff: as-is (same LSB, ~1.17 cents)
+    //   pitch/cutoff/resonance: as-is (one bus integer = one octave;
+    //          for resonance that is one octave of Q ≈ +6 dB of peak)
     //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
-    //   Q:     <<< 6  (bus ±1.0 → q1 ±1.0 in Q2.16)
     //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
     //          bus = more attenuation = quieter). A base of 0xFF
     //          (exact mute — hard-panned channels, gated elements) is
     //          preserved regardless of the bus.
     //----------------------------------------------------------------
-    // Damping clamp, one end only (Thor): effective q1 in [0, Q1_MAX
-    // = sqrt(2)]. Heavier-than-Butterworth damping is unreachable —
-    // that is what makes FC_MAX safe. The floor is ZERO, not a
-    // minimum: infinite Q / self-oscillation stays reachable as a
-    // feature; only nonphysical negative damping is excluded.
-    wire signed [24:0] q_sum =
-        {{7{s2_q1[17]}}, s2_q1} + {s2_bus_q[17], s2_bus_q, 6'b0};
-    wire signed [17:0] eff_q1 =
-        q_sum[24] ? 18'sd0 :
-        (q_sum > 25'($signed({7'b0, synth_pkg::Q1_MAX})))
-            ? $signed(synth_pkg::Q1_MAX) :
-        q_sum[17:0];
+    // Resonance is log2-encoded (Thor, 2026-09-02: "break with
+    // convention"): r = octaves of Q above Butterworth, UQ4.10;
+    // q1 = sqrt(2) * 2^-r via q1_lut + barrel shift, the same decode
+    // shape as cutoff K. The old [0, sqrt2] damping clamp is now
+    // STRUCTURAL: r = 0 IS Butterworth and nothing decodes heavier;
+    // at the top of the range the shift underflows q1 toward zero,
+    // so self-oscillation is the natural top of scale — reachable as
+    // a feature, no special code.
+    wire signed [18:0] reso_sum =
+        $signed({5'b0, s2_reso}) + {s2_bus_q[17], s2_bus_q};
+    wire [13:0] eff_reso =
+        reso_sum[18]            ? 14'd0    :
+        (reso_sum > 19'sd16383) ? 14'h3FFF : reso_sum[13:0];
 
     // Cutoff clamps to the flat FC_MAX (14.4 kHz, measured clean at
     // the Butterworth worst case — see synth_pkg).
@@ -821,6 +828,8 @@ module element_pipeline #(
     //----------------------------------------------------------------
     logic [23:0] s3_delta_lut;
     logic [15:0] s3_k_lut;
+    logic [16:0] s3_q1_lut;
+    logic [3:0]  s3_reso_oct;
 
     logic        s3_act;
     logic [VW-1:0] s3_idx;
@@ -829,7 +838,6 @@ module element_pipeline #(
     logic [3:0]  s3_fc_oct;
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
-    logic signed [17:0] s3_q1;
     logic [7:0]  s3_gl, s3_gr;
     logic        s3_dual;
     logic [1:0]  s3_ftype;
@@ -839,6 +847,8 @@ module element_pipeline #(
         if (!rst_n) begin
             s3_delta_lut <= '0;
             s3_k_lut     <= '0;
+            s3_q1_lut    <= '0;
+            s3_reso_oct  <= '0;
             s3_act   <= 1'b0;
             s3_idx   <= '0;
             s3_phase <= '0;
@@ -846,7 +856,6 @@ module element_pipeline #(
             s3_fc_oct    <= '0;
             s3_wave  <= '0;
             s3_duty  <= '0;
-            s3_q1    <= '0;
             s3_gl    <= '0;
             s3_gr    <= '0;
             s3_dual  <= 1'b0;
@@ -858,6 +867,8 @@ module element_pipeline #(
         end else begin
             s3_delta_lut <= phase_lut[eff_pitch[9:0]];
             s3_k_lut     <= k_lut[eff_fc[9:0]];
+            s3_q1_lut    <= q1_lut[eff_reso[9:0]];
+            s3_reso_oct  <= eff_reso[13:10];
             s3_act   <= s2_act;
             s3_idx   <= s2_idx;
             s3_phase <= s2_phase;
@@ -865,7 +876,6 @@ module element_pipeline #(
             s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
             s3_duty  <= eff_duty;
-            s3_q1    <= eff_q1;
             s3_gl    <= eff_gl;
             s3_gr    <= eff_gr;
             s3_dual  <= s2_dual;
@@ -887,6 +897,12 @@ module element_pipeline #(
     // LUT+shift expands to ~22+ bits of real precision, needed later
     // for the noise oscillator and whistling-filter melodies (Thor).
     assign k     = $signed({20'd0, s3_k_lut}) <<< (3 + s3_fc_oct);
+    // Resonance decode: q1 = sqrt(2) * 2^-r in Q2.16. Same
+    // LUT+barrel-shift shape as K; registered into S3B before the
+    // S4 multiply (the silicon timing rule). At high octaves the
+    // shift underflows to 0 — self-oscillation, by design.
+    wire signed [17:0] q1_decoded =
+        $signed({1'b0, s3_q1_lut}) >>> s3_reso_oct;
 
     osc_core u_osc (
         .phase      (s3_phase),
@@ -935,7 +951,7 @@ module element_pipeline #(
             s3b_k    <= k;
             s3b_osc  <= osc_sample;
             s3b_phase <= s3_phase + delta;
-            s3b_q1   <= s3_q1;
+            s3b_q1   <= q1_decoded;
             s3b_ic1eq1 <= s3_ic1eq1;
             s3b_ic2eq1 <= s3_ic2eq1;
             s3b_ic1eq2 <= s3_ic1eq2;

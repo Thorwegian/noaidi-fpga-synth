@@ -8,10 +8,10 @@ The verified wire protocol and per-element parameter ABI stand.
 Status: **SPEC — B0 review in progress (as of 2026-08-30 evening)**.
 Settled during review: one bus format (signed Q8.10,
 octaves.fraction — law 5), detune stays a per-element static offset,
-producer pool raised to 128. Still open before sign-off: Q's
-fraction→resonance convention (deferred to B2 by design), the
-worst-case performance that finalizes sizing, and Thor's read of the
-remainder of this document.
+producer pool raised to 128, and (2026-09-02) Q's convention: log₂
+resonance, bus taken as-is like pitch/cutoff. Still open before
+sign-off: the worst-case performance that finalizes sizing, and
+Thor's read of the remainder of this document.
 
 ## Terminology used in this document
 
@@ -65,9 +65,10 @@ conventions the FPGA never sees.
    so a producer needn't know its consumer; sinks take what they
    need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
    resolution — accepted; revisit on audible evidence only). Q's
-   convention (declared at B2): bus `<<< 6` into the Q2.16 resonance
-   parameter — bus ±1.0 = q1 ±1.0, mirroring the gain slice in the
-   other direction. Consumers
+   convention (settled 2026-09-02 with log₂ resonance): the bus is
+   taken AS-IS, like pitch and cutoff — one integer = one octave of
+   Q ≈ +6 dB of resonant peak, positive = more resonance. (The
+   earlier `<<< 6`-into-linear-q1 slice is superseded.) Consumers
    use SATURATING adds into each parameter's legal range (adds-only,
    timing-clean). Read bandwidth via replicas of one uniform pool
    (broadcast writes); a bus may feed different sink types.

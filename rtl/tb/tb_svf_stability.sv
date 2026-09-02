@@ -3,10 +3,13 @@
 //
 // The FC_MAX clamp (synth_pkg) holds the effective cutoff just below
 // fs/6 = 16 kHz, from the stability criterion sin(pi*fc/fs) < Q with
-// the musical worst case Q = 0.5 (Thor). This bench verifies the one
-// combination that matters: the WORST legal programmable input —
-// cutoff word 0x3FFF (clamped internally to FC_MAX) at q1 = +max
-// (0x1FFFF ≈ 2.0, i.e. Q ≈ 0.5) — must stay tonal.
+// the musical worst case Q = 0.5 (Thor). Resonance is log2-encoded
+// (2026-09-02): FILTER[27:14] = r, octaves of Q above Butterworth,
+// q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
+// damping (the old clamp, now structural), and the top of the range
+// underflows to q1 = 0 (self-oscillation, a feature). Corners: the
+// measured-safe worst case (r = 0 at FC_MAX), today's timbre
+// (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
 // Stability metric (Thor's definition): normalized autocorrelation at
 // the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
@@ -67,10 +70,11 @@ module tb_svf_stability;
         u_pipe.gain_param_ram[256] = 36'h00000FF20;
     end
 
-    task automatic set_filter(input [13:0] fc, input [17:0] q1);
+    // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth
+    task automatic set_filter(input [13:0] fc, input [13:0] r);
         begin
-            u_pipe.filter_param_ram[0]   = {4'b0, q1[17:0], fc};
-            u_pipe.filter_param_ram[256] = {4'b0, q1[17:0], fc};
+            u_pipe.filter_param_ram[0]   = {8'b0, r[13:0], fc};
+            u_pipe.filter_param_ram[256] = {8'b0, r[13:0], fc};
         end
     endtask
 
@@ -80,6 +84,8 @@ module tb_svf_stability;
     integer  di;
     longint  sum_xx, sum_xy;
     longint  pk;
+    longint  pkr;    // peak of |mix_right| — all its elements are
+                     // muted, so any energy here is cross-element leak
 
     task automatic measure(output longint r_milli, output longint peak);
         integer n;
@@ -91,7 +97,7 @@ module tb_svf_stability;
                 if (sample_tick) n = n + 1;
             end
             for (di = 0; di < LAG; di = di + 1) dbuf[di] = 24'sd0;
-            di = 0; sum_xx = 0; sum_xy = 0; pk = 0; n = 0;
+            di = 0; sum_xx = 0; sum_xy = 0; pk = 0; pkr = 0; n = 0;
             while (n < MEAS) begin
                 @(posedge clk);
                 if (sample_tick) begin
@@ -103,6 +109,8 @@ module tb_svf_stability;
                     end
                     if (x > pk)  pk = x;
                     if (-x > pk) pk = -x;
+                    if (mr > pkr)  pkr = mr;
+                    if (-mr > pkr) pkr = -mr;
                     dbuf[di] = ml;
                     di = (di + 1) % LAG;
                     n = n + 1;
@@ -121,37 +129,58 @@ module tb_svf_stability;
         @(negedge clk);
         rst_n = 1;
 
-        // baseline: moderate cutoff, Q = 1 — guards the metric
-        set_filter(14'h2000, 18'h10000);
+        // baseline: moderate cutoff, r = 0x200 (q1 = 1.0, today's
+        // timbre) — guards the metric
+        set_filter(14'h2000, 14'h0200);
         measure(r, peak);
-        $display("baseline fc=2000 Q=1:   r=%0d peak=%0d", r, peak);
+        $display("baseline fc=2000 r=200:  r=%0d peak=%0d", r, peak);
         if (r < 700) begin
             $display("FAIL: baseline not tonal — metric broken?");
             errors = errors + 1;
         end
 
-        // Corner 1 — worst legal damping: a q1 word beyond Q1_MAX
-        // clamps to sqrt(2) (Butterworth, the accepted heaviest), and
-        // the 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz). Must be
-        // tonal AND un-railed — the characterization runs showed a
-        // limit cycle can fake a perfect r while clipping at full
-        // scale, so both criteria are asserted.
-        set_filter(14'h3FFF, 18'h1FFFF);
+        // Corner 1 — heaviest decodable damping: r = 0 decodes to
+        // q1 = sqrt(2) (Butterworth — the old clamp, now structural)
+        // and the 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz).
+        // Must be tonal AND un-railed — the characterization runs
+        // showed a limit cycle can fake a perfect r while clipping
+        // at full scale, so both criteria are asserted.
+        set_filter(14'h3FFF, 14'h0000);
         measure(r, peak);
-        $display("corner1 fc=3FFF q1=max: r=%0d peak=%0d (clamps: 2B20, sqrt2)",
+        $display("corner1 fc=3FFF r=0:     r=%0d peak=%0d (Butterworth at FC_MAX)",
                  r, peak);
         if (r < 500 || peak > 6000000) begin
-            $display("FAIL: unstable or railed at the clamp corner");
+            $display("FAIL: unstable or railed at the Butterworth corner");
             errors = errors + 1;
         end
 
-        // Corner 2 — q1 = 1.0 (no damping clamp engaged) at FC_MAX:
-        // measured clean far beyond; must be tonal and un-railed.
-        set_filter(14'h3FFF, 18'h10000);
+        // Corner 2 — r = 0x200 (q1 = 1.0) at FC_MAX: measured clean
+        // far beyond; must be tonal and un-railed.
+        set_filter(14'h3FFF, 14'h0200);
         measure(r, peak);
-        $display("corner2 fc=3FFF q1=1.0: r=%0d peak=%0d", r, peak);
+        $display("corner2 fc=3FFF r=200:   r=%0d peak=%0d", r, peak);
         if (r < 500 || peak > 6000000) begin
-            $display("FAIL: unstable or railed at q1=1.0 corner");
+            $display("FAIL: unstable or railed at r=200 corner");
+            errors = errors + 1;
+        end
+
+        // Corner 3 — self-oscillation: r at the top of the scale
+        // decodes to q1 ~= 0 (zero damping). Element 0 rings freely;
+        // no tonality assert (wrap chaos under sustained drive is
+        // possible and audible-by-design), but the mix limiter must
+        // bound the output and — the real assert — the OTHER mix
+        // channel (all its elements muted) must stay silent: one
+        // element's self-oscillation must not corrupt its neighbors.
+        set_filter(14'h2000, 14'h3FFF);
+        measure(r, peak);
+        $display("corner3 fc=2000 r=max:   r=%0d peak=%0d peakR=%0d (self-osc)",
+                 r, peak, pkr);
+        if (peak == 0) begin
+            $display("FAIL: self-oscillation corner produced silence");
+            errors = errors + 1;
+        end
+        if (pkr > 0) begin
+            $display("FAIL: self-oscillation leaked into muted elements");
             errors = errors + 1;
         end
 
@@ -161,7 +190,7 @@ module tb_svf_stability;
     end
 
     initial begin
-        #80_000_000;
+        #110_000_000;
         $display("TIMEOUT");
         $finish;
     end
