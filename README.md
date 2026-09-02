@@ -1,7 +1,5 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
-https://discord.gg/rcvabz6n8
-
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32-C3 doing all
