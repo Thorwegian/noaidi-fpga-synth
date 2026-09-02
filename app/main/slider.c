@@ -33,7 +33,14 @@
 // so a 2 ms vTaskDelay rounds to ZERO ticks and busy-spins (caught
 // by the task watchdog on the first hardware run).
 #define POLL_US        2000   // slider poll period
-#define HYST_COUNTS    8      // raw movement needed to re-evaluate
+#define HYST_COUNTS    1      // raw movement needed to re-evaluate
+                              // (Thor's call, hands-on: 8 made fine
+                              // positioning land one CC off)
+#define CAL_AVG        8      // calibration min/max tracks an
+                              // 8-sample average: single-sample noise
+                              // spikes were stretching the range
+#define CAL_MARGIN     4      // raw counts pulled inward on save so
+                              // both endpoints stay reachable
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
                               // clearly didn't see full travel
 
@@ -135,8 +142,16 @@ static void slider_task(void *arg)
             continue;
 
         if (s_calibrating) {
-            if (raw < s_cal_min) s_cal_min = (uint16_t)raw;
-            if (raw > s_cal_max) s_cal_max = (uint16_t)raw;
+            // min/max over 8-sample averages (16 ms windows), not
+            // raw samples — outlier spikes don't extend the range
+            static int cal_sum = 0, cal_n = 0;
+            cal_sum += raw;
+            if (++cal_n >= CAL_AVG) {
+                int avg = cal_sum / CAL_AVG;
+                cal_sum = 0; cal_n = 0;
+                if (avg < s_cal_min) s_cal_min = (uint16_t)avg;
+                if (avg > s_cal_max) s_cal_max = (uint16_t)avg;
+            }
             if (++cal_print >= 100) {          // every ~200 ms
                 cal_print = 0;
                 ESP_LOGI(TAG, "CAL raw=%d seen %u..%u",
@@ -178,9 +193,9 @@ static void console_task(void *arg)
                 s_calibrating = false;
                 if (s_cal_max > s_cal_min &&
                     (uint16_t)(s_cal_max - s_cal_min) > MIN_CAL_SPAN) {
-                    s_raw_min = s_cal_min;
-                    s_raw_max = s_cal_max;
-                    save_calibration(s_cal_min, s_cal_max);
+                    s_raw_min = s_cal_min + CAL_MARGIN;
+                    s_raw_max = s_cal_max - CAL_MARGIN;
+                    save_calibration(s_raw_min, s_raw_max);
                 } else {
                     ESP_LOGW(TAG, "CAL ABORT: span %u..%u too small, "
                                   "keeping %u..%u",
