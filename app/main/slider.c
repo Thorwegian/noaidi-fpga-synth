@@ -7,6 +7,7 @@
 #include <stdbool.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -27,7 +28,11 @@
 // ADC noise sits well under a step and averaging adds nothing but
 // lag at 7-bit resolution (Thor). Movement hysteresis replaces the
 // old debounce: instant while moving, silent while parked.
-#define POLL_MS        2      // slider poll period
+// Pacing is an esp_timer notifying the task — same pattern and same
+// reason as engine_link's 1 kHz tick: the FreeRTOS tick is 100 Hz,
+// so a 2 ms vTaskDelay rounds to ZERO ticks and busy-spins (caught
+// by the task watchdog on the first hardware run).
+#define POLL_US        2000   // slider poll period
 #define HYST_COUNTS    8      // raw movement needed to re-evaluate
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
                               // clearly didn't see full travel
@@ -49,6 +54,12 @@ static uint16_t s_raw_max = DEFAULT_RAW_MAX;
 
 static volatile bool s_calibrating = false;
 static uint16_t s_cal_min, s_cal_max;
+static TaskHandle_t s_poll_task;
+
+static void poll_timer_cb(void *arg)
+{
+    xTaskNotifyGive(s_poll_task);   // runs in the esp_timer task
+}
 
 static int read_raw(void)
 {
@@ -118,7 +129,7 @@ static void slider_task(void *arg)
     int     cal_print = 0;
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         int raw = read_raw();
         if (raw < 0)
             continue;
@@ -218,7 +229,14 @@ void slider_init(void)
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usj_cfg));
 
-    xTaskCreate(slider_task, "slider", 3072, NULL, 4, NULL);
+    xTaskCreate(slider_task, "slider", 3072, NULL, 4, &s_poll_task);
+    const esp_timer_create_args_t targs = {
+        .callback = poll_timer_cb,
+        .name     = "slider_poll",
+    };
+    esp_timer_handle_t timer;
+    ESP_ERROR_CHECK(esp_timer_create(&targs, &timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, POLL_US));
     xTaskCreate(console_task, "slider_con", 3072, NULL, 3, NULL);
     ESP_LOGI(TAG, "slider on GPIO1/ADC1_CH1 -> CC71; keys: c=cal r=read");
 }
