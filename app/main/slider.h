@@ -9,11 +9,13 @@
 // resonance knob (voice_alloc's temporary CC 71 handler does the
 // rest; when the MIDI schema lands, only the CC number moves).
 //
-// Serial-monitor keys (USB-Serial-JTAG console):
-//   c  toggle calibration: first press starts capturing min/max
-//      while you run the slider end to end (raw values print live),
-//      second press saves to NVS and adopts the new range
-//   r  print one raw reading + the active calibration
+// Serial-monitor keys (USB-Serial-JTAG console) — two-point settled
+// calibration: park the fader at an end, press the key, the reading
+// averages for one second and that resting value becomes the end
+// (each end persists independently and can be redone alone):
+//   1  capture the MIN end
+//   2  capture the MAX end
+//   r  print one raw reading + ends + working range
 
 #pragma once
 
