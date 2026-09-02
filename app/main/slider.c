@@ -33,9 +33,12 @@
 // so a 2 ms vTaskDelay rounds to ZERO ticks and busy-spins (caught
 // by the task watchdog on the first hardware run).
 #define POLL_US        2000   // slider poll period
-#define HYST_COUNTS    1      // raw movement needed to re-evaluate
-                              // (Thor's call, hands-on: 8 made fine
-                              // positioning land one CC off)
+// CC-step Schmitt hysteresis (Thor, hands-on: the value often
+// flickers by ±1 when parked on a step boundary). The current CC's
+// raw band is widened by step/GUARD_DIV on both sides; the value
+// changes only once the wiper sits clearly inside a neighboring
+// band. Slow travel still reaches every CC value exactly.
+#define GUARD_DIV      4      // guard = 1/4 of one CC step
 #define CAL_AVG        8      // calibration min/max tracks an
                               // 8-sample average: single-sample noise
                               // spikes were stretching the range
@@ -132,7 +135,6 @@ static void save_calibration(uint16_t mn, uint16_t mx)
 static void slider_task(void *arg)
 {
     uint8_t last_cc  = 0xFF;       // force one send at boot
-    int     last_raw = -10000;     // ditto
     int     cal_print = 0;
 
     while (1) {
@@ -160,18 +162,27 @@ static void slider_task(void *arg)
             continue;
         }
 
-        // Re-evaluate only after real movement (~1/4 CC step), so a
-        // parked slider on a step boundary can't chatter; a moving
-        // slider updates at the poll rate, one poll of latency.
-        if (raw - last_raw < HYST_COUNTS && last_raw - raw < HYST_COUNTS)
-            continue;
-        last_raw = raw;
-
         uint8_t cc = raw_to_cc(raw);
-        if (cc != last_cc) {
-            last_cc = cc;
-            publish_cc(cc);
+        if (cc == last_cc)
+            continue;
+
+        // Schmitt band: adopt the new value only when the wiper has
+        // crossed the boundary out of last_cc's band by a quarter
+        // step (rails adopt unconditionally — the calibration margin
+        // guarantees they're reachable).
+        if (last_cc != 0xFF && raw > s_raw_min && raw < s_raw_max) {
+            int32_t range = (int32_t)s_raw_max - s_raw_min;
+            int32_t pos   = ((int32_t)raw - s_raw_min) * 127;
+            int32_t guard = range / GUARD_DIV;
+            if (cc > last_cc &&
+                pos < ((int32_t)last_cc + 1) * range + guard)
+                continue;
+            if (cc < last_cc &&
+                pos >= (int32_t)last_cc * range - guard)
+                continue;
         }
+        last_cc = cc;
+        publish_cc(cc);
     }
 }
 
