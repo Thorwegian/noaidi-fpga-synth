@@ -6,8 +6,8 @@ Supersedes the modulation half of [memory_map.md](memory_map.md)
 The verified wire protocol and per-element parameter ABI stand.
 
 Status: **BUILT — the ladder is complete through B5 (all
-ear-verified and merged), with the log-domain Q rung implemented and
-in final ear-verification (2026-09-03)**. Settled during the B0
+ear-verified and merged), plus the log-domain Q rung (approved
+2026-09-03)**. Settled during the B0
 review era: one bus format (signed Q8.10, octaves.fraction — law 5),
 detune stays a per-element static offset, producer pool raised to
 128, and (2026-09-02) Q's convention: log₂ resonance, bus taken
@@ -223,13 +223,17 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (unnamed; "stop"
   was only an analogy candidate), producer-side smoothing for
-  firmware-written buses, bus read-back diagnostics. **IMPLEMENTED,
-  in final ear-verification (2026-09-03, feat/log2-resonance): the
-  log-domain Q parameter** (Thor, 2026-09-02: "Let's break with
-  convention and do log2 encoded resonance."). Suite + timing green,
-  self-oscillation corner bench passes with cross-element isolation,
-  zero new pipeline stages (the decode rides the cutoff-K stage
-  budget); temporary CC 71 and the panel fader drive it live.
+  firmware-written buses, bus read-back diagnostics. ✅ **The
+  log-domain Q parameter — APPROVED (Thor, 2026-09-03) and merged**
+  (decided 2026-09-02: "Let's break with convention and do log2
+  encoded resonance."). Suite + timing green, self-oscillation
+  corner bench passes with cross-element isolation, zero new
+  pipeline stages (the decode rides the cutoff-K stage budget);
+  temporary CC 71 and the panel fader drive it live. Deferred
+  follow-up: shrink the q1 decode LUT 1024→16 entries (att-LUT
+  pattern, ~0.375 dB grid — loudness-class percept, per the
+  attenuation precedent; reclaims a BSRAM block; wire format
+  unchanged) as its own small bench-verified rung.
   Original decision record:
   Context for the decision: synth tradition is linear-in-feedback
   (a circuit accident, not a design argument); parametric EQs step Q
