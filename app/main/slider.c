@@ -23,10 +23,12 @@
 #define SLIDER_ADC_UNIT     ADC_UNIT_1
 #define SLIDER_ADC_CHANNEL  ADC_CHANNEL_1
 
-#define POLL_MS        20     // slider poll period
-#define AVG_SAMPLES    8      // per poll, averaged against ADC noise
-#define STABLE_POLLS   2      // a new CC value must hold this many
-                              // polls before it is sent (debounce)
+// 500 Hz single-sample polls: one CC step spans ~30 raw counts, so
+// ADC noise sits well under a step and averaging adds nothing but
+// lag at 7-bit resolution (Thor). Movement hysteresis replaces the
+// old debounce: instant while moving, silent while parked.
+#define POLL_MS        2      // slider poll period
+#define HYST_COUNTS    8      // raw movement needed to re-evaluate
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
                               // clearly didn't see full travel
 
@@ -48,15 +50,12 @@ static uint16_t s_raw_max = DEFAULT_RAW_MAX;
 static volatile bool s_calibrating = false;
 static uint16_t s_cal_min, s_cal_max;
 
-static int read_raw_avg(void)
+static int read_raw(void)
 {
-    int sum = 0, v = 0;
-    for (int i = 0; i < AVG_SAMPLES; i++) {
-        if (adc_oneshot_read(s_adc, SLIDER_ADC_CHANNEL, &v) != ESP_OK)
-            return -1;
-        sum += v;
-    }
-    return sum / AVG_SAMPLES;
+    int v = 0;
+    if (adc_oneshot_read(s_adc, SLIDER_ADC_CHANNEL, &v) != ESP_OK)
+        return -1;
+    return v;
 }
 
 static uint8_t raw_to_cc(int raw)
@@ -114,21 +113,20 @@ static void save_calibration(uint16_t mn, uint16_t mx)
 
 static void slider_task(void *arg)
 {
-    uint8_t last_cc = 0xFF;        // force one send at boot
-    uint8_t pending_cc = 0xFF;
-    int     pending_polls = 0;
+    uint8_t last_cc  = 0xFF;       // force one send at boot
+    int     last_raw = -10000;     // ditto
     int     cal_print = 0;
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
-        int raw = read_raw_avg();
+        int raw = read_raw();
         if (raw < 0)
             continue;
 
         if (s_calibrating) {
             if (raw < s_cal_min) s_cal_min = (uint16_t)raw;
             if (raw > s_cal_max) s_cal_max = (uint16_t)raw;
-            if (++cal_print >= 10) {           // every ~200 ms
+            if (++cal_print >= 100) {          // every ~200 ms
                 cal_print = 0;
                 ESP_LOGI(TAG, "CAL raw=%d seen %u..%u",
                          raw, s_cal_min, s_cal_max);
@@ -136,19 +134,16 @@ static void slider_task(void *arg)
             continue;
         }
 
+        // Re-evaluate only after real movement (~1/4 CC step), so a
+        // parked slider on a step boundary can't chatter; a moving
+        // slider updates at the poll rate, one poll of latency.
+        if (raw - last_raw < HYST_COUNTS && last_raw - raw < HYST_COUNTS)
+            continue;
+        last_raw = raw;
+
         uint8_t cc = raw_to_cc(raw);
-        if (cc == last_cc) {
-            pending_cc = 0xFF;
-            continue;
-        }
-        if (cc != pending_cc) {
-            pending_cc = cc;
-            pending_polls = 1;
-            continue;
-        }
-        if (++pending_polls >= STABLE_POLLS) {
+        if (cc != last_cc) {
             last_cc = cc;
-            pending_cc = 0xFF;
             publish_cc(cc);
         }
     }
@@ -182,7 +177,7 @@ static void console_task(void *arg)
                 }
             }
         } else if (ch == 'r' || ch == 'R') {
-            int raw = read_raw_avg();
+            int raw = read_raw();
             ESP_LOGI(TAG, "raw=%d cc=%u cal=%u..%u",
                      raw, raw_to_cc(raw), s_raw_min, s_raw_max);
         }
