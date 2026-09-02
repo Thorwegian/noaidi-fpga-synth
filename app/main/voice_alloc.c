@@ -25,7 +25,7 @@
 
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
-#define Q1_ONE     0x20000000u        // q1 = 0.5 (Q2.16) in FILTER[31:14]
+#define Q1_ONE     0x40000000u        // q1 = 0.5 (Q2.16) in FILTER[31:14]
 #define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
                                       // -36 in three steps; Thor measured
                                       // full-smash chords at -12 dBFS one
@@ -95,7 +95,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // (RC-style fast-then-slow) is an OPEN QUESTION for discussion/
 // testing — the agent's suggestion, not a decision. Depth is the
 // NEGATIVE of this; sustain LSB = span/256 = 0.28125 dB here.
-#define ENV_FLOOR     0x3000
+#define ENV_FLOOR     0x2800 // Testing out -60 dB
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
 // units (the envelope level carries 4 fractional bits: that IS the
@@ -108,7 +108,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Values: Thor's latest feel carried into the re-biased decode
 // (+0x40 per rate byte: his attack 0x48 → 0x88, release 0x18 →
 // 0x58), decay dropped into the newly opened gentle zone.
-#define ADSR_RATES    (0x88u | (0x20u << 8) | (0xD0u << 16) | (0x28u << 24))
+#define ADSR_RATES    (0x88u | (0x20u << 8) | (0xF0u << 16) | (0x28u << 24))
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
@@ -232,7 +232,7 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     // octaves at vel 127); velocity → gain bakes into the GAIN word
     // (B5: the gain bus belongs to the amp envelope now). The gate
     // bus write triggers the ADSR — one write, level-sensitive.
-    s_vel_cut[pick] = (int32_t)vel * 32;
+    s_vel_cut[pick] = (int32_t)vel * 48;
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
     engine_link_bus_write(BUS_VGATE(pick), 1);
 
