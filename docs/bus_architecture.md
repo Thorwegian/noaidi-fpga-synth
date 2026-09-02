@@ -214,8 +214,15 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (unnamed; "stop"
   was only an analogy candidate), producer-side smoothing for
-  firmware-written buses, bus read-back diagnostics. **PROMOTED to a
-  scheduled rung (Thor, 2026-09-02): the log-domain Q parameter.**
+  firmware-written buses, bus read-back diagnostics. **DECIDED — the
+  next gateware rung (Thor, 2026-09-02: "Let's break with convention
+  and do log2 encoded resonance."): the log-domain Q parameter.**
+  Context for the decision: synth tradition is linear-in-feedback
+  (a circuit accident, not a design argument); parametric EQs step Q
+  geometrically; resonant peak height in dB is linear in log Q, so
+  one bus integer step ≈ +6 dB of peak — parallel to gain's 6 dB and
+  pitch's octave. Panel taper, if wanted, is a separable firmware
+  curve (the EMU lesson).
   The current linear-q1 FILTER field is an unfinished mapping — 1/Q
   must be computed/LUT-decoded in gateware so Q becomes a USABLE
   modulation bus: encode the parameter (and its bus) as log₂
