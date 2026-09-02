@@ -173,7 +173,9 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 **Codified as [bus_architecture.md](bus_architecture.md)**
 (2026-08-30) — the spec with justifications, rejected alternatives,
-sizing and build milestones B0–B6. Awaiting Thor's sign-off (B0).
+sizing and build milestones B0–B6. **Built**: B1–B5 ear-verified and
+merged (buses, all sinks, firmware routes, LFO walker, per-voice
+ADSRs); log-domain Q implemented, in final verification.
 The planning notes below record how the design was reached:
 
 - **Governing balance** (Thor): SPI bandwidth saved vs FPGA complexity

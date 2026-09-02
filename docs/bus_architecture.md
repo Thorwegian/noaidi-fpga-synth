@@ -5,13 +5,16 @@ Supersedes the modulation half of [memory_map.md](memory_map.md)
 (generic cable matrix, shared LFO bank, per-element ADSR registers).
 The verified wire protocol and per-element parameter ABI stand.
 
-Status: **SPEC — B0 review in progress (as of 2026-08-30 evening)**.
-Settled during review: one bus format (signed Q8.10,
-octaves.fraction — law 5), detune stays a per-element static offset,
-producer pool raised to 128, and (2026-09-02) Q's convention: log₂
-resonance, bus taken as-is like pitch/cutoff. Still open before
-sign-off: the worst-case performance that finalizes sizing, and
-Thor's read of the remainder of this document.
+Status: **BUILT — the ladder is complete through B5 (all
+ear-verified and merged), with the log-domain Q rung implemented and
+in final ear-verification (2026-09-03)**. Settled during the B0
+review era: one bus format (signed Q8.10, octaves.fraction — law 5),
+detune stays a per-element static offset, producer pool raised to
+128, and (2026-09-02) Q's convention: log₂ resonance, bus taken
+as-is like pitch/cutoff. Formally still open: B0's explicit spec
+sign-off (largely overtaken by events — the design has been proven
+in silicon rung by rung) and the worst-case performance patch that
+finalizes sizing.
 
 ## Terminology used in this document
 
@@ -177,9 +180,10 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   wheel is one base write instead of 256 FILTER rewrites; the bench's
   live bus sweep measured SMOOTHER than the swap sweep (worst step
   10240 vs 38144) because commits land atomically between lane reads.
-- **B2 — All sink classes.** Pitch (with the detune decision), duty,
-  Q, gains on buses; voice_alloc rewired. *Verification: playable
-  synth indistinguishable by ear from today; benches green.*
+- **B2 — All sink classes.** ✅ (2026-08-31, ear-verified and
+  merged). Pitch (with the detune decision), duty, Q, gains on
+  buses; voice_alloc rewired; the six-replica bus pool and per-sink
+  slices live.
 - **B3 — Firmware-routed buses** ✅ (2026-08-31, Thor playing: "it
   works. No problems, even at high pitches with a wide open filter").
   Velocity → per-voice gain and cutoff buses (his tuning: brightening
@@ -208,16 +212,25 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   a one-constant knob in voice_alloc — deliberately oversized for
   the verification listen). Bench: 93.75 Hz square tremolo, ±12 dB,
   zero SPI during measurement.
-- **B5 — ADSR producer + gate-bus triggering.** Amp envelope first —
-  this is where note clicks die (absorbing the old smoothing rung's
-  goal) — then the filter envelope. *Verification: click-free attack
-  and release by ear; envelope shape in bench.*
+- **B5 — ADSR producer + gate-bus triggering.** ✅ (2026-09-01,
+  Thor: "this is a good result"; merged). Amp envelopes as producers
+  32–63, one per voice, gate buses 80+v, the envelope-subtracts-
+  silence idiom, the uniform log₂ rate ladder (fractional-level
+  decode), and the keystroke-instance voice lifecycle in firmware.
+  Note clicks died as planned. Still open from the B5 ladder text:
+  the FILTER envelope (a second ADSR pool onto the cutoff buses) —
+  now a follow-on rung of its own, not part of the B5 milestone.
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (unnamed; "stop"
   was only an analogy candidate), producer-side smoothing for
-  firmware-written buses, bus read-back diagnostics. **DECIDED — the
-  next gateware rung (Thor, 2026-09-02: "Let's break with convention
-  and do log2 encoded resonance."): the log-domain Q parameter.**
+  firmware-written buses, bus read-back diagnostics. **IMPLEMENTED,
+  in final ear-verification (2026-09-03, feat/log2-resonance): the
+  log-domain Q parameter** (Thor, 2026-09-02: "Let's break with
+  convention and do log2 encoded resonance."). Suite + timing green,
+  self-oscillation corner bench passes with cross-element isolation,
+  zero new pipeline stages (the decode rides the cutoff-K stage
+  budget); temporary CC 71 and the panel fader drive it live.
+  Original decision record:
   Context for the decision: synth tradition is linear-in-feedback
   (a circuit accident, not a design argument); parametric EQs step Q
   geometrically; resonant peak height in dB is linear in log Q, so
@@ -258,6 +271,25 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   perceptual → loudness compensation in gain staging, possibly
   firmware-side. Classic analog synths split exactly this way (Moog
   ladders genuinely lose bass with resonance; SVFs mostly don't).
+  And (2026-09-03, from the first high-Q listening session):
+  **soft saturation in the SVF resonance path** — candidate for one
+  of the next milestones. At CC 64 (Q ≈ 181, resonant peak ~+45 dB,
+  ring ~50–100 ms) the sound goes glassy/waterphone: 8 detuned saws
+  into near-undamped resonators parked at 1.41× the note (between
+  harmonics 1 and 2 — inharmonic), ring-outs beating. On top of it,
+  hard-clip crunch: +45 dB of resonant gain walks over the −18 dB
+  gain-staging headroom and the sat24 mix limiter clips HARD —
+  clip-generated harmonics near Nyquist genuinely alias ("aliasing/
+  bit crushing", Thor's ears, correctly). A second quieter layer is
+  fixed-point limit-cycle grain in the nearly-lossless SVF, amplified
+  by the resonant gain (separable test: limiter crunch scales with
+  velocity, limit-cycle grain doesn't). The classic fix is also THE
+  house-sound move: a gentle saturator inside the SVF loop (or
+  resonance-dependent input attenuation, the inverse of the Q-loss
+  compensation above) turns screech-and-crunch into controlled
+  musical self-oscillation — half of every famous analog filter's
+  character. Adjacent to the Q-loss measure-first plan; do them
+  together. (The waterphone itself is arguably a keeper preset.)
   And (Thor, 2026-09-01): **revisit where the binary point of
   attenuation values actually needs to be.** The envelope level's
   four fractional bits (UQ22.4, the rate-ladder fix) were placed for
