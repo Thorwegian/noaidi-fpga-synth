@@ -73,7 +73,10 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 - Sample rate **96 kHz**; SYSCLK **73.728 MHz = 768 × 96 kHz**, from
   the board's MS5351 CLK0 on FPGA package pin 10.
-- Per-board one-time setup: `pll_clk O0=73.728M -s` on the BL616
+- Per-board one-time setup: `pll_clk O0=73728K -s` (whole kHz only —
+  decimal-M is invalid syntax; the `-s` is load-bearing: without it
+  the setting reverts on the next power blip, verified the hard way
+  2026-09-03) on the BL616
   console (Ctrl+X Ctrl+C Enter at 115200). A board without this has a
   dead pin 10 — see AGENTS.md bring-up notes.
 - **Why not ~100 MHz** (decision 2026-08-30, Thor): five ear-verified
@@ -329,6 +332,12 @@ bench-verified) milestone. One rung in flight at a time.
    IDF_PATH-driven direct invocation, or a containerized firmware
    build. The gateware side is already portable (OSS CAD Suite on
    PATH).
+8. **Clock-sanity heartbeat (parked 2026-09-03, after the SYSCLK
+   incident)**: toggle one LED every 48 000 sample ticks — a correct
+   SYSCLK reads as a metronomic 1 Hz blink, a wrong MS5351 setting is
+   visibly off. Nearly free in the drum; turns "is the clock right?"
+   from a bench investigation (SPDIF carrier present but invalid, SPI
+   self-test blind to frequency) into a glance.
 
 ## Corrections and thoughts from Thor
 

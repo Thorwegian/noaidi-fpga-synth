@@ -75,10 +75,15 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 
 One-time clock setup (the MS5351 must be programmed or pin 10 is
 dead — a gateware PLL is never the workaround): connect to the BL616
-CLI at 115200 baud (Ctrl+X Ctrl+C Enter) and run
+CLI at 115200 baud (Ctrl+X Ctrl+C Enter) and run the command below.
+The value must be whole kilohertz — an `M` suffix with a decimal
+point is invalid syntax for this command — and `-s` is what makes it
+survive power cycles; without it the clock silently reverts on the
+next blip (symptom: SPDIF carrier present but no lock, everything
+else apparently fine).
 
 ```
-pll_clk O0=73.728M -s
+pll_clk O0=73728K -s
 ```
 
 ## Build requirements
