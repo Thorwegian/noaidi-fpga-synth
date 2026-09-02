@@ -8,6 +8,7 @@
 #   make fw         build the ESP32 firmware
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
+#   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -40,7 +41,10 @@ fw:
 fw-flash:
 	cd app && $(IDF) flash
 
+fw-monitor:
+	cd app && $(IDF) monitor
+
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor clean

@@ -25,7 +25,9 @@
 
 // ── The hardcoded test timbre (no stop structure yet) ───────────────
 #define WAVE_SAW   0x0
-#define Q1_ONE     0x40000000u        // q1 = 0.5 (Q2.16) in FILTER[31:14]
+#define Q1_ONE     0x40000000u        // q1 = 1.0 (Q2.16) in FILTER[31:14]
+                                      // — heavier damping, softer pad
+                                      // resonance (Thor, by ear)
 #define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
                                       // -36 in three steps; Thor measured
                                       // full-smash chords at -12 dBFS one

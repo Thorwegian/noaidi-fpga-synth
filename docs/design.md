@@ -317,6 +317,17 @@ bench-verified) milestone. One rung in flight at a time.
    may be unnecessary waits at the lower clock. One split at a time,
    each behind an ear-verified chord torture at full clock; S3B is the
    cheap first probe (ten-line revert + Fmax delta before any listen).
+7. **Build-environment tidy-up, before it gets too messy (Thor,
+   2026-09-02)**: "Espressif doesn't make it easy to have
+   standardised Makefiles that anyone can run" — the top-level
+   Makefile's idf.py path is machine-specific (a `~/bin/idf` wrapper
+   hard-coding the activate script for IDF v6.0.2; the activate
+   script kills executed scripts via a $0 heuristic, and idf.py is a
+   shell function after activation). Candidates when picked up: an
+   in-repo `tools/` wrapper reading an untracked local config,
+   IDF_PATH-driven direct invocation, or a containerized firmware
+   build. The gateware side is already portable (OSS CAD Suite on
+   PATH).
 
 ## Corrections and thoughts from Thor
 
