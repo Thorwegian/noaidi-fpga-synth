@@ -214,11 +214,20 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (unnamed; "stop"
   was only an analogy candidate), producer-side smoothing for
-  firmware-written buses, bus read-back diagnostics. Also parked here
-  (Thor, 2026-08-31): when a proper q1 LUT is made, revisit high-Q
-  behavior — the current clamps leave the high-Q end open (eff_q1
-  floors at zero; self-oscillation reachable) and only bound the
-  heavy-damping end at Butterworth.
+  firmware-written buses, bus read-back diagnostics. **PROMOTED to a
+  scheduled rung (Thor, 2026-09-02): the log-domain Q parameter.**
+  The current linear-q1 FILTER field is an unfinished mapping — 1/Q
+  must be computed/LUT-decoded in gateware so Q becomes a USABLE
+  modulation bus: encode the parameter (and its bus) as log₂
+  resonance like pitch/cutoff/gain, sum in log domain, decode to
+  linear q1 via the LUT+barrel-shift machinery after the bus add.
+  Equal bus steps then mean equal resonance ratios, and CC 71 maps
+  on the standard ladder. While in there, revisit high-Q behavior
+  (Thor, 2026-08-31): the current clamps leave the high-Q end open
+  (eff_q1 floors at zero; self-oscillation reachable) and only bound
+  the heavy-damping end at Butterworth. Silicon timing rule applies —
+  the decode lands in the most timing-fragile path; budget a
+  pipeline stage for it.
   And (Thor, 2026-08-31): **invert the GAIN word to volume
   semantics** — 0x00 = silence/max attenuation, larger = louder, so
   programming stops being backwards AND the p3 = 0x00000000 footgun

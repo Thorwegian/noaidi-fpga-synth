@@ -31,6 +31,30 @@ than the anonymous cleanliness of most software. Inspirations: Clavia
 Nord Lead, Roland JP-8000, Sequential Prophet, EMU10K1; on the software
 side Sylenth1 and Surge XT.
 
+- **The overall design goal is a TABLETOP synthesizer** (Thor,
+  2026-09-01).
+- **The direction: "a virtual analog synth with a massive sound"**
+  (Thor, 2026-09-02). The FPGA sound generator is ultra-flexible and
+  unconventional; what the ESP32 presents to the player is a fairly
+  conventional virtual analog synthesizer. User-facing behavior
+  follows synth convention; the unconventional machinery stays under
+  the hood.
+- **The narrative: "plugins won" — and we're proving it wrong**
+  (Thor, 2026-09-02). Very few hardware synthesizers on the market
+  have the capabilities being implemented here.
+
+### Control surface (recorded 2026-09-01, paced deliberately)
+
+JT wants **motorized sliders**. Agreed pacing (Thor: "I feel it might
+be a good idea to pace things"): motorized faders exist to display
+*recalled* state, so they sequence AFTER the stored-configuration
+("stop") structure exists; the panel is a co-processor sub-project
+regardless (the ESP32-C3's ~15 usable GPIOs are committed to SPI,
+MIDI UART and USB), and it should speak the same CC/SysEx schema as
+MIDI so it drops in without firmware surgery. Sequence: MIDI schema →
+stop structure → panel electronics → motorization. JT's fader
+hardware research can proceed independently at any time.
+
 ## System topology ✅
 
 ```

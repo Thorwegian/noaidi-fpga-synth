@@ -1,13 +1,19 @@
 # MIDI Control Schema
 
-**Status: DRAFT — awaiting Thor's sign-off.** Everything marked
-*proposal* is up for discussion; the principles section restates
-already-settled decisions from the tree.
+**Status: DRAFT — under Thor's review** (first review round
+2026-09-02 folded in below).
 
 The firmware rung this schema governs: mapping the synth's live
 parameters onto MIDI CCs and SysEx, entirely in the synth model
 (firmware). The FPGA continues to know nothing of MIDI
-([design.md](design.md) topology); gateware is frozen for this rung.
+([design.md](design.md) topology).
+
+**Framing (Thor, 2026-09-02): the MIDI/user side is CONVENTIONAL.**
+The FPGA sound generator is ultra-flexible and unconventional, but
+what the ESP32 presents right now is a fairly conventional virtual
+analog synthesizer — "a virtual analog synth with a massive sound."
+Player-facing behavior follows synth-panel convention everywhere;
+the unconventional machinery stays under the hood.
 
 ## Principles (settled)
 
@@ -38,24 +44,21 @@ Adopting the quasi-standard synth CC numbers where they exist:
 | CC | Target | Mapping | Notes |
 |---|---|---|---|
 | 1 | mod wheel → cutoff open | existing (`wheel × 24`) | unchanged |
-| 71 | resonance (q1) | needs a curve decision | q1 clamps [0, √2]; self-oscillation reachable at 0 — map high-CC → low-q1? |
-| 72 | amp release rate | `cc << 1` | |
-| 73 | amp attack rate | `cc << 1` | |
+| 71 | resonance | **waits for the Q-bus rung** | Thor 2026-09-02: the current linear-q1 parameter is an unfinished mapping — 1/Q must be computed/LUT-decoded in gateware so Q becomes a usable (log-domain, perceptual) modulation bus, like pitch/cutoff/gain. CC mapping lands with that rung. |
+| 72 | amp release rate | `(127 − cc) << 1` | CC up = longer release (panel convention) |
+| 73 | amp attack rate | `(127 − cc) << 1` | CC up = longer attack (panel convention) |
 | 74 | cutoff base offset | 14-bit candidate (see below) | rides the per-voice cutoff buses' firmware term |
-| 75 | amp decay rate | `cc << 1` | |
-| 79 | amp sustain level | `cc << 1` | span/256 units below peak |
+| 75 | amp decay rate | `(127 − cc) << 1` | CC up = longer decay (panel convention) |
+| 79 | amp sustain level | `(127 − cc) << 1` | CC up = louder sustain (byte counts down from peak) |
 | 120/123 | all sound off / all notes off | gate buses → 0 | panic path; 120 may also drop levels via GATE words |
+
+Knob direction is SETTLED (Thor, 2026-09-02): "perfectly normal knob
+direction, please" — all four envelope CCs invert, which keeps every
+step on the equal-ratio ladder.
 
 Changed rates are pushed to all 32 amp-ADSR producers (32 banked
 `engine_link_prod_write`s riding one swap) and `release_tail_us()`
 switches from the compile-time `ADSR_RATES` macro to the live value.
-
-**Open question 1 — knob direction.** Raw `cc << 1` means CC up =
-*faster* attack. The near-universal synth panel convention is attack
-knob up = *longer* attack. The inversion is still trivial
-(`(127 − cc) << 1`) and stays on the ladder. Raw or inverted, per
-rate? (Sustain has the same question: CC up = louder sustain would be
-`(127 − cc) << 1` since the byte counts *down* from peak.)
 
 **Open question 2 — 7 vs 14 bit.** Rates and sustain fit 7-bit CCs
 perfectly by construction. Cutoff base is UQ4.10 (14 bits) — worth a
