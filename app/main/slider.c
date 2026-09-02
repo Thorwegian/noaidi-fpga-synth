@@ -49,10 +49,6 @@
 // to a fraction of a count), and that RESTING value becomes the
 // end. Ends persist independently, so either can be redone alone.
 #define CAPTURE_POLLS  500    // 1 s of settling average per end
-#define END_MARGIN_DIV 64     // span/64 pulled inward from each
-                              // settled end so the rails stay
-                              // reachable across drift (~1-2 CC of
-                              // plateau at each end of travel)
 #define MIN_CAL_SPAN   500    // raw counts; smaller span = the two
                               // ends clearly aren't a full travel
 
@@ -95,7 +91,11 @@ static uint8_t raw_to_cc(int raw)
 {
     if (raw <= s_raw_min) return 0;
     if (raw >= s_raw_max) return 127;
-    return (uint8_t)(((raw - s_raw_min) * 127) / (s_raw_max - s_raw_min));
+    int range = s_raw_max - s_raw_min;
+    // round to nearest: the rails bind within half a step of the
+    // settled ends, so tiny post-calibration drift can't strand the
+    // fader at 1 or 126
+    return (uint8_t)(((raw - s_raw_min) * 127 + range / 2) / range);
 }
 
 // The slider IS a MIDI controller as far as the synth model knows:
@@ -110,7 +110,10 @@ static void publish_cc(uint8_t value)
     event_bus_publish(&evt);
 }
 
-// Working range = settled ends pulled inward by span/64.
+// The calibration's job is to FIND the range (Thor) — the settled
+// ends ARE the working range, no margin. Edge noise is the backlash
+// hysteresis's job, and round-to-nearest mapping means the rails
+// bind within half a step of the settled resting values.
 static void apply_ends(void)
 {
     if (s_end_max <= s_end_min + MIN_CAL_SPAN) {
@@ -118,11 +121,9 @@ static void apply_ends(void)
                  s_end_min, s_end_max, s_raw_min, s_raw_max);
         return;
     }
-    uint16_t margin = (uint16_t)((s_end_max - s_end_min) / END_MARGIN_DIV);
-    s_raw_min = s_end_min + margin;
-    s_raw_max = s_end_max - margin;
-    ESP_LOGI(TAG, "range: ends %u..%u -> working %u..%u",
-             s_end_min, s_end_max, s_raw_min, s_raw_max);
+    s_raw_min = s_end_min;
+    s_raw_max = s_end_max;
+    ESP_LOGI(TAG, "range: %u..%u", s_raw_min, s_raw_max);
 }
 
 static void load_calibration(void)
