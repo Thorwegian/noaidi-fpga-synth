@@ -7,7 +7,7 @@ musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison elements per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz audio out on SPDIF and I2S.
 
-The narrative is that plugins won. We're proving it wrong.
+Plugins won. We're proving it wrong.
 
 ## Architecture
 
@@ -91,11 +91,3 @@ After any gateware load (`sram`/`flash`), restart the ESP32
 (`make fw-flash` or its reset button) so the engine link rewrites the
 full parameter image — the FPGA boots with the boot image, not your
 live state.
-
-## Process
-
-Development is conversation-driven between Thor and an AI agent:
-decisions land in `docs/` the turn they're made, every rung is a side
-branch (one at a time) merged only at an ear-verified (or
-bench-verified where marked) milestone, and the board always matches
-the tree.
