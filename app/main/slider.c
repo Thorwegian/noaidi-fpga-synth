@@ -35,15 +35,12 @@
 // vTaskDelay rounds to zero ticks and busy-spins).
 #define POLL_US        2000   // slider poll period
 #define WIN_LEN        8      // rolling-average window (power of 2)
-// CC-step Schmitt hysteresis (Thor, hands-on: the value often
-// flickers by ±1 when parked on a step boundary). The current CC's
-// raw band is widened by step/GUARD_DIV on both sides; the value
-// changes only once the wiper sits clearly inside a neighboring
-// band. Slow travel still reaches every CC value exactly.
-#define GUARD_DIV      2      // guard = 1/2 CC step each side (full
-                              // step of total hysteresis: measured
-                              // quarter-step still let ~4 flickers
-                              // through per 20 s parked on a boundary)
+// CC-level backlash hysteresis (Thor's design: "a change of 1 isn't
+// enough — a window of 2 that is allowed to move in steps of 1").
+// The sent value owns a ±1 window; a candidate inside it changes
+// nothing, a candidate beyond it drags the sent value to the window
+// edge. Parked ±1 flicker is structurally silent; slow travel steps
+// by 1. Rails adopt exactly so 0 and 127 stay reachable.
 #define CAL_MARGIN     4      // raw counts pulled inward on save so
                               // both endpoints stay reachable
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
@@ -171,26 +168,22 @@ static void slider_task(void *arg)
         }
 
         uint8_t cc = raw_to_cc(raw);
-        if (cc == last_cc)
-            continue;
+        uint8_t send;
+        if (last_cc == 0xFF)
+            send = cc;                          // first value at boot
+        else if (cc == 127 && last_cc < 127)
+            send = 127;                         // rails adopt exactly
+        else if (cc == 0 && last_cc > 0)
+            send = 0;
+        else if ((int)cc - (int)last_cc >= 2)
+            send = cc - 1;                      // drag to window edge
+        else if ((int)last_cc - (int)cc >= 2)
+            send = cc + 1;
+        else
+            continue;                           // inside the window
 
-        // Schmitt band: adopt the new value only when the wiper has
-        // crossed the boundary out of last_cc's band by a quarter
-        // step (rails adopt unconditionally — the calibration margin
-        // guarantees they're reachable).
-        if (last_cc != 0xFF && raw > s_raw_min && raw < s_raw_max) {
-            int32_t range = (int32_t)s_raw_max - s_raw_min;
-            int32_t pos   = ((int32_t)raw - s_raw_min) * 127;
-            int32_t guard = range / GUARD_DIV;
-            if (cc > last_cc &&
-                pos < ((int32_t)last_cc + 1) * range + guard)
-                continue;
-            if (cc < last_cc &&
-                pos >= (int32_t)last_cc * range - guard)
-                continue;
-        }
-        last_cc = cc;
-        publish_cc(cc);
+        last_cc = send;
+        publish_cc(send);
     }
 }
 
