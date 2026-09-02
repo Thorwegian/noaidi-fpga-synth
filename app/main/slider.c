@@ -40,7 +40,10 @@
 // raw band is widened by step/GUARD_DIV on both sides; the value
 // changes only once the wiper sits clearly inside a neighboring
 // band. Slow travel still reaches every CC value exactly.
-#define GUARD_DIV      4      // guard = 1/4 of one CC step
+#define GUARD_DIV      2      // guard = 1/2 CC step each side (full
+                              // step of total hysteresis: measured
+                              // quarter-step still let ~4 flickers
+                              // through per 20 s parked on a boundary)
 #define CAL_MARGIN     4      // raw counts pulled inward on save so
                               // both endpoints stay reachable
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
