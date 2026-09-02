@@ -41,8 +41,13 @@
 // nothing, a candidate beyond it drags the sent value to the window
 // edge. Parked ±1 flicker is structurally silent; slow travel steps
 // by 1. Rails adopt exactly so 0 and 127 stay reachable.
-#define CAL_MARGIN     4      // raw counts pulled inward on save so
-                              // both endpoints stay reachable
+// Calibration margin: span/32 pulled inward from each captured end.
+// Measured on Thor's hardware: pressing the fader against an end
+// stop during calibration reads ~50 counts beyond where the same
+// end RESTS afterwards, so a token margin left cc 127 unreachable.
+// span/32 (~105 counts here) guarantees both rails with headroom;
+// the interior step size barely changes (~25 vs ~26 counts per CC).
+#define CAL_MARGIN_DIV 32
 #define MIN_CAL_SPAN   500    // raw counts; smaller = calibration
                               // clearly didn't see full travel
 
@@ -205,8 +210,10 @@ static void console_task(void *arg)
                 s_calibrating = false;
                 if (s_cal_max > s_cal_min &&
                     (uint16_t)(s_cal_max - s_cal_min) > MIN_CAL_SPAN) {
-                    s_raw_min = s_cal_min + CAL_MARGIN;
-                    s_raw_max = s_cal_max - CAL_MARGIN;
+                    uint16_t margin =
+                        (uint16_t)((s_cal_max - s_cal_min) / CAL_MARGIN_DIV);
+                    s_raw_min = s_cal_min + margin;
+                    s_raw_max = s_cal_max - margin;
                     save_calibration(s_raw_min, s_raw_max);
                 } else {
                     ESP_LOGW(TAG, "CAL ABORT: span %u..%u too small, "
