@@ -73,6 +73,11 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // ── Bus plan (B3/B5, firmware convention — bus_architecture.md) ─────
 // bus 2:      global pitch offset — the pitch wheel. Every element's
 //             pitch pointer references it.
+// bus 3:      global resonance offset — TEMPORARY CC 71 assignment
+//             (Thor, 2026-09-03) until the MIDI schema is nailed
+//             down. Every element's Q pointer references it; the
+//             knob writes (cc << 7) − RESO so the effective code is
+//             exactly cc << 7 (0 = Butterworth .. 127 ≈ self-osc).
 // bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5):
 //             base = ENV_FLOOR (full attenuation), the ADSR producer
 //             adds level × (−ENV_FLOOR): silent at level 0, full at
@@ -85,6 +90,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
 // follows bends (Thor).
 #define BUS_PITCH_GLOBAL 2
+#define BUS_RESO_GLOBAL  3
 #define BUS_GAIN(v)   (16 + (v))
 #define BUS_CUT(v)    (48 + (v))
 #define BUS_VGATE(v)  (80 + (v))
@@ -92,10 +98,10 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
-// Envelope attenuation span: 0x3000 Q8.10 = 12 octaves = 72 dB
-// (Thor, 2026-09-01 — settled by ear after living with 48 dB; the
-// original -96 dB made attacks sit below audibility, "a delayed
-// short attack"). The linear level ramp into the log-encoded gain IS
+// Envelope attenuation span: 0x2800 Q8.10 = 10 octaves = 60 dB
+// (Thor, iterating by ear — -96 dB buried attacks below audibility,
+// 48 dB proved too shallow, 72 dB tried briefly; sustain LSB =
+// span/256 = 0.234 dB). The linear level ramp into the log-encoded gain IS
 // an exponential-amplitude curve (Thor) — slow-then-fast. Whether
 // the attack should additionally be LINEARIZED in amplitude
 // (RC-style fast-then-slow) is an OPEN QUESTION for discussion/
@@ -255,6 +261,16 @@ static void refresh_cut_buses(void)
             engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
 }
 
+// CC 71 → global resonance bus (TEMPORARY assignment, see bus plan).
+// One live bus write moves every element: effective resonance code
+// = RESO + (cc<<7 − RESO) = cc << 7 — 0 = Butterworth, 127 ≈ 15.9
+// octaves of Q = self-oscillation. Conventional knob: up = more.
+static void reso_update(uint8_t val)
+{
+    int32_t offset = ((int32_t)val << 7) - (int32_t)RESO;
+    engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
+}
+
 // Mod wheel → cutoff term (0 to ~+3 octaves, wheel*24 Q8.10 LSB).
 static void wheel_update(uint8_t val)
 {
@@ -314,6 +330,8 @@ static void handle_midi(const midi_message_t *m)
     case 0xB0:
         if (m->data[0] == 1)          // CC1: mod wheel → cutoff
             wheel_update(m->data[1]);
+        else if (m->data[0] == 71)    // CC71: resonance (temporary)
+            reso_update(m->data[1]);
         break;
     case 0xE0:                        // pitch wheel, 14-bit
         bend_update((uint16_t)(((uint16_t)m->data[1] << 7) | m->data[0]));
@@ -354,7 +372,8 @@ static void wire_pointers(void)
         send((uint8_t)e, 5,
              (uint32_t)BUS_PITCH_GLOBAL | ((uint32_t)BUS_CUT(v) << 20));
         send((uint8_t)e, 6,
-             ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
+             (uint32_t)BUS_RESO_GLOBAL
+             | ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
     }
 }
 
@@ -367,6 +386,7 @@ void voice_alloc_init(void)
     }
     wire_pointers();
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
+    engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
 
     // B4: producer 0 — the boot vibrato. Triangle LFO at 1.0 Hz
     // (rate16 = 175; LFOs are subsonic), depth tamed to ±19 cents

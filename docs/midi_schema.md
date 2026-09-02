@@ -44,7 +44,7 @@ Adopting the quasi-standard synth CC numbers where they exist:
 | CC | Target | Mapping | Notes |
 |---|---|---|---|
 | 1 | mod wheel → cutoff open | existing (`wheel × 24`) | unchanged |
-| 71 | resonance | `cc << 7` | onto the log₂ resonance code (UQ4.10 octaves of Q above Butterworth, FILTER[27:14]): CC up = more resonance in equal-ratio steps of ~0.75 dB peak each; CC 127 ≈ 15.9 octaves = self-oscillation at the top — the classic VA knob. Panel taper, if wanted, is a separable firmware curve. |
+| 71 | resonance | `cc << 7` | onto the log₂ resonance code (UQ4.10 octaves of Q above Butterworth, FILTER[27:14]): CC up = more resonance in equal-ratio steps of ~0.75 dB peak each; CC 127 ≈ 15.9 octaves = self-oscillation at the top — the classic VA knob. Panel taper, if wanted, is a separable firmware curve. **TEMPORARILY LIVE pre-sign-off** (Thor, 2026-09-03): rides global resonance bus 3 as one live write of `(cc << 7) − RESO`, all elements respond instantly. |
 | 72 | amp release rate | `(127 − cc) << 1` | CC up = longer release (panel convention) |
 | 73 | amp attack rate | `(127 − cc) << 1` | CC up = longer attack (panel convention) |
 | 74 | cutoff base offset | 14-bit candidate (see below) | rides the per-voice cutoff buses' firmware term |
