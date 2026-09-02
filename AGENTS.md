@@ -97,7 +97,9 @@ repo. Keep this file updated when the architecture changes.
 ## Bring-up on a NEW Tang board — read this first
 
 The 73.728 MHz on pin 10 comes from the MS5351, whose configuration lives in
-**the board's NVM, not the bitstream** (`pll_clk O0=73.728M -s` via the BL616
+**the board's NVM, not the bitstream** (`pll_clk O0=73728K -s` — whole
+kHz only, decimal-M is invalid syntax; WITHOUT `-s` it reverts on the
+next power blip — via the BL616
 CLI). A fresh board therefore has *no sysclk*, and every audio symptom follows
 from that: the drum never ticks, `spdif_tx` never runs, `spdif_out` sits at its
 reset level, and a scope on the SPDIF pin sees nothing at all.
