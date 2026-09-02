@@ -39,17 +39,39 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   design): [docs/midi_schema.md](docs/midi_schema.md); consolidated
   design: [docs/design.md](docs/design.md).
 
-## Board setup
+## Wiring
+
+**Inter-board SPI** (ESP32-C3 Super Mini master ↔ Tang Nano 20K
+slave, Mode 0, 10 MHz — measured clean to 40):
+
+| Signal | ESP32-C3 GPIO | Tang Nano 20K pin |
+|---|---|---|
+| MOSI | 6 | 26 |
+| MISO | 5 | 29 |
+| SCLK | 4 | 25 |
+| CS (active low) | 7 | 28 |
+
+(GPIO7 doubles as UART1's default TX, which is why MIDI UART init
+runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
+
+**ESP32-C3 peripherals:**
+
+| Signal | GPIO | Description |
+|---|---|---|
+| MIDI in | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit |
+| Panel slider | 1 (A1) | ADC1 ch 1: 10 kΩ linear pot wiper; pot sits between 680 Ω to GND and 3.6 kΩ to 3.3 V so the wiper stays inside the max-attenuation ADC range (~0.16–2.47 V). Calibrate via 'c' in the serial monitor; min/max persist in NVS |
+
+**Tang Nano 20K** (full list in `rtl/constraints.cst`):
 
 | Signal | Pin | Description |
 |---|---|---|
-| clk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
+| sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
 | spdif_out | 27 | SPDIF digital audio |
 | i2s_data | 54 | I2S serial data |
 | i2s_lrclk | 55 | I2S word select |
 | i2s_bclk | 56 | I2S bit clock |
-
-SPI and remaining pins: see `rtl/constraints.cst`.
+| rst | 87 | reset button |
+| led[5:0] | 20–15 | status LEDs |
 
 One-time clock setup (the MS5351 must be programmed or pin 10 is
 dead — a gateware PLL is never the workaround): connect to the BL616

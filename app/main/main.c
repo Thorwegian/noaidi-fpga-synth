@@ -13,6 +13,7 @@
 #include "event_bus.h"
 #include "engine_link.h"
 #include "voice_alloc.h"
+#include "slider.h"
 
 void app_main(void)
 {
@@ -96,5 +97,6 @@ void app_main(void)
     printf("=== voice concept: 32 voices x 8 elements, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();
+    slider_init();   // panel slider -> CC71 (resonance); 'c' = calibrate
     printf("play the keyboard — gate-by-gain, clicks expected\n");
 }
