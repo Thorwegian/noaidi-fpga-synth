@@ -32,11 +32,13 @@
 // self-oscillation. 0x200 = the q1 = 1.0 soft-pad damping Thor
 // tuned by ear in the old linear encoding.
 #define RESO       0x200u
-#define GAIN_BASE  0x30               // UQ4.4: -18 dB. Ear-tuned up from
-                                      // -36 in three steps; Thor measured
-                                      // full-smash chords at -12 dBFS one
-                                      // step below this, so headroom holds.
-#define GAIN_MUTE  0xFF               // exact mute (special-cased in RTL)
+// GAIN words are VOLUME since issue #40 (0x00 = silence, 0xFF =
+// loudest); a zeroed word is silent-by-default. VOL_BASE is the old
+// ear-tuned -18 dB expressed as volume (0xFF - 0x30); the headroom
+// evidence (full-smash chords at -12 dBFS one step below) carries
+// over unchanged.
+#define VOL_BASE   0xCF
+#define VOL_MUTE   0x00               // exact mute (special-cased in RTL)
 
 // Church-organ unison detune per element index, in UQ4.10 fraction
 // LSBs (≈1.17 cents each). Left half (0-3) and right half (4-7) use
@@ -78,11 +80,13 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 //             down. Every element's Q pointer references it; the
 //             knob writes (cc << 7) − RESO so the effective code is
 //             exactly cc << 7 (0 = Butterworth .. 127 ≈ self-osc).
-// bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5):
-//             base = ENV_FLOOR (full attenuation), the ADSR producer
-//             adds level × (−ENV_FLOOR): silent at level 0, full at
-//             level 1. Velocity is note-static and bakes into the
-//             GAIN word instead.
+// bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5;
+//             volume semantics since issue #40): base = −ENV_SPAN
+//             (the quiet floor), the ADSR source adds level ×
+//             (+ENV_SPAN) — the level simply ADDS volume: floor at
+//             level 0, the note's full volume at level 1. No
+//             negative-depth trick. Velocity is note-static and
+//             bakes into the GAIN (volume) word instead.
 // bus 48+v:   voice v's cutoff offset — velocity + wheel + bend summed
 //             by firmware (the combiner takes this job at B6).
 // bus 80+v:   voice v's GATE bus — the ADSR watches it (level-
@@ -98,16 +102,16 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
-// Envelope attenuation span: 0x2800 Q8.10 = 10 octaves = 60 dB
-// (Thor, iterating by ear — -96 dB buried attacks below audibility,
-// 48 dB proved too shallow, 72 dB tried briefly; sustain LSB =
-// span/256 = 0.234 dB). The linear level ramp into the log-encoded gain IS
-// an exponential-amplitude curve (Thor) — slow-then-fast. Whether
-// the attack should additionally be LINEARIZED in amplitude
-// (RC-style fast-then-slow) is an OPEN QUESTION for discussion/
-// testing — the agent's suggestion, not a decision. Depth is the
-// NEGATIVE of this; sustain LSB = span/256 = 0.28125 dB here.
-#define ENV_FLOOR     0x2800 // Testing out -60 dB
+// Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB (Thor, iterating
+// by ear — -96 dB buried attacks below audibility, 48 dB proved too
+// shallow, 72 dB tried briefly; sustain LSB = span/256 = 0.234 dB).
+// The linear level ramp into the log-encoded gain IS an
+// exponential-amplitude curve (Thor) — slow-then-fast. Whether the
+// attack should additionally be LINEARIZED in amplitude (RC-style
+// fast-then-slow) is an OPEN QUESTION for discussion/testing — the
+// agent's suggestion, not a decision. With volume semantics the bus
+// base is MINUS this span and the source depth is PLUS it.
+#define ENV_SPAN      0x2800 // 60 dB (Thor's by-ear pick)
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
 // units (the envelope level carries 4 fractional bits: that IS the
@@ -185,14 +189,15 @@ static uint32_t elem_osc_word(uint8_t note, int u)
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
-    uint32_t gain = (uint32_t)GAIN_BASE + ((127u - vel) >> 1);
-    if (gain > 0xFE) gain = 0xFE;
+    // volume semantics: softer hits are LOWER values
+    uint32_t vol = (uint32_t)VOL_BASE - ((127u - vel) >> 1);
+    if (vol < 0x01) vol = 0x01;
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
         uint8_t  elem  = (uint8_t)(v * ELEMS_PER_VOICE + u);
         bool left = u < (ELEMS_PER_VOICE / 2);
-        uint32_t l = left ? gain : GAIN_MUTE;
-        uint32_t r = left ? GAIN_MUTE : gain;
+        uint32_t l = left ? vol : VOL_MUTE;
+        uint32_t r = left ? VOL_MUTE : vol;
 
         send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
@@ -396,18 +401,20 @@ void voice_alloc_init(void)
         1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6) | (175u << 16));
     engine_link_prod_write(0, 2, 16);
 
-    // B5: per-voice amp envelopes — producers 32..63. Each watches
-    // its voice's gate bus and drives its voice's gain bus from the
-    // ENV_FLOOR base with negative depth (envelope subtracts
-    // silence). Bases are live bus writes; config rides the swap.
+    // B5: per-voice amp envelopes — sources 32..63. Each watches its
+    // voice's gate bus and drives its voice's gain bus: base is the
+    // quiet floor (−ENV_SPAN), the envelope level ADDS volume up to
+    // the note's GAIN word (volume semantics, issue #40 — the
+    // subtracts-silence trick is retired). Bases are live bus
+    // writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_bus_write(BUS_GAIN(v), ENV_FLOOR);
+        engine_link_bus_write(BUS_GAIN(v),
+            (uint32_t)(-(int32_t)ENV_SPAN) & 0x3FFFF);
         engine_link_prod_write(PROD_ADSR(v), 0,
             2u | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_ADSR(v), 1, ADSR_RATES);
-        engine_link_prod_write(PROD_ADSR(v), 2,
-            (uint32_t)(-(int32_t)ENV_FLOOR) & 0x3FFFF);
+        engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
     }
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {

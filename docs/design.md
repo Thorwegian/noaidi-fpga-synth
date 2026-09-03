@@ -116,7 +116,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed SVF-K LUT), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth (decided 2026-09-02, "break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | UQ4.4 log | 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift; 0xFF ≈ −96 dB |
+| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (issue #40 inverted the code to volume; the binary point stays at UQ4.4 — the 0.375 dB grid is the ear-proven resolution, answering the parked question by ratification) |
 | Envelope times | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave, decoded by the same LUT+shift machinery (📋) |
 
 ## The drum — SCMO pipeline ✅

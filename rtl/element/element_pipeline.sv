@@ -142,7 +142,10 @@ module element_pipeline #(
     //   p2[13:0]  fc    UQ4.10     p2[27:14] resonance UQ4.10 log2
     //             (r octaves of Q above Butterworth; q1 = sqrt2*2^-r,
     //              decoded via q1_lut like cutoff K; p2[31:28] reserved)
-    //   p3[7:0]   gain L UQ4.4     p3[15:8] gain R UQ4.4
+    //   p3[7:0]   volume L UQ4.4   p3[15:8] volume R UQ4.4
+    //             (0x00 = silence/exact mute .. 0xFF = loudest;
+    //              inverted to the attenuation code at the effective-
+    //              parameter seam — issue #40)
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
     // Doubled for ping-pong: {bank, voice} addressing, both halves
@@ -676,10 +679,14 @@ module element_pipeline #(
     assign s1_duty  = s1_duty_word[23:0];
     assign s1_fc    = s1_filter_word[13:0];
     assign s1_reso  = s1_filter_word[27:14];
-    // GATE off = exact-mute gain code into the existing mute machinery:
+    // GAIN word carries VOLUME (issue #40, 0x00 = silence .. 0xFF =
+    // loudest): a zeroed parameter word is now silent-by-default
+    // instead of full-blast. GATE off = volume zero, which the
+    // effective-parameter stage maps onto the existing exact-mute
+    // machinery:
     // one decode-stage mux, no new carry registers down the pipeline.
-    assign s1_gl    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'hFF;
-    assign s1_gr    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'hFF;
+    assign s1_gl    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
+    assign s1_gr    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
     assign s1_dual  = s1_gain_word[16];
     assign s1_ftype = s1_gain_word[18:17];
 
@@ -772,9 +779,13 @@ module element_pipeline #(
     //          for resonance that is one octave of Q ≈ +6 dB of peak)
     //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
     //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
-    //          bus = more attenuation = quieter). A base of 0xFF
-    //          (exact mute — hard-panned channels, gated elements) is
-    //          preserved regardless of the bus.
+    //          bus = LOUDER — volume semantics, issue #40). A base of
+    //          0x00 (exact mute — hard-panned channels, gated
+    //          elements) is preserved regardless of the bus, and the
+    //          bus alone can never reach exact mute (sums clamp to
+    //          the quietest audible step). The sum is converted to
+    //          the attenuation code here, at ONE seam, so everything
+    //          downstream (S9B decode, mute == 0xFF) is untouched.
     //----------------------------------------------------------------
     // Resonance is log2-encoded (Thor, 2026-09-02: "break with
     // convention"): r = octaves of Q above Butterworth, UQ4.10;
@@ -819,14 +830,19 @@ module element_pipeline #(
         $signed({11'b0, s2_gl}) + {gbus_l[17], gbus_l};
     wire signed [18:0] gr_sum =
         $signed({11'b0, s2_gr}) + {gbus_r[17], gbus_r};
+    // volume in, attenuation code out (the one subtract of issue #40)
     wire [7:0] eff_gl =
-        (s2_gl == 8'hFF)      ? 8'hFF :
-        gl_sum[18]            ? 8'h00 :
-        (gl_sum > 19'sd254)   ? 8'hFE : gl_sum[7:0];
+        (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins
+        (gl_sum[18] || gl_sum == 19'sd0)
+                              ? 8'hFE :             // quietest audible
+        (gl_sum > 19'sd255)   ? 8'h00 :             // full volume
+        8'hFF - gl_sum[7:0];
     wire [7:0] eff_gr =
-        (s2_gr == 8'hFF)      ? 8'hFF :
-        gr_sum[18]            ? 8'h00 :
-        (gr_sum > 19'sd254)   ? 8'hFE : gr_sum[7:0];
+        (s2_gr == 8'h00)      ? 8'hFF :
+        (gr_sum[18] || gr_sum == 19'sd0)
+                              ? 8'hFE :
+        (gr_sum > 19'sd255)   ? 8'h00 :
+        8'hFF - gr_sum[7:0];
 
     //----------------------------------------------------------------
     // S3 — LUT data, delta/K, phase_next, oscillator waveform

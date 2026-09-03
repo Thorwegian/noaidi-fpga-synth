@@ -59,15 +59,17 @@ module tb_svf_stability;
             u_pipe.osc_param_ram[e] = 36'h0;
             u_pipe.duty_param_ram[e] = 36'h0;
             u_pipe.filter_param_ram[e] = 36'h0;
-            u_pipe.gain_param_ram[e] = 36'h00000FFFF;      // mute L+R
+            u_pipe.gain_param_ram[e] = 36'h000000000;      // mute L+R
+                                                           // (volume 0,
+                                                           // issue #40)
             u_pipe.gate_param_ram[e] = 2'b01;              // gate on
             u_pipe.ptrs0_param_ram[e] = 30'd0;
             u_pipe.ptrs1_param_ram[e] = 30'd0;
         end
         u_pipe.osc_param_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
         u_pipe.osc_param_ram[256] = 36'h000001614;
-        u_pipe.gain_param_ram[0]   = 36'h00000FF20;        // L -12 dB, R mute
-        u_pipe.gain_param_ram[256] = 36'h00000FF20;
+        u_pipe.gain_param_ram[0]   = 36'h0000000DF;        // L -12 dB, R mute
+        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume, #40)
     end
 
     // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth

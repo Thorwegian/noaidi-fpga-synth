@@ -43,10 +43,11 @@ WAVE_SAW = 0x0
 #FC = 0x2AF8          # UQ4.10 ≈ 14 kHz, open LP
 RESO = 0x200         # log2 resonance UQ4.10: 0.5 octave of Q above
                      # Butterworth -> q1 = 1.0 (the old Q1 = 0x10000)
-GAIN = 0x60          # UQ4.4: -36 dB (1/64) — mixdown headroom, see above
+VOL = 0x9F           # volume UQ4.4 (issue #40: 0x00 = silence): the
+                     # old -36 dB mixdown headroom as 0xFF - 0x60
 FTYPE_LP = 0x0
 DUAL = 0             # 12 dB/oct single-filter mode
-MUTE = 0xFF          # UQ4.4: lin ≈ 1/65536 ≈ -96 dB — hard-pan off channel
+MUTE = 0x00          # volume 0 = exact mute — hard-pan off channel
 
 # Unison detune offsets per unison index, in UQ4.10 fraction LSBs
 # (1 LSB ≈ 1.17 cents).  The left half (index 0-3) and right half
@@ -96,9 +97,9 @@ for v in range(NUM_ELEMENTS):
     p1.append(0)                       # duty: saw ignores it
     p2.append((RESO << 14) | fc)   # resonance + cutoff
     if left:
-        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (MUTE << 8) | GAIN)
+        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (MUTE << 8) | VOL)
     else:
-        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (GAIN << 8) | MUTE)
+        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (VOL << 8) | MUTE)
 
 for name, words in [("boot_p0", p0),
                     ("boot_p1", p1),

@@ -64,7 +64,8 @@ conventions the FPGA never sees.
 5. **One bus format: signed Q8.10** (Thor). 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every
-   log₂ sink — pitch, cutoff, AND attenuation (gain octave = 6 dB) —
+   log₂ sink — pitch, cutoff, AND volume (gain octave = 6 dB;
+   positive gain bus = LOUDER since the volume inversion, #40) —
    so a producer needn't know its consumer; sinks take what they
    need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
    resolution — accepted; revisit on audible evidence only). Q's

@@ -93,10 +93,13 @@ localparam [13:0] RESO_R200       = 14'h0200;      // r: q1 = 1.0
 localparam [31:0] FILTER_OPEN     = {4'b0, RESO_R200, FC_OPEN};
 localparam [31:0] OSC_SINE_A4     = 32'h0000D700;  // sine, A4
 localparam [31:0] OSC_SINE_C4     = 32'h0000D400;  // sine, C4
-localparam [31:0] GAIN_12DB_BOTH  = 32'h00002020;  // -12 dB L+R
-localparam [31:0] GAIN_MUTE_BOTH  = 32'h0000FFFF;  // exact mute L+R
-localparam [31:0] GAIN_CHORD_LEFT = 32'h0000FF60;  // L -36 dB, R mute
-localparam [31:0] GAIN_CHORD_RIGHT= 32'h000060FF;  // R -36 dB, L mute
+// volume semantics (issue #40): 0x00 = silence, 0xFF = loudest
+localparam [31:0] GAIN_12DB_BOTH  = 32'h0000DFDF;  // -12 dB L+R
+localparam [31:0] GAIN_MUTE_BOTH  = 32'h00000000;  // exact mute L+R —
+                                                   // a zeroed word IS
+                                                   // silence now
+localparam [31:0] GAIN_CHORD_LEFT = 32'h0000009F;  // L -36 dB, R mute
+localparam [31:0] GAIN_CHORD_RIGHT= 32'h00009F00;  // R -36 dB, L mute
 
 // bus pointer words (PTRS0/PTRS1 field layouts per memory_map.md)
 localparam [31:0] PTRS0_CUT_BUS1        = 32'd1 << 20;
@@ -108,7 +111,6 @@ localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
 localparam [31:0] OFFS_PLUS_1OCT  = 32'h00000400;
 localparam [31:0] OFFS_PLUS_2OCT  = 32'h00000800;
 localparam [31:0] OFFS_MINUS_2OCT = 32'h0003E000;   // 18-bit signed
-localparam [31:0] ENV_FLOOR_2OCT  = 32'h00002000;   // quiet floor base
 
 // source-table words, composed from the CFG/RATES/DEPTH fields
 // (memory_map.md) instead of opaque hex

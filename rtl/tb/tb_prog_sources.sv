@@ -63,16 +63,18 @@ module tb_prog_sources;
 
         // B5: ADSR + gate bus. LFO off, gain bus base to the envelope
         // floor, source 1 = ADSR watching gate bus 5, depth -0x2000.
+        // volume semantics (#40): base = quiet floor (negative),
+        // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_MINUS_2OCT);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_2OCT);
         flip;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_MINUS_2OCT);
-        spi_word_write(bus_addr(3), ENV_FLOOR_2OCT);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_2OCT);
+        spi_word_write(bus_addr(3), OFFS_MINUS_2OCT);
         observe(60);
         observe(300);
         worst = peak;

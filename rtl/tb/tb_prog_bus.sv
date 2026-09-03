@@ -120,7 +120,9 @@ module tb_prog_bus;
         end
         spi_word_write(bus_addr(2), 32'h00000000); // pitch back
 
-        spi_word_write(bus_addr(3), OFFS_PLUS_2OCT); // +12 dB att
+        spi_word_write(bus_addr(3), OFFS_MINUS_2OCT); // -12 dB (volume
+                                                      // bus: negative =
+                                                      // quieter, #40)
         observe(60);
         observe(400);
         if (peak > worst * 2 / 5) begin
