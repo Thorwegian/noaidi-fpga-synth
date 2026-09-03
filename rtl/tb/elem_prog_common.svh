@@ -60,6 +60,66 @@ element_pipeline #(
 
 integer errors = 0;
 
+// ---- single source of truth (Thor, 2026-09-03) ---------------------
+// Addresses come from synth_pkg (the map's one home); parameter and
+// source-table words are composed from named fields here, ONCE, and
+// every bench in the family uses these. No magic hex in benches.
+localparam [15:0] CTRL_ADDR   = synth_pkg::MAP_CTRL_ADDR;
+localparam [15:0] ELEM_BASE   = synth_pkg::MAP_ELEM_BASE;
+localparam int    ELEM_STRIDE = synth_pkg::MAP_ELEM_STRIDE;
+localparam [15:0] BUS_BASE    = synth_pkg::MAP_BUS_BASE;
+localparam [15:0] SRC_BASE    = synth_pkg::MAP_PROD_BASE;   // code name
+                                                            // pending the
+                                                            // source rename
+
+// per-element word offsets (memory_map.md +0..+6)
+localparam int W_OSC = 0, W_DUTY = 1, W_FILTER = 2, W_GAIN = 3,
+               W_GATE = 4, W_PTRS0 = 5, W_PTRS1 = 6;
+
+function automatic [15:0] elem_addr(input integer e, input integer w);
+    elem_addr = 16'(ELEM_BASE + 16'(e) * ELEM_STRIDE + 16'(w));
+endfunction
+function automatic [15:0] bus_addr(input integer b);
+    bus_addr = 16'(BUS_BASE + 16'(b));
+endfunction
+// source table: 3 words per entry, stride 4
+function automatic [15:0] src_addr(input integer entry, input integer w);
+    src_addr = 16'(SRC_BASE + 16'(entry) * 4 + 16'(w));
+endfunction
+
+// the shared test timbre, in one place
+localparam [13:0] FC_OPEN         = 14'h2AF8;      // ~14 kHz LP
+localparam [13:0] RESO_R200       = 14'h0200;      // r: q1 = 1.0
+localparam [31:0] FILTER_OPEN     = {4'b0, RESO_R200, FC_OPEN};
+localparam [31:0] OSC_SINE_A4     = 32'h0000D700;  // sine, A4
+localparam [31:0] OSC_SINE_C4     = 32'h0000D400;  // sine, C4
+localparam [31:0] GAIN_12DB_BOTH  = 32'h00002020;  // -12 dB L+R
+localparam [31:0] GAIN_MUTE_BOTH  = 32'h0000FFFF;  // exact mute L+R
+localparam [31:0] GAIN_CHORD_LEFT = 32'h0000FF60;  // L -36 dB, R mute
+localparam [31:0] GAIN_CHORD_RIGHT= 32'h000060FF;  // R -36 dB, L mute
+
+// bus pointer words (PTRS0/PTRS1 field layouts per memory_map.md)
+localparam [31:0] PTRS0_CUT_BUS1        = 32'd1 << 20;
+localparam [31:0] PTRS0_CUT1_PITCH_BUS2 = (32'd1 << 20) | 32'd2;
+localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
+
+// Q8.10 bus/depth offsets — ONE name per value, used for bus bases
+// and source depths alike
+localparam [31:0] OFFS_PLUS_1OCT  = 32'h00000400;
+localparam [31:0] OFFS_PLUS_2OCT  = 32'h00000800;
+localparam [31:0] OFFS_MINUS_2OCT = 32'h0003E000;   // 18-bit signed
+localparam [31:0] ENV_FLOOR_2OCT  = 32'h00002000;   // quiet floor base
+
+// source-table words, composed from the CFG/RATES/DEPTH fields
+// (memory_map.md) instead of opaque hex
+localparam [31:0] SRC_OFF         = 32'h0;
+localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
+    32'd1 | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
+          | (32'd16384 << 16);                      // 93.75 Hz
+localparam [31:0] SRC_ADSR_BUS3_GATE5 =
+    32'd2 | (32'd3 << 6) | (32'd5 << 16);           // ADSR type
+localparam [31:0] BENCH_ADSR_RATES = 32'hF4F000F0;  // fast sim rates
+
 // ---- Mode 0 master, ~20 MHz ---------------------------------------
 localparam integer HALF = 25;
 task automatic spi_word_write(input [15:0] a, input [31:0] d);
@@ -103,7 +163,7 @@ endtask
 // request a bank flip and wait for it to take effect
 task automatic flip;
     begin
-        spi_word_write(16'h0002, 32'h00000001);   // CTRL: swap request
+        spi_word_write(CTRL_ADDR, 32'h00000001);  // CTRL: swap request
         observe(2);
     end
 endtask
@@ -118,10 +178,10 @@ task automatic reset_and_mute;
         @(negedge clk);
         rst_n = 1;
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
+            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         flip;
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
+            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         observe(4);
     end
 endtask
@@ -129,10 +189,10 @@ endtask
 // program voice 0 into the CURRENT shadow: A4 SINE, open LP, -12 dB
 task automatic program_v0;
     begin
-        spi_word_write(16'h2000, 32'h0000D700);   // OSC: A4, sine
-        spi_word_write(16'h2001, 32'h00000000);   // DUTY
-        spi_word_write(16'h2002, 32'h00802AF8);   // FILTER: r=0x200, open
-        spi_word_write(16'h2003, 32'h00002020);   // GAIN L/R -12 dB
+        spi_word_write(elem_addr(0, W_OSC),    OSC_SINE_A4);
+        spi_word_write(elem_addr(0, W_DUTY),   32'h00000000);
+        spi_word_write(elem_addr(0, W_FILTER), FILTER_OPEN);
+        spi_word_write(elem_addr(0, W_GAIN),   GAIN_12DB_BOTH);
     end
 endtask
 
@@ -154,6 +214,11 @@ function automatic signed [15:0] detune(input integer u);
     endcase
 endfunction
 
+// (Historical note: the chord's FILTER word used to be
+// 32'h40000000 | fc — a stale artifact of the OLD linear-q1
+// encoding whose set bit landed in reserved space, silently running
+// the chord at r = 0. Caught by the single-source-of-truth sweep,
+// 2026-09-03; it now uses the shared timbre's resonance.)
 task automatic program_chord;
     integer v, u;
     reg signed [15:0] pit;
@@ -163,13 +228,14 @@ task automatic program_chord;
             fc = chord_pitch(v) + 14'h0400;
             for (u = 0; u < 8; u = u + 1) begin
                 pit = $signed({2'b0, chord_pitch(v)}) + detune(u);
-                spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd0,
+                spi_word_write(elem_addr(v*8+u, W_OSC),
                                {18'b0, pit[13:0]});          // saw
-                spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd1, 32'h0);
-                spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd2,
-                               32'h40000000 | 32'(fc));
-                spi_word_write(16'h2000 + 16'(v*8+u)*64 + 16'd3,
-                               (u < 4) ? 32'h0000FF60 : 32'h000060FF);
+                spi_word_write(elem_addr(v*8+u, W_DUTY), 32'h0);
+                spi_word_write(elem_addr(v*8+u, W_FILTER),
+                               {4'b0, RESO_R200, fc});
+                spi_word_write(elem_addr(v*8+u, W_GAIN),
+                               (u < 4) ? GAIN_CHORD_LEFT
+                                       : GAIN_CHORD_RIGHT);
             end
         end
     end

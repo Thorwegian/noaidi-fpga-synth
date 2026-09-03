@@ -19,23 +19,23 @@ module tb_prog_sources;
         // flattens the tremolo ratio the assert depends on (found on
         // the split's first run).
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400); // sine C4
-            spi_word_write(16'h2001 + 16'(v)*64, 32'h00000000);
-            spi_word_write(16'h2002 + 16'(v)*64, 32'h00802AF8); // open LP
-            spi_word_write(16'h2003 + 16'(v)*64,
-                           (v < 4) ? 32'h0000FF60 : 32'h000060FF);
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001); // gate on
-            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00); // gl,gr→3
+            spi_word_write(elem_addr(v, W_OSC),    OSC_SINE_C4);
+            spi_word_write(elem_addr(v, W_DUTY),   32'h00000000);
+            spi_word_write(elem_addr(v, W_FILTER), FILTER_OPEN);
+            spi_word_write(elem_addr(v, W_GAIN),
+                           (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
+            spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
+            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400);
-            spi_word_write(16'h2001 + 16'(v)*64, 32'h00000000);
-            spi_word_write(16'h2002 + 16'(v)*64, 32'h00802AF8);
-            spi_word_write(16'h2003 + 16'(v)*64,
-                           (v < 4) ? 32'h0000FF60 : 32'h000060FF);
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
-            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00);
+            spi_word_write(elem_addr(v, W_OSC),    OSC_SINE_C4);
+            spi_word_write(elem_addr(v, W_DUTY),   32'h00000000);
+            spi_word_write(elem_addr(v, W_FILTER), FILTER_OPEN);
+            spi_word_write(elem_addr(v, W_GAIN),
+                           (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
+            spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
+            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
         end
         observe(60);
 
@@ -43,11 +43,11 @@ module tb_prog_sources;
         // absurd on purpose — the bench needs several periods inside
         // ~20 ms) on gain bus 3, depth +-2 octaves (+-12 dB). Window
         // peaks must alternate with ZERO SPI during measurement.
-        spi_word_write(16'h0100, 32'h400000D1);   // CFG: LFO,pulse,bus3,16384
-        spi_word_write(16'h0102, 32'h00000800);   // DEPTH: +2 oct
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREMOLO);
+        spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
         flip;
-        spi_word_write(16'h0100, 32'h400000D1);
-        spi_word_write(16'h0102, 32'h00000800);
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREMOLO);
+        spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
         observe(60);
         wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
         for (step = 0; step < 8; step = step + 1) begin
@@ -63,22 +63,22 @@ module tb_prog_sources;
 
         // B5: ADSR + gate bus. LFO off, gain bus base to the envelope
         // floor, source 1 = ADSR watching gate bus 5, depth -0x2000.
-        spi_word_write(16'h0100, 32'h00000000);   // source 0 off
-        spi_word_write(16'h0104, 32'h000500C2);   // ADSR, bus3, gate 5
-        spi_word_write(16'h0105, 32'hF4F000F0);   // A,D,S,R (+4 bias)
-        spi_word_write(16'h0106, 32'h0003E000);   // depth -0x2000
+        spi_word_write(src_addr(0, 0), SRC_OFF);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), OFFS_MINUS_2OCT);
         flip;
-        spi_word_write(16'h0100, 32'h00000000);
-        spi_word_write(16'h0104, 32'h000500C2);
-        spi_word_write(16'h0105, 32'hF4F000F0);
-        spi_word_write(16'h0106, 32'h0003E000);
-        spi_word_write(16'h0803, 32'h00002000);   // bus 3 base = floor
+        spi_word_write(src_addr(0, 0), SRC_OFF);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), OFFS_MINUS_2OCT);
+        spi_word_write(bus_addr(3), ENV_FLOOR_2OCT);
         observe(60);
         observe(300);
         worst = peak;
         $display("ADSR floor: peak=%0d (quiet)", worst);
 
-        spi_word_write(16'h0805, 32'h00000001);   // gate on
+        spi_word_write(bus_addr(5), 32'h00000001);  // gate on
         observe(300);
         observe(400);
         $display("ADSR attack/sustain: peak=%0d", peak);
@@ -89,7 +89,7 @@ module tb_prog_sources;
         end
         wmax = peak;
 
-        spi_word_write(16'h0805, 32'h00000000);   // gate off
+        spi_word_write(bus_addr(5), 32'h00000000);  // gate off
         observe(300);
         observe(300);
         $display("ADSR released: peak=%0d", peak);

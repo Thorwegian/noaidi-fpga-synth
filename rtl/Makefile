@@ -108,8 +108,8 @@ sim-spdif: tb/tb_spdif_block.vvp
 # independent benches so make -j4 and CI matrix jobs parallelize
 # (issue #58).
 TB_PROG = tb/tb_element_program.sv
-tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(LUTS) Makefile
-	iverilog -g2012 -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
+tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) tb/elem_prog_common.svh $(LUTS) Makefile
+	iverilog -g2012 -I. -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
 
 sim-prog-full: tb/tb_element_program.vvp
 	vvp tb/tb_element_program.vvp

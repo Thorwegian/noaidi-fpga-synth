@@ -21,10 +21,14 @@ module tb_prog_sweep;
         // the click hunt as an assertion: sweep fc via write-shadow +
         // flip; a sine at 440 Hz moves at most ~66k counts/sample, so
         // any collision garbage or flip glitch shows as a huge step.
+        // (The sweep's FILTER word previously carried the same stale
+        // old-encoding bit as the chord task — see the note in the
+        // common file; now composed from the shared fields.)
         worst = 0;
         for (step = 0; step < 40; step = step + 1) begin
-            spi_word_write(16'h2002, 32'h40002800 + 32'(step) * 4);
-            spi_word_write(16'h0002, 32'h00000001);
+            spi_word_write(elem_addr(0, W_FILTER),
+                           {4'b0, RESO_R200, 14'(14'h2800 + step * 4)});
+            spi_word_write(CTRL_ADDR, 32'h00000001);
             observe(3);
             if (maxstep > worst) worst = maxstep;
         end
@@ -37,8 +41,8 @@ module tb_prog_sweep;
         // chord stress — the firmware's exact write pattern: 4 voices
         // x 8 saw elements, church-organ detune, hard-panned,
         // retriggered repeatedly. Screaming = sustained near-clip.
-        spi_word_write(16'h2003, 32'h0000FFFF);   // silence the sine
-        flip; spi_word_write(16'h2003, 32'h0000FFFF); flip;
+        spi_word_write(elem_addr(0, W_GAIN), GAIN_MUTE_BOTH);
+        flip; spi_word_write(elem_addr(0, W_GAIN), GAIN_MUTE_BOTH); flip;
         for (step = 0; step < 4; step = step + 1) begin
             program_chord;                        // into shadow
             flip;

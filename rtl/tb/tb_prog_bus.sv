@@ -22,10 +22,10 @@ module tb_prog_bus;
         // GATE (map offset +4, bit 0): gate off silences the chord
         // even though the GAIN words still hold live values.
         for (v = 0; v < 32; v = v + 1)
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000000);
+            spi_word_write(elem_addr(v, W_GATE), 32'h00000000);
         flip;
         for (v = 0; v < 32; v = v + 1)
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000000);
+            spi_word_write(elem_addr(v, W_GATE), 32'h00000000);
         observe(4);
         observe(50);
         if (peak > 4000) begin
@@ -35,10 +35,10 @@ module tb_prog_bus;
             $display("gate off: silent, gains untouched (peak=%0d)", peak);
 
         for (v = 0; v < 8; v = v + 1)      // regate voice 0's elements
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
+            spi_word_write(elem_addr(v, W_GATE), 32'h00000001);
         flip;
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
+            spi_word_write(elem_addr(v, W_GATE), 32'h00000001);
         observe(60);
         observe(400);
         if (peak < 200000) begin
@@ -50,16 +50,16 @@ module tb_prog_bus;
         // Bus pilot (B1): elements 0-7 sound voice 0's C4. Point
         // their cutoff at bus 1, drive the base live (no swaps).
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100000); // fc ptr = 1
+            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT_BUS1);
         flip;
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100000);
+            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT_BUS1);
         observe(60);
         observe(400);
         worst = peak;                             // baseline loudness
         $display("bus pilot: baseline peak=%0d", worst);
 
-        spi_word_write(16'h0801, 32'h0003E000);   // bus 1 = -2 oct
+        spi_word_write(bus_addr(1), OFFS_MINUS_2OCT);
         observe(60);
         observe(400);
         if (peak > worst / 3) begin
@@ -68,7 +68,7 @@ module tb_prog_bus;
         end else
             $display("bus -2oct: muffled (peak=%0d)", peak);
 
-        spi_word_write(16'h0801, 32'h00000000);   // bus 1 = 0
+        spi_word_write(bus_addr(1), 32'h00000000);
         observe(60);
         observe(400);
         if (peak < worst / 2) begin
@@ -79,7 +79,7 @@ module tb_prog_bus;
 
         worst = 0;
         for (step = 0; step < 40; step = step + 1) begin
-            spi_word_write(16'h0801,
+            spi_word_write(bus_addr(1),
                            32'(($signed(-19'sd8192) + step * 205) & 32'h0003FFFF));
             observe(3);
             if (maxstep > worst) worst = maxstep;
@@ -92,17 +92,17 @@ module tb_prog_bus;
 
         // B2: remaining sinks — undetuned C4 sine on elements 0-7,
         // pitch pointer to bus 2, gains to bus 3.
-        spi_word_write(16'h0801, 32'h00000000);
+        spi_word_write(bus_addr(1), 32'h00000000);
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400); // sine C4
-            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002); // pitch→2
-            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00); // gl,gr→3
+            spi_word_write(elem_addr(v, W_OSC),   OSC_SINE_C4);
+            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_BUS2);
+            spi_word_write(elem_addr(v, W_PTRS1), PTRS1_GAINS_BUS3);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400);
-            spi_word_write(16'h2005 + 16'(v)*64, 32'h00100002);
-            spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00);
+            spi_word_write(elem_addr(v, W_OSC),   OSC_SINE_C4);
+            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_BUS2);
+            spi_word_write(elem_addr(v, W_PTRS1), PTRS1_GAINS_BUS3);
         end
         observe(60);
         observe(2182);
@@ -110,7 +110,7 @@ module tb_prog_bus;
         worst = peak;
         v = rises;                                 // C4 fundamental count
 
-        spi_word_write(16'h0802, 32'h00000400);    // pitch bus 2 = +1 oct
+        spi_word_write(bus_addr(2), OFFS_PLUS_1OCT);
         observe(60);
         observe(2182);
         $display("pitch +1oct: rises=%0d (was %0d)", rises, v);
@@ -118,9 +118,9 @@ module tb_prog_bus;
             $display("FAIL: pitch bus did not double the fundamental");
             errors = errors + 1;
         end
-        spi_word_write(16'h0802, 32'h00000000);    // pitch back
+        spi_word_write(bus_addr(2), 32'h00000000); // pitch back
 
-        spi_word_write(16'h0803, 32'h00000800);    // gain bus 3 = +12 dB att
+        spi_word_write(bus_addr(3), OFFS_PLUS_2OCT); // +12 dB att
         observe(60);
         observe(400);
         if (peak > worst * 2 / 5) begin
@@ -128,7 +128,7 @@ module tb_prog_bus;
             errors = errors + 1;
         end else
             $display("gain +12dB att: peak=%0d (was %0d)", peak, worst);
-        spi_word_write(16'h0803, 32'h00000000);
+        spi_word_write(bus_addr(3), 32'h00000000);
         observe(60);
         observe(400);
         if (peak < worst / 2) begin

@@ -24,10 +24,10 @@ module tb_prog_boot;
 
         // mute all into the shadow, flip, then mute the other bank too
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
+            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         flip;
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(16'h2000 + 16'(v)*64 + 16'd3, 32'h0000FFFF);
+            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
 
         observe(4);                        // flush the in-flight sample
         observe(50);
