@@ -20,6 +20,14 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   business; a voice is one possible grouping, not the only one.
 - The user's scope of action via MIDI/control surfaces is **not yet
   nailed down** — firmware vocabulary above voice level stays open.
+- **Source / sink is the couple** (Thor, 2026-09-03): things that
+  write buses (LFOs, ADSRs, future combiners) are SOURCES; the
+  parameters that read buses are SINKS. "Producer" was a third wheel
+  that snuck into code and docs — being retired. Code identifiers
+  (`producer_*`, `MAP_PROD_BASE`, `engine_link_prod_write`, ...)
+  still carry the old word until their rename rides the next
+  zero-behavior naming pass; docs use source/sink and quote code
+  names only as code.
 - Banned: "patch" for parameter data (everything is live; see
   Corrections). "Patch panel" survives only as the CV-routing metaphor.
 
@@ -77,18 +85,22 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   decimal-M is invalid syntax; the `-s` is load-bearing: without it
   the setting reverts on the next power blip, verified the hard way
   2026-09-03) on the BL616
-  console (Ctrl+X Ctrl+C Enter at 115200). A board without this has a
-  dead pin 10 — see AGENTS.md bring-up notes.
+  console (Ctrl+X Ctrl+C Enter at 115200). A board without this has
+  pin 10 alive at the WRONG frequency (Thor's correction — not
+  "dead"): everything frequency-agnostic works, audio rates are all
+  wrong, and SPDIF shows the classic carrier-present-but-no-lock.
+  See AGENTS.md bring-up notes.
 - **Why not ~100 MHz** (decision 2026-08-30, Thor): five ear-verified
   silicon timing failures that STA passed — the fabric has no margin
   for the filter's 36×36 DSP cascades at 98.304 MHz, and each fix
   found a new marginal path. 768 slots at 73.728 MHz keeps 96 kHz
   exactly, gives every path 33% more settling time, and still leaves
   ~500 idle slots per sample.
-- **A gateware PLL is never a valid workaround.** A dead pin 10 means
-  the clock chip wasn't programmed — fix the board setup, not the
-  gateware. (An earlier crystal+rPLL+DDS fallback was removed; it lives
-  only in git history.)
+- **A gateware PLL is never a valid workaround.** A wrong-frequency
+  pin 10 means the clock chip wasn't programmed (or lost its `-s`) —
+  fix the board setup, not the gateware. (An earlier
+  crystal+rPLL+DDS fallback was removed; it lives only in git
+  history.)
 - **The drum is the sole timebase**: one 768-slot counter yields the
   sample tick, the 256 element-entry slots, and the SPDIF cell tick
   (every 6 slots; 768 = 128 cells × 6). No other audio-rate counter
@@ -128,21 +140,17 @@ accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 **State banks**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, 11 slots apart — no address collision.
 
-**Parameter smoothing** 📋 (deferred — unresolved dilemma, Thor
-2026-08-30): the attractive design is a first-order LPF
-`out <= out + ((in - out) >>> coeff)` applied **after** the LUT
-lookups, per element, in the linear domain — interpolation between
-log-domain LUT steps falls out for free; ~10 fractional guard bits so
-`>>> 10` (τ ≈ 960 samples ≈ 10 ms, matching MIDI's ~1k events/s
-ceiling) never deadbands; GATE resets smoother state to target (snap).
-**The dilemma**: ADSR modulation sums in the log domain *before* the
-LUT, so a post-LUT smoother would low-pass the envelope as well —
-capping how snappy attacks/decays can ever be at the smoother's
-settling time. Smoothing therefore waits until the modulation
-architecture settles it (candidate direction: smooth only SPI-written
-base values, sum FPGA-generated modulators after the smoother — the
-glide principle — but that forfeits free LUT interpolation for
-modulated parameters). Not scheduled; revisit around ADSR design.
+**Parameter smoothing** ✅ (resolved by the bus architecture — no
+longer a dilemma, cleaned up 2026-09-03): the click problem the
+smoothing rung existed for died at B5 — articulation comes from
+gateware envelope sources on the buses, updating every sample with
+no SPI timing in the loop, so nothing audible needs a smoother
+anymore. The old dilemma (a post-LUT smoother would low-pass the
+envelopes too) is moot because envelopes never pass through a
+smoother path. What remains is an OPTION, not a problem:
+source-side smoothing for firmware-written bus bases (wheel/bend
+zipper at very slow sweeps) sits in the B6+ list, to be built only
+on audible evidence.
 
 ## Control plane — SPI + BSRAM 🔨
 
@@ -154,11 +162,12 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   target: an 11-bit / 2048-word backed space) in 36-bit native words.
 - Transaction: command byte (`[7]` R/W, `[6]` auto-increment) + 2
   address bytes + 4-byte data words, streaming while CS stays low.
-- CDC by construction: SPI writes on the sclk-clocked BSRAM port, the
-  drum reads on the sysclk port. Measured on this toolchain: dual-clock
-  *semi* dual-port infers (`DPX9B`); **true** dual-port does not — so
-  SPI read-back is serviced by the drum in an idle slot, never by a
-  second RAM port.
+- CDC: solved structurally, once — dual-clock semi dual-port BSRAM
+  (write sclk, read sysclk; true dual-port does not infer on this
+  toolchain) for banked parameters, a toggle mailbox for live bus
+  writes. With everything register-like ping-pong buffered or
+  mailboxed, CDC is no longer a running design concern (trimmed
+  2026-09-03, Thor).
 - Parameter data is ping-pong double-buffered (half-active/half-shadow
   in the same blocks), swapped at a sample boundary on request. There
   is no "patch" vs "live" class distinction: swaps are cheap (thousands
@@ -169,92 +178,32 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   (`spi_slave_regs.sv`) with the byte-boundary lessons baked in; it is
   the protocol's ancestor, not its final form.
 
-## Modulation 📋
+## Modulation ✅
 
 **Codified as [bus_architecture.md](bus_architecture.md)**
 (2026-08-30) — the spec with justifications, rejected alternatives,
 sizing and build milestones B0–B6. **Built**: B1–B5 ear-verified and
 merged (buses, all sinks, firmware routes, LFO walker, per-voice
 ADSRs), plus log-domain Q (approved 2026-09-03).
-The planning notes below record how the design was reached:
 
-- **Governing balance** (Thor): SPI bandwidth saved vs FPGA complexity
-  added. Every bus feature has a firmware fallback whose cost is SPI
-  traffic, so the line is tunable — and it moves on *measured* link
-  utilization (engine_link counts words/s), not assumptions. Tier the
-  build: bus memories + pointers + base registers and LFO producers
-  first (cheap silicon, biggest observed traffic wins); ADSR producers
-  come with envelopes anyway; combiner/chaining and stop tables are
-  deferred until measurements demand them.
-
-- **Mod buses** (Thor): every element's sinks are known and fixed —
-  pitch, duty, cutoff, Q, gain L, gain R — so each sink is a summing
-  bus with a small fixed number of slots (working sizing: pitch 2,
-  cutoff 3, gains 1+1, duty 1, Q 1 ≈ 9 multiply-adds per element).
-  Each slot = (source select, signed amount). No crossbar, no
-  variable summing, self-documenting map (`CUTOFF_MOD0`). Slot counts
-  to be derived from a written worst-case patch, not asserted.
-- **Sources**: CV cell / LFO / ADSR1 / ADSR2. Anything firmware puts
-  in a cell is a source — velocity rides a per-note cell written at
-  note-on (Thor: velocity and LFO are both valid cable sources).
-  When a patch wants more sources on one bus than it has slots, the
-  ESP32 pre-sums controllers into a single cell.
-- **Everything is a bus** (Thor): element parameters are not directly
-  register-controlled — they only point at buses, and each bus has a
-  register-settable BASE (the ESP32's contribution) summed with
-  producer contributions. Direct control is the degenerate allocation
-  (one private bus per parameter). Buses are sink-typed (separate
-  memories per sink class) — fixes units and read-port bandwidth at
-  once. Bus law: a bus only adds; a multiply may live only in a
-  producer. Open detail: pitch detune as per-element static offset
-  (agent's lean) vs 8 pitch buses per voice. Swap governs wiring
-  (pointer/stop tables); buses carry live signal, single-banked.
-- **Buses are memory; parameters hold pointers** (Thor): each element
-  parameter points at a numbered bus — a memory location. Effective
-  parameter = base + bus[index] (log domain), an add-only fetch in the
-  audio pipeline (timing-rule-clean); ALL scaling happens producer-side
-  in idle-slot machinery. Producers: SPI (wheels/velocity), LFO engine,
-  ADSR engine, and a bus combiner (C = A×amt + B×amt) for multi-source
-  sinks. Bus 0 = hardwired zero. The CV table and the buses unify into
-  one bus memory; per-note modulation = a per-note bus. The pointers
-  live in the shared profile (stop), not per element.
-- **ADSR is a producer too** (Thor): envelopes come from a producer
-  pool firmware instantiates — typically one pair per voice, shared by
-  the element group via its buses; per-element is just a bigger
-  allocation. Triggering can ride a gate bus the producer watches
-  (one write per voice, not eight). End-state goal: **very little
-  intelligence lives in elements** — waveform, filter type, static
-  detune, bus pointers, nothing else. The audio pipeline freezes
-  permanently once the pointer-fetch stage lands; every future
-  feature is a new producer type in the idle-slot table.
-- **Chaining** (Thor raised, agent's proposed discipline): a combiner
-  is a producer that reads buses and writes a bus, so chains already
-  exist. One rule bounds the complexity: producers execute in table
-  order once per sample and read whatever their sources hold at their
-  slot. Ordered chains are zero-lag; unordered or cyclic ones get a
-  well-defined one-sample (10 µs) delay — no hardware graph
-  validation. Graph bookkeeping is firmware's. Shared subexpressions
-  computed once = the optimization, for free.
-- **One-to-many by construction** (Thor: SPI bandwidth demands it):
-  elements reference shared registers instead of owning copies. An
-  element carries a small **profile index**; bus slot configs (source
-  selects + amounts) live in a shared profile table, so a patch-wide
-  modulation change is one write reaching every element drawn to that
-  profile — not 256 rewrites (cf. the firmware mod wheel: 256 FILTER
-  writes ≈ 2 ms of SPI per CC tick). Per-note variation stays in
-  per-note CV cells. Candidate name for the profile: **stop** (the
-  organ term — the drawn configuration many pipes sound through).
-- **CV table**: 256 anonymous control voltages — the FPGA's only
-  notion of external input; one cell write per event. A cell
-  referenced by many slots is the first rung of the one-to-many
-  ladder: cell → slots, profile → elements, base params → truly
-  per-element.
-- **ADSRs**: 2 per element (amp + filter), envelope math in the FPGA.
-- **Open question**: evaluate buses inside the audio pipeline vs a
-  decoupled control-rate mod engine in the drum's idle slots that
-  writes effective parameters (agent's lean: decoupled — never grow
-  the timing-fragile pipeline; five STA-blessed silicon failures say
-  so). LFO bank shape (shared 32 vs per-voice phase) also open.
+As built, in brief: elements are dumb sinks — waveform, filter type,
+static detune, and per-parameter bus pointers. Every dynamic value
+is a bus: `effective = base word + bus[pointer]`, a saturating add,
+zero extra pipeline stages. SOURCES (LFOs, ADSRs; combiners later)
+live in a 128-entry table walked in the drum's idle slots and write
+`base register + contribution` to the bus replicas. One bus format
+(signed Q8.10 log₂ — integer step = octave / 6 dB / octave-of-Q
+depending on sink). Sources execute in table order once per sample;
+ordered chains are zero-lag, and **cyclic bus graphs are simply not
+a thing — ever** (Thor, 2026-09-03; firmware never builds one, the
+hardware defines no semantics for one). Velocity and other per-note
+values are firmware writes to per-voice bus bases — the separate
+"CV table" concept from early planning was dropped when the buses
+unified it (superseded 2026-09-03 cleanup; historical planning notes
+live in git history rather than here). Still genuinely open, kept
+from the old notes: the shared per-element configuration table (the
+unnamed "stop" concept) for one-to-many wiring changes, and the
+combiner source type — both in the B6+ list on measured demand.
 
 ## Outputs ✅
 
@@ -340,6 +289,30 @@ bench-verified) milestone. One rung in flight at a time.
    visibly off. Nearly free in the drum; turns "is the clock right?"
    from a bench investigation (SPDIF carrier present but invalid, SPI
    self-test blind to frequency) into a glance.
+9. **On-chip logic analysis — LiteScope investigation (Thor,
+   2026-09-03)**: look into
+   [LiteScope](https://github.com/enjoy-digital/litescope) driving
+   the FPGA board's so-far-unused UART — live capture of internal
+   signals, potentially much faster than simulation for debugging.
+   Position (Thor): use the TOOL, not the framework — "these HDL
+   wrappers come a dime a dozen and half of them might not even be
+   around in 10 years"; people reinvent HDLs before learning what
+   SystemVerilog already offers. So: LiteScope as a bolt-on analyzer
+   core if it earns its keep, no LiteX adoption. (A spare Tang Nano
+   20K as a dedicated analyzer was an earlier variant of this idea.)
+10. **Gowin EDA as a resource shelf (Thor, 2026-09-03)**: official
+   EDA installed at `/opt/gowin-eda` on the dev machine (Ubuntu
+   needs some effort for the binaries). Most interesting pillage:
+   the simulation primitives in `IDE/simlib/*` — candidate fix for
+   the standing "the open-source flow cannot simulate the BSRAM it
+   generates" gap (post-synthesis netlist sim against vendor
+   models). General tips:
+   https://nand2mario.github.io/posts/2024/tang_tips/
+11. **Docs consolidation, part 2**: memory_map.md is behind actual
+   progress and its diagrams need updating; bus_architecture.md and
+   the memory map still say "producer" where the settled vocabulary
+   is source/sink (code identifiers follow in a zero-behavior naming
+   pass). Part 1 (this design.md cleanup) done 2026-09-03.
 
 ## Corrections and thoughts from Thor
 

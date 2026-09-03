@@ -6,7 +6,8 @@
 // Clock — MS5351 CLK0 at 73.728 MHz (768 × 96 kHz) on FPGA package
 // pin 10. Per-board one-time setup via the BL616 console:
 //   pll_clk O0=73728K -s     (whole kHz; decimal-M is invalid)
-// A board without that setup has a dead pin 10 — that is a setup
+// A board without that setup has pin 10 at the WRONG frequency
+// (alive, not dead — SPDIF shows carrier but no lock) — a setup
 // error: program the clock chip. A gateware PLL is never a valid
 // workaround.
 

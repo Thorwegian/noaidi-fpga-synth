@@ -1,7 +1,13 @@
 # SPI Memory Map — Noaidi Synth
 
-Draft register/address-space map for the ESP32-C3 ↔ FPGA SPI control interface.
-Status: **proposal for discussion** — most sections are not yet implemented.
+Register/address-space map for the ESP32-C3 ↔ FPGA SPI control interface.
+Status: **NEEDS CONSOLIDATION (Thor, 2026-09-03)** — this document is
+behind actual progress: much of what it still calls "proposal" is
+built and hardware-verified (wire protocol, per-element words,
+buses, the source table), the diagrams are stale, and "producer"
+should read source/sink per the settled terminology. Consolidation
+is roadmap item 11 in [design.md](design.md); trust the per-section
+Status columns and the design doc over prose here until then.
 
 ## Architecture stance
 

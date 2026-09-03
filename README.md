@@ -73,8 +73,10 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 | rst | 87 | reset button |
 | led[5:0] | 20–15 | status LEDs |
 
-One-time clock setup (the MS5351 must be programmed or pin 10 is
-dead — a gateware PLL is never the workaround): connect to the BL616
+One-time clock setup (the MS5351 must be programmed or pin 10 runs
+at the wrong frequency — everything then *seems* to work except
+audio rates, and SPDIF shows carrier-but-no-lock; a gateware PLL is
+never the workaround): connect to the BL616
 CLI at 115200 baud (Ctrl+X Ctrl+C Enter) and run the command below.
 The value must be whole kilohertz — an `M` suffix with a decimal
 point is invalid syntax for this command — and `-s` is what makes it
