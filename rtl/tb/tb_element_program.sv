@@ -127,7 +127,7 @@ module tb_element_program;
         worst = peak;
         $display("bus pilot: baseline peak=%0d", worst);
 
-        spi_word_write(bus_addr(1), OFFS_MINUS_2OCT);
+        spi_word_write(bus_addr(1), OFFS_MINUS_8OCT);
         observe(60);
         observe(400);
         if (peak > worst / 3) begin
@@ -186,7 +186,7 @@ module tb_element_program;
         end
         spi_word_write(bus_addr(2), 32'h00000000);
 
-        spi_word_write(bus_addr(3), OFFS_MINUS_2OCT); // -12 dB (volume
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -12 dB (volume
                                                       // bus, #40)
         observe(60);
         observe(400);
@@ -228,13 +228,19 @@ module tb_element_program;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_2OCT);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
+                                                          // match the
+                                                          // floor's
+                                                          // magnitude
         flip;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_2OCT);
-        spi_word_write(bus_addr(3), OFFS_MINUS_2OCT);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
+                                                          // match the
+                                                          // floor's
+                                                          // magnitude
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);
         observe(60);
         observe(300);
         worst = peak;

@@ -54,10 +54,8 @@ jobs:
           curl -sL "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_CAD_RELEASE}/${OSS_CAD_FILE}" \
             | tar xz -C "$HOME"
 
-      - name: Tool paths and python deps
-        run: |
-          echo "$HOME/oss-cad-suite/bin" >> "$GITHUB_PATH"
-          pip3 install --quiet numpy
+      - name: Tool paths
+        run: echo "$HOME/oss-cad-suite/bin" >> "$GITHUB_PATH"
 
       - name: Run bench
         run: bash scripts/ci_bench.sh ${{ matrix.bench }}

@@ -107,10 +107,14 @@ localparam [31:0] PTRS0_CUT1_PITCH_BUS2 = (32'd1 << 20) | 32'd2;
 localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
 
 // Q8.10 bus/depth offsets — ONE name per value, used for bus bases
-// and source depths alike
+// and source depths alike. (The original bench comments called
+// -0x2000 "-2 oct"; it is MINUS EIGHT octaves — the wrong name
+// propagated into a real bug at the gain inversion, so these names
+// are now checked against the value: 1 octave = 0x400.)
 localparam [31:0] OFFS_PLUS_1OCT  = 32'h00000400;
 localparam [31:0] OFFS_PLUS_2OCT  = 32'h00000800;
-localparam [31:0] OFFS_MINUS_2OCT = 32'h0003E000;   // 18-bit signed
+localparam [31:0] OFFS_PLUS_8OCT  = 32'h00002000;
+localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 
 // source-table words, composed from the CFG/RATES/DEPTH fields
 // (memory_map.md) instead of opaque hex

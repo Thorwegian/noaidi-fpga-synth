@@ -59,7 +59,7 @@ module tb_prog_bus;
         worst = peak;                             // baseline loudness
         $display("bus pilot: baseline peak=%0d", worst);
 
-        spi_word_write(bus_addr(1), OFFS_MINUS_2OCT);
+        spi_word_write(bus_addr(1), OFFS_MINUS_8OCT);
         observe(60);
         observe(400);
         if (peak > worst / 3) begin
@@ -120,7 +120,7 @@ module tb_prog_bus;
         end
         spi_word_write(bus_addr(2), 32'h00000000); // pitch back
 
-        spi_word_write(bus_addr(3), OFFS_MINUS_2OCT); // -12 dB (volume
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -12 dB (volume
                                                       // bus: negative =
                                                       // quieter, #40)
         observe(60);

@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 import math
-import numpy
 from pathlib import Path
 
 Fs = 96000
@@ -17,7 +16,10 @@ script_dir = Path(__file__).resolve().parent
 file_path = script_dir / "../rtl/element/phase_lut.hex"
 
 with open(file_path, "w") as file:
-    for note in numpy.arange(BASE_NOTE, BASE_NOTE + 12, 12 / 1024):
+    # plain range instead of numpy.arange (same doubles: start + i*step)
+    # so the generators have zero third-party deps — CI was flaking on
+    # PyPI timeouts for a single arange call
+    for note in (BASE_NOTE + i * (12 / 1024) for i in range(ENTRIES)):
         f = midiToHz(note)
         value = round(pow(2, 24) * f / Fs)
         file.write(f"{value:06x}\n")

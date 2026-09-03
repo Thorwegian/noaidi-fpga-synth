@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 import math
-import numpy
 from pathlib import Path
 
 Fs = 96000
@@ -18,7 +17,8 @@ script_dir = Path(__file__).resolve().parent
 file_path = script_dir / "../rtl/element/svf_k_lut.hex"
 
 with open(file_path, "w") as file:
-    for note in numpy.arange(0, 12, 12 / 1024):
+    # plain range instead of numpy.arange — zero third-party deps
+    for note in (i * (12 / 1024) for i in range(ENTRIES)):
         Fc = midiToHz(note)
         K = fcToK(Fc)
         value = round(K * (1 << 25))
