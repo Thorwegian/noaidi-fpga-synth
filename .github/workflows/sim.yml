@@ -2,6 +2,15 @@
 # its own matrix job, so wall time is the longest single bench and
 # no rung branch can merge red. Toolchain: pinned oss-cad-suite
 # release, cached between runs.
+#
+# Cost boundaries (checked against GitHub billing docs 2026-09-03):
+# free with no minute limit while the repo is PUBLIC and jobs use
+# standard runners. Money starts only if (a) the repo goes private
+# (2000 free min/month, then $0.006/min — we use ~15 job-min/push),
+# (b) larger runners are selected (always billed), or (c) artifact
+# storage is used (we upload none). Escape hatch either way:
+# register the dev Linux box as a self-hosted runner (always free,
+# one runs-on line).
 name: sim
 
 on:
