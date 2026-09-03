@@ -56,11 +56,12 @@ side Sylenth1 and Surge XT.
 JT wants **motorized sliders**. Agreed pacing (Thor: "I feel it might
 be a good idea to pace things"): motorized faders exist to display
 *recalled* state, so they sequence AFTER the stored-configuration
-("stop") structure exists; the panel is a co-processor sub-project
+structure exists; the panel is a co-processor sub-project
 regardless (the ESP32-C3's ~15 usable GPIOs are committed to SPI,
 MIDI UART and USB), and it should speak the same CC/SysEx schema as
 MIDI so it drops in without firmware surgery. Sequence: MIDI schema →
-stop structure → panel electronics → motorization. JT's fader
+stored-configuration structure → panel electronics → motorization.
+JT's fader
 hardware research can proceed independently at any time.
 
 ## System topology ✅
@@ -202,7 +203,7 @@ values are firmware writes to per-voice bus bases — the separate
 unified it (superseded 2026-09-03 cleanup; historical planning notes
 live in git history rather than here). Still genuinely open, kept
 from the old notes: the shared per-element configuration table (the
-unnamed "stop" concept) for one-to-many wiring changes, and the
+deliberately unnamed) for one-to-many wiring changes, and the
 combiner source type — both in the B6+ list on measured demand.
 
 ## Outputs ✅
@@ -239,7 +240,7 @@ bench-verified) milestone. One rung in flight at a time.
    [firmware_architecture.md](firmware_architecture.md). 32 voices ×
    8 elements, church-organ detune, cutoff one octave above the note,
    velocity → gain, omni, steal-oldest. Gate-by-gain (no FPGA GATE bit
-   yet): clicks expected. No stop/program structure yet.
+   yet): clicks expected. No program structure yet.
 2. **Housekeeping** ✅ (2026-08-30) — constants live in
    `synth_pkg.sv`, `*patch*` file names and voice→element/lane
    identifiers renamed. Verified zero-change: benches printed
@@ -314,18 +315,8 @@ bench-verified) milestone. One rung in flight at a time.
    is source/sink (code identifiers follow in a zero-behavior naming
    pass). Part 1 (this design.md cleanup) done 2026-09-03.
 
-## Corrections and thoughts from Thor
+## History
 
-- FPGA doesn't know what "patch" vs. "live" parameters are, though. This explains why the agent was reluctant to include stuff like GATE in shadow RAM. We can do swaps thousands of times per second. Everything is live. Don't use the word "patch" or think of it like a patch anymore, please. Every change is effected through a swap. It's okay to use the term "patch panel" as a metaphor for CV routing, but please understand that the ESP32 might rewire it on the fly for certain effects. This FPGA architecture we've developed will be used for other things than virtual analog polysynths in the future.
-
-- PLL in gateware is never a valid workaround. It means we forgot to program the clock chip. Period. So get rid of that idea in all docs and code.
-
-- Depending on DSP budget, we might consider using 36 bits for the entire audio chain and not just the filters. Or at least do summing/mixing at 36 bits. Thoughts?
-
-- Could we give stuff like SVF/oscillator frequencies and volume attenuation values smoothing *after* the LUT lookups? That way, we'd get interpolation for free. For parameter smoothing in general, we probably want to reset the smoothing filter state registers for things like GATE events, to make them snap to the correct value instantly on keystroke. MIDI can only send ~1000 CC events/second at *best* so we're looking at a *minimum* settling time of 96 samples for the smoothing filters, and realistically probably more like 960 samples (10 ms). I estimate that the filters will need a 10-bit fractional part for the internal state.
-
-- Can we get all our data types and constants moved to synth_pkg.sv? It's much easier to tune things if the individual modules don't have any hardcoded numbers.
-
-- (2026-09-01) Probing around the keyboard, I think this may be a firmware bug. It assumes that the same MIDI key can be recycled. Logical fallacy. Hitting the same key does NOT mean deallocating a voice with the same key. *(Resolved: the voice-lifecycle model in firmware_architecture.md — a voice is an instance of a keystroke, not a key.)*
-
-- On the ESP32 side, we need to start structuring things a bit for MIDI. I'm undecided on a few things and would like some input on them. We currently send SPI commands in main.c. We have a MIDI event queue that we need to subscribe to, and we need to track and allocate voices. At some point, we might need to run timed sequences of SPI commands for certain things, for things such as arpeggiators/sequences. What I'm undecided about is process/module layout and separation of concerns. It's all a bit of a jumble for me at te moment and we need a good plan/structure before we begin.
+Corrections, rejected alternatives, and abandoned concepts live in
+[journal.md](journal.md) — this document describes only what the
+design IS.

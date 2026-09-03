@@ -27,7 +27,7 @@ the unconventional machinery stays under the hood.
   ([firmware_architecture.md](firmware_architecture.md)).
 - **Everything is live** — SysEx is a bulk transport for
   configuration, not a separate "patch mode". (The stored-timbre
-  concept — the unnamed "stop" structure — stays unnamed and
+  concept — deliberately unnamed — stays unnamed and
   unimplemented until its own rung.)
 
 ## Channel policy (proposal)
@@ -83,10 +83,10 @@ engine link can do, addressable from a sequencer):
 | 0x7F | — | identity request → reply with git describe of firmware |
 
 Structured configuration blocks (whole-timbre dumps, mod-routing
-setups — the "stop" concept) are deliberately NOT in this rung: they
-deserve the naming/structure discussion first. The raw ops make
-everything reachable today; the structured layer comes when the
-stop-table rung defines what a stored configuration *is*.
+setups) are deliberately NOT in this rung: they deserve the
+structure discussion first. The raw ops make everything reachable
+today; the structured layer comes when a later rung defines what a
+stored configuration *is*.
 
 **Open question 3 — scope.** Is the raw escape hatch the right
 starting point, or should this rung jump straight to structured
@@ -101,5 +101,6 @@ bytes) for now?
 ## Explicitly out of scope this rung
 
 Gateware changes of any kind; program change / bank select (needs the
-stop structure); NRPN; MIDI 2.0 / MPE; velocity curves; per-channel
+stored-configuration structure); NRPN; MIDI 2.0 / MPE; velocity
+curves; per-channel
 timbres.

@@ -24,9 +24,9 @@ the physical FPGA chip, and is used only when discussing its
 electrical or timing behavior. **Element**, **lane** and **voice**
 are as defined in [design.md](design.md): the FPGA generates elements
 via lanes; firmware groups elements into voices. The deferred shared
-configuration table (milestone B6) has no settled name — "stop" was
-an organ-analogy candidate from a side discussion, not design
-terminology.
+configuration table (milestone B6) has no name — deliberately
+(Thor, 2026-09-03: the modulation-bus configuration "has no specific
+name"; earlier drafts misattributed a name to it).
 
 ## The model in one paragraph
 
@@ -90,24 +90,8 @@ conventions the FPGA never sees.
 
 ## Alternatives considered and rejected
 
-- **Generic cable matrix (8 any-source→any-sink cables/element)** —
-  the old map's model. Rejected: crossbar + variable summing + ordering
-  semantics; per-element config duplicated ×8; budget sized for cases
-  no patch uses; grows the audio pipeline to ~27 stages, which law 2's
-  justification forbids.
-- **In-pipeline modulation summing** — rejected on the timing record;
-  the pipeline stays add-only for modulation.
-- **Direct-parameter control as a parallel mechanism** — rejected;
-  it is the degenerate bus allocation (one private bus per parameter),
-  so a second path would duplicate the first.
-- **Per-element envelopes in fixed registers** — the old memory map
-  gave every one of the 256 elements its own two ADSR register sets
-  (offsets +5/+6), each configured individually over SPI: 512
-  envelope generators in gateware, most of them idle. Rejected: the
-  real requirement is 32-note polyphony × 2 envelopes = 64
-  simultaneously active envelopes, which the producer pool provides —
-  and the 8 elements of a voice share their pair through the buses
-  instead of each carrying a copy.
+Moved to [journal.md](journal.md) (2026-09-03: abandoned ideas are
+journal material, not design material).
 
 ## Sizing (initial allocations; address space reserves ≥2×)
 
@@ -221,8 +205,8 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   the FILTER envelope (a second ADSR pool onto the cutoff buses) —
   now a follow-on rung of its own, not part of the B5 milestone.
 - **B6+ (deferred until measured traffic demands them).** Combiner/
-  chaining, shared per-element configuration tables (unnamed; "stop"
-  was only an analogy candidate), producer-side smoothing for
+  chaining, shared per-element configuration tables (deliberately
+  unnamed), source-side smoothing for
   firmware-written buses, bus read-back diagnostics. ✅ **The
   log-domain Q parameter — APPROVED (Thor, 2026-09-03) and merged**
   (decided 2026-09-02: "Let's break with convention and do log2
