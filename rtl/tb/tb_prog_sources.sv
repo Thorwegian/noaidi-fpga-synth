@@ -12,13 +12,18 @@ module tb_prog_sources;
     initial begin
         reset_and_mute;
 
-        // preamble: elements 0-7 = undetuned C4 sine, -12 dB per
-        // side, gates on, gain L/R pointers at bus 3
+        // preamble: elements 0-7 = undetuned C4 sine, gates on, gain
+        // L/R pointers at bus 3. Gains are the chord's hard-panned
+        // -36 dB pattern — the level the chain-era LFO phase measured
+        // at; a louder preamble rails the mix limiter and clipping
+        // flattens the tremolo ratio the assert depends on (found on
+        // the split's first run).
         for (v = 0; v < 8; v = v + 1) begin
             spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400); // sine C4
             spi_word_write(16'h2001 + 16'(v)*64, 32'h00000000);
             spi_word_write(16'h2002 + 16'(v)*64, 32'h00802AF8); // open LP
-            spi_word_write(16'h2003 + 16'(v)*64, 32'h00002020);
+            spi_word_write(16'h2003 + 16'(v)*64,
+                           (v < 4) ? 32'h0000FF60 : 32'h000060FF);
             spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001); // gate on
             spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00); // gl,gr→3
         end
@@ -27,7 +32,8 @@ module tb_prog_sources;
             spi_word_write(16'h2000 + 16'(v)*64, 32'h0000D400);
             spi_word_write(16'h2001 + 16'(v)*64, 32'h00000000);
             spi_word_write(16'h2002 + 16'(v)*64, 32'h00802AF8);
-            spi_word_write(16'h2003 + 16'(v)*64, 32'h00002020);
+            spi_word_write(16'h2003 + 16'(v)*64,
+                           (v < 4) ? 32'h0000FF60 : 32'h000060FF);
             spi_word_write(16'h2004 + 16'(v)*64, 32'h00000001);
             spi_word_write(16'h2006 + 16'(v)*64, 32'h00300C00);
         end
