@@ -1,0 +1,54 @@
+# Gateware simulation suite on every push (issue #58): each bench is
+# its own matrix job, so wall time is the longest single bench and
+# no rung branch can merge red. Toolchain: pinned oss-cad-suite
+# release, cached between runs.
+name: sim
+
+on:
+  push:
+  pull_request:
+
+env:
+  OSS_CAD_RELEASE: "2026-09-01"
+  OSS_CAD_FILE: "oss-cad-suite-linux-x64-20260901.tgz"
+
+jobs:
+  sim:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bench:
+          - sim-elem
+          - sim-outputs
+          - sim-spdif
+          - sim-spi
+          - sim-bus
+          - sim-prog-boot
+          - sim-prog-sweep
+          - sim-prog-bus
+          - sim-prog-sources
+          - sim-stab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache oss-cad-suite
+        id: cache-oss
+        uses: actions/cache@v4
+        with:
+          path: ~/oss-cad-suite
+          key: oss-cad-${{ env.OSS_CAD_RELEASE }}
+
+      - name: Install oss-cad-suite
+        if: steps.cache-oss.outputs.cache-hit != 'true'
+        run: |
+          curl -sL "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/${OSS_CAD_RELEASE}/${OSS_CAD_FILE}" \
+            | tar xz -C "$HOME"
+
+      - name: Tool paths and python deps
+        run: |
+          echo "$HOME/oss-cad-suite/bin" >> "$GITHUB_PATH"
+          pip3 install --quiet numpy
+
+      - name: Run bench
+        run: bash scripts/ci_bench.sh ${{ matrix.bench }}

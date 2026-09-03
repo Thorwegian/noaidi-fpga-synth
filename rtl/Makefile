@@ -101,12 +101,35 @@ tb/tb_spdif_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
 
+# tb_element_program.sv is the ORIGINAL full chain — kept as a
+# long-soak (sim-prog-full, NOT in the default suite: its accidental
+# soak property has caught cross-phase contamination before). The
+# four tb_prog_*.sv splits below carry the same phases as
+# independent benches so make -j4 and CI matrix jobs parallelize
+# (issue #58).
 TB_PROG = tb/tb_element_program.sv
 tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(LUTS) Makefile
 	iverilog -g2012 -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
 
-sim-prog: tb/tb_element_program.vvp
-	vvp tb/tb_element_program.vvp > tb/sim-prog.out 2>&1
+sim-prog-full: tb/tb_element_program.vvp
+	vvp tb/tb_element_program.vvp
+
+PROG_COMMON = tb/elem_prog_common.svh
+
+tb/tb_prog_%.vvp: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
+	iverilog -g2012 -I. -o $@ $(SIM_MOD) spi/spi_bus.sv $<
+
+sim-prog-boot: tb/tb_prog_boot.vvp
+	vvp tb/tb_prog_boot.vvp > tb/sim-prog-boot.out 2>&1
+
+sim-prog-sweep: tb/tb_prog_sweep.vvp
+	vvp tb/tb_prog_sweep.vvp > tb/sim-prog-sweep.out 2>&1
+
+sim-prog-bus: tb/tb_prog_bus.vvp
+	vvp tb/tb_prog_bus.vvp > tb/sim-prog-bus.out 2>&1
+
+sim-prog-sources: tb/tb_prog_sources.vvp
+	vvp tb/tb_prog_sources.vvp > tb/sim-prog-sources.out 2>&1
 
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
@@ -131,9 +154,14 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
-sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus sim-prog sim-stab
+sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus \
+     sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources \
+     sim-stab
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
-	     tb/sim-spi.out tb/sim-bus.out tb/sim-prog.out tb/sim-stab.out
+	     tb/sim-spi.out tb/sim-bus.out \
+	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
+	     tb/sim-prog-bus.out tb/sim-prog-sources.out \
+	     tb/sim-stab.out
 
 clean:
 	rm -rf *.log *.json *.fs element/svf_k_lut.hex
