@@ -186,7 +186,7 @@ module tb_element_program;
         end
         spi_word_write(bus_addr(2), 32'h00000000);
 
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -12 dB (volume
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -48 dB (volume
                                                       // bus, #40)
         observe(60);
         observe(400);
@@ -194,7 +194,7 @@ module tb_element_program;
             $display("FAIL: gain bus did not attenuate (peak=%0d)", peak);
             errors = errors + 1;
         end else
-            $display("gain +12dB att: peak=%0d (was %0d)", peak, worst);
+            $display("gain bus -48 dB: peak=%0d (was %0d)", peak, worst);
         spi_word_write(bus_addr(3), 32'h00000000);
         observe(60);
         observe(400);
