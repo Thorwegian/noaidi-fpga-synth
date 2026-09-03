@@ -45,13 +45,20 @@ element/boot_p%.hex: ../scripts/gen_boot_image.py
 yosys.json: $(SRC) $(LUTS) Makefile
 	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
 
+# Placement seed is PINNED: nextpnr's router is seed-sensitive, and
+# the q1-LUT shrink (issue #41) made the default seed fail routing
+# on an unrelated u_spi net while seed 2 routes with full timing
+# margin. Bump SEED if a future netlist hits "Failed to find a
+# route" — it is placement luck, not (necessarily) real congestion.
+SEED ?= 2
+
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
-		--freq 73.728 2>&1 | tee pnr.log
+		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<
