@@ -229,6 +229,13 @@ crackle, no glitches, by ear. Note-edge clicks present and expected
 click-free; ESP32 SPI self-test ALL OK at 10 MHz; all testbenches
 green; timing closed with ~68% margin in the drum domain.
 
+> **Issue tracking (2026-09-03)**: deferred work and progress now
+> live in [GitHub issues](https://github.com/Thorwegian/noaidi-fpga-synth/issues)
+> (parking lot migrated as #40–#61, labeled gateware / firmware /
+> tooling / docs / experiment / hardware). The roadmap below records
+> the agreed ORDER and history; new deferred ideas go to the
+> tracker, not into docs prose.
+
 ## Roadmap (order agreed 2026-08-30)
 
 Each rung is a branch, merged at an ear-verified (or, where marked,
