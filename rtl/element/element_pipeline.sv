@@ -106,9 +106,14 @@ module element_pipeline #(
     //----------------------------------------------------------------
     reg [23:0] phase_lut [0:1023];     // osc phase delta, one octave
     reg [15:0] k_lut     [0:1023];     // SVF K mantissa, one octave
-    reg [16:0] q1_lut    [0:1023];     // SVF damping mantissa, one
+    reg [16:0] q1_lut    [0:15];       // SVF damping mantissa, one
                                        // octave of the log2 resonance
-                                       // code (q1 = sqrt2 * 2^-r)
+                                       // code (q1 = sqrt2 * 2^-r) in
+                                       // 1/16-octave steps — the
+                                       // attenuation-LUT grid, ear-
+                                       // proven for loudness-class
+                                       // percepts (issue #41); fabric
+                                       // LUTs, no BSRAM block
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
 
     initial begin
@@ -867,7 +872,7 @@ module element_pipeline #(
         end else begin
             s3_delta_lut <= phase_lut[eff_pitch[9:0]];
             s3_k_lut     <= k_lut[eff_fc[9:0]];
-            s3_q1_lut    <= q1_lut[eff_reso[9:0]];
+            s3_q1_lut    <= q1_lut[eff_reso[9:6]];
             s3_reso_oct  <= eff_reso[13:10];
             s3_act   <= s2_act;
             s3_idx   <= s2_idx;
