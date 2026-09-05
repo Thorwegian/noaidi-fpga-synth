@@ -12,6 +12,10 @@ extern "C" {
 // after event_bus_init.
 void ble_midi_init(void);
 
+// Serial console key 'p': log stack state and re-trigger advertising
+// (safe from any task). Part of the shared console dispatcher.
+void ble_midi_console_status(void);
+
 #ifdef __cplusplus
 }
 #endif

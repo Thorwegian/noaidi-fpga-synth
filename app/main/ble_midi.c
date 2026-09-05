@@ -25,7 +25,6 @@
 
 #include "ble_midi.h"
 
-#include <assert.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -56,6 +55,11 @@
 static const ble_uuid128_t gatt_svr_svc_midi_uuid = MIDI_SVC_UUID;
 static const ble_uuid128_t gatt_svr_chr_midi_io_uuid = MIDI_IO_UUID;
 static uint16_t gatt_svr_chr_midi_io_handle;
+
+// Advertising is one-shot: the stack stops it when a connection
+// forms, and the GAP callback restarts it on failure/disconnect.
+static bool s_advertising;
+static int s_conn_count;
 
 static midi_parser_t g_ble_parser;
 
@@ -173,6 +177,7 @@ static void ble_midi_advertise(void)
         ESP_LOGE(TAG, "adv start: rc=%d", rc);
         return;
     }
+    s_advertising = true;
 }
 
 static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
@@ -180,16 +185,21 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         midi_parser_reset(&g_ble_parser);
+        s_advertising = false;
         if (event->connect.status != 0) {
             ESP_LOGW(TAG, "connect failed, re-advertising");
             ble_midi_advertise();
         } else {
+            s_conn_count++;
             ESP_LOGI(TAG, "MIDI connection established");
         }
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
         midi_parser_reset(&g_ble_parser);
+        if (s_conn_count > 0) {
+            s_conn_count--;
+        }
         ESP_LOGI(TAG, "disconnected (reason=%d), advertising",
                  event->disconnect.reason);
         ble_midi_advertise();
@@ -205,7 +215,14 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
 static void ble_midi_on_sync(void)
 {
     int rc = ble_hs_util_ensure_addr(0);
-    assert(rc == 0);
+    if (rc != 0) {
+        ESP_LOGW(TAG, "public address unavailable (rc=%d), falling back to random", rc);
+        rc = ble_hs_util_ensure_addr(1);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "no usable address (rc=%d) - not advertising", rc);
+            return;
+        }
+    }
     ble_midi_advertise();
 }
 
@@ -215,23 +232,52 @@ static void ble_midi_host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
+// Console key 'p': print stack state and re-trigger advertising.
+// NimBLE APIs are safe to call from any task (they queue to the host
+// task), so this can run in the shared serial-console dispatcher.
+void ble_midi_console_status(void)
+{
+    bool synced = ble_hs_is_enabled();
+    ESP_LOGI(TAG, "BLE: host %s, advertising=%s, connections=%d",
+             synced ? "synced" : "NOT synced",
+             s_advertising ? "yes" : "no",
+             s_conn_count);
+    if (synced && !s_advertising) {
+        ble_midi_advertise();
+    }
+}
+
 void ble_midi_init(void)
 {
     midi_parser_init(&g_ble_parser, ble_msg_to_bus, NULL);
 
-    ble_svc_gap_device_name_set("Noaidi");
+    // nimble_port_init() is the full bring-up: controller enable, HCI,
+    // and the NPL primitives (mutex, event queue) the host lock needs.
+    // It MUST run before any service registration - ble_gatts_add_svcs
+    // takes ble_hs_lock, and without this call the lock's mutex does
+    // not exist yet (load access fault in xQueueSemaphoreTake, seen on
+    // silicon). The bundled bleprph example calls it in app_main for
+    // exactly this reason; nimble_port_freertos_init() below only
+    // spawns the host task.
+    ESP_ERROR_CHECK(nimble_port_init());
+
+    // Order matters: the GAP/GATT services must exist before their
+    // settings are touched (the bundled bleprph example does exactly
+    // this sequence).
     ble_svc_gap_init();
     ble_svc_gatt_init();
 
     ble_gatts_count_cfg(gatt_svr_svcs);
     ble_gatts_add_svcs(gatt_svr_svcs);
 
+    ble_svc_gap_device_name_set("Noaidi");
+
     ble_hs_cfg.reset_cb = NULL;   // no bonding, nothing to restore
     ble_hs_cfg.sync_cb = ble_midi_on_sync;
 
     // nimble_port_freertos_init() in this IDF version wraps
     // esp_nimble_enable(): controller + host bring-up inside, void
-    // return — errors surface as abort/log from the stack.
+    // return - errors surface as abort/log from the stack.
     nimble_port_freertos_init(ble_midi_host_task);
 
     ESP_LOGI(TAG, "BLE MIDI peripheral up, advertising as \"Noaidi\"");

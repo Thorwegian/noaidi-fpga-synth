@@ -17,6 +17,7 @@
 #include "nvs.h"
 
 #include "event_bus.h"
+#include "ble_midi.h"
 
 #define TAG "slider"
 
@@ -250,6 +251,10 @@ static void console_task(void *arg)
             ESP_LOGI(TAG, "raw=%d cc=%u ends=%u..%u working=%u..%u",
                      raw, raw_to_cc(raw), s_end_min, s_end_max,
                      s_raw_min, s_raw_max);
+        } else if (ch == 'p' || ch == 'P') {
+            // BLE: status + re-advertise (console is the shared
+            // debug dispatcher; ble_midi owns no console task).
+            ble_midi_console_status();
         }
     }
 }

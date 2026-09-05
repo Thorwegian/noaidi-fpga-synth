@@ -16,6 +16,7 @@
 //   1  capture the MIN end
 //   2  capture the MAX end
 //   r  print one raw reading + ends + working range
+//   p  BLE: print stack state + re-trigger advertising (ble_midi.c)
 
 #pragma once
 
