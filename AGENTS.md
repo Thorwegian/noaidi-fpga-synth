@@ -29,6 +29,9 @@ repo. Keep this file updated when the architecture changes.
 - UART1 default pins TX=7/RX=6 clash with SPI CS/MOSI → `midi_in_init()` must run
   before `fpga_spi_init()`.
 - Audio pins in `rtl/constraints.cst`: I2S 54–56, SPDIF 27, sysclk 10 (73.728 MHz).
+- Both dev boards (ESP32-C3 and Tang Nano 20K) are permanently USB-attached to
+  the dev host (mini-linux): `make fw-flash`/`fw-monitor` and FPGA loading always
+  work from there without touching hardware.
 
 ## Firmware (`app/`)
 
