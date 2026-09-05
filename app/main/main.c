@@ -14,6 +14,7 @@
 #include "engine_link.h"
 #include "voice_alloc.h"
 #include "slider.h"
+#include "ble_midi.h"
 
 void app_main(void)
 {
@@ -98,5 +99,6 @@ void app_main(void)
     engine_link_init();
     voice_alloc_init();
     slider_init();   // panel slider -> CC71 (resonance); 'c' = calibrate
+    ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
     printf("play the keyboard — gate-by-gain, clicks expected\n");
 }
