@@ -1,7 +1,8 @@
 # AGENTS.md — Noaidi FPGA Synth project notes
 
 Build, hardware, and architecture notes for AI coding agents working in this
-repo. Keep this file updated when the architecture changes.
+repo. Keep this file updated when the architecture changes. Agent will neatly
+summarise.
 
 ## Toolchain (user environment)
 
@@ -42,6 +43,23 @@ repo. Keep this file updated when the architecture changes.
 - `midi_parser.c/h`: running status, sysex, real-time, vel-0 note-off. Idle handling:
   50 ms partial reset (keeps running status), 500 ms silence → full reset +
   `uart_flush_input`.
+- `ble_midi.c/h`: standard MIDI 1.0 over BLE service on NimBLE. Advertises
+  "Noaidi"; unpacks BLE MIDI packets in the NimBLE host task and feeds the
+  shared `midi_parser` onto the event bus - same path as DIN MIDI, so the
+  voice allocator never knows the difference. Console key 'p' prints stack
+  state and re-triggers advertising. Verified on silicon 2026-09-05 (macOS
+  Audio MIDI Setup → Logic → audible over SPDIF). In IDF v6 the NimBLE host
+  lives inside the `bt` component - no separate `nimble` component exists.
+  Two bring-up traps, both boot loops, written here so nobody re-finds them:
+  (1) `nimble_port_init()` must run before any `ble_svc_gap_init()` /
+  `ble_gatts_add_svcs()` - it creates the host-lock mutex; without it the
+  host lock faults in `xQueueSemaphoreTake`. (2)
+  `CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC` must be `n` (Kconfig default is `y`):
+  with it on, the GAP service defs point at a NULL heap ctx and registration
+  faults with a load access fault at address 0x4. Sequence that works:
+  `nimble_port_init()` → gap/gatt svc init + `ble_gatts_count_cfg`/`add_svcs`
+  → `ble_svc_gap_device_name_set()` → `nimble_port_freertos_init()` (spawns
+  the host task only). BT/NimBLE options live in `app/sdkconfig.defaults`.
 - FPGA SPI slave: `rtl/spi/spi_slave_regs.sv` — Mode 0 slave + 16-word register
   file in one module. Command byte (`[7]` R/W, `[6:0]` addr) then data, address
   auto-increments, all inside one CS frame. MISO byte 0 is always the ID byte
