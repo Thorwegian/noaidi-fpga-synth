@@ -1,0 +1,16 @@
+# BLE MIDI (ble-midi branch): NimBLE peripheral hosting the standard
+# MIDI 1.0 over BLE service (03B80E5A-EDE8-4B33-A751-6CE34EC4C700).
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+# BLE MIDI packets ride the full ATT MTU; prefer the 4.2 maximum.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517
+# No bonding on this device — nothing to persist.
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+# Static (non-heap) NimBLE services. The dynamic path leaves the GAP
+# service defs pointing at a NULL ctx until the host allocator comes
+# up - ble_svc_gap_init() then walks a NULL+4 pointer and the chip
+# load-access-faults in a boot loop (seen on silicon). Static it is.
+CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
