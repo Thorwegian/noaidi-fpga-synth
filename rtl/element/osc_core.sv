@@ -14,7 +14,7 @@ module osc_core (
     input  logic signed [23:0] phase,     // current phase (Q0.24)
     input  logic signed [23:0] delta,     // phase increment (Q0.24)
     input  logic signed [23:0] duty,      // PWM duty cycle (Q0.24, signed)
-    input  logic        [1:0]  wave,      // 0 saw, 1 pulse, 2 tri, 3 sine
+    input  logic        [1:0]  wave,      // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
 
     output logic signed [23:0] phase_next,
     output logic signed [17:0] sample_out // Q2.16
@@ -44,16 +44,26 @@ module osc_core (
         : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
 
     //----------------------------------------------------------------
-    // Sine: y = 4x(1-x) parabolic half-wave
+    // Sine: true sine from a quarter-wave LUT (issue #65 — the old
+    // y=4x(1-x) parabola read as a noisy tone on hardware). One
+    // quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
+    // cycle is rebuilt from the top two phase bits — quadrant[0]
+    // mirrors the falling quarters, quadrant[1] negates the lower
+    // half. Full-scale like saw/tri (the parabola sat ~6 dB low).
+    // (A real parabolic waveform returns as its own type in #66.)
     //----------------------------------------------------------------
-    logic [22:0] x_abs;
-    assign x_abs = phase_next[23] ? -phase_next : phase_next;
+    reg [23:0] sine_lut [0:255];
+    initial $readmemh("element/sine_lut.hex", sine_lut);
 
-    logic [45:0] product;
-    assign product = x_abs * (24'h7FFFFF - x_abs);
+    logic [1:0]  quadrant;
+    logic [7:0]  q_idx;
+    logic [23:0] q_mag;
+    assign quadrant = phase_next[23:22];
+    assign q_idx    = quadrant[0] ? ~phase_next[21:14] : phase_next[21:14];
+    assign q_mag    = sine_lut[q_idx];
 
     logic signed [23:0] sine;
-    assign sine = phase_next[23] ? -product[45:22] : product[45:22];
+    assign sine = quadrant[1] ? -$signed(q_mag) : $signed(q_mag);
 
     //----------------------------------------------------------------
     // Waveform select

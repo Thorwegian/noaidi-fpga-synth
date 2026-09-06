@@ -39,6 +39,17 @@ module tb_osc_core;
         end
     endtask
 
+    // One sample at an exact phase (delta 0 so phase_next == phase).
+    task automatic sample_at(input [1:0] w, input signed [23:0] p,
+                             output integer s);
+        begin
+            wave = w; duty = 24'sd0; delta = 24'sd0; phase = p;
+            #1;
+            s = sample_out;
+            delta = DELTA;
+        end
+    endtask
+
     // Peak magnitude over one cycle.
     task automatic peak_mag(input [1:0] w, output integer pk);
         integer i, a;
@@ -61,16 +72,27 @@ module tb_osc_core;
     endtask
 
     integer h_lo, h_mid, h_hi, pk_saw, pk_sine;
+    integer s_q0, s_q1, s_q2, s_q3;
     initial begin
         delta = DELTA;
 
-        // SAW / TRI reach near full-scale; SINE is the parabolic
-        // half-amplitude sine (~half of saw). All must be non-silent.
+        // SAW and the LUT SINE both reach near full-scale.
         peak_mag(2'd0, pk_saw);
         peak_mag(2'd3, pk_sine);
         check(pk_saw  > 30000, "saw reaches near full scale");
-        check(pk_sine > 12000, "sine is audible (non-silent)");
-        check(pk_sine < pk_saw, "parabolic sine is below saw amplitude");
+        check(pk_sine > 30000, "sine reaches near full scale (LUT)");
+
+        // Sine cardinal points: 0 at phase 0, +peak at 1/4, 0 at 1/2,
+        // -peak at 3/4 (a true sine, not the old parabola).
+        sample_at(2'd3, 24'h000000, s_q0);
+        sample_at(2'd3, 24'h400000, s_q1);
+        sample_at(2'd3, 24'h800000, s_q2);
+        sample_at(2'd3, 24'hC00000, s_q3);
+        $display("sine cardinals: 0=%0d q=%0d h=%0d 3q=%0d", s_q0, s_q1, s_q2, s_q3);
+        check(s_q0 > -600 && s_q0 < 600, "sine(0)   ~ 0");
+        check(s_q1 > 30000,              "sine(1/4) ~ +peak");
+        check(s_q2 > -600 && s_q2 < 600, "sine(1/2) ~ 0");
+        check(s_q3 < -30000,             "sine(3/4) ~ -peak");
 
         // Pulse high-fraction must RISE with duty (the CC 25 sweep).
         high_count(2'd1, -24'sh600000, h_lo);

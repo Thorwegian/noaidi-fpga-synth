@@ -20,6 +20,7 @@ LUTS = \
 	element/svf_k_lut.hex \
 	element/q1_lut.hex \
 	element/att_lut.hex \
+	element/sine_lut.hex \
 	element/boot_p0.hex \
 	element/boot_p1.hex \
 	element/boot_p2.hex \
@@ -37,6 +38,9 @@ element/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
 element/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+element/sine_lut.hex: ../scripts/gen_sine_lut.py
 	python3 $<
 
 element/boot_p%.hex: ../scripts/gen_boot_image.py
@@ -157,7 +161,7 @@ sim-stab: tb/tb_svf_stability.vvp
 # Oscillator waveform shapes + pulse duty response (osc_core in
 # isolation — the coverage gap behind the issue #70 waveform reports).
 TB_OSC = tb/tb_osc_core.sv
-tb/tb_osc_core.vvp: element/osc_core.sv $(TB_OSC) Makefile
+tb/tb_osc_core.vvp: element/osc_core.sv $(TB_OSC) element/sine_lut.hex Makefile
 	iverilog -g2012 -o $@ element/osc_core.sv $(TB_OSC)
 
 sim-osc: tb/tb_osc_core.vvp
