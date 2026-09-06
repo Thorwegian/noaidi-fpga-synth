@@ -1,6 +1,4 @@
-// patch.h — the currently-active sound, in RAM (DRAFT / DESIGN
-// ARTIFACT, not yet wired into the build — Thor, 2026-09-06:
-// "start making a data structure for the currently active patch").
+// patch.h — the currently-active sound, in RAM (issue #69).
 //
 // This is the single source of truth for the active sound: the
 // CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
@@ -123,3 +121,8 @@ typedef struct {
     patch_t part[PERF_NUM_PARTS];
     // key/velocity split ranges, layer enables: TBD with the feature
 } performance_t;
+
+// ── The active patch (issue #69) ────────────────────────────────────
+extern patch_t g_patch;
+void     patch_default(patch_t *p);
+uint32_t patch_adsr_word(const adsr_t *e);

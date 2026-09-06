@@ -13,6 +13,7 @@
 
 #include "event_bus.h"
 #include "engine_link.h"
+#include "patch.h"
 
 #define TAG "voice_alloc"
 
@@ -23,21 +24,11 @@
 #define NUM_VOICES     32
 #define ELEMS_PER_VOICE 8
 
-// ── The hardcoded test timbre (no stop structure yet) ───────────────
-#define WAVE_SAW   0x0
-// Resonance is log2-encoded (Thor, 2026-09-02): FILTER[27:14] = r,
-// UQ4.10 octaves of Q above Butterworth (q1 = sqrt2 * 2^-r in
-// gateware). One integer = one octave of Q ≈ +6 dB of resonant
-// peak; 0 = Butterworth (softest), high values reach
-// self-oscillation. 0x200 = the q1 = 1.0 soft-pad damping Thor
-// tuned by ear in the old linear encoding.
-#define RESO       0x200u
-// GAIN words are VOLUME since issue #40 (0x00 = silence, 0xFF =
-// loudest); a zeroed word is silent-by-default. VOL_BASE is the old
-// ear-tuned -18 dB expressed as volume (0xFF - 0x30); the headroom
-// evidence (full-smash chords at -12 dBFS one step below) carries
-// over unchanged.
-#define VOL_BASE   0xCF
+// The active sound now lives in g_patch (patch.h, issue #69);
+// WAVE_SAW / resonance / base volume / ADSR come from there. Only
+// the exact-mute code stays a local constant.
+// (Resonance is log2-encoded, FILTER[27:14] = octaves of Q above
+// Butterworth; volume is UQ4.4, 0x00 = silence since #40.)
 #define VOL_MUTE   0x00               // exact mute (special-cased in RTL)
 
 // Church-organ unison detune per element index, in UQ4.10 fraction
@@ -121,10 +112,9 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // CC maps perceptually linearly as (cc << 1). Byte 2 is the SUSTAIN
 // LEVEL, one LSB = span/256 below peak (0.1875 dB at the 48 dB
 // span).
-// Values: Thor's latest feel carried into the re-biased decode
-// (+0x40 per rate byte: his attack 0x48 → 0x88, release 0x18 →
-// 0x58), decay dropped into the newly opened gentle zone.
-#define ADSR_RATES    (0x98u | (0x20u << 8) | (0xF0u << 16) | (0x28u << 24))
+// The amp envelope's A,D,S,R now lives in g_patch.env[0]
+// (patch.h, #69); patch_adsr_word() packs it into the RATES word.
+// patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
 // The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
@@ -143,7 +133,7 @@ static int s_sub_id = -1;
 // rates ever become CC-driven.
 static int64_t release_tail_us(void)
 {
-    uint32_t r    = (ADSR_RATES >> 24) & 0xFF;
+    uint32_t r    = (patch_adsr_word(&g_patch.env[0]) >> 24) & 0xFF;
     uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
     uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
     return (int64_t)(samples * 125u / 12u);           // µs at 96 kHz
@@ -180,7 +170,7 @@ static uint32_t elem_osc_word(uint8_t note, int u)
     int32_t pitch = (int32_t)midi_to_pitch(note) + DETUNE[u];
     if (pitch < 0)      pitch = 0;
     if (pitch > 0x3FFF) pitch = 0x3FFF;
-    return (uint32_t)pitch | (WAVE_SAW << 14);
+    return (uint32_t)pitch | ((uint32_t)g_patch.osc[0].wave << 14);
 }
 
 // Hard-mute a voice's elements via the per-element GATE word (exact
@@ -219,7 +209,7 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
     // volume semantics: softer hits are LOWER values
-    uint32_t vol = (uint32_t)VOL_BASE - ((127u - vel) >> 1);
+    uint32_t vol = (uint32_t)g_patch.volume - ((127u - vel) >> 1);
     if (vol < 0x01) vol = 0x01;
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
@@ -230,7 +220,7 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
 
         send(elem, 0, elem_osc_word(note, u));
         send(elem, 1, 0);
-        send(elem, 2, (RESO << 14) | fc);
+        send(elem, 2, ((uint32_t)g_patch.filter.resonance << 14) | fc);
         send(elem, 3, (r << 8) | l);
         send(elem, 4, 1);                  // GATE on (stays on)
     }
@@ -298,7 +288,7 @@ static void refresh_cut_buses(void)
 // octaves of Q = self-oscillation. Conventional knob: up = more.
 static void reso_update(uint8_t val)
 {
-    int32_t offset = ((int32_t)val << 7) - (int32_t)RESO;
+    int32_t offset = ((int32_t)val << 7) - (int32_t)g_patch.filter.resonance;
     engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
 }
 
@@ -424,6 +414,8 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
+    patch_default(&g_patch);   // active sound (#69) — the former
+                               // hardcoded timbre, now in one struct
     wire_pointers();
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
     engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
@@ -448,7 +440,7 @@ void voice_alloc_init(void)
         engine_link_prod_write(PROD_ADSR(v), 0,
             2u | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
-        engine_link_prod_write(PROD_ADSR(v), 1, ADSR_RATES);
+        engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word(&g_patch.env[0]));
         engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
     }
     s_sub_id = event_bus_subscribe(s_queue);
