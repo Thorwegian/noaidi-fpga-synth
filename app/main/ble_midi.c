@@ -153,6 +153,35 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
 
 static int ble_midi_gap_event(struct ble_gap_event *event, void *arg);
 
+// Log the parameters actually in effect on a connection — the
+// supervision timeout is what a reason-520 (0x08) drop hinges on
+// (issue #67). Units per HCI: interval 1.25 ms, timeout 10 ms.
+static void log_conn_params(uint16_t conn_handle)
+{
+    struct ble_gap_conn_desc d;
+    if (ble_gap_conn_find(conn_handle, &d) != 0)
+        return;
+    ESP_LOGI(TAG, "conn params in effect: itvl=%u (%u.%02u ms) latency=%u "
+                  "timeout=%u (%u ms)",
+             d.conn_itvl, (d.conn_itvl * 125) / 100, (d.conn_itvl * 125) % 100,
+             d.conn_latency, d.supervision_timeout, d.supervision_timeout * 10);
+}
+
+// Request our preferred connection parameters. Apple-friendly:
+// 15-30 ms interval, no latency, 6 s supervision (generous, so a
+// brief RF hiccup can't trip a reason-520 timeout). MUST run AFTER
+// encryption — requesting it in the CONNECT event collided with
+// macOS's own pairing procedure (observed status=554 = HCI 0x2A,
+// different transaction collision) and was rejected (issue #67).
+static void request_conn_params(uint16_t conn_handle)
+{
+    struct ble_gap_upd_params up = {
+        .itvl_min = 12, .itvl_max = 24,
+        .latency = 0, .supervision_timeout = 600,
+    };
+    ble_gap_update_params(conn_handle, &up);
+}
+
 static void ble_midi_advertise(void)
 {
     struct ble_gap_adv_params adv_params;
@@ -198,14 +227,9 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         } else {
             s_conn_count++;
             ESP_LOGI(TAG, "MIDI connection established");
-            // Apple-friendly connection parameters: 15-30 ms
-            // interval, no latency, 4 s supervision. Units: interval
-            // 1.25 ms, timeout 10 ms.
-            struct ble_gap_upd_params up = {
-                .itvl_min = 12, .itvl_max = 24,
-                .latency = 0, .supervision_timeout = 400,
-            };
-            ble_gap_update_params(event->connect.conn_handle, &up);
+            log_conn_params(event->connect.conn_handle);
+            // params requested AFTER encryption (see ENC_CHANGE) to
+            // avoid the pairing-time collision (issue #67)
         }
         return 0;
 
@@ -237,11 +261,14 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         ESP_LOGI(TAG, "encryption %s (status=%d)",
                  event->enc_change.status == 0 ? "established" : "FAILED",
                  event->enc_change.status);
+        if (event->enc_change.status == 0)
+            request_conn_params(event->enc_change.conn_handle);  // now valid
         return 0;
 
     case BLE_GAP_EVENT_CONN_UPDATE:
         ESP_LOGI(TAG, "conn params updated (status=%d)",
                  event->conn_update.status);
+        log_conn_params(event->conn_update.conn_handle);
         return 0;
 
     case BLE_GAP_EVENT_MTU:
