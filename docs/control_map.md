@@ -29,6 +29,16 @@ Controllers:
 - sustain pedal support
 - aftertouch and expression pedal as mod sources
 
+Input transports (Thor, 2026-09-06):
+- **Wired MIDI** (5-pin DIN → optocoupler → UART1 on GPIO0) is the
+  primary PLAYING input.
+- **BLE MIDI** is for control surfaces — up to 3 bonded devices
+  (one active connection at a time, `MAX_BONDS=3`,
+  `MAX_CONNECTIONS=1`). Good enough for now; not the play path.
+- Both land on the same event bus, so the synth model is transport-
+  agnostic; a control-surface CC over BLE and the same CC over the
+  wire are indistinguishable downstream.
+
 Constraint (Thor): **shouldn't require any FPGA changes.** (The two
 new oscillator waveforms wanted alongside — white noise, sine — are
 tracked as gateware issues separately and are not part of this
