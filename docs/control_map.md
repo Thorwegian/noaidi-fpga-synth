@@ -44,6 +44,31 @@ new oscillator waveforms wanted alongside — white noise, sine — are
 tracked as gateware issues separately and are not part of this
 firmware-side map.)
 
+## Decisions (Thor, 2026-09-06)
+
+Informed by comparing the 21st-century Prophet line (depth via a mod
+matrix) to the Roland JP-8000 (immediacy via fixed routing + the
+Supersaw + performance features). Noaidi's bus fabric is a
+mod-matrix under the hood, so the plan is a JP-8000-style surface on
+a Prophet-capable engine, staged:
+
+1. **Modulation UX is staged.** Ship FIXED-FUNCTION first — a
+   conventional default routing (the JP-8000 layer: the 2 LFOs, 2
+   ADSRs, key tracking, bend range wired to their obvious
+   destinations). Leave the **mod-matrix option open**: it maps onto
+   the deliberately-unnamed stored-configuration structure and the
+   buses already support it, so exposing flexible routing later is
+   additive, not a rewrite.
+2. **Oscillator element split (confirms the 8-element budget):**
+   osc 2 = **Supersaw, 7 elements** (detune + stereo spread); osc 1
+   = the **8th element**. 7 + 1 = 8 elements/voice = the full
+   per-voice budget; nothing on the FPGA changes.
+3. **Step sequencer** — in.
+4. **Clock source modes:** **Auto** (slave to external MIDI clock
+   when one is detected, else run the internal clock) and
+   **Internal** (force internal, ignoring any external clock — for
+   when you want to override incoming clock). Auto is the default.
+
 ## Resource sanity check (agent, same day)
 
 The list fits the engine as built:
@@ -66,3 +91,11 @@ The list fits the engine as built:
 - The chord-aware pattern engine's place in the firmware layout
   (a sequencer is "just another producer into the command queue"
   per firmware_architecture.md — the chord intelligence is new).
+- Arp/seq mechanics (from the design discussion): the engine runs
+  LOCALLY off the held-note set; MIDI carries no "arpeggiate"
+  message. Tempo via MIDI Clock (0xF8, 24 ppqn) + Start/Stop/
+  Continue — a midi_in clock handler publishes these on the event
+  bus; the seq subscribes to note + clock events and emits notes
+  back into the voice path. Chord-aware patterns are firmware
+  analysis of the held set (arranger-style), no standard MIDI for
+  it. Clock-source modes Auto/Internal per the decisions above.
