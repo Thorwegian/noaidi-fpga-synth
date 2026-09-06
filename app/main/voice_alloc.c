@@ -584,6 +584,14 @@ void voice_alloc_init(void)
     patch_default(&g_patch);   // active sound (#69) — the former
                                // hardcoded timbre, now in one struct
     wire_pointers();
+    // Null buses. The duty pointer (PTRS0[19:10]) and every other
+    // pointer left at its default target bus 0 — the intended "zero"
+    // bus. Nothing writes bus 0/1, and unwritten bus BSRAM is NOT
+    // guaranteed zero on the GW2AR (the very reason pitch/reso below
+    // are written explicitly). Without this, eff_duty = word +
+    // (garbage << 13) saturates and CC 25 pulse-width does nothing.
+    engine_link_bus_write(0, 0);
+    engine_link_bus_write(1, 0);
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
     engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
 
