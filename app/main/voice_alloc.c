@@ -31,6 +31,18 @@
 // Butterworth; volume is UQ4.4, 0x00 = silence since #40.)
 #define VOL_MUTE   0x00               // exact mute (special-cased in RTL)
 
+// Master volume rides the per-voice gain-bus BASE, summed with the
+// amp-envelope producer — exactly what the mod buses are for (Thor):
+// one cheap bus write per voice, no swap and no element re-render,
+// instead of re-baking every GAIN word. The GAIN word carries a
+// FIXED per-note ceiling (VOL_REF minus velocity); g_patch.volume
+// moves the gain-bus base around it. VOL_REF is the unity anchor
+// (the former default volume) so a bus offset of 0 reproduces the
+// old sound exactly: the RTL adds (gain_bus >>> 6) to the UQ4.4 word
+// gain, so 64 bus LSB = one UQ4.4 step, and off = (vol−VOL_REF)·64
+// makes word+bus == the old (vol−vel) code bit-for-bit.
+#define VOL_REF    0xCF               // unity anchor = patch_default volume
+
 // Church-organ unison detune per element index, in UQ4.10 fraction
 // LSBs (≈1.17 cents each). Left half (0-3) and right half (4-7) use
 // different sets → inter-channel detune. Same table as the boot image.
@@ -74,6 +86,7 @@ static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 #define D_ENV    2u   // push amp env to producers
 #define D_CUT    4u   // refresh cutoff buses
 #define D_LFO    8u   // push LFO 1
+#define D_GAIN  16u   // refresh gain-bus bases (master volume)
 static uint32_t s_dirty;
 static int64_t  s_last_apply;
 #define APPLY_MIN_US 15000   // ≤66 Hz apply rate, whatever the CC rate
@@ -223,8 +236,11 @@ static void promote_idle(int64_t now)
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
-    // volume semantics: softer hits are LOWER values
-    uint32_t vol = (uint32_t)g_patch.volume - ((127u - vel) >> 1);
+    // Per-note ceiling only: fixed VOL_REF minus velocity (softer hits
+    // are LOWER values). MASTER volume is NOT here — it rides the
+    // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
+    // writes, not a re-render of every element.
+    uint32_t vol = (uint32_t)VOL_REF - ((127u - vel) >> 1);
     if (vol < 0x01) vol = 0x01;
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
@@ -332,6 +348,19 @@ static void refresh_cut_buses(void)
             engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
 }
 
+// Master volume → every voice's gain-bus base (all 32, since the base
+// persists and a not-yet-played voice must already carry it). Base =
+// −ENV_SPAN + (g_patch.volume − VOL_REF)·64: at VOL_REF the offset is
+// 0 and the base is the plain envelope floor. No swap, no rewrite —
+// the amp-ADSR producer keeps adding the envelope on top.
+static void refresh_gain_buses(void)
+{
+    int32_t off  = ((int32_t)g_patch.volume - VOL_REF) * 64;
+    int32_t base = -(int32_t)ENV_SPAN + off;
+    for (int v = 0; v < NUM_VOICES; v++)
+        engine_link_bus_write(BUS_GAIN(v), (uint32_t)base & 0x3FFFF);
+}
+
 // CC 71 → global resonance bus (TEMPORARY assignment, see bus plan).
 // One live bus write moves every element: effective resonance code
 // = RESO + (cc<<7 − RESO) = cc << 7 — 0 = Butterworth, 127 ≈ 15.9
@@ -430,9 +459,11 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 76: g_patch.lfo[0].rate  = (uint16_t)(val << 7); s_dirty |= D_LFO; break;
     case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_dirty |= D_LFO; break;
 
-    // ---- live: element-word params (re-render sounding voices) ----
+    // ---- live: master volume → gain-bus base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
-             s_dirty |= D_RENDER; break;
+             s_dirty |= D_GAIN; break;
+
+    // ---- live: element-word params (re-render sounding voices) ----
     case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
              s_dirty |= D_RENDER; break;
     case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
@@ -486,6 +517,7 @@ static void apply_dirty(int64_t now)
     if (s_dirty & D_ENV)    update_amp_env();
     if (s_dirty & D_CUT)    refresh_cut_buses();
     if (s_dirty & D_LFO)    update_lfo1();
+    if (s_dirty & D_GAIN)   refresh_gain_buses();
     if (s_dirty & D_RENDER) render_active_voices();
     s_dirty = 0;
     s_last_apply = now;
@@ -558,19 +590,18 @@ void voice_alloc_init(void)
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
-    // quiet floor (−ENV_SPAN), the envelope level ADDS volume up to
-    // the note's GAIN word (volume semantics, issue #40 — the
-    // subtracts-silence trick is retired). Bases are live bus
-    // writes; config rides the swap.
+    // quiet floor (−ENV_SPAN) shifted by master volume, the envelope
+    // level ADDS up to the note's GAIN word ceiling (volume semantics,
+    // issue #40 — the subtracts-silence trick is retired). Bases are
+    // live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_bus_write(BUS_GAIN(v),
-            (uint32_t)(-(int32_t)ENV_SPAN) & 0x3FFFF);
         engine_link_prod_write(PROD_ADSR(v), 0,
             2u | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word(&g_patch.env[0]));
         engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
     }
+    refresh_gain_buses();   // gain-bus bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");
