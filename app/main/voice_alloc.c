@@ -65,6 +65,19 @@ static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 
+// Live CC edits COALESCE (issue #70 crash fix): a CC just marks what
+// changed; apply_dirty() does the heavy work at a bounded rate.
+// Rendering per-CC flooded engine_link and starved the CPU (task
+// watchdog) when a controller swept — render_active_voices() alone
+// is ~320 element writes.
+#define D_RENDER 1u   // re-render sounding voices (element words)
+#define D_ENV    2u   // push amp env to producers
+#define D_CUT    4u   // refresh cutoff buses
+#define D_LFO    8u   // push LFO 1
+static uint32_t s_dirty;
+static int64_t  s_last_apply;
+#define APPLY_MIN_US 15000   // ≤66 Hz apply rate, whatever the CC rate
+
 // ── Bus plan (B3/B5, firmware convention — bus_architecture.md) ─────
 // bus 2:      global pitch offset — the pitch wheel. Every element's
 //             pitch pointer references it.
@@ -335,7 +348,7 @@ static void wheel_update(uint8_t val)
     if (val == s_wheel)
         return;
     s_wheel = val;
-    refresh_cut_buses();
+    s_dirty |= D_CUT;   // coalesced (was refresh_cut_buses per CC)
 }
 
 // Pitch wheel: ±2 semitones. Q8.10 has 1024/12 ≈ 85.3 LSB per
@@ -349,8 +362,8 @@ static void bend_update(uint16_t bend14)
     if (off == s_bend)
         return;
     s_bend = off;
-    engine_link_bus_write(BUS_PITCH_GLOBAL, (uint32_t)(int32_t)off);
-    refresh_cut_buses();
+    engine_link_bus_write(BUS_PITCH_GLOBAL, (uint32_t)(int32_t)off);  // 1 write
+    s_dirty |= D_CUT;   // cut-bus refresh coalesced
 }
 
 // Note-off releases the OLDEST HELD voice carrying that note — FIFO
@@ -391,7 +404,7 @@ static void apply_cutoff(void)
     // coarse spans a few octaves, fine interpolates.
     int32_t v14 = ((int32_t)s_cut_coarse << 7) | s_cut_fine;   // 0..16383
     s_cut_off = (v14 - 8192) >> 2;   // ~±2k Q8.10 = ±2 octaves
-    refresh_cut_buses();
+    s_dirty |= D_CUT;   // coalesced
 }
 
 static void handle_cc(uint8_t num, uint8_t val)
@@ -408,26 +421,26 @@ static void handle_cc(uint8_t num, uint8_t val)
     // knob up = longer. Sustain is a LEVEL (higher byte = louder),
     // so it is NOT inverted → knob up = louder (Thor: 79 was upside
     // down when uniformly inverted).
-    case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); update_amp_env(); break;
-    case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); update_amp_env(); break;
-    case 79: g_patch.env[0].sustain = (uint8_t)(val << 1);         update_amp_env(); break;
-    case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+    case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
+    case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
+    case 79: g_patch.env[0].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV; break;
+    case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
 
     // ---- live: LFO 1 (source 0) ----
-    case 76: g_patch.lfo[0].rate  = (uint16_t)(val << 7); update_lfo1(); break;
-    case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  update_lfo1(); break;
+    case 76: g_patch.lfo[0].rate  = (uint16_t)(val << 7); s_dirty |= D_LFO; break;
+    case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_dirty |= D_LFO; break;
 
     // ---- live: element-word params (re-render sounding voices) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
-             render_active_voices(); break;
+             s_dirty |= D_RENDER; break;
     case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
-             render_active_voices(); break;
+             s_dirty |= D_RENDER; break;
     case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
-             render_active_voices(); break;
+             s_dirty |= D_RENDER; break;
     case 29: g_patch.filter.type = (uint8_t)(val >> 5) & 3;
-             render_active_voices(); break;
+             s_dirty |= D_RENDER; break;
     case 30: g_patch.filter.dual = val >= 64;
-             render_active_voices(); break;
+             s_dirty |= D_RENDER; break;
 
     // ---- MOD env: stored (#42) ----
     case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); break;
@@ -462,10 +475,27 @@ static void handle_midi(const midi_message_t *m)
     }
 }
 
+// Apply coalesced CC edits at a bounded rate (issue #70 crash fix).
+// A CC burst sets dirty bits cheaply; here the heavy work runs at
+// most every APPLY_MIN_US, so no controller sweep can flood
+// engine_link or starve the CPU. Called from the task loop.
+static void apply_dirty(int64_t now)
+{
+    if (!s_dirty || now - s_last_apply < APPLY_MIN_US)
+        return;
+    if (s_dirty & D_ENV)    update_amp_env();
+    if (s_dirty & D_CUT)    refresh_cut_buses();
+    if (s_dirty & D_LFO)    update_lfo1();
+    if (s_dirty & D_RENDER) render_active_voices();
+    s_dirty = 0;
+    s_last_apply = now;
+}
+
 // Poll period for the idle sweep (#68): a released voice must reach
 // true silence within this of its tail ending, even if no further
 // notes arrive. 50 ms is well below noticeable and negligible load.
-#define VA_SWEEP_MS   50
+// It also bounds how long a pending coalesced CC edit waits.
+#define VA_SWEEP_MS   20
 
 static void voice_alloc_task(void *arg)
 {
@@ -488,7 +518,9 @@ static void voice_alloc_task(void *arg)
             if (evt.kind == EVT_MIDI)
                 handle_midi(&evt.midi);
         }
-        promote_idle(esp_timer_get_time());   // retire + mute tails
+        int64_t now = esp_timer_get_time();
+        promote_idle(now);   // retire + mute tails
+        apply_dirty(now);    // coalesced CC edits (#70)
     }
 }
 
