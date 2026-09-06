@@ -123,16 +123,19 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 //   NOTIFY characteristic. The hand-declared one here produced TWO
 //   CCCDs on the characteristic — a GATT violation some centrals
 //   punish with a disconnect.
-// - The _ENC flags require an encrypted link for data access. The
-//   Apple BLE-MIDI spec REQUIRES encryption; without it macOS/iOS
-//   run for a while and then terminate (the observed reason 531 =
-//   HCI 0x13, remote user terminated).
+// - Encryption is SUPPORTED, not REQUIRED (issue #79). The SM config
+//   in ble_midi_init() lets Apple pair+encrypt by its own BLE-MIDI
+//   policy — that (not a characteristic flag) is what fixed the
+//   macOS reason-531 drops. Adding _ENC flags to REQUIRE encryption
+//   then broke Android, which connects without pairing (BLE MIDI
+//   Engineer Lite: connects but writes rejected, no MIDI). Plain
+//   READ/WRITE serves both: Apple still encrypts, Android works.
 static const struct ble_gatt_chr_def gatt_svr_chrs[] = {
     {
         .uuid = &gatt_svr_chr_midi_io_uuid.u,
         .access_cb = gatt_svr_chr_access,
-        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
-                 BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC |
+        .flags = BLE_GATT_CHR_F_READ |
+                 BLE_GATT_CHR_F_WRITE |
                  BLE_GATT_CHR_F_WRITE_NO_RSP |
                  BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &gatt_svr_chr_midi_io_handle,
