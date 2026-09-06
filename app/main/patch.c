@@ -44,6 +44,11 @@ void patch_default(patch_t *p)
     p->env[0].release = 0x28;
     // MOD env (#42) not rendered yet; leave zeroed.
 
+    // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
+    p->lfo[0].shape = 2;               // triangle
+    p->lfo[0].rate  = 175;             // ~1 Hz
+    p->lfo[0].depth = 16;
+
     p->volume     = 0xCF;              // was VOL_BASE (~-18 dB as volume)
     p->bend_range = 2;                 // current ±2 semitones
 }

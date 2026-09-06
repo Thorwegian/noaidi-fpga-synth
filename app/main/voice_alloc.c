@@ -52,6 +52,7 @@ typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
 typedef struct {
     voice_state_t state;
     uint8_t  note;
+    uint8_t  vel;           // stored so a live CC edit can re-render (#70)
     uint8_t  channel;       // stored for later multi-timbrality; omni today
     uint32_t stamp;         // allocation order, for oldest-steal
     int64_t  release_until; // esp_timer µs when the release tail is done
@@ -62,6 +63,7 @@ static uint32_t s_stamp;
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
+static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 
 // ── Bus plan (B3/B5, firmware convention — bus_architecture.md) ─────
 // bus 2:      global pitch offset — the pitch wheel. Every element's
@@ -120,7 +122,7 @@ static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
 static uint32_t cut_bus_value(int v)
 {
-    int32_t val = (int32_t)s_wheel * 24 + s_bend + s_vel_cut[v];
+    int32_t val = (int32_t)s_wheel * 24 + s_bend + s_vel_cut[v] + s_cut_off;
     return (uint32_t)val;   // engine masks to 18 bits (Q8.10)
 }
 static QueueHandle_t s_queue;
@@ -218,12 +220,47 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         uint32_t l = left ? vol : VOL_MUTE;
         uint32_t r = left ? VOL_MUTE : vol;
 
+        // GAIN word carries the mode byte (filter type/dual) from
+        // the patch so CC 29/30 render on re-program (#70).
+        uint32_t mode = ((uint32_t)(g_patch.filter.dual & 1) << 16)
+                      | ((uint32_t)(g_patch.filter.type & 3) << 17);
         send(elem, 0, elem_osc_word(note, u));
-        send(elem, 1, 0);
+        send(elem, 1, (uint32_t)g_patch.osc[0].duty & 0xFFFFFF);  // DUTY
         send(elem, 2, ((uint32_t)g_patch.filter.resonance << 14) | fc);
-        send(elem, 3, (r << 8) | l);
+        send(elem, 3, (r << 8) | l | mode);
         send(elem, 4, 1);                  // GATE on (stays on)
     }
+}
+
+// Re-render every sounding voice's element words from the current
+// patch — the render half of live CC editing (#70). Bus/producer
+// params update their own targets; element-word params (waveform,
+// duty, filter type, volume) re-program here. Needs the per-voice
+// note+vel, which note_on stores.
+static void render_active_voices(void)
+{
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].state != V_IDLE)
+            voice_program(v, s_voices[v].note, s_voices[v].vel);
+}
+
+// Push the amp envelope (patch env[0]) to all per-voice amp ADSR
+// sources — live envelope editing (#70). release_tail_us() already
+// reads the patch, so tail bookkeeping follows automatically.
+static void update_amp_env(void)
+{
+    for (int v = 0; v < NUM_VOICES; v++)
+        engine_link_prod_write(PROD_ADSR(v), 1,
+                               patch_adsr_word(&g_patch.env[0]));
+}
+
+// LFO 1 = source 0 (the vibrato). CC 76/77 set its rate/depth.
+static void update_lfo1(void)
+{
+    engine_link_prod_write(0, 0,
+        1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6)
+           | ((uint32_t)g_patch.lfo[0].rate << 16));
+    engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
 }
 
 // Every note-on gets a FRESH voice — allocation never matches on the
@@ -258,7 +295,7 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
                 { oldest = s_voices[v].stamp; pick = v; }
     }
 
-    s_voices[pick] = (voice_t){.state = V_HELD, .note = note,
+    s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
                                .channel = channel, .stamp = ++s_stamp};
 
     // Velocity → cutoff stays on the bus (brightening, up to ~4
@@ -336,6 +373,68 @@ static void note_off(uint8_t note)
     engine_link_bus_write(BUS_VGATE(pick), 0);
 }
 
+// Program the active patch over MIDI CCs (#70, docs/midi_schema.md).
+// The whole basic-patch surface without SysEx. Each CC mutates
+// g_patch and renders: bus params update a bus live, producer params
+// update a source, element-word params re-render sounding voices.
+// s_cut_off carries the CC74/106 cutoff brightness; env inversions
+// follow the schema ((127-cc)<<1, panel convention).
+//
+// STORED-but-not-yet-rendered (their own issues): MOD env (#42),
+// osc 2 / unison (#72), 2nd LFO + LFO shape/dest (#71), key
+// tracking, arp (#76), pan. A controller may set them; they render
+// when those rungs land.
+static uint8_t  s_cut_coarse, s_cut_fine;   // CC74 / CC106
+static void apply_cutoff(void)
+{
+    // 14-bit brightness centred at coarse 64: (val-8192) scaled so
+    // coarse spans a few octaves, fine interpolates.
+    int32_t v14 = ((int32_t)s_cut_coarse << 7) | s_cut_fine;   // 0..16383
+    s_cut_off = (v14 - 8192) >> 2;   // ~±2k Q8.10 = ±2 octaves
+    refresh_cut_buses();
+}
+
+static void handle_cc(uint8_t num, uint8_t val)
+{
+    switch (num) {
+    // ---- live: buses ----
+    case 1:  wheel_update(val); break;               // mod wheel → cutoff
+    case 71: reso_update(val); break;                // resonance (temp bus 3)
+    case 74: s_cut_coarse = val; apply_cutoff(); break;
+    case 106:s_cut_fine   = val; apply_cutoff(); break;
+
+    // ---- live: amp envelope (producers) ----
+    case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+    case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+    case 79: g_patch.env[0].sustain = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+    case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+
+    // ---- live: LFO 1 (source 0) ----
+    case 76: g_patch.lfo[0].rate  = (uint16_t)(val << 7); update_lfo1(); break;
+    case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  update_lfo1(); break;
+
+    // ---- live: element-word params (re-render sounding voices) ----
+    case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
+             render_active_voices(); break;
+    case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
+             render_active_voices(); break;
+    case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
+             render_active_voices(); break;
+    case 29: g_patch.filter.type = (uint8_t)(val >> 5) & 3;
+             render_active_voices(); break;
+    case 30: g_patch.filter.dual = val >= 64;
+             render_active_voices(); break;
+
+    // ---- MOD env: stored (#42) ----
+    case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); break;
+    case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); break;
+    case 104: g_patch.env[1].sustain = (uint8_t)((127 - val) << 1); break;
+    case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); break;
+
+    default: break;   // unmapped / deferred CCs ignored
+    }
+}
+
 static void handle_midi(const midi_message_t *m)
 {
     uint8_t type = m->status & 0xF0;
@@ -349,10 +448,7 @@ static void handle_midi(const midi_message_t *m)
         note_off(m->data[0]);
         break;
     case 0xB0:
-        if (m->data[0] == 1)          // CC1: mod wheel → cutoff
-            wheel_update(m->data[1]);
-        else if (m->data[0] == 71)    // CC71: resonance (temporary)
-            reso_update(m->data[1]);
+        handle_cc(m->data[0], m->data[1]);
         break;
     case 0xE0:                        // pitch wheel, 14-bit
         bend_update((uint16_t)(((uint16_t)m->data[1] << 7) | m->data[0]));
@@ -420,13 +516,9 @@ void voice_alloc_init(void)
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
     engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
 
-    // B4: producer 0 — the boot vibrato. Triangle LFO at 1.0 Hz
-    // (rate16 = 175; LFOs are subsonic), depth tamed to ±19 cents
-    // now that its existence is ear-verified. DEPTH moved to word 2
-    // in the B5 3-word entry layout.
-    engine_link_prod_write(0, 0,
-        1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6) | (175u << 16));
-    engine_link_prod_write(0, 2, 16);
+    // B4: source 0 — the boot vibrato (LFO 1), from patch.lfo[0].
+    // CC 76/77 retune it live via update_lfo1().
+    update_lfo1();
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
