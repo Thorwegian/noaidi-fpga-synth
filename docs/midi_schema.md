@@ -86,8 +86,10 @@ All four ADSR CCs per envelope invert — knob up = longer/louder
 equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
-| 73 / 75 / 79 / 72 | amp env A / D / S / R | `(127 − cc) << 1` (S: louder up) |
-| 102 / 103 / 104 / 105 | MOD env A / D / S / R | `(127 − cc) << 1` |
+| 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer |
+| 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
+| 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
+| 104 | MOD env S | `cc << 1` (level, not inverted) |
 | 107 | MOD env depth | amount to its destination |
 | 108 | MOD env destination | discrete; default = filter cutoff (#42) |
 

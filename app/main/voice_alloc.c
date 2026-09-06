@@ -404,9 +404,13 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 106:s_cut_fine   = val; apply_cutoff(); break;
 
     // ---- live: amp envelope (producers) ----
+    // A/D/R are log2 RATES (higher byte = faster), so invert →
+    // knob up = longer. Sustain is a LEVEL (higher byte = louder),
+    // so it is NOT inverted → knob up = louder (Thor: 79 was upside
+    // down when uniformly inverted).
     case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); update_amp_env(); break;
     case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); update_amp_env(); break;
-    case 79: g_patch.env[0].sustain = (uint8_t)((127 - val) << 1); update_amp_env(); break;
+    case 79: g_patch.env[0].sustain = (uint8_t)(val << 1);         update_amp_env(); break;
     case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); update_amp_env(); break;
 
     // ---- live: LFO 1 (source 0) ----
@@ -428,7 +432,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- MOD env: stored (#42) ----
     case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); break;
     case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); break;
-    case 104: g_patch.env[1].sustain = (uint8_t)((127 - val) << 1); break;
+    case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         break;
     case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); break;
 
     default: break;   // unmapped / deferred CCs ignored
