@@ -29,11 +29,16 @@
 
 #include "esp_log.h"
 #include "host/ble_hs.h"
+#include "host/ble_store.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+
+// NimBLE's NVS-backed bond store (no public header for this in IDF;
+// the bundled bleprph example declares it the same way)
+void ble_store_config_init(void);
 
 #include "event_bus.h"
 #include "midi_parser.h"
@@ -113,23 +118,24 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     return 0;
 }
 
+// Issue #67 notes:
+// - NO manual CCCD descriptor: NimBLE auto-creates the CCCD for any
+//   NOTIFY characteristic. The hand-declared one here produced TWO
+//   CCCDs on the characteristic — a GATT violation some centrals
+//   punish with a disconnect.
+// - The _ENC flags require an encrypted link for data access. The
+//   Apple BLE-MIDI spec REQUIRES encryption; without it macOS/iOS
+//   run for a while and then terminate (the observed reason 531 =
+//   HCI 0x13, remote user terminated).
 static const struct ble_gatt_chr_def gatt_svr_chrs[] = {
     {
         .uuid = &gatt_svr_chr_midi_io_uuid.u,
         .access_cb = gatt_svr_chr_access,
-        .flags = BLE_GATT_CHR_F_READ |
-                 BLE_GATT_CHR_F_WRITE |
+        .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
+                 BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC |
                  BLE_GATT_CHR_F_WRITE_NO_RSP |
                  BLE_GATT_CHR_F_NOTIFY,
         .val_handle = &gatt_svr_chr_midi_io_handle,
-        .descriptors = (struct ble_gatt_dsc_def[]) {
-            {
-                .uuid = BLE_UUID16_DECLARE(BLE_GATT_DSC_CLT_CFG_UUID16),
-                .att_flags = BLE_ATT_F_READ | BLE_ATT_F_WRITE,
-                .access_cb = gatt_svr_chr_access,
-            },
-            { 0, }
-        },
     },
     { 0, }
 };
@@ -192,6 +198,14 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         } else {
             s_conn_count++;
             ESP_LOGI(TAG, "MIDI connection established");
+            // Apple-friendly connection parameters: 15-30 ms
+            // interval, no latency, 4 s supervision. Units: interval
+            // 1.25 ms, timeout 10 ms.
+            struct ble_gap_upd_params up = {
+                .itvl_min = 12, .itvl_max = 24,
+                .latency = 0, .supervision_timeout = 400,
+            };
+            ble_gap_update_params(event->connect.conn_handle, &up);
         }
         return 0;
 
@@ -200,9 +214,38 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         if (s_conn_count > 0) {
             s_conn_count--;
         }
-        ESP_LOGI(TAG, "disconnected (reason=%d), advertising",
-                 event->disconnect.reason);
+        // reason = 512 + HCI code; 531 = 0x13 remote user terminated
+        ESP_LOGI(TAG, "disconnected (reason=%d / HCI 0x%02x), advertising",
+                 event->disconnect.reason, event->disconnect.reason - 512);
         ble_midi_advertise();
+        return 0;
+
+    // A central re-pairing while it holds a stale bond (our side lost
+    // or rotated keys): NimBLE's default REJECTS it, which the
+    // central answers by disconnecting (issue #67). Delete our stale
+    // peer entry and let the pairing retry.
+    case BLE_GAP_EVENT_REPEAT_PAIRING: {
+        struct ble_gap_conn_desc desc;
+        if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc) == 0) {
+            ble_store_util_delete_peer(&desc.peer_id_addr);
+        }
+        ESP_LOGI(TAG, "stale bond replaced, retrying pairing");
+        return BLE_GAP_REPEAT_PAIRING_RETRY;
+    }
+
+    case BLE_GAP_EVENT_ENC_CHANGE:
+        ESP_LOGI(TAG, "encryption %s (status=%d)",
+                 event->enc_change.status == 0 ? "established" : "FAILED",
+                 event->enc_change.status);
+        return 0;
+
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        ESP_LOGI(TAG, "conn params updated (status=%d)",
+                 event->conn_update.status);
+        return 0;
+
+    case BLE_GAP_EVENT_MTU:
+        ESP_LOGI(TAG, "MTU %u", event->mtu.value);
         return 0;
 
     default:
@@ -272,8 +315,25 @@ void ble_midi_init(void)
 
     ble_svc_gap_device_name_set("Noaidi");
 
-    ble_hs_cfg.reset_cb = NULL;   // no bonding, nothing to restore
+    ble_hs_cfg.reset_cb = NULL;
     ble_hs_cfg.sync_cb = ble_midi_on_sync;
+
+    // Security manager (issue #67): Apple BLE-MIDI requires an
+    // encrypted link. Just-Works pairing (no IO), bonded, LE Secure
+    // Connections, encryption + identity keys both ways; bonds
+    // persist in NVS (CONFIG_BT_NIMBLE_NVS_PERSIST=y +
+    // ble_store_config_init below) so reconnects after a reboot can
+    // re-establish encryption instead of being dropped.
+    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_mitm = 0;
+    ble_hs_cfg.sm_sc = 1;
+    ble_hs_cfg.sm_our_key_dist =
+        BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist =
+        BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+    ble_store_config_init();
 
     // nimble_port_freertos_init() in this IDF version wraps
     // esp_nimble_enable(): controller + host bring-up inside, void
