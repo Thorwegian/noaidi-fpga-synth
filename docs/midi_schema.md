@@ -43,11 +43,12 @@ Adopting the quasi-standard synth CC numbers where they exist:
 
 | CC | Target | Mapping | Notes |
 |---|---|---|---|
-| 1 | mod wheel → cutoff open | existing (`wheel × 24`) | unchanged |
+| 1 | mod wheel → PATCH-ASSIGNED destination | per-patch source | Thor 2026-09-06: make it patch-dependent like most synths — destination + amount are patch parameters, not the hardwired wheel→cutoff of today. (Even in the fixed-function stage the wheel is a configurable mod source; it's the first bit of the mod matrix to surface.) |
 | 71 | resonance | `cc << 7` | onto the log₂ resonance code (UQ4.10 octaves of Q above Butterworth, FILTER[27:14]): CC up = more resonance in equal-ratio steps of ~0.75 dB peak each; CC 127 ≈ 15.9 octaves = self-oscillation at the top — the classic VA knob. Panel taper, if wanted, is a separable firmware curve. **TEMPORARILY LIVE pre-sign-off** (Thor, 2026-09-03): rides global resonance bus 3 as one live write of `(cc << 7) − RESO`, all elements respond instantly. |
 | 72 | amp release rate | `(127 − cc) << 1` | CC up = longer release (panel convention) |
 | 73 | amp attack rate | `(127 − cc) << 1` | CC up = longer attack (panel convention) |
-| 74 | cutoff base offset | 14-bit candidate (see below) | rides the per-voice cutoff buses' firmware term |
+| 74 | cutoff base — COARSE | 7-bit | the everyday cutoff knob |
+| 106 | cutoff base — FINE | 7-bit | Thor 2026-09-06: "why not both" — coarse (74) + fine together give 14-bit resolution. 106 = 74+32 is the MIDI MSB/LSB convention; the two combine to a 14-bit UQ4.10 cutoff term on the per-voice cutoff buses. Fine is optional to send (coarse alone stays musical). |
 | 75 | amp decay rate | `(127 − cc) << 1` | CC up = longer decay (panel convention) |
 | 79 | amp sustain level | `(127 − cc) << 1` | CC up = louder sustain (byte counts down from peak) |
 | 120/123 | all sound off / all notes off | gate buses → 0 | panic path; 120 may also drop levels via GATE words |
@@ -60,10 +61,12 @@ Changed rates are pushed to all 32 amp-ADSR producers (32 banked
 `engine_link_prod_write`s riding one swap) and `release_tail_us()`
 switches from the compile-time `ADSR_RATES` macro to the live value.
 
-**Open question 2 — 7 vs 14 bit.** Rates and sustain fit 7-bit CCs
-perfectly by construction. Cutoff base is UQ4.10 (14 bits) — worth a
-14-bit CC pair (74 MSB + 106 LSB), or is 7-bit (128 steps ≈ 1/8
-octave each over 16 octaves) musically enough for now?
+**Open question 2 — RESOLVED (Thor, 2026-09-06): both.** Cutoff base
+is UQ4.10; use CC 74 (coarse, 7-bit MSB) + CC 106 (fine, 7-bit LSB)
+for the full 14 bits, per the MIDI MSB/LSB convention. Fine is
+optional — coarse alone (≈1/8 octave steps) is already musical, and
+a controller that only sends 74 still works. Rates and sustain stay
+7-bit by construction.
 
 ## SysEx (proposal)
 
@@ -88,9 +91,12 @@ structure discussion first. The raw ops make everything reachable
 today; the structured layer comes when a later rung defines what a
 stored configuration *is*.
 
-**Open question 3 — scope.** Is the raw escape hatch the right
-starting point, or should this rung jump straight to structured
-blocks?
+**Open question 3 — RESOLVED (Thor, 2026-09-06): basic raw ops now,
+grow later.** Ship the raw escape hatch (the op table above) for the
+first rung. But the step sequencer WILL need more — pattern data,
+per-step events, chord-mode config don't fit the raw
+elem/bus/producer writes — so a structured SysEx layer is a known
+follow-up, not a maybe. Design it alongside the sequencer rung.
 
 **Open question 4 — SysEx parser location.** `midi_in` currently
 parses channel messages; SysEx would extend it (bounded buffer,

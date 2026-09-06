@@ -12,9 +12,8 @@ synthesizer; the unconventional machinery stays under the hood.
 
 Per **voice**:
 - 2 ADSR envelopes
-- 2 oscillators — one is a normal oscillator; the other presents as
-  a single "waveform" on the UX side but is **7 unison elements**
-  under the hood, with adjustable pitch spread and stereo spread
+- 2 oscillators with a selectable UNISON/FAT mode (see decision 2 —
+  any waveform, 2-plain / 7+1 / 4+4 element structures)
 
 Per **channel**:
 - 2 LFOs
@@ -59,10 +58,21 @@ a Prophet-capable engine, staged:
    the deliberately-unnamed stored-configuration structure and the
    buses already support it, so exposing flexible routing later is
    additive, not a rewrite.
-2. **Oscillator element split (confirms the 8-element budget):**
-   osc 2 = **Supersaw, 7 elements** (detune + stereo spread); osc 1
-   = the **8th element**. 7 + 1 = 8 elements/voice = the full
-   per-voice budget; nothing on the FPGA changes.
+2. **Oscillator UNISON is a mode, not a fixed "supersaw"** (Thor,
+   2026-09-06 clarification): the fat/unison spread is a selectable
+   oscillator mode that works with ANY waveform (not saw-specific —
+   it's really UNISON/FAT). Three voice-structure modes, all within
+   the 8-element/voice budget:
+   - **Mode 1 — 2 plain oscillators** (2 elements/voice). Uses only
+     2 of 8 slots → opportunity for higher polyphony in this mode
+     (up to ~128 voices if the allocator is made mode-aware);
+     flagged as an implementation choice, not committed.
+   - **Mode 2 — 7 + 1** (one oscillator unisoned across 7 elements,
+     the other plain): 8 elements/voice, 32 voices.
+   - **Mode 3 — 4 + 4** (both oscillators unisoned, 4 elements
+     each): 8 elements/voice, 32 voices.
+   Unison spread = per-oscillator detune + stereo spread. Nothing on
+   the FPGA changes (element detune/pan are already per-element).
 3. **Step sequencer** — in.
 4. **Clock source modes:** **Auto** (slave to external MIDI clock
    when one is detected, else run the internal clock) and
@@ -72,8 +82,10 @@ a Prophet-capable engine, staged:
 ## Resource sanity check (agent, same day)
 
 The list fits the engine as built:
-- Elements: 1 (osc 1) + 7 (osc 2 unison) = **8 elements/voice** —
-  exactly the current budget; 32-voice polyphony stands.
+- Elements: the unison modes (decision 2) stay within **8 elements/
+  voice** — exactly the current budget; 32-voice polyphony stands
+  (mode 1's 2-element voices could go higher with a mode-aware
+  allocator).
 - Sources: 2 LFOs × 16 channels = 32 (pool entries 0–31 as today)
   and 2 ADSRs × 32 voices = 64 (entries 32–95) — 96 of the 128-entry
   pool, 32 spare.
