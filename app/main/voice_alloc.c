@@ -183,9 +183,38 @@ static uint32_t elem_osc_word(uint8_t note, int u)
     return (uint32_t)pitch | (WAVE_SAW << 14);
 }
 
+// Hard-mute a voice's elements via the per-element GATE word (exact
+// mute in the gateware). Issue #68: the amp envelope's floor lives on
+// the gain BUS, which bottoms at the "quietest audible" code, never
+// true silence — inaudible per element but 256 elements sum ~48 dB
+// and hum at high volume. So a fully-released voice gets GATE off,
+// the ONE path that reaches exact zero; note_on re-gates via
+// voice_program. (Enlarging ENV_SPAN to floor the bus into silence
+// would wreck the ear-tuned envelope feel — hence firmware muting.)
+static void hard_mute_voice(int v)
+{
+    for (int u = 0; u < ELEMS_PER_VOICE; u++)
+        send((uint8_t)(v * ELEMS_PER_VOICE + u), 4, 0);   // GATE off
+}
+
+// Retire release tails that have run out: RELEASING → IDLE, and mute
+// the voice exactly (once, at the transition). Called both from the
+// note_on allocation scan and the task's periodic sweep, so an idle
+// voice reaches true silence even with no further notes played.
+static void promote_idle(int64_t now)
+{
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].state == V_RELEASING &&
+            now >= s_voices[v].release_until) {
+            s_voices[v].state = V_IDLE;
+            hard_mute_voice(v);
+        }
+}
+
 // Base parameters: pan and velocity (note-static, B5) bake into the
 // GAIN word; the amp envelope articulates on the gain bus above it.
-// Elements stay GATE-on permanently — the envelope owns silence.
+// note_on re-gates (GATE on) here; a released voice was GATE-muted
+// by promote_idle (#68).
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
@@ -219,10 +248,7 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     int64_t now = esp_timer_get_time();
     int pick = -1;
 
-    // Lazily retire tails that have run out.
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_RELEASING && now >= s_voices[v].release_until)
-            s_voices[v].state = V_IDLE;
+    promote_idle(now);   // retire + hard-mute any finished tails
 
     uint32_t best = UINT32_MAX;
     for (int v = 0; v < NUM_VOICES; v++)
@@ -346,24 +372,33 @@ static void handle_midi(const midi_message_t *m)
     }
 }
 
+// Poll period for the idle sweep (#68): a released voice must reach
+// true silence within this of its tail ending, even if no further
+// notes arrive. 50 ms is well below noticeable and negligible load.
+#define VA_SWEEP_MS   50
+
 static void voice_alloc_task(void *arg)
 {
     evt_t evt;
     while (1) {
-        if (xQueueReceive(s_queue, &evt, portMAX_DELAY) != pdTRUE)
-            continue;
-        // Observability for the "mysteriously unresponsive" hunt:
-        // if events were evicted from this subscriber's queue (e.g.
-        // a CC flood crowding out note events), say so — otherwise a
-        // drop here is indistinguishable from a MIDI-side fault.
-        uint32_t dropped = event_bus_dropped(s_sub_id);
-        if (dropped > 0) {
-            ESP_LOGW(TAG, "event bus dropped %u events for voice_alloc",
-                     (unsigned)dropped);
-            event_bus_reset_dropped(s_sub_id);
+        // Timed receive so the idle sweep runs during quiet passages,
+        // not only when the next note_on happens to scan.
+        if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(VA_SWEEP_MS)) == pdTRUE) {
+            // Observability for the "mysteriously unresponsive" hunt:
+            // if events were evicted from this subscriber's queue
+            // (e.g. a CC flood crowding out note events), say so —
+            // otherwise a drop here is indistinguishable from a
+            // MIDI-side fault.
+            uint32_t dropped = event_bus_dropped(s_sub_id);
+            if (dropped > 0) {
+                ESP_LOGW(TAG, "event bus dropped %u events for voice_alloc",
+                         (unsigned)dropped);
+                event_bus_reset_dropped(s_sub_id);
+            }
+            if (evt.kind == EVT_MIDI)
+                handle_midi(&evt.midi);
         }
-        if (evt.kind == EVT_MIDI)
-            handle_midi(&evt.midi);
+        promote_idle(esp_timer_get_time());   // retire + mute tails
     }
 }
 
