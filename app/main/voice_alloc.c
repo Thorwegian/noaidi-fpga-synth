@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -349,6 +350,23 @@ static void update_amp_env(void)
                                patch_adsr_word(&g_patch.env[0]));
 }
 
+// CC → LFO phase increment. The gateware increment is LINEAR in
+// frequency (freq = inc * Fs / 2^24, Fs = 96 kHz), so an even-sounding
+// control needs the log2/exponential mapping HERE (Thor: the old
+// linear val<<7 crammed the useful slow range into the bottom and made
+// everything past ~40 uselessly fast). Exponential 0.03 Hz .. 30 Hz
+// across the CC — one equal frequency RATIO per step.
+//   inc = freq * 2^24 / 96000  ≈ freq * 174.76
+#define LFO_FS_HZ   96000.0f
+static uint16_t lfo_rate_from_cc(uint8_t val)
+{
+    float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz
+    float inc  = freq * (16777216.0f / LFO_FS_HZ);
+    if (inc < 1.0f)      inc = 1.0f;
+    if (inc > 65535.0f)  inc = 65535.0f;
+    return (uint16_t)(inc + 0.5f);
+}
+
 // LFO 1 = source 0 (the vibrato). CC 76/77 set its rate/depth.
 static void update_lfo1(void)
 {
@@ -522,7 +540,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
 
     // ---- live: LFO 1 (source 0) ----
-    case 76: g_patch.lfo[0].rate  = (uint16_t)(val << 7); s_dirty |= D_LFO; break;
+    case 76: g_patch.lfo[0].rate  = lfo_rate_from_cc(val); s_dirty |= D_LFO; break;
     case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_dirty |= D_LFO; break;
 
     // ---- live: master volume → gain-bus base (not a re-render) ----
