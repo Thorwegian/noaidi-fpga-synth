@@ -39,27 +39,82 @@ state (`s_wheel`, `s_bend`, envelope rates) becomes per-channel then.
 
 ## CC map (proposal)
 
-Adopting the quasi-standard synth CC numbers where they exist:
+Goal (Thor, 2026-09-06): **enough CCs to program a basic patch
+without SysEx** — the whole of patch.h reachable from a controller.
+Standard/quasi-standard CC numbers where they exist; the MIDI
+undefined block (20–31, 102–119) for everything else. All 7-bit
+unless a fine partner is listed. Discrete selectors take a small
+integer value; continuous params scale in the CC handler (engine
+units live in patch.h).
 
-| CC | Target | Mapping | Notes |
-|---|---|---|---|
-| 1 | mod wheel → PATCH-ASSIGNED destination | per-patch source | Thor 2026-09-06: make it patch-dependent like most synths — destination + amount are patch parameters, not the hardwired wheel→cutoff of today. (Even in the fixed-function stage the wheel is a configurable mod source; it's the first bit of the mod matrix to surface.) |
-| 71 | resonance | `cc << 7` | onto the log₂ resonance code (UQ4.10 octaves of Q above Butterworth, FILTER[27:14]): CC up = more resonance in equal-ratio steps of ~0.75 dB peak each; CC 127 ≈ 15.9 octaves = self-oscillation at the top — the classic VA knob. Panel taper, if wanted, is a separable firmware curve. **TEMPORARILY LIVE pre-sign-off** (Thor, 2026-09-03): rides global resonance bus 3 as one live write of `(cc << 7) − RESO`, all elements respond instantly. |
-| 72 | amp release rate | `(127 − cc) << 1` | CC up = longer release (panel convention) |
-| 73 | amp attack rate | `(127 − cc) << 1` | CC up = longer attack (panel convention) |
-| 74 | cutoff base — COARSE | 7-bit | the everyday cutoff knob |
-| 106 | cutoff base — FINE | 7-bit | Thor 2026-09-06: "why not both" — coarse (74) + fine together give 14-bit resolution. 106 = 74+32 is the MIDI MSB/LSB convention; the two combine to a 14-bit UQ4.10 cutoff term on the per-voice cutoff buses. Fine is optional to send (coarse alone stays musical). |
-| 75 | amp decay rate | `(127 − cc) << 1` | CC up = longer decay (panel convention) |
-| 79 | amp sustain level | `(127 − cc) << 1` | CC up = louder sustain (byte counts down from peak) |
-| 102 | MOD env attack | `(127 − cc) << 1` | env 2 (Thor 2026-09-06). The standard sound-controller CCs cover only ONE envelope, so env 2 uses the undefined block 102–105. Default destination = filter cutoff (#42); it's a general routable MOD envelope, destination+amount are patch params. |
-| 103 | MOD env decay | `(127 − cc) << 1` | |
-| 104 | MOD env sustain | `(127 − cc) << 1` | |
-| 105 | MOD env release | `(127 − cc) << 1` | |
-| 120/123 | all sound off / all notes off | gate buses → 0 | panic path; 120 may also drop levels via GATE words |
+**Global / performance**
+| CC | Target | Notes |
+|---|---|---|
+| 7 | part volume | standard Channel Volume → per-part `volume` |
+| 10 | pan | standard Pan → per-part `pan` |
+| 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface |
+| RPN 0/0 | pitch-bend range | the STANDARD mechanism (RPN 0 + data entry CC 6/38) — use it rather than a custom CC; 1–12 semitones |
+| 120/123 | all sound off / all notes off | panic → gate buses 0 |
 
-Knob direction is SETTLED (Thor, 2026-09-02): "perfectly normal knob
-direction, please" — all four envelope CCs invert, which keeps every
-step on the equal-ratio ladder.
+**Oscillators**
+| CC | Target | Notes |
+|---|---|---|
+| 20 | osc 1 waveform | discrete: saw/pulse/tri/parabolic/(noise/sine later) |
+| 21 | osc 2 waveform | discrete |
+| 22 | osc 2 coarse (interval) | semitones |
+| 23 | osc detune | fine/detune between the two |
+| 24 | osc mix / balance | osc1↔osc2 |
+| 25 | pulse width / duty | pulse & parabola skew |
+| 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
+| 27 | unison detune | spread within a unison group |
+| 28 | unison stereo spread | |
+
+**Filter**
+| CC | Target | Notes |
+|---|---|---|
+| 74 | cutoff — COARSE | 7-bit MSB |
+| 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
+| 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
+| 29 | filter type | discrete (LP…; the FILTER/GAIN mode field) |
+| 30 | filter 12/24 dB | discrete |
+| 31 | key tracking amount | cutoff-follows-pitch |
+
+**Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
+MOD (undefined block; standard CCs only ever covered one envelope).
+All four ADSR CCs per envelope invert — knob up = longer/louder
+(Thor 2026-09-02, panel convention), which keeps every step on the
+equal-ratio ladder.
+| CC | Target | Notes |
+|---|---|---|
+| 73 / 75 / 79 / 72 | amp env A / D / S / R | `(127 − cc) << 1` (S: louder up) |
+| 102 / 103 / 104 / 105 | MOD env A / D / S / R | `(127 − cc) << 1` |
+| 107 | MOD env depth | amount to its destination |
+| 108 | MOD env destination | discrete; default = filter cutoff (#42) |
+
+**LFOs** (2)
+| CC | Target | Notes |
+|---|---|---|
+| 76 | LFO 1 rate | standard "vibrato rate" |
+| 77 | LFO 1 depth | standard "vibrato depth" |
+| 113 | LFO 1 shape | discrete (saw/pulse/tri/sine) |
+| 114 | LFO 1 destination | discrete |
+| 109 | LFO 2 rate | |
+| 110 | LFO 2 depth | |
+| 111 | LFO 2 shape | discrete |
+| 112 | LFO 2 destination | discrete |
+
+**Arp / step sequencer**
+| CC | Target | Notes |
+|---|---|---|
+| 117 | arp/seq on/off | |
+| 118 | arp mode | discrete: up/down/updown/random/pattern/chord |
+| 119 | arp octave range | |
+| — | rate | follows the clock (Auto/Internal); step rate is a division, not a free CC |
+
+Deferred to the mod-matrix stage (not basic-patch CCs): the full
+source→dest routing beyond the wheel and the two env/LFO dests
+above. Glide/portamento (standard CC 5 / 65) when that feature
+lands.
 
 Changed rates are pushed to all 32 amp-ADSR producers (32 banked
 `engine_link_prod_write`s riding one swap) and `release_tail_us()`
@@ -112,5 +167,5 @@ bytes) for now?
 
 Gateware changes of any kind; program change / bank select (needs the
 stored-configuration structure); NRPN; MIDI 2.0 / MPE; velocity
-curves; per-channel
-timbres.
+curves. (Per-channel timbres / layering ARE now planned — control_map
+decision 5 — but land with channel awareness, not this CC rung.)
