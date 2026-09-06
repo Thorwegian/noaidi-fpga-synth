@@ -51,6 +51,10 @@ Adopting the quasi-standard synth CC numbers where they exist:
 | 106 | cutoff base — FINE | 7-bit | Thor 2026-09-06: "why not both" — coarse (74) + fine together give 14-bit resolution. 106 = 74+32 is the MIDI MSB/LSB convention; the two combine to a 14-bit UQ4.10 cutoff term on the per-voice cutoff buses. Fine is optional to send (coarse alone stays musical). |
 | 75 | amp decay rate | `(127 − cc) << 1` | CC up = longer decay (panel convention) |
 | 79 | amp sustain level | `(127 − cc) << 1` | CC up = louder sustain (byte counts down from peak) |
+| 102 | MOD env attack | `(127 − cc) << 1` | env 2 (Thor 2026-09-06). The standard sound-controller CCs cover only ONE envelope, so env 2 uses the undefined block 102–105. Default destination = filter cutoff (#42); it's a general routable MOD envelope, destination+amount are patch params. |
+| 103 | MOD env decay | `(127 − cc) << 1` | |
+| 104 | MOD env sustain | `(127 − cc) << 1` | |
+| 105 | MOD env release | `(127 − cc) << 1` | |
 | 120/123 | all sound off / all notes off | gate buses → 0 | panic path; 120 may also drop levels via GATE words |
 
 Knob direction is SETTLED (Thor, 2026-09-02): "perfectly normal knob

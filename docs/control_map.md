@@ -74,6 +74,22 @@ a Prophet-capable engine, staged:
    Unison spread = per-oscillator detune + stereo spread. Nothing on
    the FPGA changes (element detune/pan are already per-element).
 3. **Step sequencer** — in.
+5. **MIDI channels — implement channel awareness** (Thor,
+   2026-09-06: "pretty inexpensive for us, and also allows for
+   layering/key split later"). The engine is omni today, but
+   `voice_t.channel` already carries the groundwork. Making the
+   synth model channel-aware is cheap and unlocks multi-timbral
+   layering and key splits — each channel becomes a "part" that can
+   hold its own patch. Near-term easy win.
+6. **Active-patch data structure — start now** (Thor, 2026-09-06):
+   program change stays deferred until the stored-configuration
+   format is settled, but begin an in-RAM `patch_t` (drafted in
+   `app/main/patch.h`) that holds the whole currently-active sound.
+   It becomes the single source of truth the CC/SysEx handlers
+   MUTATE and voice_alloc/engine_link RENDER to buses and element
+   words. Program change later just loads/stores instances of it;
+   multi-timbral layering (decision 5) is an array of parts, each a
+   patch_t.
 4. **Clock source modes:** **Auto** (slave to external MIDI clock
    when one is detected, else run the internal clock) and
    **Internal** (force internal, ignoring any external clock — for
