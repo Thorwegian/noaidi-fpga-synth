@@ -25,13 +25,16 @@ void patch_default(patch_t *p)
 {
     memset(p, 0, sizeof(*p));
 
-    // ---- values that reproduce the pre-#69 hardcoded timbre ----
+    // ---- oscillators (both rendered now, issue #72) ----
     p->osc[0].wave = WAVE_SAW;
     p->osc[1].wave = WAVE_SAW;
-    // voice_struct/unison spread are not rendered yet (issue #72);
-    // today's 8-detuned-elements organ layout stays in voice_alloc's
-    // DETUNE table until then.
-    p->voice_struct = VOICE_7_PLUS_1;
+    // osc2 defaults to unison with osc1 (coarse/fine/duty 0). Two
+    // plain saws is the default voice (Thor, 2026-09-06); unison and
+    // supersaw are explicit modes (CC 26).
+    p->voice_struct  = VOICE_2_PLAIN;
+    p->osc_mix       = 0;      // centre balance
+    p->unison_detune = 6;      // LSB per spread step (used by unison modes)
+    p->unison_stereo = 64;     // stereo spread on for unison modes
 
     p->filter.resonance = 0x200;       // was RESO (q1 = 1.0)
     p->filter.type      = 0;           // LP

@@ -43,10 +43,14 @@
 // makes word+bus == the old (vol−vel) code bit-for-bit.
 #define VOL_REF    0xCF               // unity anchor = patch_default volume
 
-// Church-organ unison detune per element index, in UQ4.10 fraction
-// LSBs (≈1.17 cents each). Left half (0-3) and right half (4-7) use
-// different sets → inter-channel detune. Same table as the boot image.
-static const int8_t DETUNE[ELEMS_PER_VOICE] = {2, 6, 10, 14, -2, -6, -10, -14};
+// One semitone in the UQ4.10 log2 pitch (1024 LSB per octave).
+#define SEMI_LSB(s)  ((int32_t)(s) * 1024 / 12)
+
+// Unison detune spread positions (symmetric, in "steps"); the actual
+// LSB offset is step * g_patch.unison_detune. The 7-wide set is the
+// supersaw; the 4-wide set feeds each half of the 4+4 mode.
+static const int8_t SPREAD7[7] = {-3, -2, -1, 0, 1, 2, 3};
+static const int8_t SPREAD4[4] = {-3, -1, 1, 3};
 
 // Voice lifecycle (Thor, 2026-09-01: "hitting the same key does NOT
 // mean deallocating a voice with the same key"). A voice is an
@@ -191,14 +195,50 @@ static uint16_t voice_fc(uint8_t note)
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
-// One element's OSC word: note + church-organ detune. Pitch bend no
-// longer touches OSC words — it rides the global pitch bus.
-static uint32_t elem_osc_word(uint8_t note, int u)
+// How each of the 8 elements maps onto the two oscillators for the
+// active voice structure (issue #72). osc = which oscillator (0/1),
+// detune = unison spread in pitch LSBs, l/r = channel enables (both =
+// centre), active = sounding (else GATE-muted).
+typedef struct {
+    uint8_t osc;
+    int16_t detune;
+    bool    l, r;
+    bool    active;
+} evoice_t;
+
+// Fill the voicing plan for the current voice_struct. Returns the
+// number of active (sounding) elements, for loudness make-up.
+static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
 {
-    int32_t pitch = (int32_t)midi_to_pitch(note) + DETUNE[u];
-    if (pitch < 0)      pitch = 0;
-    if (pitch > 0x3FFF) pitch = 0x3FFF;
-    return (uint32_t)pitch | ((uint32_t)g_patch.osc[0].wave << 14);
+    for (int u = 0; u < ELEMS_PER_VOICE; u++) p[u] = (evoice_t){0};
+    int  ud = g_patch.unison_detune;         // LSB per spread step
+    bool st = g_patch.unison_stereo > 0;     // stereo spread on?
+    int  n  = 0;
+
+    switch (g_patch.voice_struct) {
+    case VOICE_2_PLAIN:                       // osc1 + osc2, centred
+        p[0] = (evoice_t){0, 0, true, true, true};
+        p[1] = (evoice_t){1, 0, true, true, true};
+        n = 2;
+        break;
+    case VOICE_7_PLUS_1:                       // supersaw x7 + osc2
+        for (int i = 0; i < 7; i++)
+            p[i] = (evoice_t){0, (int16_t)(SPREAD7[i] * ud),
+                              st ? !(i & 1) : true, st ? (i & 1) : true, true};
+        p[7] = (evoice_t){1, 0, true, true, true};
+        n = 8;
+        break;
+    case VOICE_4_PLUS_4:                       // both oscillators x4
+        for (int i = 0; i < 4; i++) {
+            p[i]     = (evoice_t){0, (int16_t)(SPREAD4[i] * ud),
+                                  st ? !(i & 1) : true, st ? (i & 1) : true, true};
+            p[i + 4] = (evoice_t){1, (int16_t)(SPREAD4[i] * ud),
+                                  st ? !(i & 1) : true, st ? (i & 1) : true, true};
+        }
+        n = 8;
+        break;
+    }
+    return n;
 }
 
 // Hard-mute a voice's elements via the per-element GATE word (exact
@@ -229,10 +269,12 @@ static void promote_idle(int64_t now)
         }
 }
 
-// Base parameters: pan and velocity (note-static, B5) bake into the
-// GAIN word; the amp envelope articulates on the gain bus above it.
-// note_on re-gates (GATE on) here; a released voice was GATE-muted
-// by promote_idle (#68).
+// Render a voice from the two-oscillator plan (issue #72). Each active
+// element takes its oscillator's wave / duty / pitch (note + coarse +
+// fine + unison detune); pan and velocity bake into the GAIN word, the
+// amp envelope articulates on the gain bus above it. Inactive elements
+// (2-plain uses only 2 of 8) are GATE-muted. note_on re-gates here; a
+// released voice was GATE-muted by promote_idle (#68).
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
@@ -240,24 +282,48 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     // are LOWER values). MASTER volume is NOT here — it rides the
     // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
-    uint32_t vol = (uint32_t)VOL_REF - ((127u - vel) >> 1);
-    if (vol < 0x01) vol = 0x01;
+    int32_t vol = (int32_t)VOL_REF - (int32_t)((127u - vel) >> 1);
+
+    // GAIN word carries the mode byte (filter type/dual) from the patch
+    // so CC 29/30 render on re-program (#70).
+    uint32_t mode = ((uint32_t)(g_patch.filter.dual & 1) << 16)
+                  | ((uint32_t)(g_patch.filter.type & 3) << 17);
+
+    evoice_t plan[ELEMS_PER_VOICE];
+    int active = build_voicing(plan);
+    // Loudness make-up: fewer summed elements are quieter. Gentle
+    // UQ4.4 step boost (≈0.375 dB/step) — a conservative first pass so
+    // 2-plain is not jarringly quiet vs the 8-element modes; Thor tunes
+    // by ear (or we fold it into per-patch volume).
+    int32_t makeup = (active <= 2) ? 8 : (active <= 4) ? 4 : 0;
+    int32_t base   = (int32_t)midi_to_pitch(note);
+    int      mix   = g_patch.osc_mix;      // ±: + favours osc2, − osc1
 
     for (int u = 0; u < ELEMS_PER_VOICE; u++) {
-        uint8_t  elem  = (uint8_t)(v * ELEMS_PER_VOICE + u);
-        bool left = u < (ELEMS_PER_VOICE / 2);
-        uint32_t l = left ? vol : VOL_MUTE;
-        uint32_t r = left ? VOL_MUTE : vol;
+        uint8_t elem = (uint8_t)(v * ELEMS_PER_VOICE + u);
+        if (!plan[u].active) {
+            send(elem, 4, 0);              // GATE off = exact element mute
+            continue;
+        }
+        const osc_t *o = &g_patch.osc[plan[u].osc];
 
-        // GAIN word carries the mode byte (filter type/dual) from
-        // the patch so CC 29/30 render on re-program (#70).
-        uint32_t mode = ((uint32_t)(g_patch.filter.dual & 1) << 16)
-                      | ((uint32_t)(g_patch.filter.type & 3) << 17);
-        send(elem, 0, elem_osc_word(note, u));
-        send(elem, 1, (uint32_t)g_patch.osc[0].duty & 0xFFFFFF);  // DUTY
+        int32_t pitch = base + SEMI_LSB(o->coarse) + o->fine + plan[u].detune;
+        if (pitch < 0)      pitch = 0;
+        if (pitch > 0x3FFF) pitch = 0x3FFF;
+
+        int32_t ovol = vol + makeup;
+        if (plan[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
+        if (plan[u].osc == 1 && mix < 0) ovol += mix;   // favour osc1
+        if (ovol < 0x01) ovol = 0x01;
+        if (ovol > 0xFF) ovol = 0xFF;
+        uint32_t l = plan[u].l ? (uint32_t)ovol : VOL_MUTE;
+        uint32_t r = plan[u].r ? (uint32_t)ovol : VOL_MUTE;
+
+        send(elem, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC
+        send(elem, 1, (uint32_t)o->duty & 0xFFFFFF);                  // DUTY
         send(elem, 2, ((uint32_t)g_patch.filter.resonance << 14) | fc);
-        send(elem, 3, (r << 8) | l | mode);
-        send(elem, 4, 1);                  // GATE on (stays on)
+        send(elem, 3, (r << 8) | l | mode);                          // GAIN
+        send(elem, 4, 1);                  // GATE on
     }
 }
 
@@ -466,7 +532,22 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- live: element-word params (re-render sounding voices) ----
     case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
              s_dirty |= D_RENDER; break;
+    case 21: g_patch.osc[1].wave = (waveform_t)(val >> 5);   // osc2 wave
+             s_dirty |= D_RENDER; break;
+    case 22: g_patch.osc[1].coarse = (int16_t)((int)val - 64);  // ±semis
+             s_dirty |= D_RENDER; break;
+    case 23: g_patch.osc[1].fine = (int16_t)(((int)val - 64) * 2);  // detune LSB
+             s_dirty |= D_RENDER; break;
+    case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
+             s_dirty |= D_RENDER; break;
     case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
+             s_dirty |= D_RENDER; break;
+    case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
+               g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
+               s_dirty |= D_RENDER; } break;
+    case 27: g_patch.unison_detune = (int16_t)(val >> 2);   // 0..31 LSB/step
+             s_dirty |= D_RENDER; break;
+    case 28: g_patch.unison_stereo = (int16_t)val;          // stereo spread
              s_dirty |= D_RENDER; break;
     // Three filter types only (RTL: 0=LP, 1=BP, 2=HP; anything else
     // falls into the LP default). Map the CC across exactly those
