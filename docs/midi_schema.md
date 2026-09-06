@@ -59,12 +59,12 @@ units live in patch.h).
 **Oscillators**
 | CC | Target | Notes |
 |---|---|---|
-| 20 | osc 1 waveform | discrete: saw/pulse/tri/parabolic/(noise/sine later) |
+| 20 | osc 1 waveform | discrete, 4 today: 0 saw / 1 pulse / 2 tri / 3 parabolic-sine (osc_core `y=4x(1−x)`, a ROUGH sine — true bandlimited sine is #65, noise is #64) |
 | 21 | osc 2 waveform | discrete |
 | 22 | osc 2 coarse (interval) | semitones |
 | 23 | osc detune | fine/detune between the two |
 | 24 | osc mix / balance | osc1↔osc2 |
-| 25 | pulse width / duty | pulse & parabola skew |
+| 25 | pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
 | 28 | unison stereo spread | |
@@ -75,7 +75,7 @@ units live in patch.h).
 | 74 | cutoff — COARSE | 7-bit MSB |
 | 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
 | 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
-| 29 | filter type | discrete (LP…; the FILTER/GAIN mode field) |
+| 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
 | 31 | key tracking amount | cutoff-follows-pitch |
 

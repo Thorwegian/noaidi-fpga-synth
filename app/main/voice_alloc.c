@@ -468,7 +468,10 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
              s_dirty |= D_RENDER; break;
-    case 29: g_patch.filter.type = (uint8_t)(val >> 5) & 3;
+    // Three filter types only (RTL: 0=LP, 1=BP, 2=HP; anything else
+    // falls into the LP default). Map the CC across exactly those
+    // three so the top of travel is HP, not a second LP.
+    case 29: g_patch.filter.type = (uint8_t)((val * 3) >> 7);  // 0..2
              s_dirty |= D_RENDER; break;
     case 30: g_patch.filter.dual = val >= 64;
              s_dirty |= D_RENDER; break;
