@@ -92,6 +92,8 @@ static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 #define D_CUT    4u   // refresh cutoff buses
 #define D_LFO    8u   // push LFO 1
 #define D_GAIN  16u   // refresh gain-bus bases (master volume)
+#define D_ENV2  32u   // push MOD env producers (#42)
+#define D_LFO2  64u   // push LFO 2 (#73)
 static uint32_t s_dirty;
 static int64_t  s_last_apply;
 #define APPLY_MIN_US 15000   // ≤66 Hz apply rate, whatever the CC rate
@@ -117,6 +119,9 @@ static int64_t  s_last_apply;
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
 // follows bends (Thor).
+#define BUS_DUTY_GLOBAL  1   // global PWM bus (#73) — was null; every
+                             // duty pointer references it (bus 0 stays
+                             // the strict null bus)
 #define BUS_PITCH_GLOBAL 2
 #define BUS_RESO_GLOBAL  3
 #define BUS_GAIN(v)   (16 + (v))
@@ -126,6 +131,10 @@ static int64_t  s_last_apply;
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs.
 #define PROD_ADSR(v)  (32 + (v))
+#define PROD_MODENV(v) (64 + (v))  // MOD env (#42): 2nd ADSR per voice,
+                                   // watches the same gate bus, drives
+                                   // the voice's CUTOFF bus
+#define PROD_LFO2     1            // global LFO 2 (#73)
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB (Thor, iterating
 // by ear — -96 dB buried attacks below audibility, 48 dB proved too
 // shallow, 72 dB tried briefly; sustain LSB = span/256 = 0.234 dB).
@@ -369,13 +378,59 @@ static uint16_t lfo_rate_from_cc(uint8_t val)
     return (uint16_t)(inc + 0.5f);
 }
 
-// LFO 1 = source 0 (the vibrato). CC 76/77 set its rate/depth.
+// LFO 1 = source 0 (the vibrato). CC 76/77 rate/depth, CC 113 shape.
 static void update_lfo1(void)
 {
     engine_link_prod_write(0, 0,
-        1u | (2u << 4) | ((uint32_t)BUS_PITCH_GLOBAL << 6)
+        1u | ((uint32_t)(g_patch.lfo[0].shape & 3) << 4)
+           | ((uint32_t)BUS_PITCH_GLOBAL << 6)
            | ((uint32_t)g_patch.lfo[0].rate << 16));
     engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
+}
+
+// LFO 2 = source 1 (#73), global. CC 109/110/111/112. Destination is
+// duty (PWM) or resonance — ONE producer per bus in the walker, and
+// pitch already belongs to LFO 1. When the destination moves, the old
+// bus's effective value would go stale (nothing writes it any more),
+// so restore its firmware base.
+static int32_t s_reso_off;   // CC 71's last bus offset (for restore)
+static void update_lfo2(void)
+{
+    static uint16_t prev_bus = BUS_DUTY_GLOBAL;
+    uint16_t bus = (g_patch.lfo[1].dest == 1) ? BUS_RESO_GLOBAL
+                                              : BUS_DUTY_GLOBAL;
+    if (bus != prev_bus) {
+        if (prev_bus == BUS_DUTY_GLOBAL)
+            engine_link_bus_write(BUS_DUTY_GLOBAL, 0);
+        else
+            engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)s_reso_off);
+        prev_bus = bus;
+    }
+    engine_link_prod_write(PROD_LFO2, 0,
+        1u | ((uint32_t)(g_patch.lfo[1].shape & 3) << 4)
+           | ((uint32_t)bus << 6)
+           | ((uint32_t)g_patch.lfo[1].rate << 16));
+    engine_link_prod_write(PROD_LFO2, 2,
+        (uint32_t)(uint16_t)g_patch.lfo[1].depth);
+}
+
+// MOD envelope (#42) = ADSR producers 64..95, one per voice: watches
+// the voice's gate bus (same gate the amp env watches), drives the
+// voice's CUTOFF bus with a SIGNED depth (the walker DEPTH word is
+// signed 18-bit) — classic filter envelope, bipolar. Rates from
+// patch env[1] (CCs 102–105), depth CC 107, dest CC 108 (stored;
+// cutoff is the implemented destination).
+static void update_mod_env(void)
+{
+    uint32_t rates = patch_adsr_word(&g_patch.env[1]);
+    uint32_t depth = (uint32_t)(int32_t)g_patch.env1_depth & 0x3FFFF;
+    for (int v = 0; v < NUM_VOICES; v++) {
+        engine_link_prod_write(PROD_MODENV(v), 0,
+            2u | ((uint32_t)BUS_CUT(v) << 6)
+               | ((uint32_t)BUS_VGATE(v) << 16));
+        engine_link_prod_write(PROD_MODENV(v), 1, rates);
+        engine_link_prod_write(PROD_MODENV(v), 2, depth);
+    }
 }
 
 // Every note-on gets a FRESH voice — allocation never matches on the
@@ -454,6 +509,7 @@ static void refresh_gain_buses(void)
 static void reso_update(uint8_t val)
 {
     int32_t offset = ((int32_t)val << 7) - (int32_t)g_patch.filter.resonance;
+    s_reso_off = offset;   // remembered so LFO 2 dest changes can restore
     engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
 }
 
@@ -466,14 +522,15 @@ static void wheel_update(uint8_t val)
     s_dirty |= D_CUT;   // coalesced (was refresh_cut_buses per CC)
 }
 
-// Pitch wheel: ±2 semitones. Q8.10 has 1024/12 ≈ 85.3 LSB per
-// semitone, so the 14-bit bend (center 8192) maps via (bend-8192)/48
-// → ±170 LSB. ONE write to the global pitch bus moves every element;
-// the cutoff buses get the same term so filter key tracking follows
-// the bend (Thor).
+// Pitch wheel: ±bend_range semitones (RPN 0, #74; default ±2). Q8.10
+// has 1024/12 ≈ 85.3 LSB per semitone: off = delta × range × 85.33 /
+// 8192 = delta × range / 96. ONE write to the global pitch bus moves
+// every element; the cutoff buses get the same term so filter key
+// tracking follows the bend (Thor).
 static void bend_update(uint16_t bend14)
 {
-    int16_t off = (int16_t)(((int32_t)bend14 - 8192) / 48);
+    int16_t off = (int16_t)(((int32_t)bend14 - 8192)
+                            * g_patch.bend_range / 96);
     if (off == s_bend)
         return;
     s_bend = off;
@@ -522,6 +579,11 @@ static void apply_cutoff(void)
     s_dirty |= D_CUT;   // coalesced
 }
 
+// RPN state (#74): CC 101/100 select an RPN, CC 6 (data entry MSB)
+// writes it. RPN 0/0 = pitch-bend range, the standard mechanism.
+// 127/127 is RPN null; an NRPN select (99/98) also deselects.
+static uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
+
 static void handle_cc(uint8_t num, uint8_t val)
 {
     switch (num) {
@@ -530,6 +592,18 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 71: reso_update(val); break;                // resonance (temp bus 3)
     case 74: s_cut_coarse = val; apply_cutoff(); break;
     case 106:s_cut_fine   = val; apply_cutoff(); break;
+
+    // ---- RPN 0: pitch-bend range (#74) ----
+    case 101: s_rpn_msb = val; break;
+    case 100: s_rpn_lsb = val; break;
+    case 99: case 98: s_rpn_msb = s_rpn_lsb = 127; break;  // NRPN deselects
+    case 6:
+        if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
+            uint8_t semis = val < 1 ? 1 : (val > 12 ? 12 : val);
+            g_patch.bend_range = semis;   // takes effect on the next bend
+        }
+        break;
+    case 38: break;                       // data entry LSB: cents, ignored
 
     // ---- live: amp envelope (producers) ----
     // A/D/R are log2 RATES (higher byte = faster), so invert →
@@ -544,6 +618,17 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- live: LFO 1 (source 0) ----
     case 76: g_patch.lfo[0].rate  = lfo_rate_from_cc(val); s_dirty |= D_LFO; break;
     case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_dirty |= D_LFO; break;
+    case 113: g_patch.lfo[0].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO; break;
+
+    // ---- live: LFO 2 (source 1, #73) ----
+    case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_dirty |= D_LFO2; break;
+    // Depth scale is per-destination: duty bus decodes <<<13 (1024 LSB
+    // = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q).
+    case 110: g_patch.lfo[1].depth =
+                  (int16_t)(g_patch.lfo[1].dest == 1 ? val << 5 : val << 4);
+              s_dirty |= D_LFO2; break;
+    case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO2; break;
+    case 112: g_patch.lfo[1].dest  = (uint8_t)(val >= 64); s_dirty |= D_LFO2; break;
 
     // ---- live: master volume → gain-bus base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
@@ -580,11 +665,16 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 30: g_patch.filter.dual = val >= 64;
              s_dirty |= D_RENDER; break;
 
-    // ---- MOD env: stored (#42) ----
-    case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); break;
-    case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); break;
-    case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         break;
-    case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); break;
+    // ---- MOD env (#42): live on the cutoff buses ----
+    case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
+    case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
+    case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV2; break;
+    case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
+    // Depth: BIPOLAR, centre 64 = off, ±4 octaves of cutoff full-scale
+    case 107: g_patch.env1_depth = (int16_t)(((int)val - 64) << 6);
+              s_dirty |= D_ENV2; break;
+    case 108: g_patch.env1_dest = (uint8_t)(val >> 5);  // stored; cutoff live
+              break;
 
     default: break;   // unmapped / deferred CCs ignored
     }
@@ -622,8 +712,10 @@ static void apply_dirty(int64_t now)
     if (!s_dirty || now - s_last_apply < APPLY_MIN_US)
         return;
     if (s_dirty & D_ENV)    update_amp_env();
+    if (s_dirty & D_ENV2)   update_mod_env();
     if (s_dirty & D_CUT)    refresh_cut_buses();
     if (s_dirty & D_LFO)    update_lfo1();
+    if (s_dirty & D_LFO2)   update_lfo2();
     if (s_dirty & D_GAIN)   refresh_gain_buses();
     if (s_dirty & D_RENDER) render_active_voices();
     s_dirty = 0;
@@ -687,7 +779,9 @@ static void wire_pointers(void)
     for (int e = 0; e < NUM_VOICES * ELEMS_PER_VOICE; e++) {
         int v = e / ELEMS_PER_VOICE;
         send((uint8_t)e, 5,
-             (uint32_t)BUS_PITCH_GLOBAL | ((uint32_t)BUS_CUT(v) << 20));
+             (uint32_t)BUS_PITCH_GLOBAL
+             | ((uint32_t)BUS_DUTY_GLOBAL << 10)   // PWM bus (#73)
+             | ((uint32_t)BUS_CUT(v) << 20));
         send((uint8_t)e, 6,
              (uint32_t)BUS_RESO_GLOBAL
              | ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
@@ -716,8 +810,10 @@ void voice_alloc_init(void)
     engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
 
     // B4: source 0 — the boot vibrato (LFO 1), from patch.lfo[0].
-    // CC 76/77 retune it live via update_lfo1().
+    // CC 76/77/113 retune it live via update_lfo1().
     update_lfo1();
+    update_lfo2();     // source 1 (#73): PWM/reso wobble, depth 0 at boot
+    update_mod_env();  // sources 64..95 (#42): filter env, depth 0 at boot
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the

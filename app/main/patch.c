@@ -45,12 +45,30 @@ void patch_default(patch_t *p)
     p->env[0].decay   = 0x20;
     p->env[0].sustain = 0xF0;
     p->env[0].release = 0x28;
-    // MOD env (#42) not rendered yet; leave zeroed.
+
+    // MOD env (#42): classic filter envelope — near-instant attack,
+    // medium decay to zero sustain. Depth 0 = OFF by default, so the
+    // boot timbre is unchanged until CC 107 dials it in.
+    p->env[1].attack  = 0xF0;
+    p->env[1].decay   = 0x60;
+    p->env[1].sustain = 0x00;
+    p->env[1].release = 0x60;
+    p->env1_dest      = 0;             // cutoff (the only dest yet)
+    p->env1_depth     = 0;             // off
 
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 175;             // ~1 Hz
     p->lfo[0].depth = 16;
+
+    // LFO 2 (#73, source 1): triangle, ~1 Hz, depth 0 = OFF; default
+    // destination is PWM (duty bus) — the thing LFO 1 can't do.
+    p->lfo[1].shape = 2;
+    p->lfo[1].rate  = 175;
+    p->lfo[1].depth = 0;
+    p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance.
+                                       // (pitch is LFO 1's bus — one
+                                       // producer per bus in the walker)
 
     p->volume     = 0xCF;              // was VOL_BASE (~-18 dB as volume)
     p->bend_range = 2;                 // current ±2 semitones
