@@ -2,9 +2,10 @@
 """Audio-chain purity self-check (issue #81, Thor's criterion).
 
 Enables the gateware test tone over BLE MIDI (CC 119): a full-scale
-sine with a 512-sample period at 96 kHz = 187.5 Hz, which at 48 kHz
-capture lands EXACTLY on bin 4 of a 1024-point FFT — coherent, no
-window, harmonics on exact bins (8, 12, 16, ...).
+sine with a 64-sample period at 96 kHz = 1500 Hz (midband, so coupling
+caps in the analog chain don't skew it — Thor), which at 48 kHz
+capture lands EXACTLY on bin 32 of a 1024-point FFT — coherent, no
+window, harmonics on exact bins (64, 96, ...).
 
 Criterion: any harmonic above 1/4096 of the fundamental (−72.2 dBc;
 2^12 — audible bit-resolution trouble starts around 12 bits) rings
@@ -27,8 +28,9 @@ import time
 
 NOAIDI_MAC = "10:00:3B:B0:4D:A6"
 RATE = 48000
-N = 1024                 # FFT size: 187.5 Hz -> bin 4 exactly
-FUND_BIN = 4
+N = 1024                 # FFT size: 1500 Hz -> bin 32 exactly
+FUND_BIN = 32
+FUND_HZ = 1500.0
 LIMIT = 1.0 / 4096.0     # -72.25 dBc
 
 
@@ -117,8 +119,8 @@ def analyze(name, ch):
     sb, sr = worst["spur"]
     fund_dbfs = 20 * math.log10(worst["fund"] / (N / 2) / 32768.0)
     ok = hr <= LIMIT
-    print(f"{name}: fundamental {fund_dbfs:6.2f} dBFS @ 187.5 Hz")
-    print(f"   worst harmonic  H{hn} ({hn*187.5:7.1f} Hz): {dbc(hr):7.2f} dBc "
+    print(f"{name}: fundamental {fund_dbfs:6.2f} dBFS @ {FUND_HZ:.0f} Hz")
+    print(f"   worst harmonic  H{hn} ({hn*FUND_HZ:7.1f} Hz): {dbc(hr):7.2f} dBc "
           f"(limit {dbc(LIMIT):.2f})  {'OK' if ok else 'ALARM'}")
     print(f"   worst other spur bin {sb} ({sb*46.875:7.1f} Hz): {dbc(sr):7.2f} dBc")
     for hh, rr in worst["harms"][:6]:

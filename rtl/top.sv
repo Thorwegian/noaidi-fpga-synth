@@ -91,20 +91,22 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // Test tone (audio-chain purity check, issue #81): 187.5 Hz sine,
-    // 512-sample period at 96 kHz (phase step 2^24/512 = 32768
-    // EXACTLY), ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607,
-    // −0.0003 dB). Enabled by bus-address-1023 writes (firmware maps
-    // CC 119); replaces the mix at BOTH outputs so a 1024-point FFT
-    // of a 48 kHz capture puts the tone exactly on bin 4 — coherent,
-    // no window, harmonics on exact bins. Thor's purity criterion:
-    // any harmonic above 1/4096 of the fundamental rings alarms.
+    // Test tone (audio-chain purity check, issue #81): 1500 Hz sine,
+    // 64-sample period at 96 kHz (phase step 2^18 = 262144 EXACTLY),
+    // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
+    // Midband per Thor — coupling caps in the analog chain attenuate
+    // low tones; 1500 Hz measures the chain flat. Enabled by
+    // bus-address-1023 writes (firmware maps CC 119); replaces the mix
+    // at BOTH outputs. At 48 kHz capture the tone lands exactly on
+    // bin 32 of a 1024-point FFT — coherent, no window, harmonics on
+    // exact bins (64, 96, ...). Thor's purity criterion: any harmonic
+    // above 1/4096 of the fundamental (−72.2 dBc) rings alarms.
     //----------------------------------------------------------------
     logic        test_tone_en;
     logic [23:0] tone_phase;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n)           tone_phase <= '0;
-        else if (sample_tick) tone_phase <= tone_phase + 24'd32768;
+        else if (sample_tick) tone_phase <= tone_phase + 24'd262144;
 
     logic signed [17:0] tone_q216;
     osc_core u_tone_osc (
