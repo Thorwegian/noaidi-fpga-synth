@@ -73,6 +73,21 @@ def wait_alsa(present, timeout):
     return False
 
 
+def wait_disconnected(timeout=10):
+    """Wait for the REAL link teardown, not just the ALSA port vanishing.
+    (BlueZ's disconnect is async: a connect issued before completion gets
+    'Connection successful' for the dying link, which the finishing
+    disconnect then tears down — the exact first-reconnect race, #78.)"""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        out = subprocess.run(["bluetoothctl", "info", NOAIDI_MAC],
+                             capture_output=True, text=True).stdout
+        if "Connected: no" in out:
+            return True
+        time.sleep(0.4)
+    return False
+
+
 def send_note(on, note=60):
     from alsa_midi import SequencerClient, NoteOnEvent, NoteOffEvent
     client = SequencerClient("reconnect-test")
@@ -123,7 +138,7 @@ def main():
                 for l in fw[-8:]:
                     print(f"    | {l}")
                 bt(btctl, f"disconnect {NOAIDI_MAC}")
-                wait_alsa(False, 10)
+                wait_disconnected()
                 time.sleep(args.gap)
                 continue
             t_conn = time.time() - t0
@@ -148,7 +163,7 @@ def main():
                     print(f"    | {l}")
 
             bt(btctl, f"disconnect {NOAIDI_MAC}")
-            if not wait_alsa(False, 10):
+            if not wait_disconnected():
                 print(f"cycle {cyc:2d}: WARN disconnect not confirmed")
             time.sleep(args.gap)
     finally:
