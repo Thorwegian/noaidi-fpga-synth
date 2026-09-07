@@ -12,6 +12,7 @@
 #include <stdio.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -62,10 +63,24 @@ static void midi_log_task(void *arg)
 {
     evt_t evt;
     bool drop_logged = false;
+    int64_t busy_since = esp_timer_get_time();
 
     while (1) {
         if (xQueueReceive(s_queue, &evt, portMAX_DELAY) != pdTRUE) {
             continue;
+        }
+
+        // Single-core guard (#70): under a MIDI flood this queue never
+        // empties, so the receive above never blocks and this printf
+        // loop (priority 4) starves IDLE → task watchdog. If we have
+        // run this long without blocking, yield a tick; the event bus
+        // drops the excess for us (counted below).
+        int64_t now = esp_timer_get_time();
+        if (now - busy_since > 2000) {
+            vTaskDelay(1);
+            busy_since = esp_timer_get_time();
+        } else if (uxQueueMessagesWaiting(s_queue) == 0) {
+            busy_since = now;   // queue drained — next receive blocks
         }
 
         // Report drops once per burst, not once per event.

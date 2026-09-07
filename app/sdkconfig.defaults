@@ -14,3 +14,11 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 # up - ble_svc_gap_init() then walks a NULL+4 pointer and the chip
 # load-access-faults in a boot loop (seen on silicon). Static it is.
 CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
+
+# Debug instrumentation for the engine_link watchdog crash (#70).
+# RISC-V backtraces are only usable with frame pointers, and
+# TASK_WDT_PANIC turns the task watchdog from a warn-and-limp into a
+# clean panic + full stack dump of the stuck task. (Debug aids — the
+# frame pointer costs a little size/speed; revisit before release.)
+CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
+CONFIG_ESP_TASK_WDT_PANIC=y

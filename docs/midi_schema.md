@@ -59,12 +59,12 @@ units live in patch.h).
 **Oscillators**
 | CC | Target | Notes |
 |---|---|---|
-| 20 | osc 1 waveform | discrete: saw/pulse/tri/parabolic/(noise/sine later) |
+| 20 | osc 1 waveform | discrete, 4 today: 0 saw / 1 pulse / 2 tri / 3 parabolic-sine (osc_core `y=4x(1−x)`, a ROUGH sine — true bandlimited sine is #65, noise is #64) |
 | 21 | osc 2 waveform | discrete |
-| 22 | osc 2 coarse (interval) | semitones |
+| 22 | osc 2 coarse (interval) | ±12 semitones, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07); cents on CC 23 |
 | 23 | osc detune | fine/detune between the two |
 | 24 | osc mix / balance | osc1↔osc2 |
-| 25 | pulse width / duty | pulse & parabola skew |
+| 25 | pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
 | 28 | unison stereo spread | |
@@ -75,7 +75,7 @@ units live in patch.h).
 | 74 | cutoff — COARSE | 7-bit MSB |
 | 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
 | 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
-| 29 | filter type | discrete (LP…; the FILTER/GAIN mode field) |
+| 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
 | 31 | key tracking amount | cutoff-follows-pitch |
 
@@ -86,15 +86,17 @@ All four ADSR CCs per envelope invert — knob up = longer/louder
 equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
-| 73 / 75 / 79 / 72 | amp env A / D / S / R | `(127 − cc) << 1` (S: louder up) |
-| 102 / 103 / 104 / 105 | MOD env A / D / S / R | `(127 − cc) << 1` |
+| 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer |
+| 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
+| 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
+| 104 | MOD env S | `cc << 1` (level, not inverted) |
 | 107 | MOD env depth | amount to its destination |
 | 108 | MOD env destination | discrete; default = filter cutoff (#42) |
 
 **LFOs** (2)
 | CC | Target | Notes |
 |---|---|---|
-| 76 | LFO 1 rate | standard "vibrato rate" |
+| 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
 | 77 | LFO 1 depth | standard "vibrato depth" |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine) |
 | 114 | LFO 1 destination | discrete |

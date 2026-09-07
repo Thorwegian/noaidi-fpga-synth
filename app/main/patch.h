@@ -41,7 +41,9 @@ typedef struct {
     waveform_t wave;
     int16_t    coarse;      // semitone offset
     int16_t    fine;        // UQ4.10 fraction (detune)
-    int16_t    duty;        // pulse width / parabola skew (Q0.24 hi)
+    int32_t    duty;        // pulse width / parabola skew, full Q0.24
+                            // signed (needs 24 bits — int16 truncated
+                            // CC 25's <<17 to zero)
 } osc_t;
 
 // ── Filter ──────────────────────────────────────────────────────────
@@ -94,6 +96,7 @@ typedef struct {
 typedef struct {
     osc_t           osc[PATCH_NUM_OSC];
     voice_struct_t  voice_struct;
+    int8_t          osc_mix;         // osc1<->osc2 balance (CC 24), 0=center
     int16_t         unison_detune;   // spread within a unison group
     int16_t         unison_stereo;   // stereo spread of the group
 

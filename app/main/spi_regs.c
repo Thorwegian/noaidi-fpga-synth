@@ -52,7 +52,13 @@ static void fpga_xfer_bytes(const uint8_t *tx, size_t nbytes)
         .tx_buffer = tx,
         .rx_buffer = NULL,
     };
-    ESP_ERROR_CHECK(spi_device_transmit(g_spi, &t));
+    // POLLING transmit, not the interrupt/queue path: engine_link is
+    // the sole SPI owner, and these are tiny frequent frames. The
+    // interrupt driver's per-transaction cost (bus-lock bg request,
+    // esp_intr_enable, a semaphore wait) dominated and pinned
+    // engine_link under a CC flood (#70). Polling busy-waits the ~5 µs
+    // of wire time instead — far less overhead per word burst.
+    ESP_ERROR_CHECK(spi_device_polling_transmit(g_spi, &t));
 }
 
 // ── Low-level: full-duplex N bytes in ONE CS-framed transaction ─────

@@ -93,6 +93,7 @@ static void engine_task(void *arg)
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        int64_t wake0 = esp_timer_get_time();
 
         // Live bus writes first: no banking, no swap — straight out.
         // No pacing needed: at 10 MHz one SPI word occupies the wire
@@ -134,18 +135,27 @@ static void engine_task(void *arg)
         if (!changed && !prev_any)
             continue;
 
-        // Write dirty_now ∪ dirty_prev to the shadow, then swap.
-        for (int i = 0; i < DIRTY_WORDS; i++) {
-            uint32_t bits = s_dirty_now[i] | s_dirty_prev[i];
-            while (bits) {
-                int b = __builtin_ctz(bits);
-                bits &= bits - 1;
-                int idx  = i * 32 + b;
-                int elem = idx / ENGINE_WORDS_PER_ELEMENT;
-                int word = idx % ENGINE_WORDS_PER_ELEMENT;
-                fpga_word_write(ELEM_BASE + elem * ELEM_STRIDE + word,
-                                s_image[elem][word]);
+        // Write dirty_now ∪ dirty_prev to the shadow, then swap. Burst
+        // the WHOLE element row (7 consecutive words, one CS-framed
+        // transaction) whenever any of its words changed. The ESP-IDF
+        // SPI-master driver cost is per-TRANSACTION (bus lock, ISR,
+        // semaphore), so the old per-word path turned a re-render into
+        // hundreds of transactions and pinned this task until the
+        // watchdog fired (#70). Untouched words in the row are already
+        // current in s_image, so re-sending them is free.
+        for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
+            bool row_dirty = false;
+            for (int w = 0; w < ENGINE_WORDS_PER_ELEMENT; w++) {
+                int bit = e * ENGINE_WORDS_PER_ELEMENT + w;
+                if ((s_dirty_now[bit >> 5] | s_dirty_prev[bit >> 5])
+                        & (1u << (bit & 31))) {
+                    row_dirty = true;
+                    break;
+                }
             }
+            if (row_dirty)
+                fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE,
+                                      s_image[e], ENGINE_WORDS_PER_ELEMENT);
         }
         for (int i = 0; i < PDIRTY_WORDS; i++) {
             uint32_t bits = s_pdirty_now[i] | s_pdirty_prev[i];
@@ -168,6 +178,15 @@ static void engine_task(void *arg)
             ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
             s_drops = 0;
         }
+
+        // Single-core guard (#70). If this wake ran long (a flood of
+        // dirty rows to burst over SPI), the 1 kHz notify is already
+        // pending, so the ulTaskNotifyTake above would return at once
+        // and we would never block — starving IDLE (priority 0) on this
+        // one-core chip → task watchdog. Yield a tick so IDLE runs; the
+        // SPI image lags at most ~1 ms, which is inaudible.
+        if (esp_timer_get_time() - wake0 > 800)
+            vTaskDelay(1);
     }
 }
 
