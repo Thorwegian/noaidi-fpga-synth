@@ -7,6 +7,8 @@ musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison elements per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz audio out on SPDIF and I2S.
 
+▶️ It plays: https://youtu.be/8topzgfvRhI
+
 Plugins won. We're proving it wrong.
 
 ## Architecture
