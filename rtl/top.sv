@@ -121,8 +121,29 @@ module top (
     // concat IS the <<8 with the sign landing at bit 23.
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
-    wire signed [23:0] out_left  = test_tone_en ? tone_sample : sample_left;
-    wire signed [23:0] out_right = test_tone_en ? tone_sample : sample_right;
+    //----------------------------------------------------------------
+    // Output tilt: one-pole 6 dB/oct lowpass on the mix (Thor,
+    // 2026-09-07, by ear): out += (in − out) >>> 4. α = 1/16 at
+    // 96 kHz → corner ≈ 950 Hz, a gentle analog-style top-end tilt.
+    // A convex combination never overflows 24 bits. Sits BEFORE the
+    // test-tone mux so the purity reference stays unfiltered.
+    //----------------------------------------------------------------
+    logic signed [23:0] lpf_l, lpf_r;
+    // 26-bit intermediates: a 24−24 difference needs 25 bits, and the
+    // convex result always fits back into 24 — truncating is safe.
+    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 4;
+    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 4;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) begin
+            lpf_l <= '0;
+            lpf_r <= '0;
+        end else if (sample_tick) begin
+            lpf_l <= 24'(26'(lpf_l) + lpf_dl);
+            lpf_r <= 24'(26'(lpf_r) + lpf_dr);
+        end
+
+    wire signed [23:0] out_left  = test_tone_en ? tone_sample : lpf_l;
+    wire signed [23:0] out_right = test_tone_en ? tone_sample : lpf_r;
 
     //----------------------------------------------------------------
     // SPDIF transmitter
