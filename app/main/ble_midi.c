@@ -86,6 +86,12 @@ static void ble_msg_to_bus(const midi_message_t *m, void *user)
 static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                                struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
+    // TEMP DEBUG (#82 fuzzer bring-up): trace every access so a write
+    // rejected BELOW this callback (security layer / stale client
+    // GATT cache hitting another handle) is distinguishable.
+    ESP_LOGI(TAG, "access op=%d attr=%u (midi_io=%u)",
+             ctxt->op, attr_handle, gatt_svr_chr_midi_io_handle);
+
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return 0; // reads (and CCCD bookkeeping) pass through
     }
