@@ -4,6 +4,25 @@ Build, hardware, and architecture notes for AI coding agents working in this
 repo. Keep this file updated when the architecture changes. Agent will neatly
 summarise.
 
+## Standing policies (Thor, 2026-09-07)
+
+- **Update GitHub as you work.** The issues (#40+) are the tracker. Every
+  commit, issue close, or scope change updates every issue it touches in the
+  same turn — including parent/tracking issues with checklists (#77 and
+  friends: tick the boxes, edit the body). Comment when *starting* a piece of
+  work, not only when finishing. Closing an issue means checking which epics
+  reference it.
+- **Docs must not go stale.** When a change lands, sweep `docs/` (and this
+  file) for statements the change falsified and fix them in the same series
+  of commits. A doc that describes the previous design is worse than no doc.
+- **Run the test suites as you go.** `make sim` for any rtl/ change; for
+  firmware, build + flash + boot-capture is the floor (compile-green is not
+  run-green), the on-target stress injector (`CONFIG_NOAIDI_STRESS_TEST`)
+  for anything touching the event bus / engine_link / voice_alloc hot paths,
+  and the BLE MIDI suite (`tools/ble_midi_fuzz.py` from the dev host) for
+  anything touching ble_midi or the MIDI path. Test tooling must always
+  disconnect BLE when done (#82) — the Noaidi accepts one connection.
+
 ## Toolchain (user environment)
 
 - FPGA tools: `/opt/oss-cad-suite/bin` (yosys, nextpnr-himbaechel, gowin_pack,
@@ -18,10 +37,15 @@ summarise.
 - FPGA (Tang Nano 20K, GW2AR-LV18QN88C8/I7): `cd rtl && make`
   (yosys `synth_gowin` → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
-- Simulation: `cd rtl && make sim` runs the iverilog testbenches:
-  `sim-elem` (element pipeline: drum cadence, phase-delta math, SVF dynamics,
-  attenuation math, mix == sum of voices, energy) and `sim-outputs` (decodes the
-  SPDIF cell stream for preamble/biphase validity and checks I2S clock rates).
+- Simulation: `cd rtl && make -j4 sim` runs the iverilog suite: `sim-elem`
+  (element pipeline), `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spi`,
+  `sim-bus` (word protocol), `sim-prog-*` (programming chain, 4 splits),
+  `sim-stab` (SVF stability corners), `sim-osc` (oscillator waveforms +
+  pulse-duty response). `sim-prog-full` is the long soak, not in the default
+  suite.
+- Firmware load test: build with `CONFIG_NOAIDI_STRESS_TEST=y` → 60 s
+  synthetic MIDI flood at boot (issue #70 repro). BLE end-to-end:
+  `tools/ble_midi_fuzz.py` on the dev host (venv with bleak + pyserial).
 
 ## Hardware facts
 
@@ -66,8 +90,12 @@ summarise.
   0xA5 (free link check); register data starts at MISO byte 1. Driver:
   `app/main/spi_regs.c`. Simulate with `make sim-spi`.
 - SPI link speed: measured clean 1–40 MHz on hardware (40 MHz is the ESP32-C3
-  GPIO-matrix ceiling, not a link limit). Firmware default is still 1 MHz in
-  `main.c` — raise it freely when traffic justifies it.
+  GPIO-matrix ceiling, not a link limit). Firmware runs 10 MHz (`main.c`).
+  Raising it further needs the live bus-write path decoupled from wire-time
+  pacing first (1-deep gateware mailbox, ~15.5 MHz pacing ceiling — see
+  engine_link.c). Transfers use `spi_device_polling_transmit` (sole owner,
+  tiny frames — the interrupt driver's per-transaction cost starved the CPU
+  under CC floods, issue #70).
 - Dual-clock BSRAM CDC infers and builds on this toolchain (write on one clock,
   read on another, sync read → `DPX9B`, packs, bitstream emitted, netlist
   structurally correct) but is **NOT functionally verified**: oss-cad-suite
