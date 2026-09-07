@@ -93,6 +93,7 @@ static void engine_task(void *arg)
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        int64_t wake0 = esp_timer_get_time();
 
         // Live bus writes first: no banking, no swap — straight out.
         // No pacing needed: at 10 MHz one SPI word occupies the wire
@@ -177,6 +178,15 @@ static void engine_task(void *arg)
             ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
             s_drops = 0;
         }
+
+        // Single-core guard (#70). If this wake ran long (a flood of
+        // dirty rows to burst over SPI), the 1 kHz notify is already
+        // pending, so the ulTaskNotifyTake above would return at once
+        // and we would never block — starving IDLE (priority 0) on this
+        // one-core chip → task watchdog. Yield a tick so IDLE runs; the
+        // SPI image lags at most ~1 ms, which is inaudible.
+        if (esp_timer_get_time() - wake0 > 800)
+            vTaskDelay(1);
     }
 }
 
