@@ -321,6 +321,19 @@ bench-verified) milestone. One rung in flight at a time.
    the memory map still say "producer" where the settled vocabulary
    is source/sink (code identifiers follow in a zero-behavior naming
    pass). Part 1 (this design.md cleanup) done 2026-09-03.
+12. **Firmware test suite (Thor, 2026-09-07, issue #80)**: "put a
+   proper test suite on the roadmap — it probably saved us hours of
+   debugging just now." Host-side units for the pure-C modules
+   (midi_parser, patch words, voicing plans, CC maps), the on-target
+   stress injector (CONFIG_NOAIDI_STRESS_TEST, landed with the #70
+   crash fix) as the load test, the BLE fuzzer end-to-end, all in the
+   GitHub Actions matrix beside the RTL sim suite.
+13. **Audio capture into the Linux box (Thor, 2026-09-07, issue
+   #81)**: FPGA audio out → the dev machine, closing the loop for
+   full-chain automation — send MIDI in, assert on the audio that
+   comes back (pitch, envelope, silence-after-release, spectra).
+   USB audio interface first; S/PDIF or I2S capture if bit-exactness
+   earns its keep.
 
 ## History
 
