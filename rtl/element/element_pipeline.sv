@@ -96,7 +96,14 @@ module element_pipeline #(
     input  logic           swap_req,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, updated at sample_tick
-    output logic signed [23:0] mix_right
+    output logic signed [23:0] mix_right,
+
+    // Test-tone control (audio-chain purity check, issue #81): bus
+    // address 1023 is reserved as a control latch — bit 0 enables the
+    // top-level 187.5 Hz full-scale sine that replaces the mix at the
+    // outputs. Latched here because the bus mailbox already has the
+    // sclk→sysclk CDC; no pointer ever references bus 1023.
+    output logic           test_tone_en
 );
 
     localparam int VW = $clog2(NUM_ELEMENTS);   // element index width
@@ -329,6 +336,12 @@ module element_pipeline #(
 
     always_ff @(posedge clk)
         if (bus_commit) bus_base[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+
+    // Bus 1023 doubles as the test-tone control latch (issue #81).
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)                                       test_tone_en <= 1'b0;
+        else if (bus_commit && bus_mailbox_addr == 10'd1023)
+            test_tone_en <= bus_mailbox_data[0];
 
     // Replica writes: one physical port, two writers — the walker
     // owns its cycle (walker_bus_write), the mailbox defers around it.

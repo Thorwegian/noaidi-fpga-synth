@@ -54,7 +54,8 @@ units live in patch.h).
 | 10 | pan | standard Pan → per-part `pan` |
 | 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface |
 | RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
-| 120/123 | all sound off / all notes off | panic → gate buses 0 |
+| 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
+| 119 | TEST TONE (#81) | ≥64: gateware replaces both outputs with a full-scale 187.5 Hz sine (512-sample period at 96 kHz — lands exactly on bin 4 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**
 | CC | Target | Notes |

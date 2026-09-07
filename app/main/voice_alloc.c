@@ -665,6 +665,14 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 30: g_patch.filter.dual = val >= 64;
              s_dirty |= D_RENDER; break;
 
+    // ---- test tone (#81): ≥64 replaces BOTH outputs with the
+    // gateware's full-scale 187.5 Hz sine (bus-1023 control latch) —
+    // the audio-chain purity reference, remotely switchable so the
+    // test suite needs no console. ----
+    case 119:
+        engine_link_bus_write(1023, val >= 64 ? 1u : 0u);
+        break;
+
     // ---- panic (found via the BLE fuzzer's stuck notes: its final
     // CC 123 was a no-op, so note-offs dropped under flood backpressure
     // left voices ringing forever) ----

@@ -86,8 +86,41 @@ module top (
         .producer_write_data     (producer_write_data),
         .swap_req    (swap_req),
         .mix_left    (sample_left),
-        .mix_right   (sample_right)
+        .mix_right   (sample_right),
+        .test_tone_en (test_tone_en)
     );
+
+    //----------------------------------------------------------------
+    // Test tone (audio-chain purity check, issue #81): 187.5 Hz sine,
+    // 512-sample period at 96 kHz (phase step 2^24/512 = 32768
+    // EXACTLY), ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607,
+    // −0.0003 dB). Enabled by bus-address-1023 writes (firmware maps
+    // CC 119); replaces the mix at BOTH outputs so a 1024-point FFT
+    // of a 48 kHz capture puts the tone exactly on bin 4 — coherent,
+    // no window, harmonics on exact bins. Thor's purity criterion:
+    // any harmonic above 1/4096 of the fundamental rings alarms.
+    //----------------------------------------------------------------
+    logic        test_tone_en;
+    logic [23:0] tone_phase;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n)           tone_phase <= '0;
+        else if (sample_tick) tone_phase <= tone_phase + 24'd32768;
+
+    logic signed [17:0] tone_q216;
+    osc_core u_tone_osc (
+        .phase      (tone_phase),
+        .delta      (24'sd0),          // phase advanced above, not here
+        .duty       (24'sd0),
+        .wave       (2'd3),            // sine (quarter-wave LUT)
+        .phase_next (),
+        .sample_out (tone_q216)
+    );
+    // Sine spans ±32767, which fits 16 signed bits exactly, so the
+    // concat IS the <<8 with the sign landing at bit 23.
+    wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
+
+    wire signed [23:0] out_left  = test_tone_en ? tone_sample : sample_left;
+    wire signed [23:0] out_right = test_tone_en ? tone_sample : sample_right;
 
     //----------------------------------------------------------------
     // SPDIF transmitter
@@ -97,8 +130,8 @@ module top (
         .rst_n       (rst_n),
         .sample_tick (sample_tick),
         .cell_tick   (cell_tick),
-        .audio_l     (sample_left),
-        .audio_r     (sample_right),
+        .audio_l     (out_left),
+        .audio_r     (out_right),
         .spdif_out   (spdif_out)
     );
 
@@ -109,8 +142,8 @@ module top (
         .sysclk      (sysclk),
         .rst_n       (rst_n),
         .sample_tick (sample_tick),
-        .data_left   (sample_left),
-        .data_right  (sample_right),
+        .data_left   (out_left),
+        .data_right  (out_right),
         .i2s_bclk    (i2s_bclk),
         .i2s_lrclk   (i2s_lrclk),
         .sd          (i2s_data)
