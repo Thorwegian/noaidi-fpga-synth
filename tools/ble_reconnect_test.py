@@ -99,14 +99,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cycles", nargs="?", type=int, default=15)
     ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--gap", type=float, default=1.0,
+                    help="seconds between disconnect and next connect")
     args = ap.parse_args()
 
     cap = SerialCapture(args.port); cap.start()
     time.sleep(3)
 
+    btlog = open("/tmp/btctl_reconnect.log", "w")
     btctl = subprocess.Popen(["bluetoothctl"], stdin=subprocess.PIPE,
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, text=True)
+                             stdout=btlog, stderr=btlog, text=True)
     results = []
     try:
         for cyc in range(1, args.cycles + 1):
@@ -116,8 +118,13 @@ def main():
             if not wait_alsa(True, 15):
                 results.append((cyc, "CONNECT-TIMEOUT", time.time() - t0))
                 print(f"cycle {cyc:2d}: CONNECT-TIMEOUT")
+                fw = cap.since(m)
+                print(f"    fw saw {len(fw)} lines during the attempt:")
+                for l in fw[-8:]:
+                    print(f"    | {l}")
                 bt(btctl, f"disconnect {NOAIDI_MAC}")
                 wait_alsa(False, 10)
+                time.sleep(args.gap)
                 continue
             t_conn = time.time() - t0
 
@@ -143,7 +150,7 @@ def main():
             bt(btctl, f"disconnect {NOAIDI_MAC}")
             if not wait_alsa(False, 10):
                 print(f"cycle {cyc:2d}: WARN disconnect not confirmed")
-            time.sleep(1.0)
+            time.sleep(args.gap)
     finally:
         try:
             bt(btctl, f"disconnect {NOAIDI_MAC}")
