@@ -554,7 +554,10 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 21: g_patch.osc[1].wave = (waveform_t)(val >> 5);   // osc2 wave
              s_dirty |= D_RENDER; break;
-    case 22: g_patch.osc[1].coarse = (int16_t)((int)val - 64);  // ±semis
+    // Coarse: ±12 semitones, ~5 CC steps per semitone (val-64 was ±63
+    // — far too sensitive for hand-tuning an interval; Thor 2026-09-07).
+    // Cents live on CC 23 fine.
+    case 22: g_patch.osc[1].coarse = (int16_t)((val * 25) / 128 - 12);
              s_dirty |= D_RENDER; break;
     case 23: g_patch.osc[1].fine = (int16_t)(((int)val - 64) * 2);  // detune LSB
              s_dirty |= D_RENDER; break;

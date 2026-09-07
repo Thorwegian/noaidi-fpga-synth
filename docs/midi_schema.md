@@ -61,7 +61,7 @@ units live in patch.h).
 |---|---|---|
 | 20 | osc 1 waveform | discrete, 4 today: 0 saw / 1 pulse / 2 tri / 3 parabolic-sine (osc_core `y=4x(1−x)`, a ROUGH sine — true bandlimited sine is #65, noise is #64) |
 | 21 | osc 2 waveform | discrete |
-| 22 | osc 2 coarse (interval) | semitones |
+| 22 | osc 2 coarse (interval) | ±12 semitones, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07); cents on CC 23 |
 | 23 | osc detune | fine/detune between the two |
 | 24 | osc mix / balance | osc1↔osc2 |
 | 25 | pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
