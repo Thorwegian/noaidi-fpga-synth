@@ -18,7 +18,9 @@
 #define TAG "stress"
 
 #define STRESS_SECONDS   60
-#define STRESS_BURST     8      // messages published back-to-back per yield
+#define STRESS_BURST     1      // iterations (4 messages each) per pace step
+#define STRESS_PACE_MS   2      // -> ~2000 msg/s, 2x wired-MIDI saturation
+                                // (a firm stress; real MIDI is ~1000/s max)
 
 static void pub(uint8_t status, uint8_t d0, uint8_t d1)
 {
@@ -53,7 +55,7 @@ static void stress_task(void *arg)
             else         pub(0x90, n, 40);           // note on
             ni++;
         }
-        vTaskDelay(1);                    // yield one tick between bursts
+        vTaskDelay(pdMS_TO_TICKS(STRESS_PACE_MS));   // pace to a realistic rate
     }
 
     pub(0xB0, 123, 0);                    // all notes off
