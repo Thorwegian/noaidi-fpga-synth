@@ -636,6 +636,7 @@ static void apply_dirty(int64_t now)
 static void voice_alloc_task(void *arg)
 {
     evt_t evt;
+    int64_t busy_since = esp_timer_get_time();
     while (1) {
         // Timed receive so the idle sweep runs during quiet passages,
         // not only when the next note_on happens to scan.
@@ -653,10 +654,25 @@ static void voice_alloc_task(void *arg)
             }
             if (evt.kind == EVT_MIDI)
                 handle_midi(&evt.midi);
+        } else {
+            busy_since = esp_timer_get_time();   // queue empty → we blocked
         }
         int64_t now = esp_timer_get_time();
         promote_idle(now);   // retire + mute tails
         apply_dirty(now);    // coalesced CC edits (#70)
+
+        // Single-core backpressure (#70). The ESP32-C3 has one core; a
+        // sustained MIDI flood keeps this queue non-empty, so the
+        // receive above never blocks and IDLE (priority 0) is never
+        // scheduled → task watchdog. If we have run this long without
+        // blocking, yield a tick so IDLE runs. Free in normal use (the
+        // queue empties and we block above); under flood it caps our
+        // CPU share and lets the event bus drop the excess, which is
+        // the correct backpressure on one core.
+        if (now - busy_since > 2000) {   // 2 ms of unbroken work
+            vTaskDelay(1);
+            busy_since = esp_timer_get_time();
+        }
     }
 }
 
