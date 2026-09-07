@@ -665,6 +665,27 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 30: g_patch.filter.dual = val >= 64;
              s_dirty |= D_RENDER; break;
 
+    // ---- panic (found via the BLE fuzzer's stuck notes: its final
+    // CC 123 was a no-op, so note-offs dropped under flood backpressure
+    // left voices ringing forever) ----
+    case 123:                          // all notes off: release held voices
+        for (int v = 0; v < NUM_VOICES; v++)
+            if (s_voices[v].state == V_HELD) {
+                s_voices[v].state = V_RELEASING;
+                s_voices[v].release_until =
+                    esp_timer_get_time() + release_tail_us();
+                engine_link_bus_write(BUS_VGATE(v), 0);
+            }
+        break;
+    case 120:                          // all sound off: immediate silence
+        for (int v = 0; v < NUM_VOICES; v++)
+            if (s_voices[v].state != V_IDLE) {
+                s_voices[v].state = V_IDLE;
+                engine_link_bus_write(BUS_VGATE(v), 0);
+                hard_mute_voice(v);
+            }
+        break;
+
     // ---- MOD env (#42): live on the cutoff buses ----
     case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
     case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
