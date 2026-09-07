@@ -328,15 +328,17 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     }
 }
 
-// Re-render every sounding voice's element words from the current
-// patch — the render half of live CC editing (#70). Bus/producer
-// params update their own targets; element-word params (waveform,
-// duty, filter type, volume) re-program here. Needs the per-voice
-// note+vel, which note_on stores.
+// Re-render HELD voices' element words from the current patch — the
+// render half of live CC editing (#70). Only keys still down: a
+// releasing tail is fading out, so re-programming its element words on
+// every CC is inaudible and just multiplies the SPI load that pinned
+// engine_link (#70 watchdog) — bus params (pitch/cutoff/reso/gain)
+// still track tails, only the element-word rewrite is skipped. Needs
+// the per-voice note+vel, which note_on stores.
 static void render_active_voices(void)
 {
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state != V_IDLE)
+        if (s_voices[v].state == V_HELD)
             voice_program(v, s_voices[v].note, s_voices[v].vel);
 }
 
