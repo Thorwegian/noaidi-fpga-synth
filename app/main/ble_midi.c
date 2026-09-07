@@ -16,18 +16,26 @@
 // which already understands running status and the Note-On-vel-0
 // convention.
 //
-// Threading: all parsing and publishing happen in the NimBLE host
-// task via the GATT access callback, so the parser instance is
-// single-threaded by construction. event_bus_publish is
-// non-blocking, so a slow consumer can never stall the BLE stack.
-// On connect and on disconnect the parser resets: running status
-// dies with the connection per spec.
+// Threading (#83): the GATT access callback (NimBLE host task) only
+// COPIES the packet into a ring buffer; a lower-priority ble_rx task
+// drains it, strips the BLE-MIDI framing, feeds the shared parser and
+// publishes to the event bus. Parsing in the host task starved IDLE
+// under a sustained ~1 kHz BLE flood (task watchdog with btController
+// running — found by tools/ble_midi_fuzz.py). Overflow drops packets
+// at the ring buffer, counted — the same backpressure philosophy as
+// the event bus. The parser instance stays single-threaded (ble_rx
+// only). On connect/disconnect the parser resets: running status dies
+// with the connection per spec.
 
 #include "ble_midi.h"
 
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/ringbuf.h"
+#include "freertos/task.h"
 #include "host/ble_hs.h"
 #include "host/ble_store.h"
 #include "host/util/util.h"
@@ -68,6 +76,15 @@ static int s_conn_count;
 
 static midi_parser_t g_ble_parser;
 
+// Ingress ring buffer (#83): NOSPLIT keeps packet boundaries, which
+// the BLE-MIDI framing needs. 4 KB ≈ 8 max-MTU packets or hundreds of
+// typical 5-byte ones.
+#define BLE_RX_RB_SIZE   4096
+#define BLE_RX_TASK_STACK 3072
+#define BLE_RX_TASK_PRIO  4
+static RingbufHandle_t s_rx_rb;
+static uint32_t s_rx_drops;
+
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the NimBLE host task. Fan-out to consumers
 // happens through the event bus (non-blocking).
@@ -80,9 +97,60 @@ static void ble_msg_to_bus(const midi_message_t *m, void *user)
     event_bus_publish(&evt);
 }
 
+// ── Packet processing (ble_rx task context, #83) ───────────────────
+// Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
+// set = timestamp present and a status byte follows; clear =
+// running status continues.
+static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n)
+{
+    int idx = 2;
+    if (pkt[1] & 0x80) {
+        if (idx >= n) {
+            return;   // status promised, absent — drop the runt
+        }
+        midi_parser_feed(&g_ble_parser, pkt[idx++]);
+    }
+    while (idx < n) {
+        midi_parser_feed(&g_ble_parser, pkt[idx++]);
+    }
+}
+
+// Drain the ingress ring buffer, with the standard single-core yield
+// guard (#70/#83): after ~2 ms of unbroken work, give IDLE a tick.
+static void ble_rx_task(void *arg)
+{
+    int64_t busy_since = esp_timer_get_time();
+    while (1) {
+        size_t n = 0;
+        uint8_t *pkt = xRingbufferReceive(s_rx_rb, &n, pdMS_TO_TICKS(100));
+        if (pkt == NULL) {
+            busy_since = esp_timer_get_time();   // we blocked
+            continue;
+        }
+        if (n >= 2)
+            process_ble_midi_pkt(pkt, (uint16_t)n);
+        else
+            midi_parser_reset(&g_ble_parser);   // 1-byte reset sentinel
+                                                // (connect/disconnect)
+        vRingbufferReturnItem(s_rx_rb, pkt);
+
+        if (s_rx_drops) {
+            ESP_LOGW(TAG, "rx ring full, dropped %" PRIu32 " packets",
+                     s_rx_drops);
+            s_rx_drops = 0;
+        }
+        int64_t now = esp_timer_get_time();
+        if (now - busy_since > 2000) {
+            vTaskDelay(1);
+            busy_since = esp_timer_get_time();
+        }
+    }
+}
+
 // ── GATT access callback ───────────────────────────────────────────
 // Writes carry one BLE MIDI packet (possibly several MIDI messages
-// under running status). Parse and publish here; never block.
+// under running status). COPY into the ring buffer and return — never
+// parse in the NimBLE host task (#83).
 static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                                struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -102,18 +170,8 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     }
     os_mbuf_copydata(om, 0, n, pkt);
 
-    // Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
-    // set = timestamp present and a status byte follows; clear =
-    // running status continues.
-    int idx = 2;
-    if (pkt[1] & 0x80) {
-        if (idx >= n) {
-            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; // status promised, absent
-        }
-        midi_parser_feed(&g_ble_parser, pkt[idx++]);
-    }
-    while (idx < n) {
-        midi_parser_feed(&g_ble_parser, pkt[idx++]);
+    if (xRingbufferSend(s_rx_rb, pkt, n, 0) != pdTRUE) {
+        s_rx_drops++;   // full: drop, count, never block the host task
     }
     return 0;
 }
@@ -220,9 +278,13 @@ static void ble_midi_advertise(void)
 
 static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
 {
+    // Parser resets ride the rx ring as a 1-byte sentinel so the
+    // parser stays owned by ble_rx alone (#83).
+    static const uint8_t RESET_SENTINEL = 0;
+
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
-        midi_parser_reset(&g_ble_parser);
+        xRingbufferSend(s_rx_rb, &RESET_SENTINEL, 1, 0);
         s_advertising = false;
         if (event->connect.status != 0) {
             ESP_LOGW(TAG, "connect failed, re-advertising");
@@ -237,7 +299,7 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
-        midi_parser_reset(&g_ble_parser);
+        xRingbufferSend(s_rx_rb, &RESET_SENTINEL, 1, 0);
         if (s_conn_count > 0) {
             s_conn_count--;
         }
@@ -323,6 +385,19 @@ void ble_midi_console_status(void)
 void ble_midi_init(void)
 {
     midi_parser_init(&g_ble_parser, ble_msg_to_bus, NULL);
+
+    // Ingress decoupling (#83): ring buffer + drain task, so the
+    // NimBLE host task never parses or publishes.
+    s_rx_rb = xRingbufferCreate(BLE_RX_RB_SIZE, RINGBUF_TYPE_NOSPLIT);
+    if (s_rx_rb == NULL) {
+        ESP_LOGE(TAG, "failed to create rx ring buffer");
+        return;
+    }
+    if (xTaskCreate(ble_rx_task, "ble_rx", BLE_RX_TASK_STACK, NULL,
+                    BLE_RX_TASK_PRIO, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "failed to create ble_rx task");
+        return;
+    }
 
     // nimble_port_init() is the full bring-up: controller enable, HCI,
     // and the NPL primitives (mutex, event queue) the host lock needs.

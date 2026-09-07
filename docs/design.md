@@ -333,7 +333,19 @@ bench-verified) milestone. One rung in flight at a time.
    full-chain automation — send MIDI in, assert on the audio that
    comes back (pitch, envelope, silence-after-release, spectra).
    USB audio interface first; S/PDIF or I2S capture if bit-exactness
-   earns its keep.
+   earns its keep. DONE 2026-09-07: chain certified −81.5 dBc worst
+   harmonic via the CC-119 gateware test tone + coherent-FFT purity
+   check; the check's first run caught (and fixed) a −54 dBc
+   quarter-wave-mirror bug in the sine LUT.
+14. **Sampled/tracker sound — "save the rabbit" (Thor, 2026-09-07,
+   issue #85)**: the Amiga/Paula character (Jazz Jackrabbit lineage)
+   as a direction: whole-spectrum rate-pitching, zero-order hold
+   aliasing, 8-bit crush, tick-quantized modulation. Tiers: tracker
+   idioms in firmware (rides the arp epic) → wavetable oscillator
+   type reading an uploadable single-cycle BSRAM table (also the
+   general wavetable-synthesis door) → the unused 64 Mbit in-package
+   PSRAM as real sampler memory. Deliberately NOT correcting the
+   artifacts — they are the sound.
 
 ## History
 

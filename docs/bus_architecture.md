@@ -48,6 +48,16 @@ conventions the FPGA never sees.
    producer, in idle-slot machinery. This keeps every multiply out of
    the audio pipeline and out of summing structures — the silicon
    timing rule, made structural.
+   **Implementation status (found 2026-09-07, issue #84): the walker
+   today supports ONE source per bus** — each source writes
+   `firmware base + own contribution` wholesale, so a second source on
+   the same bus overwrites (last write wins), not sums. Invisible so
+   far because every allocation has ≤1 source per bus (each gain bus:
+   its amp ADSR; pitch: LFO 1; each cutoff bus: its MOD env). The
+   firmware base does sum with that one source. Closing the gap is
+   #84 (candidate: chain same-bus sources placed in consecutive
+   walker slots through a one-register bypass — no new RAM, pipeline
+   untouched).
 2. **The audio pipeline freezes** once the pointer-fetch stage lands.
    All future features are new producer types. (Justification: five
    ear-verified timing failures that STA passed, all in pipeline

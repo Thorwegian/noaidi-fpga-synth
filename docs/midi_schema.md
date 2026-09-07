@@ -53,8 +53,9 @@ units live in patch.h).
 | 7 | part volume | standard Channel Volume → per-part `volume` |
 | 10 | pan | standard Pan → per-part `pan` |
 | 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface |
-| RPN 0/0 | pitch-bend range | the STANDARD mechanism (RPN 0 + data entry CC 6/38) — use it rather than a custom CC; 1–12 semitones |
-| 120/123 | all sound off / all notes off | panic → gate buses 0 |
+| RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
+| 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
+| 119 | TEST TONE (#81) | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**
 | CC | Target | Notes |
@@ -90,20 +91,20 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | amount to its destination |
-| 108 | MOD env destination | discrete; default = filter cutoff (#42) |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, full travel = ±4 octaves of cutoff (the walker DEPTH word is signed) |
+| 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
 
 **LFOs** (2)
 | CC | Target | Notes |
 |---|---|---|
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
 | 77 | LFO 1 depth | standard "vibrato depth" |
-| 113 | LFO 1 shape | discrete (saw/pulse/tri/sine) |
-| 114 | LFO 1 destination | discrete |
-| 109 | LFO 2 rate | |
-| 110 | LFO 2 depth | |
-| 111 | LFO 2 shape | discrete |
-| 112 | LFO 2 destination | discrete |
+| 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
+| 114 | LFO 1 destination | DEFERRED to the mod matrix — LFO 1 is the pitch vibrato (one producer per bus in the walker) |
+| 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
+| 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance `val<<5` (≈2 octaves of Q) |
+| 111 | LFO 2 shape | discrete, `val >> 5` |
+| 112 | LFO 2 destination | <64 = duty/PWM (global bus 1, new), ≥64 = resonance. Pitch belongs to LFO 1 — one producer per bus |
 
 **Arp / step sequencer**
 | CC | Target | Notes |
