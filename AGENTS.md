@@ -68,9 +68,15 @@ summarise.
   50 ms partial reset (keeps running status), 500 ms silence → full reset +
   `uart_flush_input`.
 - `ble_midi.c/h`: standard MIDI 1.0 over BLE service on NimBLE. Advertises
-  "Noaidi"; unpacks BLE MIDI packets in the NimBLE host task and feeds the
-  shared `midi_parser` onto the event bus - same path as DIN MIDI, so the
-  voice allocator never knows the difference. Console key 'p' prints stack
+  "Noaidi"; the GATT access callback only COPIES each packet into a NOSPLIT
+  ring buffer — a `ble_rx` task (prio 4, with the 2 ms single-core yield
+  guard) unpacks the BLE-MIDI framing and feeds the shared `midi_parser`
+  onto the event bus — same path as DIN MIDI, so the voice allocator never
+  knows the difference. (Parsing in the host task starved IDLE under a
+  ~1 kHz BLE flood — btController watchdog, issue #83; never move it back.)
+  Linux-side note: BlueZ's built-in BLE-MIDI plugin claims the MIDI service
+  on connect (raw D-Bus GATT writes bounce NotAuthorized) and exposes an
+  ALSA sequencer port — test tooling talks to THAT (tools/ble_midi_fuzz.py). Console key 'p' prints stack
   state and re-triggers advertising. Verified on silicon 2026-09-05 (macOS
   Audio MIDI Setup → Logic → audible over SPDIF). In IDF v6 the NimBLE host
   lives inside the `bt` component - no separate `nimble` component exists.
