@@ -15,6 +15,7 @@
 #include "voice_alloc.h"
 #include "slider.h"
 #include "ble_midi.h"
+#include "stress_test.h"
 
 void app_main(void)
 {
@@ -100,5 +101,8 @@ void app_main(void)
     voice_alloc_init();
     slider_init();   // panel slider -> CC71 (resonance); 'c' = calibrate
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
+#if CONFIG_NOAIDI_STRESS_TEST
+    stress_test_start();  // synthetic MIDI flood (#70 repro); off by default
+#endif
     printf("play the keyboard — gate-by-gain, clicks expected\n");
 }
