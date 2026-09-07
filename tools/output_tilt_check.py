@@ -93,6 +93,8 @@ def main():
         rec = subprocess.run(
             ["arecord", "-D", args.device, "-f", "S16_LE", "-r", str(RATE),
              "-c", "2", "-t", "raw", "-q", "-d", "2"], capture_output=True)
+        with open("/tmp/tilt_capture.raw", "wb") as f:
+            f.write(rec.stdout)   # kept for publish_capture.sh review
         send(NoteOffEvent(note=args.note, channel=0, velocity=0))
         send(ControlChangeEvent(channel=0, param=74, value=64))
         send(ControlChangeEvent(channel=0, param=123, value=0))
