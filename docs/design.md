@@ -111,7 +111,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 | Quantity | Format | Notes |
 |---|---|---|
-| Audio transport | Q2.16 (18-bit) | Gowin DSP register width |
+| Audio transport | Q4.14 (18-bit) | Gowin DSP register width. Repointed from Q2.16 (issue #63, Thor 2026-09-08): filter-output clamp ±8.0 instead of ±2.0 = +12 dB resonance headroom; zero-resonance loudness unchanged (mix shift compensates); 14 fraction bits ≈ 86 dB per-element SNR, under the analog floor |
 | Filter states | Q8.28 (36-bit) | Gowin DSP register width |
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed SVF-K LUT), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth (decided 2026-09-02, "break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
