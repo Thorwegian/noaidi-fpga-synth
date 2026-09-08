@@ -48,6 +48,16 @@ the architecture changes. Agent will neatly summarise.
 
 - Chain: Noaidi analog out → Focusrite → ICUSBAUDIO7D LINE IN (card 1,
   `hw:1,0`), captured S16_LE 48 kHz stereo with `arecord`.
+- **The Focusrite MUST be clock-slaved to its S/PDIF input.** On internal
+  clock it free-runs ~6 ppm off the FPGA stream and its receive FIFO
+  recenters every ~1.65 s — an ~8 ms hold/jump glitch burst, heard as
+  periodic clicking (issue #86; 73 bursts/120 s → 0 after the setting).
+  If periodic clicks at a crystal-steady interval ever reappear, check
+  the clock source FIRST.
+- **A dev-host reboot reverts the USB card's mixer** (capture source back
+  to Mic at +11 dB → loud 100 Hz buzz + noise floor ×3). Every capture
+  script must assert the state first: source=Line, Line capture 58%
+  `cap`, Line playback off, Mic muted/nocap.
 - SPDIF is the clean reference. The analog LINE path has ~48 dB dynamic range
   (issue #86) — use it for presence checks and gain-staging, not quality
   verdicts.
