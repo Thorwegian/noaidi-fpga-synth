@@ -519,15 +519,32 @@ module element_pipeline #(
         end
     end
 
-    // P4 (walker_step == 1) combinational: value = base + contribution,
+    // P4 (walker_step == 1) combinational: value = addend + contribution,
     // saturating — REGISTERED into walker_write_* at the end of P4, written to
     // the replicas at P5 (walker_step == 2). The RAM-output → add → clamp →
     // RAM-write chain carries a register in the middle (the 76 MHz
     // critical-path fix). Declared before the stage block below
     // (iverilog binds declaration-before-use at module scope).
+    //
+    // BUS SUMMING (issue #84, law 1 made real): buses are summing
+    // nodes, so summing is the DEFAULT — no flags. At this moment the
+    // walker_write_* registers still hold the PREVIOUS entry's result;
+    // if this entry targets the same bus, accumulate onto that result
+    // instead of re-reading the firmware base. Same-bus sources
+    // allocated in CONSECUTIVE slots therefore sum automatically, to
+    // any chain length (each link sees the running total). The
+    // allocator's rule (bus_architecture.md): group same-bus sources
+    // adjacently; scattered ones keep last-write-wins.
     wire signed [19:0] walker_contribution = depth_product[35:16];
+    // walker_write_valid is cleared after the P5 RAM write, so the
+    // chain test uses its own uncleaned copy (bus/value persist).
+    logic walker_prev_wrote;
+    wire chain_prev = walker_prev_wrote
+                      && (walker_write_bus == target_bus_c);
+    wire signed [17:0] walker_addend =
+        chain_prev ? walker_write_value : bus_base_readout;
     wire signed [20:0] walker_sum =
-        {{3{bus_base_readout[17]}}, bus_base_readout} + {walker_contribution[19], walker_contribution};
+        {{3{walker_addend[17]}}, walker_addend} + {walker_contribution[19], walker_contribution};
     wire signed [17:0] walker_value_clamped =
         (walker_sum > 21'sd131071)  ? 18'sd131071  :
         (walker_sum < -21'sd131072) ? -18'sd131072 : walker_sum[17:0];
@@ -538,6 +555,7 @@ module element_pipeline #(
         if (!rst_n) begin
             walker_read_valid <= 1'b0;
             producer_valid_a <= 1'b0; producer_valid_b <= 1'b0; producer_valid_c <= 1'b0; walker_write_valid <= 1'b0;
+            walker_prev_wrote <= 1'b0;
             producer_index_a <= '0; producer_type_a <= '0; lfo_shape_a <= '0;
             target_bus_a <= '0; lfo_rate_a <= '0; producer_state_prev <= '0;
             target_bus_b <= '0; mod_source_value <= '0;
@@ -560,6 +578,7 @@ module element_pipeline #(
                 // ...and register the previous entry's saturated sum
                 // (write happens next cycle, at P5)
                 walker_write_valid   <= producer_valid_c && (target_bus_c != 10'd0);
+                walker_prev_wrote    <= producer_valid_c && (target_bus_c != 10'd0);
                 walker_write_bus <= target_bus_c;
                 walker_write_value <= walker_value_clamped;
                 producer_valid_c    <= 1'b0;

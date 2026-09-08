@@ -104,7 +104,7 @@ equal-ratio ladder.
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
 | 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance `val<<5` (≈2 octaves of Q) |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | <64 = duty/PWM (global bus 1, new), ≥64 = resonance. Pitch belongs to LFO 1 — one producer per bus |
+| 112 | LFO 2 destination | 3-way `(val*3)>>7`: duty/PWM (global bus 1) / resonance / PITCH (sums with LFO 1 via bus summing #84 — dual vibrato) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |

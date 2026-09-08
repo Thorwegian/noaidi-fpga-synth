@@ -388,22 +388,26 @@ static void update_lfo1(void)
     engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
 }
 
-// LFO 2 = source 1 (#73), global. CC 109/110/111/112. Destination is
-// duty (PWM) or resonance — ONE producer per bus in the walker, and
-// pitch already belongs to LFO 1. When the destination moves, the old
-// bus's effective value would go stale (nothing writes it any more),
-// so restore its firmware base.
+// LFO 2 = source 1 (#73), global. CC 109/110/111/112. Destinations:
+// duty (PWM), resonance, or PITCH — the pitch case rides bus summing
+// (#84): sources 0 (LFO 1) and 1 sit in consecutive walker slots, so
+// both targeting the pitch bus SUM (dual vibrato). When the
+// destination moves, the old bus's effective value would go stale
+// (nothing writes it any more), so restore its firmware base.
 static int32_t s_reso_off;   // CC 71's last bus offset (for restore)
 static void update_lfo2(void)
 {
     static uint16_t prev_bus = BUS_DUTY_GLOBAL;
     uint16_t bus = (g_patch.lfo[1].dest == 1) ? BUS_RESO_GLOBAL
+                 : (g_patch.lfo[1].dest == 2) ? BUS_PITCH_GLOBAL
                                               : BUS_DUTY_GLOBAL;
     if (bus != prev_bus) {
         if (prev_bus == BUS_DUTY_GLOBAL)
             engine_link_bus_write(BUS_DUTY_GLOBAL, 0);
-        else
+        else if (prev_bus == BUS_RESO_GLOBAL)
             engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)s_reso_off);
+        // prev == pitch needs no restore: LFO 1 (slot 0) rewrites the
+        // pitch bus every sample, so it never goes stale.
         prev_bus = bus;
     }
     engine_link_prod_write(PROD_LFO2, 0,
@@ -625,10 +629,14 @@ static void handle_cc(uint8_t num, uint8_t val)
     // Depth scale is per-destination: duty bus decodes <<<13 (1024 LSB
     // = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q).
     case 110: g_patch.lfo[1].depth =
-                  (int16_t)(g_patch.lfo[1].dest == 1 ? val << 5 : val << 4);
+                  (int16_t)(g_patch.lfo[1].dest == 1 ? val << 5
+                          : g_patch.lfo[1].dest == 2 ? val << 2   // pitch: like CC 77
+                                                     : val << 4);
               s_dirty |= D_LFO2; break;
     case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO2; break;
-    case 112: g_patch.lfo[1].dest  = (uint8_t)(val >= 64); s_dirty |= D_LFO2; break;
+    // Three destinations (bus summing #84 legalised pitch):
+    // 0..42 duty/PWM, 43..85 resonance, 86..127 pitch (sums with LFO 1)
+    case 112: g_patch.lfo[1].dest  = (uint8_t)((val * 3) >> 7); s_dirty |= D_LFO2; break;
 
     // ---- live: master volume → gain-bus base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);

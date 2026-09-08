@@ -106,6 +106,43 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
+        // BUS SUMMING (issue #84, law 1): two ADSR sources in
+        // CONSECUTIVE slots (1 and 2), same gate, same target bus 3,
+        // +4 oct depth each over a −8 oct base. Summed: −8+4+4 = 0
+        // (full loudness). Last-write-wins would leave −8+4 = −4 oct
+        // = 24 dB quieter. Compare against slot-2-off single-source.
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
+        flip;
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
+        spi_word_write(bus_addr(5), 32'h00000001);      // gate on
+        observe(300);
+        observe(400);
+        wmax = peak;   // two chained sources
+        $display("bus summing, two sources: peak=%0d", wmax);
+
+        spi_word_write(src_addr(2, 0), SRC_OFF);        // drop source 2
+        flip;
+        spi_word_write(src_addr(2, 0), SRC_OFF);
+        observe(300);
+        observe(400);
+        $display("bus summing, one source:  peak=%0d", peak);
+        if (peak == 0) peak = 1;
+        if (wmax / peak < 8) begin
+            $display("FAIL: consecutive same-bus sources do not sum (#84)");
+            errors = errors + 1;
+        end
+
         report;
     end
 

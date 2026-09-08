@@ -113,6 +113,7 @@ localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
 // are now checked against the value: 1 octave = 0x400.)
 localparam [31:0] OFFS_PLUS_1OCT  = 32'h00000400;
 localparam [31:0] OFFS_PLUS_2OCT  = 32'h00000800;
+localparam [31:0] OFFS_PLUS_4OCT  = 32'h00001000;
 localparam [31:0] OFFS_PLUS_8OCT  = 32'h00002000;
 localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 
