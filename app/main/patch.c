@@ -26,19 +26,21 @@ void patch_default(patch_t *p)
     memset(p, 0, sizeof(*p));
 
     // ---- oscillators (both rendered now, issue #72) ----
-    p->osc[0].wave = WAVE_SAW;
-    p->osc[1].wave = WAVE_SAW;
-    // osc2 defaults to unison with osc1 (coarse/fine/duty 0). Two
-    // plain saws is the default voice (Thor, 2026-09-06); unison and
-    // supersaw are explicit modes (CC 26).
-    p->voice_struct  = VOICE_2_PLAIN;
+    // Default voice (Thor, 2026-09-08): the "7+1" structure — a
+    // 7-voice supersaw (osc1) plus a single pure sine (osc2) one
+    // octave below. The sine sub fattens the saws without muddying
+    // the midrange; the ×7 detune gives the classic supersaw width.
+    p->osc[0].wave   = WAVE_SAW;    // the ×7 supersaw
+    p->osc[1].wave   = WAVE_SINE;   // the single "+1" — a pure sine
+    p->osc[1].coarse = -12;         // one octave below the supersaw (sub)
+    p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
-    p->unison_detune = 6;      // LSB per spread step (used by unison modes)
-    p->unison_stereo = 64;     // stereo spread on for unison modes
+    p->unison_detune = 6;      // LSB per spread step (supersaw spread)
+    p->unison_stereo = 64;     // stereo spread on
 
     p->filter.resonance = 0x200;       // was RESO (q1 = 1.0)
     p->filter.type      = 0;           // LP
-    p->filter.dual      = 0;           // 12 dB
+    p->filter.dual      = 1;           // 24 dB/oct default (Thor, 2026-09-08)
 
     // amp env — was ADSR_RATES (0x98/0x20/0xF0/0x28, A,D,S,R)
     p->env[0].attack  = 0x98;

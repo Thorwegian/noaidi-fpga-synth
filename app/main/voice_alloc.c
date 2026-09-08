@@ -158,11 +158,12 @@ static int64_t  s_last_apply;
 // (patch.h, #69); patch_adsr_word() packs it into the RATES word.
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
-// The per-voice cutoff bus value: wheel opens up to ~+3 octaves,
+// The per-voice cutoff bus value: wheel opens up to ~+5 octaves (the
+// main sweep control — widened Thor 2026-09-08, was *24/~+3 oct),
 // bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
 static uint32_t cut_bus_value(int v)
 {
-    int32_t val = (int32_t)s_wheel * 24 + s_bend + s_vel_cut[v] + s_cut_off;
+    int32_t val = (int32_t)s_wheel * 40 + s_bend + s_vel_cut[v] + s_cut_off;
     return (uint32_t)val;   // engine masks to 18 bits (Q8.10)
 }
 static QueueHandle_t s_queue;
@@ -517,7 +518,7 @@ static void reso_update(uint8_t val)
     engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
 }
 
-// Mod wheel → cutoff term (0 to ~+3 octaves, wheel*24 Q8.10 LSB).
+// Mod wheel → cutoff term (0 to ~+5 octaves, wheel*40 Q8.10 LSB).
 static void wheel_update(uint8_t val)
 {
     if (val == s_wheel)
@@ -579,7 +580,8 @@ static void apply_cutoff(void)
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so
     // coarse spans a few octaves, fine interpolates.
     int32_t v14 = ((int32_t)s_cut_coarse << 7) | s_cut_fine;   // 0..16383
-    s_cut_off = (v14 - 8192) >> 2;   // ~±2k Q8.10 = ±2 octaves
+    s_cut_off = (v14 - 8192) >> 1;   // ~±4k Q8.10 = ±4 octaves (widened
+                                     // sweep, Thor 2026-09-08; was >>2/±2)
     s_dirty |= D_CUT;   // coalesced
 }
 

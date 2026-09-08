@@ -64,6 +64,19 @@ stored-configuration structure → panel electronics → motorization.
 JT's fader
 hardware research can proceed independently at any time.
 
+### Default voice (Thor, 2026-09-08)
+
+The power-on `patch_default()` timbre is a **7+1 supersaw with a sine
+sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
+(fattens the saws without muddying the mid), through a **24 dB/oct**
+lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74
+spans ±4 octaves (was ±2) and the mod wheel opens ~+5 octaves (was
+~+3) — the wheel is Thor's primary sweep control. (Earlier default was
+two plain saws / 12 dB, superseded.) Open question left with Thor: the
+rest (wheel-down) cutoff still sits half an octave above the note, so
+the sweep starts fairly bright; lowering the base would give a
+closed→open travel if he wants it.
+
 ## System topology ✅
 
 ```
