@@ -226,6 +226,11 @@ combiner source type — both in the B6+ list on measured demand.
   why is documented in `spdif_tx.sv`.
 - **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/16.
 - Both latch the same stereo mix on the drum's sample tick.
+- **Output tilt** (Thor, 2026-09-07/08): a one-pole 6 dB/oct lowpass
+  on the mix, `out += (in − out) >>> 2` at 96 kHz → corner ≈ 4.4 kHz —
+  smooths the digital top end, keeps the presence band. Ear-tuned:
+  started at `>>> 4` (~950 Hz), retuned to `>>> 2` as too dark. Sits
+  before the test-tone mux so the purity reference stays unfiltered.
 
 ## Effects 📋
 
