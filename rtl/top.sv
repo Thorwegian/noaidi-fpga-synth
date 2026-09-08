@@ -123,16 +123,18 @@ module top (
 
     //----------------------------------------------------------------
     // Output tilt: one-pole 6 dB/oct lowpass on the mix (Thor,
-    // 2026-09-07, by ear): out += (in − out) >>> 4. α = 1/16 at
-    // 96 kHz → corner ≈ 950 Hz, a gentle analog-style top-end tilt.
+    // 2026-09-07, by ear): out += (in − out) >>> 2. α = 1/4 at
+    // 96 kHz → corner ≈ 4.4 kHz — smooths the digital edge but keeps
+    // the presence band (retuned from >>>4/~950 Hz, Thor 2026-09-08:
+    // "too aggressive" — it muffled the supersaw).
     // A convex combination never overflows 24 bits. Sits BEFORE the
     // test-tone mux so the purity reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;
     // 26-bit intermediates: a 24−24 difference needs 25 bits, and the
     // convex result always fits back into 24 — truncating is safe.
-    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 4;
-    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 4;
+    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 2;
+    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 2;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n) begin
             lpf_l <= '0;

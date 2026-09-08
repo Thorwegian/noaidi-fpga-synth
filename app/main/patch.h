@@ -25,8 +25,8 @@
 
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum {                     // matches OSC word waveform field
-    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_PARABOLIC,
-    // future gateware waveforms (#64 noise, #65 true sine, #66 skew)
+    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT (#65)
+    // future gateware waveforms: #64 noise; #66 a real parabola as its own type
 } waveform_t;
 
 // Voice structure — how the 2 oscillators map onto the 8 elements

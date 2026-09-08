@@ -78,9 +78,9 @@ module tb_element_pipeline;
 
     integer adds_this_period = 0;      // voices entering the mix
 
-    integer      exp_acc_l, exp_acc_r; // expected mix accum (Q2.16, wide)
-    integer      exp_lat_l;            // expected latched left output
-    integer      exp_lat_r;            // expected latched right output
+    longint      exp_acc_l, exp_acc_r; // expected mix accum (Q4.14, wide)
+    longint      exp_lat_l;            // expected latched left output
+    longint      exp_lat_r;            // expected latched right output
 
     // per-voice phase capture (period 2 vs 3)
     integer phase_v0_p2 = 0;
@@ -94,7 +94,7 @@ module tb_element_pipeline;
     integer prev_s9_elem = 0,  prev_s9_gl = 0;
     integer prev2_s9_elem = 0, prev2_s9_gl = 0;
 
-    function automatic integer sat24_impl(input integer x);
+    function automatic longint sat24_impl(input longint x);
         // x: Q0.24-ish (unbounded); clamp to signed 24-bit
         if (x > 8388607)      return 8388607;
         if (x < -8388608)     return -8388608;
@@ -152,8 +152,10 @@ module tb_element_pipeline;
                 errors = errors + 1;
             end
             if (period >= 1) begin
-                exp_lat_l = sat24_impl(exp_acc_l << 8);
-                exp_lat_r = sat24_impl(exp_acc_r << 8);
+                // Q4.14 → Q0.24 is << 10 (repoint #63; mirrors the RTL's
+                // sat24(mix_acc <<< 10)). Was << 8 in the Q2.16 era.
+                exp_lat_l = sat24_impl(exp_acc_l << 10);
+                exp_lat_r = sat24_impl(exp_acc_r << 10);
             end
             period = period + 1;
             adds_this_period = 0;

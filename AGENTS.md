@@ -147,9 +147,10 @@ the architecture changes. Agent will neatly summarise.
   S1 state/param RAM read → S2 LUT reads → S3 oscillator → S3B K-shift (timing
   split) → S4–S6 SVF1 (S5B) → S7–S9 SVF2 (S8B) → S9B gain decode → S10
   attenuation multiply → S11 mix accumulate + writeback.
-- Formats: phase UQ0.24, audio Q2.16 (18-bit), SVF states Q8.28 (36-bit),
-  pitch/cutoff UQ4.10 (14-bit), gain UQ4.4 (log: 6 dB/step, 0.375 dB/frac
-  step; 0xFF ≈ −96 dB ≈ mute).
+- Formats: phase UQ0.24, audio Q4.14 (18-bit; repointed from Q2.16 in #63 —
+  filter clamp ±8.0, +12 dB resonance headroom, loudness unchanged), SVF
+  states Q8.28 (36-bit), pitch/cutoff UQ4.10 (14-bit), gain UQ4.4 (log:
+  6 dB/step, 0.375 dB/frac step; 0xFF ≈ −96 dB ≈ mute).
 - Memories (BSRAM): per-element state RAMs semi dual-port — read S0, writeback
   15 cycles later (addresses never collide). Param RAMs read-only this
   milestone. LUT ROMs: `phase_lut.hex`, `svf_k_lut.hex`, `att_lut.hex`.

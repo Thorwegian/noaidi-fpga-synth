@@ -64,6 +64,19 @@ stored-configuration structure → panel electronics → motorization.
 JT's fader
 hardware research can proceed independently at any time.
 
+### Default voice (Thor, 2026-09-08)
+
+The power-on `patch_default()` timbre is a **7+1 supersaw with a sine
+sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
+(fattens the saws without muddying the mid), through a **24 dB/oct**
+lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74
+spans ±4 octaves (was ±2) and the mod wheel opens ~+5 octaves (was
+~+3) — the wheel is Thor's primary sweep control. (Earlier default was
+two plain saws / 12 dB, superseded.) Open question left with Thor: the
+rest (wheel-down) cutoff still sits half an octave above the note, so
+the sweep starts fairly bright; lowering the base would give a
+closed→open travel if he wants it.
+
 ## System topology ✅
 
 ```
@@ -111,7 +124,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 | Quantity | Format | Notes |
 |---|---|---|
-| Audio transport | Q2.16 (18-bit) | Gowin DSP register width |
+| Audio transport | Q4.14 (18-bit) | Gowin DSP register width. Repointed from Q2.16 (issue #63, Thor 2026-09-08): filter-output clamp ±8.0 instead of ±2.0 = +12 dB resonance headroom; zero-resonance loudness unchanged (mix shift compensates); 14 fraction bits ≈ 86 dB per-element SNR, under the analog floor |
 | Filter states | Q8.28 (36-bit) | Gowin DSP register width |
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed SVF-K LUT), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth (decided 2026-09-02, "break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
@@ -213,6 +226,11 @@ combiner source type — both in the B6+ list on measured demand.
   why is documented in `spdif_tx.sv`.
 - **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/16.
 - Both latch the same stereo mix on the drum's sample tick.
+- **Output tilt** (Thor, 2026-09-07/08): a one-pole 6 dB/oct lowpass
+  on the mix, `out += (in − out) >>> 2` at 96 kHz → corner ≈ 4.4 kHz —
+  smooths the digital top end, keeps the presence band. Ear-tuned:
+  started at `>>> 4` (~950 Hz), retuned to `>>> 2` as too dark. Sits
+  before the test-tone mux so the purity reference stays unfiltered.
 
 ## Effects 📋
 

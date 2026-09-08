@@ -519,15 +519,32 @@ module element_pipeline #(
         end
     end
 
-    // P4 (walker_step == 1) combinational: value = base + contribution,
+    // P4 (walker_step == 1) combinational: value = addend + contribution,
     // saturating — REGISTERED into walker_write_* at the end of P4, written to
     // the replicas at P5 (walker_step == 2). The RAM-output → add → clamp →
     // RAM-write chain carries a register in the middle (the 76 MHz
     // critical-path fix). Declared before the stage block below
     // (iverilog binds declaration-before-use at module scope).
+    //
+    // BUS SUMMING (issue #84, law 1 made real): buses are summing
+    // nodes, so summing is the DEFAULT — no flags. At this moment the
+    // walker_write_* registers still hold the PREVIOUS entry's result;
+    // if this entry targets the same bus, accumulate onto that result
+    // instead of re-reading the firmware base. Same-bus sources
+    // allocated in CONSECUTIVE slots therefore sum automatically, to
+    // any chain length (each link sees the running total). The
+    // allocator's rule (bus_architecture.md): group same-bus sources
+    // adjacently; scattered ones keep last-write-wins.
     wire signed [19:0] walker_contribution = depth_product[35:16];
+    // walker_write_valid is cleared after the P5 RAM write, so the
+    // chain test uses its own uncleaned copy (bus/value persist).
+    logic walker_prev_wrote;
+    wire chain_prev = walker_prev_wrote
+                      && (walker_write_bus == target_bus_c);
+    wire signed [17:0] walker_addend =
+        chain_prev ? walker_write_value : bus_base_readout;
     wire signed [20:0] walker_sum =
-        {{3{bus_base_readout[17]}}, bus_base_readout} + {walker_contribution[19], walker_contribution};
+        {{3{walker_addend[17]}}, walker_addend} + {walker_contribution[19], walker_contribution};
     wire signed [17:0] walker_value_clamped =
         (walker_sum > 21'sd131071)  ? 18'sd131071  :
         (walker_sum < -21'sd131072) ? -18'sd131072 : walker_sum[17:0];
@@ -538,6 +555,7 @@ module element_pipeline #(
         if (!rst_n) begin
             walker_read_valid <= 1'b0;
             producer_valid_a <= 1'b0; producer_valid_b <= 1'b0; producer_valid_c <= 1'b0; walker_write_valid <= 1'b0;
+            walker_prev_wrote <= 1'b0;
             producer_index_a <= '0; producer_type_a <= '0; lfo_shape_a <= '0;
             target_bus_a <= '0; lfo_rate_a <= '0; producer_state_prev <= '0;
             target_bus_b <= '0; mod_source_value <= '0;
@@ -560,6 +578,7 @@ module element_pipeline #(
                 // ...and register the previous entry's saturated sum
                 // (write happens next cycle, at P5)
                 walker_write_valid   <= producer_valid_c && (target_bus_c != 10'd0);
+                walker_prev_wrote    <= producer_valid_c && (target_bus_c != 10'd0);
                 walker_write_bus <= target_bus_c;
                 walker_write_value <= walker_value_clamped;
                 producer_valid_c    <= 1'b0;
@@ -1190,13 +1209,20 @@ module element_pipeline #(
     // Q8.28 → Q2.16 with saturation: with real state headroom, resonant
     // peaks can legitimately exceed the ±2 output range and must clamp,
     // not wrap.
-    function automatic logic signed [17:0] sat_q216(input logic signed [35:0] x);
+    // Audio repoint Q2.16 → Q4.14 (issue #63, Thor's call): same 18-bit
+    // wires and DSP width, binary point moved two right — the filter-
+    // output clamp becomes ±8.0 instead of ±2.0, +12 dB more headroom
+    // for resonant peaks before the (pre-gain!) rail. Loudness at zero
+    // resonance is IDENTICAL: the −2-bit audio scale cancels against
+    // the +2-bit mix conversion below. Osc drive and SVF state
+    // magnitudes are unchanged (the S4 osc alignment stays <<<12).
+    function automatic logic signed [17:0] sat_q414(input logic signed [35:0] x);
         logic signed [35:0] s;
         begin
-            s = x >>> 12;                       // Q8.28 → Q8.16
-            if (s > 36'sd131071)        sat_q216 = 18'sd131071;
-            else if (s < -36'sd131072)  sat_q216 = -18'sd131072;
-            else                        sat_q216 = s[17:0];
+            s = x >>> 14;                       // Q8.28 → Q8.14
+            if (s > 36'sd131071)        sat_q414 = 18'sd131071;
+            else if (s < -36'sd131072)  sat_q414 = -18'sd131072;
+            else                        sat_q414 = s[17:0];
         end
     endfunction
 
@@ -1230,7 +1256,7 @@ module element_pipeline #(
         end else begin
             s6_act  <= s5b_act;
             s6_idx  <= s5b_idx;
-            s6_f1   <= sat_q216(f1_36);
+            s6_f1   <= sat_q414(f1_36);
             s6_ic1eq1n <= bp1;
             s6_ic2eq1n <= s5b_lp1;
             s6_ic1eq2 <= s5b_ic1eq2;
@@ -1314,7 +1340,7 @@ module element_pipeline #(
     logic signed [35:0] lp2, hp2;
     always_comb begin
         lp2 = s7_ic2eq2 + (s7_m4 >>> 28);
-        hp2 = (s7_f1 <<< 12) - lp2 - (s7_m5 >>> 28);   // true Q8.28, as SVF1
+        hp2 = (s7_f1 <<< 14) - lp2 - (s7_m5 >>> 28);   // Q4.14 → Q8.28 (repoint #63)
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1438,7 +1464,7 @@ module element_pipeline #(
         end else begin
             s9_act  <= s8b_act;
             s9_idx  <= s8b_idx;
-            s9_elem <= s8b_dual ? sat_q216(f2_36) : s8b_f1;
+            s9_elem <= s8b_dual ? sat_q414(f2_36) : s8b_f1;
             s9_phase <= s8b_phase;
             s9_ic1eq1n <= s8b_ic1eq1n;
             s9_ic2eq1n <= s8b_ic2eq1n;
@@ -1549,18 +1575,19 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // S11 — mix accumulate + state writeback
     //
-    // Mixdown headroom: 256 elements × Q2.16 (±2.0) needs 8 guard bits,
-    // so the accumulator is 26-bit and can never overflow even with
-    // all elements coherent and full-scale.  The output limiter (sat24)
-    // converts Q2.16 → Q0.24 (<< 8) and clips only in the pathological
-    // all-256-elements-aligned case; overall loudness is set by the
-    // per-element UQ4.4 gains (boot image: -36 dB/element → 8 unison elements
-    // aligned reach exactly 1/8 FS per note).
+    // Mixdown headroom: 256 elements × Q4.14 (±8.0) sums to ±2048 in a
+    // 26-bit Q4.14 accumulator (12 integer bits, ±2048) — marginal by
+    // design exactly as the Q2.16 era was (256 × ±2.0 vs ±512). The
+    // output limiter (sat24) converts Q4.14 → Q0.24 (<< 10) and clips
+    // only in the pathological all-aligned-at-the-rail case; overall
+    // loudness is set by the per-element UQ4.4 gains and is IDENTICAL
+    // to the Q2.16 era at zero resonance (repoint #63: −2 bits of
+    // audio scale cancel the +2 bits of conversion shift).
     //----------------------------------------------------------------
-    function automatic logic signed [23:0] sat24(input logic signed [33:0] x);
-        if (x > 33'sd8388607)
+    function automatic logic signed [23:0] sat24(input logic signed [35:0] x);
+        if (x > 36'sd8388607)
             sat24 = 24'sd8388607;
-        else if (x < -33'sd8388608)
+        else if (x < -36'sd8388608)
             sat24 = -24'sd8388608;
         else
             sat24 = x[23:0];
@@ -1577,8 +1604,8 @@ module element_pipeline #(
         end else begin
             if (sample_tick) begin
                 // sample boundary: publish the finished sum, start fresh
-                mix_left   <= sat24(mix_l_acc <<< 8);   // Q2.16 → Q0.24
-                mix_right  <= sat24(mix_r_acc <<< 8);
+                mix_left   <= sat24(36'(mix_l_acc) <<< 10);   // Q4.14 → Q0.24 (#63)
+                mix_right  <= sat24(36'(mix_r_acc) <<< 10);
                 mix_l_acc  <= '0;
                 mix_r_acc  <= '0;
             end else if (s10_act) begin
