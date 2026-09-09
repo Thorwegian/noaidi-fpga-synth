@@ -64,6 +64,18 @@ stored-configuration structure → panel electronics → motorization.
 JT's fader
 hardware research can proceed independently at any time.
 
+**Dev-time control surface (Thor, 2026-09-09, approved):** an
+Open Stage Control browser panel on the dev host — every CC as a
+labeled knob with its real range and default, generated from the CC
+schema, so the panel file doubles as living documentation of
+`midi_schema.md` and becomes the spec the motorized-fader panel
+later implements. Context: modern DAWs/plugin formats have largely
+dropped external-MIDI-out (Thor's observation — the DAW and hardware
+ecosystems split), so development knobs come from our own panel, not
+a DAW. MIDI transport from the dev host is under discussion — the
+dev host currently reaches the synth only via BLE (shared with test
+scripts).
+
 ### Default voice (Thor, 2026-09-08)
 
 The power-on `patch_default()` timbre is a **7+1 supersaw with a sine
@@ -219,7 +231,33 @@ from the old notes: the shared per-element configuration table (the
 deliberately unnamed) for one-to-many wiring changes, and the
 combiner source type — both in the B6+ list on measured demand.
 
-## Outputs ✅
+### Modulation authority rule (Thor, 2026-09-09, approved)
+
+**Any amount that modulates pitch/cutoff must be able to drive the
+destination rail to rail.** The cutoff code is UQ4.10 = 16 encoded
+octaves (~11 audibly useful); an amount CC that can't span that is
+wrong by definition — "if the CC for MOD→CUTOFF is the only input,
+it has to span the full range." Over-authority is safe: base + send
+saturates at the 0..0x3FFF clamp, like an env-amount knob pinning.
+CC 107's ±4-octave scale (#42's conservative first pass) is to be
+widened to full authority (`<<6` → `<<8`); the same rule applies to
+every future pitch/cutoff amount. 7-bit resolution at full span is
+0.25 oct/step — acceptable for depths; the MIDI fine-pair convention
+(as CC 74/106) is the fix if stepping ever becomes audible.
+
+### Velocity routing (Thor, 2026-09-09, approved)
+
+Today's velocity is two hardcoded sends (a little to gain, up to
+−1 oct to cutoff) with no amount control — impossible to isolate
+when testing CCs. Decided: **velocity becomes a source with
+per-destination sensitivity amounts** (vel→amp, vel→cutoff offset,
+vel→MOD-env depth), patch fields with CCs; defaults reproduce
+today's behavior, zero = off for isolation. **Velocity scales the
+MOD envelope's depth multiplicatively** (the DX7-through-modern-VA
+convention: soft note = shallower sweep, same shape) — firmware
+scales the per-voice DEPTH word at note-on, no gateware change. The
+amp path is already multiplicative-equivalent (log-domain subtract =
+linear scaling) and just gains a sensitivity amount.
 
 - **SPDIF** (pin 27): biphase-mark, M/W/B preambles, valid channel
   status (consumer PCM / 96 kHz / 24-bit). What a receiver requires and
