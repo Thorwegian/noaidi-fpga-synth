@@ -56,8 +56,9 @@ the architecture changes. Agent will neatly summarise.
   the clock source FIRST.
 - **A dev-host reboot reverts the USB card's mixer** (capture source back
   to Mic at +11 dB → loud 100 Hz buzz + noise floor ×3). Every capture
-  script must assert the state first: source=Line, Line capture 58%
-  `cap`, Line playback off, Mic muted/nocap.
+  script must assert the state first: source=Line, Line capture at the
+  stored calibration (0% since 2026-09-09 — `sudo alsactl restore`
+  recovers it), Line playback off, Mic muted/nocap.
 - SPDIF is the clean reference. The analog LINE path has ~48 dB dynamic range
   (issue #86) — use it for presence checks and gain-staging, not quality
   verdicts.
@@ -65,6 +66,13 @@ the architecture changes. Agent will neatly summarise.
   target ~−6 dBFS (warns >−1 and <−30). ALSA knobs:
   `amixer -c 1 sset 'PCM Capture Source' Line`,
   `amixer -c 1 sset 'Line' <0-100%> cap`.
+- **Calibration (Thor, 2026-09-09, saved with `sudo alsactl store`)**: Line
+  capture at **0% (−16 dB)**, Focusrite output hand-tuned to not clip. The
+  USB interface clips well BEFORE 0 dBFS in the recording — do not trust
+  headroom above its clip point; judge "hot" by the meter's clip counter,
+  not proximity to 0 dBFS. The captured signal carries a **significant DC
+  offset**: every measurement tool subtracts the mean before computing
+  peak/RMS/FFT (added 2026-09-09), and any new capture analysis must too.
 - Purity check: `python3 tools/audio_purity_check.py` — enables the gateware
   test tone (CC 119, 1500 Hz). Also `tools/output_tilt_check.py`,
   `tools/reso_clip_sweep.py`.

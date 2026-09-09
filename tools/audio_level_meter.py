@@ -92,6 +92,7 @@ def main():
 
     peak_session = 0
     clipped = 0
+    dc_worst = 0.0
     t0 = time.time()
     try:
         while time.time() - t0 < args.seconds:
@@ -100,7 +101,12 @@ def main():
                 print("capture stream ended early"); break
             n = len(data) // 2
             samples = struct.unpack(f"<{n}h", data)
-            peak = max(max(samples), -min(samples))
+            # Peak is measured around the block's DC offset (#81: the
+            # analog path carries one); clipping is still judged on the
+            # RAW codes — the ADC rails at +/-32768 regardless of DC.
+            dc = sum(samples) / n
+            dc_worst = max(dc_worst, abs(dc))
+            peak = max(max(samples) - dc, dc - min(samples))
             peak_session = max(peak_session, peak)
             clipped += sum(1 for s in samples if s >= 32767 or s <= -32768)
             d = db(peak)
@@ -113,7 +119,9 @@ def main():
             print("\n[midi] chord released")
 
     d = db(peak_session)
-    print(f"\n\nsession peak: {d:.1f} dBFS, clipped samples: {clipped}")
+    dc_str = f"{db(dc_worst):.1f} dBFS" if dc_worst >= 1 else "none"
+    print(f"\n\nsession peak: {d:.1f} dBFS, clipped samples: {clipped}, "
+          f"worst DC offset: {dc_worst:.0f} LSB ({dc_str})")
     if d > -1.0:
         print("-> TOO HOT: back off the Focusrite output (or ALSA 'Line' capture)")
     elif d < -30.0:

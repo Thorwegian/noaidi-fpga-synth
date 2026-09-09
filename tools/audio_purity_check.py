@@ -85,7 +85,8 @@ def analyze(name, ch):
         frame = ch[start + f * N: start + (f + 1) * N]
         if len(frame) < N:
             break
-        mag = dft_mag(frame)
+        dc = sum(frame) / N       # capture-path DC offset (#81)
+        mag = dft_mag([v - dc for v in frame])
         fund = mag[FUND_BIN]
         if fund <= 0:
             continue

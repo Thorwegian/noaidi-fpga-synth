@@ -103,7 +103,8 @@ def main():
         n = len(rec.stdout) // 2
         s = struct.unpack(f"<{n}h", rec.stdout)
         frame = s[0::2][RATE // 2: RATE // 2 + N]
-        mag = hann_fft_mag(frame)
+        dc = sum(frame) / len(frame)      # capture-path DC offset (#81)
+        mag = hann_fft_mag([v - dc for v in frame])
 
         # harmonic levels: peak bin within +/-3 of each ideal position
         print(f"saw @ {f0:.1f} Hz, SVF at clamp; expect one-pole "
