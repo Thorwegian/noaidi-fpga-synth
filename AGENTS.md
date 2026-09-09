@@ -43,6 +43,12 @@ the architecture changes. Agent will neatly summarise.
 - Load test: `CONFIG_NOAIDI_STRESS_TEST=y` → 60 s synthetic MIDI flood at boot
   (issue #70 repro). BLE end-to-end: `tools/ble_midi_fuzz.py` (venv with
   bleak + pyserial).
+- **Crash witness**: `TASK_WDT_PANIC=y` — a starved task REBOOTS the chip
+  (sound vanishes mid-play; engine mutes on boot) and prints a decoded
+  backtrace, but only if something listens. When no `idf.py monitor` is
+  open, run `nohup tools/console_logger.sh &` on the dev host →
+  timestamped `/tmp/noaidi_console.log`. It holds `/dev/ttyACM0`;
+  `fuser -k /dev/ttyACM0` before any flash/monitor.
 
 ## Audio test path (analog, dev host)
 
