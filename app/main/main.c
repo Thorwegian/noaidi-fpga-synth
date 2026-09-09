@@ -6,6 +6,7 @@
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 
 #include "spi_regs.h"
 #include "midi_in.h"
@@ -19,6 +20,14 @@
 
 void app_main(void)
 {
+    // Boot banner: WHICH build is running (esp_app_desc is regenerated
+    // every build — version is git-describe, date/time is the compile).
+    // Exists because a hash-verified flash once left the old app running
+    // (USB-JTAG hard-reset quirk): trust this line, not esptool's exit.
+    const esp_app_desc_t *ad = esp_app_get_description();
+    printf("=== noaidi fw %s (built %s %s) ===\n",
+           ad->version, ad->date, ad->time);
+
     /* Print chip information */
     esp_chip_info_t chip_info;
     uint32_t flash_size;

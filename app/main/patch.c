@@ -48,15 +48,13 @@ void patch_default(patch_t *p)
     p->env[0].sustain = 0xF0;
     p->env[0].release = 0x28;
 
-    // MOD env (#42): classic filter envelope — near-instant attack,
-    // medium decay to zero sustain. Depth 0 = OFF by default, so the
-    // boot timbre is unchanged until CC 107 dials it in.
-    p->env[1].attack  = 0xF0;
-    p->env[1].decay   = 0x60;
-    p->env[1].sustain = 0x00;
-    p->env[1].release = 0x60;
+    // MOD env (#87, Thor 2026-09-09): ON by default in the boot patch —
+    // same initial params as the AMP envelope, sent to the cutoff bus.
+    // The filter contour tracks the loudness contour: opens with the
+    // attack, settles bright at sustain, closes on release.
+    p->env[1] = p->env[0];
     p->env1_dest      = 0;             // cutoff (the only dest yet)
-    p->env1_depth     = 0;             // off
+    p->env1_depth     = 2048;          // +2 octaves send (CC 107 ≈ 96)
 
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
