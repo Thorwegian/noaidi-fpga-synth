@@ -182,6 +182,15 @@ static void engine_task(void *arg)
         memcpy(s_pdirty_prev, s_pdirty_now, sizeof(s_pdirty_prev));
         memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
 
+        // Drop visibility, always on (not just at init): a silent drop
+        // is a voice configured wrong forever (2026-09-10, twice).
+        static uint32_t s_drops_reported;
+        if (s_drops != s_drops_reported) {
+            ESP_LOGW(TAG, "engine writes dropped: %u total",
+                     (unsigned)s_drops);
+            s_drops_reported = s_drops;
+        }
+
         if (s_drops) {
             ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
             s_drops = 0;
@@ -277,7 +286,15 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
     if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 3)
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {
+    // BACKPRESSURE, not drops (2026-09-10, the stale-RATES drag bug):
+    // producer words are CONFIG — losing one leaves a voice silently
+    // wrong forever (voices 30/31 lost amp envelopes at boot; a knob
+    // drag left tail voices with stale MOD-env rates). When the engine
+    // task is wedged in a long element flush, WAIT for queue space —
+    // the caller is the voice_alloc task, whose own loop already
+    // yields for the watchdog; a bounded block here is harmless and
+    // makes config writes lossless. 50 ms >> the worst observed flush.
+    if (xQueueSend(s_prod_queue, &pc, pdMS_TO_TICKS(50)) != pdTRUE) {
         s_drops++;
         return false;
     }
