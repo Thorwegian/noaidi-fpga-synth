@@ -106,7 +106,12 @@ def main():
             results[pan] = (l_db, r_db)
             print(f"[pan] cc10={pan:3d}: L {l_db:6.1f} dBFS  "
                   f"R {r_db:6.1f} dBFS  (L-R {l_db - r_db:+5.1f} dB)")
-            time.sleep(0.8)      # release tail out of the next capture
+            # The amp release runs seconds; a lingering tail from THIS
+            # note (at THIS pan) would contaminate the next capture.
+            # CC 120 = all-sound-off hard-mutes immediately (and
+            # conveniently exercises the panic path each round).
+            cc(120, 0)
+            time.sleep(0.4)
 
         cc(10, 64)               # restore center
         cc(123, 0)               # all notes off
@@ -140,7 +145,12 @@ def main():
     time.sleep(1.0); cap.stop(); cap.join(timeout=3)
 
     echoes = [l for l in cap.lines if "cc " in l or "note_on" in l]
-    crash = [l for l in cap.lines if any(k in l for k in CRASH_KEYS)]
+    # the capture's own DTR/RTS reset prints a benign boot-reason line
+    # ("rst:0x15 (USB_UART_CHIP_RESET)") - not a crash
+    crash = [l for l in cap.lines
+             if any(k in l for k in CRASH_KEYS)
+             and "USB_UART_CHIP_RESET" not in l
+             and "POWERON" not in l]
     smoke = {num: any(f"num={num:3d}" in l or f"num= {num}" in l
                       for l in cap.lines) for num in (10, 31, 85, 107)}
     for num, seen in smoke.items():
