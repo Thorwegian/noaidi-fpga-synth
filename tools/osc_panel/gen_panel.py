@@ -22,14 +22,38 @@ import os
 TARGET = "midi:noaidi"
 CH = 1
 
+# Widget labels turned out not to render for knobs/faders/switches in
+# v1.31 (buttons and text widgets do - measured on Thor's screen), so
+# every control is wrapped with an explicit text caption underneath.
+# The caption's @{ccNN} reference is o-s-c's live-value syntax: the
+# readout updates as the control moves.
+
+def captioned(widget, caption):
+    return {
+        "type": "panel",
+        "id": f"wrap_{widget['id']}",
+        "layout": "vertical",
+        "expand": True,
+        "widgets": [
+            widget,
+            {
+                "type": "text",
+                "id": f"cap_{widget['id']}",
+                "value": caption,
+                "default": caption,
+                "align": "center",
+                "height": 34,
+                "wrap": True,
+                "css": "font-size: 11px;",
+            },
+        ],
+    }
+
 def knob(cc, label, default=64, bipolar=False):
     w = {
         "type": "knob",
         "id": f"cc{cc}",
-        # @{this.value} renders the LIVE value in the label (o-s-c
-        # dynamic property syntax) - Thor: knobs without a readout are
-        # unusable for probing ranges.
-        "label": f"{label} ({cc}) @{{this.value}}",
+        "label": False,
         "address": "/control",
         "preArgs": [CH, cc],
         "target": TARGET,
@@ -40,18 +64,18 @@ def knob(cc, label, default=64, bipolar=False):
     }
     if bipolar:
         w["origin"] = 64     # value bar grows from center
-    return w
+    return captioned(w, f"{label} ({cc}): @{{cc{cc}}}")
 
 def fader(cc, label, default=0):
-    w = knob(cc, label, default)
-    w["type"] = "fader"
-    return w
+    wrapped = knob(cc, label, default)
+    wrapped["widgets"][0]["type"] = "fader"
+    return wrapped
 
 def switch(cc, label, values, default):
-    return {
+    w = {
         "type": "switch",
         "id": f"cc{cc}",
-        "label": f"{label} ({cc})",
+        "label": False,
         "address": "/control",
         "preArgs": [CH, cc],
         "target": TARGET,
@@ -59,8 +83,10 @@ def switch(cc, label, values, default):
         "default": default,
         "expand": True,
     }
+    return captioned(w, f"{label} ({cc})")
 
 def button(cc, label, value):
+    # buttons DO render their label (in-widget) - no caption needed
     return {
         "type": "button",
         "id": f"cc{cc}",
