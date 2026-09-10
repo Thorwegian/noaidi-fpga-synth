@@ -9,3 +9,5 @@ app/build
 *.vcd
 !rtl/tb/ref_boot_*.hex
 rtl/tb/sim-*.out
+__pycache__/
+sdkconfig.old
