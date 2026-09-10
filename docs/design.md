@@ -47,8 +47,16 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
 A hardware synthesizer with a **house sound** — a characteristic,
 identifiable sonic character in the tradition of the Minimoog, rather
 than the anonymous cleanliness of most software. Inspirations: Clavia
-Nord Lead, Roland JP-8000, Sequential Prophet, EMU10K1; on the software
-side Sylenth1 and Surge XT.
+Nord Lead, Roland JP-8000, Sequential Prophet, EMU10K1 (for its DSP —
+SoundFont is Creative's format, consulted only as a rare written spec
+of parameter mappings); on the software side Sylenth1 and Surge XT.
+
+- **"A controllable machine"** (Thor, 2026-09-10, the roadmap's
+  stated goal): every contribution to the sound — velocity, wheel,
+  envelopes, LFOs — becomes a parameter with a true zero, so each can
+  be isolated when testing and nothing is hardwired. "Once I can
+  control how much each contributes, it's easier to pinpoint when
+  ranges are off."
 
 - **The overall design goal is a TABLETOP synthesizer** (Thor,
   2026-09-01).
