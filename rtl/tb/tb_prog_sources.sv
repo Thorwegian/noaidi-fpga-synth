@@ -143,6 +143,49 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
+        // BUS AS SOURCE (issue #44, Thor: a bus is already a combiner
+        // of sources — the only new thing is "other bus" as a source).
+        // ADSRs off; type-3 entry reads bus 6, multiplies by DEPTH,
+        // adds to gain bus 3. Bus 3 base = −8 oct floor. Bus 6 = 0 →
+        // floor stays; bus 6 = +8 oct at unity depth → full loudness
+        // (≥8× the floor); half depth → +4 oct = clearly in between.
+        spi_word_write(src_addr(1, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(1, 2), DEPTH_UNITY);
+        spi_word_write(src_addr(2, 0), SRC_OFF);
+        flip;
+        spi_word_write(src_addr(1, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(1, 2), DEPTH_UNITY);
+        spi_word_write(src_addr(2, 0), SRC_OFF);
+        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
+        spi_word_write(bus_addr(6), 32'h00000000);      // source: zero
+        observe(60);
+        observe(300);
+        worst = peak;
+        if (worst == 0) worst = 1;
+        $display("bus source, src zero:   peak=%0d (floor)", worst);
+
+        spi_word_write(bus_addr(6), OFFS_PLUS_8OCT);    // source: +8 oct
+        observe(60);
+        observe(300);
+        wmax = peak;
+        $display("bus source, unity copy: peak=%0d", wmax);
+        if (wmax / worst < 8) begin
+            $display("FAIL: bus source did not copy bus 6 into bus 3 (#44)");
+            errors = errors + 1;
+        end
+
+        spi_word_write(src_addr(1, 2), DEPTH_HALF);     // live depth edit
+        flip;
+        spi_word_write(src_addr(1, 2), DEPTH_HALF);
+        observe(60);
+        observe(300);
+        $display("bus source, half depth: peak=%0d", peak);
+        if (peak == 0) peak = 1;
+        if (!(peak > worst && peak < wmax && wmax / peak >= 2)) begin
+            $display("FAIL: bus-source DEPTH does not scale (#44)");
+            errors = errors + 1;
+        end
+
         report;
     end
 

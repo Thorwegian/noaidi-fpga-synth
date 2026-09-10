@@ -40,7 +40,7 @@ Elements are dumb: waveform select, filter type, a static detune
 offset, and per-parameter **bus pointers** — nothing else. Every
 dynamic value arrives on a **bus**: a memory cell holding
 `base register (ESP32's contribution) + Σ producer contributions`.
-**Producers** — LFOs, ADSRs, combiners, future types — live in a
+**Producers** — LFOs, ADSRs, bus sources, future types — live in a
 table walked once per sample through the drum's idle slots and write
 buses. The audio pipeline's entire share is `effective = base_word +
 bus[pointer]`, an add. Firmware allocates everything: buses, producers,
@@ -147,9 +147,20 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   that a dedicated per-element offset is the pragmatic form. All 8
   elements of a voice share one pitch bus; note-on writes one base,
   not eight.
+- **Bus as source — type 3 (#44, built 2026-09-10)**: Thor's
+  reframing killed the "combiner" as a concept — *a bus is already a
+  combiner of sources*; the only new thing needed is **"other bus" as
+  a source**. A type-3 entry is stateless: CFG names a SOURCE bus
+  (in the field the ADSR uses for its gate bus, so the walker's read
+  path is unchanged), the value read is multiplied by DEPTH
+  (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
+  target like any source. Reads see earlier-in-table writes from the
+  same sample, so ordered routes are zero-lag; C = A·x + B·y is just
+  two type-3 entries targeting the same bus in adjacent slots (#84).
+  This is the fan-out primitive for the #92 channel-bus mod matrix.
 - **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
   polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
-  to 32 LFOs + combiners + margin. One entry = type + config + state.
+  to 32 LFOs + bus sources + margin. One entry = type + config + state.
   Walker budget: ≤2 idle slots per entry per sample → 256 of ~497
   idle slots. If the pool ever grows again, half-rate updates double
   the headroom (still 48 kHz effective).

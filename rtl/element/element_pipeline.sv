@@ -608,9 +608,21 @@ module element_pipeline #(
                 adswap_toggle_syncustain_target  <= {producer_table_readout[23:16], 18'b0};
                 adsr_release_step <= (21'd16 + 21'(producer_table_readout[27:24]))
                                << producer_table_readout[31:28];
-                producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2);
+                // Source types: 1 = LFO, 2 = ADSR, 3 = BUS (issue #44,
+                // Thor's reframing: a bus is already a combiner of
+                // sources — the only new thing needed is "other bus"
+                // as a source). Type 3 is STATELESS: CFG[25:16] names
+                // the SOURCE bus (the field the ADSR uses for its gate
+                // bus, so the P1 read needs no change), the value read
+                // is multiplied by DEPTH like any source (0x10000 =
+                // unity copy, sign inverts) and chain-adds to the
+                // target. Reads see earlier-in-table writes from THIS
+                // sample — ordered routes stay zero-lag (#84 law).
+                producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2
+                                                           || producer_type_a == 4'd3);
                 target_bus_b <= target_bus_a;
                 mod_source_value   <= (producer_type_a == 4'd1) ? walker_lfo_wave
+                                    : (producer_type_a == 4'd3) ? bus_base_readout
                                             : $signed({2'b0, producer_state_prev[25:10]});
                 walker_write_valid  <= 1'b0;              // P5 write just happened
             end else begin
