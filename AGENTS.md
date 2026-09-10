@@ -76,6 +76,13 @@ the architecture changes. Agent will neatly summarise.
   hard mute) between steps or the previous note's tail contaminates the next
   measurement (bit shakedown_check's pan test, 2026-09-10, as a phantom
   −46 dB "leak").
+- **CC state PERSISTS across test runs** (no reboot between them): a test
+  must set every CC its measurement depends on — volume, slope, sens,
+  reso — or its "baseline" inherits the previous test's patch. Bit hard
+  2026-09-10: a leftover CC 7=73 (−23 dB) masqueraded as an 18 dB firmware
+  regression and triggered a full A/B flash bisect. Absolute-level
+  comparisons across runs are only valid against a freshly-rebooted
+  default patch.
 - Gain staging: `python3 tools/audio_level_meter.py [secs]` — live peak meter,
   target ~−6 dBFS (warns >−1 and <−30). ALSA knobs:
   `amixer -c 1 sset 'PCM Capture Source' Line`,
