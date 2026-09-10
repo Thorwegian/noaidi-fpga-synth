@@ -26,7 +26,10 @@ from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
 
 AUDIO_DEV = "hw:1,0"
 RATE = 48000
-NOTE = 45
+NOTE = 57   # note 45's 110 Hz fundamental sank into the chain's LF
+            # rolloff (coupling caps - the reason the test tone is
+            # 1500 Hz); 57 is the pain-sweep-calibrated choice: dark
+            # (CC74=52) measured -53 dBFS tonal there
 
 PATCH = [
     (20, 0), (14, 64), (15, 64), (25, 0),           # osc1 saw
