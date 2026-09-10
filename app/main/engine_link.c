@@ -286,15 +286,14 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
     if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 3)
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    // BACKPRESSURE, not drops (2026-09-10, the stale-RATES drag bug):
-    // producer words are CONFIG — losing one leaves a voice silently
-    // wrong forever (voices 30/31 lost amp envelopes at boot; a knob
-    // drag left tail voices with stale MOD-env rates). When the engine
-    // task is wedged in a long element flush, WAIT for queue space —
-    // the caller is the voice_alloc task, whose own loop already
-    // yields for the watchdog; a bounded block here is harmless and
-    // makes config writes lossless. 50 ms >> the worst observed flush.
-    if (xQueueSend(s_prod_queue, &pc, pdMS_TO_TICKS(50)) != pdTRUE) {
+    // Drops stay possible under a wedged flush (blocking here was
+    // tried 2026-09-10 and reverted the same hour — risk containment
+    // after a new symptom appeared with it live). The LOSSLESSNESS
+    // guarantee lives one level up instead: voice_alloc's apply_dirty
+    // checks engine_link_drops() around each config burst and RE-ARMS
+    // the dirty bit when anything dropped, so the coalescer retries at
+    // its own bounded pace until the config lands complete.
+    if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {
         s_drops++;
         return false;
     }

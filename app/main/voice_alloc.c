@@ -854,6 +854,15 @@ static void apply_dirty(int64_t now)
 {
     if (!s_dirty || now - s_last_apply < APPLY_MIN_US)
         return;
+    // Lossless-config guarantee (2026-09-10, the stale-RATES drag
+    // bug): a wedged engine flush can overflow the queues and DROP
+    // part of a config burst — which left tail voices with stale
+    // MOD-env rates ("random notes have a longer MOD envelope",
+    // Thor). Snapshot the drop counter; if anything dropped during
+    // this apply, RE-ARM the same dirty bits so the whole batch
+    // retries at the next bounded-rate apply until it lands whole.
+    uint32_t applied = s_dirty;
+    uint32_t drops0  = engine_link_drops();
     if (s_dirty & D_ENV)    update_amp_env();
     if (s_dirty & D_ENV2)   update_mod_env();
     if (s_dirty & D_CUT)    refresh_cut_buses();
@@ -862,6 +871,10 @@ static void apply_dirty(int64_t now)
     if (s_dirty & D_GAIN)   refresh_gain_buses();
     if (s_dirty & D_RENDER) render_active_voices();
     s_dirty = 0;
+    if (engine_link_drops() != drops0) {
+        s_dirty |= applied;   // retry the batch — coalesced, bounded
+        ESP_LOGW(TAG, "config burst dropped writes — retrying batch");
+    }
     s_last_apply = now;
 }
 
