@@ -15,7 +15,14 @@ This sweeps CC 71 at both slopes and measures, per step:
   the fraction jumps. DC removed per #81; CC 120 between steps per
   the capture-hygiene rule.
 
-    ~/.noaidi-blenv/bin/python3 tools/filter_pain_check.py
+    ~/.noaidi-blenv/bin/python3 tools/filter_pain_check.py [cutoff_cc]
+
+cutoff_cc overrides CC 74 (default 52 = Thor's recipe, corner ~1 oct
+below the fundamental). Run with e.g. 96 to probe the BRIGHT corner -
+hypothesis (Thor 2026-09-10: the physical slider on a bright patch
+could near-max resonance, "just glassy"): SVF stress is the
+low-cutoff/high-Q corner, where integrator states scale ~1/K into
+the clamps; high fc keeps states small and stable.
 
 BLE transport; console untouched (the polite logger keeps running).
 """
@@ -67,6 +74,9 @@ def capture(seconds=1.0):
 
 
 def main():
+    cutoff = int(sys.argv[1]) if len(sys.argv) > 1 else 52
+    patch = [(n, cutoff if n == 74 else v) for n, v in PATCH]
+    print(f"[patch] cutoff CC74 = {cutoff}")
     btctl = subprocess.Popen(["bluetoothctl"], stdin=subprocess.PIPE,
                              stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, text=True)
@@ -87,7 +97,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in patch:
             cc(num, val)
             time.sleep(0.03)
 
