@@ -100,7 +100,10 @@ the architecture changes. Agent will neatly summarise.
 - Both boards permanently USB-attached to the dev host (mini-linux):
   `make fw-flash`/`fw-monitor` and FPGA loading work from there without
   touching hardware.
-- USB serial: /dev/ttyACM0 = ESP32-C3 console; /dev/ttyUSB1 = FPGA UART bridge —
+- USB serial: the ESP32-C3 console is the ttyACM device with
+  `ID_VENDOR=Espressif` (`udevadm info -q property -n /dev/ttyACM*`) — it
+  RE-ENUMERATES across replugs (ACM0 one day, ACM1 the next), so discover it,
+  never hardcode. /dev/ttyUSB1 = FPGA UART bridge —
   SILENT unless the bitstream drives a UART (none of the diagnostic tops do;
   silence is not a fault). Do not diagnose the BL616 from that port.
 
