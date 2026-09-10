@@ -38,6 +38,9 @@ void patch_default(patch_t *p)
     p->unison_detune = 6;      // LSB per spread step (supersaw spread)
     p->unison_stereo = 64;     // stereo spread on
 
+    p->vel_amp_sens = 64;              // = historical (127-vel)>>1 feel
+    p->vel_cut_sens = 64;              // = historical vel*48 brightening
+
     p->filter.key_track = 64;          // center = 100% tracking = the
                                        // historical voice_fc behavior
                                        // (#91; 0..200% scale since #94)

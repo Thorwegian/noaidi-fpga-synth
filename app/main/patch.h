@@ -110,6 +110,11 @@ typedef struct {
 
     mod_route_t     mod[PATCH_MOD_ROUTES];
 
+    // Velocity sensitivity (#89): 64 = the historical hardwired feel,
+    // 0 = OFF (isolation testing), 127 = double. CC 86/87.
+    uint8_t         vel_amp_sens;
+    uint8_t         vel_cut_sens;
+
     uint8_t         bend_range;      // 1..12 semitones
     uint8_t         volume;          // per-channel/part volume (UQ4.4)
     int8_t          pan;             // per-channel/part pan

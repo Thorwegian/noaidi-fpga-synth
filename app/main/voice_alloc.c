@@ -301,7 +301,10 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     // are LOWER values). MASTER volume is NOT here — it rides the
     // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
-    int32_t vol = (int32_t)VOL_REF - (int32_t)((127u - vel) >> 1);
+    // Sensitivity (#89, CC 86): 64 = the historical (127−vel)>>1 span
+    // (−23.6 dB at vel 1), 127 ≈ double (−47 dB), 0 = velocity OFF.
+    int32_t vol = (int32_t)VOL_REF
+                - (((int32_t)(127 - vel) * g_patch.vel_amp_sens) >> 7);
 
     // GAIN word carries the mode byte (filter type/dual) from the patch
     // so CC 29/30 render on re-program (#70).
@@ -495,11 +498,14 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
                                .channel = channel, .stamp = ++s_stamp};
 
-    // Velocity → cutoff stays on the bus (brightening, up to ~4
-    // octaves at vel 127); velocity → gain bakes into the GAIN word
-    // (B5: the gain bus belongs to the amp envelope now). The gate
-    // bus write triggers the ADSR — one write, level-sensitive.
-    s_vel_cut[pick] = (int32_t)vel * 48;
+    // Velocity → cutoff stays on the bus (brightening, ~+6 octaves at
+    // vel 127 with sens 64 — the historical vel*48); velocity → gain
+    // bakes into the GAIN word (B5: the gain bus belongs to the amp
+    // envelope now). Sensitivity (#89, CC 87): 0 = velocity OFF for
+    // isolation testing (Thor 2026-09-10 — could not judge key track
+    // under the hardwired brightening). The gate bus write triggers
+    // the ADSR — one write, level-sensitive.
+    s_vel_cut[pick] = ((int32_t)vel * g_patch.vel_cut_sens * 3) >> 2;
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
     engine_link_bus_write(BUS_VGATE(pick), 1);
 
@@ -698,6 +704,10 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 85: g_patch.osc[1].duty = (int32_t)((val - 64) << 17);  // osc2 PW (#91)
              s_dirty |= D_RENDER; break;
+    // Velocity sensitivity (#89): read at note_on — new notes pick the
+    // change up; held notes keep their velocity terms until re-struck.
+    case 86: g_patch.vel_amp_sens = val; break;
+    case 87: g_patch.vel_cut_sens = val; break;
     case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
                g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
                s_dirty |= D_RENDER; } break;

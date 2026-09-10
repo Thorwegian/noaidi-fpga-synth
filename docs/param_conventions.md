@@ -7,9 +7,11 @@ modulation and frequency mappings are conventionally implemented, and
 how to map that most closely onto our gateware.
 
 References: the named inspirations (design.md: Nord Lead, JP-8000,
-Sequential Prophet, EMU10K1); the SoundFont 2 spec — the EMU10K1's
-own parameter model and the best *documented* convention set
-(<http://www.synthfont.com/sfspec24.pdf>); analog envelope behavior
+Sequential Prophet, EMU10K1 — the latter for its DSP, per Thor); the
+SoundFont 2 spec (a Creative Labs format the EMU10K1 executes —
+consulted not as an inspiration but because it is a rare *written*
+specification of these mappings; most synthesizers never wrote theirs
+down) (<http://www.synthfont.com/sfspec24.pdf>); analog envelope behavior
 (RC segments, Moog/Prophet lineage); JP-8000 supplemental notes
 (<https://cdn.roland.com/assets/media/pdf/JP8000_Basic_Synthesis.pdf>).
 
