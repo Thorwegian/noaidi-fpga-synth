@@ -38,6 +38,8 @@ void patch_default(patch_t *p)
     p->unison_detune = 6;      // LSB per spread step (supersaw spread)
     p->unison_stereo = 64;     // stereo spread on
 
+    p->filter.key_track = 127;         // 100% tracking = the historical
+                                       // hardwired voice_fc behavior (#91)
     p->filter.resonance = 0x200;       // was RESO (q1 = 1.0)
     p->filter.type      = 0;           // LP
     p->filter.dual      = 1;           // 24 dB/oct default (Thor, 2026-09-08)

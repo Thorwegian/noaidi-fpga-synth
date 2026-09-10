@@ -130,17 +130,33 @@ def section(title, widgets):
 WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}
 
 root_widgets = [
-    section("Oscillators", [
-        switch(20, "Osc1 Wave", WAVES, 0),
-        switch(21, "Osc2 Wave", WAVES, 96),
-        knob(22, "Osc2 Pitch", 0),           # 0 = -12 semi (sine sub default)
-        knob(23, "Osc2 Fine", 64, bipolar=True),
-        knob(24, "Osc Balance", 64, bipolar=True),
-        knob(25, "Pulse Width", 64, bipolar=True),
-        switch(26, "Voice Mode", {"2 plain": 0, "7+1": 64, "4+4": 127}, 64),
-        knob(27, "Unison Spread", 24),
-        switch(28, "Uni Stereo", {"Off": 0, "On": 127}, 127),
-    ]),
+    {
+        # three oscillator subsections sharing one row (Thor: each
+        # oscillator its own subsection)
+        "type": "panel",
+        "id": "osc_row",
+        "layout": "horizontal",
+        "expand": True,
+        "widgets": [
+            section("Oscillator 1", [
+                switch(20, "Wave", WAVES, 0),
+                knob(25, "Pulse Width", 64, bipolar=True),
+            ]),
+            section("Oscillator 2", [
+                switch(21, "Wave", WAVES, 96),
+                knob(22, "Pitch", 0),        # 0 = -12 semi (sine sub)
+                knob(23, "Fine", 64, bipolar=True),
+                knob(85, "Pulse Width", 64, bipolar=True),   # (#91)
+            ]),
+            section("Mix and Unison", [
+                knob(24, "Osc Balance", 64, bipolar=True),
+                switch(26, "Voice Mode",
+                       {"2 plain": 0, "7+1": 64, "4+4": 127}, 64),
+                knob(27, "Unison Spread", 24),
+                switch(28, "Uni Stereo", {"Off": 0, "On": 127}, 127),
+            ]),
+        ],
+    },
     section("Filter", [
         knob(74, "Cutoff", 64),
         knob(106, "Cutoff Fine", 0),
@@ -160,7 +176,8 @@ root_widgets = [
         knob(103, "Decay", 111),
         knob(104, "Sustain", 120),
         knob(105, "Release", 107),
-        knob(107, "Env>Cutoff", 96, bipolar=True),  # 64 = off; 96 = +2 oct
+        knob(107, "Env>Cutoff", 72, bipolar=True),  # 64 = off; <<8 scale
+                                                    # (#88): 72 = boot +2 oct
         # CC 108 (env dest) deliberately absent: stored-only in firmware,
         # cutoff is the sole implemented destination (#42) - a knob that
         # does nothing erodes trust in the panel (Thor, 2026-09-10).
@@ -215,8 +232,9 @@ out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 with open(out, "w") as f:
     json.dump(session, f, indent=2)
 
-n = 0
-for s in root_widgets:
-    rows = s.get("widgets", [])
-    n += len(rows[1]["widgets"]) if len(rows) == 2 and "widgets" in rows[1] else 1
-print(f"wrote {out}: {n} controls")
+def count(w):
+    if "preArgs" in w:
+        return 1
+    return sum(count(x) for x in w.get("widgets", []))
+
+print(f"wrote {out}: {sum(count(s) for s in root_widgets)} controls")

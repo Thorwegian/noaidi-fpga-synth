@@ -202,7 +202,14 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
 // references (see engine_link_init).
 static uint16_t voice_fc(uint8_t note)
 {
-    uint32_t fc = (uint32_t)midi_to_pitch(note) + 0x200;
+    // Key tracking (#91, CC 31): kt = 127 reproduces the previously
+    // hardwired 100% tracking; 0 pins the cutoff at the C4 reference
+    // regardless of note (which also lets a sweep start closed).
+    int32_t p   = (int32_t)midi_to_pitch(note);
+    int32_t ref = (int32_t)midi_to_pitch(60);
+    int32_t kt  = g_patch.filter.key_track;
+    int32_t fc  = ref + ((p - ref) * kt) / 127 + 0x200;
+    if (fc < 0) fc = 0;
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
 
@@ -325,10 +332,24 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         int32_t ovol = vol + makeup;
         if (plan[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
         if (plan[u].osc == 1 && mix < 0) ovol += mix;   // favour osc1
-        if (ovol < 0x01) ovol = 0x01;
-        if (ovol > 0xFF) ovol = 0xFF;
-        uint32_t l = plan[u].l ? (uint32_t)ovol : VOL_MUTE;
-        uint32_t r = plan[u].r ? (uint32_t)ovol : VOL_MUTE;
+        // Balance extremes are a MUTE (#91): the mix term above tops
+        // out at ~23.6 dB of attenuation (63 UQ4.4 steps), so CC 24 at
+        // the rails must silence the disfavored oscillator outright.
+        bool bal_mute = (plan[u].osc == 0 && mix >= 63)
+                     || (plan[u].osc == 1 && mix <= -63);
+        // Pan (#91, CC 10): log-domain per-side attenuation, full
+        // deflection mutes the far side (same shape as balance).
+        int32_t pan  = g_patch.pan;
+        int32_t lvol = ovol - (pan > 0 ?  pan : 0);
+        int32_t rvol = ovol - (pan < 0 ? -pan : 0);
+        if (lvol < 0x01) lvol = 0x01;
+        if (lvol > 0xFF) lvol = 0xFF;
+        if (rvol < 0x01) rvol = 0x01;
+        if (rvol > 0xFF) rvol = 0xFF;
+        uint32_t l = (plan[u].l && !bal_mute && pan <  63)
+                       ? (uint32_t)lvol : VOL_MUTE;
+        uint32_t r = (plan[u].r && !bal_mute && pan > -63)
+                       ? (uint32_t)rvol : VOL_MUTE;
 
         send(elem, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC
         send(elem, 1, (uint32_t)o->duty & 0xFFFFFF);                  // DUTY
@@ -643,6 +664,10 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- live: master volume → gain-bus base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
              s_dirty |= D_GAIN; break;
+    case 10: g_patch.pan = (int8_t)((int)val - 64);     // pan (#91)
+             s_dirty |= D_RENDER; break;
+    case 31: g_patch.filter.key_track = (int16_t)val;   // key track (#91)
+             s_dirty |= D_RENDER; break;
 
     // ---- live: element-word params (re-render sounding voices) ----
     case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
@@ -659,6 +684,8 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
              s_dirty |= D_RENDER; break;
     case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
+             s_dirty |= D_RENDER; break;
+    case 85: g_patch.osc[1].duty = (int32_t)((val - 64) << 17);  // osc2 PW (#91)
              s_dirty |= D_RENDER; break;
     case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
                g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
@@ -709,8 +736,10 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
     case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV2; break;
     case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
-    // Depth: BIPOLAR, centre 64 = off, ±4 octaves of cutoff full-scale
-    case 107: g_patch.env1_depth = (int16_t)(((int)val - 64) << 6);
+    // Depth: BIPOLAR, centre 64 = off, full travel = ±16 octaves — the
+    // authority rule (#88, Thor: any pitch/cutoff amount spans rail to
+    // rail; the cutoff clamp saturates safely). Was <<6 / ±4 oct.
+    case 107: g_patch.env1_depth = (int16_t)(((int)val - 64) << 8);
               s_dirty |= D_ENV2; break;
     case 108: g_patch.env1_dest = (uint8_t)(val >> 5);  // stored; cutoff live
               break;

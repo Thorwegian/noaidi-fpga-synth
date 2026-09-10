@@ -51,7 +51,7 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
-| 10 | pan | standard Pan → per-part `pan` |
+| 10 | pan | IMPLEMENTED (#91): per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
 | 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface |
 | RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
@@ -64,8 +64,9 @@ units live in patch.h).
 | 21 | osc 2 waveform | discrete |
 | 22 | osc 2 coarse (interval) | ±12 semitones, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07); cents on CC 23 |
 | 23 | osc detune | fine/detune between the two |
-| 24 | osc mix / balance | osc1↔osc2 |
-| 25 | pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
+| 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (#91 — the log-gain mix term alone tops out at ~23.6 dB) |
+| 25 | osc 1 pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
+| 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
 | 28 | unison stereo spread | |
@@ -78,7 +79,7 @@ units live in patch.h).
 | 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
-| 31 | key tracking amount | cutoff-follows-pitch |
+| 31 | key tracking amount | IMPLEMENTED (#91): 127 = 100% tracking (the historical hardwired behavior, default), 0 = cutoff fixed at the C4 reference, linear between |
 
 **Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
 MOD (undefined block; standard CCs only ever covered one envelope).
@@ -91,7 +92,7 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, full travel = ±4 octaves of cutoff (the walker DEPTH word is signed) |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, full travel = ±16 octaves of cutoff — rail-to-rail per the authority rule (#88/#91; the cutoff clamp saturates safely). The walker DEPTH word is signed |
 | 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
 
 **LFOs** (2)
