@@ -45,6 +45,15 @@ domain that yields fast-early/slow-late dB growth ≈ convex amplitude,
 which is the analog shape. One subtract and shift in an existing
 case; bench gets an attack-shape assertion; ear-verify.
 
+**Status: DEFERRED (Thor, 2026-09-10)** — "isn't critical right now
+and will greatly complicate things"; parked as its own issue. An
+important scoping refinement found while filing it: SF2's
+*modulation* envelope stages are linear in the MODULATION domain
+(output applied linearly in cents) — which is exactly what our MOD
+envelope already does on the log-domain cutoff bus. **The MOD
+envelope conforms natively; F1's deviation is the AMP envelope's
+attack only.**
+
 ## AMPLITUDE — gain, velocity, pan
 
 | Aspect | Convention | Ours | Verdict |

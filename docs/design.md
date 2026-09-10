@@ -51,6 +51,12 @@ Nord Lead, Roland JP-8000, Sequential Prophet, EMU10K1 (for its DSP —
 SoundFont is Creative's format, consulted only as a rare written spec
 of parameter mappings); on the software side Sylenth1 and Surge XT.
 
+- **Behave like a SoundFont player for run-of-the-mill behavior,
+  where applicable** (Thor, 2026-09-10): SF players "handle things in
+  a reasonable way. If our synth behaves a bit like that, it won't
+  surprise anybody." The SF2 spec's value is that it is WRITTEN —
+  most synthesizers never wrote theirs down. Where SF2's
+  sample-playback worldview diverges from VA practice, VA wins.
 - **"A controllable machine"** (Thor, 2026-09-10, the roadmap's
   stated goal): every contribution to the sound — velocity, wheel,
   envelopes, LFOs — becomes a parameter with a true zero, so each can
