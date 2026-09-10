@@ -45,10 +45,13 @@ the architecture changes. Agent will neatly summarise.
   bleak + pyserial).
 - **Crash witness**: `TASK_WDT_PANIC=y` — a starved task REBOOTS the chip
   (sound vanishes mid-play; engine mutes on boot) and prints a decoded
-  backtrace, but only if something listens. When no `idf.py monitor` is
-  open, run `nohup tools/console_logger.sh &` on the dev host →
-  timestamped `/tmp/noaidi_console.log`. It holds `/dev/ttyACM0`;
-  `fuser -k /dev/ttyACM0` before any flash/monitor.
+  backtrace, but only if something listens. `nohup tools/console_logger.sh &`
+  on the dev host → timestamped `/tmp/noaidi_console.log`; follow live with
+  **`tail -f /tmp/noaidi_console.log`** (Thor's replacement for a monitor).
+  POLITE since 2026-09-10: attaches only when the ESP port is free, backs
+  off for esptool/monitor, re-attaches by itself after flashes — safe to
+  leave running permanently. Deploy scripts should still expect the log to
+  gap for the seconds a flash holds the port.
 
 ## Audio test path (analog, dev host)
 

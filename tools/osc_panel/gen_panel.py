@@ -209,19 +209,9 @@ root_widgets = [
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
     ]),
-    {
-        # test keyboard: /note channel note velocity (o-s-c MIDI spec)
-        "type": "keyboard",
-        "id": "kbd",
-        "keys": 25,
-        "start": 48,
-        "address": "/note",
-        "preArgs": [CH],
-        "target": TARGET,
-        "on": 100,
-        "off": 0,
-        "expand": True,
-    },
+    # No virtual keyboard: Thor's physical keyboard covers notes /
+    # velocity / both wheels — the panel exists precisely for the MIDI
+    # the physical keyboard CANNOT send (Thor, 2026-09-10).
 ]
 
 session = {
