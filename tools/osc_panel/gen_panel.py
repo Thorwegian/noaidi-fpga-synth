@@ -26,7 +26,10 @@ def knob(cc, label, default=64, bipolar=False):
     w = {
         "type": "knob",
         "id": f"cc{cc}",
-        "label": f"{label} ({cc})",
+        # @{this.value} renders the LIVE value in the label (o-s-c
+        # dynamic property syntax) - Thor: knobs without a readout are
+        # unusable for probing ranges.
+        "label": f"{label} ({cc}) @{{this.value}}",
         "address": "/control",
         "preArgs": [CH, cc],
         "target": TARGET,
