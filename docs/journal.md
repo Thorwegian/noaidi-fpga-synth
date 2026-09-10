@@ -63,3 +63,18 @@ journal/notes/log thing."). Entries are append-only history — never
 - **"Producer"** as a third term beside source/sink: retired
   2026-09-03; source/sink is the couple (code identifiers await the
   next naming pass).
+
+## 2026-09-10 — rejected/reverted along the way
+
+- **The "combiner source" as a concept**: dissolved by Thor — "a bus
+  is already a combiner of sources; all we really need is other-bus
+  as a possible source." Built as walker type 3 (#44); the planned
+  C = A·x + B·y device never existed as hardware, only as two
+  bus-source entries in adjacent slots.
+- **Blocking producer sends** (50 ms backpressure in
+  engine_link_prod_write): shipped and reverted within the hour —
+  a new symptom flavor appeared while it was live, and risk
+  containment won. The lossless-config guarantee moved up a level
+  instead (apply_dirty retries a batch whose writes dropped).
+- **A per-parameter CC 119 for arp octaves**: was double-booked
+  against the live test tone; arp gets a fresh number later.

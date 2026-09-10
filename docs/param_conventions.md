@@ -81,12 +81,22 @@ attack only.**
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct | ✓ post-round-1 |
 | LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | note for the #92 rung — cheap as a walker ramp or firmware ramp on depth |
 
-## Proposed order
+## Status (end of 2026-09-10)
 
-1. **F1 attack curve** — gateware, small, likely the biggest feel win.
-2. **F2 PW clamp** — firmware one-liner.
-3. **F5 resonance-taper measurement** — tooling exists; rescale is a
-   firmware one-liner after the measurement.
-4. **F3 vibrato-depth zones** — with Thor's blessing on the shape, or
-   folded into #92.
-5. Velocity curve/span — inside #89 as planned.
+- **F1 attack curve** — DEFERRED by Thor to #95 (scoped tighter: the
+  MOD envelope is already linear-in-cents = SF2-conformant; only the
+  AMP attack deviates).
+- **F2 PW** — DONE, better than the clamp: unipolar equal-ratio log
+  taper, 0 = square → 127 = 5%, degenerate rails unreachable (the
+  bipolar halves sounded identical — Thor).
+- **F5 resonance-taper placement** — open; the reso sweep tooling
+  (filter_pain_check.py) is the instrument. Related measured find:
+  the low-cutoff × high-Q corner is unstable (#43 catalog: BRRR /
+  silence / noise — three failure modes at extreme Q).
+- **F3 vibrato-depth zones** — open, awaiting Thor's call on the
+  shape (or folds into #92 per-destination depths).
+- Velocity curve/span — sens knobs landed (CC 86/87, 0 = off);
+  multiplicative MOD-depth scaling remains in #89.
+- **F6/F7 (added post-audit, Thor's ears)**: MOD-env depth got a
+  square-law bipolar taper (fine near centre, ±16 oct rails); key
+  track rescaled to 0–200% with centre 64 = 100%.

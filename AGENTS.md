@@ -3,13 +3,24 @@
 Notes for AI coding agents working in this repo. Keep this file updated when
 the architecture changes. Agent will neatly summarise.
 
-## Standing policies (Thor, 2026-09-07)
+## Standing policies (Thor, 2026-09-07, extended 2026-09-10)
 
-- **Update GitHub as you work.** Issues (#40+) are the tracker. Every commit,
+- **All ongoing work is tracked on GitHub.** Issues (#40+) are the tracker;
+  the roadmap tracker (#93) holds active rungs as sub-issues. Every commit,
   issue close, or scope change updates every issue it touches in the same turn —
-  including parent/tracking issues with checklists (#77 and friends: tick the
-  boxes, edit the body). Comment when *starting* work, not only when finishing.
-  Closing an issue means checking which epics reference it.
+  including parent/tracking issues with checklists (#77, #93 and friends).
+  Comment when *starting* work, not only when finishing. Closing an issue
+  means checking which epics reference it. Bugs get an issue the moment they
+  are confirmed, with the repro attached.
+- **Subtask checkboxes are ticked as they finish** (edit the issue body,
+  don't just comment). A checklist that lags reality is a stale doc.
+- **Check GitHub for stale tickets regularly** — open issues whose work is
+  actually done get closed with a summary; hanging issues annoy Thor and
+  have had to be bulk-closed by him before.
+- **Untested new features are never completed** (Thor, 2026-09-10). Closing
+  a feature issue requires: sim/bench where applicable, a HARDWARE test, and
+  the feature exercised in real use — not just merged code. Compile-green ≠
+  run-green ≠ verified.
 - **Docs must not go stale.** When a change lands, sweep `docs/` (and this
   file) for statements the change falsified and fix them in the same series
   of commits.
@@ -19,7 +30,54 @@ the architecture changes. Agent will neatly summarise.
   anything touching event bus / engine_link / voice_alloc; the BLE MIDI suite
   (`tools/ble_midi_fuzz.py` from the dev host) for anything touching ble_midi
   or MIDI. Test tooling must always disconnect BLE when done (#82) — the
-  Noaidi accepts one connection.
+  Noaidi accepts one connection. Hardware regression tools live in `tools/`:
+  `shakedown_check.py` (CC smoke + measured pan), `voice_cycle_check.py`
+  (pool uniformity), `modenv_uniformity_check.py` (config under CC storms),
+  `bus_source_check.py` (fan-out path), `filter_pain_check.py` (reso sweep).
+- **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
+  FPGA comes up with the boot image; the ESP must re-program it (bit us
+  2026-09-10: a fresh bitstream left the synth dead until reboot).
+
+## Test rig (dev machine + prototype, as wired 2026-09-10)
+
+Everything runs on/around Thor's Linux dev machine (`home.thj.no`).
+Both boards are permanently USB-attached; nothing requires touching
+hardware.
+
+```
+                         ┌────────────── dev machine (Linux) ──────────────┐
+ physical MIDI keyboard  │  o-s-c panel :8080   BLE (BlueZ)   test tools   │
+        │ DIN            │        │                 │             │        │
+        ▼                │        ▼ CH345 USB-MIDI  ▼ radio       ▼ USB    │
+ ┌─────────────┐  GPIO0  │  ┌───────────┐                    ttyACM* console
+ │  ESP32-C3   │◄────────┘  │ DIN cable │──► GPIO2 (panel MIDI, o-s-c ONLY)
+ │  SuperMini  │◄───────────┴───────────┘
+ │ ("firmware")│◄─── BLE MIDI (test transport + phone)
+ └──────┬──────┘
+        │ SPI 10 MHz (MOSI 6 / MISO 5 / SCLK 4 / CS 7)
+        ▼
+ ┌─────────────┐ SPDIF ──► Focusrite (MUST clock-slave to S/PDIF!)
+ │ Tang Nano   │            │ analog out
+ │ 20K         │            ▼
+ │ ("gateware")│        ICUSBAUDIO7D LINE IN (hw:1,0) ◄── capture chain
+ └─────────────┘        (arecord S16_LE 48k; calibration via alsactl)
+```
+
+- **MIDI ingress, three ways**: DIN (GPIO0/UART1) = the physical
+  keyboard; GPIO2/UART0 = the dev-host panel via CH345 USB-MIDI,
+  reserved for Open Stage Control EXCLUSIVELY; BLE = phone + all
+  test scripts (venv `~/.noaidi-blenv`, helpers in
+  `tools/ble_midi_fuzz.py`, always disconnect+untrust after).
+- **USB serial on the dev machine**: the ESP console is the ttyACM
+  device with `ID_VENDOR=Espressif` (re-enumerates across replugs —
+  discover, never hardcode); ttyUSB0/1 = the Sipeed FPGA debugger.
+  The polite `tools/console_logger.sh` normally holds the console →
+  `tail -f /tmp/noaidi_console.log` is the monitor; it yields to
+  esptool/monitor and re-attaches by itself.
+- **Panel server**: `tools/osc_panel/run.sh` serves :8080 headless
+  and owns the CH345 (one owner at a time).
+- **Audio capture**: see "Audio test path" below for calibration,
+  clock-slaving, DC offset and capture-hygiene rules.
 
 ## Toolchain
 
@@ -31,7 +89,8 @@ the architecture changes. Agent will neatly summarise.
 ## Build & verify
 
 - Firmware: `cd app && idf.py build`; flash/monitor:
-  `idf.py -p /dev/ttyACM0 flash monitor`.
+  `idf.py -p <ESP port> flash monitor` — discover the port by
+  `ID_VENDOR=Espressif` (it re-enumerates; never hardcode ACM0).
 - FPGA (Tang Nano 20K, GW2AR-LV18QN88C8/I7): `cd rtl && make`
   (synth_gowin → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.

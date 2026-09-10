@@ -258,8 +258,11 @@ values are firmware writes to per-voice bus bases — the separate
 unified it (superseded 2026-09-03 cleanup; historical planning notes
 live in git history rather than here). Still genuinely open, kept
 from the old notes: the shared per-element configuration table (the
-deliberately unnamed) for one-to-many wiring changes, and the
-combiner source type — both in the B6+ list on measured demand.
+deliberately unnamed) for one-to-many wiring changes. The combiner
+source type was BUILT 2026-09-10 as Thor's simpler reframing —
+"a bus is already a combiner of sources" — walker type 3, bus-as-
+source (#44, bus_architecture.md); first real use is the channel
+cutoff bus fanning out to the per-voice buses.
 
 ### Modulation authority rule (Thor, 2026-09-09, approved)
 

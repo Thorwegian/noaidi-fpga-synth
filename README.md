@@ -60,8 +60,9 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 
 | Signal | GPIO | Description |
 |---|---|---|
-| MIDI in | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit |
-| Panel slider | 1 (A1) | ADC1 ch 1: 10 kΩ linear pot wiper; pot sits between 680 Ω to GND and 3.6 kΩ to 3.3 V so the wiper stays inside the max-attenuation ADC range (~0.16–2.47 V). Calibrate via 'c' in the serial monitor; min/max persist in NVS |
+| MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
+| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — reserved for the Open Stage Control dev panel (requires the console on USB-Serial/JTAG, which it is) |
+| Panel slider | 1 (A1) | ADC1 ch 1: 10 kΩ linear pot wiper; pot sits between 680 Ω to GND and 3.6 kΩ to 3.3 V so the wiper stays inside the max-attenuation ADC range (~0.16–2.47 V). Calibrate via '1'/'2' keys in the serial monitor; ends persist in NVS |
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 

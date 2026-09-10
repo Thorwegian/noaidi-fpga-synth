@@ -7,7 +7,8 @@ The verified wire protocol and per-element parameter ABI stand.
 
 Status: **BUILT — the ladder is complete through B5 (all
 ear-verified and merged), plus the log-domain Q rung (approved
-2026-09-03)**. Settled during the B0
+2026-09-03) and the bus-as-source type (#44, 2026-09-10 — in real
+use for channel→voice cutoff fan-out)**. Settled during the B0
 review era: one bus format (signed Q8.10, octaves.fraction — law 5),
 detune stays a per-element static offset, producer pool raised to
 128, and (2026-09-02) Q's convention: log₂ resonance, bus taken

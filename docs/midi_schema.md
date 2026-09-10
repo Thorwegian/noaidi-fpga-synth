@@ -116,7 +116,7 @@ equal-ratio ladder.
 |---|---|---|
 | 117 | arp/seq on/off | |
 | 118 | arp mode | discrete: up/down/updown/random/pattern/chord |
-| 119 | arp octave range | |
+| TBD | arp octave range | CC 119 was double-booked here — it is the TEST TONE (live, #81); the arp gets a new number when the arp rung lands |
 | — | rate | follows the clock (Auto/Internal); step rate is a division, not a free CC |
 
 Deferred to the mod-matrix stage (not basic-patch CCs): the full
