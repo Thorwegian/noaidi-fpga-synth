@@ -72,9 +72,14 @@ schema, so the panel file doubles as living documentation of
 later implements. Context: modern DAWs/plugin formats have largely
 dropped external-MIDI-out (Thor's observation — the DAW and hardware
 ecosystems split), so development knobs come from our own panel, not
-a DAW. MIDI transport from the dev host is under discussion — the
-dev host currently reaches the synth only via BLE (shared with test
-scripts).
+a DAW. **Transport resolved (Thor, 2026-09-10)**: a dedicated wired
+MIDI IN — Thor moved the console wholly to the USB-Serial/JTAG
+controller (freeing UART0), soldered a second MIDI-IN circuit to
+GPIO2, and connected it to the dev host via a CH345 USB-MIDI
+adapter. Firmware ingests it as UART0 (`midi_panel_init(2)`), a
+second parser instance on the same event bus. **The port is for
+Open Stage Control exclusively** — test scripts stay on BLE/DIN, so
+panel traffic and test traffic never contend.
 
 ### Default voice (Thor, 2026-09-08)
 
@@ -264,11 +269,12 @@ linear scaling) and just gains a sensitivity amount.
   why is documented in `spdif_tx.sv`.
 - **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/16.
 - Both latch the same stereo mix on the drum's sample tick.
-- **Output tilt** (Thor, 2026-09-07/08): a one-pole 6 dB/oct lowpass
-  on the mix, `out += (in − out) >>> 2` at 96 kHz → corner ≈ 4.4 kHz —
-  smooths the digital top end, keeps the presence band. Ear-tuned:
-  started at `>>> 4` (~950 Hz), retuned to `>>> 2` as too dark. Sits
-  before the test-tone mux so the purity reference stays unfiltered.
+- **Output tilt** (Thor, 2026-09-07..10): a one-pole 6 dB/oct lowpass
+  on the mix, `out += (in − out) >>> 3` at 96 kHz → corner ≈ 2 kHz —
+  the warm/vintage stop. Ear-tuned in three steps: `>>> 4` (~950 Hz)
+  too dark, `>>> 2` (~4.4 kHz) too bright, Thor settled on `>>> 3`
+  by ear 2026-09-09. Sits before the test-tone mux so the purity
+  reference stays unfiltered.
 
 ## Effects 📋
 

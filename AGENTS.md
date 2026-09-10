@@ -89,6 +89,11 @@ the architecture changes. Agent will neatly summarise.
 
 - ESP32-C3 ↔ FPGA SPI (SPI2 master): MOSI=6, MISO=5, SCLK=4, CS=7.
   MIDI in: UART1 RX GPIO0, 31250 baud 8N1 (`app/main/midi_in.c`, task "midi_in").
+- **Panel MIDI in** (#90, 2026-09-10): UART0 RX GPIO2 (task "midi_pnl"), fed
+  from the dev host via a CH345 USB-MIDI adapter. **Open Stage Control
+  exclusively** — test scripts stay on BLE/DIN. Possible because the console
+  moved wholly to USB-Serial/JTAG (sdkconfig `ESP_CONSOLE_UART_NUM=-1`);
+  never re-enable a UART console without re-homing this port.
 - UART1 default pins TX=7/RX=6 clash with SPI CS/MOSI → `midi_in_init()` must
   run before `fpga_spi_init()`.
 - Audio pins (`rtl/constraints.cst`): I2S 54–56, SPDIF 27, sysclk 10 (73.728 MHz).

@@ -123,10 +123,9 @@ module top (
 
     //----------------------------------------------------------------
     // Output tilt: one-pole 6 dB/oct lowpass on the mix (Thor,
-    // 2026-09-07, by ear): out += (in − out) >>> 2. α = 1/4 at
-    // 96 kHz → corner ≈ 4.4 kHz — smooths the digital edge but keeps
-    // the presence band (retuned from >>>4/~950 Hz, Thor 2026-09-08:
-    // "too aggressive" — it muffled the supersaw).
+    // 2026-09-07..09, by ear): out += (in − out) >>> 3. α = 1/8 at
+    // 96 kHz → corner ≈ 2 kHz — the warm stop, settled after >>>4
+    // (~950 Hz, muffled the supersaw) and >>>2 (~4.4 kHz, too bright).
     // A convex combination never overflows 24 bits. Sits BEFORE the
     // test-tone mux so the purity reference stays unfiltered.
     //----------------------------------------------------------------

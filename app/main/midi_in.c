@@ -1,8 +1,15 @@
-// midi_in.c — MIDI input process (UART1)
+// midi_in.c — MIDI input processes (UART1 = DIN, UART0 = panel)
 //
-// Owns UART1 at 31250 baud 8N1 on the configured RX pin, feeds the
-// byte stream through the MIDI parser and publishes complete messages
-// to the event bus. Never prints and never blocks on a consumer.
+// Each port owns its UART at 31250 baud 8N1 on a configured RX pin,
+// feeds the byte stream through its OWN parser instance (running
+// status is per-stream — two sources must never share decode state)
+// and publishes complete messages to the event bus. Never prints in
+// the hot path and never blocks on a consumer.
+//
+// Port roles (#90): UART1/GPIO0 is the DIN MIDI jack (keyboard);
+// UART0/GPIO2 is the dev-host panel port, reserved for Open Stage
+// Control exclusively (Thor, 2026-09-10) — test scripts stay on
+// BLE/DIN so panel traffic never contends with them.
 
 #include "midi_in.h"
 
@@ -15,7 +22,6 @@
 #include "event_bus.h"
 #include "midi_parser.h"
 
-#define MIDI_UART_PORT   UART_NUM_1
 #define MIDI_BAUD        31250
 #define MIDI_RX_BUF_SIZE 256
 #define MIDI_TASK_STACK  2048
@@ -27,8 +33,18 @@
 #define MIDI_PARTIAL_TIMEOUT_MS 50
 #define MIDI_SOURCE_TIMEOUT_MS  500
 
+// ── Per-port context ───────────────────────────────────────────────
+typedef struct {
+    uart_port_t   uart;
+    const char   *name;      // task name + log tag
+    midi_parser_t parser;
+} midi_port_t;
+
+static midi_port_t s_din   = { .uart = UART_NUM_1, .name = "midi_in"  };
+static midi_port_t s_panel = { .uart = UART_NUM_0, .name = "midi_pnl" };
+
 // ── Parser callback ────────────────────────────────────────────────
-// Runs in the context of the midi_in task. Fan-out to consumers
+// Runs in the context of the port's task. Fan-out to consumers
 // happens through the event bus (non-blocking), so a slow consumer
 // can never stall MIDI reception.
 
@@ -41,19 +57,18 @@ static void midi_msg_to_bus(const midi_message_t *m, void *user)
     event_bus_publish(&evt);
 }
 
-static midi_parser_t g_parser;
-
 static void midi_in_task(void *arg)
 {
+    midi_port_t *p = (midi_port_t *)arg;
     uint8_t byte;
     uint32_t idle_ms = 0;
     bool had_traffic = false;
 
     while (1) {
-        int n = uart_read_bytes(MIDI_UART_PORT, &byte, 1,
+        int n = uart_read_bytes(p->uart, &byte, 1,
                                 pdMS_TO_TICKS(MIDI_PARTIAL_TIMEOUT_MS));
         if (n == 1) {
-            midi_parser_feed(&g_parser, byte);
+            midi_parser_feed(&p->parser, byte);
             idle_ms = 0;
             had_traffic = true;
             continue;
@@ -62,7 +77,7 @@ static void midi_in_task(void *arg)
         // Silence: a message half-received before the gap can never be
         // completed by legal MIDI, so drop it. Running Status is kept
         // so spec-legal reuse across silence still decodes.
-        midi_parser_reset_partial(&g_parser);
+        midi_parser_reset_partial(&p->parser);
 
         idle_ms += MIDI_PARTIAL_TIMEOUT_MS;
         if (idle_ms >= MIDI_SOURCE_TIMEOUT_MS) {
@@ -74,20 +89,20 @@ static void midi_in_task(void *arg)
             // sends 0xFE must never be silenced by silence alone. Further,
             // after such a silence, Active Sensing must be observed again
             // before panic is re-enabled.
-            midi_parser_reset(&g_parser);
-            uart_flush_input(MIDI_UART_PORT);
+            midi_parser_reset(&p->parser);
+            uart_flush_input(p->uart);
             idle_ms = 0;
             if (had_traffic) {
-                ESP_LOGW("midi_in", "MIDI source silent, parser reset");
+                ESP_LOGW(p->name, "MIDI source silent, parser reset");
                 had_traffic = false;
             }
         }
     }
 }
 
-void midi_in_init(int rx_pin)
+static void port_init(midi_port_t *p, int rx_pin)
 {
-    midi_parser_init(&g_parser, midi_msg_to_bus, NULL);
+    midi_parser_init(&p->parser, midi_msg_to_bus, NULL);
 
     uart_config_t cfg = {
         .baud_rate  = MIDI_BAUD,
@@ -98,18 +113,34 @@ void midi_in_init(int rx_pin)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(MIDI_UART_PORT, MIDI_RX_BUF_SIZE, 0, 0,
+    ESP_ERROR_CHECK(uart_driver_install(p->uart, MIDI_RX_BUF_SIZE, 0, 0,
                                         NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(MIDI_UART_PORT, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(MIDI_UART_PORT, UART_PIN_NO_CHANGE, rx_pin,
+    ESP_ERROR_CHECK(uart_param_config(p->uart, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(p->uart, UART_PIN_NO_CHANGE, rx_pin,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
-    BaseType_t ok = xTaskCreate(midi_in_task, "midi_in", MIDI_TASK_STACK, NULL,
+    BaseType_t ok = xTaskCreate(midi_in_task, p->name, MIDI_TASK_STACK, p,
                                 MIDI_TASK_PRIO, NULL);
     if (ok != pdPASS) {
-        ESP_LOGE("midi_in", "Failed to create RX task");
+        ESP_LOGE(p->name, "Failed to create RX task");
         return;
     }
 
-    ESP_LOGI("midi_in", "UART1 RX on GPIO%d, %d baud", rx_pin, MIDI_BAUD);
+    ESP_LOGI(p->name, "UART%d RX on GPIO%d, %d baud", (int)p->uart,
+             rx_pin, MIDI_BAUD);
+}
+
+void midi_in_init(int rx_pin)
+{
+    port_init(&s_din, rx_pin);
+}
+
+void midi_panel_init(int rx_pin)
+{
+    // UART0 is free for this since the console moved wholly to the
+    // USB-Serial/JTAG controller (sdkconfig: ESP_CONSOLE_UART_NUM=-1,
+    // Thor 2026-09-10). RX moves to rx_pin (GPIO2 — idles high via the
+    // MIDI opto, which suits the C3 strap sampling at reset); TX stays
+    // on UART0's default pin, unused.
+    port_init(&s_panel, rx_pin);
 }

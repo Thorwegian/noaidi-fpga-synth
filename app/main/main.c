@@ -61,6 +61,10 @@ void app_main(void)
     // the SPI CS pin, so the SPI init must run last and re-claim it.
     midi_in_init(0);
 
+    // Panel MIDI (#90): UART0 on GPIO2, from the dev host via USB-MIDI.
+    // Open Stage Control exclusively — test scripts stay on BLE/DIN.
+    midi_panel_init(2);
+
     // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
     // 32 words (~60 us each) would blow the engine's 1 ms tick.
     fpga_spi_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
