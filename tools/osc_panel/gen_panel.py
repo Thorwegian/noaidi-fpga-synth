@@ -11,6 +11,10 @@ Conventions: /control preArgs are [channel(1-based), cc]; every widget
 targets the 'noaidi' MIDI device declared by run.sh (--midi noaidi:...).
 Defaults mirror patch_default() so the panel opens showing the boot
 patch (widgets send nothing until touched).
+
+Layout notes (o-s-c v1.31): panel widgets do NOT render their label,
+so every section carries an explicit text-widget header; children of
+flex panels need expand:true to share space, fixed height otherwise.
 """
 import json
 import os
@@ -22,13 +26,14 @@ def knob(cc, label, default=64, bipolar=False):
     w = {
         "type": "knob",
         "id": f"cc{cc}",
-        "label": f"{label}\n{cc}",
+        "label": f"{label} ({cc})",
         "address": "/control",
         "preArgs": [CH, cc],
         "target": TARGET,
         "range": {"min": 0, "max": 127},
         "default": default,
         "doubleTap": True,   # double-tap resets to default
+        "expand": True,
     }
     if bipolar:
         w["origin"] = 64     # value bar grows from center
@@ -43,12 +48,13 @@ def switch(cc, label, values, default):
     return {
         "type": "switch",
         "id": f"cc{cc}",
-        "label": f"{label}\n{cc}",
+        "label": f"{label} ({cc})",
         "address": "/control",
         "preArgs": [CH, cc],
         "target": TARGET,
         "values": values,
         "default": default,
+        "expand": True,
     }
 
 def button(cc, label, value):
@@ -62,28 +68,49 @@ def button(cc, label, value):
         "target": TARGET,
         "on": value,
         "off": None,         # nothing on release
+        "expand": True,
     }
 
-def section(label, widgets):
+def section(title, widgets):
+    slug = title.lower().replace(" ", "_").replace("&", "and")
     return {
         "type": "panel",
-        "id": f"sec_{label.lower().replace(' ', '_')}",
-        "label": label,
-        "layout": "horizontal",
-        "widgets": widgets,
+        "id": f"sec_{slug}",
+        "layout": "vertical",
+        "expand": True,
+        "widgets": [
+            {
+                "type": "text",
+                "id": f"hdr_{slug}",
+                "value": title.upper(),
+                "default": title.upper(),
+                "align": "center",
+                "height": 26,
+                "css": "font-size: 13px; letter-spacing: 3px; opacity: 0.7;",
+            },
+            {
+                "type": "panel",
+                "id": f"row_{slug}",
+                "layout": "horizontal",
+                "expand": True,
+                "widgets": widgets,
+            },
+        ],
     }
+
+WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}
 
 root_widgets = [
     section("Oscillators", [
-        switch(20, "Osc1 Wave", {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}, 0),
-        switch(21, "Osc2 Wave", {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}, 96),
-        knob(22, "Osc2 Coarse", 0),          # 0 = -12 semi (sine sub default)
-        knob(23, "Detune", 64, bipolar=True),
-        knob(24, "Osc Mix", 64, bipolar=True),
-        knob(25, "Duty", 64, bipolar=True),
+        switch(20, "Osc1 Wave", WAVES, 0),
+        switch(21, "Osc2 Wave", WAVES, 96),
+        knob(22, "Osc2 Pitch", 0),           # 0 = -12 semi (sine sub default)
+        knob(23, "Osc2 Fine", 64, bipolar=True),
+        knob(24, "Osc Balance", 64, bipolar=True),
+        knob(25, "Pulse Width", 64, bipolar=True),
         switch(26, "Voice Mode", {"2 plain": 0, "7+1": 64, "4+4": 127}, 64),
-        knob(27, "Uni Detune", 24),
-        switch(28, "Stereo", {"Off": 0, "On": 127}, 127),
+        knob(27, "Unison Spread", 24),
+        switch(28, "Uni Stereo", {"Off": 0, "On": 127}, 127),
     ]),
     section("Filter", [
         knob(74, "Cutoff", 64),
@@ -93,33 +120,33 @@ root_widgets = [
         switch(30, "Slope", {"12 dB": 0, "24 dB": 127}, 127),
         knob(31, "Key Track", 0),
     ]),
-    section("Amp Env", [                     # rate CCs invert: up = longer
+    section("Amp Envelope  -  knob up = longer", [
         knob(73, "Attack", 51),
         knob(75, "Decay", 111),
         knob(79, "Sustain", 120),
         knob(72, "Release", 107),
     ]),
-    section("Mod Env", [                     # boot: copy of amp env (#87)
+    section("Filter (MOD) Envelope", [
         knob(102, "Attack", 51),
         knob(103, "Decay", 111),
         knob(104, "Sustain", 120),
         knob(105, "Release", 107),
-        knob(107, "Depth", 96, bipolar=True),  # 64 = off; 96 = +2 oct boot
-        knob(108, "Dest", 0),
+        knob(107, "Env>Cutoff", 96, bipolar=True),  # 64 = off; 96 = +2 oct
+        knob(108, "Env Dest", 0),
     ]),
     section("LFOs", [
-        knob(76, "LFO1 Rate", 64),
-        knob(77, "LFO1 Depth", 16),
-        switch(113, "LFO1 Shape", {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}, 64),
+        knob(76, "Vibrato Rate", 64),
+        knob(77, "Vibrato Depth", 16),
+        switch(113, "LFO1 Shape", WAVES, 64),
         knob(109, "LFO2 Rate", 64),
         knob(110, "LFO2 Depth", 0),
-        switch(111, "LFO2 Shape", {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}, 64),
+        switch(111, "LFO2 Shape", WAVES, 64),
         switch(112, "LFO2 Dest", {"PWM": 0, "Reso": 64, "Pitch": 127}, 0),
     ]),
     section("Global", [
         fader(7, "Volume", 100),
         knob(10, "Pan", 64, bipolar=True),
-        fader(1, "Mod Wheel", 0),
+        fader(1, "Wheel > Cutoff", 0),
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
@@ -135,6 +162,7 @@ root_widgets = [
         "target": TARGET,
         "on": 100,
         "off": 0,
+        "expand": True,
     },
 ]
 
@@ -152,4 +180,9 @@ out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    "noaidi-panel.json")
 with open(out, "w") as f:
     json.dump(session, f, indent=2)
-print(f"wrote {out}: {sum(len(s.get('widgets', [s])) for s in root_widgets)} widgets")
+
+n = 0
+for s in root_widgets:
+    rows = s.get("widgets", [])
+    n += len(rows[1]["widgets"]) if len(rows) == 2 and "widgets" in rows[1] else 1
+print(f"wrote {out}: {n} controls")
