@@ -186,6 +186,36 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
+        // FIRMWARE-SHAPED TRIPLE (issue #44 real wiring): the exact
+        // per-voice chain the ESP32 programs — even slot = MOD env
+        // (ADSR, depth 0 here), odd slot = fan-out (type 3, unity,
+        // from the channel bus) — and a hierarchical peek asserts the
+        // replica holds EXACTLY base + 0 + channel. Guards the whole
+        // sum against regressions no audio-level assert would pin.
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), 32'h0);          // MOD env depth 0
+        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6); // fan-out, adjacent
+        spi_word_write(src_addr(2, 2), DEPTH_UNITY);
+        flip;
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 2), 32'h0);
+        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 2), DEPTH_UNITY);
+        spi_word_write(bus_addr(3), 32'h00000064);      // base = 100
+        spi_word_write(bus_addr(6), 32'h00001200);      // channel = 4608
+        spi_word_write(bus_addr(5), 32'h00000001);      // gate held
+        observe(60);
+        observe(60);
+        if ($signed(u_pipe.bus_ram_fc[3]) !== 18'sd4708) begin
+            $display("FAIL: triple chain replica = %0d, expected 4708 (#44)",
+                     $signed(u_pipe.bus_ram_fc[3]));
+            errors = errors + 1;
+        end else begin
+            $display("triple chain replica = 4708 exact (base+0+channel)");
+        end
+
         report;
     end
 
