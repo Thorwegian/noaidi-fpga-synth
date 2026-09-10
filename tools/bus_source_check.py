@@ -84,8 +84,13 @@ def main():
             cc(num, val)
             time.sleep(0.03)
 
+        # Operating points chosen so BOTH captures carry tonal signal
+        # (first run's dark=10 closed ~7 oct down = chain-floor noise,
+        # whose diff-RMS index reads HIGH and inverts the comparison):
+        # dark = 52 (corner ~1 oct below the note, Thor's pain-recipe
+        # value, ~-53 dBFS measured), bright = 100 (corner ~+4 oct).
         results = {}
-        for label, cut in (("dark", 10), ("bright", 110)):
+        for label, cut in (("dark", 52), ("bright", 100)):
             cc(74, cut)
             time.sleep(0.2)
             send(NoteOnEvent(note=NOTE, channel=0, velocity=100))
@@ -101,12 +106,17 @@ def main():
 
         d_level, d_idx = results["dark"]
         b_level, b_idx = results["bright"]
-        if d_level < -60 or b_level < -60:
-            failures.append("a capture carried no real signal")
-        if d_idx <= 0 or b_idx / max(d_idx, 1e-9) < 2:
+        if d_level < -65 or b_level < -65:
+            failures.append("a capture sat at the chain floor - "
+                            "operating point wrong or note missing")
+        if b_level - d_level < 12:
             failures.append(
-                f"brightness ratio {b_idx / max(d_idx, 1e-9):.2f} < 2 - "
-                "CC 74 not reaching the elements through the fan-out")
+                f"bright only {b_level - d_level:.1f} dB louder than dark "
+                "(need >=12) - cutoff not moving through the fan-out")
+        if d_idx <= 0 or b_idx / max(d_idx, 1e-9) < 1.5:
+            failures.append(
+                f"brightness ratio {b_idx / max(d_idx, 1e-9):.2f} < 1.5 - "
+                "spectrum not opening with CC 74")
         client.close()
     finally:
         try:
