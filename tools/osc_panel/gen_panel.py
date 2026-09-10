@@ -161,7 +161,9 @@ root_widgets = [
         knob(104, "Sustain", 120),
         knob(105, "Release", 107),
         knob(107, "Env>Cutoff", 96, bipolar=True),  # 64 = off; 96 = +2 oct
-        knob(108, "Env Dest", 0),
+        # CC 108 (env dest) deliberately absent: stored-only in firmware,
+        # cutoff is the sole implemented destination (#42) - a knob that
+        # does nothing erodes trust in the panel (Thor, 2026-09-10).
     ]),
     section("LFOs", [
         knob(76, "Vibrato Rate", 64),
@@ -173,9 +175,12 @@ root_widgets = [
         switch(112, "LFO2 Dest", {"PWM": 0, "Reso": 64, "Pitch": 127}, 0),
     ]),
     section("Global", [
-        fader(7, "Volume", 100),
+        # knobs, not faders: the vertical sliders were nearly unusable
+        # (Thor, 2026-09-10). PAN stays despite no firmware handler yet
+        # (roadmap rung 1) so the control is ready when the CC lands.
+        knob(7, "Volume", 100),
         knob(10, "Pan", 64, bipolar=True),
-        fader(1, "Wheel > Cutoff", 0),
+        knob(1, "Wheel > Cutoff", 0),
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
