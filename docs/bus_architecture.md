@@ -23,7 +23,13 @@ means the SystemVerilog running on the FPGA. **Silicon** refers to
 the physical FPGA chip, and is used only when discussing its
 electrical or timing behavior. **Element**, **lane** and **voice**
 are as defined in [design.md](design.md): the FPGA generates elements
-via lanes; firmware groups elements into voices. The deferred shared
+via lanes; firmware groups elements into voices. Bus fan-out scope
+follows the **scope ladder** (Thor, 2026-09-10, see design.md):
+**Global** = all channels, **Channel** = all voices on one channel,
+**Voice** = all elements on one voice. Nothing in the current fabric
+is Global by intent — buses this document historically calls "global"
+(resonance, duty, bend) are CHANNEL buses that coincide with global
+scope only while a single channel exists. The deferred shared
 configuration table (milestone B6) has no name — deliberately
 (Thor, 2026-09-03: the modulation-bus configuration "has no specific
 name"; earlier drafts misattributed a name to it).

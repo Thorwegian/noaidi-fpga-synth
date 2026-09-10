@@ -20,6 +20,17 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   business; a voice is one possible grouping, not the only one.
 - The user's scope of action via MIDI/control surfaces is **not yet
   nailed down** — firmware vocabulary above voice level stays open.
+- **Scope ladder** (Thor, 2026-09-10, used consistently from now on):
+  - **Global** — fans out to all channels (whole synth).
+  - **Channel** — fans out to all voices on one channel.
+  - **Voice** — fans out to all elements on one voice.
+
+  Each channel is its own little synth; channels just happen to share
+  certain resources. NOTHING in the current bus fabric is Global by
+  intent: every bus previously described as "global" (the resonance
+  bus, the duty bus, the bend bus, ...) is a CHANNEL bus that merely
+  coincides with global scope while exactly one channel exists. Older
+  "global bus" wording in docs and code comments reads as Channel.
 - **Source / sink is the couple** (Thor, 2026-09-03): things that
   write buses (LFOs, ADSRs, future combiners) are SOURCES; the
   parameters that read buses are SINKS. "Producer" was a third wheel
