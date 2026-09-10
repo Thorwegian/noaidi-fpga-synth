@@ -52,7 +52,7 @@ units live in patch.h).
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
 | 10 | pan | IMPLEMENTED (#91): per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
-| 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface |
+| 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface. Today's wheel→cutoff IS a temporary hardwiring (Thor 2026-09-10: to become a routable per-channel destination like the LFO dests, see #92) |
 | RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
 | 119 | TEST TONE (#81) | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
@@ -62,8 +62,10 @@ units live in patch.h).
 |---|---|---|
 | 20 | osc 1 waveform | discrete, 4 today: 0 saw / 1 pulse / 2 tri / 3 parabolic-sine (osc_core `y=4x(1−x)`, a ROUGH sine — true bandlimited sine is #65, noise is #64) |
 | 21 | osc 2 waveform | discrete |
-| 22 | osc 2 coarse (interval) | ±12 semitones, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07); cents on CC 23 |
-| 23 | osc detune | fine/detune between the two |
+| 14 | osc 1 coarse (interval) | (Thor 2026-09-10) ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22 |
+| 15 | osc 1 fine | full travel ±0.5 semitone, center 64 |
+| 22 | osc 2 coarse (interval) | ±12 semitones in whole-semitone steps, center 64, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07) |
+| 23 | osc 2 fine | full travel ±0.5 semitone, center 64 (was ±1.5, retuned Thor 2026-09-10) |
 | 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (#91 — the log-gain mix term alone tops out at ~23.6 dB) |
 | 25 | osc 1 pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
 | 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
@@ -74,7 +76,7 @@ units live in patch.h).
 **Filter**
 | CC | Target | Notes |
 |---|---|---|
-| 74 | cutoff — COARSE | 7-bit MSB |
+| 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (authority rule #88, Thor 2026-09-10 — full deflection reaches the closed rail; was ±2 then ±4) |
 | 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
 | 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |

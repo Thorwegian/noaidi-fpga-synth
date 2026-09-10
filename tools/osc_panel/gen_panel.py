@@ -138,13 +138,20 @@ root_widgets = [
         "layout": "horizontal",
         "expand": True,
         "widgets": [
+            # PITCH/FINE default 64 = center: double-tap is the way
+            # back to unison (Thor 2026-09-10). NOTE: osc2 BOOTS at
+            # -12 (the sine sub), so its Pitch dial reads center until
+            # first touched - the double-tap home wins over boot-state
+            # display, per Thor.
             section("Oscillator 1", [
                 switch(20, "Wave", WAVES, 0),
+                knob(14, "Pitch", 64, bipolar=True),
+                knob(15, "Fine", 64, bipolar=True),
                 knob(25, "Pulse Width", 64, bipolar=True),
             ]),
             section("Oscillator 2", [
                 switch(21, "Wave", WAVES, 96),
-                knob(22, "Pitch", 0),        # 0 = -12 semi (sine sub)
+                knob(22, "Pitch", 64, bipolar=True),
                 knob(23, "Fine", 64, bipolar=True),
                 knob(85, "Pulse Width", 64, bipolar=True),   # (#91)
             ]),
@@ -192,12 +199,12 @@ root_widgets = [
         switch(112, "LFO2 Dest", {"PWM": 0, "Reso": 64, "Pitch": 127}, 0),
     ]),
     section("Global", [
-        # knobs, not faders: the vertical sliders were nearly unusable
-        # (Thor, 2026-09-10). PAN stays despite no firmware handler yet
-        # (roadmap rung 1) so the control is ready when the CC lands.
+        # knobs, not faders (Thor: vertical sliders nearly unusable).
+        # No mod-wheel control here: Thor has it on the physical
+        # keyboard, and wheel→cutoff is a temporary hardwiring anyway —
+        # it becomes a routable per-channel destination (#92 note).
         knob(7, "Volume", 100),
         knob(10, "Pan", 64, bipolar=True),
-        knob(1, "Wheel > Cutoff", 0),
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),

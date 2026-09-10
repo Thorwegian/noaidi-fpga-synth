@@ -601,8 +601,11 @@ static void apply_cutoff(void)
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so
     // coarse spans a few octaves, fine interpolates.
     int32_t v14 = ((int32_t)s_cut_coarse << 7) | s_cut_fine;   // 0..16383
-    s_cut_off = (v14 - 8192) >> 1;   // ~±4k Q8.10 = ±4 octaves (widened
-                                     // sweep, Thor 2026-09-08; was >>2/±2)
+    s_cut_off = v14 - 8192;          // ±8 octaves — authority rule (#88):
+                                     // full deflection must reach the
+                                     // rails; Thor 2026-09-10 could not
+                                     // dial cutoff to 0 at the old ±4
+                                     // (was >>2/±2, then >>1/±4)
     s_dirty |= D_CUT;   // coalesced
 }
 
@@ -674,12 +677,19 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 21: g_patch.osc[1].wave = (waveform_t)(val >> 5);   // osc2 wave
              s_dirty |= D_RENDER; break;
-    // Coarse: ±12 semitones, ~5 CC steps per semitone (val-64 was ±63
-    // — far too sensitive for hand-tuning an interval; Thor 2026-09-07).
-    // Cents live on CC 23 fine.
+    // Coarse: ±12 semitones in WHOLE semitone steps, ~5 CC steps per
+    // semitone, center = 64 (val-64 was ±63 — far too sensitive for
+    // hand-tuning an interval; Thor 2026-09-07). Same mapping both
+    // oscillators (osc1 pitch/fine added Thor 2026-09-10: CC 14/15).
+    case 14: g_patch.osc[0].coarse = (int16_t)((val * 25) / 128 - 12);
+             s_dirty |= D_RENDER; break;
     case 22: g_patch.osc[1].coarse = (int16_t)((val * 25) / 128 - 12);
              s_dirty |= D_RENDER; break;
-    case 23: g_patch.osc[1].fine = (int16_t)(((int)val - 64) * 2);  // detune LSB
+    // Fine: full travel = ±0.5 semitone (Thor 2026-09-10; was ±1.5).
+    // 0.5 semi = 1024/24 ≈ 42.7 LSB → (val−64)*2/3 spans ±42.
+    case 15: g_patch.osc[0].fine = (int16_t)((((int)val - 64) * 2) / 3);
+             s_dirty |= D_RENDER; break;
+    case 23: g_patch.osc[1].fine = (int16_t)((((int)val - 64) * 2) / 3);
              s_dirty |= D_RENDER; break;
     case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
              s_dirty |= D_RENDER; break;
