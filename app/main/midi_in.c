@@ -14,6 +14,8 @@
 #include "midi_in.h"
 
 #include "driver/uart.h"
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -38,6 +40,7 @@ typedef struct {
     uart_port_t   uart;
     const char   *name;      // task name + log tag
     midi_parser_t parser;
+    uint8_t       dbg_seen;  // first-bytes hex log budget (bring-up aid)
 } midi_port_t;
 
 static midi_port_t s_din   = { .uart = UART_NUM_1, .name = "midi_in"  };
@@ -68,6 +71,13 @@ static void midi_in_task(void *arg)
         int n = uart_read_bytes(p->uart, &byte, 1,
                                 pdMS_TO_TICKS(MIDI_PARTIAL_TIMEOUT_MS));
         if (n == 1) {
+            // Bring-up aid: hex-log the first few bytes ever seen on
+            // this port, so "wired but garbled" (framing/polarity) is
+            // distinguishable from "nothing arrives" without a scope.
+            if (p->dbg_seen < 8) {
+                p->dbg_seen++;
+                ESP_LOGI(p->name, "rx byte %02X", byte);
+            }
             midi_parser_feed(&p->parser, byte);
             idle_ms = 0;
             had_traffic = true;
@@ -142,5 +152,35 @@ void midi_panel_init(int rx_pin)
     // Thor 2026-09-10). RX moves to rx_pin (GPIO2 — idles high via the
     // MIDI opto, which suits the C3 strap sampling at reset); TX stays
     // on UART0's default pin, unused.
+    //
+    // Idle-polarity preflight: a standard MIDI-IN (opto, non-inverting)
+    // idles HIGH (UART mark). Sample the pin before the UART claims it;
+    // a LOW idle means either an inverting input stage or a wiring
+    // problem — enable RX inversion so an inverting stage still works,
+    // and say so loudly (a floating/broken line also reads low, so the
+    // warning is the breadcrumb either way).
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << rx_pin,
+        .mode         = GPIO_MODE_INPUT,
+    };
+    gpio_config(&io);
+    int highs = 0;
+    for (int i = 0; i < 32; i++) {
+        highs += gpio_get_level(rx_pin);
+        esp_rom_delay_us(300);          // ~10 ms total, spans any byte
+    }
+    bool idle_high = highs >= 24;       // ≥75% high = healthy idle
+
     port_init(&s_panel, rx_pin);
+
+    if (!idle_high) {
+        ESP_ERROR_CHECK(uart_set_line_inverse(s_panel.uart,
+                                              UART_SIGNAL_RXD_INV));
+        ESP_LOGW(s_panel.name,
+                 "line idles LOW (%d/32 high) - RX inverted; if no bytes"
+                 " follow, check wiring/plug orientation", highs);
+    } else {
+        ESP_LOGI(s_panel.name, "line idles high (%d/32) - polarity OK",
+                 highs);
+    }
 }
