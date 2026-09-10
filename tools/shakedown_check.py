@@ -63,6 +63,11 @@ def main():
     if not port_dev:
         print("FAIL: no ESP console port found")
         return 2
+    # The polite console logger (tools/console_logger.sh) may hold the
+    # port - pause it for the duration and hand the port back at exit.
+    subprocess.run(["pkill", "-f", "console_logger"], capture_output=True)
+    subprocess.run(["fuser", "-k", port_dev], capture_output=True)
+    time.sleep(1.0)
     cap = SerialCapture(port_dev); cap.start()
     time.sleep(4.0)              # capture resets the chip; let boot settle
 
@@ -143,6 +148,15 @@ def main():
         print("[ble] disconnected + untrusted (cleanup)")
 
     time.sleep(1.0); cap.stop(); cap.join(timeout=3)
+
+    # hand the console back to the crash witness
+    import os
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    subprocess.Popen(
+        ["setsid", "nohup", "bash", "tools/console_logger.sh"],
+        cwd=repo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, start_new_session=True)
+    print("[logger] console_logger restarted")
 
     echoes = [l for l in cap.lines if "cc " in l or "note_on" in l]
     # the capture's own DTR/RTS reset prints a benign boot-reason line
