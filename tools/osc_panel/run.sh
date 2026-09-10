@@ -12,7 +12,9 @@ BIN=/usr/lib/open-stage-control/open-stage-control
 APP=/usr/lib/open-stage-control/resources/app
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SESSION="$DIR/noaidi-panel.json"
-[ -f "$SESSION" ] || { echo "no session - run gen_panel.py first"; exit 1; }
+# regenerate every launch: the generator table is the source of truth
+# (the .json itself is gitignored - repo-wide *.json rule)
+python3 "$DIR/gen_panel.py" || exit 1
 
 # CH345 port indices from o-s-c's own listing (they drift with replugs)
 LIST=$(ELECTRON_RUN_AS_NODE=1 timeout 15 "$BIN" "$APP" --no-gui --midi list 2>/dev/null)
