@@ -154,10 +154,13 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   (in the field the ADSR uses for its gate bus, so the walker's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
-  target like any source. Reads see earlier-in-table writes from the
-  same sample, so ordered routes are zero-lag; C = A·x + B·y is just
-  two type-3 entries targeting the same bus in adjacent slots (#84).
-  This is the fan-out primitive for the #92 channel-bus mod matrix.
+  target like any source. The read is of the source bus's FIRMWARE
+  base — walker contributions live only in the replicas — so type 3
+  relays firmware-written channel values (wheel, bend, CC offsets);
+  making walker sources (LFOs) visible through a type-3 relay is a
+  #92 design point. C = A·x + B·y is two type-3 entries targeting
+  the same bus in adjacent slots (#84). First real use: the channel
+  cutoff bus (bus 4) fanning out to the 32 per-voice cutoff buses.
 - **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
   polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
   to 32 LFOs + bus sources + margin. One entry = type + config + state.

@@ -616,8 +616,12 @@ module element_pipeline #(
                 // bus, so the P1 read needs no change), the value read
                 // is multiplied by DEPTH like any source (0x10000 =
                 // unity copy, sign inverts) and chain-adds to the
-                // target. Reads see earlier-in-table writes from THIS
-                // sample — ordered routes stay zero-lag (#84 law).
+                // target. NOTE the read is of bus_base — the FIRMWARE-
+                // written base. Walker contributions live only in the
+                // replicas, so a type-3 source relays firmware channel
+                // values; walker-source→bus→type-3 relaying is not
+                // visible (a #92 design point when LFOs target
+                // channel buses).
                 producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2
                                                            || producer_type_a == 4'd3);
                 target_bus_b <= target_bus_a;

@@ -113,8 +113,13 @@ static int64_t  s_last_apply;
 //             level 0, the note's full volume at level 1. No
 //             negative-depth trick. Velocity is note-static and
 //             bakes into the GAIN (volume) word instead.
-// bus 48+v:   voice v's cutoff offset — velocity + wheel + bend summed
-//             by firmware (the combiner takes this job at B6).
+// bus 4:      CHANNEL cutoff bus (#44, the scope ladder made real):
+//             wheel + bend + CC74/106 — ONE firmware write, fanned
+//             out to the 32 per-voice cutoff buses by type-3 bus
+//             sources in the walker (channel → voice → element).
+// bus 48+v:   voice v's cutoff offset — per-voice base carries ONLY
+//             the velocity term now; the walker adds the MOD env and
+//             the channel-bus fan-out on top (#84 chaining).
 // bus 80+v:   voice v's GATE bus — the ADSR watches it (level-
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
@@ -124,16 +129,22 @@ static int64_t  s_last_apply;
                              // the strict null bus)
 #define BUS_PITCH_GLOBAL 2
 #define BUS_RESO_GLOBAL  3
+#define BUS_CH_CUT       4   // channel cutoff bus (#44)
 #define BUS_GAIN(v)   (16 + (v))
 #define BUS_CUT(v)    (48 + (v))
 #define BUS_VGATE(v)  (80 + (v))
 
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
-// entries 32..63 = per-voice amp ADSRs.
-#define PROD_ADSR(v)  (32 + (v))
-#define PROD_MODENV(v) (64 + (v))  // MOD env (#42): 2nd ADSR per voice,
-                                   // watches the same gate bus, drives
-                                   // the voice's CUTOFF bus
+// entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
+// (MOD env, channel-cut fan-out) — the pair MUST be adjacent: both
+// write BUS_CUT(v), and #84 chain-summing requires same-bus writers
+// in consecutive walker slots.
+#define PROD_ADSR(v)   (32 + (v))
+#define PROD_MODENV(v) (64 + 2 * (v))  // MOD env (#42): 2nd ADSR per
+                                       // voice, watches the gate bus,
+                                       // drives the voice's CUTOFF bus
+#define PROD_FANOUT(v) (65 + 2 * (v))  // type-3 bus source (#44):
+                                       // BUS_CH_CUT → BUS_CUT(v), unity
 #define PROD_LFO2     1            // global LFO 2 (#73)
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB (Thor, iterating
 // by ear — -96 dB buried attacks below audibility, 48 dB proved too
@@ -158,13 +169,20 @@ static int64_t  s_last_apply;
 // (patch.h, #69); patch_adsr_word() packs it into the RATES word.
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
-// The per-voice cutoff bus value: wheel opens up to ~+5 octaves (the
-// main sweep control — widened Thor 2026-09-08, was *24/~+3 oct),
-// bend tracks ±2 semitones, velocity darkens soft hits up to ~-1 oct.
+// The per-voice cutoff bus BASE carries only the velocity term (#44):
+// the channel-wide terms moved to BUS_CH_CUT, fanned out by the
+// walker's type-3 sources — a wheel/CC74 sweep is now ONE bus write
+// instead of 32.
 static uint32_t cut_bus_value(int v)
 {
-    int32_t val = (int32_t)s_wheel * 40 + s_bend + s_vel_cut[v] + s_cut_off;
-    return (uint32_t)val;   // engine masks to 18 bits (Q8.10)
+    return (uint32_t)s_vel_cut[v];   // engine masks to 18 bits (Q8.10)
+}
+
+// The CHANNEL cutoff value: wheel opens up to ~+5 octaves (Thor
+// 2026-09-08), bend tracks ±2 semitones, CC 74/106 spans ±8 oct (#88).
+static uint32_t ch_cut_value(void)
+{
+    return (uint32_t)((int32_t)s_wheel * 40 + s_bend + s_cut_off);
 }
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
@@ -453,7 +471,10 @@ static void update_lfo2(void)
         (uint32_t)(uint16_t)g_patch.lfo[1].depth);
 }
 
-// MOD envelope (#42) = ADSR producers 64..95, one per voice: watches
+// MOD envelope (#42) = the even slots of the 64..127 pairs (#44
+// layout: each voice's MOD env sits adjacent to its fan-out bus
+// source — both write BUS_CUT(v), and #84 summing needs consecutive
+// slots), one per voice: watches
 // the voice's gate bus (same gate the amp env watches), drives the
 // voice's CUTOFF bus with a SIGNED depth (the walker DEPTH word is
 // signed 18-bit) — classic filter envelope, bipolar. Rates from
@@ -522,13 +543,26 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 }
 
 // Refresh the cutoff buses of active voices — the wheel and bend
-// terms are shared, so both events land here. At most 32 bus writes,
-// no swaps, no parameter rewrites.
+// terms are shared, so both events land here. Since #44 this is ONE
+// channel-bus write — the walker's type-3 fan-out entries distribute
+// it to every voice (channel → voice → element).
 static void refresh_cut_buses(void)
 {
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state != V_IDLE)   // releasing tails track too
-            engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
+    engine_link_bus_write(BUS_CH_CUT, ch_cut_value());
+}
+
+// Boot wiring for the fan-out (#44): 32 stateless type-3 sources,
+// entry PROD_FANOUT(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
+// slot adjacent to its voice's MOD env (same target bus — #84 chain
+// summing requires consecutive slots). Word 1 (RATES) is meaningless
+// for type 3.
+static void init_fanout_sources(void)
+{
+    for (int v = 0; v < NUM_VOICES; v++) {
+        engine_link_prod_write(PROD_FANOUT(v), 0,
+            3u | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
+        engine_link_prod_write(PROD_FANOUT(v), 2, 0x10000u);   // unity
+    }
 }
 
 // Master volume → every voice's gain-bus base (all 32, since the base
@@ -922,7 +956,9 @@ void voice_alloc_init(void)
     // CC 76/77/113 retune it live via update_lfo1().
     update_lfo1();
     update_lfo2();     // source 1 (#73): PWM/reso wobble, depth 0 at boot
-    update_mod_env();  // sources 64..95 (#42): filter env, depth 0 at boot
+    update_mod_env();  // MOD envs, even slots of the 64..127 pairs (#42/#44)
+    init_fanout_sources();  // fan-out bus sources, odd slots (#44)
+    refresh_cut_buses();    // channel cutoff bus base (wheel/bend/CC74 = 0)
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
