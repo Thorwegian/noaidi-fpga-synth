@@ -87,6 +87,9 @@ the architecture changes. Agent will neatly summarise.
   not proximity to 0 dBFS. The captured signal carries a **significant DC
   offset**: every measurement tool subtracts the mean before computing
   peak/RMS/FFT (added 2026-09-09), and any new capture analysis must too.
+  The chain also carries a small (~0.5 dB) L/R imbalance at center pan
+  (Thor, 2026-09-10 — like the DC, a chain artifact): don't chase
+  sub-dB stereo asymmetries as synth bugs.
 - Purity check: `python3 tools/audio_purity_check.py` — enables the gateware
   test tone (CC 119, 1500 Hz). Also `tools/output_tilt_check.py`,
   `tools/reso_clip_sweep.py`.

@@ -69,7 +69,7 @@ units live in patch.h).
 | 22 | osc 2 coarse (interval) | ±12 semitones in whole-semitone steps, center 64, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07) |
 | 23 | osc 2 fine | full travel ±0.5 semitone, center 64 (was ±1.5, retuned Thor 2026-09-10) |
 | 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (#91 — the log-gain mix term alone tops out at ~23.6 dB) |
-| 25 | osc 1 pulse width / duty | pulse ONLY today (osc_core: saw/tri/sine ignore duty); parabola skew is #66 |
+| 25 | osc 1 pulse width / duty | UNIPOLAR log taper (#94, Thor: the bipolar halves sound identical): 0 = square (50%), 127 = 5% pulse, equal duty ratio per step, never the degenerate 0/100%. Pulse ONLY today (saw/tri/sine ignore duty); parabola skew is #66 |
 | 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |

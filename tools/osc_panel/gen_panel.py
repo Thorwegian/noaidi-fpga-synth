@@ -147,13 +147,13 @@ root_widgets = [
                 switch(20, "Wave", WAVES, 0),
                 knob(14, "Pitch", 64, bipolar=True),
                 knob(15, "Fine", 64, bipolar=True),
-                knob(25, "Pulse Width", 64, bipolar=True),
+                knob(25, "Pulse Width", 0),   # unipolar: 0=square, 127=5% (#94)
             ]),
             section("Oscillator 2", [
                 switch(21, "Wave", WAVES, 96),
                 knob(22, "Pitch", 64, bipolar=True),
                 knob(23, "Fine", 64, bipolar=True),
-                knob(85, "Pulse Width", 64, bipolar=True),   # (#91)
+                knob(85, "Pulse Width", 0),   # unipolar (#94)
             ]),
             section("Mix and Unison", [
                 knob(24, "Osc Balance", 64, bipolar=True),

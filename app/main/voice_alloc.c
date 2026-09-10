@@ -394,6 +394,15 @@ static void update_amp_env(void)
 // everything past ~40 uselessly fast). Exponential 0.03 Hz .. 30 Hz
 // across the CC — one equal frequency RATIO per step.
 //   inc = freq * 2^24 / 96000  ≈ freq * 174.76
+// CC → pulse-width duty offset, Q0.24 (#94 F2): duty = 0.5·10^(−v),
+// v = val/127 — equal duty RATIO per step, 50% down to 5%, never the
+// degenerate 0%/100%. Offset from square = 0.5 − duty.
+static int32_t duty_from_cc(uint8_t val)
+{
+    float duty = 0.5f * powf(10.0f, -(float)val / 127.0f);
+    return (int32_t)((0.5f - duty) * 16777216.0f);
+}
+
 #define LFO_FS_HZ   96000.0f
 static uint16_t lfo_rate_from_cc(uint8_t val)
 {
@@ -700,9 +709,15 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
              s_dirty |= D_RENDER; break;
-    case 25: g_patch.osc[0].duty = (int32_t)((val - 64) << 17);  // Q0.24
+    // Pulse width (#94 F2, Thor 2026-09-10): UNIPOLAR — the two halves
+    // of the old bipolar range sound identical (duty d and 1−d are the
+    // same spectrum, inverted), and the rails reached silent 0%/100%.
+    // Now 0 = square (50%), 127 = 5% pulse, EQUAL-RATIO duty steps
+    // (log taper: duty = 0.5·10^(−val/127)) — fine resolution at the
+    // thin end where the effect is dramatic, never degenerate.
+    case 25: g_patch.osc[0].duty = duty_from_cc(val);
              s_dirty |= D_RENDER; break;
-    case 85: g_patch.osc[1].duty = (int32_t)((val - 64) << 17);  // osc2 PW (#91)
+    case 85: g_patch.osc[1].duty = duty_from_cc(val);   // osc2 PW (#91)
              s_dirty |= D_RENDER; break;
     // Velocity sensitivity (#89): read at note_on — new notes pick the
     // change up; held notes keep their velocity terms until re-struck.
