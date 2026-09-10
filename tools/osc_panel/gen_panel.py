@@ -170,7 +170,7 @@ root_widgets = [
         knob(71, "Resonance", 4),            # boot reso r=0x200 = cc 4
         switch(29, "Type", {"LP": 0, "BP": 64, "HP": 127}, 0),
         switch(30, "Slope", {"12 dB": 0, "24 dB": 127}, 127),
-        knob(31, "Key Track", 0),
+        knob(31, "Key Track", 64, bipolar=True),   # center = 100% (#94)
     ]),
     section("Amp Envelope  -  knob up = longer", [
         knob(73, "Attack", 51),
@@ -183,8 +183,8 @@ root_widgets = [
         knob(103, "Decay", 111),
         knob(104, "Sustain", 120),
         knob(105, "Release", 107),
-        knob(107, "Env>Cutoff", 72, bipolar=True),  # 64 = off; <<8 scale
-                                                    # (#88): 72 = boot +2 oct
+        knob(107, "Env>Cutoff", 87, bipolar=True),  # 64 = off; square-law
+                                                    # (#94): 87 ~ boot +2 oct
         # CC 108 (env dest) deliberately absent: stored-only in firmware,
         # cutoff is the sole implemented destination (#42) - a knob that
         # does nothing erodes trust in the panel (Thor, 2026-09-10).

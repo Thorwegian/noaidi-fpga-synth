@@ -202,13 +202,14 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
 // references (see engine_link_init).
 static uint16_t voice_fc(uint8_t note)
 {
-    // Key tracking (#91, CC 31): kt = 127 reproduces the previously
-    // hardwired 100% tracking; 0 pins the cutoff at the C4 reference
-    // regardless of note (which also lets a sweep start closed).
+    // Key tracking (#91/#94, CC 31): 0..200% with CENTER 64 = 100% =
+    // the historical hardwired tracking (Thor 2026-09-10: capping at
+    // 100% felt undersensitive — convention overtracks to 200%).
+    // 0 pins the cutoff at the C4 reference regardless of note.
     int32_t p   = (int32_t)midi_to_pitch(note);
     int32_t ref = (int32_t)midi_to_pitch(60);
     int32_t kt  = g_patch.filter.key_track;
-    int32_t fc  = ref + ((p - ref) * kt) / 127 + 0x200;
+    int32_t fc  = ref + ((p - ref) * kt) / 64 + 0x200;
     if (fc < 0) fc = 0;
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
@@ -746,11 +747,16 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
     case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV2; break;
     case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
-    // Depth: BIPOLAR, centre 64 = off, full travel = ±16 octaves — the
-    // authority rule (#88, Thor: any pitch/cutoff amount spans rail to
-    // rail; the cutoff clamp saturates safely). Was <<6 / ±4 oct.
-    case 107: g_patch.env1_depth = (int16_t)(((int)val - 64) << 8);
-              s_dirty |= D_ENV2; break;
+    // Depth: BIPOLAR, centre 64 = off. Square-law taper (Thor
+    // 2026-09-10: linear over ±16 oct was 3 semitones per click —
+    // overly sensitive): d·|d|·4 gives ~±1 oct at a quarter turn,
+    // ±4 oct at half, ±16 oct at the rails — fine near centre, full
+    // authority (#88) at the ends.
+    case 107: {
+        int d = (int)val - 64;
+        g_patch.env1_depth = (int16_t)((d * (d < 0 ? -d : d)) << 2);
+        s_dirty |= D_ENV2;
+    } break;
     case 108: g_patch.env1_dest = (uint8_t)(val >> 5);  // stored; cutoff live
               break;
 

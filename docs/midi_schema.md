@@ -81,7 +81,7 @@ units live in patch.h).
 | 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
-| 31 | key tracking amount | IMPLEMENTED (#91): 127 = 100% tracking (the historical hardwired behavior, default), 0 = cutoff fixed at the C4 reference, linear between |
+| 31 | key tracking amount | IMPLEMENTED (#91, rescaled #94): 0..200% with CENTER 64 = 100% (the historical hardwired behavior, default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
 
 **Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
 MOD (undefined block; standard CCs only ever covered one envelope).
@@ -94,7 +94,7 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, full travel = ±16 octaves of cutoff — rail-to-rail per the authority rule (#88/#91; the cutoff clamp saturates safely). The walker DEPTH word is signed |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper (#94 — linear over the full span was 3 semitones/click): ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (authority rule #88). The walker DEPTH word is signed |
 | 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
 
 **LFOs** (2)
