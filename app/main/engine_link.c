@@ -40,7 +40,15 @@ static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 #define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
                                   // gates in one burst
 #define PROD_BASE_ADDR     0x0100
-#define PROD_QUEUE_LEN     256    // 32 ADSRs x 3 words + LFOs at boot
+#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs + 32 amp ADSRs
+                                  // + 32 MOD envs (3 words each) + 32
+                                  // fan-out sources (2 words) = 262
+                                  // pushes before the 1 kHz tick can
+                                  // drain. 256 silently dropped the
+                                  // tail = voices 30/31's amp-env
+                                  // configs = gain floor forever =
+                                  // Thor's "every 32 note-ons it goes
+                                  // low" (2026-09-10). Headroom 2x.
 
 typedef struct {
     uint16_t bus;
@@ -257,6 +265,11 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
         return false;
     }
     return true;
+}
+
+uint32_t engine_link_drops(void)
+{
+    return s_drops;
 }
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)

@@ -984,6 +984,12 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
+    // Tripwire (2026-09-10): a full engine queue during the init burst
+    // silently drops config — voices 30/31 lost their amp envelopes
+    // exactly this way. Scream if ANY init write was dropped.
+    if (engine_link_drops() > 0)
+        ESP_LOGE(TAG, "INIT DROPPED %u engine writes — config incomplete!",
+                 (unsigned)engine_link_drops());
     ESP_LOGI(TAG, "%d voices x %d elements ready (sub id %d)",
              NUM_VOICES, ELEMS_PER_VOICE, s_sub_id);
 }

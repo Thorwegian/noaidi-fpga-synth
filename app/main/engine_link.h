@@ -82,6 +82,12 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 #define ENGINE_NUM_PRODUCERS 128
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
+// Total dropped commands (queue-full across all engine queues). A
+// nonzero value after an init burst means silently missing config —
+// exactly the class of bug that made voices 30/31 lose their amp
+// envelopes (2026-09-10). Callers of init bursts must check and LOG.
+uint32_t engine_link_drops(void);
+
 #ifdef __cplusplus
 }
 #endif
