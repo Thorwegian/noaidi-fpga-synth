@@ -133,8 +133,8 @@ module top (
     logic signed [23:0] lpf_l, lpf_r;
     // 26-bit intermediates: a 24−24 difference needs 25 bits, and the
     // convex result always fits back into 24 — truncating is safe.
-    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 2;
-    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 2;
+    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 3;
+    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 3;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n) begin
             lpf_l <= '0;
