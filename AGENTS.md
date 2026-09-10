@@ -68,6 +68,11 @@ the architecture changes. Agent will neatly summarise.
 - SPDIF is the clean reference. The analog LINE path has ~48 dB dynamic range
   (issue #86) — use it for presence checks and gain-staging, not quality
   verdicts.
+- **Capture hygiene**: the amp release tail runs SECONDS — any scripted
+  sequence of note+capture steps must send CC 120 (all sound off, immediate
+  hard mute) between steps or the previous note's tail contaminates the next
+  measurement (bit shakedown_check's pan test, 2026-09-10, as a phantom
+  −46 dB "leak").
 - Gain staging: `python3 tools/audio_level_meter.py [secs]` — live peak meter,
   target ~−6 dBFS (warns >−1 and <−30). ALSA knobs:
   `amixer -c 1 sset 'PCM Capture Source' Line`,
