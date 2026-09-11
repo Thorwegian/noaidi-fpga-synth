@@ -181,8 +181,9 @@ module element_pipeline #(
     // Gate 0 silences the element (gain decode forced to exact mute);
     // the oscillator and filters free-run regardless. NOTE (Thor,
     // #98): this never became and will never become an ADSR trigger —
-    // envelopes are walker SOURCES watching GATE BUSES (shared across
-    // a voice's elements), not element traits. Today GATE's only job
+    // envelopes are walker SOURCES, gated by a control input (a gate
+    // bus shared across a voice's elements), not element traits.
+    // Today GATE's only job
     // is the exact-mute path (#68); Thor has proposed dropping GATE
     // and RETRIG as element parameters entirely (#98 discussion).
     // Both banks boot gated ON so the boot image keeps sounding (the
