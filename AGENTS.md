@@ -41,7 +41,15 @@ the architecture changes. Agent will neatly summarise.
   Noaidi accepts one connection. Hardware regression tools live in `tools/`:
   `shakedown_check.py` (CC smoke + measured pan), `voice_cycle_check.py`
   (pool uniformity), `modenv_uniformity_check.py` (config under CC storms),
-  `bus_source_check.py` (fan-out path), `filter_pain_check.py` (reso sweep).
+  `bus_source_check.py` (fan-out path), `filter_pain_check.py` (reso sweep),
+  `mash_check.py` (chaos-in-silence-out, see next bullet).
+- **The mash test runs after ANY change to the synth** (Thor,
+  2026-09-11): `tools/mash_check.py` — both-board reset, then random
+  notes/velocities/CCs over BLE, plain note-offs, then poll the
+  digital capture until BIT-EXACT silence. Mashing must stabilise;
+  anything still sounding after the release tails is a stuck voice /
+  engine wedge (#97 family). It prints its seed — rerun with
+  `--seed N` to reproduce a failure.
 - **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
   FPGA comes up with the boot image; the ESP must re-program it (bit us
   2026-09-10: a fresh bitstream left the synth dead until reboot). This
