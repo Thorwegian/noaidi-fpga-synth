@@ -89,7 +89,7 @@ module element_pipeline #(
 
     // Producer table writes (sclk domain, banked — wiring per law 4)
     input  logic           producer_write_enable,
-    input  logic [8:0]     producer_write_addr,     // {entry[6:0], word[1:0]}
+    input  logic [9:0]     producer_write_addr,     // {entry[7:0], word[1:0]} (#100)
     input  logic [31:0]    producer_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
@@ -416,7 +416,7 @@ module element_pipeline #(
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    reg [35:0] producer_table_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry,word[1:0]}
+    reg [35:0] producer_table_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry[7:0],word[1:0]}
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
     // BITS, so rate increments are in 1/16-LSB units and the 8-bit
@@ -437,15 +437,24 @@ module element_pipeline #(
     always_ff @(posedge sclk)
         if (producer_write_enable) producer_table_ram[{bank_shadow, producer_write_addr}] <= {4'b0, producer_write_data};
 
-    // control: 3-slot stride via a small counter, armed at slot 299
+    // control: 3-slot stride via a small counter, armed at slot 299.
+    // HALF-RATE (#100): each sample walks 128 entries — ONE HALF of
+    // the 256-entry table, halves alternating by walker_half — so a
+    // source updates at 48 kHz effective (zipper at 24 kHz, under
+    // the master tilt; Thor 2026-09-11). Chains must live within a
+    // half (allocator rule); cross-half reads see the other half's
+    // previous pass.
     logic [1:0] walker_step;
     logic [7:0] walker_entry;
-    wire walker_active = (walker_entry < 8'(synth_pkg::NUM_PRODUCERS));
+    logic       walker_half;
+    wire walker_active = (walker_entry < 8'(synth_pkg::WALK_PER_SAMPLE));
+    wire [7:0] walker_index = {walker_half, walker_entry[6:0]};
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            walker_step <= 2'd0; walker_entry <= 8'hFF;
+            walker_step <= 2'd0; walker_entry <= 8'hFF; walker_half <= 1'b0;
         end else if (slot == 10'd299) begin
             walker_step <= 2'd0; walker_entry <= 8'd0;
+            walker_half <= ~walker_half;
         end else if (walker_active) begin
             if (walker_step == 2'd2) begin
                 walker_step <= 2'd0;
@@ -468,7 +477,7 @@ module element_pipeline #(
 
     // A stage — latched at the end of P1, stable for 3 cycles
     logic        producer_valid_a;
-    logic [6:0]  producer_index_a;
+    logic [7:0]  producer_index_a;   // {half, entry[6:0]} (#100)
     logic [3:0]  producer_type_a;
     logic [1:0]  lfo_shape_a;
     logic [9:0]  target_bus_a;
@@ -595,7 +604,7 @@ module element_pipeline #(
             if (walker_step == 2'd1) begin
                 // end of P1: latch config (producer_table_readout = CFG) + state
                 producer_valid_a     <= walker_read_valid;
-                producer_index_a     <= walker_entry[6:0];
+                producer_index_a     <= walker_index;
                 producer_type_a  <= producer_table_readout[3:0];
                 lfo_shape_a <= producer_table_readout[5:4];
                 target_bus_a   <= producer_table_readout[15:6];
@@ -673,8 +682,8 @@ module element_pipeline #(
     // DEPTH (P2); bus_base serves the gate bus (P1, address from the
     // CFG word just read) / the target base (P3).
     always_ff @(posedge clk) begin
-        producer_table_readout  <= producer_table_ram[{bank_active, walker_entry[6:0], walker_step}];
-        producer_state_readout    <= producer_state_ram[walker_entry[6:0]];
+        producer_table_readout  <= producer_table_ram[{bank_active, walker_index, walker_step}];
+        producer_state_readout    <= producer_state_ram[walker_index];
         bus_base_readout <= bus_base[(walker_step == 2'd1) ? producer_table_readout[25:16]
                                               : target_bus_b];
         // SEND source read (#92/#98): the OUTPUT SUM of CFG[25:16] —

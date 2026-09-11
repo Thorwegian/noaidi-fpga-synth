@@ -76,7 +76,7 @@ module spi_bus #(
     // Producer config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
     output logic        producer_write_enable,
-    output logic [8:0]  producer_write_addr,   // {entry[6:0], word[1:0]}
+    output logic [9:0]  producer_write_addr,   // {entry[7:0], word[1:0]} (#100)
     output logic [31:0] producer_write_data,
     output logic [7:0]  elem_write_index,
     output logic [31:0] elem_write_data,
@@ -237,7 +237,7 @@ module spi_bus #(
                                && (elem_offset[2:0] < 3'd7);
     assign elem_write_word   = elem_offset[2:0];
 
-    // ---- producer table write decode (0x0100..0x02FF) --------------
+    // ---- producer table write decode (0x0100..0x04FF, #100) --------
     localparam [15:0] PROD_BASE = synth_pkg::MAP_PROD_BASE;
     localparam [15:0] PROD_END  = synth_pkg::MAP_PROD_BASE
                                 + 16'(4 * synth_pkg::NUM_PRODUCERS);
@@ -250,7 +250,7 @@ module spi_bus #(
     // Region-relative offset — word_addr[8:0] alone is WRONG here: the
     // region starts at 0x0100, whose bit 8 is set, so a raw slice
     // lands writes 64 entries off.
-    assign producer_write_addr = 9'(word_addr - synth_pkg::MAP_PROD_BASE);
+    assign producer_write_addr = 10'(word_addr - synth_pkg::MAP_PROD_BASE);
     assign producer_write_data = {partial_word, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----

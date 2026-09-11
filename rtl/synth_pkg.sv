@@ -67,8 +67,17 @@ package synth_pkg;
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
     // A producer's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
+    // Pool 256 with a HALF-RATE walker (#100, Thor 2026-09-11): each
+    // sample walks one half of the table (alternating), so every
+    // source updates at 48 kHz effective — any zipper sits at 24 kHz,
+    // above audibility and under the master tilt. Region grows to
+    // 0x0100..0x04FF (stride 4). Allocator rule: a chain (sources +
+    // their sends sharing a target) must live within ONE half; cross-
+    // half reads see the other half's previous pass (one sample old —
+    // negligible at control rates).
     parameter logic [15:0] MAP_PROD_BASE = 16'h0100;
-    parameter int          NUM_PRODUCERS = 128;
+    parameter int          NUM_PRODUCERS = 256;
+    parameter int          WALK_PER_SAMPLE = NUM_PRODUCERS / 2;
 
     //--- Filter stability clamp (Thor's call, 2026-08-31) ------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not
@@ -94,7 +103,7 @@ package synth_pkg;
 
     parameter int CTRL_W = 14;      // UQ4.10 pitch/cutoff
 
-    parameter int AUDIO_W = 18;     // Q2.16 audio transport
+    parameter int AUDIO_W = 18;     // Q4.14 audio transport (#63)
     typedef logic signed [AUDIO_W-1:0] sample_t;
 
     parameter int SVF_W = 36;       // Q8.28 filter states

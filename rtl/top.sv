@@ -63,8 +63,9 @@ module top (
     logic [17:0] bus_write_data;
     logic        bus_write_toggle;
     logic        producer_write_enable;
-    logic [8:0]  producer_write_addr;   // {entry[6:0], word[1:0]} — 9 bits; an 8-bit
-                            // wire here silently truncated entries >= 64
+    logic [9:0]  producer_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
+                            // (#100); a too-narrow wire here silently
+                            // truncated entries before — size from the pool
     logic [31:0] producer_write_data;
 
     element_pipeline u_elem_pipeline (

@@ -249,6 +249,33 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
+        // UPPER HALF EXECUTES (#100 half-rate walker): move the send
+        // to entry 130 — half B, walked on alternate samples. The
+        // LFO (entry 0, half A) writes bus 6 on even passes; the
+        // half-B send relays the sum on odd passes (one sample
+        // stale — invisible at these rates). Same wobble assert
+        // proves entries above 127 are configured, walked, and
+        // summing.
+        spi_word_write(src_addr(2, 0), SRC_OFF);
+        spi_word_write(src_addr(130, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(130, 2), DEPTH_UNITY);
+        flip;
+        spi_word_write(src_addr(2, 0), SRC_OFF);
+        spi_word_write(src_addr(130, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(130, 2), DEPTH_UNITY);
+        observe(60);
+        wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
+        for (step = 0; step < 8; step = step + 1) begin
+            observe(256);
+            if (peak > wmax) wmax = peak;
+            if (peak < wmin) wmin = peak;
+        end
+        $display("upper-half send: window peaks max=%0d min=%0d", wmax, wmin);
+        if (wmin == 0 || (wmax * 2) / wmin < 5) begin
+            $display("FAIL: upper-half entry not executing (#100)");
+            errors = errors + 1;
+        end
+
         report;
     end
 

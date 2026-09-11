@@ -17,6 +17,14 @@ the architecture changes. Agent will neatly summarise.
 - **Check GitHub for stale tickets regularly** — open issues whose work is
   actually done get closed with a summary; hanging issues annoy Thor and
   have had to be bulk-closed by him before.
+- **Dependencies drive the work order** (Thor, 2026-09-11): every issue
+  MUST state its blocking dependencies ("Blocked by: #N" / "Blocks: #M"),
+  and when work on one issue affects another, codify that link on both.
+  If A depends on B, B completes first; with no dependency, order is
+  free — just start.
+- **Morning routine**: when the daily session with the user begins, the
+  agent checks GitHub for issues created since the last session (Thor
+  files findings around the clock) before proposing what to work on.
 - **Untested new features are never completed** (Thor, 2026-09-10). Closing
   a feature issue requires: sim/bench where applicable, a HARDWARE test, and
   the feature exercised in real use — not just merged code. Compile-green ≠

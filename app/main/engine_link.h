@@ -79,7 +79,10 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
 // Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
 // envelope subtracts silence.
-#define ENGINE_NUM_PRODUCERS 128
+#define ENGINE_NUM_PRODUCERS 256   // half-rate walker pool (#100):
+                                    // entries 0..127 = half A,
+                                    // 128..255 = half B; a chain must
+                                    // live within one half
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
 // Total dropped commands (queue-full across all engine queues). A

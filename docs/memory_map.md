@@ -160,13 +160,16 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-## Producer table — `0x0100–0x02FF` (live, B4/B5)
+## Source table — `0x0100–0x04FF` (live, B4/B5; pool doubled #100)
 
-128 producers × 3 words, stride 4 (word 3 reserved), banked like
+256 sources × 3 words, stride 4 (word 3 reserved), banked like
 parameters (config is wiring — takes effect at the swap). See
-[bus_architecture.md](bus_architecture.md). A producer's output uses
-the previous sample's state (one-sample lag, keeps multiplies fed by
-registers).
+[bus_architecture.md](bus_architecture.md). **Half-rate walker
+(#100)**: entries 0–127 (half A) walk on even samples, 128–255
+(half B) on odd — every source updates at 48 kHz effective; a chain
+(sources + their sends sharing a target) must live within ONE half.
+A source's output uses the previous walk's state (registered
+multiplies). LFO rate steps are 2.9 mHz (increment per 48 kHz walk).
 
 | Offset | Word | Contents |
 |---|---|---|
