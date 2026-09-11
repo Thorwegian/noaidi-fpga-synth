@@ -119,6 +119,16 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
             if (cmd.word >= ENGINE_WORDS_PER_ELEMENT)
                 continue;   // elem is uint8_t: 0..255 by construction
+            // No-op elision (Thor's Big-O/lazy principle, 2026-09-11):
+            // the image IS the FPGA's state (the FPGA-reload → ESP-
+            // reboot rule guarantees it), so a write of the value
+            // already there is pure waste. voice_program re-renders
+            // resend every word; skipping the unchanged ones turns a
+            // one-knob re-render's flush from all 256 rows (~15 ms of
+            // SPI — the wedge pressuring #97) into just the touched
+            // rows.
+            if (s_image[cmd.elem][cmd.word] == cmd.value)
+                continue;
             s_image[cmd.elem][cmd.word] = cmd.value;
             mark_dirty(cmd.elem, cmd.word);
             changed = true;
@@ -126,6 +136,8 @@ static void engine_task(void *arg)
         prod_cmd_t pc;
         while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
             if (pc.entry >= ENGINE_NUM_PRODUCERS || pc.word >= 3)
+                continue;
+            if (s_prod[pc.entry][pc.word] == pc.value)   // no-op elision
                 continue;
             s_prod[pc.entry][pc.word] = pc.value;
             int bit = pc.entry * 3 + pc.word;

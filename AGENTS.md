@@ -36,7 +36,16 @@ the architecture changes. Agent will neatly summarise.
   `bus_source_check.py` (fan-out path), `filter_pain_check.py` (reso sweep).
 - **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
   FPGA comes up with the boot image; the ESP must re-program it (bit us
-  2026-09-10: a fresh bitstream left the synth dead until reboot).
+  2026-09-10: a fresh bitstream left the synth dead until reboot). This
+  rule also underwrites the engine's no-op write elision: the CPU image
+  is trusted to equal FPGA state ONLY because reloads force a reboot.
+- **Aim for Big-O efficiency and lazy evaluation across the code base**
+  (Thor, 2026-09-11): prefer O(changed) over O(everything) — dirty
+  tracking, no-op elision against the reference image, compute/program
+  on demand (a voice is programmed at note-on, not before; note state
+  rides one bus write, not N element words). When adding a path that
+  scans or rewrites "all of X", justify why O(X) is acceptable or make
+  it lazy.
 
 ## Test rig (dev machine + prototype, as wired 2026-09-10)
 
