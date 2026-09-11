@@ -179,9 +179,14 @@ module element_pipeline #(
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
     // Gate 0 silences the element (gain decode forced to exact mute);
-    // the oscillator and filters free-run regardless — later this
-    // edge becomes the ADSR trigger. Both banks boot gated ON so the
-    // boot image keeps sounding (the power-up liveness check).
+    // the oscillator and filters free-run regardless. NOTE (Thor,
+    // #98): this never became and will never become an ADSR trigger —
+    // envelopes are walker SOURCES watching GATE BUSES (shared across
+    // a voice's elements), not element traits. Today GATE's only job
+    // is the exact-mute path (#68); Thor has proposed dropping GATE
+    // and RETRIG as element parameters entirely (#98 discussion).
+    // Both banks boot gated ON so the boot image keeps sounding (the
+    // power-up liveness check).
     reg [1:0] gate_param_ram [0:2*NUM_ELEMENTS-1];
     integer gi;
     initial for (gi = 0; gi < 2*NUM_ELEMENTS; gi = gi + 1)
@@ -527,14 +532,18 @@ module element_pipeline #(
     // (iverilog binds declaration-before-use at module scope).
     //
     // BUS SUMMING (issue #84, law 1 made real): buses are summing
-    // nodes, so summing is the DEFAULT — no flags. At this moment the
-    // walker_write_* registers still hold the PREVIOUS entry's result;
-    // if this entry targets the same bus, accumulate onto that result
-    // instead of re-reading the firmware base. Same-bus sources
-    // allocated in CONSECUTIVE slots therefore sum automatically, to
-    // any chain length (each link sees the running total). The
-    // allocator's rule (bus_architecture.md): group same-bus sources
-    // adjacently; scattered ones keep last-write-wins.
+    // nodes — exactly like mixing-console buses, never
+    // self-referential (Thor, #98) — so summing is the DEFAULT, no
+    // flags. At this moment the walker_write_* registers still hold
+    // the PREVIOUS entry's result; if this entry targets the same
+    // TARGET bus as that previous entry, accumulate onto the running
+    // total instead of re-reading the firmware base. Multiple sources
+    // SHARING A TARGET BUS therefore sum automatically when allocated
+    // in consecutive slots, to any chain length (each link sees the
+    // running total — the cumulative sum, nothing more). The
+    // allocator's rule (bus_architecture.md): group sources that
+    // share a target bus adjacently; scattered ones keep
+    // last-write-wins.
     wire signed [19:0] walker_contribution = depth_product[35:16];
     // walker_write_valid is cleared after the P5 RAM write, so the
     // chain test uses its own uncleaned copy (bus/value persist).

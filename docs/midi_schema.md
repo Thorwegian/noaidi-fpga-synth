@@ -73,7 +73,7 @@ units live in patch.h).
 | 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
-| 28 | unison stereo spread | |
+| 28 | unison stereo spread | CONTINUOUS since #98 (was a de-facto on/off bool): 0 = centered, far side attenuated 0.375 dB/step, 127 = hard pan / exact far-side mute (the historical On, default) |
 
 **Filter**
 | CC | Target | Notes |

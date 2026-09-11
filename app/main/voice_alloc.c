@@ -249,9 +249,12 @@ static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
 {
     for (int u = 0; u < ELEMS_PER_VOICE; u++) p[u] = (evoice_t){0};
     int  ud = g_patch.unison_detune;         // LSB per spread step
-    bool st = g_patch.unison_stereo > 0;     // stereo spread on?
     int  n  = 0;
 
+    // l/r mark which side a unison element LEANS (alternating). How
+    // FAR it leans is continuous now — voice_program scales the far
+    // side by g_patch.unison_stereo (#98: CC 28 is a spread AMOUNT
+    // per the schema, not the on/off the old bool made of it).
     switch (g_patch.voice_struct) {
     case VOICE_2_PLAIN:                       // osc1 + osc2, centred
         p[0] = (evoice_t){0, 0, true, true, true};
@@ -261,16 +264,16 @@ static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
     case VOICE_7_PLUS_1:                       // supersaw x7 + osc2
         for (int i = 0; i < 7; i++)
             p[i] = (evoice_t){0, (int16_t)(SPREAD7[i] * ud),
-                              st ? !(i & 1) : true, st ? (i & 1) : true, true};
+                              !(i & 1), (i & 1) != 0, true};
         p[7] = (evoice_t){1, 0, true, true, true};
         n = 8;
         break;
     case VOICE_4_PLUS_4:                       // both oscillators x4
         for (int i = 0; i < 4; i++) {
             p[i]     = (evoice_t){0, (int16_t)(SPREAD4[i] * ud),
-                                  st ? !(i & 1) : true, st ? (i & 1) : true, true};
+                                  !(i & 1), (i & 1) != 0, true};
             p[i + 4] = (evoice_t){1, (int16_t)(SPREAD4[i] * ud),
-                                  st ? !(i & 1) : true, st ? (i & 1) : true, true};
+                                  !(i & 1), (i & 1) != 0, true};
         }
         n = 8;
         break;
@@ -368,9 +371,24 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         if (lvol > 0xFF) lvol = 0xFF;
         if (rvol < 0x01) rvol = 0x01;
         if (rvol > 0xFF) rvol = 0xFF;
-        uint32_t l = (plan[u].l && !bal_mute && pan <  63)
+        // Continuous stereo spread (#98, CC 28): a leaning unison
+        // element keeps its near side at full and attenuates the FAR
+        // side by spread>>1 log-gain steps (0.375 dB each) — spread 0
+        // = centered, 126 = −23.6 dB, 127 = exact far-side mute (the
+        // historical hard pan, bit-for-bit at the default).
+        int32_t spread = g_patch.unison_stereo & 0x7F;
+        bool    lean   = plan[u].l != plan[u].r;
+        bool l_en = plan[u].l || (lean && spread < 127);
+        bool r_en = plan[u].r || (lean && spread < 127);
+        if (lean && spread < 127) {
+            if (plan[u].l) rvol -= spread >> 1;
+            else           lvol -= spread >> 1;
+            if (lvol < 0x01) lvol = 0x01;
+            if (rvol < 0x01) rvol = 0x01;
+        }
+        uint32_t l = (l_en && !bal_mute && pan <  63)
                        ? (uint32_t)lvol : VOL_MUTE;
-        uint32_t r = (plan[u].r && !bal_mute && pan > -63)
+        uint32_t r = (r_en && !bal_mute && pan > -63)
                        ? (uint32_t)rvol : VOL_MUTE;
 
         send(elem, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC

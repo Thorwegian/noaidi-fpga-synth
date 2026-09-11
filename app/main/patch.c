@@ -36,7 +36,8 @@ void patch_default(patch_t *p)
     p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
     p->unison_detune = 6;      // LSB per spread step (supersaw spread)
-    p->unison_stereo = 64;     // stereo spread on
+    p->unison_stereo = 127;    // full stereo spread = the historical
+                               // hard pan (CC 28 continuous since #98)
 
     p->vel_amp_sens = 64;              // = historical (127-vel)>>1 feel
     p->vel_cut_sens = 64;              // = historical vel*48 brightening

@@ -160,7 +160,8 @@ root_widgets = [
                 switch(26, "Voice Mode",
                        {"2 plain": 0, "7+1": 64, "4+4": 127}, 64),
                 knob(27, "Unison Spread", 24),
-                switch(28, "Uni Stereo", {"Off": 0, "On": 127}, 127),
+                knob(28, "Stereo Spread", 127),   # continuous (#98):
+                                                  # 0 centered, 127 hard pan
             ]),
         ],
     },
