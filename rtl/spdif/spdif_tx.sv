@@ -1,9 +1,12 @@
 // SPDIF Transmitter — IEC 60958 consumer-level digital audio output
 //
-// Biphase-mark encoded, 96 kHz stereo, 24-bit audio.
-// sysclk / 8 = cell rate; 2 cells/bit × 64 bits/frame = 128 cells per
-// sample period — so the stream is internally consistent at ANY sysclk
-// (Fs = sysclk/768), and a receiver locks to the actual bit rate.
+// Biphase-mark encoded stereo, 24-bit audio. The sample rate is set
+// entirely by the ticks the caller feeds it: 2 cells/bit × 64
+// bits/frame = 128 cells per sample period — so the stream is
+// internally consistent at ANY tick rate, and a receiver locks to the
+// actual bit rate. Only the channel-status frequency byte (CS_FREQ
+// parameter) must be told what rate that is: 0x0A = 96 kHz (default,
+// the main output), 0x02 = 48 kHz (the #101 LED test output).
 //
 // What a receiver needs from this module (all four, not just the first
 // two — the earlier version stopped after 2 and pro interfaces refused
@@ -31,7 +34,10 @@
 // Connect to RCA center pin via 75Ω coax; shield to GND.
 // ────────────────────────────────────────────────────────────────
 `default_nettype none
-module spdif_tx (
+module spdif_tx #(
+    parameter [7:0] CS_FREQ = 8'h0A     // channel-status byte 3
+                                        // (sampling frequency code)
+) (
     input  wire             clk,            // sysclk
     input  wire             rst_n,
     input  wire             sample_tick,    // frame boundary ("sample ready")
@@ -72,13 +78,13 @@ module spdif_tx (
     //   byte 0 = 0x04  consumer, PCM, copy permitted, no emphasis
     //   byte 1 = 0x00  category: general
     //   byte 2 = 0x00  source/channel: don't care
-    //   byte 3 = 0x0A  sampling frequency: 96 kHz
+    //   byte 3 = CS_FREQ  sampling frequency (0x0A = 96 kHz)
     //   byte 4 = 0x0B  word length: 24-bit (max 24 base)
     //   bytes 5..23 = 0
     // Both subframes of a frame carry the same bit (L and R blocks are
     // identical and aligned to the same B preamble).
     localparam [191:0] CS_FLAT =
-        {152'd0, 8'h0B, 8'h0A, 8'h00, 8'h00, 8'h04};
+        {152'd0, 8'h0B, CS_FREQ, 8'h00, 8'h00, 8'h04};
 
     reg  [7:0] frame_cnt;                    // 0..191 within the block
     wire       block_start = (frame_cnt == 8'd0);

@@ -105,6 +105,15 @@ tb/tb_spdif_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
 
+# 48 kHz test transmitter (#101): drum's half-rate ticks + CS_FREQ
+# override, decoded with the same block checker.
+TB_SPDIF48 = tb/tb_spdif48_block.sv
+tb/tb_spdif48_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
+	iverilog -g2012 -o $@ $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+
+sim-spdif48: tb/tb_spdif48_block.vvp
+	vvp tb/tb_spdif48_block.vvp > tb/sim-spdif48.out 2>&1
+
 # tb_element_program.sv is the ORIGINAL full chain — kept as a
 # long-soak (sim-prog-full, NOT in the default suite: its accidental
 # soak property has caught cross-phase contamination before). The
@@ -167,10 +176,11 @@ tb/tb_osc_core.vvp: element/osc_core.sv $(TB_OSC) element/sine_lut.hex Makefile
 sim-osc: tb/tb_osc_core.vvp
 	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
 
-sim: sim-elem sim-outputs sim-spdif sim-spi sim-bus \
+sim: sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources \
      sim-stab sim-osc
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
+	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out \

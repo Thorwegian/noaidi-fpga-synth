@@ -18,6 +18,13 @@
 //                 sample_tick by construction; the drum really is the
 //                 sole timebase, output stages included.
 //   slot        : current drum slot (scheduling / debug).
+//   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
+//                 48 kHz test S/PDIF output (#101): sample boundary
+//                 every second wrap (1536 sysclk), cell boundary every
+//                 second cell (12 sysclk). Derived from the same
+//                 counters, so 1536 = 128 cells × 12 and sample_tick48
+//                 coincides with a cell_tick48 by construction — the
+//                 drum stays the sole timebase.
 //--------------------------------------------------------------------
 `default_nettype none
 module drum #(
@@ -31,6 +38,8 @@ module drum #(
     output logic                   sample_tick,
     output logic                   lane_enter,
     output logic                   cell_tick,
+    output logic                   sample_tick48,
+    output logic                   cell_tick48,
     output logic [$clog2(CYCLES)-1:0] slot
 );
 
@@ -56,9 +65,35 @@ module drum #(
             cell_cnt <= (cell_cnt == CELLDIV - 1) ? '0 : cell_cnt + 1'b1;
     end
 
-    assign slot        = slot_r;
-    assign sample_tick = (slot_r == '0);
-    assign lane_enter  = (slot_r < NUM_LANES);
-    assign cell_tick   = (cell_cnt == '0);
+    // ── 48 kHz derivation (#101): two half toggles ──
+    // half48: which CYCLES-long period of the 48 kHz frame this is
+    // (0 = first). cell_half48: which CELLDIV-long cell of the
+    // doubled cell this is (0 = first). Both flip at their boundary;
+    // the wrap realign is a no-op while the ratios divide evenly,
+    // same defensive style as cell_cnt above.
+    logic half48, cell_half48;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            half48 <= 1'b0;
+        else if (slot_r == CYCLES - 1)
+            half48 <= ~half48;
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            cell_half48 <= 1'b0;
+        else if (slot_r == CYCLES - 1)
+            cell_half48 <= half48 ? 1'b0 : ~cell_half48;
+        else if (cell_cnt == CELLDIV - 1)
+            cell_half48 <= ~cell_half48;
+    end
+
+    assign slot          = slot_r;
+    assign sample_tick   = (slot_r == '0);
+    assign lane_enter    = (slot_r < NUM_LANES);
+    assign cell_tick     = (cell_cnt == '0);
+    assign sample_tick48 = sample_tick && !half48;
+    assign cell_tick48   = cell_tick   && !cell_half48;
 
 endmodule

@@ -2,10 +2,13 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S
+// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S,
+//         plus a 48 kHz test SPDIF (#101: bare LED into the dev
+//         box's optical input — the digital measurement path)
 // Timing: drum.sv owns every timebase — the sample boundary
-//         (768 sysclk = 1 sample) and the SPDIF cell boundary
-//         (6 sysclk = 1 cell), counted from one reset.
+//         (768 sysclk = 1 sample), the SPDIF cell boundary
+//         (6 sysclk = 1 cell), and their half-rate 48 kHz
+//         counterparts — all counted from one reset.
 // Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 73.728 MHz = 768×96 kHz
 //         (per-board setup: pll_clk O0=73728K -s on the BL616).
 //         Stepped down from 98.304 MHz after five ear-verified timing
@@ -29,7 +32,8 @@ module top (
     output logic        i2s_lrclk,
     output logic        i2s_data,
 
-    output logic        spdif_out
+    output logic        spdif_out,
+    output logic        spdif48_out
 );
 
     wire rst_n = ~rst;
@@ -38,15 +42,18 @@ module top (
     // Drum — the sole timebase
     //----------------------------------------------------------------
     logic       sample_tick, lane_enter, cell_tick;
+    logic       sample_tick48, cell_tick48;
     logic [9:0] slot;
 
     drum u_drum (
-        .clk         (sysclk),
-        .rst_n       (rst_n),
-        .sample_tick (sample_tick),
-        .lane_enter  (lane_enter),
-        .cell_tick   (cell_tick),
-        .slot        (slot)
+        .clk           (sysclk),
+        .rst_n         (rst_n),
+        .sample_tick   (sample_tick),
+        .lane_enter    (lane_enter),
+        .cell_tick     (cell_tick),
+        .sample_tick48 (sample_tick48),
+        .cell_tick48   (cell_tick48),
+        .slot          (slot)
     );
 
     //----------------------------------------------------------------
@@ -158,6 +165,45 @@ module top (
         .audio_l     (out_left),
         .audio_r     (out_right),
         .spdif_out   (spdif_out)
+    );
+
+    //----------------------------------------------------------------
+    // 48 kHz test SPDIF (#101) — the digital measurement path.
+    // Drives a bare red LED (68 Ω series) taped into the dev box's
+    // ICUSBAUDIO7D optical input; its CM106 receiver caps at 48 kHz,
+    // hence the second transmitter instead of a tap on the main one.
+    // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
+    // sits at 48 kHz — content near the new Nyquist (24 kHz) is
+    // already crushed by the 2 kHz master tilt, so no longer filter
+    // is warranted. sample_tick48 coincides with a sample_tick, so
+    // out_left/out_right below are the very values the 96 kHz
+    // transmitter latches on the same edge: the held register is the
+    // previous sample, the wire is the current one.
+    //----------------------------------------------------------------
+    logic signed [23:0] dec48_l_prev, dec48_r_prev;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) begin
+            dec48_l_prev <= '0;
+            dec48_r_prev <= '0;
+        end else if (sample_tick) begin
+            dec48_l_prev <= out_left;
+            dec48_r_prev <= out_right;
+        end
+
+    // A 24+24 sum needs 25 bits; halving brings it back into 24.
+    wire signed [23:0] dec48_l =
+        24'((25'(out_left)  + 25'(dec48_l_prev)) >>> 1);
+    wire signed [23:0] dec48_r =
+        24'((25'(out_right) + 25'(dec48_r_prev)) >>> 1);
+
+    spdif_tx #(.CS_FREQ(8'h02)) u_spdif48 (   // 0x02 = 48 kHz
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick48),
+        .cell_tick   (cell_tick48),
+        .audio_l     (dec48_l),
+        .audio_r     (dec48_r),
+        .spdif_out   (spdif48_out)
     );
 
     //----------------------------------------------------------------
