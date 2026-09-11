@@ -13,7 +13,9 @@ receiver locks and the path is digital end to end:
      1024-point frame - coherent, no window needed
   4. capture again with the tone off: a locked digital path delivers
      bit-exact zeros, something the analog path never once managed
-  5. restore the rig: tone off, capture source back to Line
+  5. leave the rig in its resting state: tone off, capture source
+     IEC958 In — the DEFAULT since 2026-09-11 (Thor: the 48 kHz
+     digital path is the primary measurement path)
 
 PASS = tone on bin 32 at better than -6 dBFS. The off-bin floor and
 the silence capture are printed for the issue record.
@@ -46,8 +48,9 @@ TONE_BIN = TONE_HZ * 1024 // RATE          # 32
 
 # CM106 mixer controls (amixer -c 1): numid=16 is the 4-way capture
 # source (0 Mic, 1 Line, 2 'IEC958 In', 3 Mixer), numid=13 the
-# IEC958 capture switch. Restored to the analog rig state on exit
-# until the tooling flip (#101 checkbox 3) retires Line.
+# IEC958 capture switch. IEC958 is the DEFAULT capture source
+# (Thor, 2026-09-11) — asserted at start AND on exit, so a crashed
+# run can never strand the rig on the analog path.
 def set_capture(source_item, iec_switch):
     subprocess.run(["amixer", "-c", "1", "cset", "numid=16",
                     str(source_item)], capture_output=True)
@@ -141,7 +144,7 @@ def lock_probe(deadline_s):
                 return 0
             time.sleep(1)
     finally:
-        set_capture(1, False)               # back to Line for the old rig
+        set_capture(2, True)                # IEC958 stays the default
     print("RESULT: FAIL - no lock before deadline")
     return 1
 
@@ -190,8 +193,8 @@ def main():
                        capture_output=True, timeout=10)
         subprocess.run(["bluetoothctl", "untrust", NOAIDI_MAC],
                        capture_output=True, timeout=10)
-        set_capture(1, False)               # back to Line for the old rig
-        print("[ble] disconnected + untrusted; capture source restored")
+        set_capture(2, True)                # IEC958 stays the default
+        print("[ble] disconnected + untrusted; capture source IEC958")
 
     if not got_tone:
         print("RESULT: FAIL - receiver delivered no data (no S/PDIF "

@@ -81,11 +81,11 @@ hardware.
  └──────┬──────┘
         │ SPI 10 MHz (MOSI 6 / MISO 5 / SCLK 4 / CS 7)
         ▼
- ┌─────────────┐ SPDIF ──► Focusrite (MUST clock-slave to S/PDIF!)
- │ Tang Nano   │            │ analog out
- │ 20K         │            ▼
- │ ("gateware")│        ICUSBAUDIO7D LINE IN (hw:1,0) ◄── capture chain
- └─────────────┘        (arecord S16_LE 48k; calibration via alsactl)
+ ┌─────────────┐ 48 kHz SPDIF, pin 27 — THE PRIMARY AUDIO PATH (#101)
+ │ Tang Nano   │   ├─► coax (330R/91R divider) ─► Focusrite (human ears)
+ │ 20K         │   └─► 68R + red LED taped into ICUSBAUDIO7D OPTICAL IN
+ │ ("gateware")│        (hw:1,0, IEC958 capture — bit-perfect digits)
+ └─────────────┘ 96 kHz SPDIF parked on pin 86 (unwired, future #53)
 ```
 
 - **MIDI ingress, three ways**: DIN (GPIO0/UART1) = the physical
@@ -101,8 +101,9 @@ hardware.
   esptool/monitor and re-attaches by itself.
 - **Panel server**: `tools/osc_panel/run.sh` serves :8080 headless
   and owns the CH345 (one owner at a time).
-- **Audio capture**: see "Audio test path" below for calibration,
-  clock-slaving, DC offset and capture-hygiene rules.
+- **Audio capture**: see "Audio test path" below — DIGITAL (IEC958)
+  is the default capture source since 2026-09-11; the analog rules
+  survive only for the optional line-in real-world check.
 
 ## Toolchain
 
@@ -120,7 +121,8 @@ hardware.
   (synth_gowin → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
 - Sim: `cd rtl && make -j4 sim` — suite: `sim-elem` (element pipeline),
-  `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spi`, `sim-bus` (word protocol),
+  `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spdif48` (the 48 kHz
+  primary output + drum half-rate ticks), `sim-spi`, `sim-bus` (word protocol),
   `sim-prog-*` (programming chain, 4 splits), `sim-stab` (SVF stability corners),
   `sim-osc` (waveforms + pulse-duty). `sim-prog-full` = long soak, not in the
   default suite.
@@ -137,24 +139,44 @@ hardware.
   leave running permanently. Deploy scripts should still expect the log to
   gap for the seconds a flash holds the port.
 
-## Audio test path (analog, dev host)
+## Audio test path (dev host) — DIGITAL FIRST since 2026-09-11
 
-- Chain: Noaidi analog out → Focusrite → ICUSBAUDIO7D LINE IN (card 1,
-  `hw:1,0`), captured S16_LE 48 kHz stereo with `arecord`.
-- **The Focusrite MUST be clock-slaved to its S/PDIF input.** On internal
-  clock it free-runs ~6 ppm off the FPGA stream and its receive FIFO
-  recenters every ~1.65 s — an ~8 ms hold/jump glitch burst, heard as
-  periodic clicking (issue #86; 73 bursts/120 s → 0 after the setting).
-  If periodic clicks at a crystal-steady interval ever reappear, check
-  the clock source FIRST.
-- **A dev-host reboot reverts the USB card's mixer** (capture source back
-  to Mic at +11 dB → loud 100 Hz buzz + noise floor ×3). Every capture
-  script must assert the state first: source=Line, Line capture at the
-  stored calibration (0% since 2026-09-09 — `sudo alsactl restore`
-  recovers it), Line playback off, Mic muted/nocap.
-- SPDIF is the clean reference. The analog LINE path has ~48 dB dynamic range
-  (issue #86) — use it for presence checks and gain-staging, not quality
-  verdicts.
+**Primary path (#101, Thor's decision): the 48 kHz S/PDIF on pin 27,
+captured DIGITALLY** via a red LED taped into the ICUSBAUDIO7D's
+optical input (LED-as-TOSLINK-transmitter — biphase-mark doesn't care
+which way the light toggles). Same `arecord -D hw:1,0 -f S16_LE -r
+48000`, but the CM106 capture source is **IEC958 In** (`amixer -c 1
+cset numid=16 2` + `numid=13 on`) — the DEFAULT mixer state; capture
+scripts assert it rather than assume it. First light 2026-09-11
+(`tools/spdif48_first_light.py`): tone −0.0 dBFS exactly on its FFT
+bin, harmonics at the 16-bit floor, off-bin bins bit-exact zero,
+tone-off capture 0/96000 nonzero samples.
+
+- **What this retires for measurements**: the DC-offset subtraction
+  (#81 — digital DC is exactly 0; the subtraction in the tools is a
+  harmless no-op, kept for the analog fallback), the −78 dB floor
+  allowances, the ~0.5 dB L/R chain-imbalance tolerance, alsactl
+  gain calibration, and **the Focusrite clock-slave requirement** —
+  the Focusrite is out of the measurement chain entirely (it stays on
+  the same pin-27 stream for HUMAN listening, and its clock settings
+  are its own business again; the Mac gets its interface back).
+- **Lock semantics**: the CM106 aborts capture reads with I/O error
+  when its S/PDIF receiver has no lock — data arriving IS the lock
+  proof (`spdif48_first_light.py --lock-probe`). A dark LED means:
+  FPGA not loaded (SRAM lost on power-cycle!), or the LED chain —
+  in that order of likelihood.
+- **A dev-host reboot reverts the USB card's mixer** — assert
+  source=IEC958 (numid=16 → 2, numid=13 → on) before capturing.
+
+**Analog line-in path (optional real-world check only)**: Focusrite
+analog out → ICUSBAUDIO7D LINE IN, source=Line, Line capture at the
+stored calibration (0% since 2026-09-09, `sudo alsactl restore`),
+Line playback off, Mic muted. ~48 dB dynamic range (#86), significant
+DC offset (tools subtract the mean), ~0.5 dB L/R imbalance at center
+pan — presence checks and gain-staging, never quality verdicts. If it
+is used with the Focusrite in the S/PDIF chain, the old rule returns:
+the Focusrite must clock-slave to its S/PDIF input or its receive
+FIFO recenters every ~1.65 s as periodic clicking (#86).
 - **Capture hygiene**: the amp release tail runs SECONDS — any scripted
   sequence of note+capture steps must send CC 120 (all sound off, immediate
   hard mute) between steps or the previous note's tail contaminates the next
@@ -198,7 +220,9 @@ hardware.
   never re-enable a UART console without re-homing this port.
 - UART1 default pins TX=7/RX=6 clash with SPI CS/MOSI → `midi_in_init()` must
   run before `fpga_spi_init()`.
-- Audio pins (`rtl/constraints.cst`): I2S 54–56, SPDIF 27, sysclk 10 (73.728 MHz).
+- Audio pins (`rtl/constraints.cst`): I2S 54–56; **48 kHz SPDIF on 27
+  (primary — coax + LED share the node)**; 96 kHz SPDIF parked on 86
+  (unwired); sysclk 10 (73.728 MHz).
 - Both boards permanently USB-attached to the dev host (mini-linux):
   `make fw-flash`/`fw-monitor` and FPGA loading work from there without
   touching hardware.

@@ -57,20 +57,25 @@ IO_PORT "i2s_lrclk" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 IO_LOC  "i2s_data"  54;  // HP_DIN  — serial data
 IO_PORT "i2s_data"  PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
-// SPDIF audio output
+// SPDIF audio outputs (#101, Thor 2026-09-11): the 48 kHz stream on
+// PIN 27 IS THE PRIMARY AUDIO PATH, for humans and agents alike.
+// The pin's node fans out on the veroboard to BOTH sinks: the coax
+// (through the 330R/91R consumer-level divider) to the Focusrite for
+// listening, and 68R -> red LED taped into the dev box's
+// ICUSBAUDIO7D optical input for bit-perfect automated capture
+// (first light 2026-09-11). DRIVE=16: divider + LED together draw
+// ~28 mA peaks; a TOSLINK receiver needs light, not logic levels.
 
-IO_LOC  "spdif_out" 27;
-IO_PORT "spdif_out" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
-
-// 48 kHz test SPDIF (#101) — drives a bare red LED straight off the
-// pin: pin 86 → 68 Ω → LED anode; cathode to the GND two holes below
-// (86, 79, GND on the right header, 13th hole from the top with USB
-// up). The LED nose is taped into the ICUSBAUDIO7D optical input.
-// DRIVE=16: the LED is the load (~15-20 mA through the 68 Ω), and a
-// TOSLINK receiver needs light, not logic levels — sag is fine.
-
-IO_LOC  "spdif48_out" 86;
+IO_LOC  "spdif48_out" 27;
 IO_PORT "spdif48_out" PULL_MODE=NONE DRIVE=16 IO_TYPE=LVCMOS33;
+
+// The 96 kHz stream is parked on header pin 86 (right header, 13th
+// hole from the top with USB up, GND two holes below) — unwired;
+// reserved as the future high-rate tap (#53 remains the bit-perfect
+// 96 kHz instrument).
+
+IO_LOC  "spdif_out" 86;
+IO_PORT "spdif_out" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 // Unused / Reserved — uncomment as needed
 

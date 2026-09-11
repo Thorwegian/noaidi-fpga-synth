@@ -2,9 +2,11 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
-// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S,
-//         plus a 48 kHz test SPDIF (#101: bare LED into the dev
-//         box's optical input — the digital measurement path)
+// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S.
+//         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path
+//         (#101, Thor 2026-09-11): Focusrite coax for listening AND
+//         an LED-TOSLINK tap into the dev box for bit-perfect
+//         capture. The 96 kHz SPDIF is parked on pin 86.
 // Timing: drum.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the SPDIF cell boundary
 //         (6 sysclk = 1 cell), and their half-rate 48 kHz
@@ -168,10 +170,11 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 48 kHz test SPDIF (#101) — the digital measurement path.
-    // Drives a bare red LED (68 Ω series) taped into the dev box's
-    // ICUSBAUDIO7D optical input; its CM106 receiver caps at 48 kHz,
-    // hence the second transmitter instead of a tap on the main one.
+    // 48 kHz SPDIF (#101) — THE PRIMARY AUDIO PATH (Thor 2026-09-11):
+    // pin 27 feeds the Focusrite coax (listening) and a red LED
+    // (68 Ω series) taped into the dev box's ICUSBAUDIO7D optical
+    // input (bit-perfect capture); its CM106 receiver caps at 48 kHz,
+    // hence the second transmitter instead of a tap on the 96 kHz one.
     // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
     // sits at 48 kHz — content near the new Nyquist (24 kHz) is
     // already crushed by the 2 kHz master tilt, so no longer filter

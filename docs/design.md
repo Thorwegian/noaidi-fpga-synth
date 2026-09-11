@@ -152,6 +152,17 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   Talks to the FPGA as SPI master (measured clean to 40 MHz).
 - **Tang Nano 20K**: a dumb-but-fast 256-voice synthesis engine. It has
   no concept of notes, MIDI or CCs.
+- **Audio outputs (#101, Thor 2026-09-11): the 48 kHz S/PDIF on pin 27
+  is THE PRIMARY AUDIO PATH** — one pin, two sinks: the coax (through
+  the consumer-level divider) to the Focusrite for human listening,
+  and a red LED taped into the dev box's ICUSBAUDIO7D optical input
+  for bit-perfect automated capture (LED-as-TOSLINK; first light
+  2026-09-11 — tone −0.0 dBFS on the exact FFT bin, tone-off capture
+  bit-exact zeros). It carries the main mix decimated by 2 with pair
+  averaging; the 2 kHz master tilt has already crushed content near
+  the 24 kHz Nyquist. The 96 kHz S/PDIF is parked on header pin 86,
+  unwired — #53's future bit-perfect high-rate instrument. I2S
+  unchanged.
 
 ## Clocking ✅
 
@@ -178,8 +189,11 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   crystal+rPLL+DDS fallback was removed; it lives only in git
   history.)
 - **The drum is the sole timebase**: one 768-slot counter yields the
-  sample tick, the 256 element-entry slots, and the SPDIF cell tick
-  (every 6 slots; 768 = 128 cells × 6). No other audio-rate counter
+  sample tick, the 256 element-entry slots, the SPDIF cell tick
+  (every 6 slots; 768 = 128 cells × 6), and — since #101 — their
+  half-rate twins for the 48 kHz output (sample every 1536 sysclk,
+  cell every 12; same counters, so the 48 kHz frame boundary sits on
+  the 48 kHz cell grid by construction). No other audio-rate counter
   exists in the design.
 
 ## Number formats ✅
