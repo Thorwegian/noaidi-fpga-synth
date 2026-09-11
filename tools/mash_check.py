@@ -14,9 +14,12 @@ Sequence:
      CC 123 - the panic path would mask exactly the bug we hunt)
   4. wait for the release tails (D/R can be long under random CCs)
      by polling 1 s captures from the digital S/PDIF input
-  5. PASS = the capture reaches BIT-EXACT digital silence (the #101
-     path makes true zero measurable); FAIL = anything still sounding
-     at the deadline, with its RMS and spectrum printed
+  5. PASS = the capture reaches AC-SILENCE: zero samples deviate from
+     each channel's parked constant, and that constant (DC) is within
+     4 LSB of zero. The DC tolerance exists because the output tilt's
+     truncating integrator parks a ~1-LSB DC after signal decays
+     (#102) - pure DC, inaudible, and NOT a stuck voice. Anything
+     with actual AC energy at the deadline = FAIL, spectrum printed.
 
 CCs excluded from randomization - each would MASK a stuck voice:
   7 (volume could land at 0), 119 (test tone replaces the mix),
@@ -98,7 +101,11 @@ def reset_boards():
 
 
 def capture_probe(secs=1):
-    """Return (rms_db, max_abs, nonzero_count) from a short capture."""
+    """Return (rms_db, ac_nonzero, (dc_l, dc_r)) from a short capture.
+
+    ac_nonzero counts samples that deviate from their channel's median
+    - the parked-DC-tolerant silence metric (#102: the output tilt
+    parks a ~1-LSB DC; that is not a stuck voice)."""
     subprocess.run(["amixer", "-c", "1", "cset", "numid=16", "2"],
                    capture_output=True)
     subprocess.run(["amixer", "-c", "1", "cset", "numid=13", "on"],
@@ -115,9 +122,11 @@ def capture_probe(secs=1):
         return None
     if d.size < RATE:
         return None
+    st = d.reshape(-1, 2)
+    dcs = (int(np.median(st[:, 0])), int(np.median(st[:, 1])))
+    ac = int((st[:, 0] != dcs[0]).sum() + (st[:, 1] != dcs[1]).sum())
     f = d.astype(np.float64) / 32768.0
-    return (db(np.sqrt((f ** 2).mean())), float(np.abs(f).max()),
-            int(np.count_nonzero(d)))
+    return (db(np.sqrt((f ** 2).mean())), ac, dcs)
 
 
 def spectrum_lines(path="/tmp/mash_probe.wav", count=4):
@@ -227,19 +236,18 @@ def main():
     print(f"[settle] waiting for digital silence "
           f"(max {args.settle} s; D/R tails may be long) ...")
     t0 = time.time()
-    last = None
     while time.time() - t0 < args.settle:
-        last = capture_probe(1)
-        if last is None:
+        probe = capture_probe(1)
+        if probe is None:
             print("  capture failed (no S/PDIF lock?)")
             time.sleep(5)
             continue
-        rms, peak, nz = last
+        rms, ac, dcs = probe
         print(f"  t=+{time.time() - t0:5.0f}s  RMS {rms:+7.1f} dBFS  "
-              f"nonzero {nz}")
-        if nz == 0:
-            print(f"RESULT: PASS - bit-exact silence after mash "
-                  f"(seed {seed})")
+              f"AC-deviating {ac}  DC {dcs}")
+        if ac == 0 and max(abs(dcs[0]), abs(dcs[1])) <= 4:
+            print(f"RESULT: PASS - AC-silent after mash (seed {seed}; "
+                  f"parked DC {dcs} is the known #102 tilt residual)")
             return 0
         time.sleep(5)
     print("RESULT: FAIL - still sounding at the deadline "
