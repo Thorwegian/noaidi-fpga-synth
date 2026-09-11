@@ -158,9 +158,14 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   and a red LED taped into the dev box's ICUSBAUDIO7D optical input
   for bit-perfect automated capture (LED-as-TOSLINK; first light
   2026-09-11 — tone −0.0 dBFS on the exact FFT bin, tone-off capture
-  bit-exact zeros). It carries the main mix decimated by 2 with pair
-  averaging; the 2 kHz master tilt has already crushed content near
-  the 24 kHz Nyquist. The 96 kHz S/PDIF is parked on header pin 86,
+  bit-exact zeros). **The engine itself is untouched — everything
+  inside the FPGA still runs at 96 kHz**; only this output tap
+  decimates by 2, currently with pair averaging (a 2-tap boxcar,
+  null at 48 kHz). Its stopband is shallow, so 20–28 kHz content
+  folds down attenuated mainly by the 2 kHz master tilt; a
+  windowed-sinc / Lanczos polyphase decimator is the acknowledged
+  upgrade, **gated on Thor's listening verdict** (Thor, 2026-09-11:
+  "let's have a listen first"). The 96 kHz S/PDIF is parked on header pin 86,
   unwired — #53's future bit-perfect high-rate instrument. I2S
   unchanged.
 
