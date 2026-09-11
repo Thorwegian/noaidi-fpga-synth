@@ -39,6 +39,14 @@ the architecture changes. Agent will neatly summarise.
   2026-09-10: a fresh bitstream left the synth dead until reboot). This
   rule also underwrites the engine's no-op write elision: the CPU image
   is trusted to equal FPGA state ONLY because reloads force a reboot.
+- **Terminology and tone (Thor, 2026-09-11)**: agents use PROPER,
+  textbook/industry-standard terminology — when in doubt, prefer what the
+  relevant Wikipedia article calls the thing — even when the user's request
+  is informal or brief. Do not mirror slang back as the technical record.
+  BUT: pair the correct term with tangible, everyday explanation
+  (Feynman-style) — Thor is self-taught and reviews best when formal names
+  come with a plain-language picture of what the thing actually does. The
+  formal term names it; the everyday sentence makes it checkable.
 - **Aim for Big-O efficiency and lazy evaluation across the code base**
   (Thor, 2026-09-11): prefer O(changed) over O(everything) — dirty
   tracking, no-op elision against the reference image, compute/program
