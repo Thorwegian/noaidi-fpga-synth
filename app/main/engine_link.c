@@ -135,7 +135,9 @@ static void engine_task(void *arg)
         }
         prod_cmd_t pc;
         while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
-            if (pc.entry >= ENGINE_NUM_PRODUCERS || pc.word >= 3)
+            // entry is uint8_t = 0..255 — exactly the #100 pool, so
+            // the old entry bound is vacuous (the type IS the bound)
+            if (pc.word >= 3)
                 continue;
             if (s_prod[pc.entry][pc.word] == pc.value)   // no-op elision
                 continue;
@@ -295,7 +297,7 @@ uint32_t engine_link_drops(void)
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
 {
-    if (s_prod_queue == NULL || entry >= ENGINE_NUM_PRODUCERS || word >= 3)
+    if (s_prod_queue == NULL || word >= 3)   // uint8_t entry spans the pool
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
     // Drops stay possible under a wedged flush (blocking here was
