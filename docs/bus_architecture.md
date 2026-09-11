@@ -169,10 +169,17 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   CUTOFF destination riding that fan-out.
 - **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
   polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
-  to 32 LFOs + bus sources + margin. One entry = type + config + state.
-  Walker budget: ≤2 idle slots per entry per sample → 256 of ~497
-  idle slots. If the pool ever grows again, half-rate updates double
-  the headroom (still 48 kHz effective).
+  to 32 LFOs + sends + margin. One entry = type + config + state.
+  Walker budget: 3 idle slots per entry per sample → 384 of ~500
+  idle slots.
+- **Half-rate walker — APPROVED (Thor, 2026-09-11, #98)**: for the
+  per-osc bus graph (~226 entries: 128 per-osc pitch/gain sends + 32
+  cutoff sends + 64 ADSRs + LFOs) the walker walks alternate halves
+  of the table each sample — every source updates at 48 kHz
+  effective. Thor's reasoning: "any zipper noise will be at 24 kHz
+  and thus likely inaudible, especially after our master bus LPF"
+  (the output tilt). Doubles the entry budget to ~320; pool grows to
+  256 entries when that rung lands.
 - **Producer multiplies**: ≤200/sample on one 18×18 DSP lane
   (envelope scaling ~64, LFO depths ~32, combiner terms, margin).
   Escape hatch: shift-add amounts (~1.5 dB steps, zero DSP).
