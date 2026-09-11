@@ -32,13 +32,33 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   coincides with global scope while exactly one channel exists. Older
   "global bus" wording in docs and code comments reads as Channel.
 - **Source / sink is the couple** (Thor, 2026-09-03): things that
-  write buses (LFOs, ADSRs, future combiners) are SOURCES; the
-  parameters that read buses are SINKS. "Producer" was a third wheel
-  that snuck into code and docs — being retired. Code identifiers
-  (`producer_*`, `MAP_PROD_BASE`, `engine_link_prod_write`, ...)
-  still carry the old word until their rename rides the next
-  zero-behavior naming pass; docs use source/sink and quote code
-  names only as code.
+  write buses are SOURCES; the parameters that read buses are SINKS.
+  "Producer" was a third wheel that snuck into code and docs — being
+  retired. Code identifiers (`producer_*`, `MAP_PROD_BASE`,
+  `engine_link_prod_write`, ...) still carry the old word until #50
+  (now on the #93 roadmap; renames to `source_*`); docs use
+  source/sink and quote code names only as code.
+- **The full terminal triad — source / sink (drain) / gate** (Thor +
+  agent, 2026-09-11, blessed): source/sink is FET source/drain, and
+  the analogy completes with the GATE — a control input that steers
+  a source's output without its signal entering the sum. The ADSR's
+  gate-bus read is a gate terminal, making the ADSR a *gated
+  generator*, not a processor.
+- **Generators vs processors** (Thor, 2026-09-11, blessed):
+  GENERATORS output signal without signal inputs (LFO: no inputs;
+  ADSR: one gate input only). PROCESSORS take signal in and put
+  signal out. The first processor is the **SEND** (walker type 3) —
+  the mixing-console aux send: taps a bus's signal, applies a level
+  (DEPTH; sign = polarity flip), routes into another bus's sum.
+  C = A·x + B·y is two sends sharing a target bus.
+- **The fabric IS a node graph** (Thor + agent, 2026-09-11): a bus
+  is a processor with many sinks summed to one source; the walker
+  table is a topological sort (the allocator owns the order), one
+  evaluation pass per sample; "no cycles, ever" keeps it a DAG. The
+  hardware bus/processor distinction is an optimization of the
+  common node shape, not a different model. The #92 bus-sum RAM
+  makes the graph's edges real (sends reading true output sums, not
+  firmware bases).
 - Banned: "patch" for parameter data (everything is live; see
   Corrections). "Patch panel" survives only as the CV-routing metaphor.
 

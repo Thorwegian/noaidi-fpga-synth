@@ -148,10 +148,13 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   that a dedicated per-element offset is the pragmatic form. All 8
   elements of a voice share one pitch bus; note-on writes one base,
   not eight.
-- **Bus as source — type 3 (#44, built 2026-09-10)**: Thor's
-  reframing killed the "combiner" as a concept — *a bus is already a
-  combiner of sources*; the only new thing needed is **"other bus" as
-  a source**. A type-3 entry is stateless: CFG names a SOURCE bus
+- **The SEND — type 3 (#44, built 2026-09-10; named 2026-09-11,
+  #98)**: Thor's reframing killed the "combiner" as a concept — *a
+  bus is already a combiner of sources*; the only new thing needed
+  is **"other bus" as a source**, and its blessed name is the SEND
+  (the mixing-console aux send — the fabric's first PROCESSOR, vs
+  the generators LFO/ADSR). A send entry is stateless: CFG names a
+  SOURCE bus
   (in the field the ADSR uses for its gate bus, so the walker's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
