@@ -97,7 +97,8 @@ def main():
         for num, val in ((10, 32), (31, 64), (85, 96), (107, 72)):
             cc(num, val)
             time.sleep(0.15)
-        cc(31, 127)              # restore key tracking default
+        cc(31, 64)               # restore key tracking default
+                                 # (64 = 100% since the #94 0-200% scale)
 
         # ---- 2. measured pan check ----
         results = {}
