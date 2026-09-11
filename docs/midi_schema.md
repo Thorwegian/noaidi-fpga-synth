@@ -107,9 +107,9 @@ equal-ratio ladder.
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
 | 114 | LFO 1 destination | DEFERRED to the mod matrix — LFO 1 is the pitch vibrato (one producer per bus in the walker) |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
-| 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance `val<<5` (≈2 octaves of Q) |
+| 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance and cutoff `val<<5` (up to ~±4 oct), pitch `val<<2` |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | 3-way `(val*3)>>7`: duty/PWM (global bus 1) / resonance / PITCH (sums with LFO 1 via bus summing #84 — dual vibrato) |
+| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1, #84 — dual vibrato) / **CUTOFF** (#92 first route: channel cut bus → per-voice sends; needs the bus-sum read, 2026-09-11) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |

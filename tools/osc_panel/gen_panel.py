@@ -197,7 +197,8 @@ root_widgets = [
         knob(109, "LFO2 Rate", 64),
         knob(110, "LFO2 Depth", 0),
         switch(111, "LFO2 Shape", WAVES, 64),
-        switch(112, "LFO2 Dest", {"PWM": 0, "Reso": 64, "Pitch": 127}, 0),
+        switch(112, "LFO2 Dest",
+               {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 0),
     ]),
     section("Global", [
         # knobs, not faders (Thor: vertical sliders nearly unusable).

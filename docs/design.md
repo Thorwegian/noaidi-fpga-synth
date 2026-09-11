@@ -56,9 +56,9 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   table is a topological sort (the allocator owns the order), one
   evaluation pass per sample; "no cycles, ever" keeps it a DAG. The
   hardware bus/processor distinction is an optimization of the
-  common node shape, not a different model. The #92 bus-sum RAM
-  makes the graph's edges real (sends reading true output sums, not
-  firmware bases).
+  common node shape, not a different model. The bus-sum RAM (landed
+  2026-09-11) makes the graph's edges real: sends read true output
+  sums, not firmware bases.
 - Banned: "patch" for parameter data (everything is live; see
   Corrections). "Patch panel" survives only as the CV-routing metaphor.
 

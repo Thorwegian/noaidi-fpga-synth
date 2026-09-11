@@ -125,8 +125,10 @@ localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
           | (32'd16384 << 16);                      // 93.75 Hz
 localparam [31:0] SRC_ADSR_BUS3_GATE5 =
     32'd2 | (32'd3 << 6) | (32'd5 << 16);           // ADSR type
-localparam [31:0] SRC_BUS3_FROM6 =                  // BUS source (#44):
-    32'd3 | (32'd3 << 6) | (32'd6 << 16);           // read bus 6 -> bus 3
+localparam [31:0] SRC_BUS3_FROM6 =                  // SEND (#44/#98):
+    32'd3 | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
+localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
+    32'd1 | (32'd1 << 4) | (32'd6 << 6) | (32'd16384 << 16);
 localparam [31:0] BENCH_ADSR_RATES = 32'hF4F000F0;  // fast sim rates
 localparam [31:0] DEPTH_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
 localparam [31:0] DEPTH_HALF  = 32'h00008000;       // 0.5

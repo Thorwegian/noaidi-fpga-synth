@@ -216,6 +216,39 @@ module tb_prog_sources;
             $display("triple chain replica = 4708 exact (base+0+channel)");
         end
 
+        // SEND READS THE OUTPUT SUM (#92/#98): a WALKER source's
+        // contribution must propagate through a send — the property
+        // the firmware-base read could not provide. LFO tremolo
+        // (entry 0) writes bus 6; the send (entry 2, after it) relays
+        // bus 6's SUM into gain bus 3 at unity. The gain must wobble
+        // exactly like the direct-LFO case B4: alternating window
+        // peaks with ratio >= 5.
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_BUS6);
+        spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
+        spi_word_write(src_addr(1, 0), SRC_OFF);
+        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 2), DEPTH_UNITY);
+        flip;
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_BUS6);
+        spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
+        spi_word_write(src_addr(1, 0), SRC_OFF);
+        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 2), DEPTH_UNITY);
+        spi_word_write(bus_addr(3), 32'h00000000);      // gain base 0
+        spi_word_write(bus_addr(6), 32'h00000000);      // sum = LFO only
+        observe(60);
+        wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
+        for (step = 0; step < 8; step = step + 1) begin
+            observe(256);
+            if (peak > wmax) wmax = peak;
+            if (peak < wmin) wmin = peak;
+        end
+        $display("LFO through send: window peaks max=%0d min=%0d", wmax, wmin);
+        if (wmin == 0 || (wmax * 2) / wmin < 5) begin
+            $display("FAIL: walker contribution not visible through the send (#92)");
+            errors = errors + 1;
+        end
+
         report;
     end
 

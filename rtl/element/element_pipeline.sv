@@ -298,6 +298,18 @@ module element_pipeline #(
     initial for (bbi = 0; bbi < synth_pkg::NUM_BUSES; bbi = bbi + 1)
         bus_base[bbi] = 18'sd0;
 
+    // BUS-SUM RAM (#92/#98): the walker-facing mirror of a bus's
+    // OUTPUT SUM — written by the same strobes as the replicas, read
+    // at P1 by SEND entries. This is what makes the node graph's
+    // edges real (Thor, #98): a send references the bus's summed
+    // output (firmware base + every source contribution written so
+    // far), not the firmware base alone. With sources ordered before
+    // their sends in the table, propagation is same-sample.
+    reg signed [17:0] bus_sum_ram [0:synth_pkg::NUM_BUSES-1];
+    integer bsi;
+    initial for (bsi = 0; bsi < synth_pkg::NUM_BUSES; bsi = bsi + 1)
+        bus_sum_ram[bsi] = 18'sd0;
+
     // Producer walker replica-write strobes (driven below)
     logic               walker_bus_write;
     logic [9:0]         walker_bus_addr;
@@ -369,6 +381,9 @@ module element_pipeline #(
     always_ff @(posedge clk)
         if (bus_commit)   bus_ram_gr[bus_mailbox_addr] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_gr[walker_bus_addr]   <= walker_bus_value;
+    always_ff @(posedge clk)
+        if (bus_commit)   bus_sum_ram[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_sum_ram[walker_bus_addr]  <= walker_bus_value;
 
     //----------------------------------------------------------------
     // Producer walker (B4/B5, bus_architecture.md) — the idle-slot
@@ -448,6 +463,7 @@ module element_pipeline #(
     logic [35:0] producer_table_readout;
     logic [27:0] producer_state_readout;
     logic signed [17:0] bus_base_readout;
+    logic signed [17:0] bus_sum_readout;   // send-source read (#92/#98)
     logic        walker_read_valid; // a P0 read was issued last cycle
 
     // A stage — latched at the end of P1, stable for 3 cycles
@@ -618,25 +634,21 @@ module element_pipeline #(
                 adswap_toggle_syncustain_target  <= {producer_table_readout[23:16], 18'b0};
                 adsr_release_step <= (21'd16 + 21'(producer_table_readout[27:24]))
                                << producer_table_readout[31:28];
-                // Source types: 1 = LFO, 2 = ADSR, 3 = BUS (issue #44,
-                // Thor's reframing: a bus is already a combiner of
-                // sources — the only new thing needed is "other bus"
-                // as a source). Type 3 is STATELESS: CFG[25:16] names
-                // the SOURCE bus (the field the ADSR uses for its gate
-                // bus, so the P1 read needs no change), the value read
-                // is multiplied by DEPTH like any source (0x10000 =
-                // unity copy, sign inverts) and chain-adds to the
-                // target. NOTE the read is of bus_base — the FIRMWARE-
-                // written base. Walker contributions live only in the
-                // replicas, so a type-3 source relays firmware channel
-                // values; walker-source→bus→type-3 relaying is not
-                // visible (a #92 design point when LFOs target
-                // channel buses).
+                // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
+                // SEND (the fabric's processor — #44/#98). A send is
+                // STATELESS: CFG[25:16] names the source bus (the
+                // field the ADSR uses for its GATE input), the value
+                // read is the bus's OUTPUT SUM (bus_sum_ram, #92 —
+                // firmware base + all contributions written so far;
+                // sources ordered before their sends propagate
+                // same-sample), multiplied by DEPTH like any source
+                // (0x10000 = unity, sign = polarity) and chain-added
+                // to the target.
                 producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2
                                                            || producer_type_a == 4'd3);
                 target_bus_b <= target_bus_a;
                 mod_source_value   <= (producer_type_a == 4'd1) ? walker_lfo_wave
-                                    : (producer_type_a == 4'd3) ? bus_base_readout
+                                    : (producer_type_a == 4'd3) ? bus_sum_readout
                                             : $signed({2'b0, producer_state_prev[25:10]});
                 walker_write_valid  <= 1'b0;              // P5 write just happened
             end else begin
@@ -665,6 +677,10 @@ module element_pipeline #(
         producer_state_readout    <= producer_state_ram[walker_entry[6:0]];
         bus_base_readout <= bus_base[(walker_step == 2'd1) ? producer_table_readout[25:16]
                                               : target_bus_b];
+        // SEND source read (#92/#98): the OUTPUT SUM of CFG[25:16] —
+        // read in parallel with bus_base (own RAM, own register);
+        // P2 selects by type. Only meaningful at P1.
+        bus_sum_readout <= bus_sum_ram[producer_table_readout[25:16]];
     end
     always_ff @(posedge clk)
         if ((walker_step == 2'd0) && producer_valid_a
