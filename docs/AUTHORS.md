@@ -14,7 +14,7 @@ the historical record cannot itself carry. Established per issue #99.
 | Thor | [@Thorwegian](https://github.com/Thorwegian) | Project owner; hardware, DSP direction, ear tests, decisions. |
 | Jens Tore | [@jenstf](https://github.com/jenstf) | Operates the Claude Code agent; relays between Thor and Claude. |
 | Claude (Claude Code) | [@noaidi-claude](https://github.com/noaidi-claude) | AI coding agent, operated by @jenstf. Machine account, created 2026-09-12. Commits also carry a `Co-Authored-By: Claude` trailer naming the exact model. |
-| Hermes (Hermes Oracle) | *(pending)* | Thor's second AI agent. Its own machine account is its operator's to create; until then its work appears under @Thorwegian. |
+| Hermes (Hermes Oracle) | [@HermesOracle](https://github.com/HermesOracle) | Thor's second AI agent, operated by @Thorwegian. Machine account since 2026-09-12; verified collaborator, HTTPS push path, commits attributed to the account. |
 
 ## The tangle this file untangles
 
@@ -22,8 +22,8 @@ Before 2026-09-12, neither agent had its own GitHub identity. Both
 acted through @Thorwegian's `gh` login, so a large share of the issues,
 comments and commits attributed to @Thorwegian were in fact written by
 Claude or by Hermes. From 2026-09-12 onward each agent uses its own
-account (Claude: @noaidi-claude; Hermes: pending), so new attribution
-is correct at the source.
+account (Claude: @noaidi-claude; Hermes: @HermesOracle), so new
+attribution is correct at the source.
 
 ### Reconstructing the past
 
@@ -34,8 +34,10 @@ is correct at the source.
 - **Claude's issues/comments** filed via @Thorwegian's login cannot be
   reassigned (GitHub API limitation). Where it matters, a provenance
   line is added to the issue body rather than faked.
-- **Hermes's contributions** need one enumeration from Hermes's
-  operator (issue/commit ranges); appended here when supplied.
+- **Hermes's contributions** made before 2026-09-12 (under
+  @Thorwegian's login) are best enumerated by its operator as
+  issue/commit ranges; appended here when supplied. From 2026-09-12
+  its work is attributed to @HermesOracle at the source.
 
 ### On rewriting commit history
 
