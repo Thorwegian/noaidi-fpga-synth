@@ -1,7 +1,15 @@
-// spi_regs.c — ESP32-C3 driver for spi_slave_regs FPGA peripheral
+// spi_regs.c — ESP32-C3 SPI transport init + LEGACY byte-protocol
+// reference (#109)
 //
-// Uses ESP-IDF SPI master API.  For Arduino-ESP32, the hardware
-// SPI calls would differ slightly but the protocol logic is identical.
+// LIVE: fpga_spi_init() — the ESP-IDF SPI-master bus/device setup
+// every current transfer rides (engine_link.c and the word-protocol
+// helpers use the device handle exported here).
+//
+// REFERENCE ONLY: the fpga_reg_* byte-protocol functions below talk
+// to spi_slave_regs.sv, the bring-up peripheral. The live gateware
+// peripheral is spi_bus.sv (16-bit word addresses, 32-bit data —
+// docs/memory_map.md); these functions are kept, like the .sv file,
+// as the known-good A/B reference for SPI link debugging.
 
 #include "spi_regs.h"
 #include "driver/spi_master.h"
