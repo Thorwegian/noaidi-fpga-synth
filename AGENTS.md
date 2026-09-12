@@ -130,7 +130,8 @@ hardware.
   flash: `make flash`.
 - Sim: `cd rtl && make -j4 sim` — suite: `sim-elem` (element pipeline),
   `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spdif48` (the 48 kHz
-  primary output + drum half-rate ticks), `sim-spi`, `sim-bus` (word protocol),
+  primary output + drum half-rate ticks), `sim-tilt` (output-tilt
+  error feedback, #102), `sim-spi`, `sim-bus` (word protocol),
   `sim-prog-*` (programming chain, 4 splits), `sim-stab` (SVF stability corners),
   `sim-osc` (waveforms + pulse-duty). `sim-prog-full` = long soak, not in the
   default suite.
