@@ -103,7 +103,10 @@ module tb_osc_core;
         check(h_mid < h_hi,  "pulse duty mid  < high (width tracks duty)");
         check(h_mid >= N/2-2 && h_mid <= N/2+2, "pulse at duty 0 is ~50%");
 
-        if (errors == 0) $display("RESULT tb_osc_core: PASS");
+        // "ALL PASS" is the suite-wide success marker ci_bench.sh
+        // greps for (this bench read "RESULT ...: PASS", which the
+        // harness did not recognize once sim-osc joined CI in #107).
+        if (errors == 0) $display("RESULT tb_osc_core: ALL PASS");
         else             $display("RESULT tb_osc_core: FAIL (%0d)", errors);
         $finish;
     end
