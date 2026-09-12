@@ -95,10 +95,17 @@ void app_main(void)
     fails += !id_ok;
 
     printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
-    fpga_word_write(0x0805, 0xBAD0BAD0);      // would alias 0x0005 if broken
-    uint32_t z = fpga_word_read(0x0805);
+    // 0x1005 aliases 0x0005 under the 11-bit backed mask AND decodes
+    // to nothing else. The previous probe address, 0x0805, was inside
+    // the BUS POOL (0x0800-0x0BFF): the store dropped it as intended,
+    // but spi_bus fired the bus mailbox and parked bus 5 at a large
+    // negative base every boot - a self-test moving a live fader
+    // (issue #103). Probe addresses must miss EVERY decode window:
+    // backed 0x0000-0x07FF, bus 0x0800-0x0BFF, elements 0x2000-0x5FFF.
+    fpga_word_write(0x1005, 0xBAD0BAD0);      // would alias 0x0005 if broken
+    uint32_t z = fpga_word_read(0x1005);
     uint32_t keep = fpga_word_read(0x0005);
-    printf("word[0x0805] = %08lX %s, word[0x0005] = %08lX %s\n",
+    printf("word[0x1005] = %08lX %s, word[0x0005] = %08lX %s\n",
            (unsigned long)z, z == 0 ? "OK" : "FAIL",
            (unsigned long)keep, keep == 0xDEADBEEF ? "OK" : "FAIL");
     fails += (z != 0) + (keep != 0xDEADBEEF);
@@ -117,5 +124,8 @@ void app_main(void)
 #if CONFIG_NOAIDI_STRESS_TEST
     stress_test_start();  // synthetic MIDI flood (#70 repro); off by default
 #endif
-    printf("play the keyboard — gate-by-gain, clicks expected\n");
+    // NOTE: boot-capture tooling waits for the "play the keyboard"
+    // marker - keep the prefix if this line ever changes.
+    printf("play the keyboard\n");   // (the gate-by-gain/clicks caveat
+                                     // predates the ADSR era - #110)
 }
