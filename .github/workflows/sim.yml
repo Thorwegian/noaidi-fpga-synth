@@ -31,6 +31,7 @@ jobs:
           - sim-elem
           - sim-outputs
           - sim-spdif
+          - sim-spdif48
           - sim-spi
           - sim-bus
           - sim-prog-boot
@@ -38,6 +39,8 @@ jobs:
           - sim-prog-bus
           - sim-prog-sources
           - sim-stab
+          - sim-osc
+          - sim-tilt
     steps:
       - uses: actions/checkout@v4
 
