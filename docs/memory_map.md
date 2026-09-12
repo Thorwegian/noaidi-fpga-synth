@@ -282,16 +282,14 @@ Voice v base address: `0x2000 + v × 64`.
 
 | Offset | Register | Contents | Status |
 |--------|----------|----------|--------|
-| `+0` | `OSC` | `[15:0]` pitch (UQ4.10 in `[13:0]`, `[15:14]` reserved), `[19:16]` osc type (0 saw, 1 pulse, 2 tri, 3 sine, 4–15 reserved: noise, wavetable, sample, ...), `[20]` phase reset, `[31:21]` reserved | implemented |
+| `+0` | `OSC` | `[13:0]` pitch UQ4.10, `[15:14]` waveform (0 saw, 1 pulse, 2 tri, 3 sine — wider codes for noise/wavetable/sample take reserved bits when they land, #64/#85), `[31:16]` reserved. (An earlier draft documented type at `[19:16]` + a phase-reset bit — never what the pipeline decoded; corrected per #110.) | implemented |
 | `+1` | `DUTY` | `[23:0]` duty Q0.24 signed, `[31:24]` reserved | implemented |
 | `+2` | `FILTER` | `[13:0]` cutoff UQ4.10, `[27:14]` resonance UQ4.10 **log₂** — octaves of Q above Butterworth (0 = Butterworth = heaviest decodable damping; one integer ≈ +6 dB of resonant peak; top of range underflows the decode to q1 = 0 = self-oscillation), `[31:28]` reserved. Decided 2026-09-02 ("break with convention"); decodes via q1_lut + barrel shift, the cutoff-K pattern | implemented |
 | `+3` | `GAIN` | `[7:0]` **volume** L UQ4.4, `[15:8]` volume R UQ4.4 (issue #40: 0x00 = silence/exact mute, 0xFF = loudest — a zeroed word is silent-by-default; inverted to the attenuation decode at the effective-parameter seam), `[23:16]` mode byte: `[16]` 12/24 dB, `[18:17]` filter type, `[19]` smoothing coeff select, `[23:20]` reserved | implemented |
-| `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run; later the ADSR trigger), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
+| `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run — a control input, NEVER an envelope trigger: envelopes are gated by their own gate-bus reads in the source table, #98; the register is slated for removal in #100), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `PTRS0` | bus pointers ([bus_architecture.md](bus_architecture.md)): `[9:0]` pitch, `[19:10]` duty, `[29:20]` cutoff — 0 = bus 0 = no modulation | cutoff live (B1) |
 | `+6` | `PTRS1` | bus pointers: `[9:0]` filter 1/Q, `[19:10]` gain L, `[29:20]` gain R | live (B2) |
-| `+5` | `ADSR1` | `[7:0]` A, `[15:8]` D, `[23:16]` S UQ4.4, `[31:24]` R — times are log2: 4-bit octave + 4-bit fraction (1/16 octave per LSB), decoded to linear via the LUT+barrel-shift pattern | TBD |
-| `+6` | `ADSR2` | same layout (amp + filter) | TBD |
-| `+7..+15` | — | envelope curve, sustain shape, ... | reserved |
+| `+7..+15` | — | reserved. (A pre-bus draft placed per-element ADSR words at +5/+6, colliding with PTRS0/PTRS1 — removed per #110; envelopes live in the SOURCE TABLE at `0x0100–0x04FF`, shared between elements by design.) | reserved |
 | `+16..+23` | `ROUTE[0..7]` | patch cables: `[3:0]` source type, `[14:4]` source index, `[17:15]` sink (0 pitch, 1 duty, 2 cutoff, 3 Q, 4 gain L, 5 gain R, 6–7 reserved), `[31:18]` amount sQ2.12 | TBD |
 | `+24..+63` | — | per-element LFO, glide, FM amount, sample position, ... | reserved |
 
@@ -326,8 +324,9 @@ Notes:
 
 ## SPI speed budget
 
-- Current firmware default: 1 MHz, 8-bit addressing, one CS frame per
-  transaction — bring-up only, and now unnecessarily conservative.
+- Current firmware default: **10 MHz** (engine_link era), one CS frame
+  per transaction. (The 1 MHz / 8-bit-addressing figure this line once
+  carried was the bring-up configuration — #110.)
 - **Measured on hardware (2026-08-28): clean at every rate from 1 MHz to
   40 MHz.** 88/88 transactions correct — write four registers, burst-read
   them back, check the ID byte and all four values, ×8 repetitions at each

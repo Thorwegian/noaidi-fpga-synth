@@ -60,10 +60,12 @@ package synth_pkg;
     //                  increment — 5.7 mHz steps, 375 Hz max)
     //             ADSR: [25:16] gate bus (watched, level-sensitive:
     //                   value > 0 = held)
-    //   +1 RATES (ADSR): [7:0] attack, [15:8] decay, [23:16] release
-    //             — 8-bit log2 rates: increment = (16+frac) << oct on
-    //             the 22-bit level (instant .. ~2.7 s) — and [31:24]
-    //             sustain (level fraction, 8 bits)
+    //   +1 RATES (ADSR): [7:0] attack, [15:8] decay, [23:16] SUSTAIN
+    //             (level fraction, 8 bits), [31:24] RELEASE — byte
+    //             order matches patch_adsr_word(), the pipeline
+    //             decode and memory_map.md (a swapped S/R in this
+    //             comment was issue #105). Rates are 8-bit log2:
+    //             increment = (16+frac) << oct on the 22-bit level
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
     // A producer's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).

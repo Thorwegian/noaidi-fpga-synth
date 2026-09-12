@@ -986,10 +986,13 @@ void voice_alloc_init(void)
     wire_pointers();
     // Null buses. The duty pointer (PTRS0[19:10]) and every other
     // pointer left at its default target bus 0 — the intended "zero"
-    // bus. Nothing writes bus 0/1, and unwritten bus BSRAM is NOT
+    // bus. NO RUNTIME PATH ever writes bus 0/1 (that is what makes
+    // them safe "zero" targets), and unwritten bus BSRAM is NOT
     // guaranteed zero on the GW2AR (the very reason pitch/reso below
-    // are written explicitly). Without this, eff_duty = word +
-    // (garbage << 13) saturates and CC 25 pulse-width does nothing.
+    // are written explicitly) — hence these two one-time nulling
+    // writes at init, the only writes those buses ever get. Without
+    // them, eff_duty = word + (garbage << 13) saturates and CC 25
+    // pulse-width does nothing.
     engine_link_bus_write(0, 0);
     engine_link_bus_write(1, 0);
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
