@@ -37,7 +37,8 @@
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
-//   audio      Q2.16   (18-bit)
+//   audio      Q4.14   (18-bit; repointed from Q2.16 in #63 — same
+//              word, clamp ±8.0, +12 dB resonance headroom)
 //   SVF states Q8.28   (36-bit)
 //   pitch/fc   UQ4.10  (14-bit)
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
@@ -517,12 +518,12 @@ module element_pipeline #(
     // cone the critical path (76 MHz — 3.5% margin, on a timing
     // model proven optimistic five times).
     logic        adsr_gate;
-    logic [20:0] adsr_attack_step, adswap_toggle_prevecay_step, adsr_release_step;   // 1/16-LSB units
-    logic [25:0] adswap_toggle_syncustain_target;
+    logic [20:0] adsr_attack_step, adsr_decay_step, adsr_release_step;   // 1/16-LSB units
+    logic [25:0] adsr_sustain_target;
 
     // next-state, computed at P3 from registered inputs only.
     // ADSR level is UQ22.4 (26 bits).
-    wire [1:0]  adswap_toggle_synctage_prev  = producer_state_prev[27:26];
+    wire [1:0]  adsr_stage_prev  = producer_state_prev[27:26];
     wire [25:0] adsr_level_prev  = producer_state_prev[25:0];
     logic [27:0] producer_state_next;
     always_comb begin
@@ -535,15 +536,15 @@ module element_pipeline #(
                 ? {AST_REL, adsr_level_prev - 26'(adsr_release_step)}
                 : {AST_IDLE, 26'd0};
         end else begin
-            case (adswap_toggle_synctage_prev)
+            case (adsr_stage_prev)
                 AST_ATT: producer_state_next =
                     ({1'b0, adsr_level_prev} + 27'(adsr_attack_step) > 27'h3FFFFFF)
                         ? {AST_DEC, 26'h3FFFFFF}
                         : {AST_ATT, adsr_level_prev + 26'(adsr_attack_step)};
                 AST_DEC: producer_state_next =
-                    (adsr_level_prev > adswap_toggle_syncustain_target + 26'(adswap_toggle_prevecay_step))
-                        ? {AST_DEC, adsr_level_prev - 26'(adswap_toggle_prevecay_step)}
-                        : (adsr_level_prev > adswap_toggle_syncustain_target) ? {AST_DEC, adswap_toggle_syncustain_target}
+                    (adsr_level_prev > adsr_sustain_target + 26'(adsr_decay_step))
+                        ? {AST_DEC, adsr_level_prev - 26'(adsr_decay_step)}
+                        : (adsr_level_prev > adsr_sustain_target) ? {AST_DEC, adsr_sustain_target}
                                              : {AST_DEC, adsr_level_prev};
                 default: producer_state_next = {AST_ATT, adsr_level_prev};  // idle/release
             endcase
@@ -597,7 +598,7 @@ module element_pipeline #(
             target_bus_c <= '0; depth_product <= '0;
             walker_write_bus <= '0; walker_write_value <= '0;
             adsr_gate <= 1'b0;
-            adsr_attack_step <= '0; adswap_toggle_prevecay_step <= '0; adsr_release_step <= '0; adswap_toggle_syncustain_target <= '0;
+            adsr_attack_step <= '0; adsr_decay_step <= '0; adsr_release_step <= '0; adsr_sustain_target <= '0;
         end else begin
             walker_read_valid <= walker_entry_start;
 
@@ -638,9 +639,9 @@ module element_pipeline #(
                 adsr_gate <= (bus_base_readout > 18'sd0);
                 adsr_attack_step <= (21'd16 + 21'(producer_table_readout[3:0]))
                                << producer_table_readout[7:4];
-                adswap_toggle_prevecay_step <= (21'd16 + 21'(producer_table_readout[11:8]))
+                adsr_decay_step <= (21'd16 + 21'(producer_table_readout[11:8]))
                                << producer_table_readout[15:12];
-                adswap_toggle_syncustain_target  <= {producer_table_readout[23:16], 18'b0};
+                adsr_sustain_target  <= {producer_table_readout[23:16], 18'b0};
                 adsr_release_step <= (21'd16 + 21'(producer_table_readout[27:24]))
                                << producer_table_readout[31:28];
                 // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
@@ -1483,7 +1484,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     logic        s9_act;
     logic [VW-1:0] s9_idx;
-    logic signed [17:0] s9_elem;          // Q2.16
+    logic signed [17:0] s9_elem;          // Q4.14 (audio, #63)
     logic signed [23:0] s9_phase;
     logic signed [35:0] s9_ic1eq1n, s9_ic2eq1n;
     logic signed [35:0] s9_ic1eq2n, s9_ic2eq2n;
@@ -1644,7 +1645,7 @@ module element_pipeline #(
             sat24 = x[23:0];
     endfunction
 
-    logic signed [25:0] mix_l_acc, mix_r_acc;   // Q2.16 + 8 guard bits
+    logic signed [25:0] mix_l_acc, mix_r_acc;   // Q4.14 audio + 8 guard bits
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
