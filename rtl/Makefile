@@ -168,6 +168,17 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
+# SVF stability under a MOVING cutoff (#117). STANDALONE, not in the
+# default `sim` gate: it currently REPRODUCES the bug (the #117 guard
+# corner rails), so it is expected to report a FAILURE until the filter
+# is made unconditionally stable. Run with: make sim-svfmod
+TB_SVFMOD = tb/tb_svf_modulation.sv
+tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
+	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_SVFMOD)
+
+sim-svfmod: tb/tb_svf_modulation.vvp
+	vvp tb/tb_svf_modulation.vvp
+
 # Output tilt error feedback (#102): exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_TILT = tb/tb_tilt.sv
