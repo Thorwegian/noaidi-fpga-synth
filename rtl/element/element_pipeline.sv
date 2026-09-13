@@ -448,17 +448,35 @@ module element_pipeline #(
     logic [7:0] walker_entry;
     logic       walker_half;
     wire walker_active = (walker_entry < 8'(synth_pkg::WALK_PER_SAMPLE));
+    // #97 fix: the bus write is pipeline-delayed by one entry — entry N's
+    // write fires during entry N+1's P5. Without a drain the step machine
+    // freezes the instant walker_entry hits WALK_PER_SAMPLE, so the LAST
+    // real entry's write (index 127 in half A = PROD_FANOUT(31), voice
+    // 31's cutoff send) never lands and that voice reads a stale/low
+    // cutoff bus. Keep advancing while draining so the trailing write
+    // completes. The drain entries carry producer_valid=0 (walker_active
+    // gates the reads), so they inject nothing; they only flush the last
+    // write and clear walker_prev_wrote, so no chain leaks across halves.
+    // A registered walker_draining keeps the walker_entry->RAM-address
+    // path off the extended compare (timing).
+    localparam int WALK_DRAIN = 2;
+    logic [1:0] drain_cnt;
+    wire walker_running = walker_active || (drain_cnt != 2'd0);
     wire [7:0] walker_index = {walker_half, walker_entry[6:0]};
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             walker_step <= 2'd0; walker_entry <= 8'hFF; walker_half <= 1'b0;
+            drain_cnt <= 2'd0;
         end else if (slot == 10'd299) begin
             walker_step <= 2'd0; walker_entry <= 8'd0;
             walker_half <= ~walker_half;
-        end else if (walker_active) begin
+            drain_cnt <= 2'(WALK_DRAIN);
+        end else if (walker_running) begin
             if (walker_step == 2'd2) begin
                 walker_step <= 2'd0;
                 walker_entry <= walker_entry + 8'd1;
+                if (!walker_active && drain_cnt != 2'd0)
+                    drain_cnt <= drain_cnt - 2'd1;
             end else
                 walker_step <= walker_step + 2'd1;
         end
