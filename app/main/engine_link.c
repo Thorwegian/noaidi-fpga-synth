@@ -224,9 +224,11 @@ static void engine_task(void *arg)
 void engine_link_init(void)
 {
     // Image: every element gated off (and gain-muted for belt and
-    // braces at boot), benign params otherwise. Every element's
-    // cutoff pointer targets bus 1 (the global cutoff-offset bus the
-    // mod wheel drives); all other pointers stay on bus 0 (zero).
+    // braces at boot), benign params otherwise. ALL pointers start on
+    // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
+    // at note-on. (An earlier era parked cutoff pointers on bus 1 for
+    // a hardwired wheel; the wheel rides BUS_CH_CUT since #44 and the
+    // stale claim here was #110.)
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;

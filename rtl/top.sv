@@ -132,26 +132,27 @@ module top (
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
     //----------------------------------------------------------------
-    // Output tilt: one-pole 6 dB/oct lowpass on the mix (Thor,
-    // 2026-09-07..09, by ear): out += (in − out) >>> 3. α = 1/8 at
-    // 96 kHz → corner ≈ 2 kHz — the warm stop, settled after >>>4
-    // (~950 Hz, muffled the supersaw) and >>>2 (~4.4 kHz, too bright).
-    // A convex combination never overflows 24 bits. Sits BEFORE the
-    // test-tone mux so the purity reference stays unfiltered.
+    // Output tilt (output_tilt.sv): one-pole 6 dB/oct lowpass on the
+    // mix, corner ≈ 2 kHz — Thor's ear-tuned warm stop. Error
+    // feedback inside the module makes it settle to EXACT zero on
+    // silence (#102). Sits BEFORE the test-tone mux so the purity
+    // reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;
-    // 26-bit intermediates: a 24−24 difference needs 25 bits, and the
-    // convex result always fits back into 24 — truncating is safe.
-    wire signed [25:0] lpf_dl = (26'(sample_left)  - 26'(lpf_l)) >>> 3;
-    wire signed [25:0] lpf_dr = (26'(sample_right) - 26'(lpf_r)) >>> 3;
-    always_ff @(posedge sysclk or negedge rst_n)
-        if (!rst_n) begin
-            lpf_l <= '0;
-            lpf_r <= '0;
-        end else if (sample_tick) begin
-            lpf_l <= 24'(26'(lpf_l) + lpf_dl);
-            lpf_r <= 24'(26'(lpf_r) + lpf_dr);
-        end
+    output_tilt #(.SHIFT(3)) u_tilt_l (
+        .clk   (sysclk),
+        .rst_n (rst_n),
+        .tick  (sample_tick),
+        .in    (sample_left),
+        .out   (lpf_l)
+    );
+    output_tilt #(.SHIFT(3)) u_tilt_r (
+        .clk   (sysclk),
+        .rst_n (rst_n),
+        .tick  (sample_tick),
+        .in    (sample_right),
+        .out   (lpf_r)
+    );
 
     wire signed [23:0] out_left  = test_tone_en ? tone_sample : lpf_l;
     wire signed [23:0] out_right = test_tone_en ? tone_sample : lpf_r;

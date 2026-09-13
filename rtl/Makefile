@@ -6,6 +6,7 @@ PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
 	drum.sv \
+	output_tilt.sv \
 	element/element_pipeline.sv \
 	element/osc_core.sv \
 	spi/spi_bus.sv \
@@ -167,6 +168,15 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
+# Output tilt error feedback (#102): exact-zero convergence on
+# silence, exact-value convergence on DC, both polarities.
+TB_TILT = tb/tb_tilt.sv
+tb/tb_tilt.vvp: output_tilt.sv $(TB_TILT) Makefile
+	iverilog -g2012 -o $@ output_tilt.sv $(TB_TILT)
+
+sim-tilt: tb/tb_tilt.vvp
+	vvp tb/tb_tilt.vvp > tb/sim-tilt.out 2>&1
+
 # Oscillator waveform shapes + pulse duty response (osc_core in
 # isolation — the coverage gap behind the issue #70 waveform reports).
 TB_OSC = tb/tb_osc_core.sv
@@ -178,13 +188,13 @@ sim-osc: tb/tb_osc_core.vvp
 
 sim: sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources \
-     sim-stab sim-osc
+     sim-stab sim-osc sim-tilt
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out \
-	     tb/sim-stab.out tb/sim-osc.out
+	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out
 
 clean:
 	rm -rf *.log *.json *.fs element/svf_k_lut.hex
