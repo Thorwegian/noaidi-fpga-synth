@@ -49,7 +49,12 @@ the architecture changes. Agent will neatly summarise.
   digital capture until BIT-EXACT silence. Mashing must stabilise;
   anything still sounding after the release tails is a stuck voice /
   engine wedge (#97 family). It prints its seed — rerun with
-  `--seed N` to reproduce a failure.
+  `--seed N` to reproduce a failure. It reboots the ESP to a clean
+  default patch when it finishes: the mash fires ~2500 random CCs and
+  a SCRAMBLED patch left behind reads as quiet/buzzy/cutting-off notes
+  on the next play ("nothing touched", but the state is mashed — this
+  masqueraded as a #97 regression once, 2026-09-13). NEVER diagnose
+  audio on a post-mash synth without a reboot first.
 - **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
   FPGA comes up with the boot image; the ESP must re-program it (bit us
   2026-09-10: a fresh bitstream left the synth dead until reboot). This
