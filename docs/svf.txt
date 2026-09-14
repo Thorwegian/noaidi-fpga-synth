@@ -79,12 +79,14 @@ F1int := clog2(F1max) → 0               # Integer range for LUT values
 #    < 0.7c through C6, -2.7c at C7. A tan-tuned g-LUT (0c) was declined.
 #  * R2 = q1 (Q2.16, existing decode) -- adequate; Q-resolution is not
 #    reciprocal-limited.
-#  * h  = Newton-Raphson reciprocal: 16-entry seed LUT (1/m, m in [1,2),
-#    element/recip_seed.hex) + 2 iterations y <- y*(2 - D*y). Seed table
-#    is generated OFFLINE (tan-free at runtime). Within FC_MAX D < 2, so
-#    the normalize exponent e = 0 -- no barrel shift needed. Error
-#    < 0.003%; precision never affects stability (rho <= 1 at every
-#    tested width), so h size is an accuracy, not a stability, choice.
+#  * h  = DIRECT reciprocal LUT (element/recip_lut.hex, 256 x UQ0.16).
+#    Within FC_MAX, D is clamped to [1, 1.889) (< 2), so h = 1/D is one
+#    table indexed by D's fractional bits (idx = D16[15:8]) -- no
+#    normalize, no Newton iteration (an iterative reciprocal was
+#    prototyped and dropped: the LUT is simpler, spends no DSP, and fits
+#    the K/q1/phase/att LUT idiom). Max realized-Q error 0.175% over the
+#    (fc x Q) grid -- inaudible; and quantization never moves a pole off
+#    the unit circle, so h size is an accuracy, not a stability, choice.
 #  * Fixed point: state stays Q8.28. g full-width in the CORE multiplies
 #    (frequency/pitch); a Q2.16 g is fine for the h computation only.
 #    R2, h in Q2.16.

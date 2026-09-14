@@ -8,6 +8,7 @@ MOD = \
 	drum.sv \
 	output_tilt.sv \
 	element/element_pipeline.sv \
+	element/svf_tpt.sv \
 	element/osc_core.sv \
 	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
@@ -20,6 +21,7 @@ LUTS = \
 	element/phase_lut.hex \
 	element/svf_k_lut.hex \
 	element/q1_lut.hex \
+	element/recip_lut.hex \
 	element/att_lut.hex \
 	element/sine_lut.hex \
 	element/boot_p0.hex \
@@ -36,6 +38,9 @@ element/svf_k_lut.hex: ../scripts/gen_svf_lut.py
 	python3 $<
 
 element/q1_lut.hex: ../scripts/gen_q1_lut.py
+	python3 $<
+
+element/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
 element/att_lut.hex: ../scripts/gen_att_lut.py
@@ -77,7 +82,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv element/element_pipeline.sv element/osc_core.sv
+SIM_MOD = $(PKG) drum.sv element/element_pipeline.sv element/svf_tpt.sv element/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile

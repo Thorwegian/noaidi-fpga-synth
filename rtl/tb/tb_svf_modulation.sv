@@ -3,34 +3,30 @@
 //
 // tb_svf_stability.sv proves the filter is stable when the cutoff is set
 // once and HELD. This bench proves the missing case: a cutoff that MOVES,
-// as mod-envelope -> cutoff drives it in play. The Chamberlin SVF
-// (element_pipeline S4-S9, no 1/(1+K(K+q1)) normalization) is only
-// CONDITIONALLY stable; a cutoff swept across a wide range while the
-// filter carries resonant state energy pushes the recurrence's pole
-// outside the unit circle -> the "screaming" Thor heard.
+// as mod-envelope -> cutoff drives it in play. It first REPRODUCED #117 on
+// the Chamberlin SVF, and is now the GUARD for the ZDF/TPT fix.
 //
 // Method: element 0 plays a saw at 375 Hz (period 256 samples), gain
 // -12 dB, through the REAL default patch (dual = 1, i.e. a 4-pole cascade;
-// LP). A -12 dB source fed through a filter CANNOT reach full scale unless
-// the filter itself diverges (a filter adds only bounded resonant gain).
-// So the stability metric is simply PEAK: un-railed = stable, railed = the
-// filter blew up. Autocorrelation r is printed for context.
+// LP). The cutoff is swept full-range (0x0040 <-> FC_MAX) at rising
+// resonance. Stability is judged by the internal filter STATE (Q8.28),
+// not the output peak: a resonant filter can be LOUD yet bounded, and only
+// the state distinguishes loud-but-stable from diverging. Bounded state =
+// stable; state running to the Q8.28 rail = the pole left the unit circle.
 //
-// FINDINGS (measured here, 2026-09-13):
-//   - Cutoff modulation at the DEFAULT resonance (r=0x200, q1=1.0) is
-//     stable at any sweep rate/shape, incl. an every-sample slam. This is
-//     why normal default-patch play and the static bench never screamed.
-//   - Divergence threshold is between r=0x400 (q1~=1.4) and r=0x600
-//     (q1~=2.0) — an ORDINARY musical resonance. Above it, a full-range
-//     cutoff sweep rails.
-//   - A SMOOTH sweep diverges on its own; no violent step (i.e. no #106
-//     bus-race glitch) is required. The glitch would only widen the range.
+// FINDINGS:
+//   - Chamberlin (before the fix): state diverged to the rail once
+//     resonance passed ~q1=2.0 (r=0x600..0x800) under a full-range sweep --
+//     an ordinary musical resonance, and a SMOOTH sweep sufficed (no #106
+//     bus glitch needed). That is the #117 "screaming".
+//   - TPT (the fix, #118): state stays ~1.75 at r=0x800 where the
+//     Chamberlin railed -- unconditionally stable, matching the pole-radius
+//     proof and the Python fixed-point model. Output peak grows with
+//     resonance (legitimate resonant gain) but the state is bounded.
 //
-// The #117 guard corner asserts the DESIRED behavior (stable under
-// modulation at r=0x800). On today's Chamberlin filter it is EXPECTED TO
-// FAIL — that failure is the deterministic reproduction of #117. When a
-// ZDF/TPT filter lands it flips to PASS and this bench joins the default
-// `sim` gate. Until then it is a standalone target (`make sim-svfmod`).
+// The #117 guard corner asserts bounded STATE at r=0x800 under a smooth
+// full-range sweep. It FAILS on the Chamberlin (reproduction) and PASSES on
+// the TPT (the fix). Standalone target `make sim-svfmod` (heavy, ~3 min).
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -105,9 +101,32 @@ module tb_svf_modulation;
     localparam longint RAIL = 6000000;      // ml is 24-bit; passive filter
                                             // of a -12 dB saw cannot reach
                                             // this without diverging
+    // The DEFINITIVE stability bound: filter state (Q8.28). A stable SVF's
+    // state stays O(1)-O(10); divergence runs it to the Q8.28 rail (2^35).
+    // 64.0 leaves huge margin for legitimate resonant ring yet is far
+    // below any real blow-up. (Output peak alone can't tell loud-but-
+    // bounded resonance from divergence; the state can.)
+    localparam longint STATE_RAIL = 64 * (64'sd1 <<< 28);   // 64.0 in Q8.28
     logic signed [23:0] dbuf [0:LAG-1];
     integer  di;
     longint  sum_xx, sum_xy, pk;
+    longint  pk_state;      // peak |filter state| over the run (Q8.28):
+                            // the DEFINITIVE stability signal. Bounded =
+                            // stable (TPT ~ a few); unbounded = diverging.
+
+    function automatic longint absl(input logic signed [35:0] v);
+        longint s;
+        begin s = longint'(v); absl = (s < 0) ? -s : s; end
+    endfunction
+
+    task automatic track_state;
+        begin
+            if (absl(u_pipe.ic1eq1_ram[0]) > pk_state) pk_state = absl(u_pipe.ic1eq1_ram[0]);
+            if (absl(u_pipe.ic2eq1_ram[0]) > pk_state) pk_state = absl(u_pipe.ic2eq1_ram[0]);
+            if (absl(u_pipe.ic1eq2_ram[0]) > pk_state) pk_state = absl(u_pipe.ic1eq2_ram[0]);
+            if (absl(u_pipe.ic2eq2_ram[0]) > pk_state) pk_state = absl(u_pipe.ic2eq2_ram[0]);
+        end
+    endtask
 
     // one triangle-sweep step of the cutoff, held in these regs so the
     // static and modulated measures share the accumulator
@@ -152,11 +171,12 @@ module tb_svf_modulation;
                 if (sample_tick) begin step_sweep(); n = n + 1; end
             end
             for (di = 0; di < LAG; di = di + 1) dbuf[di] = 24'sd0;
-            di = 0; sum_xx = 0; sum_xy = 0; pk = 0; n = 0;
+            di = 0; sum_xx = 0; sum_xy = 0; pk = 0; n = 0; pk_state = 0;
             while (n < MEAS) begin
                 @(posedge clk);
                 if (sample_tick) begin
                     step_sweep();
+                    track_state();
                     x  = ml;
                     xl = dbuf[di];
                     if (n >= LAG) begin
@@ -216,9 +236,10 @@ module tb_svf_modulation;
         // play never screamed. A regression here would be a NEW break.
         arm_sweep(14'h0040, synth_pkg::FC_MAX, 14'h0200, 14'h0200, 1'b0);
         measure(r, peak);
-        $display("control    r=200 mod (tri)      : peak=%0d %s", peak,
-                 (peak > RAIL) ? "RAILED - regression!" : "un-railed OK");
-        if (peak > RAIL) begin
+        $display("control    r=200 mod (tri)      : peak=%0d state=%.2f %s",
+                 peak, $itor(pk_state)/268435456.0,
+                 (pk_state > STATE_RAIL) ? "UNBOUNDED - regression!" : "state bounded OK");
+        if (pk_state > STATE_RAIL) begin
             $display("FAIL: default resonance diverged under modulation");
             errors = errors + 1;
         end
@@ -232,12 +253,14 @@ module tb_svf_modulation;
         for (li = 0; li < 3; li = li + 1) begin
             arm_sweep(14'h0040, synth_pkg::FC_MAX, 14'h0200, rlad[li], 1'b0);
             measure(r, peak);
-            $display("ladder tri  r=%04x : peak=%0d %s", rlad[li], peak,
-                     (peak > RAIL) ? "RAILED (diverged)" : "ok");
+            $display("ladder tri  r=%04x : peak=%0d state=%.2f %s", rlad[li],
+                     peak, $itor(pk_state)/268435456.0,
+                     (pk_state > STATE_RAIL) ? "STATE UNBOUNDED" : "state bounded");
             arm_sweep(14'h0040, synth_pkg::FC_MAX, 14'h0000, rlad[li], 1'b1);
             measure(r, peak);
-            $display("ladder slam r=%04x : peak=%0d %s", rlad[li], peak,
-                     (peak > RAIL) ? "RAILED (diverged)" : "ok");
+            $display("ladder slam r=%04x : peak=%0d state=%.2f %s", rlad[li],
+                     peak, $itor(pk_state)/268435456.0,
+                     (pk_state > STATE_RAIL) ? "STATE UNBOUNDED" : "state bounded");
         end
 
         // #117 GUARD — moderate musical resonance (r=0x800, q1~=0.35,
@@ -247,10 +270,11 @@ module tb_svf_modulation;
         // PASS and the whole bench moves into the default `sim` gate.
         arm_sweep(14'h0040, synth_pkg::FC_MAX, 14'h0200, 14'h0800, 1'b0);
         measure(r, peak);
-        $display("#117 guard r=800 mod (tri)      : peak=%0d %s", peak,
-                 (peak > RAIL) ? "RAILED" : "un-railed");
-        if (peak > RAIL) begin
-            $display("REPRO #117: resonant filter diverges under cutoff modulation (r=0x800, smooth sweep, dual)");
+        $display("#117 guard r=800 mod (tri)      : peak=%0d state=%.2f %s",
+                 peak, $itor(pk_state)/268435456.0,
+                 (pk_state > STATE_RAIL) ? "UNBOUNDED" : "state bounded");
+        if (pk_state > STATE_RAIL) begin
+            $display("FAIL #117: filter STATE diverges under cutoff modulation (r=0x800, smooth sweep, dual)");
             errors = errors + 1;
         end
 
