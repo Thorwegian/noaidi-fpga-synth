@@ -36,3 +36,57 @@ F1int := clog2(F1max) → 0               # Integer range for LUT values
 # 1. Extract 4 MSB as octave number
 # 2. Extract 10 LSB as LUT index
 # 3. Barrel-shift LUT value left by octave number to get F1 value
+
+
+# =====================================================================
+# TPT migration (#117 / #118, 2026-09-14)
+# =====================================================================
+#
+# WHY: the Chamberlin SVF above is only CONDITIONALLY stable. #117
+# reproduced it deterministically (tb_svf_modulation): at an ordinary
+# musical resonance (threshold Q ~ 1.4..2.0) a wide cutoff excursion --
+# which mod-env -> cutoff produces in play -- drives it to the full-scale
+# rail ("screaming"). Pole-radius analysis: Chamberlin reaches rho = 12
+# beyond FC_MAX; a moving cutoff at resonance leaves the unit circle.
+#
+# FIX: the ZDF / TPT (topology-preserving transform) state-variable
+# filter -- reference: JUCE StateVariableTPTFilter (Thor's pick). It is
+# UNCONDITIONALLY stable: measured max pole radius = 1.000000 across the
+# whole (cutoff up to Nyquist) x (Q up to 1e6) space -- it only touches
+# the unit circle at self-oscillation, never crosses. A/B rendered
+# against the Chamberlin in its comfortable range: identical to the ear
+# (Thor, 2026-09-14) and sample-matched to <= -55 dB when tuned alike.
+#
+# CORE (per pole, JUCE form):
+#   g  = pi*fc/fs                (cutoff coefficient; see g decision)
+#   R2 = 1/Q                     (= q1, the existing resonance decode)
+#   h  = 1 / (1 + R2*g + g*g)    (the one new op: a scalar reciprocal)
+#   yHP = h*(u - s1*(g+R2) - s2)
+#   yBP = g*yHP + s1 ;  s1 = g*yHP + yBP
+#   yLP = g*yBP + s2 ;  s2 = g*yBP + yLP
+# NOT a 2D LUT (the Timoney-Lazzarini trap): the cutoff/Q coupling is the
+# single scalar h. h needs only a 1D reciprocal.
+#
+# DECISIONS (Thor):
+#  * g = LINEAR pi*fc/fs = K/2 = (F1 coefficient >> 1). We KEEP the tuned,
+#    octave-scalable K-LUT above and just halve it -- no runtime tan(),
+#    no new table, full 28-frac precision preserved (pitch accuracy: the
+#    F1frac ~22-bit rationale still holds; self-osc = melodic voice).
+#    Cost of the linear approx: self-oscillation pitch error grows to
+#    -10.7 cents at C8 (4186 Hz) vs the Chamberlin's +5.5c. ACCEPTED
+#    2026-09-14 ("soccer whistle, not melodic"; and pitch discrimination
+#    itself collapses above ~4-5 kHz, so it is inaudible). In tune to
+#    < 0.7c through C6, -2.7c at C7. A tan-tuned g-LUT (0c) was declined.
+#  * R2 = q1 (Q2.16, existing decode) -- adequate; Q-resolution is not
+#    reciprocal-limited.
+#  * h  = Newton-Raphson reciprocal: 16-entry seed LUT (1/m, m in [1,2),
+#    element/recip_seed.hex) + 2 iterations y <- y*(2 - D*y). Seed table
+#    is generated OFFLINE (tan-free at runtime). Within FC_MAX D < 2, so
+#    the normalize exponent e = 0 -- no barrel shift needed. Error
+#    < 0.003%; precision never affects stability (rho <= 1 at every
+#    tested width), so h size is an accuracy, not a stability, choice.
+#  * Fixed point: state stays Q8.28. g full-width in the CORE multiplies
+#    (frequency/pitch); a Q2.16 g is fine for the h computation only.
+#    R2, h in Q2.16.
+#  * FC_MAX clamp retained for now (keeps D < 2, trivial reciprocal).
+#    TPT is stable to Nyquist, so the clamp could later be relaxed.
