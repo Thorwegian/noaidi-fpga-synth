@@ -75,6 +75,13 @@ static uint16_t s_end_max = DEFAULT_RAW_MAX;
 static volatile uint8_t s_capture_end = 0;     // 0 idle, 1 min, 2 max
 static TaskHandle_t s_poll_task;
 
+// Slider parked 2026-09-15 (Thor): the resonance fader fires spurious
+// CC71 on the prototype board and isn't needed right now, so it stops
+// emitting CC71. The poll task, ADC and console keys stay live -- '1'/
+// '2'/'r' (slider) and 'p' (BLE status/re-advertise) still work, and
+// re-enabling is this one flip back to true.
+static bool s_slider_active = false;
+
 static void poll_timer_cb(void *arg)
 {
     xTaskNotifyGive(s_poll_task);   // runs in the esp_timer task
@@ -229,7 +236,8 @@ static void slider_task(void *arg)
             continue;                           // inside the window
 
         last_cc = send;
-        publish_cc(send);
+        if (s_slider_active)       // parked: spurious firing (2026-09-15)
+            publish_cc(send);
     }
 }
 
