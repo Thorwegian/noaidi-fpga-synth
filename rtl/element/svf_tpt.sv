@@ -72,6 +72,24 @@ module svf_tpt #(
         end
     endfunction
 
+    // State saturator (#43): the integrator state is the one datapath node
+    // that WRAPPED instead of saturating -- at top-of-dial resonance the
+    // undamped Q8.28 state diverged past the 36-bit rail and wrapped (the
+    // two's-complement sign-flip = the scream). Clamp it so it SATURATES
+    // instead, like sat24 / sat_q414 elsewhere in the datapath. Ceiling
+    // +-96.0 is NOT a musical limit: the tempered knob (Q<=32) keeps legit
+    // state under ~49, so this never clips real resonance; it sits a
+    // quarter-range below the +-128 register rail so the pole's own 36-bit
+    // intermediate sums (t, s1n, ...) can't wrap either (clamping at the
+    // exact rail reintroduces the static). Bit-identical below the clamp.
+    localparam signed [35:0] ST_MAX =  36'sd25769803775;  // +96.0 - 1 LSB (Q8.28)
+    localparam signed [35:0] ST_MIN = -36'sd25769803776;  // -96.0
+    function automatic logic signed [35:0] sat_state(input logic signed [35:0] x);
+        if (x > ST_MAX)      sat_state = ST_MAX;
+        else if (x < ST_MIN) sat_state = ST_MIN;
+        else                 sat_state = x;
+    endfunction
+
     // ================= S_IN: derive g, R2, carry ========================
     reg                 a_act;   reg [IDXW-1:0] a_idx;
     reg signed [35:0]   a_g;      // g = k>>1  (Q8.28)
@@ -486,10 +504,10 @@ module svf_tpt #(
             out_act  <= p2f_act;
             out_idx  <= p2f_idx;
             out_elem <= p2f_dual ? sat_q414(f2sel) : p2f_f1;
-            out_ic1an<= p2f_s1an;
-            out_ic2an<= p2f_s2an;
-            out_ic1bn<= p2f_s1bn;
-            out_ic2bn<= ylp2 + p2f_gybp;
+            out_ic1an<= sat_state(p2f_s1an);
+            out_ic2an<= sat_state(p2f_s2an);
+            out_ic1bn<= sat_state(p2f_s1bn);
+            out_ic2bn<= sat_state(ylp2 + p2f_gybp);
             out_phase<= p2f_phase;
             out_gl   <= p2f_gl;
             out_gr   <= p2f_gr;

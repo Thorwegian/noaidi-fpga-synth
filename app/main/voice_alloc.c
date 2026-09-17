@@ -610,7 +610,13 @@ static void refresh_gain_buses(void)
 // octaves of Q = self-oscillation. Conventional knob: up = more.
 static void reso_update(uint8_t val)
 {
-    int32_t offset = ((int32_t)val << 7) - (int32_t)g_patch.filter.resonance;
+    // Tempered scale (#43, Thor 2026-09-17): the cc<<7 mapping described
+    // above ran Q up to ~15.9 octaves (Q~42000) at the top -- a
+    // hair-trigger into the undamped/static zone. Rescale so CC 127 tops
+    // out at r = 5.5 octaves = Q~32 (a sharp but stable peak), still
+    // linear in log2(Q) so each step is an equal Q ratio (~3%/step).
+    int32_t code   = ((int32_t)val * 5632) / 127;   // 5632 = r 5.5 oct -> Q 32
+    int32_t offset = code - (int32_t)g_patch.filter.resonance;
     s_reso_off = offset;   // remembered so LFO 2 dest changes can restore
     engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
 }
