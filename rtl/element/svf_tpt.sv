@@ -72,6 +72,22 @@ module svf_tpt #(
         end
     endfunction
 
+    // State saturator (#43): the integrator state is the one datapath node
+    // that WRAPPED instead of saturating. At the top of the resonance dial
+    // q1 (R2) underflows to 0 -> undamped resonator -> the Q8.28 state
+    // diverges past the 36-bit rail and wraps in two's complement, i.e.
+    // pure static. Clamp it, exactly as sat24 guards the mix bus and
+    // sat_q414 the pole output. Ceiling +-32.0 (Thor, 2026-09-17): the
+    // +-128 register rail is an insane resonance range; 32 caps resonant
+    // self-oscillation to a musical level.
+    localparam signed [35:0] ST_MAX =  36'sd8589934591;  // +32.0 - 1 LSB (Q8.28)
+    localparam signed [35:0] ST_MIN = -36'sd8589934592;  // -32.0
+    function automatic logic signed [35:0] sat_state(input logic signed [35:0] x);
+        if (x > ST_MAX)      sat_state = ST_MAX;
+        else if (x < ST_MIN) sat_state = ST_MIN;
+        else                 sat_state = x;
+    endfunction
+
     // ================= S_IN: derive g, R2, carry ========================
     reg                 a_act;   reg [IDXW-1:0] a_idx;
     reg signed [35:0]   a_g;      // g = k>>1  (Q8.28)
@@ -486,10 +502,10 @@ module svf_tpt #(
             out_act  <= p2f_act;
             out_idx  <= p2f_idx;
             out_elem <= p2f_dual ? sat_q414(f2sel) : p2f_f1;
-            out_ic1an<= p2f_s1an;
-            out_ic2an<= p2f_s2an;
-            out_ic1bn<= p2f_s1bn;
-            out_ic2bn<= ylp2 + p2f_gybp;
+            out_ic1an<= sat_state(p2f_s1an);
+            out_ic2an<= sat_state(p2f_s2an);
+            out_ic1bn<= sat_state(p2f_s1bn);
+            out_ic2bn<= sat_state(ylp2 + p2f_gybp);
             out_phase<= p2f_phase;
             out_gl   <= p2f_gl;
             out_gr   <= p2f_gr;
