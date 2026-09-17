@@ -23,6 +23,7 @@ LUTS = \
 	element/q1_lut.hex \
 	element/recip_lut.hex \
 	element/att_lut.hex \
+	element/reso_att_lut.hex \
 	element/sine_lut.hex \
 	element/boot_p0.hex \
 	element/boot_p1.hex \
@@ -44,6 +45,9 @@ element/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
 element/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+element/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
 element/sine_lut.hex: ../scripts/gen_sine_lut.py

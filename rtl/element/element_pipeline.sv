@@ -123,12 +123,15 @@ module element_pipeline #(
                                        // percepts (issue #41); fabric
                                        // LUTs, no BSRAM block
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
+    reg [15:0] reso_att_lut [0:63];    // #43 resonance-indexed input
+                                       // attenuation, UQ0.16 (dual)
 
     initial begin
         $readmemh("element/phase_lut.hex", phase_lut);
         $readmemh("element/svf_k_lut.hex", k_lut);
         $readmemh("element/q1_lut.hex", q1_lut);
         $readmemh("element/att_lut.hex", att_lut);
+        $readmemh("element/reso_att_lut.hex", reso_att_lut);
     end
 
     //----------------------------------------------------------------
@@ -964,6 +967,7 @@ module element_pipeline #(
     logic [7:0]  s3_gl, s3_gr;
     logic        s3_dual;
     logic [1:0]  s3_ftype;
+    logic [15:0] s3_reso_att;   // #43 input-atten gain (UQ0.16)
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -983,6 +987,7 @@ module element_pipeline #(
             s3_gr    <= '0;
             s3_dual  <= 1'b0;
             s3_ftype <= '0;
+            s3_reso_att <= 16'hffff;
             s3_ic1eq1 <= '0;
             s3_ic2eq1 <= '0;
             s3_ic1eq2 <= '0;
@@ -1003,6 +1008,7 @@ module element_pipeline #(
             s3_gr    <= eff_gr;
             s3_dual  <= s2_dual;
             s3_ftype <= s2_ftype;
+            s3_reso_att <= s2_dual ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
             s3_ic1eq1 <= s2_ic1eq1;
             s3_ic2eq1 <= s2_ic2eq1;
             s3_ic1eq2 <= s2_ic1eq2;
@@ -1037,6 +1043,61 @@ module element_pipeline #(
     );
 
     //----------------------------------------------------------------
+    // S3B/S3C -- resonance-dependent INPUT attenuation (#43). Scale the
+    // oscillator sample down as resonance rises so the 24 dB/oct dual
+    // cascade never overdrives its internal +-8 guardrail (sat_q414).
+    // Register-then-multiply: S3B registers osc + the (dual-gated) atten
+    // and every SVF operand; S3C multiplies. Keeps the osc_core->reg
+    // critical path intact (no combinational mult in it). Single (12
+    // dB/oct) never overdrives, so its atten is unity (0xffff).
+    //----------------------------------------------------------------
+    logic               s3b_act;   logic [VW-1:0] s3b_idx;
+    logic signed [17:0] s3b_osc;   logic [15:0] s3b_att;
+    logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
+    logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
+    logic               s3b_dual;  logic [1:0] s3b_ftype;
+    logic signed [23:0] s3b_phase; logic [7:0] s3b_gl, s3b_gr;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s3b_act<=1'b0; s3b_idx<='0; s3b_osc<='0; s3b_att<='0;
+            s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
+            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_ftype<='0;
+            s3b_phase<='0; s3b_gl<='0; s3b_gr<='0;
+        end else begin
+            s3b_act<=s3_act; s3b_idx<=s3_idx; s3b_osc<=osc_sample;
+            s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
+            s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
+            s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
+            s3b_dual<=s3_dual; s3b_ftype<=s3_ftype;
+            s3b_phase<=s3_phase + delta; s3b_gl<=s3_gl; s3b_gr<=s3_gr;
+        end
+    end
+
+    // Q2.16 osc * UQ0.16 atten -> Q2.16 (>>16); registered-input DSP
+    wire signed [35:0] osc_mul = s3b_osc * $signed({1'b0, s3b_att});
+    logic               s3c_act;   logic [VW-1:0] s3c_idx;
+    logic signed [17:0] s3c_osc;
+    logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
+    logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
+    logic               s3c_dual;  logic [1:0] s3c_ftype;
+    logic signed [23:0] s3c_phase; logic [7:0] s3c_gl, s3c_gr;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s3c_act<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_k<='0; s3c_q1<='0;
+            s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
+            s3c_dual<=1'b0; s3c_ftype<='0; s3c_phase<='0; s3c_gl<='0; s3c_gr<='0;
+        end else begin
+            s3c_act<=s3b_act; s3c_idx<=s3b_idx;
+            s3c_osc <= 18'($signed(osc_mul >>> 16));
+            s3c_k<=s3b_k; s3c_q1<=s3b_q1;
+            s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
+            s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
+            s3c_dual<=s3b_dual; s3c_ftype<=s3b_ftype;
+            s3c_phase<=s3b_phase; s3c_gl<=s3b_gl; s3c_gr<=s3b_gr;
+        end
+    end
+
+    //----------------------------------------------------------------
     // SVF core (TPT, #117/#118) -- replaces the Chamberlin S3B..S9.
     //   g = k>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
@@ -1052,12 +1113,12 @@ module element_pipeline #(
 
     svf_tpt #(.IDXW(VW)) u_svf (
         .clk(clk), .rst_n(rst_n),
-        .in_act(s3_act), .in_idx(s3_idx),
-        .in_osc(osc_sample), .in_k(k), .in_q1(q1_decoded),
-        .in_ic1a(s3_ic1eq1), .in_ic2a(s3_ic2eq1),
-        .in_ic1b(s3_ic1eq2), .in_ic2b(s3_ic2eq2),
-        .in_dual(s3_dual), .in_ftype(s3_ftype),
-        .in_phase(s3_phase + delta), .in_gl(s3_gl), .in_gr(s3_gr),
+        .in_act(s3c_act), .in_idx(s3c_idx),
+        .in_osc(s3c_osc), .in_k(s3c_k), .in_q1(s3c_q1),
+        .in_ic1a(s3c_ic1eq1), .in_ic2a(s3c_ic2eq1),
+        .in_ic1b(s3c_ic1eq2), .in_ic2b(s3c_ic2eq2),
+        .in_dual(s3c_dual), .in_ftype(s3c_ftype),
+        .in_phase(s3c_phase), .in_gl(s3c_gl), .in_gr(s3c_gr),
         .out_act(s9_act), .out_idx(s9_idx), .out_elem(s9_elem),
         .out_ic1an(s9_ic1eq1n), .out_ic2an(s9_ic2eq1n),
         .out_ic1bn(s9_ic1eq2n), .out_ic2bn(s9_ic2eq2n),
