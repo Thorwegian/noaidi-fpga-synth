@@ -73,15 +73,17 @@ module svf_tpt #(
     endfunction
 
     // State saturator (#43): the integrator state is the one datapath node
-    // that WRAPPED instead of saturating. At the top of the resonance dial
-    // q1 (R2) underflows to 0 -> undamped resonator -> the Q8.28 state
-    // diverges past the 36-bit rail and wraps in two's complement, i.e.
-    // pure static. Clamp it, exactly as sat24 guards the mix bus and
-    // sat_q414 the pole output. Ceiling +-32.0 (Thor, 2026-09-17): the
-    // +-128 register rail is an insane resonance range; 32 caps resonant
-    // self-oscillation to a musical level.
-    localparam signed [35:0] ST_MAX =  36'sd8589934591;  // +32.0 - 1 LSB (Q8.28)
-    localparam signed [35:0] ST_MIN = -36'sd8589934592;  // -32.0
+    // that WRAPPED instead of saturating -- at top-of-dial resonance the
+    // undamped Q8.28 state diverged past the 36-bit rail and wrapped (the
+    // two's-complement sign-flip = the scream). Clamp it so it SATURATES
+    // instead, like sat24 / sat_q414 elsewhere in the datapath. Ceiling
+    // +-96.0 is NOT a musical limit: the tempered knob (Q<=32) keeps legit
+    // state under ~49, so this never clips real resonance; it sits a
+    // quarter-range below the +-128 register rail so the pole's own 36-bit
+    // intermediate sums (t, s1n, ...) can't wrap either (clamping at the
+    // exact rail reintroduces the static). Bit-identical below the clamp.
+    localparam signed [35:0] ST_MAX =  36'sd25769803775;  // +96.0 - 1 LSB (Q8.28)
+    localparam signed [35:0] ST_MIN = -36'sd25769803776;  // -96.0
     function automatic logic signed [35:0] sat_state(input logic signed [35:0] x);
         if (x > ST_MAX)      sat_state = ST_MAX;
         else if (x < ST_MIN) sat_state = ST_MIN;
