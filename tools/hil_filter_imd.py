@@ -53,8 +53,20 @@ FREQS = tuple(440.0 * 2 ** ((n - 69) / 12) for n in NOTES)
 PATCH = [
     (20, 0),    # osc1 = saw
     (24, 0),    # mix hard to osc1 (osc2 hard-muted at the rail)
-    (26, 0),    # voice mode: plain
-    (27, 0),    # unison detune OFF
+    (26, 0),    # voice mode: PLAIN, one element per note.
+                #
+                # Do NOT use unison to raise the level here, though it is
+                # tempting: much of this grid sits below the -55 dBFS trust
+                # threshold. Measured 2026-09-18, plain vs 7+1 unison at
+                # detune 0, same cells, back-to-back runs:
+                #     plain   cutoff 64/r127:  -12.2 -12.2 -12.3 -12.4
+                #     unison  cutoff 64/r127:   -7.1 -12.4 -13.4 -18.7
+                # Eight coherent elements sum PHASE-DEPENDENTLY on whatever
+                # the allocator hands out, so levels swing ~15 dB and the
+                # metric wobbles by 11 dB. Plain is 100x more repeatable.
+                # The quiet cells stay quiet; that is a real limit of this
+                # metric, not something to paper over with more voices.
+    (27, 0),    # unison detune off (moot in plain mode; kept explicit)
     (28, 0),    # unison spread: centered
     (86, 0),    # velocity -> amp OFF
     (87, 0),    # velocity -> cutoff OFF
