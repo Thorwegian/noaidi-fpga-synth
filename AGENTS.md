@@ -26,13 +26,35 @@ the architecture changes. Agent will neatly summarise.
   agent checks GitHub for issues created since the last session (Thor
   files findings around the clock) before proposing what to work on.
 - **Untested new features are never completed** (Thor, 2026-09-10). Closing
-  a feature issue requires: sim/bench where applicable, a HARDWARE test, and
-  the feature exercised in real use — not just merged code. Compile-green ≠
-  run-green ≠ verified.
+  a feature issue requires: a HARDWARE test and the feature exercised in
+  real use — not just merged code. Compile-green ≠ run-green ≠ verified.
 - **Docs must not go stale.** When a change lands, sweep `docs/` (and this
   file) for statements the change falsified and fix them in the same series
   of commits.
-- **Run the test suites as you go.** `make sim` for any rtl/ change. For
+- **Test gateware ON HARDWARE; iverilog is dropped** (Thor, 2026-09-18).
+  The board IS the simulator (#123): upload to SRAM, drive it over BLE MIDI,
+  capture the digital SPDIF output, analyse. Measured head-to-head the same
+  day, same question ("does the master limiter hold windowed RMS within
+  3 dB under heavy drive?"), same DUT (`c0604fa`), machine otherwise idle:
+
+      iverilog  429.7 s   (one bench, compile + run)
+      hardware    9.6 s   (2.7 s SRAM load + 6.8 s capture & analyse)
+
+  The board also pays a one-time `make pack.fs` of 416 s per RTL change,
+  which AMORTISES across every question asked of that bitstream — the
+  second question costs 9.6 s, the twentieth costs 9.6 s. And it answers
+  in silicon, which is the only place six timing failures ever showed up
+  (all six passed STA and failed by ear). Verilator (#62) is closed by
+  the same decision: it optimised the branch we are not taking.
+
+  KNOWN GAP, do not pretend otherwise: hardware currently has no internal
+  visibility. iverilog could probe any node; SPDIF only sees what is
+  audible. Anything whose failure is inaudible (state wrap that never
+  reaches the output, a bus word that is wrong but masked) is currently
+  UNTESTABLE — that is what the SPI debug-readback window in #123 is for.
+  Until it lands, "hardware says fine" means "hardware says fine at the
+  output", and a silent-but-wrong internal node will not be caught.
+- **Run the test suites as you go.** For
   firmware: build + flash + boot-capture is the floor (compile-green is not
   run-green); the on-target stress injector (`CONFIG_NOAIDI_STRESS_TEST`) for
   anything touching event bus / engine_link / voice_alloc; the BLE MIDI suite
@@ -57,13 +79,12 @@ the architecture changes. Agent will neatly summarise.
   audio on a post-mash synth without a reboot first.
 - **Use all four cores of the dev machine** (Thor, 2026-09-18). The dev
   host is a 4-core Mac Mini and the only rig in the world for this project;
-  anything parallelisable runs parallel. `make -j4 sim` always (each bench
-  logs to its own file precisely so the suite can fan out, #58); `-j4` for
-  the iverilog compiles too; and any new tool or script that fans out
-  (per-bench captures, nextpnr threads, batch analyses) takes the same
-  job count. A serial `make sim` is 3-4x slower than the suite needs to be
-  and was why simulation read as a 25-55 min wall on 2026-09-17 when it is
-  ~7.5 min at `-j4`. Setup-specific, deliberately: it is the setup we have.
+  anything parallelisable runs parallel: `-j4` for `make pack.fs` (nextpnr
+  threads) and for any tool or script that fans out — per-bench captures,
+  batch analyses, sweep grids. Setup-specific, deliberately: it is the
+  setup we have. (This policy originally mandated `make -j4 sim`; the sim
+  suite is dropped per the hardware-testing bullet above, but the rule
+  itself stands for everything still parallelisable.)
 - **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
   FPGA comes up with the boot image; the ESP must re-program it (bit us
   2026-09-10: a fresh bitstream left the synth dead until reboot). This
@@ -142,13 +163,13 @@ hardware.
 - FPGA (Tang Nano 20K, GW2AR-LV18QN88C8/I7): `cd rtl && make`
   (synth_gowin → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
-- Sim: `cd rtl && make -j4 sim` (always `-j4`; standing policy above) — suite: `sim-elem` (element pipeline),
-  `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spdif48` (the 48 kHz
-  primary output + drum half-rate ticks), `sim-tilt` (output-tilt
-  error feedback, #102), `sim-spi`, `sim-bus` (word protocol),
-  `sim-prog-*` (programming chain, 4 splits), `sim-stab` (SVF stability corners),
-  `sim-osc` (waveforms + pulse-duty). `sim-prog-full` = long soak, not in the
-  default suite.
+- Gateware verification: ON HARDWARE (Thor, 2026-09-18) — `make sram`,
+  then drive over BLE MIDI and analyse the captured SPDIF. Harnesses live
+  in `tools/hil_*.py`. See the hardware-testing bullet at the top for the
+  measured basis and for the internal-visibility gap this leaves open.
+  The `sim-*` make targets and `rtl/tb/*` benches are RETAINED but are no
+  longer the gate and are not run as a suite; nothing may be declared
+  verified on their say-so.
 - Load test: `CONFIG_NOAIDI_STRESS_TEST=y` → 60 s synthetic MIDI flood at boot
   (issue #70 repro). BLE end-to-end: `tools/ble_midi_fuzz.py` (venv with
   bleak + pyserial).
