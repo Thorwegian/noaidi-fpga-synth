@@ -55,6 +55,15 @@ the architecture changes. Agent will neatly summarise.
   on the next play ("nothing touched", but the state is mashed — this
   masqueraded as a #97 regression once, 2026-09-13). NEVER diagnose
   audio on a post-mash synth without a reboot first.
+- **Use all four cores of the dev machine** (Thor, 2026-09-18). The dev
+  host is a 4-core Mac Mini and the only rig in the world for this project;
+  anything parallelisable runs parallel. `make -j4 sim` always (each bench
+  logs to its own file precisely so the suite can fan out, #58); `-j4` for
+  the iverilog compiles too; and any new tool or script that fans out
+  (per-bench captures, nextpnr threads, batch analyses) takes the same
+  job count. A serial `make sim` is 3-4x slower than the suite needs to be
+  and was why simulation read as a 25-55 min wall on 2026-09-17 when it is
+  ~7.5 min at `-j4`. Setup-specific, deliberately: it is the setup we have.
 - **Every FPGA load (`make sram`/`flash`) requires an ESP32 reboot** — the
   FPGA comes up with the boot image; the ESP must re-program it (bit us
   2026-09-10: a fresh bitstream left the synth dead until reboot). This
@@ -133,7 +142,7 @@ hardware.
 - FPGA (Tang Nano 20K, GW2AR-LV18QN88C8/I7): `cd rtl && make`
   (synth_gowin → nextpnr-himbaechel `--freq 73.728` → gowin_pack);
   flash: `make flash`.
-- Sim: `cd rtl && make -j4 sim` — suite: `sim-elem` (element pipeline),
+- Sim: `cd rtl && make -j4 sim` (always `-j4`; standing policy above) — suite: `sim-elem` (element pipeline),
   `sim-outputs` (SPDIF/I2S), `sim-spdif`, `sim-spdif48` (the 48 kHz
   primary output + drum half-rate ticks), `sim-tilt` (output-tilt
   error feedback, #102), `sim-spi`, `sim-bus` (word protocol),

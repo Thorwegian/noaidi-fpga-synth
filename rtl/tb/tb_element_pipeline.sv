@@ -7,7 +7,9 @@
 //   3. oscillator: per-voice phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
 //   5. attenuation: s10_out == (s9_elem * lin) >>> 16, exact
-//   6. mixer: mix_left/right == sat24(sum of s10 outputs << 8),
+//   6. mixer: mix_left/right == sat24(sum of s10 outputs << 8)
+//      (through the #121 limiter at unity gain: levels stay under
+//      its -1 dBFS threshold; published 3 cycles after the tick),
 //      exactly, over a full sample period; L == R (equal gains)
 //   7. signal energy: the mix is not silent
 //
@@ -172,7 +174,11 @@ module tb_element_pipeline;
 
         // latch check: one cycle after the tick, mix regs hold the
         // latched sums (L and R independently — the boot image is hard-panned)
-        if (slot == 1 && period >= 2) begin
+        // S11 master limiter (#121) publishes mix_* 10 cycles after the
+        // tick (feedforward needs the finished sum first); read at slot 16.
+        // Stimulus peaks ~-12 dBFS, under the -1 dBFS threshold, so the
+        // limiter gain is unity and the sum is still bit-exact.
+        if (slot == 16 && period >= 2) begin
             if (mix_left !== exp_lat_l[23:0]) begin
                 $display("FAIL mix L: period %0d mix=%h expect=%h",
                          period - 1, mix_left, exp_lat_l[23:0]);
