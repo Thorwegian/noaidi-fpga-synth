@@ -7,6 +7,7 @@ MOD = \
 	$(TOP).sv \
 	drum.sv \
 	output_tilt.sv \
+	limiter.sv \
 	element/element_pipeline.sv \
 	element/svf_tpt.sv \
 	element/osc_core.sv \
@@ -23,6 +24,7 @@ LUTS = \
 	element/q1_lut.hex \
 	element/recip_lut.hex \
 	element/att_lut.hex \
+	element/log_lut.hex \
 	element/reso_att_lut.hex \
 	element/sine_lut.hex \
 	element/boot_p0.hex \
@@ -45,6 +47,9 @@ element/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
 element/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+element/log_lut.hex: ../scripts/gen_log_lut.py
 	python3 $<
 
 element/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
@@ -86,7 +91,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv element/element_pipeline.sv element/svf_tpt.sv element/osc_core.sv
+SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv element/svf_tpt.sv element/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
@@ -206,15 +211,24 @@ tb/tb_osc_core.vvp: element/osc_core.sv $(TB_OSC) element/sine_lut.hex Makefile
 sim-osc: tb/tb_osc_core.vvp
 	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
 
+# Log-domain limiter unit bench (#121): the per-step function in
+# isolation -- transparency, proportional attack, release, saturation.
+TB_LIM = tb/tb_limiter.sv
+tb/tb_limiter.vvp: limiter.sv $(TB_LIM) element/log_lut.hex element/att_lut.hex Makefile
+	iverilog -g2012 -o $@ limiter.sv $(TB_LIM)
+
+sim-limiter: tb/tb_limiter.vvp
+	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
+
 sim: sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources \
-     sim-stab sim-osc sim-tilt
+     sim-stab sim-osc sim-tilt sim-limiter
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out \
-	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out
+	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out tb/sim-limiter.out
 
 clean:
 	rm -rf *.log *.json *.fs element/svf_k_lut.hex
