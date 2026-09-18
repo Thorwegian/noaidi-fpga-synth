@@ -1,11 +1,11 @@
 //------------------------------------------------------------------------
-// tb_limiter.sv -- unit bench for limiter.sv (#121 M1). The bench owns
-// the gain_q state like an instantiator would and steps it by hand.
-// Checks: transparency below threshold, proportional attack above it
-// (level*gain lands at the threshold within one grid step), bounded
-// release, and saturation -- first at the largest code REACHABLE for
-// this level width/threshold ((LW-1)*16+15 - THRESH), then the hard
-// 255 clamp by dropping the threshold to 0.
+// tb_limiter.sv -- unit bench for the PIPELINED limiter.sv (#121 M1). The
+// bench owns the gain_q state like an instantiator would: present a level
+// (held), wait for the 5-stage pipeline to settle, latch gain_q_out back
+// as gain_q_in, read gain_lin. Checks: transparency below threshold,
+// proportional attack (level*gain lands on the threshold within one grid
+// step), bounded release, saturation at the largest REACHABLE code, then
+// the hard 255 clamp with threshold 0.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -15,7 +15,10 @@ module tb_limiter;
     localparam logic [17:0] ATK     = 18'd32768;   // 32 units = 12 dB/sample
     localparam logic [17:0] REL     = 18'd3;
     localparam int          MAXCODE = (LW-1)*16 + 15 - 205;   // 210 here
+    localparam int          LAT     = 6;           // > 5-stage latency, margin
 
+    logic clk = 0, rst_n = 0;
+    always #5 clk = ~clk;
     logic [LW-1:0] level;
     logic [7:0]    thresh;
     logic [17:0]   gq, gq_next;
@@ -24,19 +27,31 @@ module tb_limiter;
     real ratio;
 
     limiter #(.LEVEL_W(LW), .SUB(SUB)) dut (
+        .clk(clk), .rst_n(rst_n),
         .level(level), .gain_q_in(gq), .thresh_code(thresh),
         .attack_q(ATK), .release_q(REL),
         .gain_q_out(gq_next), .gain_lin(glin)
     );
 
+    // one "sample": hold the level, let the pipe settle, commit ONE slew
+    // step (gain_q_in is constant until committed, so gain_q_out settles
+    // exactly one step ahead of gq; glin decodes that next step -- equal
+    // to gq's decode once converged, which is where every check reads it)
     task automatic step(input [LW-1:0] lv);
-        begin level = lv; #1; gq = gq_next; #1; end
+        begin
+            level = lv;
+            repeat (LAT) @(posedge clk);
+            @(negedge clk); gq = gq_next;
+            repeat (2) @(posedge clk);
+        end
     endtask
 
     initial begin
-        gq = '0; thresh = THRESH;
+        level = '0; gq = '0; thresh = THRESH;
+        repeat (3) @(posedge clk); rst_n = 1; repeat (3) @(posedge clk);
+
         // 1) below threshold: stays at unity
-        for (i = 0; i < 50; i = i + 1) step(26'd1000);
+        for (i = 0; i < 20; i = i + 1) step(26'd1000);
         if (gq != 0 || glin != 17'h10000) begin
             $display("FAIL: not transparent below threshold (gq=%0d glin=%0h)", gq, glin);
             errors = errors + 1;
@@ -61,22 +76,19 @@ module tb_limiter;
                 $display("FAIL: release step %0d (expected %0d)", g0 - gq, REL);
                 errors = errors + 1;
             end else $display("pass: release steps by REL");
-            for (i = 0; i < 200000; i = i + 1) step(26'd1000);
+            for (i = 0; i < 12000; i = i + 1) step(26'd1000);
             if (gq != 0) begin
                 $display("FAIL: did not release to unity (gq=%0d)", gq);
                 errors = errors + 1;
             end else $display("pass: releases fully to unity");
         end
 
-        // 4a) max level at the working threshold: code lands at the
-        //     largest REACHABLE value, gain essentially zero
+        // 4a) max level at the working threshold: largest REACHABLE code
         for (i = 0; i < 20; i = i + 1) step({LW{1'b1}});
         if ((gq >> SUB) != MAXCODE || glin > 17'd8) begin
-            $display("FAIL: max-level code=%0d (expected %0d) glin=%0d",
-                     gq >> SUB, MAXCODE, glin);
+            $display("FAIL: max-level code=%0d (expected %0d) glin=%0d", gq >> SUB, MAXCODE, glin);
             errors = errors + 1;
-        end else $display("pass: max level -> code %0d (%0.1f dB), gain ~0",
-                          MAXCODE, MAXCODE * 0.375);
+        end else $display("pass: max level -> code %0d (%0.1f dB), gain ~0", MAXCODE, MAXCODE * 0.375);
 
         // 4b) threshold 0 exposes the hard 255 clamp (415 - 0 -> 255)
         thresh = 8'd0;

@@ -159,6 +159,11 @@ sim-prog-bus: tb/tb_prog_bus.vvp
 sim-prog-sources: tb/tb_prog_sources.vvp
 	vvp tb/tb_prog_sources.vvp > tb/sim-prog-sources.out 2>&1
 
+# Active master limiter in situ (#121): hot chord must not rail, must not
+# go near-silent, and 50 ms RMS must not jump > 3 dB (Thor's criterion).
+sim-prog-limiter: tb/tb_prog_limiter.vvp
+	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
+
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
@@ -221,13 +226,13 @@ sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
 sim: sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
-     sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources \
+     sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
-	     tb/sim-prog-bus.out tb/sim-prog-sources.out \
+	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
 	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out tb/sim-limiter.out
 
 clean:
