@@ -120,11 +120,9 @@ module top (
 
     logic signed [17:0] tone_q216;
     osc_core u_tone_osc (
-        .phase      (tone_phase),
-        .delta      (24'sd0),          // phase advanced above, not here
+        .phase_next (tone_phase),      // advanced above, not here (#128)
         .duty       (24'sd0),
         .wave       (2'd3),            // sine (quarter-wave LUT)
-        .phase_next (),
         .sample_out (tone_q216)
     );
     // Sine spans ±32767, which fits 16 signed bits exactly, so the

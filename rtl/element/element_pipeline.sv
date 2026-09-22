@@ -11,8 +11,10 @@
 // Stage map:
 //   S1  state/param RAM read data available (address issued at S0)
 //   S2  issue phase-delta + SVF-K LUT reads
-//   S3  LUT data → delta, K, q1; phase_next; oscillator waveform
-//   S3B register the barrel-shifted K / osc sample / phase_next
+//   S3  LUT data → delta, K, q1; phase_next = phase + delta (ONE adder)
+//   S3B register phase_next / barrel-shifted K / q1 / duty / wave
+//   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
+//   S3D #43 resonance attenuation multiply on registered operands (DSP)
 //   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
 //   S5  SVF1 B1: lp1/hp1 adder tree
 //   S5B SVF1 B2: m3 = K*hp1 on registered hp1        (DSP)
@@ -528,11 +530,9 @@ module element_pipeline #(
     wire signed [23:0] walker_lfo_phase = $signed(producer_state_prev[23:0]);
     logic signed [17:0] walker_lfo_wave;
     osc_core u_wk_osc (
-        .phase      (walker_lfo_phase),
-        .delta      (24'sd0),
+        .phase_next (walker_lfo_phase), // LFO phase is the accumulator (#128)
         .duty       (24'sd0),
         .wave       (lfo_shape_a),
-        .phase_next (),
         .sample_out (walker_lfo_wave)
     );
 
@@ -1037,14 +1037,14 @@ module element_pipeline #(
     wire signed [17:0] q1_decoded =
         $signed({1'b0, s3_q1_lut}) >>> s3_reso_oct;
 
-    osc_core u_osc (
-        .phase      (s3_phase),
-        .delta      (delta),
-        .duty       (s3_duty),
-        .wave       (s3_wave),
-        .phase_next (),
-        .sample_out (osc_sample)
-    );
+    // #128: the phase advance is ONE adder now, here, and its result is
+    // REGISTERED (s3b_phase) before any waveform is generated from it.
+    // It used to be computed twice -- once inside osc_core feeding the
+    // waveforms, once again below for the writeback -- and the waveform
+    // path hung off the combinational sum, giving one cycle of
+    // BSRAM read -> octave shift -> 24-bit add -> sine LUT -> mux.
+    // That was the critical path of the whole design.
+    wire signed [23:0] phase_next = s3_phase + delta;
 
     //----------------------------------------------------------------
     // S3B/S3C -- resonance-dependent INPUT attenuation (#43). Scale the
@@ -1055,49 +1055,96 @@ module element_pipeline #(
     // critical path intact (no combinational mult in it). Single (12
     // dB/oct) never overdrives, so its atten is unity (0xffff).
     //----------------------------------------------------------------
+    // S3B registers the ADVANCED PHASE (and duty/wave alongside it); the
+    // waveform is generated from the registered value in S3B->S3C (#128).
     logic               s3b_act;   logic [VW-1:0] s3b_idx;
-    logic signed [17:0] s3b_osc;   logic [15:0] s3b_att;
+    logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
     logic               s3b_dual;  logic [1:0] s3b_ftype;
     logic signed [23:0] s3b_phase; logic [7:0] s3b_gl, s3b_gr;
+    logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3b_act<=1'b0; s3b_idx<='0; s3b_osc<='0; s3b_att<='0;
+            s3b_act<=1'b0; s3b_idx<='0; s3b_att<='0;
             s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
             s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_ftype<='0;
             s3b_phase<='0; s3b_gl<='0; s3b_gr<='0;
+            s3b_duty<='0; s3b_wave<='0;
         end else begin
-            s3b_act<=s3_act; s3b_idx<=s3_idx; s3b_osc<=osc_sample;
+            s3b_act<=s3_act; s3b_idx<=s3_idx;
             s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
             s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
             s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
             s3b_dual<=s3_dual; s3b_ftype<=s3_ftype;
-            s3b_phase<=s3_phase + delta; s3b_gl<=s3_gl; s3b_gr<=s3_gr;
+            s3b_phase<=phase_next; s3b_gl<=s3_gl; s3b_gr<=s3_gr;
+            s3b_duty<=s3_duty; s3b_wave<=s3_wave;
         end
     end
 
-    // Q2.16 osc * UQ0.16 atten -> Q2.16 (>>16); registered-input DSP
-    wire signed [35:0] osc_mul = s3b_osc * $signed({1'b0, s3b_att});
+    // Waveform generation now stands alone in its own stage, driven by
+    // the REGISTERED phase. This is the half of the old critical path
+    // that was chained behind the adder: sine LUT read + 4:1 mux (#128).
+    osc_core u_osc (
+        .phase_next (s3b_phase),
+        .duty       (s3b_duty),
+        .wave       (s3b_wave),
+        .sample_out (osc_sample)
+    );
+
+    // S3C registers the WAVEFORM (was: the attenuation product). The
+    // multiply moves to S3D so nothing chains a mux into a DSP.
     logic               s3c_act;   logic [VW-1:0] s3c_idx;
-    logic signed [17:0] s3c_osc;
+    logic signed [17:0] s3c_osc;   logic [15:0] s3c_att;
     logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
     logic               s3c_dual;  logic [1:0] s3c_ftype;
     logic signed [23:0] s3c_phase; logic [7:0] s3c_gl, s3c_gr;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3c_act<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_k<='0; s3c_q1<='0;
+            s3c_act<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
+            s3c_k<='0; s3c_q1<='0;
             s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
             s3c_dual<=1'b0; s3c_ftype<='0; s3c_phase<='0; s3c_gl<='0; s3c_gr<='0;
         end else begin
             s3c_act<=s3b_act; s3c_idx<=s3b_idx;
-            s3c_osc <= 18'($signed(osc_mul >>> 16));
+            s3c_osc <= osc_sample; s3c_att <= s3b_att;
             s3c_k<=s3b_k; s3c_q1<=s3b_q1;
             s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
             s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
             s3c_dual<=s3b_dual; s3c_ftype<=s3b_ftype;
             s3c_phase<=s3b_phase; s3c_gl<=s3b_gl; s3c_gr<=s3b_gr;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S3D -- the #43 attenuation multiply, on REGISTERED operands.
+    // It used to sit at S3C; the waveform stage inserted by #128 pushed
+    // it one stage later so that no cycle chains the waveform mux into
+    // a DSP. Element latency is therefore 17 -> 18; the state writeback
+    // lands 14 cycles after the read, against a 256-slot half, so read
+    // and write still cannot collide.
+    //----------------------------------------------------------------
+    wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
+    logic               s3d_act;   logic [VW-1:0] s3d_idx;
+    logic signed [17:0] s3d_osc;
+    logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
+    logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
+    logic               s3d_dual;  logic [1:0] s3d_ftype;
+    logic signed [23:0] s3d_phase; logic [7:0] s3d_gl, s3d_gr;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s3d_act<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
+            s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
+            s3d_dual<=1'b0; s3d_ftype<='0; s3d_phase<='0; s3d_gl<='0; s3d_gr<='0;
+        end else begin
+            s3d_act<=s3c_act; s3d_idx<=s3c_idx;
+            s3d_osc <= 18'($signed(osc_mul >>> 16));
+            s3d_k<=s3c_k; s3d_q1<=s3c_q1;
+            s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
+            s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
+            s3d_dual<=s3c_dual; s3d_ftype<=s3c_ftype;
+            s3d_phase<=s3c_phase; s3d_gl<=s3c_gl; s3d_gr<=s3c_gr;
         end
     end
 
@@ -1117,12 +1164,12 @@ module element_pipeline #(
 
     svf_tpt #(.IDXW(VW)) u_svf (
         .clk(clk), .rst_n(rst_n),
-        .in_act(s3c_act), .in_idx(s3c_idx),
-        .in_osc(s3c_osc), .in_k(s3c_k), .in_q1(s3c_q1),
-        .in_ic1a(s3c_ic1eq1), .in_ic2a(s3c_ic2eq1),
-        .in_ic1b(s3c_ic1eq2), .in_ic2b(s3c_ic2eq2),
-        .in_dual(s3c_dual), .in_ftype(s3c_ftype),
-        .in_phase(s3c_phase), .in_gl(s3c_gl), .in_gr(s3c_gr),
+        .in_act(s3d_act), .in_idx(s3d_idx),
+        .in_osc(s3d_osc), .in_k(s3d_k), .in_q1(s3d_q1),
+        .in_ic1a(s3d_ic1eq1), .in_ic2a(s3d_ic2eq1),
+        .in_ic1b(s3d_ic1eq2), .in_ic2b(s3d_ic2eq2),
+        .in_dual(s3d_dual), .in_ftype(s3d_ftype),
+        .in_phase(s3d_phase), .in_gl(s3d_gl), .in_gr(s3d_gr),
         .out_act(s9_act), .out_idx(s9_idx), .out_elem(s9_elem),
         .out_ic1an(s9_ic1eq1n), .out_ic2an(s9_ic2eq1n),
         .out_ic1bn(s9_ic1eq2n), .out_ic2bn(s9_ic2eq2n),
