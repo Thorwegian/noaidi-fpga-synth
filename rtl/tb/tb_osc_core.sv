@@ -2,7 +2,8 @@
 // tb_osc_core.sv — oscillator waveform bench (was missing; issue #70
 // ear reports: wave 3 "noisy tone", pulse duty "does nothing"). Drives
 // a phase accumulator into osc_core the way the pipeline does
-// (phase_next = phase + delta) and asserts the SHAPE of each waveform,
+// (phase_next = phase + delta, now added in the bench since #128 moved
+// that adder out of the module) and asserts the SHAPE of each waveform,
 // plus that the pulse high-fraction tracks duty. Proves osc_core is
 // functionally correct in isolation — so a hardware fault is upstream
 // (bus/pointer plumbing or synthesis), not in the core math.
@@ -13,12 +14,18 @@
 module tb_osc_core;
     logic signed [23:0] phase, delta, duty;
     logic        [1:0]  wave;
-    logic signed [23:0] phase_next;
     logic signed [17:0] sample_out;
 
+    // #128 moved the phase adder OUT of osc_core (it was duplicated by
+    // element_pipeline, and having it inside forced BSRAM read -> shift
+    // -> add -> sine LUT -> mux into one cycle). The bench now performs
+    // the same add the pipeline does, so every check below is unchanged:
+    // phase_next is still phase + delta exactly as before.
+    wire signed [23:0] phase_next = phase + delta;
+
     osc_core dut (
-        .phase (phase), .delta (delta), .duty (duty), .wave (wave),
-        .phase_next (phase_next), .sample_out (sample_out)
+        .phase_next (phase_next), .duty (duty), .wave (wave),
+        .sample_out (sample_out)
     );
 
     localparam int N = 64;                       // samples per cycle

@@ -1,26 +1,31 @@
 //--------------------------------------------------------------------
 // osc_core.sv — combinational oscillator core (waveform generation)
 //
-// Pure combinational function of phase — no accumulators, no
-// registers (the pipeline owns the phase register).  Phase, delta and
-// duty are Q0.24 signed.  All waveforms are computed from the NEXT
-// phase value so the accumulator and the waveforms are aligned in
-// time within the pipeline.
+// Pure combinational function of the ALREADY-ADVANCED phase — no
+// accumulators, no registers (the pipeline owns the phase register).
+// Phase and duty are Q0.24 signed.
 //
 //   sample_out — selected waveform, scaled Q0.24 → Q2.16
+//
+// #128: the phase adder used to live HERE, and its phase_next output
+// was left unconnected at all three call sites while element_pipeline
+// computed `s3_phase + delta` a SECOND time for the writeback — two
+// 24-bit adders for one value. Worse, keeping the adder inside meant
+// one cycle had to carry BSRAM read -> octave shift -> 24-bit add ->
+// sine LUT read -> 4:1 mux, which was this design's critical path
+// (13.04 ns against a 13.56 ns period, i.e. 4% margin). The adder now
+// belongs to the caller, which can register its result before asking
+// for a waveform. Callers that advance phase elsewhere just pass their
+// own phase in.
 //--------------------------------------------------------------------
 `default_nettype none
 module osc_core (
-    input  logic signed [23:0] phase,     // current phase (Q0.24)
-    input  logic signed [23:0] delta,     // phase increment (Q0.24)
-    input  logic signed [23:0] duty,      // PWM duty cycle (Q0.24, signed)
-    input  logic        [1:0]  wave,      // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
+    input  logic signed [23:0] phase_next, // advanced phase (Q0.24)
+    input  logic signed [23:0] duty,       // PWM duty cycle (Q0.24, signed)
+    input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
 
-    output logic signed [23:0] phase_next,
-    output logic signed [17:0] sample_out // Q2.16
+    output logic signed [17:0] sample_out  // Q2.16
 );
-
-    assign phase_next = phase + delta;
 
     //----------------------------------------------------------------
     // Sawtooth: phase passthrough (signed Q0.24)
