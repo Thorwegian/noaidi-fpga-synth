@@ -71,6 +71,21 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # route" — it is placement luck, not (necessarily) real congestion.
 SEED ?= 2
 
+# ---------------------------------------------------------------- #128
+# TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
+# "met the constraint on this placement, with this seed", and placement
+# moves. Measured on unchanged RTL over 11 seeds (main @ 00471db):
+# min 74.26, max 80.38, mean 77.46, sigma 1.98 -- a 6.12 MHz spread, with
+# seed 5 landing 0.53 MHz above the constraint. Every RTL edit redraws
+# from that distribution, and a timing failure here is not a build error,
+# it is audible corruption on the bench (six times so far, all of which
+# passed STA). So require headroom, not a pass.
+# Both numbers are RATCHETS: raise them as paths are fixed. Never lower
+# one to make a build go green -- fix the path.
+TIMING_MIN_MHZ  ?= 2.0
+TIMING_WARN_MHZ ?= 8.0
+
+
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
 		--write $@ \
@@ -81,6 +96,33 @@ pnr.json: yosys.json
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<
+	@python3 ../scripts/check_timing.py pnr.log \
+		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
+		{ echo "*** timing gate FAILED -- bitstream discarded, see #128 ***"; \
+		  rm -f $@; exit 1; }
+
+# Strict check: demands the TARGET headroom, not just the floor. Use it
+# to see whether a fix has actually bought margin.
+timing-check: pnr.log
+	python3 ../scripts/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)
+
+# Placement is a lottery (sigma ~2 MHz): build N seeds, keep the best.
+# Same wall-clock as one build on four cores, and takes the best draw
+# instead of a random one.
+SEEDS ?= 2 3 4 7
+timing-sweep: yosys.json
+	@rm -rf /tmp/tsweep && mkdir -p /tmp/tsweep
+	@for s in $(SEEDS); do \
+		nextpnr-himbaechel --json yosys.json --write /dev/null \
+			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
+			--vopt cst=constraints.cst --freq 73.728 --seed $$s \
+			> /tmp/tsweep/$$s.log 2>&1 & \
+	done; wait
+	@for s in $(SEEDS); do \
+		printf "seed %-4s " $$s; \
+		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {print $$NF, $$0}' \
+			/tmp/tsweep/$$s.log | grep drum || echo "(no result)"; \
+	done
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<
