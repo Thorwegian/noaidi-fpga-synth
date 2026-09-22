@@ -1266,10 +1266,10 @@ module element_pipeline #(
     // -1 dBFS, attack 12 dB/sample, release ~105 dB/s. sat24 stays
     // underneath as the guaranteed catch.
     //----------------------------------------------------------------
-    localparam int          LIM_SUB       = 10;
-    localparam logic [7:0]  LIM_THRESH    = 8'd205;     // -1 dBFS (acc 7301)
-    localparam logic [17:0] LIM_ATTACK_Q  = 18'd32768;  // 32 units = 12 dB/sample
-    localparam logic [17:0] LIM_RELEASE_Q = 18'd3;      // ~1 unit / 341 samples
+    localparam int          LIM_SUB       = 11;
+    localparam logic [7:0]  LIM_THRESH    = 8'd192;
+    localparam logic [17:0] LIM_ATTACK_Q  = 18'd256;
+    localparam logic [17:0] LIM_RELEASE_Q = 18'd1;
     logic signed [25:0] lim_acc_l, lim_acc_r, lim_prod_l, lim_prod_r;
     logic        [25:0] lim_abs_l, lim_abs_r, lim_level;   // unsigned magnitudes
     logic        [17:0] lim_gain_q;                        // envelope state
