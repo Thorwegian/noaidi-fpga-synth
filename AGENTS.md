@@ -1,3 +1,7 @@
+**This AGENTS.md file is a mess as of 2026-09-22 and should be taken with a grain of
+salt. See related GitHub issue at:
+https://github.com/Thorwegian/noaidi-fpga-synth/issues/129**
+
 # AGENTS.md — Noaidi FPGA Synth project notes
 
 Notes for AI coding agents working in this repo. Keep this file updated when
@@ -449,3 +453,7 @@ lately. Verify when an external DAC is attached.
   byte, so the bench passed while hardware dropped writes. `tb_spi_slave_regs.sv`
   drives as `spi_device_transmit()` does: SCLK idles low, CS deasserts after
   the last falling edge.
+
+**This AGENTS.md file is a mess as of 2026-09-22 and should be taken with a grain of
+salt. See related GitHub issue at:
+https://github.com/Thorwegian/noaidi-fpga-synth/issues/129**
