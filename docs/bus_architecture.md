@@ -79,7 +79,17 @@ conventions the FPGA never sees.
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are live and single-banked — each pipeline read is one word, so
    there is no multi-word tear to protect against.
-5. **One bus format: signed Q8.10** (Thor). 8 integer bits (sign
+5. **One bus format: signed Q8.10** (Thor). Q8.10 is a LOG format —
+   octaves.fraction — which is why it suits pitch, cutoff and
+   resonance: 8 integer bits carry ±128 octaves and 10 fractional
+   bits resolve about 0.006 dB.
+   **Exception (#127): the `gain_lin` buses are Q4.14**, unity
+   `0x4000`. A linear gain is the first non-logarithmic quantity on
+   the pool, and Q8.10's 10 fractional bits would put a −60 dB
+   envelope tail on 1 LSB. Q4.14 is the project's standard 18-bit
+   format (the audio path's own), so this introduces no new format
+   — it reuses an existing one for the first sink that is not
+   measured in octaves. 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every
    log₂ sink — pitch, cutoff, AND volume (gain octave = 6 dB;

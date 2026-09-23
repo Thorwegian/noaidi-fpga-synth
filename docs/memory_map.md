@@ -289,7 +289,8 @@ Voice v base address: `0x2000 + v × 64`.
 | `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run — a control input, NEVER an envelope trigger: envelopes are gated by their own gate-bus reads in the source table, #98; the register is slated for removal in #100), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `PTRS0` | bus pointers ([bus_architecture.md](bus_architecture.md)): `[9:0]` pitch, `[19:10]` duty, `[29:20]` cutoff — 0 = bus 0 = no modulation | cutoff live (B1) |
 | `+6` | `PTRS1` | bus pointers: `[9:0]` filter 1/Q, `[19:10]` gain L, `[29:20]` gain R | live (B2) |
-| `+7..+15` | — | reserved. (A pre-bus draft placed per-element ADSR words at +5/+6, colliding with PTRS0/PTRS1 — removed per #110; envelopes live in the SOURCE TABLE at `0x0100–0x04FF`, shared between elements by design.) | reserved |
+| `+7` | `PTRS2` | bus pointers: `[9:0]` gain_lin L, `[19:10]` gain_lin R, `[31:20]` reserved. **LINEAR** gain buses in Q4.14 (unity `0x4000`), multiplied into the log-decoded gain at S9D (#127). Pointer 0 = **BYPASS**, not bus 0: this gain is multiplicative, so an unset pointer reading the hardwired-zero bus would silence the element | live (#127) |
+| `+8..+15` | — | reserved. (A pre-bus draft placed per-element ADSR words at +5/+6, colliding with PTRS0/PTRS1 — removed per #110; envelopes live in the SOURCE TABLE at `0x0100–0x04FF`, shared between elements by design.) | reserved |
 | `+16..+23` | `ROUTE[0..7]` | patch cables: `[3:0]` source type, `[14:4]` source index, `[17:15]` sink (0 pitch, 1 duty, 2 cutoff, 3 Q, 4 gain L, 5 gain R, 6–7 reserved), `[31:18]` amount sQ2.12 | TBD |
 | `+24..+63` | — | per-element LFO, glide, FM amount, sample position, ... | reserved |
 

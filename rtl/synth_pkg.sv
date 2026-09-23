@@ -29,8 +29,11 @@ package synth_pkg;
 
     // Drum slot where element 0 enters the pipeline
     parameter int LANE_BASE    = 0;
-    // Pipeline stages per element (S0..S11 + S3B/S5B/S8B/S9B splits)
-    parameter int LANE_STAGES  = 16;
+    // Pipeline stages per element. Actual chain (the S5B/S8B in the
+    // old comment were Chamberlin-era and no longer exist):
+    //   S1 S2 S3 S3B S3C S3D | svf_tpt x17 | S9 S9B S9C S9D S10 S11
+    // S9C/S9D are the #127 linear-gain pair.
+    parameter int LANE_STAGES  = 18;
     // Contiguous drum span occupied by the lane pipeline
     parameter int LANE_SPAN    = NUM_ELEMENTS + LANE_STAGES - 1;
 

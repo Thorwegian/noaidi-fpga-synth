@@ -179,12 +179,20 @@ module element_pipeline #(
     // are wiring, so they ride the ping-pong banks like every
     // parameter. Init 0: every parameter points at bus 0 (hardwired
     // zero), so boot behavior is exactly the pre-bus behavior.
+    // +7 (PTRS2, #127): the LINEAR gain bus pointers -- [9:0] gain_lin
+    // L, [19:10] gain_lin R. Pointer 0 means BYPASS, not "bus 0":
+    // this gain is MULTIPLICATIVE, so an unset pointer reading the
+    // hardwired-zero bus would silence the element (and the whole boot
+    // image). Bypass is what preserves the law that an unset pointer
+    // behaves exactly as the pre-bus design did.
     reg [29:0] ptrs0_param_ram [0:2*NUM_ELEMENTS-1];
     reg [29:0] ptrs1_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [19:0] ptrs2_param_ram [0:2*NUM_ELEMENTS-1];
     integer pi;
     initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1) begin
         ptrs0_param_ram[pi] = 30'd0;
         ptrs1_param_ram[pi] = 30'd0;
+        ptrs2_param_ram[pi] = 20'd0;
     end
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
@@ -287,6 +295,15 @@ module element_pipeline #(
     reg signed [17:0] bus_ram_q     [0:synth_pkg::NUM_BUSES-1];
     reg signed [17:0] bus_ram_gl    [0:synth_pkg::NUM_BUSES-1];
     reg signed [17:0] bus_ram_gr    [0:synth_pkg::NUM_BUSES-1];
+    // #127: two more sinks, so two more replicas (one read port each).
+    // These carry a LINEAR gain in Q4.14 (unity = 0x4000), the same
+    // format as the audio path -- NOT the octaves the rest of the pool
+    // uses. A linear gain is the first non-logarithmic quantity on the
+    // bus, so law 5's Q8.10 does not fit it: 10 fractional bits would
+    // put a -60 dB envelope tail on 1 LSB. Q4.14 puts it on 16, with
+    // ~24 dB still usable below, and invents no new format.
+    reg signed [17:0] bus_ram_gll   [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_glr   [0:synth_pkg::NUM_BUSES-1];
     integer bi;
     initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1) begin
         bus_ram_pitch[bi] = 18'sd0;
@@ -295,6 +312,8 @@ module element_pipeline #(
         bus_ram_q[bi]     = 18'sd0;
         bus_ram_gl[bi]    = 18'sd0;
         bus_ram_gr[bi]    = 18'sd0;
+        bus_ram_gll[bi]   = 18'sd0;
+        bus_ram_glr[bi]   = 18'sd0;
     end
 
     // SPI bus-base writes now land in a dedicated BASE RAM as well as
@@ -391,6 +410,14 @@ module element_pipeline #(
     always_ff @(posedge clk)
         if (bus_commit)   bus_ram_gr[bus_mailbox_addr] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_gr[walker_bus_addr]   <= walker_bus_value;
+    always_ff @(posedge clk) begin
+        if (bus_commit)   bus_ram_gll[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_gll[walker_bus_addr]  <= walker_bus_value;
+    end
+    always_ff @(posedge clk) begin
+        if (bus_commit)   bus_ram_glr[bus_mailbox_addr] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_glr[walker_bus_addr]  <= walker_bus_value;
+    end
     always_ff @(posedge clk)
         if (bus_commit)   bus_sum_ram[bus_mailbox_addr] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_sum_ram[walker_bus_addr]  <= walker_bus_value;
@@ -781,6 +808,8 @@ module element_pipeline #(
         if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
     always_ff @(posedge sclk)
         if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+    always_ff @(posedge sclk)
+        if (elem_write_enable && elem_write_word == 3'd7) ptrs2_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[19:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_osc_word[13:0];
@@ -1121,9 +1150,10 @@ module element_pipeline #(
     // S3D -- the #43 attenuation multiply, on REGISTERED operands.
     // It used to sit at S3C; the waveform stage inserted by #128 pushed
     // it one stage later so that no cycle chains the waveform mux into
-    // a DSP. Element latency is therefore 17 -> 18; the state writeback
-    // lands 14 cycles after the read, against a 256-slot half, so read
-    // and write still cannot collide.
+    // a DSP. Element latency went 17 -> 18 there, and #127's S9C/S9D
+    // pair takes it to 20; the state writeback lands 16 cycles after
+    // the read, against a 256-slot half, so read and write still
+    // cannot collide.
     //----------------------------------------------------------------
     wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
     logic               s3d_act;   logic [VW-1:0] s3d_idx;
@@ -1235,7 +1265,106 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // S10 — attenuation multiply on REGISTERED operands  (DSP)
+    // S9C / S9D -- the LINEAR gain bus (#127, Thor's placement B)
+    //
+    // An element's gain is now the PRODUCT of two sources: the log gain
+    // code (UQ4.4 -> att_lut -> linear, exactly as before) and an
+    // optional LINEAR gain bus in Q4.14 (unity = 0x4000) -- the
+    // project's standard 18-bit format, the same one the audio path
+    // uses, so this rung adds no new number format. Thor's
+    // scope call: the log buses STAY for now, so this is a parallel
+    // gain source, not a replacement -- hence a real second multiply
+    // rather than a mux.
+    //
+    // PLACEMENT B: combine the GAINS, do not chain the audio. Chaining
+    // two multiplies on the sample would truncate the audio twice and
+    // re-plumb everything downstream; here S10 onward is bit-identical
+    // and only the gain feeding it changes. UQ0.16 x Q4.14 carries 30
+    // fractional bits before requantizing to UQ0.16, so the precision
+    // loss lands in the gain -- where 0.375 dB is already our quantum
+    // -- and not in the samples.
+    //
+    // The pointer is re-read LATE, addressed by the element index
+    // coming OUT of the SVF, instead of being carried beside the audio:
+    // routing two 18-bit bus values through svf_tpt's 17 stages would
+    // have cost ~600 registers.
+    //
+    //   S9C: bus fetch -- RAM readout only, no arithmetic
+    //   S9D: the gain x gain multiply -- multiply only (the timing rule)
+    //
+    // Exact mute survives by arithmetic: lin_log = 0 (gain code 0xFF)
+    // or a zero bus both force the product to zero, so the hardcoded
+    // mute at S9B keeps working and needs no companion here.
+    //----------------------------------------------------------------
+    logic [19:0] s9b_ptrs2;
+    always_ff @(posedge clk)
+        s9b_ptrs2 <= ptrs2_param_ram[{bank_active, s9_idx}];
+
+    logic          s9c_act;   logic [VW-1:0] s9c_idx;
+    logic signed [17:0] s9c_elem, s9c_lin_l, s9c_lin_r;
+    logic signed [17:0] s9c_bus_l, s9c_bus_r;
+    logic          s9c_byp_l, s9c_byp_r;
+    logic signed [23:0] s9c_phase;
+    logic signed [35:0] s9c_ic1eq1n, s9c_ic2eq1n, s9c_ic1eq2n, s9c_ic2eq2n;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s9c_act <= 1'b0; s9c_idx <= '0; s9c_elem <= '0;
+            s9c_lin_l <= '0; s9c_lin_r <= '0;
+            s9c_bus_l <= '0; s9c_bus_r <= '0;
+            s9c_byp_l <= 1'b1; s9c_byp_r <= 1'b1;
+            s9c_phase <= '0;
+            s9c_ic1eq1n <= '0; s9c_ic2eq1n <= '0;
+            s9c_ic1eq2n <= '0; s9c_ic2eq2n <= '0;
+        end else begin
+            s9c_act <= s9b_act; s9c_idx <= s9b_idx; s9c_elem <= s9b_elem;
+            s9c_lin_l <= s9b_lin_l; s9c_lin_r <= s9b_lin_r;
+            s9c_bus_l <= bus_ram_gll[s9b_ptrs2[9:0]];
+            s9c_bus_r <= bus_ram_glr[s9b_ptrs2[19:10]];
+            s9c_byp_l <= (s9b_ptrs2[9:0]   == 10'd0);
+            s9c_byp_r <= (s9b_ptrs2[19:10] == 10'd0);
+            s9c_phase <= s9b_phase;
+            s9c_ic1eq1n <= s9b_ic1eq1n; s9c_ic2eq1n <= s9b_ic2eq1n;
+            s9c_ic1eq2n <= s9b_ic1eq2n; s9c_ic2eq2n <= s9b_ic2eq2n;
+        end
+    end
+
+    // A gain is never inverting, so a negative bus value clamps to zero
+    // rather than flipping the signal's polarity.
+    wire signed [17:0] gbusc_l = (s9c_bus_l < 18'sd0) ? 18'sd0 : s9c_bus_l;
+    wire signed [17:0] gbusc_r = (s9c_bus_r < 18'sd0) ? 18'sd0 : s9c_bus_r;
+    wire signed [35:0] gmul_l  = s9c_lin_l * gbusc_l;
+    wire signed [35:0] gmul_r  = s9c_lin_r * gbusc_r;
+    // UQ0.16 x Q4.14 -> 30 fractional bits; >>14 lands back in UQ0.16,
+    // which is what S10's multiply expects.
+    wire signed [21:0] gsh_l   = 22'($signed(gmul_l >>> 14));
+    wire signed [21:0] gsh_r   = 22'($signed(gmul_r >>> 14));
+
+    logic          s9d_act;   logic [VW-1:0] s9d_idx;
+    logic signed [17:0] s9d_elem, s9d_g_l, s9d_g_r;
+    logic signed [23:0] s9d_phase;
+    logic signed [35:0] s9d_ic1eq1n, s9d_ic2eq1n, s9d_ic1eq2n, s9d_ic2eq2n;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s9d_act <= 1'b0; s9d_idx <= '0; s9d_elem <= '0;
+            s9d_g_l <= '0; s9d_g_r <= '0; s9d_phase <= '0;
+            s9d_ic1eq1n <= '0; s9d_ic2eq1n <= '0;
+            s9d_ic1eq2n <= '0; s9d_ic2eq2n <= '0;
+        end else begin
+            s9d_act <= s9c_act; s9d_idx <= s9c_idx; s9d_elem <= s9c_elem;
+            s9d_g_l <= s9c_byp_l ? s9c_lin_l
+                     : (gsh_l > 22'sd65535) ? 18'sd65535 : 18'(gsh_l);
+            s9d_g_r <= s9c_byp_r ? s9c_lin_r
+                     : (gsh_r > 22'sd65535) ? 18'sd65535 : 18'(gsh_r);
+            s9d_phase <= s9c_phase;
+            s9d_ic1eq1n <= s9c_ic1eq1n; s9d_ic2eq1n <= s9c_ic2eq1n;
+            s9d_ic1eq2n <= s9c_ic1eq2n; s9d_ic2eq2n <= s9c_ic2eq2n;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S10 - attenuation multiply on REGISTERED operands  (DSP)
     //----------------------------------------------------------------
     logic        s10_act;
     logic [VW-1:0] s10_idx;
@@ -1245,8 +1374,8 @@ module element_pipeline #(
 
     logic signed [34:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9b_elem * s9b_lin_l;
-        prod_r = s9b_elem * s9b_lin_r;
+        prod_l = s9d_elem * s9d_g_l;
+        prod_r = s9d_elem * s9d_g_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1261,15 +1390,15 @@ module element_pipeline #(
             s10_ic1eq2n <= '0;
             s10_ic2eq2n <= '0;
         end else begin
-            s10_act  <= s9b_act;
-            s10_idx  <= s9b_idx;
+            s10_act  <= s9d_act;
+            s10_idx  <= s9d_idx;
             s10_outl <= prod_l >>> 16;
             s10_outr <= prod_r >>> 16;
-            s10_phase <= s9b_phase;
-            s10_ic1eq1n <= s9b_ic1eq1n;
-            s10_ic2eq1n <= s9b_ic2eq1n;
-            s10_ic1eq2n <= s9b_ic1eq2n;
-            s10_ic2eq2n <= s9b_ic2eq2n;
+            s10_phase <= s9d_phase;
+            s10_ic1eq1n <= s9d_ic1eq1n;
+            s10_ic2eq1n <= s9d_ic2eq1n;
+            s10_ic1eq2n <= s9d_ic1eq2n;
+            s10_ic2eq2n <= s9d_ic2eq2n;
         end
     end
 
