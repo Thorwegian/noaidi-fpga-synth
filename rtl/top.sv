@@ -8,12 +8,13 @@
 //         an LED-TOSLINK tap into the dev box for bit-perfect
 //         capture. The 96 kHz SPDIF is parked on pin 86.
 // Timing: drum.sv owns every timebase — the sample boundary
-//         (768 sysclk = 1 sample), the SPDIF cell boundary
-//         (6 sysclk = 1 cell), and their half-rate 48 kHz
+//         (1024 sysclk = 1 sample), the SPDIF cell boundary
+//         (8 sysclk = 1 cell), and their half-rate 48 kHz
 //         counterparts — all counted from one reset.
-// Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 73.728 MHz = 768×96 kHz
-//         (per-board setup: pll_clk O0=73728K -s on the BL616).
-//         Stepped down from 98.304 MHz after five ear-verified timing
+// Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 98.304 MHz = 1024×96 kHz
+//         (per-board setup: pll_clk O0=98304K -s on the BL616).
+//         Restored to 98.304 MHz by #130 after #128 fixed the timing
+//         paths behind the 2026-09 step down from it, namely five
 //         failures STA missed — margin for the 36×36 DSP cascades.
 //
 //--------------------------------------------------------------------

@@ -9,7 +9,7 @@
 //      consumer PCM, 96 kHz, 24-bit — identical on both subframes
 //   5. audio payload intact (LSB-first, bits 4..27)
 //
-// The drum is exactly the "counter of 768 per sample" — this bench is
+// The drum is exactly the "counter of 1024 per sample" — this bench is
 // the minimal drum→spdif pairing with nothing else in the way.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -32,7 +32,7 @@ module tb_spdif_block;
     wire  spdif_out;
 
     // integer cell timebase: /6, reset-aligned with the drum so
-    // sample_tick coincides with a cell_tick (768 = 128 x 6)
+    // sample_tick coincides with a cell_tick (1024 = 128 x 8)
     logic [2:0] cd;
     always @(posedge clk or negedge rst_n)
         if (!rst_n) cd <= 3'd0; else cd <= (cd == 3'd5) ? 3'd0 : cd + 3'd1;

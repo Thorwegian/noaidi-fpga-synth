@@ -2,7 +2,7 @@
 // drum.sv — SCMO timing core ("the drum")
 //
 // Single timebase for the whole synth: a free-running counter wrapping
-// every DRUM_CYCLES sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
+// every DRUM_CYCLES sysclk cycles (1024 = 98.304 MHz / 96 kHz). All
 // time-multiplexed operations are scheduled against this counter —
 // there is no other sample-rate timing source in the design.
 //
@@ -12,7 +12,7 @@
 //   lane_enter  : high during the NUM_LANES slots in which an element
 //                 enters the pipeline (slot 0..255).
 //   cell_tick   : high during the first slot of every CELL_DIV — the
-//                 SPDIF cell boundary (768 = 128 cells × 6). Counted
+//                 SPDIF cell boundary (1024 = 128 cells × 8). Counted
 //                 from the same reset and realigned at every wrap
 //                 (CYCLES % CELL_DIV == 0), so it coincides with
 //                 sample_tick by construction; the drum really is the
@@ -20,9 +20,9 @@
 //   slot        : current drum slot (scheduling / debug).
 //   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
 //                 48 kHz test S/PDIF output (#101): sample boundary
-//                 every second wrap (1536 sysclk), cell boundary every
-//                 second cell (12 sysclk). Derived from the same
-//                 counters, so 1536 = 128 cells × 12 and sample_tick48
+//                 every second wrap (2048 sysclk), cell boundary every
+//                 second cell (16 sysclk). Derived from the same
+//                 counters, so 2048 = 128 cells × 16 and sample_tick48
 //                 coincides with a cell_tick48 by construction — the
 //                 drum stays the sole timebase.
 //--------------------------------------------------------------------

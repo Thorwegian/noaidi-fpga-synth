@@ -24,7 +24,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 ```
 
 - **Gateware** (SystemVerilog, `rtl/`): a 768-slot "drum" pipeline at
-  73.728 MHz (= 768 × 96 kHz) computes 256 elements per sample —
+  98.304 MHz (= 1024 × 96 kHz) computes 256 elements per sample —
   oscillator (saw/pulse/tri/sine), two Chamberlin SVFs, stereo log
   attenuation. Parameters live in ping-pong BSRAM banks written over
   SPI; dynamic values ride **modulation buses** written by a
@@ -68,7 +68,7 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 
 | Signal | Pin | Description |
 |---|---|---|
-| sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
+| sysclk | 10 | 98.304 MHz from the board's MS5351 CLK0 |
 | spdif_out | 27 | SPDIF digital audio |
 | i2s_data | 54 | I2S serial data |
 | i2s_lrclk | 55 | I2S word select |
@@ -88,7 +88,7 @@ next blip (symptom: SPDIF carrier present but no lock, everything
 else apparently fine).
 
 ```
-pll_clk O0=73728K -s
+pll_clk O0=98304K -s
 ```
 
 ## Build requirements

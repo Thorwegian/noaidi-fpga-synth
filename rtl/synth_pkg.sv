@@ -7,16 +7,20 @@
 package synth_pkg;
 
     parameter int SAMPLE_RATE = 96000;
-    // 768 x 96 kHz. Stepped down from 98.304 MHz (1024 slots) after
-    // five ear-verified silicon timing failures that STA passed: the
-    // fabric has no margin for our 36x36 DSP cascades at ~100 MHz,
-    // and 25% more slack protects the paths we haven't found yet.
-    parameter int SYS_CLK_HZ  = 73_728_000;
+    // 1024 x 96 kHz. RESTORED to 98.304 MHz (#130). The 2026-09 era
+    // stepped this down to 73.728 MHz after five ear-verified silicon
+    // timing failures that STA passed; #128 then found their common
+    // cause (a duplicated 24-bit phase adder, and decode chained into
+    // multiply) and took sysclk Fmax from 76.69 to 123.17 MHz. #51
+    // afterwards confirmed by measurement that no further pipeline
+    // restructuring helps -- the design is placement-bound, not
+    // depth-bound. Worst of four seeds is 121.32 MHz = 23% margin here.
+    parameter int SYS_CLK_HZ  = 98_304_000;
 
     //--- Drum (SCMO) scheduling -------------------------------------
-    parameter int DRUM_CYCLES  = 768;    // SYS_CLK_HZ / SAMPLE_RATE
-    parameter int DRUM_W       = 10;     // $clog2(DRUM_CYCLES)
-    parameter int CELL_DIV     = 6;      // SPDIF cell = 6 sysclk (768 = 128 x 6)
+    parameter int DRUM_CYCLES  = 1024;   // SYS_CLK_HZ / SAMPLE_RATE
+    parameter int DRUM_W       = 10;     // $clog2(DRUM_CYCLES) (768 and 1024 alike)
+    parameter int CELL_DIV     = 8;      // SPDIF cell = 8 sysclk (1024 = 128 x 8)
 
     //--- Elements and lanes (design doc terminology) ----------------
     // The FPGA generates ELEMENTS (256 of them), technically via

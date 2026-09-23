@@ -171,9 +171,9 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 ## Clocking ✅
 
-- Sample rate **96 kHz**; SYSCLK **73.728 MHz = 768 × 96 kHz**, from
+- Sample rate **96 kHz**; SYSCLK **98.304 MHz = 1024 × 96 kHz**, from
   the board's MS5351 CLK0 on FPGA package pin 10.
-- Per-board one-time setup: `pll_clk O0=73728K -s` (whole kHz only —
+- Per-board one-time setup: `pll_clk O0=98304K -s` (whole kHz only —
   decimal-M is invalid syntax; the `-s` is load-bearing: without it
   the setting reverts on the next power blip, verified the hard way
   2026-09-03) on the BL616

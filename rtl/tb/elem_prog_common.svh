@@ -9,7 +9,7 @@
 // owns its own initial block, preamble and timeout.
 
 logic clk = 0, rst_n = 0;
-always #6.781 clk = ~clk;               // ~73.728 MHz
+always #5.086 clk = ~clk;               // ~98.304 MHz
 
 logic sclk = 0, cs = 1, mosi = 0;
 wire  miso;

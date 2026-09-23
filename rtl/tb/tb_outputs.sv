@@ -8,7 +8,7 @@ module tb_outputs;
 
     logic clk = 0;
     logic rst_n = 0;
-    always #6.781 clk = ~clk;   // ~73.728 MHz
+    always #5.086 clk = ~clk;   // ~98.304 MHz
 
     logic sample_tick, lane_enter;
     logic [9:0] slot;
@@ -16,12 +16,12 @@ module tb_outputs;
     logic signed [23:0] audio_l = 24'h123456;
     logic signed [23:0] audio_r = 24'h654321;
 
-    drum #(.CYCLES(768), .NUM_LANES(256)) u_drum (
+    drum #(.CYCLES(1024), .NUM_LANES(256)) u_drum (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
         .lane_enter(lane_enter), .slot(slot));
 
     // integer cell timebase: /6, reset-aligned so sample_tick coincides
-    // with a cell_tick (768 = 128 x 6)
+    // with a cell_tick (1024 = 128 x 8)
     logic [2:0] cd;
     always @(posedge clk or negedge rst_n)
         if (!rst_n) cd <= 3'd0; else cd <= (cd == 3'd5) ? 3'd0 : cd + 3'd1;

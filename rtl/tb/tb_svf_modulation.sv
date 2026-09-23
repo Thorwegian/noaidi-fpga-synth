@@ -33,7 +33,7 @@
 module tb_svf_modulation;
 
     logic clk = 0, rst_n = 0;
-    always #6.781 clk = ~clk;               // ~73.728 MHz
+    always #5.086 clk = ~clk;               // ~98.304 MHz
 
     logic       sample_tick, lane_enter;
     logic [9:0] slot;

@@ -1,6 +1,6 @@
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
-# Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
+# Mainline: 256-element pipeline → SPDIF + I2S at 98.304 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
@@ -92,7 +92,7 @@ pnr.json: yosys.json
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
-		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
+		--freq 98.304 --seed $(SEED) 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<
@@ -115,7 +115,7 @@ timing-sweep: yosys.json
 	@for s in $(SEEDS); do \
 		nextpnr-himbaechel --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
-			--vopt cst=constraints.cst --freq 73.728 --seed $$s \
+			--vopt cst=constraints.cst --freq 98.304 --seed $$s \
 			> /tmp/tsweep/$$s.log 2>&1 & \
 	done; wait
 	@for s in $(SEEDS); do \

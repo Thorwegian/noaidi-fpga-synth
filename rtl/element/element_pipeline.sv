@@ -5,7 +5,7 @@
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different element: stage Sk at drum slot t holds the
 // element that entered at slot t-k.  The pipeline occupies
-// 256 + 16 - 1 = 271 contiguous slots (~35% of the 768-slot drum
+// 256 + 16 - 1 = 271 contiguous slots (~26% of the 1024-slot drum
 // rotation).
 //
 // Stage map:
@@ -332,16 +332,17 @@ module element_pipeline #(
     // Mailbox commits happen in any idle slot where the walker is not
     // writing the replicas THIS cycle (walker_bus_write below): lane reads issue
     // during slots 1..~257, and a commit colliding with a walker
-    // write simply defers one cycle. The window stays ~500 slots
-    // wide, so a 10 MHz SPI burst can never overrun the 1-deep
-    // mailbox (word period 5.6 us >> max wait).
+    // write simply defers one cycle. The window is ~750 slots wide
+    // on the 1024-slot drum, so a 10 MHz SPI burst can never overrun
+    // the 1-deep mailbox (word period 5.6 us >> max wait).
     // bus_mailbox_take is the SINGLE condition for both committing and
     // clearing pending. An earlier version cleared pending on
     // bus_write_window alone while the commit also required !walker_bus_write — when a
     // write's first idle cycle coincided with a walker write (~1 in
     // 3 during the walker span), the write was silently dropped:
     // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    wire  bus_write_window   = (slot > 10'd258) && (slot < 10'd760);
+    wire  bus_write_window   = (slot > 10'd258)
+                            && (slot < 10'(synth_pkg::DRUM_CYCLES - 8));
     wire  bus_mailbox_take   = bus_mailbox_pending && bus_write_window && !walker_bus_write;
     wire  bus_commit = bus_mailbox_take && (bus_mailbox_addr != 10'd0);
 
@@ -1304,7 +1305,7 @@ module element_pipeline #(
     // one operation class per stage (the silicon timing rule): the first
     // cut computed abs -> max -> lzc -> shift -> LUT -> adds -> LUT ->
     // shift in ONE cycle, passed STA, and sputtered at -63 dBFS on the
-    // board (2026-09-18). 768 cycles of slack per sample, so the phase
+    // board (2026-09-18). 1024 cycles of slack per sample, so the phase
     // walk is free:  p1 abs | p2 max -> level | p3..p7 limiter pipeline
     // settles (5 stages) | p8 latch gain_q + gain | p9 multiply | p10
     // sat24 publish. Every consumer latches mix_* at the NEXT tick, so
