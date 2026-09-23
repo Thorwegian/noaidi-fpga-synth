@@ -11,8 +11,9 @@
 // Stage map:
 //   S1  state/param RAM read data available (address issued at S0)
 //   S2  issue phase-delta + SVF-K LUT reads
-//   S3  LUT data → delta, K, q1; phase_next = phase + delta (ONE adder)
-//   S3B register phase_next / barrel-shifted K / q1 / duty / wave
+//   S3  LUT data → delta, K, q1 (barrel-shift decodes only)
+//   S3A register the shifted decodes (#51: decode and add were chained)
+//   S3B register phase_next = phase + delta (ONE adder, alone)
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
 //   S3D #43 resonance attenuation multiply on registered operands (DSP)
 //   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
@@ -1044,7 +1045,46 @@ module element_pipeline #(
     // path hung off the combinational sum, giving one cycle of
     // BSRAM read -> octave shift -> 24-bit add -> sine LUT -> mux.
     // That was the critical path of the whole design.
-    wire signed [23:0] phase_next = s3_phase + delta;
+
+    //----------------------------------------------------------------
+    // S3A (#51, goal 3) -- register the BARREL-SHIFTED decodes before
+    // the adder. After #128 the critical path on main was:
+    //     phase_lut BSRAM clk-to-q  2.26 ns
+    //       -> octave barrel shift  ~2.3 ns
+    //       -> 24-bit phase_next add ~3.5 ns    = 8.1 ns  (123 MHz)
+    // which is a LUT read and a barrel shift chained into arithmetic --
+    // the same class the house rule forbids. It simply was not the
+    // WORST path until #128 removed the one above it. Splitting decode
+    // from the add should leave roughly 4.6 ns and 3.7 ns.
+    //----------------------------------------------------------------
+    logic               s3a_act;   logic [VW-1:0] s3a_idx;
+    logic [15:0]        s3a_att;
+    logic signed [35:0] s3a_k;     logic signed [17:0] s3a_q1;
+    logic signed [35:0] s3a_ic1eq1, s3a_ic2eq1, s3a_ic1eq2, s3a_ic2eq2;
+    logic               s3a_dual;  logic [1:0] s3a_ftype;
+    logic signed [23:0] s3a_phase, s3a_delta;
+    logic [7:0]         s3a_gl, s3a_gr;
+    logic signed [23:0] s3a_duty;  logic [1:0] s3a_wave;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s3a_act<=1'b0; s3a_idx<='0; s3a_att<='0; s3a_k<='0; s3a_q1<='0;
+            s3a_ic1eq1<='0; s3a_ic2eq1<='0; s3a_ic1eq2<='0; s3a_ic2eq2<='0;
+            s3a_dual<=1'b0; s3a_ftype<='0; s3a_phase<='0; s3a_delta<='0;
+            s3a_gl<='0; s3a_gr<='0; s3a_duty<='0; s3a_wave<='0;
+        end else begin
+            s3a_act<=s3_act; s3a_idx<=s3_idx; s3a_att<=s3_reso_att;
+            s3a_k<=k; s3a_q1<=q1_decoded;
+            s3a_ic1eq1<=s3_ic1eq1; s3a_ic2eq1<=s3_ic2eq1;
+            s3a_ic1eq2<=s3_ic1eq2; s3a_ic2eq2<=s3_ic2eq2;
+            s3a_dual<=s3_dual; s3a_ftype<=s3_ftype;
+            s3a_phase<=s3_phase; s3a_delta<=delta;
+            s3a_gl<=s3_gl; s3a_gr<=s3_gr;
+            s3a_duty<=s3_duty; s3a_wave<=s3_wave;
+        end
+    end
+
+    // the 24-bit adder now stands alone between S3A and S3B
+    wire signed [23:0] phase_next = s3a_phase + s3a_delta;
 
     //----------------------------------------------------------------
     // S3B/S3C -- resonance-dependent INPUT attenuation (#43). Scale the
@@ -1072,13 +1112,13 @@ module element_pipeline #(
             s3b_phase<='0; s3b_gl<='0; s3b_gr<='0;
             s3b_duty<='0; s3b_wave<='0;
         end else begin
-            s3b_act<=s3_act; s3b_idx<=s3_idx;
-            s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
-            s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
-            s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
-            s3b_dual<=s3_dual; s3b_ftype<=s3_ftype;
-            s3b_phase<=phase_next; s3b_gl<=s3_gl; s3b_gr<=s3_gr;
-            s3b_duty<=s3_duty; s3b_wave<=s3_wave;
+            s3b_act<=s3a_act; s3b_idx<=s3a_idx;
+            s3b_att<=s3a_att; s3b_k<=s3a_k; s3b_q1<=s3a_q1;
+            s3b_ic1eq1<=s3a_ic1eq1; s3b_ic2eq1<=s3a_ic2eq1;
+            s3b_ic1eq2<=s3a_ic1eq2; s3b_ic2eq2<=s3a_ic2eq2;
+            s3b_dual<=s3a_dual; s3b_ftype<=s3a_ftype;
+            s3b_phase<=phase_next; s3b_gl<=s3a_gl; s3b_gr<=s3a_gr;
+            s3b_duty<=s3a_duty; s3b_wave<=s3a_wave;
         end
     end
 
