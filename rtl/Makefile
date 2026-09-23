@@ -204,6 +204,12 @@ sim-prog-bus: tb/tb_prog_bus.vvp
 sim-prog-sources: tb/tb_prog_sources.vvp
 	vvp tb/tb_prog_sources.vvp > tb/sim-prog-sources.out 2>&1
 
+# #134: the ping-pong bus generation. Timing and resource numbers
+# cannot tell a right-generation read from a wrong one, and hardware
+# cannot see the bus at all -- these invariants only exist in sim.
+sim-prog-pingpong: tb/tb_prog_pingpong.vvp
+	vvp tb/tb_prog_pingpong.vvp > tb/sim-prog-pingpong.out 2>&1
+
 # Active master limiter in situ (#121): hot chord must not rail, must not
 # go near-silent, and 50 ms RMS must not jump > 3 dB (Thor's criterion).
 sim-prog-limiter: tb/tb_prog_limiter.vvp
@@ -270,7 +276,7 @@ tb/tb_limiter.vvp: limiter.sv $(TB_LIM) element/log_lut.hex element/att_lut.hex 
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \

@@ -284,12 +284,12 @@ module element_pipeline #(
     // Six replicas of the one uniform pool — one read port per sink
     // (see bus_architecture.md "Why six replicas"). Broadcast writes
     // keep them identical.
-    reg signed [17:0] bus_ram_pitch [0:synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_duty  [0:synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_fc    [0:synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_q     [0:synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_gl    [0:synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_gr    [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_pitch [0:2*synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_duty  [0:2*synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_fc    [0:2*synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_q     [0:2*synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_gl    [0:2*synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_ram_gr    [0:2*synth_pkg::NUM_BUSES-1];
     integer bi;
     initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1) begin
         bus_ram_pitch[bi] = 18'sd0;
@@ -306,7 +306,7 @@ module element_pipeline #(
     // (the spec's "bus = base register + producer contributions",
     // realized). A bus no producer targets keeps value = base via the
     // mailbox's own replica write.
-    reg signed [17:0] bus_base [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_base [0:2*synth_pkg::NUM_BUSES-1];
     integer bbi;
     initial for (bbi = 0; bbi < synth_pkg::NUM_BUSES; bbi = bbi + 1)
         bus_base[bbi] = 18'sd0;
@@ -318,7 +318,7 @@ module element_pipeline #(
     // output (firmware base + every source contribution written so
     // far), not the firmware base alone. With sources ordered before
     // their sends in the table, propagation is same-sample.
-    reg signed [17:0] bus_sum_ram [0:synth_pkg::NUM_BUSES-1];
+    reg signed [17:0] bus_sum_ram [0:2*synth_pkg::NUM_BUSES-1];
     integer bsi;
     initial for (bsi = 0; bsi < synth_pkg::NUM_BUSES; bsi = bsi + 1)
         bus_sum_ram[bsi] = 18'sd0;
@@ -327,6 +327,17 @@ module element_pipeline #(
     logic               walker_bus_write;
     logic [9:0]         walker_bus_addr;
     logic signed [17:0] walker_bus_value;
+
+    // #134: ping-pong generation bit. The walker writes generation
+    // ~bus_gen while the pipeline reads bus_gen, and they swap at the
+    // sample boundary -- so every element sees one coherent generation
+    // and a read can never collide with a write. Costs no extra BSRAM:
+    // the second generation lives in the half of each block that the
+    // 512-entry pool leaves unused.
+    logic bus_gen;
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)          bus_gen <= 1'b0;
+        else if (sample_tick) bus_gen <= ~bus_gen;
 
     logic bus_write_toggle_meta, bus_write_toggle_sync, bus_write_toggle_prev;
     logic bus_mailbox_pending;
@@ -344,7 +355,11 @@ module element_pipeline #(
     // write's first idle cycle coincided with a walker write (~1 in
     // 3 during the walker span), the write was silently dropped:
     // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    wire  bus_write_window   = (slot > 10'd258) && (slot < 10'd760);
+    // #134: ping-pong put reads and writes in different generations,
+    // so the window that used to keep them apart by schedule is gone.
+    // A commit still defers a cycle when the walker is writing, since
+    // they share the write port.
+    wire  bus_write_window   = 1'b1;
     wire  bus_mailbox_take   = bus_mailbox_pending && bus_write_window && !walker_bus_write;
     wire  bus_commit = bus_mailbox_take && (bus_mailbox_addr != 10'd0);
 
@@ -377,23 +392,23 @@ module element_pipeline #(
     // Replica writes: one physical port, two writers — the walker
     // owns its cycle (walker_bus_write), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_pitch[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_pitch[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_pitch[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_pitch[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_duty[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_duty[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_duty[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_duty[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_fc[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_fc[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_fc[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_fc[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_q[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_q[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_q[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_q[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gl[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_gl[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_gl[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_gl[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gr[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_gr[walker_bus_addr]   <= walker_bus_value;
+        if (bus_commit)   bus_ram_gr[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        else if (walker_bus_write)   bus_ram_gr[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
         if (bus_commit)   bus_sum_ram[bus_mailbox_addr] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_sum_ram[walker_bus_addr]  <= walker_bus_value;
@@ -480,7 +495,7 @@ module element_pipeline #(
         if (!rst_n) begin
             walker_step <= 2'd0; walker_entry <= 8'hFF; walker_half <= 1'b0;
             drain_cnt <= 2'd0;
-        end else if (slot == 10'd299) begin
+        end else if (sample_tick) begin
             walker_step <= 2'd0; walker_entry <= 8'd0;
             walker_half <= ~walker_half;
             drain_cnt <= 2'(WALK_DRAIN);
@@ -834,12 +849,12 @@ module element_pipeline #(
     logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
     logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
     always_ff @(posedge clk) begin
-        s2_bus_pitch <= bus_ram_pitch[s1_ptrs0_word[9:0]];
-        s2_bus_duty  <= bus_ram_duty[s1_ptrs0_word[19:10]];
-        s2_bus_fc    <= bus_ram_fc[s1_ptrs0_word[29:20]];
-        s2_bus_q     <= bus_ram_q[s1_ptrs1_word[9:0]];
-        s2_bus_gl    <= bus_ram_gl[s1_ptrs1_word[19:10]];
-        s2_bus_gr    <= bus_ram_gr[s1_ptrs1_word[29:20]];
+        s2_bus_pitch <= bus_ram_pitch[{bus_gen, s1_ptrs0_word[8:0]}];
+        s2_bus_duty  <= bus_ram_duty[{bus_gen, s1_ptrs0_word[18:10]}];
+        s2_bus_fc    <= bus_ram_fc[{bus_gen, s1_ptrs0_word[28:20]}];
+        s2_bus_q     <= bus_ram_q[{bus_gen, s1_ptrs1_word[8:0]}];
+        s2_bus_gl    <= bus_ram_gl[{bus_gen, s1_ptrs1_word[18:10]}];
+        s2_bus_gr    <= bus_ram_gr[{bus_gen, s1_ptrs1_word[28:20]}];
     end
 
     always_ff @(posedge clk or negedge rst_n) begin

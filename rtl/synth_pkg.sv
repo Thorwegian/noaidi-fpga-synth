@@ -51,7 +51,7 @@ package synth_pkg;
 
     //--- Bus fabric (docs/bus_architecture.md) ----------------------
     parameter logic [15:0] MAP_BUS_BASE = 16'h0800;    // bus base registers
-    parameter int          NUM_BUSES    = 1024;        // uniform pool
+    parameter int          NUM_BUSES    = 512;         // uniform pool (#134)
     parameter int          BUS_W        = 18;          // signed Q8.10
 
     //--- Producer table (B4/B5) -------------------------------------
