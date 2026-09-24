@@ -21,6 +21,7 @@ module tb_csp;
     localparam int CYC     = synth_pkg::DRUM_CYCLES;
     localparam int TESTBUS = 20;
     localparam int QUIETBUS= 300;
+    localparam int DROPBUS = 77;   // nothing produces this one
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;
 
@@ -202,42 +203,58 @@ module tb_csp;
         //    invariant #134 deleted, and it is fully observable.
         //---------------------------------------------------------------
         live_hits = 0; shadow_hits = 0; same_addr_hits = 0;
-        @(negedge clk); rd_a = TESTBUS[8:0];
+        @(negedge clk); rd_a = DROPBUS[8:0];
+        gen_prev = dut.dmem_gen;        // stale from test 1 otherwise
         fork
-            // a stream of mailbox writes, as live firmware traffic does
             begin
-                for (w = 0; w < 40; w = w + 1)
-                    bus_write(10'(TESTBUS), 18'sd1000 + 18'(w));
+                for (w = 0; w < 60; w = w + 1)
+                    bus_write(10'(DROPBUS), 18'sd1000 + 18'(w));
             end
-            // watch where each commit actually lands
             begin : watcher
-                for (cyc = 0; cyc < 40*40; cyc = cyc + 1) begin
+                for (cyc = 0; cyc < 60*60; cyc = cyc + 1) begin
                     @(posedge clk);
                     if (dut.dmem_commit) begin
-                        if (dut.dmem_commit_half_sel === dut.dmem_gen) begin
+                        shadow_hits = shadow_hits + 1;
+                        // THE invariant: a commit may only land in the
+                        // idle window, where neither the lane nor the
+                        // sequencer is reading anything.
+                        if (!dut.csp_idle_window)
                             live_hits = live_hits + 1;
-                            if (dut.dmem_mbox_addr[8:0] === rd_a)
-                                same_addr_hits = same_addr_hits + 1;
-                        end else
-                            shadow_hits = shadow_hits + 1;
                     end
+                    // The swap sits at CSP_FLIP_SLOT, deliberately just
+                    // BEFORE the commit window so no commit straddles it.
+                    // What matters is that both readers are done: the lane
+                    // ends at LANE_SPAN and the sequencer at ~390.
+                    if (dut.dmem_gen !== gen_prev
+                        && dut.csp_slot <= 10'd390)
+                        same_addr_hits = same_addr_hits + 1;
+                    gen_prev = dut.dmem_gen;
                 end
             end
         join_any
         disable watcher;
 
-        $display("commits into the SHADOW half: %0d", shadow_hits);
-        $display("commits into the LIVE   half: %0d", live_hits);
-        $display("  ...of which at the address being read: %0d", same_addr_hits);
-        if (same_addr_hits > 0) begin
-            $display("FAIL: a mailbox commit writes the LIVE half at the very");
-            $display("      address a sink is reading -- read-during-write on");
-            $display("      one BSRAM port. #134 removed the slot window that");
-            $display("      made this impossible and the comment saying so");
-            $display("      survived. THIS IS THE BUG.");
+        $display("commits:                        %0d", shadow_hits);
+        $display("commits OUTSIDE the idle window: %0d", live_hits);
+        $display("swaps   while a reader was live:  %0d", same_addr_hits);
+        if (live_hits > 0 || same_addr_hits > 0) begin
+            $display("FAIL: a commit or a swap landed while a reader was live");
             errors = errors + 1;
         end else
-            $display("no read-during-write: commits never hit a live read");
+            $display("scheduling: every commit and swap sits in the idle window");
+
+        // The fix must not trade a glitch for a DROPPED WRITE. A lost
+        // gate-off is a stuck note, which is worse than the scratching --
+        // and it is exactly how the first window attempt failed.
+        repeat (6*CYC) @(posedge clk);
+        if (dut.dmem_gl[{1'b0, DROPBUS[8:0]}] !== 18'sd1059 ||
+            dut.dmem_gl[{1'b1, DROPBUS[8:0]}] !== 18'sd1059) begin
+            $display("FAIL: writes dropped -- halves hold %0d / %0d, want 1059",
+                     dut.dmem_gl[{1'b0, DROPBUS[8:0]}],
+                     dut.dmem_gl[{1'b1, DROPBUS[8:0]}]);
+            errors = errors + 1;
+        end else
+            $display("no dropped writes: 60 back-to-back all reached both halves");
 
         if (errors) $display("%0d FAILURE(S)", errors);
         else        $display("ALL PASS");

@@ -143,10 +143,53 @@ module csp (
     // 512-entry pool leaves unused.
     logic dmem_gen;   // process below, with pc_half
 
+    // ---- the CSP's own place in the sample (#127, Thor) -------------
+    // Nothing here is asynchronous except the ARRIVAL of a firmware
+    // write. The lane and the sequencer are both on a fixed 768-slot
+    // schedule, so a commit should be PLACED in the gap rather than
+    // dodging readers -- which is what two earlier attempts tried, one
+    // by window and one by address compare, and both were wrong.
+    //
+    // Measured, not read off a comment:
+    //
+    //   CSP busy        slots   1..390     (INSTR_PER_PASS+PIPE_DRAIN)*3
+    //   lane reads end  slot      273      LANE_SPAN
+    //   IDLE            slots 391..767     377 slots, nothing reading
+    //
+    // Three cycles per commit, so about 125 fit in one window against
+    // the three the SPI can deliver per sample. One window serves every
+    // RAM -- replicas and dmem_init alike.
+    //
+    // This is the CSP keeping its own schedule, so it still references
+    // nothing of the drum's (#136). It also retires the "armed at slot
+    // 299" the sequencer has not done since #134.
+    localparam int CSP_FLIP_SLOT   = 395;   // after both readers
+    localparam int CSP_COMMIT_FROM = 400;   // after the flip, so no
+                                            // commit straddles a swap
+    logic [synth_pkg::DRUM_W-1:0] csp_slot;
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)                                        csp_slot <= '0;
+        else if (sample_tick)                              csp_slot <= '0;
+        else if (csp_slot != synth_pkg::DRUM_CYCLES[synth_pkg::DRUM_W-1:0] - 1'b1)
+                                                           csp_slot <= csp_slot + 1'b1;
+    wire csp_idle_window = (csp_slot >= CSP_COMMIT_FROM[synth_pkg::DRUM_W-1:0]);
+
+    // ---- the mailbox is a FIFO now ----------------------------------
+    // Holding commits for a once-per-sample window means up to three SPI
+    // words can arrive between windows, and the old 1-deep mailbox
+    // DROPPED on overwrite. That would have traded the glitch for a
+    // stuck note, which is the worse bug.
+    localparam int MBOX_DEPTH = 8;
     logic dmem_wr_toggle_meta, dmem_wr_toggle_sync, dmem_wr_toggle_prev;
-    logic dmem_mbox_pending;
-    logic [9:0]  dmem_mbox_addr;
-    logic [17:0] dmem_mbox_data;
+    reg   [27:0] mbox_mem [0:MBOX_DEPTH-1];
+    logic [3:0]  mbox_wr, mbox_rd;
+    integer mbi;
+    initial for (mbi = 0; mbi < MBOX_DEPTH; mbi = mbi + 1) mbox_mem[mbi] = 28'd0;
+    wire mbox_empty = (mbox_wr == mbox_rd);
+    wire mbox_full  = (mbox_wr[2:0] == mbox_rd[2:0]) && (mbox_wr[3] != mbox_rd[3]);
+    wire         dmem_mbox_pending = !mbox_empty;
+    wire [9:0]   dmem_mbox_addr = mbox_mem[mbox_rd[2:0]][27:18];
+    wire [17:0]  dmem_mbox_data = mbox_mem[mbox_rd[2:0]][17:0];
     // #134: a mailbox entry commits over TWO takes, one per generation.
     // The sequencer rewrites its target buses every sample, so ITS writes
     // can live in one half. A mailbox write sets a PERSISTENT base that
@@ -160,8 +203,8 @@ module csp (
     // need is that the WALKER's sweep is seen as one complete
     // generation. Firmware writes were always asynchronous and
     // mid-sample, before ping-pong and after it.
-    logic dmem_commit_phase;
-    logic dmem_commit_half;
+    logic [1:0] dmem_commit_phase;
+    logic       dmem_commit_half;
     // Mailbox commits happen in any idle slot where the sequencer is not
     // writing the replicas THIS cycle (dmem_we below): lane reads issue
     // during slots 1..~257, and a commit colliding with a sequencer
@@ -174,79 +217,98 @@ module csp (
     // write's first idle cycle coincided with a sequencer write (~1 in
     // 3 during the sequencer span), the write was silently dropped:
     // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    // #134: ping-pong put reads and writes in different generations,
-    // so the window that used to keep them apart by schedule is gone.
-    // A commit still defers a cycle when the sequencer is writing, since
-    // they share the write port.
-    wire  dmem_wr_window   = 1'b1;
-    wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
-    wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
-    wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_gen;
+    // #134 replaced the scheduling window with `1'b1`, reasoning that
+    // ping-pong puts reads and writes in different generations. True of
+    // the SEQUENCER, false of the MAILBOX: the commit is write-through by
+    // design, so one of its takes MUST land in the half being read.
+    // Measured before this fix: 40 of 40 commits hit the live half at the
+    // address under read. Thor heard it as scratching on the audio and as
+    // an attack that restarted forever -- the latter because dmem_init
+    // carries the GATE and has no generation between writer and reader.
+    //
+    // Three takes, all inside the idle window: the two replica halves,
+    // then dmem_init. The FIFO entry pops only after the third, so
+    // nothing is dropped.
+    wire  dmem_mbox_take   = dmem_mbox_pending && csp_idle_window && !dmem_we;
+    wire  dmem_commit_repl = dmem_mbox_take && (dmem_commit_phase != 2'd2)
+                             && (dmem_mbox_addr != 10'd0);
+    wire  dmem_commit_init = dmem_mbox_take && (dmem_commit_phase == 2'd2)
+                             && (dmem_mbox_addr != 10'd0);
+    wire  dmem_commit      = dmem_commit_repl || dmem_commit_init;
+    wire  dmem_commit_half_sel = (dmem_commit_phase == 2'd1) ? ~dmem_commit_half
+                                                             : ~dmem_gen;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             dmem_wr_toggle_meta <= 1'b0; dmem_wr_toggle_sync <= 1'b0; dmem_wr_toggle_prev <= 1'b0;
-            dmem_mbox_pending <= 1'b0;
-            dmem_mbox_addr <= '0; dmem_mbox_data <= '0;
+            mbox_wr <= 4'd0;
         end else begin
             dmem_wr_toggle_meta <= dmem_wr_toggle; dmem_wr_toggle_sync <= dmem_wr_toggle_meta; dmem_wr_toggle_prev <= dmem_wr_toggle_sync;
-            if (dmem_wr_toggle_sync != dmem_wr_toggle_prev) begin
-                dmem_mbox_pending <= 1'b1;         // payload is stable: it was
-                dmem_mbox_addr   <= dmem_wr_addr;      // written before the toggle,
-                dmem_mbox_data   <= dmem_wr_data;      // 2 sync FFs ago
-            end else if (dmem_mbox_take && dmem_commit_phase) begin
-                dmem_mbox_pending <= 1'b0;
+            // payload is stable: it was written before the toggle, two
+            // sync FFs ago. A full FIFO drops rather than corrupting the
+            // queue -- 8 deep against 3 words per sample, so it cannot
+            // fill in practice.
+            if ((dmem_wr_toggle_sync != dmem_wr_toggle_prev) && !mbox_full) begin
+                mbox_mem[mbox_wr[2:0]] <= {dmem_wr_addr, dmem_wr_data};
+                mbox_wr <= mbox_wr + 4'd1;
             end
         end
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            dmem_commit_phase <= 1'b0;
+            dmem_commit_phase <= 2'd0;
             dmem_commit_half  <= 1'b0;
+            mbox_rd           <= 4'd0;
         end else if (dmem_mbox_take) begin
-            if (!dmem_commit_phase) begin
-                dmem_commit_half  <= ~dmem_gen;   // the half written now
-                dmem_commit_phase <= 1'b1;
-            end else
-                dmem_commit_phase <= 1'b0;
+            case (dmem_commit_phase)
+                2'd0: begin
+                    dmem_commit_half  <= ~dmem_gen;   // the half written now
+                    dmem_commit_phase <= 2'd1;
+                end
+                2'd1: dmem_commit_phase <= 2'd2;
+                default: begin                        // dmem_init done
+                    dmem_commit_phase <= 2'd0;
+                    mbox_rd           <= mbox_rd + 4'd1;
+                end
+            endcase
         end
     end
 
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit_init) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
     // Bus 1023 doubles as the test-tone control latch (issue #81).
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
-        else if (dmem_commit && dmem_mbox_addr == 10'd1023)
+        else if (dmem_commit_init && dmem_mbox_addr == 10'd1023)
             test_tone_en <= dmem_mbox_data[0];
 
     // Replica writes: one physical port, two writers — the sequencer
     // owns its cycle (dmem_we), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_pitch[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_duty[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_fc[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_gl[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gl[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gr[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gll[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_gll[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gll[{~dmem_gen, dmem_waddr[8:0]}]  <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_glr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit_repl) dmem_glr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_glr[{~dmem_gen, dmem_waddr[8:0]}]  <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_local[dmem_mbox_addr] <= $signed(dmem_mbox_data);
@@ -332,7 +394,10 @@ module csp (
     always_ff @(posedge sclk)
         if (imem_write_enable) imem[{bank_shadow, imem_write_addr}] <= {4'b0, imem_write_data};
 
-    // control: 3-slot stride via a small counter, armed at slot 299.
+    // control: 3-slot stride via a small counter, armed at sample_tick.
+    // (It said "slot 299" until #127; #134 moved the arming and the
+    // comment did not follow, which is what made me mis-measure the
+    // idle window twice.)
     // HALF-RATE (#100): each sample walks 128 entries — ONE HALF of
     // the 256-entry table, halves alternating by pc_half — so a
     // source updates at 48 kHz effective (zipper at 24 kHz, under
@@ -351,8 +416,12 @@ module csp (
     // depth and a stale link in any chain. pc_half marks the
     // two-sample cycle, so the swap rides it.
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)                          dmem_gen <= 1'b0;
-        else if (sample_tick && pc_half) dmem_gen <= ~dmem_gen;
+        if (!rst_n)                      dmem_gen <= 1'b0;
+        // #127: in the idle window, not at slot 0. At slot 0 the swap is
+        // one cycle ahead of the lane's first read; here nothing is
+        // reading either RAM group.
+        else if ((csp_slot == CSP_FLIP_SLOT[synth_pkg::DRUM_W-1:0]) && pc_half)
+            dmem_gen <= ~dmem_gen;
     wire pc_active = (pc < 8'(synth_pkg::INSTR_PER_PASS));
     // #97 fix: the bus write is pipeline-delayed by one entry — entry N's
     // write fires during entry N+1's P5. Without a drain the step machine
