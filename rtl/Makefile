@@ -215,6 +215,14 @@ sim-prog-pingpong: tb/tb_prog_pingpong.vvp
 sim-prog-limiter: tb/tb_prog_limiter.vvp
 	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
 
+# #136: the bus engine alone -- seconds, not minutes, because it does
+# not elaborate the SVF, the oscillators or the limiter.
+tb/tb_bus_engine.vvp: $(PKG) element/bus_engine.sv element/osc_core.sv tb/tb_bus_engine.sv Makefile
+	iverilog -g2012 -I. -o $@ $(PKG) element/bus_engine.sv element/osc_core.sv tb/tb_bus_engine.sv
+
+sim-bus-engine: tb/tb_bus_engine.vvp
+	vvp tb/tb_bus_engine.vvp > tb/sim-bus-engine.out 2>&1
+
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
@@ -276,7 +284,7 @@ tb/tb_limiter.vvp: limiter.sv $(TB_LIM) element/log_lut.hex element/att_lut.hex 
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-bus-engine sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
