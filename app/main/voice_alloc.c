@@ -136,6 +136,14 @@ static int64_t  s_last_apply;
 #define BUS_GAIN(v)   (16 + (v))
 #define BUS_CUT(v)    (48 + (v))
 #define BUS_VGATE(v)  (80 + (v))
+// bus 112+v: voice v's LINEAR amp bus (#127). A SEPARATE pair from the
+//            log gain buses, which stay exactly as they are until they
+//            are ready to migrate -- driven exclusively by the ADSR
+//            until further notice (Thor). The element gain stage
+//            MULTIPLIES the log gain by this one at S9D, which is why
+//            they can coexist rather than compete. Q4.14, unity
+//            0x4000, base 0: the envelope supplies the whole range.
+#define BUS_AMP(v)    (112 + (v))
 
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
@@ -202,6 +210,13 @@ static int64_t release_tail_us(void)
     uint32_t r    = (patch_adsr_word(&g_patch.env[0]) >> 24) & 0xFF;
     uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
     uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
+    // #127: an RC release is asymptotic, so it takes far longer to
+    // reach silence than the linear ramp this formula was written for
+    // -- about 15.25/k against 2^22/step, roughly 8x. Under-estimating
+    // here hard-mutes a voice while it is still audible, which is a
+    // click; over-estimating only delays voice stealing. So: 8x, and
+    // deliberately the conservative direction.
+    samples *= 8;
     return (int64_t)(samples * 125u / 6u);            // µs at 48 kHz
 }
 
@@ -595,14 +610,17 @@ static void init_fanout_sources(void)
 }
 
 // Master volume → every voice's gain-bus base (all 32, since the base
-// persists and a not-yet-played voice must already carry it). Base =
-// −ENV_SPAN + (g_patch.volume − VOL_REF)·64: at VOL_REF the offset is
-// 0 and the base is the plain envelope floor. No swap, no rewrite —
-// the amp-ADSR producer keeps adding the envelope on top.
+// persists and a not-yet-played voice must already carry it).
+//
+// #127: the −ENV_SPAN floor is GONE from this base. It existed because
+// the envelope added +ENV_SPAN back on this same bus; the envelope
+// lives on BUS_AMP(v) now and multiplies in at S9D instead, so this
+// bus carries the volume offset alone. Leaving the floor here would
+// park every voice 60 dB down with nothing to lift it.
 static void refresh_gain_buses(void)
 {
     int32_t off  = ((int32_t)g_patch.volume - VOL_REF) * 64;
-    int32_t base = -(int32_t)ENV_SPAN + off;
+    int32_t base = off;
     for (int v = 0; v < NUM_VOICES; v++)
         engine_link_bus_write(BUS_GAIN(v), (uint32_t)base & 0x3FFFF);
 }
@@ -980,6 +998,12 @@ static void wire_pointers(void)
         send((uint8_t)e, 6,
              (uint32_t)BUS_RESO_GLOBAL
              | ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
+        // PTRS2 (#127): the LINEAR gain pointers, L and R, at the
+        // voice's own amp bus. Routed HERE, where the voice also gets
+        // its envelope -- an element pointed at a linear gain bus that
+        // nothing drives is silence, not unity.
+        send((uint8_t)e, 7,
+             (uint32_t)BUS_AMP(v) | ((uint32_t)BUS_AMP(v) << 10));
     }
 }
 
@@ -1022,11 +1046,18 @@ void voice_alloc_init(void)
     // issue #40 — the subtracts-silence trick is retired). Bases are
     // live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
+        // #127: the amp envelope drives the voice's LINEAR bus now, at
+        // unity depth -- the envelope IS the gain, so there is no span
+        // to scale by. CFG[26] = SUS_LOG: the sustain byte decodes
+        // exponentially because this destination is amplitude, where a
+        // linear taper would cram the useful range into the top third.
         engine_link_prod_write(PROD_ADSR(v), 0,
-            2u | ((uint32_t)BUS_GAIN(v) << 6)
-               | ((uint32_t)BUS_VGATE(v) << 16));
+            2u | ((uint32_t)BUS_AMP(v) << 6)
+               | ((uint32_t)BUS_VGATE(v) << 16)
+               | (1u << 26));
         engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word(&g_patch.env[0]));
-        engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
+        engine_link_prod_write(PROD_ADSR(v), 2, 0x10000u);   // unity
+        engine_link_bus_write(BUS_AMP(v), 0);                // silent base
     }
     refresh_gain_buses();   // gain-bus bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);

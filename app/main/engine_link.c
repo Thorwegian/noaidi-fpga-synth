@@ -240,6 +240,11 @@ void engine_link_init(void)
         s_image[e][4] = 0;            // GATE off
         s_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
         s_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
+        s_image[e][7] = 0;            // PTRS2: 0 = BYPASS, not bus 0. The
+                                      // linear gain is MULTIPLICATIVE, so
+                                      // an unset pointer reading the
+                                      // hardwired-zero bus would silence
+                                      // the element (#127).
     }
 
     // Both banks get the muted image before anything can play.
