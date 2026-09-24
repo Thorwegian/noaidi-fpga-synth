@@ -75,9 +75,9 @@ localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
                                                             // pending the
                                                             // source rename
 
-// per-element word offsets (memory_map.md +0..+6)
+// per-element word offsets (memory_map.md +0..+7)
 localparam int W_OSC = 0, W_DUTY = 1, W_FILTER = 2, W_GAIN = 3,
-               W_GATE = 4, W_PTRS0 = 5, W_PTRS1 = 6;
+               W_GATE = 4, W_PTRS0 = 5, W_PTRS1 = 6, W_PTRS2 = 7;
 
 function automatic [15:0] elem_addr(input integer e, input integer w);
     elem_addr = 16'(ELEM_BASE + 16'(e) * ELEM_STRIDE + 16'(w));
@@ -108,6 +108,11 @@ localparam [31:0] GAIN_CHORD_RIGHT= 32'h00009F00;  // R -36 dB, L mute
 localparam [31:0] PTRS0_CUT_BUS1        = 32'd1 << 20;
 localparam [31:0] PTRS0_CUT1_PITCH_BUS2 = (32'd1 << 20) | 32'd2;
 localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
+// PTRS2 (+7, #127 phase 1): the LINEAR gain bus pointers, [9:0] L and
+// [19:10] R. This bus is MULTIPLICATIVE in Q4.14 with unity 0x4000, so
+// a base of 0 is silence and the envelope's own output is the gain --
+// there is no floor-and-offset dance, because nothing is in octaves.
+localparam [31:0] PTRS2_GLIN_BUS4       = 32'd4 | (32'd4 << 10);
 
 // Q8.10 bus/depth offsets — ONE name per value, used for bus bases
 // and source depths alike. (The original bench comments called
@@ -129,6 +134,11 @@ localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
                                                     // 48 kHz walk (#100)
 localparam [31:0] SRC_ADSR_BUS3_GATE5 =
     32'd2 | (32'd3 << 6) | (32'd5 << 16);           // ADSR type
+// #127: the envelope emits a LINEAR amplitude and belongs on the
+// linear gain bus. Bus 3 stays log so the LFO tremolo test above keeps
+// testing what it was written to test (multiplicative LFO is #137).
+localparam [31:0] SRC_ADSR_BUS4_GATE5 =
+    32'd2 | (32'd4 << 6) | (32'd5 << 16);
 localparam [31:0] SRC_BUS3_FROM6 =                  // SEND (#44/#98):
     32'd3 | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
 localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6

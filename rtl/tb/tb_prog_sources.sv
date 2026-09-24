@@ -29,6 +29,7 @@ module tb_prog_sources;
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
             spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
+            spi_word_write(elem_addr(v, W_PTRS2),  PTRS2_GLIN_BUS4);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
@@ -39,6 +40,7 @@ module tb_prog_sources;
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
             spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
+            spi_word_write(elem_addr(v, W_PTRS2),  PTRS2_GLIN_BUS4);
         end
         observe(60);
 
@@ -69,21 +71,19 @@ module tb_prog_sources;
         // volume semantics (#40): base = quiet floor (negative),
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
-                                                          // match the
-                                                          // floor's
-                                                          // magnitude
+        spi_word_write(src_addr(1, 2), DEPTH_UNITY);      // linear: the
+                                                          // envelope IS
+                                                          // the gain
         flip;
         spi_word_write(src_addr(0, 0), SRC_OFF);
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
-                                                          // match the
-                                                          // floor's
-                                                          // magnitude
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);
+        spi_word_write(src_addr(1, 2), DEPTH_UNITY);      // linear: the
+                                                          // envelope IS
+                                                          // the gain
+        spi_word_write(bus_addr(4), 32'h00000000);   // linear base: silent
         observe(60);
         observe(300);
         worst = peak;
@@ -114,20 +114,20 @@ module tb_prog_sources;
         // +4 oct depth each over a −8 oct base. Summed: −8+4+4 = 0
         // (full loudness). Last-write-wins would leave −8+4 = −4 oct
         // = 24 dB quieter. Compare against slot-2-off single-source.
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
-        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 2), DEPTH_HALF);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
+        spi_word_write(src_addr(2, 2), DEPTH_HALF);
         flip;
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
-        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 2), DEPTH_HALF);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS4_GATE5);
         spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
+        spi_word_write(src_addr(2, 2), DEPTH_HALF);
+        spi_word_write(bus_addr(4), 32'h00000000);      // linear base
         spi_word_write(bus_addr(5), 32'h00000001);      // gate on
         observe(300);
         observe(400);
@@ -141,7 +141,14 @@ module tb_prog_sources;
         observe(400);
         $display("bus summing, one source:  peak=%0d", peak);
         if (peak == 0) peak = 1;
-        if (wmax / peak < 8) begin
+        // THRESHOLD CHANGED (#127), and for a reason, not to go green.
+        // On the LOG bus, summing added OCTAVES: two +4 oct sources
+        // made +8 oct, an 8x amplitude ratio. On the LINEAR bus,
+        // summing adds AMPLITUDES: two half-depth sources make exactly
+        // 2x. The test still separates the two outcomes it was written
+        // to separate, because last-write-wins would leave the ratio at
+        // 1.0 -- the gap is 2.0 against 1.0 instead of 8.0 against 2.0.
+        if (wmax * 10 < peak * 15) begin
             $display("FAIL: consecutive same-bus sources do not sum (#84)");
             errors = errors + 1;
         end
