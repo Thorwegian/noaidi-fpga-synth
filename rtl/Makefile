@@ -11,7 +11,7 @@ MOD = \
 	drum.sv \
 	output_tilt.sv \
 	limiter.sv \
-	element/element_pipeline.sv \
+	element/element_pipeline.sv element/bus_engine.sv \
 	element/svf_tpt.sv \
 	element/osc_core.sv \
 	spi/spi_bus.sv \
@@ -136,7 +136,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv element/svf_tpt.sv element/osc_core.sv
+SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv element/bus_engine.sv element/svf_tpt.sv element/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
