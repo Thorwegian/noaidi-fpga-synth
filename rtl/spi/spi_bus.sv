@@ -60,7 +60,7 @@ module spi_bus #(
     // Offsets 7..63 are dropped for now; per-element read-back is TBD
     // (reads in this range return zero).
     output logic        elem_write_enable,
-    output logic [2:0]  elem_write_word,   // 0..6 = OSC..PTRS1 param RAM
+    output logic [2:0]  elem_write_word,   // 0..7 = OSC..PTRS2 param RAM
 
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
     // Bus values are live (no ping-pong). The write crosses clock
@@ -224,7 +224,7 @@ module spi_bus #(
                               && !is_read && addr_in_backed;
 
     // ---- per-element write decode (MAP_ELEM_BASE + 256×64 words,
-    //      offsets 0..6) -------------------------------------------
+    //      offsets 0..7) -------------------------------------------
     localparam [15:0] ELEM_BASE = synth_pkg::MAP_ELEM_BASE;
     localparam [15:0] ELEM_END  = synth_pkg::MAP_ELEM_BASE
                                 + 16'(synth_pkg::NUM_ELEMENTS
@@ -236,8 +236,16 @@ module spi_bus #(
     assign elem_write_enable = byte_end && (frame_phase == 3'd4)
                                && (data_byte_index == 2'd3)
                                && !is_read && in_elem_range
-                               && (elem_offset[5:3] == 3'd0)
-                               && (elem_offset[2:0] < 3'd7);
+                               && (elem_offset[5:3] == 3'd0);
+                               // offsets 0..7. Word 7 is PTRS2 (#127).
+                               // It used to be excluded here, and phase 1
+                               // added the word to the element pipeline
+                               // WITHOUT lifting this gate -- so every
+                               // PTRS2 write was silently dropped at the
+                               // SPI boundary and the linear gain bus was
+                               // unreachable. [5:3]==0 already bounds the
+                               // offset to 0..7, so no further test is
+                               // needed.
     assign elem_write_word   = elem_offset[2:0];
 
     // ---- instruction table write decode (0x0100..0x04FF, #100) --------
