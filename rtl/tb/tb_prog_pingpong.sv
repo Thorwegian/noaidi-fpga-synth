@@ -28,7 +28,7 @@ module tb_prog_pingpong;
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;  // negative: sign survives
 
-    localparam int          QUIETBUS = 300;   // no producer targets this
+    localparam int          QUIETBUS = 300;   // no instruction targets this
     integer toggles, ticks, cyc;
     integer persist_ok;
     integer straddles, windows;
@@ -37,8 +37,8 @@ module tb_prog_pingpong;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
     // hierarchical peeks -- the whole point of doing this in simulation
-    `define LIVE   u_pipe.u_bus.bus_ram_gl[{ u_pipe.u_bus.bus_gen, TESTBUS[8:0]}]
-    `define SHADOW u_pipe.u_bus.bus_ram_gl[{~u_pipe.u_bus.bus_gen, TESTBUS[8:0]}]
+    `define LIVE   u_pipe.u_csp.bus_ram_gl[{ u_pipe.u_csp.bus_gen, TESTBUS[8:0]}]
+    `define SHADOW u_pipe.u_csp.bus_ram_gl[{~u_pipe.u_csp.bus_gen, TESTBUS[8:0]}]
 
     initial begin
         reset_and_mute;
@@ -47,23 +47,23 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         // 1. bus_gen toggles exactly once per sample
         //---------------------------------------------------------------
-        toggles = 0; ticks = 0; gen_prev = u_pipe.u_bus.bus_gen;
+        toggles = 0; ticks = 0; gen_prev = u_pipe.u_csp.bus_gen;
         for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
             @(posedge clk);
-            if (u_pipe.u_bus.bus_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = u_pipe.u_bus.bus_gen;
+            if (u_pipe.u_csp.bus_gen !== gen_prev) toggles = toggles + 1;
+            gen_prev = u_pipe.u_csp.bus_gen;
             if (sample_tick) ticks = ticks + 1;
         end
-        // One generation == one COMPLETE walker pass, and the walker is
+        // One generation == one COMPLETE sequencer pass, and the sequencer is
         // half-rate (#100), so the cadence is one toggle per TWO samples.
-        // Flipping per sample would publish a generation the walker had
+        // Flipping per sample would publish a generation the sequencer had
         // only half-written -- halved modulation depth, broken chains.
         if (toggles !== ticks/2) begin
             $display("FAIL: bus_gen toggled %0d times over %0d samples, want %0d",
                      toggles, ticks, ticks/2);
             errors = errors + 1;
         end else
-            $display("gen cadence: %0d toggles / %0d samples -- one per walker pass",
+            $display("gen cadence: %0d toggles / %0d samples -- one per sequencer pass",
                      toggles, ticks);
 
         //---------------------------------------------------------------
@@ -85,7 +85,7 @@ module tb_prog_pingpong;
         // restored, not a concession -- firmware writes have always
         // landed mid-sample. The atomicity that matters is the WALKER's,
         // which writes only the shadow half; test 7 covers persistence
-        // and the walker's own sweep is covered by tb_prog_sources.
+        // and the sequencer's own sweep is covered by tb_prog_sources.
         if (live_mid !== MARK_A) begin
             $display("FAIL: mailbox write not visible in the live half (got %0d, want %0d)",
                      live_mid, MARK_A);
@@ -132,7 +132,7 @@ module tb_prog_pingpong;
         // 6. a neighbouring bus must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
-        if (u_pipe.u_bus.bus_ram_gl[{u_pipe.u_bus.bus_gen, 9'(TESTBUS+1)}] === MARK_B) begin
+        if (u_pipe.u_csp.bus_ram_gl[{u_pipe.u_csp.bus_gen, 9'(TESTBUS+1)}] === MARK_B) begin
             $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TESTBUS+1);
             errors = errors + 1;
         end else
@@ -165,7 +165,7 @@ module tb_prog_pingpong;
         else $display("persistence: value stable across 13 consecutive swaps");
 
         //---------------------------------------------------------------
-        // 8. the same for a bus NO producer targets -- the exact case
+        // 8. the same for a bus NO instruction targets -- the exact case
         //    that broke. Nothing refreshes it, so it depends entirely on
         //    the mailbox write having reached both halves.
         //---------------------------------------------------------------
@@ -174,10 +174,10 @@ module tb_prog_pingpong;
         spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
         repeat (6) @(posedge sample_tick);
         repeat (4) @(posedge clk);
-        if (u_pipe.u_bus.bus_ram_fc[{u_pipe.u_bus.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (u_pipe.u_csp.bus_ram_fc[{u_pipe.u_csp.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus %0d lost its base (got %0d, want %0d)",
                      QUIETBUS,
-                     u_pipe.u_bus.bus_ram_fc[{u_pipe.u_bus.bus_gen, QUIETBUS[8:0]}], MARK_B);
+                     u_pipe.u_csp.bus_ram_fc[{u_pipe.u_csp.bus_gen, QUIETBUS[8:0]}], MARK_B);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists with nothing refreshing it");
@@ -199,8 +199,8 @@ module tb_prog_pingpong;
                 gen_seen = 1'bx;                 // swap happens here
             end else if (slot <= 10'd256) begin
                 if (gen_seen === 1'bx)
-                    gen_seen = u_pipe.u_bus.bus_gen;   // first read of this pass
-                else if (u_pipe.u_bus.bus_gen !== gen_seen) begin
+                    gen_seen = u_pipe.u_csp.bus_gen;   // first read of this pass
+                else if (u_pipe.u_csp.bus_gen !== gen_seen) begin
                     if (straddles == 0)
                         $display("FAIL: bus_gen changed at slot %0d, mid lane pass", slot);
                     straddles = straddles + 1;

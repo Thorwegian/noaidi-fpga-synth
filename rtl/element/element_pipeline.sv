@@ -93,10 +93,10 @@ module element_pipeline #(
     input  logic [17:0]    bus_write_data,
     input  logic           bus_write_toggle,
 
-    // Producer table writes (sclk domain, banked — wiring per law 4)
-    input  logic           producer_write_enable,
-    input  logic [9:0]     producer_write_addr,     // {entry[7:0], word[1:0]} (#100)
-    input  logic [31:0]    producer_write_data,
+    // Instruction table writes (sclk domain, banked — wiring per law 4)
+    input  logic           imem_write_enable,
+    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]} (#100)
+    input  logic [31:0]    imem_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
     input  logic           swap_req,    // sclk-domain toggle
@@ -194,7 +194,7 @@ module element_pipeline #(
     // Gate 0 silences the element (gain decode forced to exact mute);
     // the oscillator and filters free-run regardless. NOTE (Thor,
     // #98): this never became and will never become an ADSR trigger —
-    // envelopes are walker SOURCES, gated by a control input (a gate
+    // envelopes are sequencer SOURCES, gated by a control input (a gate
     // bus shared across a voice's elements), not element traits.
     // Today GATE's only job
     // is the exact-mute path (#68); Thor has proposed dropping GATE
@@ -376,20 +376,20 @@ module element_pipeline #(
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
     //----------------------------------------------------------------
-    // The modulation bus and its source walker now live in their own
+    // The modulation bus and its source sequencer now live in their own
     // module (#136). Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
     logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
 
-    bus_engine u_bus (
+    csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(bank_active), .bank_shadow(bank_shadow),
         .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data),
         .bus_write_toggle(bus_write_toggle),
-        .producer_write_enable(producer_write_enable),
-        .producer_write_addr(producer_write_addr),
-        .producer_write_data(producer_write_data),
+        .imem_write_enable(imem_write_enable),
+        .imem_write_addr(imem_write_addr),
+        .imem_write_data(imem_write_data),
         .rd_pitch_a(s1_ptrs0_word[8:0]),
         .rd_duty_a (s1_ptrs0_word[18:10]),
         .rd_fc_a   (s1_ptrs0_word[28:20]),

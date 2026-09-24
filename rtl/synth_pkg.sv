@@ -54,7 +54,7 @@ package synth_pkg;
     parameter int          NUM_BUSES    = 512;         // uniform pool (#134)
     parameter int          BUS_W        = 18;          // signed Q8.10
 
-    //--- Producer table (B4/B5) -------------------------------------
+    //--- Instruction table (B4/B5) -------------------------------------
     // 128 entries x 3 words, stride 4, at 0x0100-0x02FF. Config is
     // wiring, so it rides the ping-pong banks (law 4).
     //   +0 CFG:   [3:0] type (0 off, 1 LFO, 2 ADSR), [5:4] LFO shape
@@ -70,9 +70,9 @@ package synth_pkg;
     //             comment was issue #105). Rates are 8-bit log2:
     //             increment = (16+frac) << oct on the 22-bit level
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
-    // A producer's OUTPUT uses the previous sample's state (the
+    // A instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
-    // Pool 256 with a HALF-RATE walker (#100, Thor 2026-09-11): each
+    // Pool 256 with a HALF-RATE sequencer (#100, Thor 2026-09-11): each
     // sample walks one half of the table (alternating), so every
     // source updates at 48 kHz effective — any zipper sits at 24 kHz,
     // above audibility and under the master tilt. Region grows to
@@ -80,9 +80,9 @@ package synth_pkg;
     // their sends sharing a target) must live within ONE half; cross-
     // half reads see the other half's previous pass (one sample old —
     // negligible at control rates).
-    parameter logic [15:0] MAP_PROD_BASE = 16'h0100;
-    parameter int          NUM_PRODUCERS = 256;
-    parameter int          WALK_PER_SAMPLE = NUM_PRODUCERS / 2;
+    parameter logic [15:0] MAP_IMEM_BASE = 16'h0100;
+    parameter int          NUM_INSTR = 256;
+    parameter int          INSTR_PER_PASS = NUM_INSTR / 2;
 
     //--- Filter stability clamp (Thor's call, 2026-08-31) ------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not

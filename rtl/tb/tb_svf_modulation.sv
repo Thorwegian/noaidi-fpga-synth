@@ -55,8 +55,8 @@ module tb_svf_modulation;
         .swap_req(1'b0),
         .bus_write_addr(10'b0), .bus_write_data(18'b0),
         .bus_write_toggle(1'b0),
-        .producer_write_enable(1'b0), .producer_write_addr(10'b0),
-        .producer_write_data(32'b0),
+        .imem_write_enable(1'b0), .imem_write_addr(10'b0),
+        .imem_write_data(32'b0),
         .mix_left(ml), .mix_right(mr)
     );
 

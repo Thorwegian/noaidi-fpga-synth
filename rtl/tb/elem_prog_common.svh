@@ -32,9 +32,9 @@ wire [31:0] elem_write_data;
 wire [9:0]  bus_write_addr;
 wire [17:0] bus_write_data;
 wire        bus_write_toggle;
-wire        producer_write_enable;
-wire [9:0]  producer_write_addr;
-wire [31:0] producer_write_data;
+wire        imem_write_enable;
+wire [9:0]  imem_write_addr;
+wire [31:0] imem_write_data;
 wire        swap_req;
 
 spi_bus #(.AW_BACKED(11)) u_bus (
@@ -43,7 +43,7 @@ spi_bus #(.AW_BACKED(11)) u_bus (
     .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
     .elem_write_index(elem_write_index), .elem_write_data(elem_write_data),
     .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data), .bus_write_toggle(bus_write_toggle),
-    .producer_write_enable(producer_write_enable), .producer_write_addr(producer_write_addr), .producer_write_data(producer_write_data),
+    .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .swap_req(swap_req)
 );
 
@@ -57,7 +57,7 @@ element_pipeline #(
     .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
     .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_req(swap_req),
     .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data), .bus_write_toggle(bus_write_toggle),
-    .producer_write_enable(producer_write_enable), .producer_write_addr(producer_write_addr), .producer_write_data(producer_write_data),
+    .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .mix_left(ml), .mix_right(mr)
 );
 
@@ -71,7 +71,7 @@ localparam [15:0] CTRL_ADDR   = synth_pkg::MAP_CTRL_ADDR;
 localparam [15:0] ELEM_BASE   = synth_pkg::MAP_ELEM_BASE;
 localparam int    ELEM_STRIDE = synth_pkg::MAP_ELEM_STRIDE;
 localparam [15:0] BUS_BASE    = synth_pkg::MAP_BUS_BASE;
-localparam [15:0] SRC_BASE    = synth_pkg::MAP_PROD_BASE;   // code name
+localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
                                                             // pending the
                                                             // source rename
 

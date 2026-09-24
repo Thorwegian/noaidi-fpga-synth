@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_bus_engine.sv -- the bus engine on its own (#136)
+// tb_csp.sv -- the bus engine on its own (#136)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -7,7 +7,7 @@
 // The point of this bench is SPEED. tb_prog_pingpong exercises the same
 // invariants, but it elaborates the whole element pipeline -- the SVF,
 // the oscillators, the limiter -- and takes minutes. This instantiates
-// bus_engine alone and runs in seconds, which is what makes it usable
+// csp alone and runs in seconds, which is what makes it usable
 // as a tight loop while working on the engine.
 //
 // It drives the SPI mailbox ports directly rather than through
@@ -16,7 +16,7 @@
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
-module tb_bus_engine;
+module tb_csp;
 
     localparam int CYC     = synth_pkg::DRUM_CYCLES;
     localparam int TESTBUS = 20;
@@ -40,13 +40,13 @@ module tb_bus_engine;
     wire signed [17:0] rd_pitch_d, rd_duty_d, rd_fc_d, rd_q_d, rd_gl_d, rd_gr_d;
     wire         test_tone_en;
 
-    bus_engine dut (
+    csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(1'b0), .bank_shadow(1'b1),
         .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data),
         .bus_write_toggle(bus_write_toggle),
-        .producer_write_enable(1'b0), .producer_write_addr(10'd0),
-        .producer_write_data(32'd0),
+        .imem_write_enable(1'b0), .imem_write_addr(10'd0),
+        .imem_write_data(32'd0),
         .rd_pitch_a(rd_a), .rd_duty_a(rd_a), .rd_fc_a(rd_a),
         .rd_q_a(rd_a), .rd_gl_a(rd_a), .rd_gr_a(rd_a),
         .rd_pitch_d(rd_pitch_d), .rd_duty_d(rd_duty_d), .rd_fc_d(rd_fc_d),
@@ -72,7 +72,7 @@ module tb_bus_engine;
         repeat (4) @(posedge clk); rst_n = 1;
         repeat (CYC) @(posedge clk);
 
-        // 1. generation cadence: one flip per walker pass (two samples)
+        // 1. generation cadence: one flip per sequencer pass (two samples)
         toggles = 0; ticks = 0; gen_prev = dut.bus_gen;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
