@@ -60,6 +60,7 @@ module tb_csp;
     integer errors = 0, toggles = 0, ticks = 0, cyc, i;
     logic   gen_prev;
     integer pass, restarts, reached_dec, prev_lvl, lvl, stg, prev_stg;
+    integer live_hits, shadow_hits, same_addr_hits, w;
 
     // a mailbox write: payload then a toggle edge, as spi_bus does it
     task automatic bus_write(input [9:0] a, input signed [17:0] d);
@@ -184,6 +185,59 @@ module tb_csp;
             errors = errors + 1;
         end else
             $display("ADSR with SUS_LOG: attack terminates, no restart");
+
+        //---------------------------------------------------------------
+        // 7. READ-DURING-WRITE HAZARD (#127, root cause of Thor's
+        //    scratching). #134 replaced the mailbox's slot window with
+        //       wire dmem_wr_window = 1'b1;
+        //    on the argument that reads and writes live in different
+        //    generations. True of the SEQUENCER, false of the MAILBOX:
+        //    the commit is write-through by design and one of its two
+        //    takes lands in the half being read RIGHT NOW.
+        //
+        //    iverilog will not show the corruption -- it models a
+        //    read-during-write as returning the old value, which is the
+        //    BSRAM sim gap. So this asserts the PRECONDITION instead:
+        //    that a commit can target the LIVE half at all. That is the
+        //    invariant #134 deleted, and it is fully observable.
+        //---------------------------------------------------------------
+        live_hits = 0; shadow_hits = 0; same_addr_hits = 0;
+        @(negedge clk); rd_a = TESTBUS[8:0];
+        fork
+            // a stream of mailbox writes, as live firmware traffic does
+            begin
+                for (w = 0; w < 40; w = w + 1)
+                    bus_write(10'(TESTBUS), 18'sd1000 + 18'(w));
+            end
+            // watch where each commit actually lands
+            begin : watcher
+                for (cyc = 0; cyc < 40*40; cyc = cyc + 1) begin
+                    @(posedge clk);
+                    if (dut.dmem_commit) begin
+                        if (dut.dmem_commit_half_sel === dut.dmem_gen) begin
+                            live_hits = live_hits + 1;
+                            if (dut.dmem_mbox_addr[8:0] === rd_a)
+                                same_addr_hits = same_addr_hits + 1;
+                        end else
+                            shadow_hits = shadow_hits + 1;
+                    end
+                end
+            end
+        join_any
+        disable watcher;
+
+        $display("commits into the SHADOW half: %0d", shadow_hits);
+        $display("commits into the LIVE   half: %0d", live_hits);
+        $display("  ...of which at the address being read: %0d", same_addr_hits);
+        if (same_addr_hits > 0) begin
+            $display("FAIL: a mailbox commit writes the LIVE half at the very");
+            $display("      address a sink is reading -- read-during-write on");
+            $display("      one BSRAM port. #134 removed the slot window that");
+            $display("      made this impossible and the comment saying so");
+            $display("      survived. THIS IS THE BUG.");
+            errors = errors + 1;
+        end else
+            $display("no read-during-write: commits never hit a live read");
 
         if (errors) $display("%0d FAILURE(S)", errors);
         else        $display("ALL PASS");
