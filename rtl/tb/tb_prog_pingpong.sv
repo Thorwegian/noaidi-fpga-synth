@@ -52,11 +52,17 @@ module tb_prog_pingpong;
             gen_prev = u_pipe.bus_gen;
             if (sample_tick) ticks = ticks + 1;
         end
-        if (toggles !== ticks) begin
-            $display("FAIL: bus_gen toggled %0d times over %0d samples", toggles, ticks);
+        // One generation == one COMPLETE walker pass, and the walker is
+        // half-rate (#100), so the cadence is one toggle per TWO samples.
+        // Flipping per sample would publish a generation the walker had
+        // only half-written -- halved modulation depth, broken chains.
+        if (toggles !== ticks/2) begin
+            $display("FAIL: bus_gen toggled %0d times over %0d samples, want %0d",
+                     toggles, ticks, ticks/2);
             errors = errors + 1;
         end else
-            $display("gen cadence: %0d toggles / %0d samples -- exactly one per sample", toggles, ticks);
+            $display("gen cadence: %0d toggles / %0d samples -- one per walker pass",
+                     toggles, ticks);
 
         //---------------------------------------------------------------
         // 2 + 4. a write goes to the shadow, and is not dropped

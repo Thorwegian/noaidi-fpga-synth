@@ -336,10 +336,7 @@ module element_pipeline #(
     // and a read can never collide with a write. Costs no extra BSRAM:
     // the second generation lives in the half of each block that the
     // 512-entry pool leaves unused.
-    logic bus_gen;
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)          bus_gen <= 1'b0;
-        else if (sample_tick) bus_gen <= ~bus_gen;
+    logic bus_gen;   // process below, with walker_half
 
     logic bus_write_toggle_meta, bus_write_toggle_sync, bus_write_toggle_prev;
     logic bus_mailbox_pending;
@@ -506,6 +503,17 @@ module element_pipeline #(
     logic [1:0] walker_step;
     logic [7:0] walker_entry;
     logic       walker_half;
+
+    // #134: the generation flips once per COMPLETE walker pass, not once
+    // per sample. The walker is half-rate (#100) -- one half of the
+    // producer table per sample -- so a producer refreshes its bus every
+    // OTHER sample. Flipping every sample would publish a generation the
+    // walker had only half written, which reads as halved modulation
+    // depth and a stale link in any chain. walker_half marks the
+    // two-sample cycle, so the swap rides it.
+    always_ff @(posedge clk or negedge rst_n)
+        if (!rst_n)                          bus_gen <= 1'b0;
+        else if (sample_tick && walker_half) bus_gen <= ~bus_gen;
     wire walker_active = (walker_entry < 8'(synth_pkg::WALK_PER_SAMPLE));
     // #97 fix: the bus write is pipeline-delayed by one entry — entry N's
     // write fires during entry N+1's P5. Without a drain the step machine
