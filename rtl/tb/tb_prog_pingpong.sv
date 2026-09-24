@@ -37,8 +37,8 @@ module tb_prog_pingpong;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
     // hierarchical peeks -- the whole point of doing this in simulation
-    `define LIVE   u_pipe.bus_ram_gl[{ u_pipe.bus_gen, TESTBUS[8:0]}]
-    `define SHADOW u_pipe.bus_ram_gl[{~u_pipe.bus_gen, TESTBUS[8:0]}]
+    `define LIVE   u_pipe.u_bus.bus_ram_gl[{ u_pipe.u_bus.bus_gen, TESTBUS[8:0]}]
+    `define SHADOW u_pipe.u_bus.bus_ram_gl[{~u_pipe.u_bus.bus_gen, TESTBUS[8:0]}]
 
     initial begin
         reset_and_mute;
@@ -47,11 +47,11 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         // 1. bus_gen toggles exactly once per sample
         //---------------------------------------------------------------
-        toggles = 0; ticks = 0; gen_prev = u_pipe.bus_gen;
+        toggles = 0; ticks = 0; gen_prev = u_pipe.u_bus.bus_gen;
         for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
             @(posedge clk);
-            if (u_pipe.bus_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = u_pipe.bus_gen;
+            if (u_pipe.u_bus.bus_gen !== gen_prev) toggles = toggles + 1;
+            gen_prev = u_pipe.u_bus.bus_gen;
             if (sample_tick) ticks = ticks + 1;
         end
         // One generation == one COMPLETE walker pass, and the walker is
@@ -132,7 +132,7 @@ module tb_prog_pingpong;
         // 6. a neighbouring bus must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
-        if (u_pipe.bus_ram_gl[{u_pipe.bus_gen, 9'(TESTBUS+1)}] === MARK_B) begin
+        if (u_pipe.u_bus.bus_ram_gl[{u_pipe.u_bus.bus_gen, 9'(TESTBUS+1)}] === MARK_B) begin
             $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TESTBUS+1);
             errors = errors + 1;
         end else
@@ -174,10 +174,10 @@ module tb_prog_pingpong;
         spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
         repeat (6) @(posedge sample_tick);
         repeat (4) @(posedge clk);
-        if (u_pipe.bus_ram_fc[{u_pipe.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (u_pipe.u_bus.bus_ram_fc[{u_pipe.u_bus.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus %0d lost its base (got %0d, want %0d)",
                      QUIETBUS,
-                     u_pipe.bus_ram_fc[{u_pipe.bus_gen, QUIETBUS[8:0]}], MARK_B);
+                     u_pipe.u_bus.bus_ram_fc[{u_pipe.u_bus.bus_gen, QUIETBUS[8:0]}], MARK_B);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists with nothing refreshing it");
@@ -199,8 +199,8 @@ module tb_prog_pingpong;
                 gen_seen = 1'bx;                 // swap happens here
             end else if (slot <= 10'd256) begin
                 if (gen_seen === 1'bx)
-                    gen_seen = u_pipe.bus_gen;   // first read of this pass
-                else if (u_pipe.bus_gen !== gen_seen) begin
+                    gen_seen = u_pipe.u_bus.bus_gen;   // first read of this pass
+                else if (u_pipe.u_bus.bus_gen !== gen_seen) begin
                     if (straddles == 0)
                         $display("FAIL: bus_gen changed at slot %0d, mid lane pass", slot);
                     straddles = straddles + 1;

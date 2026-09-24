@@ -211,9 +211,9 @@ module tb_prog_sources;
         spi_word_write(bus_addr(5), 32'h00000001);      // gate held
         observe(60);
         observe(60);
-        if ($signed(u_pipe.bus_ram_fc[3]) !== 18'sd4708) begin
+        if ($signed(u_pipe.u_bus.bus_ram_fc[3]) !== 18'sd4708) begin
             $display("FAIL: triple chain replica = %0d, expected 4708 (#44)",
-                     $signed(u_pipe.bus_ram_fc[3]));
+                     $signed(u_pipe.u_bus.bus_ram_fc[3]));
             errors = errors + 1;
         end else begin
             $display("triple chain replica = 4708 exact (base+0+channel)");
