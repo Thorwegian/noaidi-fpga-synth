@@ -291,7 +291,9 @@ module element_pipeline #(
     reg signed [17:0] bus_ram_gl    [0:2*synth_pkg::NUM_BUSES-1];
     reg signed [17:0] bus_ram_gr    [0:2*synth_pkg::NUM_BUSES-1];
     integer bi;
-    initial for (bi = 0; bi < synth_pkg::NUM_BUSES; bi = bi + 1) begin
+    // BOTH generations -- the arrays are 2*NUM_BUSES deep (#134) and an
+    // uninitialised shadow half reads X the first time bus_gen flips.
+    initial for (bi = 0; bi < 2*synth_pkg::NUM_BUSES; bi = bi + 1) begin
         bus_ram_pitch[bi] = 18'sd0;
         bus_ram_duty[bi]  = 18'sd0;
         bus_ram_fc[bi]    = 18'sd0;
@@ -308,7 +310,7 @@ module element_pipeline #(
     // mailbox's own replica write.
     reg signed [17:0] bus_base [0:2*synth_pkg::NUM_BUSES-1];
     integer bbi;
-    initial for (bbi = 0; bbi < synth_pkg::NUM_BUSES; bbi = bbi + 1)
+    initial for (bbi = 0; bbi < 2*synth_pkg::NUM_BUSES; bbi = bbi + 1)
         bus_base[bbi] = 18'sd0;
 
     // BUS-SUM RAM (#92/#98): the walker-facing mirror of a bus's
@@ -320,7 +322,7 @@ module element_pipeline #(
     // their sends in the table, propagation is same-sample.
     reg signed [17:0] bus_sum_ram [0:2*synth_pkg::NUM_BUSES-1];
     integer bsi;
-    initial for (bsi = 0; bsi < synth_pkg::NUM_BUSES; bsi = bsi + 1)
+    initial for (bsi = 0; bsi < 2*synth_pkg::NUM_BUSES; bsi = bsi + 1)
         bus_sum_ram[bsi] = 18'sd0;
 
     // Producer walker replica-write strobes (driven below)
@@ -343,6 +345,21 @@ module element_pipeline #(
     logic bus_mailbox_pending;
     logic [9:0]  bus_mailbox_addr;
     logic [17:0] bus_mailbox_data;
+    // #134: a mailbox entry commits over TWO takes, one per generation.
+    // The walker rewrites its target buses every sample, so ITS writes
+    // can live in one half. A mailbox write sets a PERSISTENT base that
+    // nothing refreshes, so a single-half write alternates with stale
+    // data on every swap -- silence, in practice (caught by
+    // tb_prog_pingpong's persistence check). bus_commit_half latches the
+    // half written first, so a sample boundary falling between the two
+    // takes cannot make the second write repeat it.
+    //
+    // This does not weaken atomicity where it matters: the property we
+    // need is that the WALKER's sweep is seen as one complete
+    // generation. Firmware writes were always asynchronous and
+    // mid-sample, before ping-pong and after it.
+    logic bus_commit_phase;
+    logic bus_commit_half;
     // Mailbox commits happen in any idle slot where the walker is not
     // writing the replicas THIS cycle (walker_bus_write below): lane reads issue
     // during slots 1..~257, and a commit colliding with a walker
@@ -362,6 +379,7 @@ module element_pipeline #(
     wire  bus_write_window   = 1'b1;
     wire  bus_mailbox_take   = bus_mailbox_pending && bus_write_window && !walker_bus_write;
     wire  bus_commit = bus_mailbox_take && (bus_mailbox_addr != 10'd0);
+    wire  bus_commit_wr_half = bus_commit_phase ? ~bus_commit_half : ~bus_gen;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -374,9 +392,22 @@ module element_pipeline #(
                 bus_mailbox_pending <= 1'b1;         // payload is stable: it was
                 bus_mailbox_addr   <= bus_write_addr;      // written before the toggle,
                 bus_mailbox_data   <= bus_write_data;      // 2 sync FFs ago
-            end else if (bus_mailbox_take) begin
+            end else if (bus_mailbox_take && bus_commit_phase) begin
                 bus_mailbox_pending <= 1'b0;
             end
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            bus_commit_phase <= 1'b0;
+            bus_commit_half  <= 1'b0;
+        end else if (bus_mailbox_take) begin
+            if (!bus_commit_phase) begin
+                bus_commit_half  <= ~bus_gen;   // the half written now
+                bus_commit_phase <= 1'b1;
+            end else
+                bus_commit_phase <= 1'b0;
         end
     end
 
@@ -392,22 +423,22 @@ module element_pipeline #(
     // Replica writes: one physical port, two writers — the walker
     // owns its cycle (walker_bus_write), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_pitch[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_pitch[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_pitch[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_duty[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_duty[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_duty[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_fc[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_fc[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_fc[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_q[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_q[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_q[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gl[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_gl[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_gl[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gr[{~bus_gen, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
+        if (bus_commit)   bus_ram_gr[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
         else if (walker_bus_write)   bus_ram_gr[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
     always_ff @(posedge clk)
         if (bus_commit)   bus_sum_ram[bus_mailbox_addr] <= $signed(bus_mailbox_data);

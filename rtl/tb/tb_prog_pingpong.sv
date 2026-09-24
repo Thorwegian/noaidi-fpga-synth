@@ -1,5 +1,8 @@
 //------------------------------------------------------------------------
-// tb_bus_pingpong.sv -- #134: the ping-pong bus generation.
+// tb_prog_pingpong.sv -- #134: the ping-pong bus generation.
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 //
 // Resource and timing numbers say nothing about correctness: a design
 // that reads the wrong generation places and routes exactly like one
@@ -25,7 +28,9 @@ module tb_prog_pingpong;
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;  // negative: sign survives
 
+    localparam int          QUIETBUS = 300;   // no producer targets this
     integer toggles, ticks, cyc;
+    integer persist_ok;
     logic   gen_prev;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
@@ -66,12 +71,19 @@ module tb_prog_pingpong;
         live_mid   = `LIVE;
         shadow_mid = `SHADOW;
 
-        if (live_mid !== live_before) begin
-            $display("FAIL: live generation changed mid-sample (%0d -> %0d)",
-                     live_before, live_mid);
+        // A MAILBOX write is immediate by design: it must reach both
+        // halves (see bus_commit_phase in element_pipeline.sv), or its
+        // value dies on the second swap. That is the pre-#134 behaviour
+        // restored, not a concession -- firmware writes have always
+        // landed mid-sample. The atomicity that matters is the WALKER's,
+        // which writes only the shadow half; test 7 covers persistence
+        // and the walker's own sweep is covered by tb_prog_sources.
+        if (live_mid !== MARK_A) begin
+            $display("FAIL: mailbox write not visible in the live half (got %0d, want %0d)",
+                     live_mid, MARK_A);
             errors = errors + 1;
         end else
-            $display("write isolation: live half stable across the whole sample");
+            $display("mailbox write-through: visible in both halves immediately");
 
         if (shadow_mid !== MARK_A) begin
             $display("FAIL: write did not reach the shadow half (got %0d, want %0d)",
@@ -117,6 +129,50 @@ module tb_prog_pingpong;
             errors = errors + 1;
         end else
             $display("no aliasing: neighbouring bus untouched");
+
+        //---------------------------------------------------------------
+        // 7. PERSISTENCE -- the check that was missing, and the one the
+        //    write-through bug hid behind. A value must still be live
+        //    many samples later, not alternate with stale data on every
+        //    swap. ONE boundary cannot see this: the bug only shows from
+        //    the second swap onward.
+        //---------------------------------------------------------------
+        @(posedge sample_tick);
+        wait (slot == 10'd40);
+        spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_A});
+        @(posedge sample_tick);            // first swap: value goes live
+
+        persist_ok = 1;
+        for (cyc = 0; cyc < 12; cyc = cyc + 1) begin
+            @(posedge sample_tick);
+            repeat (4) @(posedge clk);
+            if (`LIVE !== MARK_A) begin
+                if (persist_ok)
+                    $display("FAIL: value lost on swap %0d (got %0d, want %0d)",
+                             cyc + 2, `LIVE, MARK_A);
+                persist_ok = 0;
+            end
+        end
+        if (!persist_ok) errors = errors + 1;
+        else $display("persistence: value stable across 13 consecutive swaps");
+
+        //---------------------------------------------------------------
+        // 8. the same for a bus NO producer targets -- the exact case
+        //    that broke. Nothing refreshes it, so it depends entirely on
+        //    the mailbox write having reached both halves.
+        //---------------------------------------------------------------
+        @(posedge sample_tick);
+        wait (slot == 10'd40);
+        spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
+        repeat (6) @(posedge sample_tick);
+        repeat (4) @(posedge clk);
+        if (u_pipe.bus_ram_fc[{u_pipe.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+            $display("FAIL: unproduced bus %0d lost its base (got %0d, want %0d)",
+                     QUIETBUS,
+                     u_pipe.bus_ram_fc[{u_pipe.bus_gen, QUIETBUS[8:0]}], MARK_B);
+            errors = errors + 1;
+        end else
+            $display("unproduced bus: base persists with nothing refreshing it");
 
         report;
     end
