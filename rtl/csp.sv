@@ -436,6 +436,9 @@ module csp (
     // to read; everything else about the segment is identical.
     // RATES word is the universal A, D, S, R: [7:0] attack rate,
     // [15:8] decay rate, [23:16] SUSTAIN LEVEL, [31:24] release rate.
+    // Latched from CFG[26] at P1, so it is declared ahead of the decode
+    // that reads it -- iverilog binds declaration-before-use here.
+    logic       adsr_sus_log;
     wire        adsr_gate_now = (dmem_init_readout > 18'sd0);
     // Gate high out of IDLE or RELEASE restarts the attack from
     // WHEREVER THE LEVEL IS, which is what a legato retrigger does on
@@ -446,11 +449,26 @@ module csp (
     wire [7:0]  adsr_nib_w = !adsr_gate_now         ? imem_readout[31:24]
                            : (adsr_stage_sel_w == AST_ATT) ? imem_readout[7:0]
                                                            : imem_readout[15:8];
-    // Sustain byte scales into the linear level: 0xFF lands 0.4% under
-    // full scale, which is a fifth of a dB and not worth a multiply.
+    // SUSTAIN, decoded two ways, because the same generator feeds two
+    // kinds of destination and the log-ness of an analog envelope never
+    // lived in the pot -- it lived in what the CV was plugged into.
+    //
+    //   SUS_LOG = 0   the CUTOFF bus is already log2/octave, so it IS
+    //                 the V/oct input: send the byte linearly
+    //   SUS_LOG = 1   the linear gain bus is AMPLITUDE, the one place
+    //                 with no analog counterpart to the exponential
+    //                 VCA, so the decode has to go here
+    //
+    // Larger = louder in both (Thor). The log form is the mantissa and
+    // barrel shift a third time, so no table: about 96 dB of range,
+    // 0xFF landing 3% under full scale.
+    wire [25:0] adsr_sus_lin_v = {4'b0, imem_readout[23:16], 14'b0};
+    wire [25:0] adsr_sus_log_v = (26'd16 + 26'(imem_readout[19:16])) << 17
+                                 >> (4'd15 - imem_readout[23:20]);
     wire [25:0] adsr_target_w = !adsr_gate_now ? 26'd0
                               : (adsr_stage_sel_w == AST_ATT) ? ENV_OVER
-                                          : {4'b0, imem_readout[23:16], 14'b0};
+                              : adsr_sus_log ? adsr_sus_log_v
+                                             : adsr_sus_lin_v;
 
     // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
     // output through shifts or a compare — short); the state step
@@ -561,6 +579,7 @@ module csp (
             dest_addr_c <= '0; coeff_product <= '0;
             wb_addr <= '0; wb_value <= '0;
             adsr_gate <= 1'b0;
+            adsr_sus_log <= 1'b0;
             adsr_mant <= '0; adsr_shift <= '0; adsr_delta <= '0;
             adsr_stage_sel <= AST_IDLE;
             rc_product <= '0; rc_shift_d <= '0; rc_stage_d <= AST_IDLE;
@@ -578,6 +597,9 @@ module csp (
                 lfo_shape_a <= imem_readout[5:4];
                 dest_addr_a   <= imem_readout[15:6];
                 lfo_rate_a  <= imem_readout[31:16];
+                // CFG[26] = SUS_LOG. An ADSR uses CFG[25:16] as its gate
+                // bus and nothing above it, so this bit is free.
+                adsr_sus_log <= imem_readout[26];
                 istate_prev      <= istate_readout;
                 // ...and register the previous entry's saturated sum
                 // (write happens next cycle, at P5)
