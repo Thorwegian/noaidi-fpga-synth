@@ -37,16 +37,19 @@ module tb_csp;
     logic [17:0] dmem_wr_data = 0;
     logic        dmem_wr_toggle = 0;
     logic [8:0]  rd_a = 0;
+    logic        imem_we   = 0;
+    logic [9:0]  imem_addr = 0;
+    logic [31:0] imem_data = 0;
     wire signed [17:0] rd_pitch_d, rd_duty_d, rd_fc_d, rd_q_d, rd_gl_d, rd_gr_d;
     wire         test_tone_en;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .bank_active(1'b0), .bank_shadow(1'b1),
+        .bank_active(1'b0), .bank_shadow(1'b0),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
-        .imem_write_enable(1'b0), .imem_write_addr(10'd0),
-        .imem_write_data(32'd0),
+        .imem_write_enable(imem_we), .imem_write_addr(imem_addr),
+        .imem_write_data(imem_data),
         .rd_pitch_a(rd_a), .rd_duty_a(rd_a), .rd_fc_a(rd_a),
         .rd_q_a(rd_a), .rd_gl_a(rd_a), .rd_gr_a(rd_a),
         .rd_pitch_d(rd_pitch_d), .rd_duty_d(rd_duty_d), .rd_fc_d(rd_fc_d),
@@ -56,6 +59,7 @@ module tb_csp;
 
     integer errors = 0, toggles = 0, ticks = 0, cyc, i;
     logic   gen_prev;
+    integer pass, restarts, reached_dec, prev_lvl, lvl, stg, prev_stg;
 
     // a mailbox write: payload then a toggle edge, as spi_bus does it
     task automatic bus_write(input [9:0] a, input signed [17:0] d);
@@ -65,6 +69,18 @@ module tb_csp;
             @(negedge clk);
             dmem_wr_toggle = ~dmem_wr_toggle;
             repeat (8) @(posedge clk);       // let the sync + commit land
+        end
+    endtask
+
+    // imem is written on sclk, as spi_bus does it.
+    task automatic imem_write(input [7:0] entry, input [1:0] word,
+                              input [31:0] d);
+        begin
+            @(negedge clk);
+            imem_addr = {entry, word}; imem_data = d; imem_we = 1'b1;
+            sclk = 0; #1; sclk = 1; #1; sclk = 0;
+            imem_we = 1'b0;
+            @(posedge clk);
         end
     endtask
 
@@ -128,13 +144,54 @@ module tb_csp;
         end else
             $display("read port: returns the live generation's value");
 
+        //---------------------------------------------------------------
+        // 6. THE ADSR ACTUALLY RUNNING, with SUS_LOG SET (#127).
+        //    Every other test in this file leaves imem empty, so the
+        //    generator has never been exercised here at all -- and the
+        //    log sustain decode is the path the firmware takes and the
+        //    benches did not. Thor heard the attack restarting forever.
+        //---------------------------------------------------------------
+        // CFG: opcode 2 (ADSR), dest bus TESTBUS, gate bus 5, SUS_LOG=1
+        imem_write(8'd0, 2'd0, 32'd2 | (32'(TESTBUS) << 6)
+                               | (32'd5 << 16) | (32'd1 << 26));
+        // RATES A,D,S,R -- fast attack, fast decay, mid sustain
+        imem_write(8'd0, 2'd1, 32'hF0_80_F0_F0);
+        imem_write(8'd0, 2'd2, 32'h00010000);         // unity depth
+        bus_write(10'd5, 18'sd1);                     // gate ON
+        repeat (4*CYC) @(posedge clk);
+
+        restarts = 0; reached_dec = 0;
+        prev_lvl = 0; prev_stg = 0;
+        $display("  pass  stage  level");
+        for (pass = 0; pass < 1200; pass = pass + 1) begin
+            repeat (2*CYC) @(posedge clk);      // one walker pass
+            stg = dut.istate[0][27:26];
+            lvl = dut.istate[0][25:0];
+            if (pass % 50 == 0 || stg != prev_stg)
+                $display("  %4d  %5d  %0d", pass, stg, lvl);
+            // a restart: level collapses while the gate is still held
+            if (lvl < prev_lvl / 2 && prev_lvl > 100000)
+                restarts = restarts + 1;
+            if (stg == 2'd2) reached_dec = 1;
+            prev_lvl = lvl; prev_stg = stg;
+        end
+
+        if (restarts > 0) begin
+            $display("FAIL: envelope restarted %0d times with the gate held", restarts);
+            errors = errors + 1;
+        end else if (!reached_dec) begin
+            $display("FAIL: attack never handed over to decay");
+            errors = errors + 1;
+        end else
+            $display("ADSR with SUS_LOG: attack terminates, no restart");
+
         if (errors) $display("%0d FAILURE(S)", errors);
         else        $display("ALL PASS");
         $finish;
     end
 
     initial begin
-        #20_000_000;
+        #900_000_000;
         $display("FAIL: timeout");
         $finish;
     end
