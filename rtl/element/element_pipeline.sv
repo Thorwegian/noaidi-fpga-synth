@@ -89,9 +89,9 @@ module element_pipeline #(
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
     // so a commit never collides with a lane's bus read.
-    input  logic [9:0]     bus_write_addr,
-    input  logic [17:0]    bus_write_data,
-    input  logic           bus_write_toggle,
+    input  logic [9:0]     dmem_wr_addr,
+    input  logic [17:0]    dmem_wr_data,
+    input  logic           dmem_wr_toggle,
 
     // Instruction table writes (sclk domain, banked — wiring per law 4)
     input  logic           imem_write_enable,
@@ -379,14 +379,14 @@ module element_pipeline #(
     // The modulation bus and its source sequencer now live in their own
     // module (#136). Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
-    logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
-    logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
+    logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
+    logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
 
     csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(bank_active), .bank_shadow(bank_shadow),
-        .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data),
-        .bus_write_toggle(bus_write_toggle),
+        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
+        .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_write_enable),
         .imem_write_addr(imem_write_addr),
         .imem_write_data(imem_write_data),
@@ -396,8 +396,8 @@ module element_pipeline #(
         .rd_q_a    (s1_ptrs1_word[8:0]),
         .rd_gl_a   (s1_ptrs1_word[18:10]),
         .rd_gr_a   (s1_ptrs1_word[28:20]),
-        .rd_pitch_d(s2_bus_pitch), .rd_duty_d(s2_bus_duty), .rd_fc_d(s2_bus_fc),
-        .rd_q_d(s2_bus_q), .rd_gl_d(s2_bus_gl), .rd_gr_d(s2_bus_gr),
+        .rd_pitch_d(s2_dmem_pitch), .rd_duty_d(s2_dmem_duty), .rd_fc_d(s2_dmem_fc),
+        .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gl), .rd_gr_d(s2_dmem_gr),
         .test_tone_en(test_tone_en)
     );
 
@@ -468,7 +468,7 @@ module element_pipeline #(
     // so self-oscillation is the natural top of scale — reachable as
     // a feature, no special code.
     wire signed [18:0] reso_sum =
-        $signed({5'b0, s2_reso}) + {s2_bus_q[17], s2_bus_q};
+        $signed({5'b0, s2_reso}) + {s2_dmem_q[17], s2_dmem_q};
     wire [13:0] eff_reso =
         reso_sum[18]            ? 14'd0    :
         (reso_sum > 19'sd16383) ? 14'h3FFF : reso_sum[13:0];
@@ -476,7 +476,7 @@ module element_pipeline #(
     // Cutoff clamps to the flat FC_MAX (14.4 kHz, measured clean at
     // the Butterworth worst case — see synth_pkg).
     wire signed [18:0] fc_sum =
-        $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
+        $signed({5'b0, s2_fc}) + {s2_dmem_fc[17], s2_dmem_fc};
     wire [13:0] eff_fc =
         fc_sum[18] ? 14'd0 :
         (fc_sum > 19'($signed({5'b0, synth_pkg::FC_MAX})))
@@ -484,24 +484,24 @@ module element_pipeline #(
         fc_sum[13:0];
 
     wire signed [18:0] pitch_sum =
-        $signed({5'b0, s2_pitch}) + {s2_bus_pitch[17], s2_bus_pitch};
+        $signed({5'b0, s2_pitch}) + {s2_dmem_pitch[17], s2_dmem_pitch};
     wire [13:0] eff_pitch =
         pitch_sum[18]            ? 14'd0    :
         (pitch_sum > 19'sd16383) ? 14'h3FFF : pitch_sum[13:0];
 
     wire signed [31:0] duty_sum =
         {{8{s2_duty[23]}}, s2_duty}
-        + {{1{s2_bus_duty[17]}}, s2_bus_duty, 13'b0};
+        + {{1{s2_dmem_duty[17]}}, s2_dmem_duty, 13'b0};
     wire signed [23:0] eff_duty =
         (duty_sum >  32'sd8388607) ? 24'sd8388607  :
         (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
 
-    wire signed [17:0] gbus_l = s2_bus_gl >>> 6;
-    wire signed [17:0] gbus_r = s2_bus_gr >>> 6;
+    wire signed [17:0] gmod_l = s2_dmem_gl >>> 6;
+    wire signed [17:0] gmod_r = s2_dmem_gr >>> 6;
     wire signed [18:0] gl_sum =
-        $signed({11'b0, s2_gl}) + {gbus_l[17], gbus_l};
+        $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
     wire signed [18:0] gr_sum =
-        $signed({11'b0, s2_gr}) + {gbus_r[17], gbus_r};
+        $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
     // volume in, attenuation code out (the one subtract of issue #40)
     wire [7:0] eff_gl =
         (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins

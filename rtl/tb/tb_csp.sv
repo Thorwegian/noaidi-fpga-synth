@@ -33,9 +33,9 @@ module tb_csp;
     always_ff @(posedge clk) slotc <= (slotc == CYC-1) ? 16'd0 : slotc + 16'd1;
     assign sample_tick = (slotc == 16'd0);
 
-    logic [9:0]  bus_write_addr = 0;
-    logic [17:0] bus_write_data = 0;
-    logic        bus_write_toggle = 0;
+    logic [9:0]  dmem_wr_addr = 0;
+    logic [17:0] dmem_wr_data = 0;
+    logic        dmem_wr_toggle = 0;
     logic [8:0]  rd_a = 0;
     wire signed [17:0] rd_pitch_d, rd_duty_d, rd_fc_d, rd_q_d, rd_gl_d, rd_gr_d;
     wire         test_tone_en;
@@ -43,8 +43,8 @@ module tb_csp;
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(1'b0), .bank_shadow(1'b1),
-        .bus_write_addr(bus_write_addr), .bus_write_data(bus_write_data),
-        .bus_write_toggle(bus_write_toggle),
+        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
+        .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(1'b0), .imem_write_addr(10'd0),
         .imem_write_data(32'd0),
         .rd_pitch_a(rd_a), .rd_duty_a(rd_a), .rd_fc_a(rd_a),
@@ -61,9 +61,9 @@ module tb_csp;
     task automatic bus_write(input [9:0] a, input signed [17:0] d);
         begin
             @(negedge clk);
-            bus_write_addr = a; bus_write_data = d;
+            dmem_wr_addr = a; dmem_wr_data = d;
             @(negedge clk);
-            bus_write_toggle = ~bus_write_toggle;
+            dmem_wr_toggle = ~dmem_wr_toggle;
             repeat (8) @(posedge clk);       // let the sync + commit land
         end
     endtask
@@ -73,11 +73,11 @@ module tb_csp;
         repeat (CYC) @(posedge clk);
 
         // 1. generation cadence: one flip per sequencer pass (two samples)
-        toggles = 0; ticks = 0; gen_prev = dut.bus_gen;
+        toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
-            if (dut.bus_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = dut.bus_gen;
+            if (dut.dmem_gen !== gen_prev) toggles = toggles + 1;
+            gen_prev = dut.dmem_gen;
             if (sample_tick) ticks = ticks + 1;
         end
         if (toggles !== ticks/2) begin
@@ -89,11 +89,11 @@ module tb_csp;
         // 2. write-through: the value must be in BOTH halves
         bus_write(10'(TESTBUS), MARK_A);
         repeat (2*CYC) @(posedge clk);
-        if (dut.bus_ram_gl[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
-            dut.bus_ram_gl[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
+        if (dut.dmem_gl[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
+            dut.dmem_gl[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
             $display("FAIL: write-through -- halves read %0d / %0d, want %0d",
-                     dut.bus_ram_gl[{1'b0, TESTBUS[8:0]}],
-                     dut.bus_ram_gl[{1'b1, TESTBUS[8:0]}], MARK_A);
+                     dut.dmem_gl[{1'b0, TESTBUS[8:0]}],
+                     dut.dmem_gl[{1'b1, TESTBUS[8:0]}], MARK_A);
             errors = errors + 1;
         end else
             $display("write-through: present in both generations");
@@ -101,7 +101,7 @@ module tb_csp;
         // 3. persistence across many swaps -- the bug that silenced #134
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
-            if (dut.bus_ram_gl[{dut.bus_gen, TESTBUS[8:0]}] !== MARK_A) begin
+            if (dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
                 $display("FAIL: value lost on swap %0d", i + 1);
                 errors = errors + 1;
                 i = 99;
@@ -112,9 +112,9 @@ module tb_csp;
         // 4. a bus nothing refreshes keeps its base
         bus_write(10'(QUIETBUS), MARK_B);
         repeat (6*CYC) @(posedge clk);
-        if (dut.bus_ram_fc[{dut.bus_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus lost its base (got %0d)",
-                     dut.bus_ram_fc[{dut.bus_gen, QUIETBUS[8:0]}]);
+                     dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}]);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists");
