@@ -31,6 +31,8 @@ module tb_prog_pingpong;
     localparam int          QUIETBUS = 300;   // no producer targets this
     integer toggles, ticks, cyc;
     integer persist_ok;
+    integer straddles, windows;
+    logic   gen_seen;
     logic   gen_prev;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
@@ -179,6 +181,37 @@ module tb_prog_pingpong;
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists with nothing refreshing it");
+
+        //---------------------------------------------------------------
+        // 9. NO STRADDLE (Thor, #134): a swap must not land inside a lane
+        //    pass. Elements enter at slots 0..255 and read the bus at S2,
+        //    slots 1..256, so bus_gen constant across that window means
+        //    every element of the pass saw one generation. Several passes,
+        //    so a one-off alignment cannot hide a real straddle.
+        //---------------------------------------------------------------
+        straddles = 0;
+        windows   = 0;
+        gen_seen  = 1'bx;
+        for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
+            @(posedge clk);
+            if (slot == 10'd0) begin
+                if (gen_seen !== 1'bx) windows = windows + 1;
+                gen_seen = 1'bx;                 // swap happens here
+            end else if (slot <= 10'd256) begin
+                if (gen_seen === 1'bx)
+                    gen_seen = u_pipe.bus_gen;   // first read of this pass
+                else if (u_pipe.bus_gen !== gen_seen) begin
+                    if (straddles == 0)
+                        $display("FAIL: bus_gen changed at slot %0d, mid lane pass", slot);
+                    straddles = straddles + 1;
+                end
+            end
+        end
+        if (straddles) begin
+            $display("FAIL: %0d straddle(s) over %0d lane passes", straddles, windows);
+            errors = errors + 1;
+        end else
+            $display("no straddle: bus_gen constant across all %0d lane read windows", windows);
 
         report;
     end
