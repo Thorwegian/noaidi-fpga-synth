@@ -273,12 +273,17 @@ module csp (
     // then the first 77% of an RC charge, which is convex, instead of
     // the tail, which flattens into a soft attack nobody wants.
     localparam [25:0] ENV_OVER = 26'h533333;   // 1.3 * ENV_FULL
-    // k = (16 + low4) >> (high4 + RC_SHIFT_BIAS): the SAME 5-bit
+    // k = (16 + low4) >> (RC_SHIFT_BIAS + 15 - high4): the SAME 5-bit
     // mantissa and barrel shift the linear rates already used, mirrored
     // from an increment into a fraction. 16 codes per octave over 16
     // octaves = 256 distinct equal-ratio rates with NO TABLE, which is
-    // the whole point (Thor: no more LUTs for ADSR). Bias 10 puts the
-    // fastest attack near 1 ms and the slowest release near 44 s.
+    // the whole point (Thor: no more LUTs for ADSR).
+    //
+    // The high nibble is SUBTRACTED because it used to scale an
+    // increment and now scales a fraction; keeping it as a plain shift
+    // would silently invert every rate byte the firmware already sends.
+    // Bias 10 then puts the fastest attack near 1 ms and the slowest
+    // release near 44 s, which brackets the ladder it replaces.
     localparam int    RC_SHIFT_BIAS = 10;
 
     reg [35:0] imem [0:8*synth_pkg::NUM_INSTR-1]; // {bank,entry[7:0],word[1:0]}
@@ -577,7 +582,15 @@ module csp (
                 adsr_gate <= adsr_gate_now;
                 adsr_stage_sel <= adsr_stage_sel_w;
                 adsr_mant  <= 5'd16 + {1'b0, adsr_nib_w[3:0]};
-                adsr_shift <= 5'(adsr_nib_w[7:4]) + 5'(RC_SHIFT_BIAS);
+                // The exponent is INVERTED against the old ladder on
+                // purpose. There, the high nibble was a LEFT shift on an
+                // increment, so bigger meant faster; here it scales a
+                // FRACTION, so the same byte has to be subtracted to keep
+                // its meaning. Without this, every rate the firmware
+                // already sends would come out at the opposite end of the
+                // ladder -- the bench's "fast sim rates" would be the
+                // slowest the machine can do.
+                adsr_shift <= 5'(RC_SHIFT_BIAS) + 5'(4'd15 - adsr_nib_w[7:4]);
                 adsr_delta <= $signed({1'b0, adsr_target_w})
                             - $signed({1'b0, adsr_level_prev});
                 // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
