@@ -89,14 +89,14 @@ module element_pipeline #(
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
     // so a commit never collides with a lane's bus read.
-    input  logic [9:0]     bus_write_addr,
-    input  logic [17:0]    bus_write_data,
-    input  logic           bus_write_toggle,
+    input  logic [9:0]     dmem_wr_addr,
+    input  logic [17:0]    dmem_wr_data,
+    input  logic           dmem_wr_toggle,
 
-    // Producer table writes (sclk domain, banked — wiring per law 4)
-    input  logic           producer_write_enable,
-    input  logic [9:0]     producer_write_addr,     // {entry[7:0], word[1:0]} (#100)
-    input  logic [31:0]    producer_write_data,
+    // Instruction table writes (sclk domain, banked — wiring per law 4)
+    input  logic           imem_write_enable,
+    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]} (#100)
+    input  logic [31:0]    imem_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
     input  logic           swap_req,    // sclk-domain toggle
@@ -194,7 +194,7 @@ module element_pipeline #(
     // Gate 0 silences the element (gain decode forced to exact mute);
     // the oscillator and filters free-run regardless. NOTE (Thor,
     // #98): this never became and will never become an ADSR trigger —
-    // envelopes are walker SOURCES, gated by a control input (a gate
+    // envelopes are sequencer SOURCES, gated by a control input (a gate
     // bus shared across a voice's elements), not element traits.
     // Today GATE's only job
     // is the exact-mute path (#68); Thor has proposed dropping GATE
@@ -271,513 +271,6 @@ module element_pipeline #(
         end
     end
 
-    //----------------------------------------------------------------
-    // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
-    // One replica in the B1 pilot (only cutoff reads it); replicas
-    // are added per sink at B2. Written ONLY on sysclk: SPI writes
-    // arrive through the toggle mailbox below and commit in an idle
-    // slot (lane bus reads issue during slots 1..~257, so a commit at
-    // slot >258 can never collide with a read — the BSRAM
-    // read-during-write corruption class is impossible by schedule).
-    // Bus 0 is hardwired zero (writes to it are ignored).
-    //----------------------------------------------------------------
-    // Six replicas of the one uniform pool — one read port per sink
-    // (see bus_architecture.md "Why six replicas"). Broadcast writes
-    // keep them identical.
-    reg signed [17:0] bus_ram_pitch [0:2*synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_duty  [0:2*synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_fc    [0:2*synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_q     [0:2*synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_gl    [0:2*synth_pkg::NUM_BUSES-1];
-    reg signed [17:0] bus_ram_gr    [0:2*synth_pkg::NUM_BUSES-1];
-    integer bi;
-    // BOTH generations -- the arrays are 2*NUM_BUSES deep (#134) and an
-    // uninitialised shadow half reads X the first time bus_gen flips.
-    initial for (bi = 0; bi < 2*synth_pkg::NUM_BUSES; bi = bi + 1) begin
-        bus_ram_pitch[bi] = 18'sd0;
-        bus_ram_duty[bi]  = 18'sd0;
-        bus_ram_fc[bi]    = 18'sd0;
-        bus_ram_q[bi]     = 18'sd0;
-        bus_ram_gl[bi]    = 18'sd0;
-        bus_ram_gr[bi]    = 18'sd0;
-    end
-
-    // SPI bus-base writes now land in a dedicated BASE RAM as well as
-    // the value replicas: sinks read the replicas, the producer walker
-    // reads the base and writes base + contribution into the replicas
-    // (the spec's "bus = base register + producer contributions",
-    // realized). A bus no producer targets keeps value = base via the
-    // mailbox's own replica write.
-    reg signed [17:0] bus_base [0:2*synth_pkg::NUM_BUSES-1];
-    integer bbi;
-    initial for (bbi = 0; bbi < 2*synth_pkg::NUM_BUSES; bbi = bbi + 1)
-        bus_base[bbi] = 18'sd0;
-
-    // BUS-SUM RAM (#92/#98): the walker-facing mirror of a bus's
-    // OUTPUT SUM — written by the same strobes as the replicas, read
-    // at P1 by SEND entries. This is what makes the node graph's
-    // edges real (Thor, #98): a send references the bus's summed
-    // output (firmware base + every source contribution written so
-    // far), not the firmware base alone. With sources ordered before
-    // their sends in the table, propagation is same-sample.
-    reg signed [17:0] bus_sum_ram [0:2*synth_pkg::NUM_BUSES-1];
-    integer bsi;
-    initial for (bsi = 0; bsi < 2*synth_pkg::NUM_BUSES; bsi = bsi + 1)
-        bus_sum_ram[bsi] = 18'sd0;
-
-    // Producer walker replica-write strobes (driven below)
-    logic               walker_bus_write;
-    logic [9:0]         walker_bus_addr;
-    logic signed [17:0] walker_bus_value;
-
-    // #134: ping-pong generation bit. The walker writes generation
-    // ~bus_gen while the pipeline reads bus_gen, and they swap at the
-    // sample boundary -- so every element sees one coherent generation
-    // and a read can never collide with a write. Costs no extra BSRAM:
-    // the second generation lives in the half of each block that the
-    // 512-entry pool leaves unused.
-    logic bus_gen;   // process below, with walker_half
-
-    logic bus_write_toggle_meta, bus_write_toggle_sync, bus_write_toggle_prev;
-    logic bus_mailbox_pending;
-    logic [9:0]  bus_mailbox_addr;
-    logic [17:0] bus_mailbox_data;
-    // #134: a mailbox entry commits over TWO takes, one per generation.
-    // The walker rewrites its target buses every sample, so ITS writes
-    // can live in one half. A mailbox write sets a PERSISTENT base that
-    // nothing refreshes, so a single-half write alternates with stale
-    // data on every swap -- silence, in practice (caught by
-    // tb_prog_pingpong's persistence check). bus_commit_half latches the
-    // half written first, so a sample boundary falling between the two
-    // takes cannot make the second write repeat it.
-    //
-    // This does not weaken atomicity where it matters: the property we
-    // need is that the WALKER's sweep is seen as one complete
-    // generation. Firmware writes were always asynchronous and
-    // mid-sample, before ping-pong and after it.
-    logic bus_commit_phase;
-    logic bus_commit_half;
-    // Mailbox commits happen in any idle slot where the walker is not
-    // writing the replicas THIS cycle (walker_bus_write below): lane reads issue
-    // during slots 1..~257, and a commit colliding with a walker
-    // write simply defers one cycle. The window stays ~500 slots
-    // wide, so a 10 MHz SPI burst can never overrun the 1-deep
-    // mailbox (word period 5.6 us >> max wait).
-    // bus_mailbox_take is the SINGLE condition for both committing and
-    // clearing pending. An earlier version cleared pending on
-    // bus_write_window alone while the commit also required !walker_bus_write — when a
-    // write's first idle cycle coincided with a walker write (~1 in
-    // 3 during the walker span), the write was silently dropped:
-    // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    // #134: ping-pong put reads and writes in different generations,
-    // so the window that used to keep them apart by schedule is gone.
-    // A commit still defers a cycle when the walker is writing, since
-    // they share the write port.
-    wire  bus_write_window   = 1'b1;
-    wire  bus_mailbox_take   = bus_mailbox_pending && bus_write_window && !walker_bus_write;
-    wire  bus_commit = bus_mailbox_take && (bus_mailbox_addr != 10'd0);
-    wire  bus_commit_wr_half = bus_commit_phase ? ~bus_commit_half : ~bus_gen;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            bus_write_toggle_meta <= 1'b0; bus_write_toggle_sync <= 1'b0; bus_write_toggle_prev <= 1'b0;
-            bus_mailbox_pending <= 1'b0;
-            bus_mailbox_addr <= '0; bus_mailbox_data <= '0;
-        end else begin
-            bus_write_toggle_meta <= bus_write_toggle; bus_write_toggle_sync <= bus_write_toggle_meta; bus_write_toggle_prev <= bus_write_toggle_sync;
-            if (bus_write_toggle_sync != bus_write_toggle_prev) begin
-                bus_mailbox_pending <= 1'b1;         // payload is stable: it was
-                bus_mailbox_addr   <= bus_write_addr;      // written before the toggle,
-                bus_mailbox_data   <= bus_write_data;      // 2 sync FFs ago
-            end else if (bus_mailbox_take && bus_commit_phase) begin
-                bus_mailbox_pending <= 1'b0;
-            end
-        end
-    end
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            bus_commit_phase <= 1'b0;
-            bus_commit_half  <= 1'b0;
-        end else if (bus_mailbox_take) begin
-            if (!bus_commit_phase) begin
-                bus_commit_half  <= ~bus_gen;   // the half written now
-                bus_commit_phase <= 1'b1;
-            end else
-                bus_commit_phase <= 1'b0;
-        end
-    end
-
-    always_ff @(posedge clk)
-        if (bus_commit) bus_base[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-
-    // Bus 1023 doubles as the test-tone control latch (issue #81).
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)                                       test_tone_en <= 1'b0;
-        else if (bus_commit && bus_mailbox_addr == 10'd1023)
-            test_tone_en <= bus_mailbox_data[0];
-
-    // Replica writes: one physical port, two writers — the walker
-    // owns its cycle (walker_bus_write), the mailbox defers around it.
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_pitch[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_pitch[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_duty[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_duty[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_fc[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_fc[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_q[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_q[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gl[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_gl[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_ram_gr[{bus_commit_wr_half, bus_mailbox_addr[8:0]}] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_ram_gr[{~bus_gen, walker_bus_addr[8:0]}]   <= walker_bus_value;
-    always_ff @(posedge clk)
-        if (bus_commit)   bus_sum_ram[bus_mailbox_addr] <= $signed(bus_mailbox_data);
-        else if (walker_bus_write)   bus_sum_ram[walker_bus_addr]  <= walker_bus_value;
-
-    //----------------------------------------------------------------
-    // Producer walker (B4/B5, bus_architecture.md) — the idle-slot
-    // table executor. 128 entries × 3 config words (stride 4 in the
-    // RAM), 3 slots per entry, span 300..~690. Law 1: the ONE
-    // producer multiply sits alone in its own stage with registered
-    // operands. Law 3: entries execute in table order, once per
-    // sample. A producer's OUTPUT uses the PREVIOUS sample's state —
-    // the one-sample lag is inaudible at control rates and it keeps
-    // the sine's internal multiply and the producer multiply fed by
-    // registers only.
-    //
-    // Per-entry phases (overlapped across entries):
-    //   P0: read CFG + state
-    //   P1: latch cfg/state; read RATES; read gate bus (bus_base)
-    //   P2: REGISTER rate decode + gate + source (each a short
-    //       RAM-output cone); read DEPTH
-    //   P3: state step from registers (adds/compares) + writeback;
-    //       source × depth (DSP, registered operands — a parallel,
-    //       independent path); read target base (bus_base — port
-    //       shared with P1 by phase mux)
-    //   P4: REGISTER value = base + (product >>> 16), saturated
-    //   P5: write replicas (the RAM→add→clamp→RAM chain carries a
-    //       register in the middle — the 76 MHz critical path fix)
-    //
-    // ADSR state word: [23:22] stage (0 idle, 1 attack, 2 decay/
-    // sustain, 3 release), [21:0] level. Gate is LEVEL-sensitive on
-    // the watched bus (> 0 = held): note-on/off is one live bus write.
-    //----------------------------------------------------------------
-    localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
-                     AST_DEC  = 2'd2, AST_REL = 2'd3;
-
-    reg [35:0] producer_table_ram [0:8*synth_pkg::NUM_PRODUCERS-1]; // {bank,entry[7:0],word[1:0]}
-    // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
-    // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
-    // BITS, so rate increments are in 1/16-LSB units and the 8-bit
-    // log2 rate byte decodes as ONE uniform expression with no
-    // truncation anywhere: all 256 codes are distinct equal-ratio
-    // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
-    // cc << 1). The fractional bits ARE the "binary point moved four
-    // left" — in the accumulator, where it belongs.
-    reg [27:0] producer_state_ram [0:synth_pkg::NUM_PRODUCERS-1];
-    integer wi;
-    initial begin
-        for (wi = 0; wi < 8*synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            producer_table_ram[wi] = 36'd0;                  // type 0 = off
-        for (wi = 0; wi < synth_pkg::NUM_PRODUCERS; wi = wi + 1)
-            producer_state_ram[wi] = 28'd0;
-    end
-
-    always_ff @(posedge sclk)
-        if (producer_write_enable) producer_table_ram[{bank_shadow, producer_write_addr}] <= {4'b0, producer_write_data};
-
-    // control: 3-slot stride via a small counter, armed at slot 299.
-    // HALF-RATE (#100): each sample walks 128 entries — ONE HALF of
-    // the 256-entry table, halves alternating by walker_half — so a
-    // source updates at 48 kHz effective (zipper at 24 kHz, under
-    // the master tilt; Thor 2026-09-11). Chains must live within a
-    // half (allocator rule); cross-half reads see the other half's
-    // previous pass.
-    logic [1:0] walker_step;
-    logic [7:0] walker_entry;
-    logic       walker_half;
-
-    // #134: the generation flips once per COMPLETE walker pass, not once
-    // per sample. The walker is half-rate (#100) -- one half of the
-    // producer table per sample -- so a producer refreshes its bus every
-    // OTHER sample. Flipping every sample would publish a generation the
-    // walker had only half written, which reads as halved modulation
-    // depth and a stale link in any chain. walker_half marks the
-    // two-sample cycle, so the swap rides it.
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)                          bus_gen <= 1'b0;
-        else if (sample_tick && walker_half) bus_gen <= ~bus_gen;
-    wire walker_active = (walker_entry < 8'(synth_pkg::WALK_PER_SAMPLE));
-    // #97 fix: the bus write is pipeline-delayed by one entry — entry N's
-    // write fires during entry N+1's P5. Without a drain the step machine
-    // freezes the instant walker_entry hits WALK_PER_SAMPLE, so the LAST
-    // real entry's write (index 127 in half A = PROD_FANOUT(31), voice
-    // 31's cutoff send) never lands and that voice reads a stale/low
-    // cutoff bus. Keep advancing while draining so the trailing write
-    // completes. The drain entries carry producer_valid=0 (walker_active
-    // gates the reads), so they inject nothing; they only flush the last
-    // write and clear walker_prev_wrote, so no chain leaks across halves.
-    // A registered walker_draining keeps the walker_entry->RAM-address
-    // path off the extended compare (timing).
-    localparam int WALK_DRAIN = 2;
-    logic [1:0] drain_cnt;
-    wire walker_running = walker_active || (drain_cnt != 2'd0);
-    wire [7:0] walker_index = {walker_half, walker_entry[6:0]};
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            walker_step <= 2'd0; walker_entry <= 8'hFF; walker_half <= 1'b0;
-            drain_cnt <= 2'd0;
-        end else if (sample_tick) begin
-            walker_step <= 2'd0; walker_entry <= 8'd0;
-            walker_half <= ~walker_half;
-            drain_cnt <= 2'(WALK_DRAIN);
-        end else if (walker_running) begin
-            if (walker_step == 2'd2) begin
-                walker_step <= 2'd0;
-                walker_entry <= walker_entry + 8'd1;
-                if (!walker_active && drain_cnt != 2'd0)
-                    drain_cnt <= drain_cnt - 2'd1;
-            end else
-                walker_step <= walker_step + 2'd1;
-        end
-    end
-    wire walker_entry_start = walker_active && (walker_step == 2'd0);
-
-    // Sequential read registers: producer_table_ram serves CFG/RATES/DEPTH on
-    // consecutive cycles through ONE register (address muxed by
-    // phase); bus_base serves the gate read (P1) and the target-base
-    // read (P3) through one register the same way.
-    logic [35:0] producer_table_readout;
-    logic [27:0] producer_state_readout;
-    logic signed [17:0] bus_base_readout;
-    logic signed [17:0] bus_sum_readout;   // send-source read (#92/#98)
-    logic        walker_read_valid; // a P0 read was issued last cycle
-
-    // A stage — latched at the end of P1, stable for 3 cycles
-    logic        producer_valid_a;
-    logic [7:0]  producer_index_a;   // {half, entry[6:0]} (#100)
-    logic [3:0]  producer_type_a;
-    logic [1:0]  lfo_shape_a;
-    logic [9:0]  target_bus_a;
-    logic [15:0] lfo_rate_a;
-    logic [27:0] producer_state_prev;
-    // B stage — latched at the end of P2
-    logic        producer_valid_b;
-    logic [9:0]  target_bus_b;
-    logic signed [17:0] mod_source_value;
-    // C stage — latched at the end of P3
-    logic        producer_valid_c;
-    logic [9:0]  target_bus_c;
-    logic signed [35:0] depth_product;
-    // E stage — the saturated sum, latched at the end of P4
-    logic        walker_write_valid;
-    logic [9:0]  walker_write_bus;
-    logic signed [17:0] walker_write_value;
-
-    // LFO waveform on the OLD phase (registered producer_state_prev → rule-clean).
-    // Named intermediate wire: a $signed() cast directly in the port
-    // connection crashes yosys's genrtlil signedness assert.
-    wire signed [23:0] walker_lfo_phase = $signed(producer_state_prev[23:0]);
-    logic signed [17:0] walker_lfo_wave;
-    osc_core u_wk_osc (
-        .phase_next (walker_lfo_phase), // LFO phase is the accumulator (#128)
-        .duty       (24'sd0),
-        .wave       (lfo_shape_a),
-        .sample_out (walker_lfo_wave)
-    );
-
-    // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
-    // output through shifts or a compare — short); the state step
-    // then runs at P3 entirely from registers. This split exists
-    // because the un-split version made the RAM-output→state-write
-    // cone the critical path (76 MHz — 3.5% margin, on a timing
-    // model proven optimistic five times).
-    logic        adsr_gate;
-    logic [20:0] adsr_attack_step, adsr_decay_step, adsr_release_step;   // 1/16-LSB units
-    logic [25:0] adsr_sustain_target;
-
-    // next-state, computed at P3 from registered inputs only.
-    // ADSR level is UQ22.4 (26 bits).
-    wire [1:0]  adsr_stage_prev  = producer_state_prev[27:26];
-    wire [25:0] adsr_level_prev  = producer_state_prev[25:0];
-    logic [27:0] producer_state_next;
-    always_comb begin
-        if (producer_type_a == 4'd1) begin
-            // LFO: free-running phase accumulator in [23:0]
-            producer_state_next = {producer_state_prev[27:24], producer_state_prev[23:0] + {8'b0, lfo_rate_a}};
-        end else if (!adsr_gate) begin
-            // ADSR, gate low: release toward zero
-            producer_state_next = (adsr_level_prev > {5'b0, adsr_release_step})
-                ? {AST_REL, adsr_level_prev - 26'(adsr_release_step)}
-                : {AST_IDLE, 26'd0};
-        end else begin
-            case (adsr_stage_prev)
-                AST_ATT: producer_state_next =
-                    ({1'b0, adsr_level_prev} + 27'(adsr_attack_step) > 27'h3FFFFFF)
-                        ? {AST_DEC, 26'h3FFFFFF}
-                        : {AST_ATT, adsr_level_prev + 26'(adsr_attack_step)};
-                AST_DEC: producer_state_next =
-                    (adsr_level_prev > adsr_sustain_target + 26'(adsr_decay_step))
-                        ? {AST_DEC, adsr_level_prev - 26'(adsr_decay_step)}
-                        : (adsr_level_prev > adsr_sustain_target) ? {AST_DEC, adsr_sustain_target}
-                                             : {AST_DEC, adsr_level_prev};
-                default: producer_state_next = {AST_ATT, adsr_level_prev};  // idle/release
-            endcase
-        end
-    end
-
-    // P4 (walker_step == 1) combinational: value = addend + contribution,
-    // saturating — REGISTERED into walker_write_* at the end of P4, written to
-    // the replicas at P5 (walker_step == 2). The RAM-output → add → clamp →
-    // RAM-write chain carries a register in the middle (the 76 MHz
-    // critical-path fix). Declared before the stage block below
-    // (iverilog binds declaration-before-use at module scope).
-    //
-    // BUS SUMMING (issue #84, law 1 made real): buses are summing
-    // nodes — exactly like mixing-console buses, never
-    // self-referential (Thor, #98) — so summing is the DEFAULT, no
-    // flags. At this moment the walker_write_* registers still hold
-    // the PREVIOUS entry's result; if this entry targets the same
-    // TARGET bus as that previous entry, accumulate onto the running
-    // total instead of re-reading the firmware base. Multiple sources
-    // SHARING A TARGET BUS therefore sum automatically when allocated
-    // in consecutive slots, to any chain length (each link sees the
-    // running total — the cumulative sum, nothing more). The
-    // allocator's rule (bus_architecture.md): group sources that
-    // share a target bus adjacently; scattered ones keep
-    // last-write-wins.
-    wire signed [19:0] walker_contribution = depth_product[35:16];
-    // walker_write_valid is cleared after the P5 RAM write, so the
-    // chain test uses its own uncleaned copy (bus/value persist).
-    logic walker_prev_wrote;
-    wire chain_prev = walker_prev_wrote
-                      && (walker_write_bus == target_bus_c);
-    wire signed [17:0] walker_addend =
-        chain_prev ? walker_write_value : bus_base_readout;
-    wire signed [20:0] walker_sum =
-        {{3{walker_addend[17]}}, walker_addend} + {walker_contribution[19], walker_contribution};
-    wire signed [17:0] walker_value_clamped =
-        (walker_sum > 21'sd131071)  ? 18'sd131071  :
-        (walker_sum < -21'sd131072) ? -18'sd131072 : walker_sum[17:0];
-
-    // Phase-guarded stage latches: each stage latches only at its own
-    // phase edge and stays stable for the entry's three cycles.
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            walker_read_valid <= 1'b0;
-            producer_valid_a <= 1'b0; producer_valid_b <= 1'b0; producer_valid_c <= 1'b0; walker_write_valid <= 1'b0;
-            walker_prev_wrote <= 1'b0;
-            producer_index_a <= '0; producer_type_a <= '0; lfo_shape_a <= '0;
-            target_bus_a <= '0; lfo_rate_a <= '0; producer_state_prev <= '0;
-            target_bus_b <= '0; mod_source_value <= '0;
-            target_bus_c <= '0; depth_product <= '0;
-            walker_write_bus <= '0; walker_write_value <= '0;
-            adsr_gate <= 1'b0;
-            adsr_attack_step <= '0; adsr_decay_step <= '0; adsr_release_step <= '0; adsr_sustain_target <= '0;
-        end else begin
-            walker_read_valid <= walker_entry_start;
-
-            if (walker_step == 2'd1) begin
-                // end of P1: latch config (producer_table_readout = CFG) + state
-                producer_valid_a     <= walker_read_valid;
-                producer_index_a     <= walker_index;
-                producer_type_a  <= producer_table_readout[3:0];
-                lfo_shape_a <= producer_table_readout[5:4];
-                target_bus_a   <= producer_table_readout[15:6];
-                lfo_rate_a  <= producer_table_readout[31:16];
-                producer_state_prev      <= producer_state_readout;
-                // ...and register the previous entry's saturated sum
-                // (write happens next cycle, at P5)
-                walker_write_valid   <= producer_valid_c && (target_bus_c != 10'd0);
-                walker_prev_wrote    <= producer_valid_c && (target_bus_c != 10'd0);
-                walker_write_bus <= target_bus_c;
-                walker_write_value <= walker_value_clamped;
-                producer_valid_c    <= 1'b0;
-            end else if (walker_step == 2'd2) begin
-                // end of P2: register the rate decode + gate (short
-                // RAM-output cones) and the source from OLD state
-                // RATES field order is the universal A, D, S, R —
-                // bytes 0,1 = attack/decay rates, byte 2 = SUSTAIN
-                // level, byte 3 = release rate (Thor: S is a level
-                // and sits third by convention). One sustain LSB
-                // = 0.375 dB below peak at the 16-octave amp depth.
-                // Rate decode: increment = (16 + low4) << high4 in
-                // 1/16-LSB units — the level's four fractional bits
-                // carry the four-octave down-bias (decay only
-                // traverses peak→sustain, so unbiased rates made
-                // every decay fast). ONE uniform expression, no
-                // truncating right-shift: all 256 codes are distinct
-                // equal-ratio steps of a log2 ladder (Thor's
-                // perceptual-linearity rule; a MIDI CC maps as
-                // cc << 1). Slowest full-range time ~44 s, fastest
-                // ~0.7 ms.
-                adsr_gate <= (bus_base_readout > 18'sd0);
-                adsr_attack_step <= (21'd16 + 21'(producer_table_readout[3:0]))
-                               << producer_table_readout[7:4];
-                adsr_decay_step <= (21'd16 + 21'(producer_table_readout[11:8]))
-                               << producer_table_readout[15:12];
-                adsr_sustain_target  <= {producer_table_readout[23:16], 18'b0};
-                adsr_release_step <= (21'd16 + 21'(producer_table_readout[27:24]))
-                               << producer_table_readout[31:28];
-                // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
-                // SEND (the fabric's processor — #44/#98). A send is
-                // STATELESS: CFG[25:16] names the source bus (the
-                // field the ADSR uses for its GATE input), the value
-                // read is the bus's OUTPUT SUM (bus_sum_ram, #92 —
-                // firmware base + all contributions written so far;
-                // sources ordered before their sends propagate
-                // same-sample), multiplied by DEPTH like any source
-                // (0x10000 = unity, sign = polarity) and chain-added
-                // to the target.
-                producer_valid_b   <= producer_valid_a && (producer_type_a == 4'd1 || producer_type_a == 4'd2
-                                                           || producer_type_a == 4'd3);
-                target_bus_b <= target_bus_a;
-                mod_source_value   <= (producer_type_a == 4'd1) ? walker_lfo_wave
-                                    : (producer_type_a == 4'd3) ? bus_sum_readout
-                                            : $signed({2'b0, producer_state_prev[25:10]});
-                walker_write_valid  <= 1'b0;              // P5 write just happened
-            end else begin
-                // end of P3 (walker_step == 0): the producer multiply —
-                // registered operands (mod_source_value, and producer_table_readout = DEPTH);
-                // state writeback happens here too (see below)
-                producer_valid_c   <= producer_valid_b;
-                target_bus_c <= target_bus_b;
-                depth_product     <= mod_source_value * $signed(producer_table_readout[17:0]);
-                producer_valid_b   <= 1'b0;
-                producer_valid_a   <= 1'b0;
-            end
-        end
-    end
-
-    assign walker_bus_value = walker_write_value;
-    assign walker_bus_addr = walker_write_bus;
-    assign walker_bus_write  = walker_write_valid && (walker_step == 2'd2);
-
-    // walker memory reads — sync-only, one register per RAM, address
-    // muxed by phase: producer_table_ram serves CFG (P0) / RATES (P1) /
-    // DEPTH (P2); bus_base serves the gate bus (P1, address from the
-    // CFG word just read) / the target base (P3).
-    always_ff @(posedge clk) begin
-        producer_table_readout  <= producer_table_ram[{bank_active, walker_index, walker_step}];
-        producer_state_readout    <= producer_state_ram[walker_index];
-        bus_base_readout <= bus_base[(walker_step == 2'd1) ? producer_table_readout[25:16]
-                                              : target_bus_b];
-        // SEND source read (#92/#98): the OUTPUT SUM of CFG[25:16] —
-        // read in parallel with bus_base (own RAM, own register);
-        // P2 selects by type. Only meaningful at P1.
-        bus_sum_readout <= bus_sum_ram[producer_table_readout[25:16]];
-    end
-    always_ff @(posedge clk)
-        if ((walker_step == 2'd0) && producer_valid_a
-            && (producer_type_a == 4'd1 || producer_type_a == 4'd2))
-            producer_state_ram[producer_index_a] <= producer_state_next;                      // P3
 
     //----------------------------------------------------------------
     // S0/S1 — RAM reads (address = element entering this cycle)
@@ -882,19 +375,32 @@ module element_pipeline #(
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
-    // Bus fetches, one per sink: reads issued with the S1 pointers,
-    // data lands at S2 alongside the base fields. Sync-only (one
-    // BSRAM read port per replica).
-    logic signed [17:0] s2_bus_pitch, s2_bus_duty, s2_bus_fc;
-    logic signed [17:0] s2_bus_q, s2_bus_gl, s2_bus_gr;
-    always_ff @(posedge clk) begin
-        s2_bus_pitch <= bus_ram_pitch[{bus_gen, s1_ptrs0_word[8:0]}];
-        s2_bus_duty  <= bus_ram_duty[{bus_gen, s1_ptrs0_word[18:10]}];
-        s2_bus_fc    <= bus_ram_fc[{bus_gen, s1_ptrs0_word[28:20]}];
-        s2_bus_q     <= bus_ram_q[{bus_gen, s1_ptrs1_word[8:0]}];
-        s2_bus_gl    <= bus_ram_gl[{bus_gen, s1_ptrs1_word[18:10]}];
-        s2_bus_gr    <= bus_ram_gr[{bus_gen, s1_ptrs1_word[28:20]}];
-    end
+    //----------------------------------------------------------------
+    // The modulation bus and its source sequencer now live in their own
+    // module (#136). Six read ports: S1 pointers in, S2 data out.
+    //----------------------------------------------------------------
+    logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
+    logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
+
+    csp u_csp (
+        .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
+        .bank_active(bank_active), .bank_shadow(bank_shadow),
+        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
+        .dmem_wr_toggle(dmem_wr_toggle),
+        .imem_write_enable(imem_write_enable),
+        .imem_write_addr(imem_write_addr),
+        .imem_write_data(imem_write_data),
+        .rd_pitch_a(s1_ptrs0_word[8:0]),
+        .rd_duty_a (s1_ptrs0_word[18:10]),
+        .rd_fc_a   (s1_ptrs0_word[28:20]),
+        .rd_q_a    (s1_ptrs1_word[8:0]),
+        .rd_gl_a   (s1_ptrs1_word[18:10]),
+        .rd_gr_a   (s1_ptrs1_word[28:20]),
+        .rd_pitch_d(s2_dmem_pitch), .rd_duty_d(s2_dmem_duty), .rd_fc_d(s2_dmem_fc),
+        .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gl), .rd_gr_d(s2_dmem_gr),
+        .test_tone_en(test_tone_en)
+    );
+
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -962,7 +468,7 @@ module element_pipeline #(
     // so self-oscillation is the natural top of scale — reachable as
     // a feature, no special code.
     wire signed [18:0] reso_sum =
-        $signed({5'b0, s2_reso}) + {s2_bus_q[17], s2_bus_q};
+        $signed({5'b0, s2_reso}) + {s2_dmem_q[17], s2_dmem_q};
     wire [13:0] eff_reso =
         reso_sum[18]            ? 14'd0    :
         (reso_sum > 19'sd16383) ? 14'h3FFF : reso_sum[13:0];
@@ -970,7 +476,7 @@ module element_pipeline #(
     // Cutoff clamps to the flat FC_MAX (14.4 kHz, measured clean at
     // the Butterworth worst case — see synth_pkg).
     wire signed [18:0] fc_sum =
-        $signed({5'b0, s2_fc}) + {s2_bus_fc[17], s2_bus_fc};
+        $signed({5'b0, s2_fc}) + {s2_dmem_fc[17], s2_dmem_fc};
     wire [13:0] eff_fc =
         fc_sum[18] ? 14'd0 :
         (fc_sum > 19'($signed({5'b0, synth_pkg::FC_MAX})))
@@ -978,24 +484,24 @@ module element_pipeline #(
         fc_sum[13:0];
 
     wire signed [18:0] pitch_sum =
-        $signed({5'b0, s2_pitch}) + {s2_bus_pitch[17], s2_bus_pitch};
+        $signed({5'b0, s2_pitch}) + {s2_dmem_pitch[17], s2_dmem_pitch};
     wire [13:0] eff_pitch =
         pitch_sum[18]            ? 14'd0    :
         (pitch_sum > 19'sd16383) ? 14'h3FFF : pitch_sum[13:0];
 
     wire signed [31:0] duty_sum =
         {{8{s2_duty[23]}}, s2_duty}
-        + {{1{s2_bus_duty[17]}}, s2_bus_duty, 13'b0};
+        + {{1{s2_dmem_duty[17]}}, s2_dmem_duty, 13'b0};
     wire signed [23:0] eff_duty =
         (duty_sum >  32'sd8388607) ? 24'sd8388607  :
         (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
 
-    wire signed [17:0] gbus_l = s2_bus_gl >>> 6;
-    wire signed [17:0] gbus_r = s2_bus_gr >>> 6;
+    wire signed [17:0] gmod_l = s2_dmem_gl >>> 6;
+    wire signed [17:0] gmod_r = s2_dmem_gr >>> 6;
     wire signed [18:0] gl_sum =
-        $signed({11'b0, s2_gl}) + {gbus_l[17], gbus_l};
+        $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
     wire signed [18:0] gr_sum =
-        $signed({11'b0, s2_gr}) + {gbus_r[17], gbus_r};
+        $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
     // volume in, attenuation code out (the one subtract of issue #40)
     wire [7:0] eff_gl =
         (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins

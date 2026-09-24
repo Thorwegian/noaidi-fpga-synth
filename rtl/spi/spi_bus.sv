@@ -65,22 +65,22 @@ module spi_bus #(
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
     // Bus values are live (no ping-pong). The write crosses clock
     // domains through this 1-deep toggle mailbox; the pipeline syncs
-    // bus_write_toggle and commits to bus RAM only in an idle drum
+    // dmem_wr_toggle and commits to bus RAM only in an idle drum
     // slot, so a commit can never collide with a lane's bus read (the
     // BSRAM read-during-write corruption class stays impossible by
     // construction, not by probability). Overrun math: one SPI word
     // takes >= ~5.6 us at 10 MHz; a commit waits at most one lane
     // span (~3.7 us) — back-to-back writes cannot outrun the mailbox.
-    output logic [9:0]  bus_write_addr,
-    output logic [17:0] bus_write_data,
-    output logic        bus_write_toggle,  // toggles once per bus write
+    output logic [9:0]  dmem_wr_addr,
+    output logic [17:0] dmem_wr_data,
+    output logic        dmem_wr_toggle,  // toggles once per bus write
 
-    // ---- producer table writes (sclk domain, banked like params) ---
-    // Producer config is wiring: it rides the ping-pong banks and
+    // ---- instruction table writes (sclk domain, banked like params) ---
+    // Instruction config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
-    output logic        producer_write_enable,
-    output logic [9:0]  producer_write_addr,   // {entry[7:0], word[1:0]} (#100)
-    output logic [31:0] producer_write_data,
+    output logic        imem_write_enable,
+    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]} (#100)
+    output logic [31:0] imem_write_data,
     output logic [7:0]  elem_write_index,
     output logic [31:0] elem_write_data,
 
@@ -240,33 +240,33 @@ module spi_bus #(
                                && (elem_offset[2:0] < 3'd7);
     assign elem_write_word   = elem_offset[2:0];
 
-    // ---- producer table write decode (0x0100..0x04FF, #100) --------
-    localparam [15:0] PROD_BASE = synth_pkg::MAP_PROD_BASE;
-    localparam [15:0] PROD_END  = synth_pkg::MAP_PROD_BASE
-                                + 16'(4 * synth_pkg::NUM_PRODUCERS);
-    wire in_producer_range = (word_addr >= PROD_BASE)
+    // ---- instruction table write decode (0x0100..0x04FF, #100) --------
+    localparam [15:0] PROD_BASE = synth_pkg::MAP_IMEM_BASE;
+    localparam [15:0] PROD_END  = synth_pkg::MAP_IMEM_BASE
+                                + 16'(4 * synth_pkg::NUM_INSTR);
+    wire in_instruction_range = (word_addr >= PROD_BASE)
                           && (word_addr <  PROD_END)
                           && (word_addr[1:0] != 2'd3);  // word 3 reserved
-    assign producer_write_enable = byte_end && (frame_phase == 3'd4)
+    assign imem_write_enable = byte_end && (frame_phase == 3'd4)
                                    && (data_byte_index == 2'd3)
-                                   && !is_read && in_producer_range;
+                                   && !is_read && in_instruction_range;
     // Region-relative offset — word_addr[8:0] alone is WRONG here: the
     // region starts at 0x0100, whose bit 8 is set, so a raw slice
     // lands writes 64 entries off.
-    assign producer_write_addr = 10'(word_addr - synth_pkg::MAP_PROD_BASE);
-    assign producer_write_data = {partial_word, rx_byte};
+    assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
+    assign imem_write_data = {partial_word, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----
     wire in_bus_range = (word_addr >= synth_pkg::MAP_BUS_BASE)
                      && (word_addr <  synth_pkg::MAP_BUS_BASE
-                                      + 16'(synth_pkg::NUM_BUSES));
-    initial bus_write_toggle = 1'b0;
+                                      + 16'(synth_pkg::DMEM_WORDS));
+    initial dmem_wr_toggle = 1'b0;
     always_ff @(posedge sclk) begin
         if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
             && !is_read && in_bus_range) begin
-            bus_write_addr   <= word_addr[9:0];
-            bus_write_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
-            bus_write_toggle <= ~bus_write_toggle;
+            dmem_wr_addr   <= word_addr[9:0];
+            dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
+            dmem_wr_toggle <= ~dmem_wr_toggle;
         end
     end
     assign elem_write_index = elem_offset[13:6];

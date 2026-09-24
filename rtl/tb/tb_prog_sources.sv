@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_sources.sv — split bench D (issue #58): the source walker —
+// tb_prog_sources.sv — split bench D (issue #58): the source sequencer —
 // LFO tremolo on a gain bus, then ADSR + gate-bus triggering.
 // Preamble rebuilds the B2 end-state (C4 sines with gains on bus 3).
 //------------------------------------------------------------------------
@@ -42,7 +42,7 @@ module tb_prog_sources;
         end
         observe(60);
 
-        // B4: source walker + LFO. 93.75 Hz square LFO (musically
+        // B4: source sequencer + LFO. 93.75 Hz square LFO (musically
         // absurd on purpose — the bench needs several periods inside
         // ~20 ms) on gain bus 3, depth +-2 octaves (+-12 dB). Window
         // peaks must alternate with ZERO SPI during measurement.
@@ -211,9 +211,9 @@ module tb_prog_sources;
         spi_word_write(bus_addr(5), 32'h00000001);      // gate held
         observe(60);
         observe(60);
-        if ($signed(u_pipe.bus_ram_fc[3]) !== 18'sd4708) begin
+        if ($signed(u_pipe.u_csp.dmem_fc[3]) !== 18'sd4708) begin
             $display("FAIL: triple chain replica = %0d, expected 4708 (#44)",
-                     $signed(u_pipe.bus_ram_fc[3]));
+                     $signed(u_pipe.u_csp.dmem_fc[3]));
             errors = errors + 1;
         end else begin
             $display("triple chain replica = 4708 exact (base+0+channel)");
@@ -248,11 +248,11 @@ module tb_prog_sources;
         end
         $display("LFO through send: window peaks max=%0d min=%0d", wmax, wmin);
         if (wmin == 0 || (wmax * 2) / wmin < 5) begin
-            $display("FAIL: walker contribution not visible through the send (#92)");
+            $display("FAIL: sequencer contribution not visible through the send (#92)");
             errors = errors + 1;
         end
 
-        // UPPER HALF EXECUTES (#100 half-rate walker): move the send
+        // UPPER HALF EXECUTES (#100 half-rate sequencer): move the send
         // to entry 130 — half B, walked on alternate samples. The
         // LFO (entry 0, half A) writes bus 6 on even passes; the
         // half-B send relays the sum on odd passes (one sample

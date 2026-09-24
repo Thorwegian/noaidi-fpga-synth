@@ -11,7 +11,7 @@ MOD = \
 	drum.sv \
 	output_tilt.sv \
 	limiter.sv \
-	element/element_pipeline.sv \
+	element/element_pipeline.sv csp.sv \
 	element/svf_tpt.sv \
 	element/osc_core.sv \
 	spi/spi_bus.sv \
@@ -136,7 +136,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv element/svf_tpt.sv element/osc_core.sv
+SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv csp.sv element/svf_tpt.sv element/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
@@ -215,6 +215,14 @@ sim-prog-pingpong: tb/tb_prog_pingpong.vvp
 sim-prog-limiter: tb/tb_prog_limiter.vvp
 	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
 
+# #136: the bus engine alone -- seconds, not minutes, because it does
+# not elaborate the SVF, the oscillators or the limiter.
+tb/tb_csp.vvp: $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv Makefile
+	iverilog -g2012 -I. -o $@ $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv
+
+sim-csp: tb/tb_csp.vvp
+	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
+
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
@@ -276,7 +284,7 @@ tb/tb_limiter.vvp: limiter.sv $(TB_LIM) element/log_lut.hex element/att_lut.hex 
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-csp sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
 	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \

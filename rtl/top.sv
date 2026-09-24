@@ -71,14 +71,14 @@ module top (
     logic [7:0]  elem_write_index;
     logic [31:0] elem_write_data;
     logic        swap_req;
-    logic [9:0]  bus_write_addr;
-    logic [17:0] bus_write_data;
-    logic        bus_write_toggle;
-    logic        producer_write_enable;
-    logic [9:0]  producer_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
+    logic [9:0]  dmem_wr_addr;
+    logic [17:0] dmem_wr_data;
+    logic        dmem_wr_toggle;
+    logic        imem_write_enable;
+    logic [9:0]  imem_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
                             // (#100); a too-narrow wire here silently
                             // truncated entries before — size from the pool
-    logic [31:0] producer_write_data;
+    logic [31:0] imem_write_data;
 
     element_pipeline u_elem_pipeline (
         .clk         (sysclk),
@@ -91,12 +91,12 @@ module top (
         .elem_write_word     (elem_write_word),
         .elem_write_index     (elem_write_index),
         .elem_write_data    (elem_write_data),
-        .bus_write_addr     (bus_write_addr),
-        .bus_write_data     (bus_write_data),
-        .bus_write_toggle      (bus_write_toggle),
-        .producer_write_enable       (producer_write_enable),
-        .producer_write_addr     (producer_write_addr),
-        .producer_write_data     (producer_write_data),
+        .dmem_wr_addr     (dmem_wr_addr),
+        .dmem_wr_data     (dmem_wr_data),
+        .dmem_wr_toggle      (dmem_wr_toggle),
+        .imem_write_enable       (imem_write_enable),
+        .imem_write_addr     (imem_write_addr),
+        .imem_write_data     (imem_write_data),
         .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right),
@@ -242,12 +242,12 @@ module top (
         .elem_write_word  (elem_write_word),
         .elem_write_index  (elem_write_index),
         .elem_write_data (elem_write_data),
-        .bus_write_addr  (bus_write_addr),
-        .bus_write_data  (bus_write_data),
-        .bus_write_toggle   (bus_write_toggle),
-        .producer_write_enable    (producer_write_enable),
-        .producer_write_addr  (producer_write_addr),
-        .producer_write_data  (producer_write_data),
+        .dmem_wr_addr  (dmem_wr_addr),
+        .dmem_wr_data  (dmem_wr_data),
+        .dmem_wr_toggle   (dmem_wr_toggle),
+        .imem_write_enable    (imem_write_enable),
+        .imem_write_addr  (imem_write_addr),
+        .imem_write_data  (imem_write_data),
         .swap_req (swap_req)
     );
 
