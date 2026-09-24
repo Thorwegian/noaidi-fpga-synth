@@ -29,7 +29,10 @@ module tb_prog_sources;
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
             spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
-            spi_word_write(elem_addr(v, W_PTRS2),  PTRS2_GLIN_BUS4);
+            // PTRS2 stays 0 = BYPASS here. Routing an element at a
+            // linear gain bus that no envelope drives is SILENCE, not
+            // unity -- the gain is multiplicative. The B5 block below
+            // routes it at the same moment it gives it an envelope.
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
@@ -40,7 +43,10 @@ module tb_prog_sources;
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
             spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
-            spi_word_write(elem_addr(v, W_PTRS2),  PTRS2_GLIN_BUS4);
+            // PTRS2 stays 0 = BYPASS here. Routing an element at a
+            // linear gain bus that no envelope drives is SILENCE, not
+            // unity -- the gain is multiplicative. The B5 block below
+            // routes it at the same moment it gives it an envelope.
         end
         observe(60);
 
@@ -84,6 +90,8 @@ module tb_prog_sources;
                                                           // envelope IS
                                                           // the gain
         spi_word_write(bus_addr(4), 32'h00000000);   // linear base: silent
+        for (v = 0; v < 8; v = v + 1)
+            spi_word_write(elem_addr(v, W_PTRS2), PTRS2_GLIN_BUS4);
         observe(60);
         observe(300);
         worst = peak;
