@@ -2,6 +2,9 @@
 """BLE reconnect soak test (issue #78: "first reconnect sometimes
 drops, second is stable").
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Cycles connect -> verify MIDI actually flows (a note echoed on the ESP
 console AND audible-path gate write) -> disconnect, N times, capturing
 the ESP serial throughout. Reports per-cycle timing and any cycle

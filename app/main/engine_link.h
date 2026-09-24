@@ -1,5 +1,8 @@
 // engine_link.h — the single owner of the FPGA SPI link
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Everything the synth engine hears goes through here: a command
 // queue mutates a local image of the per-element parameter space, and
 // a fixed 1 kHz tick writes the dirty words to the shadow bank and

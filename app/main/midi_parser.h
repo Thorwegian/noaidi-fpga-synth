@@ -1,5 +1,8 @@
 // midi_parser.h — MIDI byte-stream parser (pure, hardware-independent)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Turns a serial byte stream into complete channel-voice messages via a
 // callback. Handles the protocol edge cases that real hardware throws at
 // you:

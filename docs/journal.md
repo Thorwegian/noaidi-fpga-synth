@@ -1,5 +1,8 @@
 # Journal — corrections, rejected alternatives, abandoned ideas
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 Design documents describe what the design IS. This journal holds
 what it is NOT and how it got here: Thor's verbatim corrections,
 alternatives considered and rejected, and concepts that were

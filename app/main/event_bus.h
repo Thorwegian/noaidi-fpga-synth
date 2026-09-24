@@ -1,5 +1,8 @@
 // event_bus.h — tiny publish/subscribe fan-out for inter-task events
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Consumers subscribe one FreeRTOS queue (holding evt_t items);
 // publishers fan each event out to every subscriber with a
 // non-blocking send. Events that cannot be delivered (subscriber

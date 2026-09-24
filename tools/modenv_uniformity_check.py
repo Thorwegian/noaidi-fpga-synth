@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """MOD-env uniformity under CC dragging (Thor's 15:14 bug, 2026-09-10).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Thor: with a plucky MOD-env patch, 'random notes have a longer MOD
 envelope, probably every 32nd.' Suspected cause: a knob DRAG that
 includes a re-render (e.g. PW) wedges the engine task in a long SPI

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Automated check for the #91 shakedown batch, over BLE MIDI.
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Runs BEFORE Thor's ear pass (his rule, 2026-09-10): drive the synth
 through the sanctioned test transport (BLE - the panel port is Open
 Stage Control's exclusively), watch the ESP console for ingress and

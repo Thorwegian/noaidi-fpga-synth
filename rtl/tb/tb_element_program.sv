@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_element_program.sv — the FULL-CHAIN long-soak (make
 // sim-prog-full, not in the default suite). Same phases as the four

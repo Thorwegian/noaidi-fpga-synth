@@ -1,5 +1,8 @@
 // synth_pkg.sv — shared design parameters
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // The single home for the design's constants (Thor: modules should
 // not carry hardcoded numbers). Modules import what they need; module
 // parameters default from here so testbenches can still override.

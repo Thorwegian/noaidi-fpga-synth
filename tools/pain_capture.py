@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Capture listenable examples of the filter pain zones (#43).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Companion to filter_pain_check.py: same Thor-recipe patch, but records
 a few representative (slope, resonance) settings as WAV files for
 listening review (publish with tools/publish_capture.sh).

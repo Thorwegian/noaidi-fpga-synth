@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------
 // i2s_tx.sv — self-contained I2S master transmitter
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Generates its own BCLK (sysclk / BCLK_DIV) and LRCLK (BCLK /
 // BCLK_PER_WS), so no I2S-specific timing lives anywhere else in the
 // design.  New sample data is latched on sample_tick (the drum's

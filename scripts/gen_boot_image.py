@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 # gen_boot_image.py — generate the boot parameter image
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Writes (into rtl/element/):
 #   boot_p0.hex .. boot_p3.hex — per-element parameter RAM init
 #

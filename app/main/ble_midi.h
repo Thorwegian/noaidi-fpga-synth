@@ -1,4 +1,7 @@
 // ble_midi.h — MIDI over Bluetooth LE (peripheral, standard MIDI service)
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 
 #pragma once
 

@@ -1,5 +1,8 @@
 # Control Map — the player-facing architecture
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+ 
 **Status: WORKING NOTES, deliberately incomplete** (started
 2026-09-03, Thor: "This is not a final list. I just want to get one
 started and written down for now."). This document grows into the

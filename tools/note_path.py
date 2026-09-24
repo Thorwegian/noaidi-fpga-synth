@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Do BLE note-ons reach the firmware AND produce audio? Mark the
+"""
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+
+Do BLE note-ons reach the firmware AND produce audio? Mark the
 console, hold a note, capture during the hold, then the caller greps
 the console for what the firmware saw."""
 import subprocess, sys, time, wave

@@ -1,6 +1,9 @@
 //------------------------------------------------------------------------
 // svf_tpt.sv -- ZDF/TPT state-variable filter, two poles (#117 / #118)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Replaces the Chamberlin recurrence with the topology-preserving
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
 // stable under cutoff modulation at resonance (the #117 fix). Streaming,

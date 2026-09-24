@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Live capture-level meter for the Noaidi audio chain (issue #81).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Chain: Noaidi analog out -> Focusrite (preamp/monitor) -> ICUSBAUDIO7D
 line-in -> ALSA. Two gain stages to set: the Focusrite output/gain
 knob (so the StarTech's input stage doesn't clip) and the ALSA capture

@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //--------------------------------------------------------------------
 // tb_osc_core.sv — oscillator waveform bench (was missing; issue #70
 // ear reports: wave 3 "noisy tone", pulse duty "does nothing"). Drives

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Is the bad corner CLIPPING at all? (#125)
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 The -12.4 dB IMD at cutoff CC74=64 / reso 127 survived widening the pole
 output word from +-8 to +-128 with its LEVEL unchanged, so sat_q414 is not
 what limits it. Before guessing at another node, settle the category:

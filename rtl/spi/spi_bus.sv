@@ -1,6 +1,9 @@
 //------------------------------------------------------------------------
 // spi_bus.sv — the memory-map wire protocol (docs/memory_map.md)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Wire format (SPI Mode 0, MSB first — one CS-framed transaction):
 //
 //   byte 0      command: [7] 1 = read, 0 = write

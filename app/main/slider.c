@@ -1,5 +1,8 @@
 // slider.c — panel slider on GPIO1/A1 → internal resonance CC
 // (see slider.h for the wiring and console keys)
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 
 #include "slider.h"
 

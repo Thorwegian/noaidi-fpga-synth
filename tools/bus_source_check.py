@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Hardware test of the type-3 bus source (#44).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Since #44's firmware half, CC 74 travels the new path end to end:
 CC 74 -> channel cutoff bus (BUS_CH_CUT) BASE -> 32 type-3 walker
 entries -> per-voice cutoff buses -> element cutoff. If the fan-out

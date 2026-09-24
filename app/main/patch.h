@@ -1,5 +1,8 @@
 // patch.h — the currently-active sound, in RAM (issue #69).
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // This is the single source of truth for the active sound: the
 // CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
 // RENDER it to buses and element words. Program change is deferred

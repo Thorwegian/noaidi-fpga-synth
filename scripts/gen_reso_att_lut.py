@@ -1,4 +1,8 @@
 #!/usr/bin/python3
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # reso_att_lut (#43): resonance-indexed INPUT attenuation for the dual
 # (24 dB/oct) SVF. The 4-pole cascade's resonant peak grows ~Q^2, so at
 # high resonance a full-scale input overdrives the internal +-8 (Q4.14)

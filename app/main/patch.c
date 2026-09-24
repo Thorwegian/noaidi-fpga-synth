@@ -1,5 +1,8 @@
 // patch.c — the active-patch instance and its default (issue #69).
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Foundation of the VA surface: g_patch is the single source of
 // truth for the active sound. patch_default() reproduces the former
 // hardcoded timbre EXACTLY, so wiring voice_alloc to render from it

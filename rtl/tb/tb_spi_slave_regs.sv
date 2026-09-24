@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_spi_slave_regs.sv — SPI slave + register file, driven by a master
 // that behaves like the ESP32 actually does.

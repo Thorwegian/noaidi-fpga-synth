@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Timing-headroom gate: nextpnr reporting PASS is not enough (#128).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+
 PASS means "met the constraint on THIS placement, with THIS seed". The
 placement moves. Measured on unchanged RTL, 11 seeds, main @ 00471db:
 

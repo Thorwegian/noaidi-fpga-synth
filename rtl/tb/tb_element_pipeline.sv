@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------
 // tb_element_pipeline.sv — 256-element SCMO pipeline testbench (iverilog)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Checks:
 //   1. drum cadence: sample_tick every 768 cycles, high 1 cycle
 //   2. voice span: exactly 256 voices enter per sample period

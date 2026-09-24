@@ -1,6 +1,9 @@
 // spi_regs.c — ESP32-C3 SPI transport init + LEGACY byte-protocol
 // reference (#109)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // LIVE: fpga_spi_init() — the ESP-IDF SPI-master bus/device setup
 // every current transfer rides (engine_link.c and the word-protocol
 // helpers use the device handle exported here).

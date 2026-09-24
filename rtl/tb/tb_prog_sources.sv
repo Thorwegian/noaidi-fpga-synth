@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_prog_sources.sv — split bench D (issue #58): the source walker —
 // LFO tremolo on a gain bus, then ADSR + gate-bus triggering.

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Hardware test: LFO2 -> CUTOFF through the send graph (#92/#98).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 The first route that NEEDS the bus-sum read: LFO2 (a walker source)
 writes the channel cut bus; the 32 per-voice sends relay its
 contribution into the voice cutoff buses. With the old firmware-base

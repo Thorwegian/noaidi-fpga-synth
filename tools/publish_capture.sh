@@ -3,6 +3,9 @@
 # review it on his phone (public repo -> release assets are one tap
 # from the GitHub notification).
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+# 
 #   publish_capture.sh <file.raw|file.wav|file.flac> <label>
 #
 # .raw is assumed S16_LE 48 kHz stereo (the arecord format the test

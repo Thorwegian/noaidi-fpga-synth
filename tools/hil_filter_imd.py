@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """FPGA-in-the-loop filter distortion probe (#123, for #121 M3).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 WHY NOT flat-top: tools/filter_pain_check.py measures the share of samples
 at the output rails. That detects clipping of the MASTER bus -- but the
 element's internal sat_q414 clip is attenuated downstream by the per-element

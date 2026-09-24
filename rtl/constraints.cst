@@ -2,6 +2,9 @@
 // Tang Nano 20K — Pin Constraints
 // Target: GW2AR-LV18QN88C8/I7
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+
 
 // Clock — MS5351 CLK0 at 73.728 MHz (768 × 96 kHz) on FPGA package
 // pin 10. Per-board one-time setup via the BL616 console:

@@ -1,6 +1,9 @@
 //------------------------------------------------------------------------
 // spi_slave_regs.sv — SPI slave (Mode 0) + byte-wide register file
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Replaces spi_slave.sv + reg_banks.sv.  Those two had one structural
 // fault per direction, and both came from the same root cause: the
 // transceiver had no notion of a *byte boundary*, so it could neither

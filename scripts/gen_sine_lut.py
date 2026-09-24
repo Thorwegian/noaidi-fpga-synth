@@ -1,4 +1,8 @@
 #!/usr/bin/python3
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Quarter-wave sine LUT for osc_core (issue #65). Replaces the
 # parabolic sine approximation (y = 4x(1-x)), which read as a noisy
 # tone on hardware, with a true sine reconstructed from one quarter

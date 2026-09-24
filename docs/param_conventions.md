@@ -1,5 +1,8 @@
 # Parameter mapping conventions — audit (DRAFT for Thor)
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 2026-09-10, requested by Thor after the first panel sessions: "a lot
 of these parameters are kind of working, but not exactly behaving as
 one would conventionally expect" — research how time, amplitude,

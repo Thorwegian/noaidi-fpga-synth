@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_spdif_block.sv — decode TWO FULL IEC 60958 BLOCKS (384+ frames)
 // from drum + spdif_tx and check everything a receiver needs:

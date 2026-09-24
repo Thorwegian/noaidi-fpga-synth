@@ -1,6 +1,9 @@
 //------------------------------------------------------------------------
 // limiter.sv -- log-domain peak limiter, PIPELINED per-step function (#121).
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Everything lives in att_lut's log-gain grid: 16 code units per octave
 // (6.02 dB), 0.375 dB per unit. No division anywhere:
 //   level_code = octave(level)*16 + log_lut[4 bits under the leading 1]

@@ -1,5 +1,8 @@
 // midi_in.h — MIDI input processes (UART1 = DIN, UART0 = panel)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Two serial MIDI ingress ports, each 31250 baud 8N1 with its own
 // parser instance, both publishing to the event bus.
 

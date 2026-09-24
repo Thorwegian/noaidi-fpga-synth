@@ -1,4 +1,7 @@
 // engine_link.c — command queue → parameter image → shadow writes → swap
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 
 #include "engine_link.h"
 

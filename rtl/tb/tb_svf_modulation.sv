@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_svf_modulation.sv — SVF stability under a MOVING cutoff (#117)
 //

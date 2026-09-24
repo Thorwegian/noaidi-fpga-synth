@@ -1,4 +1,8 @@
 // output_tilt.sv — one-pole 6 dB/oct lowpass on the mix (the master
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // "tilt", Thor 2026-09-07..09, by ear): out += (in − out) >>> SHIFT.
 // α = 1/2^SHIFT per sample → corner ≈ 2 kHz at SHIFT=3, 96 kHz —
 // the warm stop, settled after >>>4 (~950 Hz, muffled the supersaw)

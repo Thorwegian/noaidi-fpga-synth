@@ -1,4 +1,7 @@
 // voice_alloc.c — MIDI events → voices → element parameter commands
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 
 #include "voice_alloc.h"
 

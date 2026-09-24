@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 # TPT reciprocal LUT (#118): h = 1/D, D = 1 + R2*g + g*g.
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Within FC_MAX the effective cutoff is clamped so g <= pi*FC_MAX/fs and
 # D stays in [1, 1.889) -- always < 2. So h is a plain 1-D table indexed
 # by D's fractional bits (the integer part is always 1): no normalize, no

@@ -1,5 +1,8 @@
 # Bus Architecture — the modulation and control fabric
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+ 
 Codified 2026-08-30 from planning between Thor and the agent.
 Supersedes the modulation half of [memory_map.md](memory_map.md)
 (generic cable matrix, shared LFO bank, per-element ADSR registers).

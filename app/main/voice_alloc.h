@@ -1,5 +1,8 @@
 // voice_alloc.h — voices as a firmware concept
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // A voice is a grouping of elements (design.md terminology). This
 // allocator runs the first grouping: 32 voices × 8 elements in fixed
 // blocks (voice v owns elements 8v..8v+7), church-organ unison detune,

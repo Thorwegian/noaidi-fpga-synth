@@ -1,5 +1,8 @@
 // SPDIF Transmitter — IEC 60958 consumer-level digital audio output
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Biphase-mark encoded stereo, 24-bit audio. The sample rate is set
 // entirely by the ticks the caller feeds it: 2 cells/bit × 64
 // bits/frame = 128 cells per sample period — so the stream is

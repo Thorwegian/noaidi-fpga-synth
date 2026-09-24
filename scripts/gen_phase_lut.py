@@ -1,5 +1,8 @@
 #!/usr/bin/python3
-
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 import math
 from pathlib import Path
 

@@ -1,5 +1,8 @@
 # SPI Memory Map — Noaidi Synth
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 Register/address-space map for the ESP32-C3 ↔ FPGA SPI control interface.
 Status: **NEEDS CONSOLIDATION (Thor, 2026-09-03)** — this document is
 behind actual progress: much of what it still calls "proposal" is

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Audio-chain purity self-check (issue #81).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Enables the gateware test tone over BLE MIDI (CC 119): a full-scale
 sine with a 64-sample period at 96 kHz = 1500 Hz (midband, so coupling
 caps in the analog chain don't skew it — Thor), which at 48 kHz

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Automated BLE-MIDI stress test for Noaidi (issues #70/#80/#82).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Floods the Noaidi with the abuse that used to crash it -- continuous CC
 sweeps (voice mode / volume / mix) interleaved with note on/off -- over
 the REAL Linux BLE-MIDI path, while capturing the ESP32 serial and

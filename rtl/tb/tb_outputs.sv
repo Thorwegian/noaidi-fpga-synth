@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //--------------------------------------------------------------------
 // tb_outputs.sv — output-stage check: drum + spdif_tx + i2s_tx
 // Feeds constant audio and decodes the SPDIF cell stream to verify a

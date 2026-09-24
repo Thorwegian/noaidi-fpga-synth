@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Persistent ESP32-C3 console logger — the always-on witness for
 # panics/reboots (WDT panic + frame pointers are enabled, so a crash
 # prints a real backtrace; this catches it when no monitor is open).

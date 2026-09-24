@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 # gen_att_lut.py — attenuation-stage log-gain fractional-part LUT
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # att_lut[i] = 2^(-i/16) in UQ0.16 (17-bit unsigned)
 #   i = frac 0..15 → 0 dB .. -5.6 dB in 0.375 dB steps
 #

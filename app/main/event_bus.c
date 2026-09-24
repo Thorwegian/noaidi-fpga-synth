@@ -1,5 +1,8 @@
 // event_bus.c — tiny publish/subscribe fan-out for inter-task events
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // See event_bus.h for the design rationale.
 
 #include "event_bus.h"

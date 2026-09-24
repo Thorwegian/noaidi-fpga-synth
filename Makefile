@@ -1,3 +1,6 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
 # Top-level build orchestration — every target runs from the repo
 # root, so "make sram" simply works:
 #

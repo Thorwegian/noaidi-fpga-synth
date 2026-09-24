@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Voice-pool uniformity check (the every-32-note-ons bug, 2026-09-10).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Thor: 'every 32 note-ons, the cutoff goes low.' Cause: the engine
 prod queue overflowed during the init burst and silently dropped the
 TAIL - voices 30/31's amp-envelope configs - so notes landing on

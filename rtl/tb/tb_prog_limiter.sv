@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_prog_limiter.sv -- the S11 master limiter (#121) ACTIVE, in situ,
 // through the real programming path. The pipeline bench never crosses

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Match 1, board side: does the master limiter hold windowed RMS?
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Thor's acceptance criterion, verbatim: "the RMS over a window long enough
 to cover about a 20 Hz sine wave cycle-long window should not deviate by
 more than ~3 dB". 20 Hz -> 50 ms windows.

@@ -2,6 +2,9 @@
 // top.sv — Noaidi Flex Synthesizer Top Level
 // Tang Nano 20K — GW2AR-LV18QN88C8/I7
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S.
 //         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path
 //         (#101, Thor 2026-09-11): Focusrite coax for listening AND

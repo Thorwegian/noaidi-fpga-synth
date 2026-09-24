@@ -2,6 +2,9 @@
 # q1 (SVF damping) decode LUT for the log2-encoded resonance
 # parameter (bus_architecture.md; issue #41 shrank it 1024 -> 16).
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Encoding: r = octaves of Q above Butterworth, UQ4.10.
 #   q1 = sqrt(2) * 2^(-r)
 # r = 0      -> q1 = sqrt(2)  (Butterworth, heaviest damping)

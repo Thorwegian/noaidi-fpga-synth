@@ -1,5 +1,8 @@
 // stress_test.c — synthetic MIDI flood to reproduce load crashes (#70).
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Publishes the exact abuse Thor hits by hand -- continuous CC sweeps
 // (voice mode 26, volume 7, mix 24) interleaved with note on/off so the
 // voice pool stays busy with release tails -- straight onto the event

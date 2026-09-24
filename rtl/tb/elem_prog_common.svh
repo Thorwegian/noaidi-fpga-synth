@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // elem_prog_common.svh — shared body for the split element-program
 // benches (issue #58: the monolithic tb_element_program was ~95% of
 // suite wall time; four independent benches let make -j4 and CI

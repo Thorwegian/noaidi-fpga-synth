@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_spi_bus.sv — the memory-map wire protocol against a real Mode 0
 // master (SCLK idles low, bits driven while low, CS deasserts after the

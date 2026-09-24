@@ -1,5 +1,8 @@
 // slider.h — panel slider (10k linear pot) on GPIO1/A1 → resonance
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // The wiper feeds ADC1 channel 1 through a divider (680R to GND,
 // 3k6 to 3.3V around the pot) that keeps the voltage inside the
 // max-attenuation ADC range. Readings map through a stored

@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_prog_bus.sv — split bench C (issue #58): GATE semantics, the B1
 // bus pilot (live cutoff bus, click-free sweep), and the B2 sink

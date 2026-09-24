@@ -1,5 +1,8 @@
 # Authors & provenance
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 This repository has been written by two people and two AI coding
 agents. GitHub's author attribution is only partly correctable after
 the fact (issue and comment authorship cannot be reassigned through

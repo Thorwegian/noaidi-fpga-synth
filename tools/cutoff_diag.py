@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Robust cutoff diagnosis: prove sound is present (RMS) and track the
+"""
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
+Robust cutoff diagnosis: prove sound is present (RMS) and track the
 spectral CENTROID (Hz) as a cutoff proxy across a CC 74 sweep, with a
 velocity control to match Thor's 'only velocity works' observation."""
 import subprocess, sys, time, wave

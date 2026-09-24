@@ -1,5 +1,8 @@
 # Noaidi — Consolidated Design Document
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 The single reference for the synth's architecture. Where this document
 and [memory_map.md](memory_map.md) overlap, the memory map is the
 authoritative, more recent word on the SPI/BSRAM control plane and the

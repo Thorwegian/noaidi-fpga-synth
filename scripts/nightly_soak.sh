@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # Nightly full-chain soak (Thor: 3 AM on the Linux box). Runs the
 # serial long-soak bench (sim-prog-full) against the tree as
 # currently checked out; on failure, files a GitHub issue so a

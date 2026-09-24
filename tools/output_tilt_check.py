@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Verify the output 6 dB/oct tilt (top.sv one-pole, alpha=1/16).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Plays a saw with the SVF opened to its clamp (CC 74 max, resonance 0)
 so the synth filter is ~flat below 8 kHz, captures, and measures the
 harmonic envelope. A saw is -6 dB/oct by itself; through the one-pole

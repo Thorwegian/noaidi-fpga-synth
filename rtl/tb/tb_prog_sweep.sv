@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_prog_sweep.sv — split bench B (issue #58): the click hunt
 // (cutoff sweep with bank flips on a sine) and the chord-retrigger

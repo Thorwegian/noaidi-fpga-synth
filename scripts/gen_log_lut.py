@@ -1,6 +1,9 @@
 #!/usr/bin/python3
 # gen_log_lut.py — limiter log2 fractional-part LUT (#121)
 #
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # log_lut[m] = round(16 * log2(1 + m/16)), m = the 4 bits under the
 # leading 1 of the level magnitude. Same 16-per-octave grid as att_lut
 # (0.375 dB per unit), so level_code = octave*16 + log_lut[m] and

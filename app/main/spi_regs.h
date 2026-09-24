@@ -1,5 +1,8 @@
 // spi_regs.h — ESP32-C3 driver for spi_slave_regs FPGA peripheral
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Protocol summary:
 //   Byte 0:  [7]=R/W (1=read, 0=write), [6:0]=7-bit register address
 //   Byte 1+: data bytes, address auto-increments after each byte

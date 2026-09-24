@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_prog_boot.sv — split bench A (issue #58): boot image, mute-all,
 // programmed tone over SPI. The boot/mute phases ARE the test here,

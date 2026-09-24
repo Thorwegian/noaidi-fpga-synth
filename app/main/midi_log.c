@@ -1,5 +1,8 @@
 // midi_log.c — console monitor task for MIDI events
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Subscribes to the event bus with its own queue and runs a single
 // event loop that decodes MIDI messages and prints them. This is the
 // only place MIDI traffic is printed: the RX task never blocks on the

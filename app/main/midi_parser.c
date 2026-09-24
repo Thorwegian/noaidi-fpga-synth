@@ -1,5 +1,8 @@
 // midi_parser.c — MIDI byte-stream parser (pure, hardware-independent)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // See midi_parser.h for the protocol behaviour. This module has no
 // hardware dependencies and no heap usage — it can later be reused
 // unchanged for other MIDI transports (USB MIDI, BLE MIDI, ...).

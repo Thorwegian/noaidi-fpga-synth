@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_spdif48_block.sv — the 48 kHz test transmitter (#101), decoded the
 // same way tb_spdif_block.sv decodes the 96 kHz stream.

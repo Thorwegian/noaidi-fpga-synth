@@ -1,3 +1,6 @@
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 //------------------------------------------------------------------------
 // tb_limiter.sv -- unit bench for the PIPELINED limiter.sv (#121 M1). The
 // bench owns the gain_q state like an instantiator would: present a level

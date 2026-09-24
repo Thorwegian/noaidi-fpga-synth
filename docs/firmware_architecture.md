@@ -1,5 +1,8 @@
 # ESP32 Firmware Architecture
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 Approved 2026-08-30 (Thor). Three modules on the existing event bus;
 one owner for SPI and the bank-swap discipline.
 

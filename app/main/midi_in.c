@@ -1,5 +1,8 @@
 // midi_in.c — MIDI input processes (UART1 = DIN, UART0 = panel)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Each port owns its UART at 31250 baud 8N1 on a configured RX pin,
 // feeds the byte stream through its OWN parser instance (running
 // status is per-stream — two sources must never share decode state)

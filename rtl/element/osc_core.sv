@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------
 // osc_core.sv — combinational oscillator core (waveform generation)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Pure combinational function of the ALREADY-ADVANCED phase — no
 // accumulators, no registers (the pipeline owns the phase register).
 // Phase and duty are Q0.24 signed.

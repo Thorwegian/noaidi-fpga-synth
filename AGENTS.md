@@ -4,6 +4,9 @@ https://github.com/Thorwegian/noaidi-fpga-synth/issues/129**
 
 # AGENTS.md — Noaidi FPGA Synth project notes
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+ 
 Notes for AI coding agents working in this repo. Keep this file updated when
 the architecture changes. Agent will neatly summarise.
 

@@ -3,7 +3,12 @@
 actual test conditions). A chord fires a burst of voice allocations;
 if the desync drops a voice's cutoff, that chord loses its high-band
 energy. Measures per-chord high-band (>2.5 kHz) energy and flags the
-dark chords."""
+dark chords.
+
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
+ """
 import subprocess, sys, time, wave
 import numpy as np
 sys.path.insert(0, __file__.rsplit("/", 1)[0])

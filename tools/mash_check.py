@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Mash test (#97, Thor 2026-09-11): chaos in, silence out.
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 "Mashing (random keys, random velocities, random CCs) should, after
 some time, stabilise." This is the standing regression for stuck
 voices / engine wedges: run it AFTER ANY CHANGE TO THE SYNTH.

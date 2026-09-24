@@ -1,3 +1,6 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
 # Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).

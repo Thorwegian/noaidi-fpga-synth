@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------
 // element_pipeline.sv — 256-element SCMO pipeline (the drum's lanes)
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // One element enters a lane every sysclk cycle for 256 cycles of
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different element: stage Sk at drum slot t holds the

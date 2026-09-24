@@ -1,5 +1,8 @@
 # MIDI Control Schema
 
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
 **Status: DRAFT — under Thor's review** (first review round
 2026-09-02 folded in below).
 

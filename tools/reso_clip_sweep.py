@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Resonance clipping onset measurement (issue #63).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Theory from the RTL: the element audio path clamps at sat_q216 (Q2.16,
 +/-2.0) at the FILTER OUTPUTS (S6/S9), upstream of the S10 gain
 multiply -- and the oscillator drives the filter at a fixed clamp-12 dB

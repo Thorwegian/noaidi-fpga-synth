@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 # CI runner for one simulation bench target (issue #58): build + run
 # it, print its output, and judge pass/fail from the output markers.
 # Usage: ci_bench.sh <make-target>   e.g. ci_bench.sh sim-prog-boot

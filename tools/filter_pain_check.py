@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Filter pain test (#43): measure where high resonance turns to BRRR.
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 Thor's repro recipe (2026-09-10, panel screenshot): a 7+1 patch with
 velocity fully OFF, MOD env off, cutoff CC74=52 + 100% key track -
 the corner rides a constant ~1 octave BELOW the fundamental, which he

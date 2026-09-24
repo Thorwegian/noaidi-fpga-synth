@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """First-light check for the LED-TOSLINK digital capture path (#101).
 
+    Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+    License: CERN-OHL-S v2
+ 
 The FPGA's second S/PDIF transmitter (48 kHz, pin 86) drives a red LED
 taped into the ICUSBAUDIO7D optical input. This script proves the
 receiver locks and the path is digital end to end:

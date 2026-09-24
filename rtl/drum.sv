@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------
 // drum.sv — SCMO timing core ("the drum")
 //
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
 // Single timebase for the whole synth: a free-running counter wrapping
 // every DRUM_CYCLES sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
 // time-multiplexed operations are scheduled against this counter —
