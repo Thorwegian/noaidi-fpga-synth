@@ -89,9 +89,9 @@ module element_pipeline #(
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
     // so a commit never collides with a lane's bus read.
-    input  logic [9:0]     dmem_wr_addr,
-    input  logic [17:0]    dmem_wr_data,
-    input  logic           dmem_wr_toggle,
+    input  logic           dmem_write_enable,
+    input  logic [9:0]     dmem_write_addr,
+    input  logic [17:0]    dmem_write_data,
 
     // Instruction table writes (sclk domain, banked — wiring per law 4)
     input  logic           imem_write_enable,
@@ -400,8 +400,9 @@ module element_pipeline #(
     csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(bank_active), .bank_shadow(bank_shadow),
-        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
-        .dmem_wr_toggle(dmem_wr_toggle),
+        .dmem_write_enable(dmem_write_enable),
+        .dmem_write_addr(dmem_write_addr),
+        .dmem_write_data(dmem_write_data),
         .imem_write_enable(imem_write_enable),
         .imem_write_addr(imem_write_addr),
         .imem_write_data(imem_write_data),

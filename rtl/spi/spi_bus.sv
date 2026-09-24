@@ -63,17 +63,20 @@ module spi_bus #(
     output logic [2:0]  elem_write_word,   // 0..7 = OSC..PTRS2 param RAM
 
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
-    // Bus values are live (no ping-pong). The write crosses clock
-    // domains through this 1-deep toggle mailbox; the pipeline syncs
-    // dmem_wr_toggle and commits to bus RAM only in an idle drum
-    // slot, so a commit can never collide with a lane's bus read (the
-    // BSRAM read-during-write corruption class stays impossible by
-    // construction, not by probability). Overrun math: one SPI word
-    // takes >= ~5.6 us at 10 MHz; a commit waits at most one lane
-    // span (~3.7 us) — back-to-back writes cannot outrun the mailbox.
-    output logic [9:0]  dmem_wr_addr,
-    output logic [17:0] dmem_wr_data,
-    output logic        dmem_wr_toggle,  // toggles once per bus write
+    // Bus bases are BANKED, exactly like the instruction table and the
+    // per-element words: written straight into the shadow bank on sclk
+    // and published by the slot-512 swap. There is no mailbox and no
+    // clock-domain handshake, because there is no live write to cross
+    // with -- the engine only ever reads the ACTIVE bank (#127).
+    //
+    // What was here before was a 1-deep toggle mailbox committing into
+    // the live RAM. #134 then made each commit write BOTH ping-pong
+    // generations, which meant one of the two writes necessarily landed
+    // in the half being read: a read-during-write, heard as scratching
+    // on the audio and as a gate that glitched the envelope.
+    output logic        dmem_write_enable,
+    output logic [9:0]  dmem_write_addr,
+    output logic [17:0] dmem_write_data,
 
     // ---- instruction table writes (sclk domain, banked like params) ---
     // Instruction config is wiring: it rides the ping-pong banks and
@@ -264,19 +267,15 @@ module spi_bus #(
     assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
     assign imem_write_data = {partial_word, rx_byte};
 
-    // ---- bus base write capture (see mailbox note at the ports) ----
+    // ---- bus base writes: the same shape as imem's ----------------
     wire in_bus_range = (word_addr >= synth_pkg::MAP_BUS_BASE)
                      && (word_addr <  synth_pkg::MAP_BUS_BASE
                                       + 16'(synth_pkg::DMEM_WORDS));
-    initial dmem_wr_toggle = 1'b0;
-    always_ff @(posedge sclk) begin
-        if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
-            && !is_read && in_bus_range) begin
-            dmem_wr_addr   <= word_addr[9:0];
-            dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
-            dmem_wr_toggle <= ~dmem_wr_toggle;
-        end
-    end
+    assign dmem_write_enable = byte_end && (frame_phase == 3'd4)
+                            && (data_byte_index == 2'd3)
+                            && !is_read && in_bus_range;
+    assign dmem_write_addr   = word_addr[9:0];
+    assign dmem_write_data   = {partial_word[9:0], rx_byte};  // low 18
     assign elem_write_index = elem_offset[13:6];
     assign elem_write_data  = {partial_word, rx_byte};
 

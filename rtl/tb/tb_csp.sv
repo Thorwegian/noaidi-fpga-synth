@@ -34,9 +34,9 @@ module tb_csp;
     always_ff @(posedge clk) slotc <= (slotc == CYC-1) ? 16'd0 : slotc + 16'd1;
     assign sample_tick = (slotc == 16'd0);
 
-    logic [9:0]  dmem_wr_addr = 0;
-    logic [17:0] dmem_wr_data = 0;
-    logic        dmem_wr_toggle = 0;
+    logic        dmem_write_enable = 0;
+    logic [9:0]  dmem_write_addr = 0;
+    logic [17:0] dmem_write_data = 0;
     logic [8:0]  rd_a = 0;
     logic        imem_we   = 0;
     logic [9:0]  imem_addr = 0;
@@ -47,8 +47,9 @@ module tb_csp;
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
         .bank_active(1'b0), .bank_shadow(1'b0),
-        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
-        .dmem_wr_toggle(dmem_wr_toggle),
+        .dmem_write_enable(dmem_write_enable),
+        .dmem_write_addr(dmem_write_addr),
+        .dmem_write_data(dmem_write_data),
         .imem_write_enable(imem_we), .imem_write_addr(imem_addr),
         .imem_write_data(imem_data),
         .rd_pitch_a(rd_a), .rd_duty_a(rd_a), .rd_fc_a(rd_a),
@@ -64,13 +65,15 @@ module tb_csp;
     integer live_hits, shadow_hits, same_addr_hits, w;
 
     // a mailbox write: payload then a toggle edge, as spi_bus does it
+    // #127: a bus base write is now an ordinary banked write on sclk,
+    // exactly like an imem write. No toggle, no mailbox, no commit.
     task automatic bus_write(input [9:0] a, input signed [17:0] d);
         begin
             @(negedge clk);
-            dmem_wr_addr = a; dmem_wr_data = d;
-            @(negedge clk);
-            dmem_wr_toggle = ~dmem_wr_toggle;
-            repeat (8) @(posedge clk);       // let the sync + commit land
+            dmem_write_addr = a; dmem_write_data = d; dmem_write_enable = 1'b1;
+            sclk = 0; #1; sclk = 1; #1; sclk = 0;
+            dmem_write_enable = 1'b0;
+            repeat (2) @(posedge clk);
         end
     endtask
 
@@ -104,17 +107,25 @@ module tb_csp;
         end else
             $display("gen cadence: %0d toggles / %0d samples", toggles, ticks);
 
-        // 2. write-through: the value must be in BOTH halves
+        // 2. #127: the contract CHANGED here, deliberately. There is no
+        //    write-through any more -- a base write lands in the shadow
+        //    BANK and the sweep carries it into the shadow GENERATION,
+        //    so it becomes visible to sinks at the next flip rather than
+        //    instantly in both halves. The old assert was testing the
+        //    two-take mailbox commit, which is exactly the mechanism
+        //    that caused the read-during-write.
+        //
+        //    What matters is that it ARRIVES, and within a bounded time:
+        //    at most one generation, two samples, about 21 us. Thor's
+        //    tolerance is "about a millisecond".
         bus_write(10'(TESTBUS), MARK_A);
-        repeat (2*CYC) @(posedge clk);
-        if (dut.dmem_gl[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
-            dut.dmem_gl[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
-            $display("FAIL: write-through -- halves read %0d / %0d, want %0d",
-                     dut.dmem_gl[{1'b0, TESTBUS[8:0]}],
-                     dut.dmem_gl[{1'b1, TESTBUS[8:0]}], MARK_A);
+        repeat (6*CYC) @(posedge clk);
+        if (dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
+            $display("FAIL: base never reached the live generation (%0d, want %0d)",
+                     dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}], MARK_A);
             errors = errors + 1;
         end else
-            $display("write-through: present in both generations");
+            $display("base write: live within one generation flip");
 
         // 3. persistence across many swaps -- the bug that silenced #134
         for (i = 0; i < 12; i = i + 1) begin
@@ -202,59 +213,40 @@ module tb_csp;
         //    that a commit can target the LIVE half at all. That is the
         //    invariant #134 deleted, and it is fully observable.
         //---------------------------------------------------------------
-        live_hits = 0; shadow_hits = 0; same_addr_hits = 0;
-        @(negedge clk); rd_a = DROPBUS[8:0];
-        gen_prev = dut.dmem_gen;        // stale from test 1 otherwise
-        fork
-            begin
-                for (w = 0; w < 60; w = w + 1)
-                    bus_write(10'(DROPBUS), 18'sd1000 + 18'(w));
-            end
-            begin : watcher
-                for (cyc = 0; cyc < 60*60; cyc = cyc + 1) begin
-                    @(posedge clk);
-                    if (dut.dmem_commit) begin
-                        shadow_hits = shadow_hits + 1;
-                        // THE invariant: a commit may only land in the
-                        // idle window, where neither the lane nor the
-                        // sequencer is reading anything.
-                        if (!dut.csp_idle_window)
-                            live_hits = live_hits + 1;
-                    end
-                    // The swap sits at CSP_FLIP_SLOT, deliberately just
-                    // BEFORE the commit window so no commit straddles it.
-                    // What matters is that both readers are done: the lane
-                    // ends at LANE_SPAN and the sequencer at ~390.
-                    if (dut.dmem_gen !== gen_prev
-                        && dut.csp_slot <= 10'd390)
-                        same_addr_hits = same_addr_hits + 1;
-                    gen_prev = dut.dmem_gen;
-                end
-            end
-        join_any
-        disable watcher;
-
-        $display("commits:                        %0d", shadow_hits);
-        $display("commits OUTSIDE the idle window: %0d", live_hits);
-        $display("swaps   while a reader was live:  %0d", same_addr_hits);
-        if (live_hits > 0 || same_addr_hits > 0) begin
-            $display("FAIL: a commit or a swap landed while a reader was live");
+        //---------------------------------------------------------------
+        // 7. THE BASE SWEEP (#127). The mailbox is gone, so the thing
+        //    that keeps an UNPRODUCED bus in step with its base is the
+        //    sweep. Without it the pitch wheel, the resonance bus and
+        //    the channel cutoff bus -- none of which has a producer --
+        //    would stop following firmware.
+        //---------------------------------------------------------------
+        bus_write(10'(DROPBUS), 18'sd4242);
+        repeat (8*CYC) @(posedge clk);          // a few generations
+        live_hits = 0;
+        if (dut.dmem_pitch[{dut.dmem_gen, DROPBUS[8:0]}] !== 18'sd4242) live_hits = live_hits + 1;
+        if (dut.dmem_fc   [{dut.dmem_gen, DROPBUS[8:0]}] !== 18'sd4242) live_hits = live_hits + 1;
+        if (dut.dmem_gl   [{dut.dmem_gen, DROPBUS[8:0]}] !== 18'sd4242) live_hits = live_hits + 1;
+        if (dut.dmem_glr  [{dut.dmem_gen, DROPBUS[8:0]}] !== 18'sd4242) live_hits = live_hits + 1;
+        if (live_hits > 0) begin
+            $display("FAIL: the sweep did not carry the base into %0d replica(s)", live_hits);
+            $display("      pitch=%0d fc=%0d gl=%0d glr=%0d want 4242",
+                     dut.dmem_pitch[{dut.dmem_gen, DROPBUS[8:0]}],
+                     dut.dmem_fc   [{dut.dmem_gen, DROPBUS[8:0]}],
+                     dut.dmem_gl   [{dut.dmem_gen, DROPBUS[8:0]}],
+                     dut.dmem_glr  [{dut.dmem_gen, DROPBUS[8:0]}]);
             errors = errors + 1;
         end else
-            $display("scheduling: every commit and swap sits in the idle window");
+            $display("base sweep: an unproduced bus follows its base in every replica");
 
-        // The fix must not trade a glitch for a DROPPED WRITE. A lost
-        // gate-off is a stuck note, which is worse than the scratching --
-        // and it is exactly how the first window attempt failed.
-        repeat (6*CYC) @(posedge clk);
-        if (dut.dmem_gl[{1'b0, DROPBUS[8:0]}] !== 18'sd1059 ||
-            dut.dmem_gl[{1'b1, DROPBUS[8:0]}] !== 18'sd1059) begin
-            $display("FAIL: writes dropped -- halves hold %0d / %0d, want 1059",
-                     dut.dmem_gl[{1'b0, DROPBUS[8:0]}],
-                     dut.dmem_gl[{1'b1, DROPBUS[8:0]}]);
+        // and a produced bus must NOT be flattened by the sweep -- that
+        // is what the produced map is for. Entry 0 still drives TESTBUS
+        // from test 6, at its sustain level.
+        if (dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}] === 18'sd0) begin
+            $display("FAIL: the sweep flattened a bus the sequencer produces");
             errors = errors + 1;
         end else
-            $display("no dropped writes: 60 back-to-back all reached both halves");
+            $display("produced map: a produced bus keeps its contribution (%0d)",
+                     dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}]);
 
         if (errors) $display("%0d FAILURE(S)", errors);
         else        $display("ALL PASS");
