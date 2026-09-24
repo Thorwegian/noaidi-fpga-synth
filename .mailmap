@@ -1,0 +1,24 @@
+# Authorship corrections (#99).
+#
+# The majority of this project's code was written by AI agents. Two
+# accounts carry commits their owners did not write:
+#
+#   jenstf  -- Jens Tore Fremmegaard has never personally written a line
+#              of code on this project (his own statement, 2026-09-24).
+#              Every commit under his identity is the Claude agent he
+#              operates, which committed under whatever git config the
+#              machine happened to have.
+#
+#   Claude <claude@thj.no> and the noaidi-claude noreply address are the
+#   same agent; folded together so shortlog and blame agree.
+#
+# Commits under Thorwegian are NOT remapped: Thor genuinely commits, and
+# a second agent (Hermes) has also worked under his identity, so they
+# cannot be separated safely by rule. See #99.
+#
+# This file changes what git log / shortlog / blame report. It does NOT
+# change GitHub's web UI, which reads the commit object directly.
+
+noaidi-claude <claude@thj.no>  Jens Tore Fremmegaard <jenstf@gmail.com>
+noaidi-claude <claude@thj.no>  noaidi-claude <328324444+noaidi-claude@users.noreply.github.com>
+noaidi-claude <claude@thj.no>  Claude <claude@thj.no>
