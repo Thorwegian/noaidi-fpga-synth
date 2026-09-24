@@ -210,13 +210,21 @@ static int64_t release_tail_us(void)
     uint32_t r    = (patch_adsr_word(&g_patch.env[0]) >> 24) & 0xFF;
     uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
     uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
-    // #127: an RC release is asymptotic, so it takes far longer to
-    // reach silence than the linear ramp this formula was written for
-    // -- about 15.25/k against 2^22/step, roughly 8x. Under-estimating
-    // here hard-mutes a voice while it is still audible, which is a
-    // click; over-estimating only delays voice stealing. So: 8x, and
-    // deliberately the conservative direction.
-    samples *= 8;
+    // #127: an RC release is asymptotic, so it never reaches zero and
+    // this formula -- written for a linear ramp -- has to be told where
+    // to stop. Thor's threshold: -60 dBFS of the ADSR's own peak.
+    //
+    //   RC reaches 1/1000 of full in  ln(1000)/k = 6.908/k samples
+    //   k = (16+low4) >> (25-high4), so that is
+    //       6.908 * 2^(25-high4) / (16+low4)
+    //   the linear formula above gives
+    //             2^(26-high4) / (16+low4)
+    //   ratio = 6.908/2 = 3.454
+    //
+    // 7/2 rounds that up slightly, which is the safe direction: too
+    // short hard-mutes a voice while it is still audible, and that is
+    // a click; too long only delays voice stealing.
+    samples = samples * 7u / 2u;
     return (int64_t)(samples * 125u / 6u);            // µs at 48 kHz
 }
 
