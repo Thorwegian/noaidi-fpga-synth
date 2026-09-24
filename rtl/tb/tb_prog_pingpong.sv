@@ -74,6 +74,8 @@ module tb_prog_pingpong;
         live_before = `LIVE;
 
         spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_A});
+        flip;                       // #127: bases are banked
+        repeat (4*synth_pkg::DRUM_CYCLES) @(posedge clk);
 
         wait (slot == 10'd700);            // same sample, long after the commit
         live_mid   = `LIVE;
@@ -120,6 +122,8 @@ module tb_prog_pingpong;
         @(posedge sample_tick);
         wait (slot == 10'd40);
         spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_B});
+        flip;                       // #127: bases are banked
+        repeat (4*synth_pkg::DRUM_CYCLES) @(posedge clk);
         @(posedge sample_tick);
         repeat (4) @(posedge clk);
         if (`LIVE !== MARK_B) begin
@@ -148,6 +152,8 @@ module tb_prog_pingpong;
         @(posedge sample_tick);
         wait (slot == 10'd40);
         spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_A});
+        flip;                       // #127: bases are banked
+        repeat (4*synth_pkg::DRUM_CYCLES) @(posedge clk);
         @(posedge sample_tick);            // first swap: value goes live
 
         persist_ok = 1;
@@ -172,6 +178,8 @@ module tb_prog_pingpong;
         @(posedge sample_tick);
         wait (slot == 10'd40);
         spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
+        flip;                       // #127: bases are banked
+        repeat (4*synth_pkg::DRUM_CYCLES) @(posedge clk);
         repeat (6) @(posedge sample_tick);
         repeat (4) @(posedge clk);
         if (u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_gen, QUIETBUS[8:0]}] !== MARK_B) begin

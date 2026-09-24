@@ -51,8 +51,8 @@ module tb_element_pipeline;
         .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
         .elem_write_index(8'b0), .elem_write_data(32'b0),   // no SPI
         .swap_req(1'b0),                                    // writes in
-        .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
-        .dmem_wr_toggle(1'b0),
+        .dmem_write_addr(10'b0), .dmem_write_data(18'b0),
+        .dmem_write_enable(1'b0),
         .imem_write_enable(1'b0), .imem_write_addr(10'b0),
         .imem_write_data(32'b0),
         .mix_left(mix_left), .mix_right(mix_right)
