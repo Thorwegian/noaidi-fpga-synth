@@ -33,7 +33,7 @@ package synth_pkg;
     // Drum slot where element 0 enters the pipeline
     parameter int LANE_BASE    = 0;
     // Pipeline stages per element (S0..S11 + S3B/S5B/S8B/S9B splits)
-    parameter int LANE_STAGES  = 16;
+    parameter int LANE_STAGES  = 18;
     // Contiguous drum span occupied by the lane pipeline
     parameter int LANE_SPAN    = NUM_ELEMENTS + LANE_STAGES - 1;
 
