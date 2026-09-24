@@ -90,6 +90,12 @@ module tb_prog_sources;
                                                           // envelope IS
                                                           // the gain
         spi_word_write(bus_addr(4), 32'h00000000);   // linear base: silent
+        // BOTH banks. The param RAMs are banked, which is why every
+        // other element word here is written on either side of the
+        // flip; a single pass reaches the shadow bank only.
+        for (v = 0; v < 8; v = v + 1)
+            spi_word_write(elem_addr(v, W_PTRS2), PTRS2_GLIN_BUS4);
+        flip;
         for (v = 0; v < 8; v = v + 1)
             spi_word_write(elem_addr(v, W_PTRS2), PTRS2_GLIN_BUS4);
         observe(60);
