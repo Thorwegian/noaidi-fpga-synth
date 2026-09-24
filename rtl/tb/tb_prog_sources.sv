@@ -240,7 +240,7 @@ module tb_prog_sources;
             $display("triple chain replica = 4708 exact (base+0+channel)");
         end
 
-        // SEND READS THE OUTPUT SUM (#92/#98): a WALKER source's
+        // SEND READS THE OUTPUT SUM (#92/#98): an INSTRUCTION's
         // contribution must propagate through a send — the property
         // the firmware-base read could not provide. LFO tremolo
         // (entry 0) writes bus 6; the send (entry 2, after it) relays

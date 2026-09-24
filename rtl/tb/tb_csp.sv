@@ -177,7 +177,7 @@ module tb_csp;
         prev_lvl = 0; prev_stg = 0;
         $display("  pass  stage  level");
         for (pass = 0; pass < 1200; pass = pass + 1) begin
-            repeat (2*CYC) @(posedge clk);      // one walker pass
+            repeat (2*CYC) @(posedge clk);      // one program counter pass
             stg = dut.istate[0][27:26];
             lvl = dut.istate[0][25:0];
             if (pass % 50 == 0 || stg != prev_stg)

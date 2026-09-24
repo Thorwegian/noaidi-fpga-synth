@@ -85,7 +85,7 @@ module tb_prog_pingpong;
         // halves (see dmem_commit_phase in element_pipeline.sv), or its
         // value dies on the second swap. That is the pre-#134 behaviour
         // restored, not a concession -- firmware writes have always
-        // landed mid-sample. The atomicity that matters is the WALKER's,
+        // landed mid-sample. The atomicity that matters is the PROGRAM
         // which writes only the shadow half; test 7 covers persistence
         // and the sequencer's own sweep is covered by tb_prog_sources.
         if (live_mid !== MARK_A) begin

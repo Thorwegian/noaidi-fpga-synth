@@ -162,7 +162,7 @@ module csp (
     // The "produced" map is what stops the sweep clobbering a
     // contribution. The generation flips once per COMPLETE pass -- two
     // samples -- and BOTH halves' instructions write into that one
-    // generation. A sweep that straddles a walker run would otherwise
+    // generation. A sweep that straddles a program counter pass would
     // reset a bus the sequencer had already summed, which is the #134
     // bug wearing a different coat.
     // Declared here because the sweep below reads them and iverilog
