@@ -215,7 +215,7 @@ sim-prog-pingpong: tb/tb_prog_pingpong.vvp
 sim-prog-limiter: tb/tb_prog_limiter.vvp
 	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
 
-# #136: the bus engine alone -- seconds, not minutes, because it does
+# #136: the CSP alone -- seconds, not minutes, because it does
 # not elaborate the SVF, the oscillators or the limiter.
 tb/tb_csp.vvp: $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv Makefile
 	iverilog -g2012 -I. -o $@ $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv

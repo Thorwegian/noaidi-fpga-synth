@@ -376,8 +376,8 @@ module element_pipeline #(
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
     //----------------------------------------------------------------
-    // The modulation bus and its source sequencer now live in their own
-    // module (#136). Six read ports: S1 pointers in, S2 data out.
+    // The Control Signal Processor now lives in its own module
+    // (#136). Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
     logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
