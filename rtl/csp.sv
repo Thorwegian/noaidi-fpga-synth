@@ -258,6 +258,29 @@ module csp (
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
+    // RC envelope (#127 phase 2). The level is a LINEAR AMPLITUDE in
+    // UQ12.14 across [25:0]: full scale is 0x400000, which is the
+    // linear gain bus's Q4.14 unity (0x4000) carrying eight extra
+    // fractional bits, so that a slow step does not truncate away.
+    // Every segment is the same recurrence, y += (target - y) * k, and
+    // the stage chooses nothing but the target and the rate. Sustain
+    // is the only straight line in the envelope, and it is straight
+    // because it is a FIXED POINT of that recurrence rather than a
+    // special case (Thor, #127).
+    localparam [25:0] ENV_FULL = 26'h400000;
+    // Attack charges toward 1.3x full scale and the comparator ends it
+    // at full scale -- the CEM3310 / SSM2056 trick. What you hear is
+    // then the first 77% of an RC charge, which is convex, instead of
+    // the tail, which flattens into a soft attack nobody wants.
+    localparam [25:0] ENV_OVER = 26'h533333;   // 1.3 * ENV_FULL
+    // k = (16 + low4) >> (high4 + RC_SHIFT_BIAS): the SAME 5-bit
+    // mantissa and barrel shift the linear rates already used, mirrored
+    // from an increment into a fraction. 16 codes per octave over 16
+    // octaves = 256 distinct equal-ratio rates with NO TABLE, which is
+    // the whole point (Thor: no more LUTs for ADSR). Bias 10 puts the
+    // fastest attack near 1 ms and the slowest release near 44 s.
+    localparam int    RC_SHIFT_BIAS = 10;
+
     reg [35:0] imem [0:8*synth_pkg::NUM_INSTR-1]; // {bank,entry[7:0],word[1:0]}
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
@@ -379,6 +402,26 @@ module csp (
         .sample_out (lfo_wave)
     );
 
+    // P2 decode wires. The stage picks the target and which rate byte
+    // to read; everything else about the segment is identical.
+    // RATES word is the universal A, D, S, R: [7:0] attack rate,
+    // [15:8] decay rate, [23:16] SUSTAIN LEVEL, [31:24] release rate.
+    wire        adsr_gate_now = (dmem_init_readout > 18'sd0);
+    // Gate high out of IDLE or RELEASE restarts the attack from
+    // WHEREVER THE LEVEL IS, which is what a legato retrigger does on
+    // the hardware -- no reset to zero, so no click.
+    wire [1:0]  adsr_stage_sel_w = !adsr_gate_now ? AST_REL
+                                 : (istate_prev[27:26] == AST_DEC) ? AST_DEC
+                                 : AST_ATT;
+    wire [7:0]  adsr_nib_w = !adsr_gate_now         ? imem_readout[31:24]
+                           : (adsr_stage_sel_w == AST_ATT) ? imem_readout[7:0]
+                                                           : imem_readout[15:8];
+    // Sustain byte scales into the linear level: 0xFF lands 0.4% under
+    // full scale, which is a fifth of a dB and not worth a multiply.
+    wire [25:0] adsr_target_w = !adsr_gate_now ? 26'd0
+                              : (adsr_stage_sel_w == AST_ATT) ? ENV_OVER
+                                          : {4'b0, imem_readout[23:16], 14'b0};
+
     // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
     // output through shifts or a compare — short); the state step
     // then runs at P3 entirely from registers. This split exists
@@ -386,37 +429,59 @@ module csp (
     // cone the critical path (76 MHz — 3.5% margin, on a timing
     // model proven optimistic five times).
     logic        adsr_gate;
-    logic [20:0] adsr_attack_step, adsr_decay_step, adsr_release_step;   // 1/16-LSB units
-    logic [25:0] adsr_sustain_target;
+    logic [4:0]  adsr_mant;        // 16..31, the rate mantissa
+    logic [4:0]  adsr_shift;       // high nibble + RC_SHIFT_BIAS
+    logic signed [26:0] adsr_delta;  // target - level, signed
+    logic [1:0]  adsr_stage_sel;   // the stage this step belongs to
 
-    // next-state, computed at P3 from registered inputs only.
-    // ADSR level is UQ22.4 (26 bits).
     wire [1:0]  adsr_stage_prev  = istate_prev[27:26];
     wire [25:0] adsr_level_prev  = istate_prev[25:0];
-    logic [27:0] istate_next;
+
+    // ---- the RC step, spread over three phases ------------------------
+    // subtract -> multiply -> shift+add, and the silicon rule says the
+    // multiply stands alone, so the result lands one phase after the
+    // stride ends. The state write is therefore DELAYED BY ONE ENTRY,
+    // exactly as the bus write already is (the #97 fix). An instruction
+    // is visited once per pass, 128 entries apart, so its own delayed
+    // write can never race its own read -- and the stride stays at 3,
+    // which is what lets #138 stay a cherry rather than a prerequisite.
+    logic signed [31:0] rc_product;   // delta * mantissa (P3 -> P1')
+    logic [4:0]  rc_shift_d;
+    logic [1:0]  rc_stage_d;
+    logic [25:0] rc_level_d;
+    logic        rc_gate_d;
+    logic        stw_valid, stw_is_lfo;
+    logic [7:0]  stw_addr;
+    logic [27:0] stw_lfo_next;
+
+    // The shifted step. rc_product's sign IS delta's sign, because the
+    // mantissa is always positive.
+    wire signed [31:0] rc_step_w = rc_product >>> rc_shift_d;
+    // Fixed-point RC STALLS: once the step truncates to zero the level
+    // freezes short of its target, and on release that is a DC tail and
+    // a voice that never frees -- which would be heard as a stuck note,
+    // not as an envelope bug. One LSB of creep bounds the arrival, and
+    // 1 LSB of 26 is far below anything audible.
+    wire signed [26:0] rc_creep = rc_product[31] ? -27'sd1 : 27'sd1;
+    wire signed [26:0] rc_inc   = (rc_step_w == 32'sd0 && rc_product != 32'sd0)
+                                ? rc_creep : rc_step_w[26:0];
+    wire signed [27:0] rc_y     = $signed({2'b0, rc_level_d}) + 28'(rc_inc);
+
+    logic [27:0] adsr_state_next;
     always_comb begin
-        if (opcode_a == 4'd1) begin
-            // LFO: free-running phase accumulator in [23:0]
-            istate_next = {istate_prev[27:24], istate_prev[23:0] + {8'b0, lfo_rate_a}};
-        end else if (!adsr_gate) begin
-            // ADSR, gate low: release toward zero
-            istate_next = (adsr_level_prev > {5'b0, adsr_release_step})
-                ? {AST_REL, adsr_level_prev - 26'(adsr_release_step)}
-                : {AST_IDLE, 26'd0};
-        end else begin
-            case (adsr_stage_prev)
-                AST_ATT: istate_next =
-                    ({1'b0, adsr_level_prev} + 27'(adsr_attack_step) > 27'h3FFFFFF)
-                        ? {AST_DEC, 26'h3FFFFFF}
-                        : {AST_ATT, adsr_level_prev + 26'(adsr_attack_step)};
-                AST_DEC: istate_next =
-                    (adsr_level_prev > adsr_sustain_target + 26'(adsr_decay_step))
-                        ? {AST_DEC, adsr_level_prev - 26'(adsr_decay_step)}
-                        : (adsr_level_prev > adsr_sustain_target) ? {AST_DEC, adsr_sustain_target}
-                                             : {AST_DEC, adsr_level_prev};
-                default: istate_next = {AST_ATT, adsr_level_prev};  // idle/release
-            endcase
-        end
+        if (!rc_gate_d)
+            // release: the target is zero, and IDLE is latched on arrival
+            adsr_state_next = (rc_y <= 28'sd0) ? {AST_IDLE, 26'd0}
+                                               : {AST_REL, rc_y[25:0]};
+        else if (rc_stage_d == AST_ATT)
+            // attack: the comparator, not the target, ends the segment
+            adsr_state_next = (rc_y >= $signed({2'b0, ENV_FULL}))
+                            ? {AST_DEC, ENV_FULL} : {AST_ATT, rc_y[25:0]};
+        else
+            // decay: it ARRIVES at sustain. An RC segment cannot
+            // overshoot its target, so the three-way compare the linear
+            // ramp needed here is simply gone.
+            adsr_state_next = {AST_DEC, rc_y[25:0]};
     end
 
     // P4 (phase == 1) combinational: value = addend + contribution,
@@ -466,7 +531,12 @@ module csp (
             dest_addr_c <= '0; coeff_product <= '0;
             wb_addr <= '0; wb_value <= '0;
             adsr_gate <= 1'b0;
-            adsr_attack_step <= '0; adsr_decay_step <= '0; adsr_release_step <= '0; adsr_sustain_target <= '0;
+            adsr_mant <= '0; adsr_shift <= '0; adsr_delta <= '0;
+            adsr_stage_sel <= AST_IDLE;
+            rc_product <= '0; rc_shift_d <= '0; rc_stage_d <= AST_IDLE;
+            rc_level_d <= '0; rc_gate_d <= 1'b0;
+            stw_valid <= 1'b0; stw_is_lfo <= 1'b0; stw_addr <= '0;
+            stw_lfo_next <= '0;
         end else begin
             pc_read_valid <= pc_entry_start;
 
@@ -504,14 +574,12 @@ module csp (
                 // perceptual-linearity rule; a MIDI CC maps as
                 // cc << 1). Slowest full-range time ~44 s, fastest
                 // ~0.7 ms.
-                adsr_gate <= (dmem_init_readout > 18'sd0);
-                adsr_attack_step <= (21'd16 + 21'(imem_readout[3:0]))
-                               << imem_readout[7:4];
-                adsr_decay_step <= (21'd16 + 21'(imem_readout[11:8]))
-                               << imem_readout[15:12];
-                adsr_sustain_target  <= {imem_readout[23:16], 18'b0};
-                adsr_release_step <= (21'd16 + 21'(imem_readout[27:24]))
-                               << imem_readout[31:28];
+                adsr_gate <= adsr_gate_now;
+                adsr_stage_sel <= adsr_stage_sel_w;
+                adsr_mant  <= 5'd16 + {1'b0, adsr_nib_w[3:0]};
+                adsr_shift <= 5'(adsr_nib_w[7:4]) + 5'(RC_SHIFT_BIAS);
+                adsr_delta <= $signed({1'b0, adsr_target_w})
+                            - $signed({1'b0, adsr_level_prev});
                 // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
                 // SEND (the fabric's processor — #44/#98). A send is
                 // STATELESS: CFG[25:16] names the source bus (the
@@ -525,9 +593,14 @@ module csp (
                 instr_valid_b   <= instr_valid_a && (opcode_a == 4'd1 || opcode_a == 4'd2
                                                            || opcode_a == 4'd3);
                 dest_addr_b <= dest_addr_a;
+                // The ADSR emits a LINEAR AMPLITUDE now, not a log gain
+                // code: [24:8] of the UQ12.14 level is exactly Q4.14
+                // with unity 0x4000, the linear gain bus's format. The
+                // curve is in the recurrence, so att_lut is out of the
+                // envelope's path entirely (#127).
                 operand   <= (opcode_a == 4'd1) ? lfo_wave
                                     : (opcode_a == 4'd3) ? bus_sum_readout
-                                            : $signed({2'b0, istate_prev[25:10]});
+                                            : $signed({1'b0, istate_prev[24:8]});
                 wb_valid  <= 1'b0;              // P5 write just happened
             end else begin
                 // end of P3 (phase == 0): the instruction multiply —
@@ -536,6 +609,19 @@ module csp (
                 instr_valid_c   <= instr_valid_b;
                 dest_addr_c <= dest_addr_b;
                 coeff_product     <= operand * $signed(imem_readout[17:0]);
+                // The RC multiply -- by a 5-bit mantissa, alone in its
+                // phase, beside the DEPTH multiply and independent of it.
+                rc_product  <= adsr_delta * $signed({1'b0, adsr_mant});
+                rc_shift_d  <= adsr_shift;
+                rc_stage_d  <= adsr_stage_sel;
+                rc_level_d  <= adsr_level_prev;
+                rc_gate_d   <= adsr_gate;
+                // Arm the state write for the NEXT entry's P1.
+                stw_valid   <= instr_valid_a && (opcode_a == 4'd1 || opcode_a == 4'd2);
+                stw_is_lfo  <= (opcode_a == 4'd1);
+                stw_addr    <= pc_a;
+                stw_lfo_next <= {istate_prev[27:24],
+                                 istate_prev[23:0] + {8'b0, lfo_rate_a}};
                 instr_valid_b   <= 1'b0;
                 instr_valid_a   <= 1'b0;
             end
@@ -560,10 +646,12 @@ module csp (
         // P2 selects by type. Only meaningful at P1.
         bus_sum_readout <= dmem_local[imem_readout[25:16]];
     end
+    // One write port, one phase, both generators: the LFO's accumulator
+    // rides the same one-entry delay as the RC step so that the state
+    // RAM never needs a second write port.
     always_ff @(posedge clk)
-        if ((phase == 2'd0) && instr_valid_a
-            && (opcode_a == 4'd1 || opcode_a == 4'd2))
-            istate[pc_a] <= istate_next;                      // P3
+        if ((phase == 2'd1) && stw_valid)
+            istate[stw_addr] <= stw_is_lfo ? stw_lfo_next : adsr_state_next;
     //----------------------------------------------------------------
     // Sink read ports. One BSRAM read port per replica, addressed by
     // the lane pipeline's S1 pointers, registered so the data lands at
