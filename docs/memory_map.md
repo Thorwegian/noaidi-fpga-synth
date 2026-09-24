@@ -163,7 +163,11 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-## Source table — `0x0100–0x04FF` (live, B4/B5; pool doubled #100)
+## Instruction memory — `0x0100–0x04FF` (live, B4/B5; pool doubled #100)
+
+The CSP's program. See [bus_architecture.md](bus_architecture.md) —
+entries are **instructions**, `CFG[3:0]` is the **opcode**, and the
+sequencer executes them in order once per pass.
 
 256 sources × 3 words, stride 4 (word 3 reserved), banked like
 parameters (config is wiring — takes effect at the swap). See
@@ -178,12 +182,17 @@ multiplies). LFO rate steps are 2.9 mHz (increment per 48 kHz walk).
 |---|---|---|
 | `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO, 2 ADSR, 3 SEND — #44/#98: the bus processor), `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held); SEND: `[25:16]` SOURCE bus — stateless, reads the bus's OUTPUT SUM (`bus_sum_ram`, #92/#98: firmware base + every contribution written so far; sources ordered before their sends propagate same-sample), × DEPTH (`0x10000` = unity, sign inverts), chain-adds to target |
 | `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) << high4 in 1/16-LSB units — the level carries 4 fractional bits (UQ22.4), which is the four-octave down-bias so gentle decays exist (decay only traverses peak→sustain). One uniform expression, no truncating shift: all 256 codes are distinct equal-ratio steps of a log₂ ladder, so a MIDI CC maps perceptually linearly as `cc << 1`. Full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware; `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
-| `+2` | `DEPTH` | `[17:0]` signed Q8.10 contribution amplitude (amp-envelope idiom: bus base = full attenuation, depth negative — the envelope subtracts silence) |
+| `+2` | `DEPTH` | `[17:0]` signed **Q2.16** — the instruction's coefficient (immediate). **Unity is `0x10000`**: the product is taken as `>>> 16`, so the field spans about −2.0…+2.0. (Earlier revisions of this table said Q8.10, which contradicted the `0x10000` unity stated on the same line and did not match the RTL — corrected #136.) Amp-envelope idiom: initial image = full attenuation, coefficient negative — the envelope subtracts silence |
 
-A producer ADDS to its target bus's base register (bus value = base +
-contribution), so firmware writes and producer modulation coexist on
-one bus. One producer per bus for now; summing multiple producers
-onto one bus is the combiner's job (B6). Disabling a producer leaves
+An instruction ADDS to its destination (word value = initial image +
+results), so firmware writes and modulation coexist on one word.
+**Multiple instructions targeting one word sum automatically** when
+allocated in adjacent slots — the accumulator carries between them
+(#84). Scattered instructions sharing a destination remain
+last-write-wins, which is why the allocator groups them. (Earlier
+revisions said "one producer per bus... the combiner's job (B6)";
+superseded by #84 — there is no combiner and no flag.) Disabling an
+instruction leaves
 its last value on the bus until the next base write refreshes it.
 
 > **SUPERSEDED (2026-08-30):** the old LFO bank, CV table and

@@ -1,4 +1,4 @@
-# Bus Architecture — the modulation and control fabric
+# The Control Signal Processor — modulation and control
 
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
@@ -19,6 +19,38 @@ as-is like pitch/cutoff. Formally still open: B0's explicit spec
 sign-off (largely overtaken by events — the design has been proven
 in silicon rung by rung) and the worst-case performance patch that
 finalizes sizing.
+
+## What this actually is
+
+It is a **processor** (Thor, 2026-09-24), and reading it as one explains
+it far better than reading it as a fabric:
+
+| processor term | in this design |
+|---|---|
+| instruction memory | the instruction table — 256 entries × 3 words |
+| program counter | the sequencer, stepping entries in order |
+| data memory | the control-signal pool, 512 words of signed 18-bit |
+| instruction | one table entry |
+| opcode | `CFG[3:0]` — 0 off, 1 LFO, 2 ADSR, 3 SEND |
+| source operand | `CFG[25:16]` — the data-memory word an instruction reads |
+| destination | `CFG[15:6]` — the word it writes |
+| immediate | `DEPTH` — a coefficient |
+| accumulator | the running total carried between adjacent instructions |
+| initial memory image | what firmware writes; each pass starts from it |
+
+It is genuinely **Harvard**: instruction memory and data memory are
+separate arrays with separate ports and separate address spaces, written
+by different paths, and they cannot alias.
+
+Where the analogy stops: there is **no control flow** — no branch, no
+jump, no predicate. Every pass executes every instruction in order and
+stops, so it is a straight-line program, not a general machine. Two
+opcodes (LFO, ADSR) also carry persistent private state, so an
+instruction is not pure.
+
+Inside the processor there are no buses — the pool is data memory.
+Outside it, firmware and [memory_map.md](memory_map.md) still say "bus"
+(see #139). The module is `rtl/csp.sv`.
 
 ## Terminology used in this document
 
@@ -41,21 +73,23 @@ name"; earlier drafts misattributed a name to it).
 ## The model in one paragraph
 
 Elements are dumb: waveform select, filter type, a static detune
-offset, and per-parameter **bus pointers** — nothing else. Every
-dynamic value arrives on a **bus**: a memory cell holding
-`base register (ESP32's contribution) + Σ producer contributions`.
-**Producers** — LFOs, ADSRs, bus sources, future types — live in a
-table walked once per sample through the drum's idle slots and write
-buses. The audio pipeline's entire share is `effective = base_word +
-bus[pointer]`, an add. Firmware allocates everything: buses, producers,
-pointers, groupings. A voice, a program, a channel — all firmware
-conventions the FPGA never sees.
+offset, and per-parameter **data-memory addresses** — nothing else.
+Every dynamic value is a word of the processor's data memory, holding
+`initial image (what firmware wrote) + Σ instruction results`.
+**Instructions** — LFO, ADSR, SEND, future opcodes — live in
+instruction memory, executed in order once per pass by the sequencer,
+and they write data memory. The audio pipeline's entire share is
+`effective = base_word + dmem[address]`, an add. Firmware allocates
+everything: addresses, instructions, groupings. It writes the program.
+A voice, a program, a channel — all firmware conventions the FPGA
+never sees.
 
 ## Laws
 
-1. **Buses add; only producers multiply.** A bus is a summing node.
-   Any scaling (depth, amount, velocity curves) happens inside a
-   producer, in idle-slot machinery. This keeps every multiply out of
+1. **Data memory adds; only instructions multiply.** A data word is a
+   summing node.
+   Any scaling (depth, amount, velocity curves) happens inside an
+   instruction, in the processor. This keeps every multiply out of
    the audio pipeline and out of summing structures — the silicon
    timing rule, made structural.
    **Multi-source summing (resolved 2026-09-08, issue #84, Thor's
@@ -70,11 +104,11 @@ conventions the FPGA never sees.
    sources remain last-write-wins. First user: LFO 2 → pitch, summing
    with LFO 1 (slots 0 and 1).
 2. **The audio pipeline freezes** once the pointer-fetch stage lands.
-   All future features are new producer types. (Justification: five
+   All future features are new opcodes. (Justification: five
    ear-verified timing failures that STA passed, all in pipeline
    growth. The fragile thing must stop changing.)
-3. **Producers execute in table order, once per sample**, reading
-   whatever their source buses hold at their slot. Ordered chains are
+3. **Instructions execute in program order, once per pass**, reading
+   whatever their source operand holds when they execute. Ordered chains are
    zero-lag; unordered or cyclic ones get a defined one-sample (10 µs)
    delay. No hardware graph validation — graph bookkeeping is
    firmware's.
@@ -82,7 +116,7 @@ conventions the FPGA never sees.
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are live and single-banked — each pipeline read is one word, so
    there is no multi-word tear to protect against.
-5. **One bus format: signed Q8.10** (Thor). 8 integer bits (sign
+5. **One data-memory word format: signed Q8.10** (Thor). 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every
    log₂ sink — pitch, cutoff, AND volume (gain octave = 6 dB;
