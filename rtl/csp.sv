@@ -48,12 +48,20 @@ module csp (
     input  wire [8:0]   rd_q_a,
     input  wire [8:0]   rd_gl_a,
     input  wire [8:0]   rd_gr_a,
+    // #127: the LINEAR gain sinks. Addressed LATE, from the element
+    // index coming out of the SVF rather than from the S1 pointers,
+    // because routing two 18-bit values through svf_tpt's 17 stages
+    // would have cost about 600 registers (Thor's call, phase 1).
+    input  wire [8:0]   rd_gll_a,
+    input  wire [8:0]   rd_glr_a,
     output logic signed [17:0] rd_pitch_d,
     output logic signed [17:0] rd_duty_d,
     output logic signed [17:0] rd_fc_d,
     output logic signed [17:0] rd_q_d,
     output logic signed [17:0] rd_gl_d,
     output logic signed [17:0] rd_gr_d,
+    output logic signed [17:0] rd_gll_d,
+    output logic signed [17:0] rd_glr_d,
 
     output logic        test_tone_en
 );
@@ -76,6 +84,15 @@ module csp (
     reg signed [17:0] dmem_q     [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_gl    [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_gr    [0:2*synth_pkg::DMEM_WORDS-1];
+    // #127 phase 1: two more sinks, so two more replicas. These carry a
+    // LINEAR gain in Q4.14 (unity 0x4000) rather than the octaves the
+    // rest of the pool uses -- the first non-logarithmic quantity on the
+    // bus. Law 5's Q8.10 does not fit it: ten fractional bits would put
+    // a -60 dB envelope tail on a single LSB, and Q4.14 puts it on 16.
+    // They are otherwise ordinary replicas, so the ping-pong generation
+    // and the SPI mailbox cover them without a special case.
+    reg signed [17:0] dmem_gll   [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_glr   [0:2*synth_pkg::DMEM_WORDS-1];
     integer bi;
     // BOTH generations -- the arrays are 2*DMEM_WORDS deep (#134) and an
     // uninitialised shadow half reads X the first time dmem_gen flips.
@@ -86,6 +103,8 @@ module csp (
         dmem_q[bi]     = 18'sd0;
         dmem_gl[bi]    = 18'sd0;
         dmem_gr[bi]    = 18'sd0;
+        dmem_gll[bi]   = 18'sd0;
+        dmem_glr[bi]   = 18'sd0;
     end
 
     // SPI bus-base writes now land in a dedicated BASE RAM as well as
@@ -223,6 +242,12 @@ module csp (
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gr[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+    always_ff @(posedge clk)
+        if (dmem_commit)   dmem_gll[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        else if (dmem_we)   dmem_gll[{~dmem_gen, dmem_waddr[8:0]}]  <= dmem_wdata;
+    always_ff @(posedge clk)
+        if (dmem_commit)   dmem_glr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        else if (dmem_we)   dmem_glr[{~dmem_gen, dmem_waddr[8:0]}]  <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_local[dmem_mbox_addr] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
@@ -677,6 +702,13 @@ module csp (
         rd_q_d     <= dmem_q[{dmem_gen, rd_q_a}];
         rd_gl_d    <= dmem_gl[{dmem_gen, rd_gl_a}];
         rd_gr_d    <= dmem_gr[{dmem_gen, rd_gr_a}];
+        // Late reads, but still inside the lane's read window, so the
+        // "no straddle" invariant (tb_prog_pingpong) has to cover these
+        // two as well -- a generation flip between the S1 reads and
+        // these would mix halves within one element. Asserted, not
+        // assumed.
+        rd_gll_d   <= dmem_gll[{dmem_gen, rd_gll_a}];
+        rd_glr_d   <= dmem_glr[{dmem_gen, rd_glr_a}];
     end
 
 endmodule
