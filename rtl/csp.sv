@@ -232,9 +232,13 @@ module csp (
         if (dmem_we)            dmem_glr[{~dmem_gen, dmem_waddr[8:0]}] <= dmem_wdata;
         else if (sweep_valid_d) dmem_glr[{~dmem_gen, sweep_addr_d}]    <= dmem_init_readout;
     always_ff @(posedge clk)
-        if (dmem_we)            dmem_local[{~dmem_gen, dmem_waddr[8:0]}] <= dmem_wdata;
-        else if (sweep_valid_d) dmem_local[{~dmem_gen, sweep_addr_d}]    <= dmem_init_readout;
-        else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
+        // NOT generational, unlike the replicas: this is the
+        // sequencer-facing mirror, written and read inside the same pass
+        // by SEND, so it is a flat file addressed by the raw address. I
+        // gave it generation indexing when the sweep went in and the
+        // read stayed flat -- every SEND then read the wrong half.
+        if (dmem_we)            dmem_local[dmem_waddr] <= dmem_wdata;
+        else if (sweep_valid_d) dmem_local[{1'b0, sweep_addr_d}] <= dmem_init_readout;
 
     //----------------------------------------------------------------
     // Program counter (B4/B5, bus_architecture.md) — the idle-slot

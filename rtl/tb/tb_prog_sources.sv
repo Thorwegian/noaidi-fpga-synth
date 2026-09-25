@@ -90,6 +90,7 @@ module tb_prog_sources;
                                                           // envelope IS
                                                           // the gain
         spi_word_write(bus_addr(4), 32'h00000000);   // linear base: silent
+        flip;   // #127: bases are banked -- publish them
         // BOTH banks. The param RAMs are banked, which is why every
         // other element word here is written on either side of the
         // flip; a single pass reaches the shadow bank only.
@@ -104,6 +105,7 @@ module tb_prog_sources;
         $display("ADSR floor: peak=%0d (quiet)", worst);
 
         spi_word_write(bus_addr(5), 32'h00000001);  // gate on
+        flip;   // #127: bases are banked -- publish them
         observe(300);
         observe(400);
         $display("ADSR attack/sustain: peak=%0d", peak);
@@ -115,6 +117,7 @@ module tb_prog_sources;
         wmax = peak;
 
         spi_word_write(bus_addr(5), 32'h00000000);  // gate off
+        flip;   // #127: bases are banked -- publish them
         observe(300);
         observe(300);
         $display("ADSR released: peak=%0d", peak);
@@ -143,6 +146,7 @@ module tb_prog_sources;
         spi_word_write(src_addr(2, 2), DEPTH_HALF);
         spi_word_write(bus_addr(4), 32'h00000000);      // linear base
         spi_word_write(bus_addr(5), 32'h00000001);      // gate on
+        flip;   // #127: bases are banked -- publish them
         observe(300);
         observe(400);
         wmax = peak;   // two chained sources
@@ -182,6 +186,7 @@ module tb_prog_sources;
         spi_word_write(src_addr(2, 0), SRC_OFF);
         spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
         spi_word_write(bus_addr(6), 32'h00000000);      // source: zero
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(300);
         worst = peak;
@@ -189,6 +194,7 @@ module tb_prog_sources;
         $display("bus source, src zero:   peak=%0d (floor)", worst);
 
         spi_word_write(bus_addr(6), OFFS_PLUS_8OCT);    // source: +8 oct
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(300);
         wmax = peak;
@@ -230,6 +236,7 @@ module tb_prog_sources;
         spi_word_write(bus_addr(3), 32'h00000064);      // base = 100
         spi_word_write(bus_addr(6), 32'h00001200);      // channel = 4608
         spi_word_write(bus_addr(5), 32'h00000001);      // gate held
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(60);
         if ($signed(u_pipe.u_csp.dmem_fc[3]) !== 18'sd4708) begin
@@ -260,6 +267,7 @@ module tb_prog_sources;
         spi_word_write(src_addr(2, 2), DEPTH_UNITY);
         spi_word_write(bus_addr(3), 32'h00000000);      // gain base 0
         spi_word_write(bus_addr(6), 32'h00000000);      // sum = LFO only
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
         for (step = 0; step < 8; step = step + 1) begin

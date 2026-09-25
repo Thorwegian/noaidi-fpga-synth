@@ -63,6 +63,7 @@ module tb_prog_bus;
         $display("bus pilot: baseline peak=%0d", worst);
 
         spi_word_write(bus_addr(1), OFFS_MINUS_8OCT);
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(400);
         if (peak > worst / 3) begin
@@ -72,6 +73,7 @@ module tb_prog_bus;
             $display("bus -2oct: muffled (peak=%0d)", peak);
 
         spi_word_write(bus_addr(1), 32'h00000000);
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(400);
         if (peak < worst / 2) begin
@@ -83,6 +85,7 @@ module tb_prog_bus;
         worst = 0;
         for (step = 0; step < 40; step = step + 1) begin
             spi_word_write(bus_addr(1),
+            flip;   // #127: bases are banked -- publish them
                            32'(($signed(-19'sd8192) + step * 205) & 32'h0003FFFF));
             observe(3);
             if (maxstep > worst) worst = maxstep;
@@ -96,6 +99,7 @@ module tb_prog_bus;
         // B2: remaining sinks — undetuned C4 sine on elements 0-7,
         // pitch pointer to bus 2, gains to bus 3.
         spi_word_write(bus_addr(1), 32'h00000000);
+        flip;   // #127: bases are banked -- publish them
         for (v = 0; v < 8; v = v + 1) begin
             spi_word_write(elem_addr(v, W_OSC),   OSC_SINE_C4);
             spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_BUS2);
@@ -114,6 +118,7 @@ module tb_prog_bus;
         v = rises;                                 // C4 fundamental count
 
         spi_word_write(bus_addr(2), OFFS_PLUS_1OCT);
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(2182);
         $display("pitch +1oct: rises=%0d (was %0d)", rises, v);
@@ -122,8 +127,10 @@ module tb_prog_bus;
             errors = errors + 1;
         end
         spi_word_write(bus_addr(2), 32'h00000000); // pitch back
+        flip;   // #127: bases are banked -- publish them
 
         spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -48 dB (volume
+        flip;   // #127: bases are banked -- publish them
                                                       // bus: negative =
                                                       // quieter, #40)
         observe(60);
@@ -134,6 +141,7 @@ module tb_prog_bus;
         end else
             $display("gain bus -48 dB: peak=%0d (was %0d)", peak, worst);
         spi_word_write(bus_addr(3), 32'h00000000);
+        flip;   // #127: bases are banked -- publish them
         observe(60);
         observe(400);
         if (peak < worst / 2) begin
