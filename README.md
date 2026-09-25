@@ -125,3 +125,9 @@ After any gateware load (`sram`/`flash`), restart the ESP32
 (`make fw-flash` or its reset button) so the engine link rewrites the
 full parameter image — the FPGA boots with the boot image, not your
 live state.
+
+## Official Sipeed docs for Tang Nano 20K
+
+[About](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html)
+[Instructions](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/example/unbox.html)
+[Code examples](https://github.com/sipeed/TangNano-20K-example/)
