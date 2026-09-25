@@ -128,6 +128,6 @@ live state.
 
 ## Official Sipeed docs for Tang Nano 20K
 
-[About](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html)
-[Instructions](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/example/unbox.html)
-[Code examples](https://github.com/sipeed/TangNano-20K-example/)
+- [About](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html)
+- [Instructions](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/example/unbox.html)
+- [Code examples](https://github.com/sipeed/TangNano-20K-example/)
