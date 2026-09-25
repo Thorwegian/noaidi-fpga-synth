@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 """#97 faithful repro: BRIGHT resonant patch + repeated CHORDS (Thor's
 actual test conditions). A chord fires a burst of voice allocations;
 if the desync drops a voice's cutoff, that chord loses its high-band

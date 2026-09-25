@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+#
+#   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+#   License: CERN-OHL-S v2
+#
 """gen_panel.py -- generate the Noaidi Open Stage Control session (#90).
 
 The panel IS the CC map (docs/midi_schema.md) rendered as knobs: each

@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// csp.sv -- the modulation bus and its source sequencer (#136)
+// csp.sv -- the Control Signal Processor (#136)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -13,7 +13,7 @@
 // independent: this module references the drum's slot counter nowhere.
 //
 // What lives here: the six bus replicas plus dmem_init and dmem_local,
-// the SPI mailbox, the ping-pong generation bit, the source table and
+// the SPI mailbox, the ping-pong generation bit, the instruction and
 // state RAMs, the sequencer state machine, the LFO and ADSR step logic,
 // and the chain-summing arithmetic.
 //
@@ -36,7 +36,7 @@ module csp (
     input  wire [17:0]  dmem_wr_data,
     input  wire         dmem_wr_toggle,
 
-    // SPI source-table writes
+    // SPI instruction-memory writes
     input  wire         imem_write_enable,
     input  wire [9:0]   imem_write_addr,
     input  wire [31:0]  imem_write_data,

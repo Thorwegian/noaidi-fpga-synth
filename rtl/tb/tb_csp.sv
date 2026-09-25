@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_csp.sv -- the bus engine on its own (#136)
+// tb_csp.sv -- the Control Signal Processor on its own (#136)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
