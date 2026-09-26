@@ -171,17 +171,21 @@ sequencer executes them in order once per pass.
 
 256 sources × 3 words, stride 4 (word 3 reserved), banked like
 parameters (config is wiring — takes effect at the swap). See
-[bus_architecture.md](bus_architecture.md). **Half-rate walker
-(#100)**: entries 0–127 (half A) walk on even samples, 128–255
-(half B) on odd — every source updates at 48 kHz effective; a chain
-(sources + their sends sharing a target) must live within ONE half.
-A source's output uses the previous walk's state (registered
-multiplies). LFO rate steps are 2.9 mHz (increment per 48 kHz walk).
+[bus_architecture.md](bus_architecture.md). **Full rate (#138)**: the
+CSP retires one instruction per cycle, so all 256 entries execute every
+sample — 256 of the sample's 768 cycles — and every source updates at
+96 kHz. #100's half-rate split is retired, and with it the rule that a
+chain (sources + their sends sharing a target) had to live within ONE
+half: a chain now tolerates gaps of up to three slots, the depth of the
+accumulator's forwarding history. A source's output uses the previous
+pass's state (registered multiplies). LFO rate steps are still 2.9 mHz
+per code — the phase accumulator gained a fractional bit when the pass
+rate doubled, so the same code means the same frequency.
 
 | Offset | Word | Contents |
 |---|---|---|
 | `+0` | `CFG` | `[3:0]` type (0 off, 1 LFO, 2 ADSR, 3 SEND — #44/#98: the bus processor), `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held); SEND: `[25:16]` SOURCE bus — stateless, reads the bus's OUTPUT SUM (`bus_sum_ram`, #92/#98: firmware base + every contribution written so far; sources ordered before their sends propagate same-sample), × DEPTH (`0x10000` = unity, sign inverts), chain-adds to target |
-| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) << high4 in 1/16-LSB units — the level carries 4 fractional bits (UQ22.4), which is the four-octave down-bias so gentle decays exist (decay only traverses peak→sustain). One uniform expression, no truncating shift: all 256 codes are distinct equal-ratio steps of a log₂ ladder, so a MIDI CC maps perceptually linearly as `cc << 1`. Full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware; `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
+| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) << high4 in 1/32-LSB units — the level carries 5 fractional bits (UQ22.5, widened from 4 by #138 when the pass rate doubled, so envelope times are unchanged), which is the down-bias so gentle decays exist (decay only traverses peak→sustain). One uniform expression, no truncating shift: all 256 codes are distinct equal-ratio steps of a log₂ ladder, so a MIDI CC maps perceptually linearly as `cc << 1`. Full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware; `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
 | `+2` | `DEPTH` | `[17:0]` signed **Q2.16** — the instruction's coefficient (immediate). **Unity is `0x10000`**: the product is taken as `>>> 16`, so the field spans about −2.0…+2.0. (Earlier revisions of this table said Q8.10, which contradicted the `0x10000` unity stated on the same line and did not match the RTL — corrected #136.) **TODO (#132):** the gain-path format unification may move this — #132 proposes Q4.14 end to end for audio, log-decoded gain and the linear gain bus, which would make this coefficient's requantization `>>14` and its unity `0x4000`. Do not treat Q2.16 as settled until #132 is decided. Amp-envelope idiom: initial image = full attenuation, coefficient negative — the envelope subtracts silence |
 
 An instruction ADDS to its destination (word value = initial image +
