@@ -95,9 +95,18 @@ module csp (
     // realized). A bus no instruction targets keeps value = base via the
     // mailbox's own replica write.
     reg signed [17:0] dmem_init [0:2*synth_pkg::DMEM_WORDS-1];
+    // SECOND COPY, for the same reason imem was split: the sequencer needs
+    // TWO different addresses out of the init image in one cycle -- the
+    // watched gate bus (from CFG) and the target's base (from the
+    // destination field). One port served both by phase muxing, which cost
+    // a cycle. Written by the identical mailbox strobe, so the two are
+    // always the same memory; only the read address differs.
+    reg signed [17:0] dmem_gate [0:2*synth_pkg::DMEM_WORDS-1];
     integer bbi;
-    initial for (bbi = 0; bbi < 2*synth_pkg::DMEM_WORDS; bbi = bbi + 1)
+    initial for (bbi = 0; bbi < 2*synth_pkg::DMEM_WORDS; bbi = bbi + 1) begin
         dmem_init[bbi] = 18'sd0;
+        dmem_gate[bbi] = 18'sd0;
+    end
 
     // BUS-SUM RAM (#92/#98): the sequencer-facing mirror of a bus's
     // OUTPUT SUM — written by the same strobes as the replicas, read
@@ -122,7 +131,7 @@ module csp (
     // and a read can never collide with a write. Costs no extra BSRAM:
     // the second generation lives in the half of each block that the
     // 512-entry pool leaves unused.
-    logic dmem_gen;   // process below, with pc_half
+    logic dmem_gen;   // flipped once per sample by the process below
 
     logic dmem_wr_toggle_meta, dmem_wr_toggle_sync, dmem_wr_toggle_prev;
     logic dmem_mbox_pending;
@@ -196,6 +205,8 @@ module csp (
 
     always_ff @(posedge clk)
         if (dmem_commit) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+    always_ff @(posedge clk)
+        if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
     // Bus 1023 doubles as the test-tone control latch (issue #81).
     always_ff @(posedge clk or negedge rst_n)
@@ -228,37 +239,44 @@ module csp (
         else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
 
     //----------------------------------------------------------------
-    // Program counter (B4/B5, bus_architecture.md) — the idle-slot
-    // table executor. 128 entries × 3 config words (stride 4 in the
-    // RAM), 3 slots per entry, span 300..~690. Law 1: the ONE
-    // instruction multiply sits alone in its own stage with registered
-    // operands. Law 3: entries execute in table order, once per
-    // sample. A instruction's OUTPUT uses the PREVIOUS sample's state —
-    // the one-sample lag is inaudible at control rates and it keeps
-    // the sine's internal multiply and the instruction multiply fed by
-    // registers only.
+    // Program counter (B4/B5, bus_architecture.md) -- the table executor.
+    // 256 entries x 3 config words (stride 4 in the RAM), ONE cycle per
+    // entry since #138; the six-stage pipeline is documented at the pc
+    // below. Law 1: the one instruction multiply sits alone in its stage
+    // with registered operands. Law 3: entries execute in table order, once
+    // per sample. An instruction's OUTPUT uses the PREVIOUS sample's state --
+    // the one-sample lag is inaudible at control rates and it keeps both the
+    // sine's internal multiply and the instruction multiply fed by registers
+    // only.
     //
-    // Per-entry phases (overlapped across entries):
-    //   P0: read CFG + state
-    //   P1: latch cfg/state; read RATES; read gate bus (dmem_init)
-    //   P2: REGISTER rate decode + gate + source (each a short
-    //       RAM-output cone); read DEPTH
-    //   P3: state step from registers (adds/compares) + writeback;
-    //       source × depth (DSP, registered operands — a parallel,
-    //       independent path); read target base (dmem_init — port
-    //       shared with P1 by phase mux)
-    //   P4: REGISTER value = base + (product >>> 16), saturated
-    //   P5: write replicas (the RAM→add→clamp→RAM chain carries a
-    //       register in the middle — the 76 MHz critical path fix)
+    // ADSR state word: [28:27] stage (0 idle, 1 attack, 2 decay/sustain,
+    // 3 release), [26:0] level in UQ22.5. Gate is LEVEL-sensitive on the
+    // watched bus (> 0 = held), so note-on/off is one live bus write.
     //
-    // ADSR state word: [23:22] stage (0 idle, 1 attack, 2 decay/
-    // sustain, 3 release), [21:0] level. Gate is LEVEL-sensitive on
-    // the watched bus (> 0 = held): note-on/off is one live bus write.
+    // FIVE fractional bits since #138, not four. A pass runs every sample
+    // now instead of every other one, so an unchanged step would have halved
+    // every envelope time. One more fractional bit restores the wall-clock
+    // rate exactly while keeping all 256 codes distinct -- halving the
+    // decoded step instead would collide codes in pairs at high4 = 0 and
+    // break the equal-ratio ladder.
     //----------------------------------------------------------------
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    reg [35:0] imem [0:8*synth_pkg::NUM_INSTR-1]; // {bank,entry[7:0],word[1:0]}
+    // THE 3-CYCLE BOTTLENECK, REMOVED (#138). This was one RAM holding
+    // {bank, entry, word} and read through a single port with the address
+    // muxed by phase: CFG at P0, RATES at P1, DEPTH at P2. Three words
+    // through one port costs three cycles however the logic is arranged, so
+    // the instruction rate was capped at one per three cycles regardless of
+    // how well the stages overlapped.
+    //
+    // Three RAMs, same total bits, read with the SAME address in the SAME
+    // cycle. The SPI write path is unchanged from the firmware's point of
+    // view: imem_write_addr is still {entry[7:0], word[1:0]} and the low two
+    // bits now select which RAM the word lands in.
+    reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {bank, entry[7:0]}
+    reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_depth [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
     // BITS, so rate increments are in 1/16-LSB units and the 8-bit
@@ -267,303 +285,308 @@ module csp (
     // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
     // cc << 1). The fractional bits ARE the "binary point moved four
     // left" — in the accumulator, where it belongs.
-    reg [27:0] istate [0:synth_pkg::NUM_INSTR-1];
+    reg [28:0] istate [0:synth_pkg::NUM_INSTR-1];
     integer wi;
     initial begin
-        for (wi = 0; wi < 8*synth_pkg::NUM_INSTR; wi = wi + 1)
-            imem[wi] = 36'd0;                  // type 0 = off
+        for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
+            imem_cfg[wi]   = 32'd0;            // opcode 0 = off
+            imem_rate[wi]  = 32'd0;
+            imem_depth[wi] = 32'd0;
+        end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
-            istate[wi] = 28'd0;
+            istate[wi] = 29'd0;
     end
 
+    // Route the word to its RAM by the low address bits. Same wire format.
+    wire [8:0] imem_wr_entry = {bank_shadow, imem_write_addr[9:2]};
     always_ff @(posedge sclk)
-        if (imem_write_enable) imem[{bank_shadow, imem_write_addr}] <= {4'b0, imem_write_data};
+        if (imem_write_enable) begin
+            case (imem_write_addr[1:0])
+                2'd0: imem_cfg[imem_wr_entry]   <= imem_write_data;
+                2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
+                2'd2: imem_depth[imem_wr_entry] <= imem_write_data;
+                default: ;                      // word 3 unused (stride 4)
+            endcase
+        end
 
-    // control: 3-slot stride via a small counter, armed at slot 299.
-    // HALF-RATE (#100): each sample walks 128 entries — ONE HALF of
-    // the 256-entry table, halves alternating by pc_half — so a
-    // source updates at 48 kHz effective (zipper at 24 kHz, under
-    // the master tilt; Thor 2026-09-11). Chains must live within a
-    // half (allocator rule); cross-half reads see the other half's
-    // previous pass.
-    logic [1:0] phase;
-    logic [7:0] pc;
-    logic       pc_half;
+    // ONE INSTRUCTION PER CYCLE (#138). Six stages, one instruction deep
+    // each, retiring one per cycle once full:
+    //
+    //   F  present pc to imem_cfg/rate/depth and istate
+    //   D  those four are out; present the gate/source address (from CFG)
+    //      and the target address to dmem_gate / dmem_local / dmem_init
+    //   R  gate, send-source and target base are out; decode the rate
+    //      bytes, resolve the gate, choose the operand
+    //   X  the instruction multiply -- registered operands, alone in its
+    //      stage (law 1) -- and the state writeback
+    //   A  value = addend + contribution, saturated
+    //   W  write the replicas
+    //
+    // FULL RATE IS BACK. #100 put the sequencer on half rate because
+    // 256 instructions x 3 cycles = 768 did not fit beside the lane
+    // pipeline in a 768-cycle sample. At one per cycle a full 256-entry
+    // pass costs 256 cycles, so every instruction runs every sample: 96 kHz
+    // control instead of 48, and the allocator's "a chain must live inside
+    // one half" rule is gone along with pc_half itself.
+    //
+    // Field map, unchanged from the 3-cycle version so the firmware format
+    // is untouched (traced from the old phase-delayed reads):
+    //   CFG   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
+    //         bus (also the ADSR's watched gate), [31:16] LFO phase
+    //         increment -- overlapping the source field, which an LFO does
+    //         not use
+    //   RATES [7:0] attack, [15:8] decay, [23:16] sustain LEVEL, [31:24]
+    //         release -- the universal A, D, S, R order
+    //   DEPTH [17:0] signed coefficient, 0x10000 = unity
+    logic [8:0] pc;             // 0..NUM_INSTR, one per cycle
 
-    // #134: the generation flips once per COMPLETE sequencer pass, not once
-    // per sample. The sequencer is half-rate (#100) -- one half of the
-    // instruction table per sample -- so a instruction refreshes its bus every
-    // OTHER sample. Flipping every sample would publish a generation the
-    // sequencer had only half written, which reads as halved modulation
-    // depth and a stale link in any chain. pc_half marks the
-    // two-sample cycle, so the swap rides it.
+    // The generation now flips once per SAMPLE, because a complete pass is
+    // once per sample again. Under half rate it had to flip every other
+    // sample (a pass spanned two), and flipping early published a
+    // half-written generation -- halved depth and a stale link in any chain.
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)                          dmem_gen <= 1'b0;
-        else if (sample_tick && pc_half) dmem_gen <= ~dmem_gen;
-    wire pc_active = (pc < 8'(synth_pkg::INSTR_PER_PASS));
-    // #97 fix: the bus write is pipeline-delayed by one entry — entry N's
-    // write fires during entry N+1's P5. Without a drain the step machine
-    // freezes the instant pc hits INSTR_PER_PASS, so the LAST
-    // real entry's write (index 127 in half A = PROD_FANOUT(31), voice
-    // 31's cutoff send) never lands and that voice reads a stale/low
-    // cutoff bus. Keep advancing while draining so the trailing write
-    // completes. The drain entries carry instruction_valid=0 (pc_active
-    // gates the reads), so they inject nothing; they only flush the last
-    // write and clear wb_prev_valid, so no chain leaks across halves.
-    // A registered pc_draining keeps the pc->RAM-address
-    // path off the extended compare (timing).
-    localparam int PIPE_DRAIN = 2;
-    logic [1:0] drain_cnt;
-    wire pc_running = pc_active || (drain_cnt != 2'd0);
-    wire [7:0] pc_addr = {pc_half, pc[6:0]};
+        if (!rst_n)           dmem_gen <= 1'b0;
+        else if (sample_tick) dmem_gen <= ~dmem_gen;
+
+    wire pc_active = (pc < 9'(synth_pkg::NUM_INSTR));
+    // Drain: the last instruction fetched still has to reach W, which is the
+    // full pipeline depth now rather than the 2 slots the 3-cycle version
+    // needed. Without it the final entries' writes never land -- #97's
+    // stale-cutoff bug was exactly this off-by-a-pipeline-length.
+    localparam int PIPE_DRAIN = 5;
+    logic [2:0] drain_cnt;
+    wire pc_running = pc_active || (drain_cnt != 3'd0);
+    wire [7:0] pc_addr = pc[7:0];
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            phase <= 2'd0; pc <= 8'hFF; pc_half <= 1'b0;
-            drain_cnt <= 2'd0;
+            pc <= 9'(synth_pkg::NUM_INSTR); drain_cnt <= 3'd0;
         end else if (sample_tick) begin
-            phase <= 2'd0; pc <= 8'd0;
-            pc_half <= ~pc_half;
-            drain_cnt <= 2'(PIPE_DRAIN);
+            pc <= 9'd0; drain_cnt <= 3'(PIPE_DRAIN);
         end else if (pc_running) begin
-            if (phase == 2'd2) begin
-                phase <= 2'd0;
-                pc <= pc + 8'd1;
-                if (!pc_active && drain_cnt != 2'd0)
-                    drain_cnt <= drain_cnt - 2'd1;
-            end else
-                phase <= phase + 2'd1;
+            if (pc_active) pc <= pc + 9'd1;
+            else if (drain_cnt != 3'd0) drain_cnt <= drain_cnt - 3'd1;
         end
     end
-    wire pc_entry_start = pc_active && (phase == 2'd0);
 
-    // Sequential read registers: imem serves CFG/RATES/DEPTH on
-    // consecutive cycles through ONE register (address muxed by
-    // phase); dmem_init serves the gate read (P1) and the target-base
-    // read (P3) through one register the same way.
-    logic [35:0] imem_readout;
-    logic [27:0] istate_readout;
-    logic signed [17:0] dmem_init_readout;
-    logic signed [17:0] bus_sum_readout;   // send-source read (#92/#98)
-    logic        pc_read_valid; // a P0 read was issued last cycle
+    // ---- RAM outputs, all arriving in the same cycle --------------------
+    logic [31:0] cfg_q, rate_q, depth_q;
+    logic [28:0] istate_q;
+    logic signed [17:0] gate_q, src_q, base_q;
+    logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
+    logic        d_valid;
 
-    // A stage — latched at the end of P1, stable for 3 cycles
-    logic        instr_valid_a;
-    logic [7:0]  pc_a;   // {half, entry[6:0]} (#100)
-    logic [3:0]  opcode_a;
-    logic [1:0]  lfo_shape_a;
-    logic [9:0]  dest_addr_a;
-    logic [15:0] lfo_rate_a;
-    logic [27:0] istate_prev;
-    // B stage — latched at the end of P2
-    logic        instr_valid_b;
-    logic [9:0]  dest_addr_b;
-    logic signed [17:0] operand;
-    // C stage — latched at the end of P3
-    logic        instr_valid_c;
-    logic [9:0]  dest_addr_c;
-    logic signed [35:0] coeff_product;
-    // E stage — the saturated sum, latched at the end of P4
+    // ---- D stage registers ---------------------------------------------
+    logic        r_valid;
+    logic [7:0]  r_pc;
+    logic [3:0]  r_opcode;
+    logic [1:0]  r_shape;
+    logic [9:0]  r_dest, r_src;
+    logic [15:0] r_lfo_rate;
+    logic [31:0] r_rate, r_depth;
+    logic [28:0] r_istate;
+
+    // ---- R stage registers ---------------------------------------------
+    logic        x_valid;
+    logic [7:0]  x_pc;
+    logic [3:0]  x_opcode;
+    logic [9:0]  x_dest;
+    logic [28:0] x_istate;
+    logic signed [17:0] x_operand, x_depth, x_base;
+    logic        x_gate;
+    logic [15:0] x_lfo_rate;
+    logic [20:0] x_attack_step, x_decay_step, x_release_step;
+    logic [26:0] x_sustain_target;
+
+    // ---- X stage registers ---------------------------------------------
+    logic        a_valid;
+    logic [9:0]  a_dest;
+    logic signed [17:0] a_base;
+    logic signed [35:0] a_product;
+
+    // ---- A stage registers: the write ----------------------------------
     logic        wb_valid;
     logic [9:0]  wb_addr;
     logic signed [17:0] wb_value;
 
-    // LFO waveform on the OLD phase (registered istate_prev → rule-clean).
-    // Named intermediate wire: a $signed() cast directly in the port
-    // connection crashes yosys's genrtlil signedness assert.
-    wire signed [23:0] lfo_phase = $signed(istate_prev[23:0]);
-    logic signed [17:0] lfo_wave;
-    osc_core u_wk_osc (
-        .phase_next (lfo_phase), // LFO phase is the accumulator (#128)
-        .duty       (24'sd0),
-        .wave       (lfo_shape_a),
-        .sample_out (lfo_wave)
-    );
-
-    // Rate decode + gate, REGISTERED at P2 (each cone is one RAM
-    // output through shifts or a compare — short); the state step
-    // then runs at P3 entirely from registers. This split exists
-    // because the un-split version made the RAM-output→state-write
-    // cone the critical path (76 MHz — 3.5% margin, on a timing
-    // model proven optimistic five times).
-    logic        adsr_gate;
-    logic [20:0] adsr_attack_step, adsr_decay_step, adsr_release_step;   // 1/16-LSB units
-    logic [25:0] adsr_sustain_target;
-
-    // next-state, computed at P3 from registered inputs only.
-    // ADSR level is UQ22.4 (26 bits).
-    wire [1:0]  adsr_stage_prev  = istate_prev[27:26];
-    wire [25:0] adsr_level_prev  = istate_prev[25:0];
-    logic [27:0] istate_next;
-    always_comb begin
-        if (opcode_a == 4'd1) begin
-            // LFO: free-running phase accumulator in [23:0]
-            istate_next = {istate_prev[27:24], istate_prev[23:0] + {8'b0, lfo_rate_a}};
-        end else if (!adsr_gate) begin
-            // ADSR, gate low: release toward zero
-            istate_next = (adsr_level_prev > {5'b0, adsr_release_step})
-                ? {AST_REL, adsr_level_prev - 26'(adsr_release_step)}
-                : {AST_IDLE, 26'd0};
-        end else begin
-            case (adsr_stage_prev)
-                AST_ATT: istate_next =
-                    ({1'b0, adsr_level_prev} + 27'(adsr_attack_step) > 27'h3FFFFFF)
-                        ? {AST_DEC, 26'h3FFFFFF}
-                        : {AST_ATT, adsr_level_prev + 26'(adsr_attack_step)};
-                AST_DEC: istate_next =
-                    (adsr_level_prev > adsr_sustain_target + 26'(adsr_decay_step))
-                        ? {AST_DEC, adsr_level_prev - 26'(adsr_decay_step)}
-                        : (adsr_level_prev > adsr_sustain_target) ? {AST_DEC, adsr_sustain_target}
-                                             : {AST_DEC, adsr_level_prev};
-                default: istate_next = {AST_ATT, adsr_level_prev};  // idle/release
-            endcase
-        end
-    end
-
-    // P4 (phase == 1) combinational: value = addend + contribution,
-    // saturating — REGISTERED into sequencer_write_* at the end of P4, written to
-    // the replicas at P5 (phase == 2). The RAM-output → add → clamp →
-    // RAM-write chain carries a register in the middle (the 76 MHz
-    // critical-path fix). Declared before the stage block below
-    // (iverilog binds declaration-before-use at module scope).
+    //----------------------------------------------------------------
+    // FORWARDING. At three cycles per instruction there was slack enough
+    // that comparing against the immediately previous entry covered every
+    // case, which is why the allocator had to group sources sharing a target
+    // into adjacent slots. At one per cycle several instructions are in
+    // flight, so a short history of completed results is kept and the MOST
+    // RECENT match wins. That relaxes the allocator rule rather than
+    // tightening it: a chain now tolerates gaps of up to three slots.
     //
-    // BUS SUMMING (issue #84, law 1 made real): buses are summing
-    // nodes — exactly like mixing-console buses, never
-    // self-referential (Thor, #98) — so summing is the DEFAULT, no
-    // flags. At this moment the sequencer_write_* registers still hold
-    // the PREVIOUS entry's result; if this entry targets the same
-    // TARGET bus as that previous entry, accumulate onto the running
-    // total instead of re-reading the firmware base. Multiple sources
-    // SHARING A TARGET BUS therefore sum automatically when allocated
-    // in consecutive slots, to any chain length (each link sees the
-    // running total — the cumulative sum, nothing more). The
-    // allocator's rule (bus_architecture.md): group sources that
-    // share a target bus adjacently; scattered ones keep
-    // last-write-wins.
-    wire signed [19:0] result = coeff_product[35:16];
-    // wb_valid is cleared after the P5 RAM write, so the
-    // chain test uses its own uncleaned copy (bus/value persist).
-    logic wb_prev_valid;
-    wire chain_prev = wb_prev_valid
-                      && (wb_addr == dest_addr_c);
+    // The base read needs no hazard logic -- dmem_init is the pass's initial
+    // image and only the SPI mailbox ever writes it.
+    //----------------------------------------------------------------
+    logic        h1_valid, h2_valid;
+    logic [9:0]  h1_addr,  h2_addr;
+    logic signed [17:0] h1_value, h2_value;
+
+    wire signed [19:0] result = a_product[35:16];
     wire signed [17:0] accum_in =
-        chain_prev ? wb_value : dmem_init_readout;
+          (wb_valid && wb_addr == a_dest) ? wb_value
+        : (h1_valid && h1_addr == a_dest) ? h1_value
+        : (h2_valid && h2_addr == a_dest) ? h2_value
+        :                                   a_base;
     wire signed [20:0] accum_sum =
         {{3{accum_in[17]}}, accum_in} + {result[19], result};
     wire signed [17:0] accum_sat =
         (accum_sum > 21'sd131071)  ? 18'sd131071  :
         (accum_sum < -21'sd131072) ? -18'sd131072 : accum_sum[17:0];
 
-    // Phase-guarded stage latches: each stage latches only at its own
-    // phase edge and stays stable for the entry's three cycles.
+    // A SEND reads a bus's OUTPUT SUM from dmem_local, and at one instruction
+    // per cycle the bus it wants may have been written by an instruction
+    // still in flight -- the read would silently be stale. Same history,
+    // same most-recent-wins rule. The instruction one ahead is in A right
+    // now, so its contribution is the combinational accum_sat.
+    wire signed [17:0] send_src =
+          (a_valid  && a_dest  == r_src) ? accum_sat
+        : (wb_valid && wb_addr == r_src) ? wb_value
+        : (h1_valid && h1_addr == r_src) ? h1_value
+        : (h2_valid && h2_addr == r_src) ? h2_value
+        :                                  src_q;
+
+    // LFO waveform on the registered phase (law 1: registered operands).
+    // Named wire: a $signed() cast in the port connection crashes yosys's
+    // genrtlil signedness assert.
+    // bits [24:1]: the extra low bit is the fractional half-step that keeps
+    // the LFO frequency unchanged now that passes are twice as frequent
+    wire signed [23:0] lfo_phase = $signed(r_istate[24:1]);
+    logic signed [17:0] lfo_wave;
+    osc_core u_wk_osc (
+        .phase_next (lfo_phase),
+        .duty       (24'sd0),
+        .wave       (r_shape),
+        .sample_out (lfo_wave)
+    );
+
+    // next state, from X-stage registers only
+    wire [1:0]  adsr_stage_prev = x_istate[28:27];
+    wire [26:0] adsr_level_prev = x_istate[26:0];
+    logic [28:0] istate_next;
+    always_comb begin
+        if (x_opcode == 4'd1) begin
+            // LFO: free-running phase accumulator in [23:0]
+            istate_next = {x_istate[28:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
+        end else if (!x_gate) begin
+            istate_next = (adsr_level_prev > {6'b0, x_release_step})
+                ? {AST_REL, adsr_level_prev - 27'(x_release_step)}
+                : {AST_IDLE, 27'd0};
+        end else begin
+            case (adsr_stage_prev)
+                AST_ATT: istate_next =
+                    ({1'b0, adsr_level_prev} + 28'(x_attack_step) > 28'h7FFFFFF)
+                        ? {AST_DEC, 27'h7FFFFFF}
+                        : {AST_ATT, adsr_level_prev + 27'(x_attack_step)};
+                AST_DEC: istate_next =
+                    (adsr_level_prev > x_sustain_target + 27'(x_decay_step))
+                        ? {AST_DEC, adsr_level_prev - 27'(x_decay_step)}
+                        : (adsr_level_prev > x_sustain_target)
+                              ? {AST_DEC, x_sustain_target}
+                              : {AST_DEC, adsr_level_prev};
+                default: istate_next = {AST_ATT, adsr_level_prev};
+            endcase
+        end
+    end
+
+    //----------------------------------------------------------------
+    // The pipeline.
+    //----------------------------------------------------------------
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            pc_read_valid <= 1'b0;
-            instr_valid_a <= 1'b0; instr_valid_b <= 1'b0; instr_valid_c <= 1'b0; wb_valid <= 1'b0;
-            wb_prev_valid <= 1'b0;
-            pc_a <= '0; opcode_a <= '0; lfo_shape_a <= '0;
-            dest_addr_a <= '0; lfo_rate_a <= '0; istate_prev <= '0;
-            dest_addr_b <= '0; operand <= '0;
-            dest_addr_c <= '0; coeff_product <= '0;
+            d_valid <= 1'b0; r_valid <= 1'b0; x_valid <= 1'b0;
+            a_valid <= 1'b0; wb_valid <= 1'b0;
+            h1_valid <= 1'b0; h2_valid <= 1'b0;
+            pc_addr_d <= '0;
+            r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
+            r_src <= '0; r_lfo_rate <= '0; r_rate <= '0; r_depth <= '0;
+            r_istate <= '0;
+            x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_istate <= '0;
+            x_operand <= '0; x_depth <= '0; x_base <= '0; x_gate <= 1'b0;
+            x_lfo_rate <= '0; x_attack_step <= '0; x_decay_step <= '0;
+            x_release_step <= '0; x_sustain_target <= '0;
+            a_dest <= '0; a_base <= '0; a_product <= '0;
             wb_addr <= '0; wb_value <= '0;
-            adsr_gate <= 1'b0;
-            adsr_attack_step <= '0; adsr_decay_step <= '0; adsr_release_step <= '0; adsr_sustain_target <= '0;
+            h1_addr <= '0; h1_value <= '0; h2_addr <= '0; h2_value <= '0;
         end else begin
-            pc_read_valid <= pc_entry_start;
+            // F -> D
+            d_valid   <= pc_active;
+            pc_addr_d <= pc_addr;
 
-            if (phase == 2'd1) begin
-                // end of P1: latch config (imem_readout = CFG) + state
-                instr_valid_a     <= pc_read_valid;
-                pc_a     <= pc_addr;
-                opcode_a  <= imem_readout[3:0];
-                lfo_shape_a <= imem_readout[5:4];
-                dest_addr_a   <= imem_readout[15:6];
-                lfo_rate_a  <= imem_readout[31:16];
-                istate_prev      <= istate_readout;
-                // ...and register the previous entry's saturated sum
-                // (write happens next cycle, at P5)
-                wb_valid   <= instr_valid_c && (dest_addr_c != 10'd0);
-                wb_prev_valid    <= instr_valid_c && (dest_addr_c != 10'd0);
-                wb_addr <= dest_addr_c;
-                wb_value <= accum_sat;
-                instr_valid_c    <= 1'b0;
-            end else if (phase == 2'd2) begin
-                // end of P2: register the rate decode + gate (short
-                // RAM-output cones) and the source from OLD state
-                // RATES field order is the universal A, D, S, R —
-                // bytes 0,1 = attack/decay rates, byte 2 = SUSTAIN
-                // level, byte 3 = release rate (Thor: S is a level
-                // and sits third by convention). One sustain LSB
-                // = 0.375 dB below peak at the 16-octave amp depth.
-                // Rate decode: increment = (16 + low4) << high4 in
-                // 1/16-LSB units — the level's four fractional bits
-                // carry the four-octave down-bias (decay only
-                // traverses peak→sustain, so unbiased rates made
-                // every decay fast). ONE uniform expression, no
-                // truncating right-shift: all 256 codes are distinct
-                // equal-ratio steps of a log2 ladder (Thor's
-                // perceptual-linearity rule; a MIDI CC maps as
-                // cc << 1). Slowest full-range time ~44 s, fastest
-                // ~0.7 ms.
-                adsr_gate <= (dmem_init_readout > 18'sd0);
-                adsr_attack_step <= (21'd16 + 21'(imem_readout[3:0]))
-                               << imem_readout[7:4];
-                adsr_decay_step <= (21'd16 + 21'(imem_readout[11:8]))
-                               << imem_readout[15:12];
-                adsr_sustain_target  <= {imem_readout[23:16], 18'b0};
-                adsr_release_step <= (21'd16 + 21'(imem_readout[27:24]))
-                               << imem_readout[31:28];
-                // Source types: 1 = LFO, 2 = ADSR (generators), 3 =
-                // SEND (the fabric's processor — #44/#98). A send is
-                // STATELESS: CFG[25:16] names the source bus (the
-                // field the ADSR uses for its GATE input), the value
-                // read is the bus's OUTPUT SUM (dmem_local, #92 —
-                // firmware base + all contributions written so far;
-                // sources ordered before their sends propagate
-                // same-sample), multiplied by DEPTH like any source
-                // (0x10000 = unity, sign = polarity) and chain-added
-                // to the target.
-                instr_valid_b   <= instr_valid_a && (opcode_a == 4'd1 || opcode_a == 4'd2
-                                                           || opcode_a == 4'd3);
-                dest_addr_b <= dest_addr_a;
-                operand   <= (opcode_a == 4'd1) ? lfo_wave
-                                    : (opcode_a == 4'd3) ? bus_sum_readout
-                                            : $signed({2'b0, istate_prev[25:10]});
-                wb_valid  <= 1'b0;              // P5 write just happened
-            end else begin
-                // end of P3 (phase == 0): the instruction multiply —
-                // registered operands (operand, and imem_readout = DEPTH);
-                // state writeback happens here too (see below)
-                instr_valid_c   <= instr_valid_b;
-                dest_addr_c <= dest_addr_b;
-                coeff_product     <= operand * $signed(imem_readout[17:0]);
-                instr_valid_b   <= 1'b0;
-                instr_valid_a   <= 1'b0;
-            end
+            // D -> R: the three config words are out of the RAMs this cycle
+            r_valid    <= d_valid;
+            r_pc       <= pc_addr_d;
+            r_opcode   <= cfg_q[3:0];
+            r_shape    <= cfg_q[5:4];
+            r_dest     <= cfg_q[15:6];
+            r_src      <= cfg_q[25:16];
+            r_lfo_rate <= cfg_q[31:16];
+            r_rate     <= rate_q;
+            r_depth    <= depth_q;
+            r_istate   <= istate_q;
+
+            // R -> X: gate / source / base are out; decode and choose
+            x_valid   <= r_valid && (r_opcode == 4'd1 || r_opcode == 4'd2
+                                                      || r_opcode == 4'd3);
+            x_pc      <= r_pc;
+            x_opcode  <= r_opcode;
+            x_dest    <= r_dest;
+            x_istate  <= r_istate;
+            x_base    <= base_q;
+            x_depth   <= $signed(r_depth[17:0]);
+            x_gate    <= (gate_q > 18'sd0);
+            x_lfo_rate <= r_lfo_rate;
+            // Increment is (16 + low4) << high4 in 1/16-LSB units -- one
+            // uniform expression, no truncating right shift, so all 256
+            // codes are distinct equal-ratio steps of a log2 ladder.
+            x_attack_step    <= (21'd16 + 21'(r_rate[3:0]))   << r_rate[7:4];
+            x_decay_step     <= (21'd16 + 21'(r_rate[11:8]))  << r_rate[15:12];
+            x_sustain_target <= {r_rate[23:16], 19'b0};
+            x_release_step   <= (21'd16 + 21'(r_rate[27:24])) << r_rate[31:28];
+            x_operand <= (r_opcode == 4'd1) ? lfo_wave
+                       : (r_opcode == 4'd3) ? send_src
+                       :                      $signed({2'b0, r_istate[26:11]});
+
+            // X -> A: the multiply, registered operands, alone in its stage
+            a_valid   <= x_valid;
+            a_dest    <= x_dest;
+            a_base    <= x_base;
+            a_product <= x_operand * x_depth;
+
+            // A -> W: the saturated sum, and push the forwarding history
+            wb_valid <= a_valid && (a_dest != 10'd0);
+            wb_addr  <= a_dest;
+            wb_value <= accum_sat;
+            h1_valid <= wb_valid; h1_addr <= wb_addr; h1_value <= wb_value;
+            h2_valid <= h1_valid; h2_addr <= h1_addr; h2_value <= h1_value;
         end
     end
 
     assign dmem_wdata = wb_value;
     assign dmem_waddr = wb_addr;
-    assign dmem_we  = wb_valid && (phase == 2'd2);
+    assign dmem_we    = wb_valid;
 
-    // sequencer memory reads — sync-only, one register per RAM, address
-    // muxed by phase: imem serves CFG (P0) / RATES (P1) /
-    // DEPTH (P2); dmem_init serves the gate bus (P1, address from the
-    // CFG word just read) / the target base (P3).
+    // Memory reads. The three imem RAMs share one address, so CFG, RATES and
+    // DEPTH all arrive together instead of over three cycles. dmem_gate and
+    // dmem_init are the same image read at two different addresses in the
+    // same cycle, which is the other thing that used to cost a phase.
     always_ff @(posedge clk) begin
-        imem_readout  <= imem[{bank_active, pc_addr, phase}];
-        istate_readout    <= istate[pc_addr];
-        dmem_init_readout <= dmem_init[(phase == 2'd1) ? imem_readout[25:16]
-                                              : dest_addr_b];
-        // SEND source read (#92/#98): the OUTPUT SUM of CFG[25:16] —
-        // read in parallel with dmem_init (own RAM, own register);
-        // P2 selects by type. Only meaningful at P1.
-        bus_sum_readout <= dmem_local[imem_readout[25:16]];
+        cfg_q    <= imem_cfg[{bank_active, pc_addr}];
+        rate_q   <= imem_rate[{bank_active, pc_addr}];
+        depth_q  <= imem_depth[{bank_active, pc_addr}];
+        istate_q <= istate[pc_addr];
+        gate_q   <= dmem_gate[cfg_q[25:16]];   // watched gate bus
+        src_q    <= dmem_local[cfg_q[25:16]];  // SEND source: bus output sum
+        base_q   <= dmem_init[cfg_q[15:6]];    // the target's initial value
     end
+
     always_ff @(posedge clk)
-        if ((phase == 2'd0) && instr_valid_a
-            && (opcode_a == 4'd1 || opcode_a == 4'd2))
-            istate[pc_a] <= istate_next;                      // P3
+        if (x_valid && (x_opcode == 4'd1 || x_opcode == 4'd2))
+            istate[x_pc] <= istate_next;
+
     //----------------------------------------------------------------
     // Sink read ports. One BSRAM read port per replica, addressed by
     // the lane pipeline's S1 pointers, registered so the data lands at

@@ -54,13 +54,17 @@ module tb_prog_pingpong;
             gen_prev = u_pipe.u_csp.dmem_gen;
             if (sample_tick) ticks = ticks + 1;
         end
-        // One generation == one COMPLETE sequencer pass, and the sequencer is
-        // half-rate (#100), so the cadence is one toggle per TWO samples.
-        // Flipping per sample would publish a generation the sequencer had
-        // only half-written -- halved modulation depth, broken chains.
-        if (toggles !== ticks/2) begin
+        // One generation == one COMPLETE sequencer pass. Since #138 the
+        // sequencer retires one instruction per cycle, so a full 256-entry
+        // pass costs 256 of the sample's 768 cycles and completes inside one
+        // sample: the cadence is one toggle per sample. Under the old
+        // half-rate scheme (#100) a pass spanned two samples, and flipping
+        // per sample would have published a half-written generation --
+        // halved modulation depth and broken chains. The invariant is
+        // unchanged; what changed is how long a pass takes.
+        if (toggles !== ticks) begin
             $display("FAIL: dmem_gen toggled %0d times over %0d samples, want %0d",
-                     toggles, ticks, ticks/2);
+                     toggles, ticks, ticks);
             errors = errors + 1;
         end else
             $display("gen cadence: %0d toggles / %0d samples -- one per sequencer pass",
