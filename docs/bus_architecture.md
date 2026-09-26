@@ -31,7 +31,7 @@ it far better than reading it as a fabric:
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
-| opcode | `CFG[3:0]` — 0 off, 1 LFO, 2 ADSR, 3 SEND |
+| opcode | `CFG[3:0]` — a bitmask of enables (#145): bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
 | source operand | `CFG[25:16]` — the data-memory word an instruction reads |
 | destination | `CFG[15:6]` — the word it writes |
 | immediate | `DEPTH` — a coefficient |
@@ -45,7 +45,7 @@ by different paths, and they cannot alias.
 Where the analogy stops: there is **no control flow** — no branch, no
 jump, no predicate. Every pass executes every instruction in order and
 stops, so it is a straight-line program, not a general machine. Two
-opcodes (LFO, ADSR) also carry persistent private state, so an
+opcodes with bit 1 set (LFO, ADSR) also carry persistent private state, so an
 instruction is not pure.
 
 Inside the processor there are no buses — the pool is data memory.
@@ -104,7 +104,9 @@ never sees.
    sources remain last-write-wins. First user: LFO 2 → pitch, summing
    with LFO 1 (slots 0 and 1).
 2. **The audio pipeline freezes** once the pointer-fetch stage lands.
-   All future features are new opcodes. (Justification: five
+   All future features are new opcodes -- and since #145 an opcode is a
+   combination of enable bits, so most of them are an encoding rather
+   than a new case in the datapath. (Justification: five
    ear-verified timing failures that STA passed, all in pipeline
    growth. The fragile thing must stop changing.)
 3. **Instructions execute in program order, once per pass**, reading
