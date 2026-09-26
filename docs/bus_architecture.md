@@ -31,7 +31,7 @@ it far better than reading it as a fabric:
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
-| opcode | `CFG[3:0]` — 0 off, 1 LFO, 2 ADSR, 3 SEND |
+| opcode | `CFG[3:0]` — a bitmask of enables (#145): bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
 | source operand | `CFG[25:16]` — the data-memory word an instruction reads |
 | destination | `CFG[15:6]` — the word it writes |
 | immediate | `DEPTH` — a coefficient |
@@ -45,7 +45,7 @@ by different paths, and they cannot alias.
 Where the analogy stops: there is **no control flow** — no branch, no
 jump, no predicate. Every pass executes every instruction in order and
 stops, so it is a straight-line program, not a general machine. Two
-opcodes (LFO, ADSR) also carry persistent private state, so an
+opcodes with bit 1 set (LFO, ADSR) also carry persistent private state, so an
 instruction is not pure.
 
 Inside the processor there are no buses — the pool is data memory.
@@ -104,7 +104,9 @@ never sees.
    sources remain last-write-wins. First user: LFO 2 → pitch, summing
    with LFO 1 (slots 0 and 1).
 2. **The audio pipeline freezes** once the pointer-fetch stage lands.
-   All future features are new opcodes. (Justification: five
+   All future features are new opcodes -- and since #145 an opcode is a
+   combination of enable bits, so most of them are an encoding rather
+   than a new case in the datapath. (Justification: five
    ear-verified timing failures that STA passed, all in pipeline
    growth. The fragile thing must stop changing.)
 3. **Instructions execute in program order, once per pass**, reading
@@ -207,16 +209,19 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 - **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
   polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
   to 32 LFOs + sends + margin. One entry = type + config + state.
-  Walker budget: 3 idle slots per entry per sample → 384 of ~500
-  idle slots.
-- **Half-rate walker — APPROVED (Thor, 2026-09-11, #98)**: for the
-  per-osc bus graph (~226 entries: 128 per-osc pitch/gain sends + 32
-  cutoff sends + 64 ADSRs + LFOs) the walker walks alternate halves
-  of the table each sample — every source updates at 48 kHz
-  effective. Thor's reasoning: "any zipper noise will be at 24 kHz
-  and thus likely inaudible, especially after our master bus LPF"
-  (the output tilt). Doubles the entry budget to ~320; pool grows to
-  256 entries when that rung lands.
+  Budget since #138: ONE cycle per instruction → 256 of the sample's
+  768 cycles for a full 256-entry pass.
+- **Half-rate walker — APPROVED (Thor, 2026-09-11, #98), SUPERSEDED
+  by #138**: it walked alternate halves of the table each sample, so
+  every source updated at 48 kHz effective, on Thor's reasoning that
+  "any zipper noise will be at 24 kHz and thus likely inaudible,
+  especially after our master bus LPF" (the output tilt). It bought
+  the entry budget that made the ~226-entry per-osc graph fit at three
+  cycles per instruction. #138 made an instruction cost one cycle, so
+  a full 256-entry pass is 256 cycles and the trade is no longer
+  needed: **all 256 entries run every sample, at 96 kHz**, and the
+  allocator rule it imposed (a chain must live inside one half) is
+  retired.
 - **Producer multiplies**: ≤200/sample on one 18×18 DSP lane
   (envelope scaling ~64, LFO depths ~32, combiner terms, margin).
   Escape hatch: shift-add amounts (~1.5 dB steps, zero DSP).
@@ -362,8 +367,8 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   together. (The waterphone itself is arguably a keeper preset.)
   And (Thor, 2026-09-01): **revisit where the binary point of
   attenuation values actually needs to be.** The envelope level's
-  four fractional bits (UQ22.4, the rate-ladder fix) were placed for
-  rate continuity, not from an analysis of what resolution the
+  fractional bits (UQ22.5 since #138, UQ22.4 before it) were placed
+  for rate continuity, not from an analysis of what resolution the
   attenuation path itself wants; when the GAIN inversion rung (above)
   reworks the gain decode anyway, work out the right point position
   from the attenuator's actual step size instead of inheriting it.
