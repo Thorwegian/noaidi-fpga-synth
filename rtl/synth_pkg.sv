@@ -72,17 +72,34 @@ package synth_pkg;
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
     // A instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
-    // Pool 256 with a HALF-RATE sequencer (#100, Thor 2026-09-11): each
-    // sample walks one half of the table (alternating), so every
-    // source updates at 48 kHz effective — any zipper sits at 24 kHz,
-    // above audibility and under the master tilt. Region grows to
-    // 0x0100..0x04FF (stride 4). Allocator rule: a chain (sources +
-    // their sends sharing a target) must live within ONE half; cross-
-    // half reads see the other half's previous pass (one sample old —
-    // negligible at control rates).
+    // Pool 256, FULL RATE (#145): the CSP retires one instruction per
+    // cycle, so all 256 entries execute every sample — 256 of the
+    // sample's 768 cycles — and every source updates at 96 kHz. This
+    // replaces the half-rate sequencer (#100, Thor 2026-09-11), which
+    // walked alternate halves for 48 kHz effective because an
+    // instruction then cost three cycles. Its allocator rule — a chain
+    // (sources + their sends sharing a target) must live within ONE
+    // half — is retired with it; a chain now tolerates gaps of up to
+    // three slots, the depth of the accumulator's forwarding history.
+    // Region 0x0100..0x04FF (stride 4). INSTR_PER_PASS is gone: a pass
+    // is the whole table.
     parameter logic [15:0] MAP_IMEM_BASE = 16'h0100;
     parameter int          NUM_INSTR = 256;
-    parameter int          INSTR_PER_PASS = NUM_INSTR / 2;
+
+    // CSP opcode = a bitmask of enables (#145), not an enum. Each bit turns
+    // on one part of the datapath, so decode is enables rather than a mux
+    // tree and a new instruction is an encoding rather than a new case.
+    parameter int OPC_SOURCE = 0;   // reads a source operand (SEND, ADSR gate)
+    parameter int OPC_STATE  = 1;   // has persistent state (LFO, ADSR)
+    parameter int OPC_MUL    = 2;   // multiplies the operand by DEPTH
+    parameter int OPC_ACCUM  = 3;   // accumulates onto the target, vs load init
+    // An envelope is the instruction that watches a gate, so STATE+SOURCE
+    // means envelope and STATE alone means phase accumulator -- no fifth bit
+    // is needed and the opcode still fits CFG[3:0].
+    parameter logic [3:0] OPC_OFF  = 4'h0;
+    parameter logic [3:0] OPC_LFO  = 4'hE;  // state + mul + accum
+    parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum
+    parameter logic [3:0] OPC_SEND = 4'hD;  // source + mul + accum
 
     //--- Filter stability clamp (Thor's call, 2026-08-31) ------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not

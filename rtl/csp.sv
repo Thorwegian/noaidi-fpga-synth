@@ -380,6 +380,13 @@ module csp (
     logic        r_valid;
     logic [7:0]  r_pc;
     logic [3:0]  r_opcode;
+    // decoded enables, so no stage switches on the opcode value
+    wire r_src_en = r_opcode[synth_pkg::OPC_SOURCE];
+    wire r_st_en  = r_opcode[synth_pkg::OPC_STATE];
+    wire r_mul_en = r_opcode[synth_pkg::OPC_MUL];
+    wire r_acc_en = r_opcode[synth_pkg::OPC_ACCUM];
+    wire r_is_env = r_st_en &&  r_src_en;     // watches a gate -> envelope
+    wire r_is_lfo = r_st_en && !r_src_en;     // free-running phase
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_lfo_rate;
@@ -390,6 +397,10 @@ module csp (
     logic        x_valid;
     logic [7:0]  x_pc;
     logic [3:0]  x_opcode;
+    wire x_st_en  = x_opcode[synth_pkg::OPC_STATE];
+    wire x_mul_en = x_opcode[synth_pkg::OPC_MUL];
+    wire x_acc_en = x_opcode[synth_pkg::OPC_ACCUM];
+    wire x_is_lfo = x_st_en && !x_opcode[synth_pkg::OPC_SOURCE];
     logic [9:0]  x_dest;
     logic [28:0] x_istate;
     logic signed [17:0] x_operand, x_depth, x_base;
@@ -400,6 +411,7 @@ module csp (
 
     // ---- X stage registers ---------------------------------------------
     logic        a_valid;
+    logic        a_acc_en;
     logic [9:0]  a_dest;
     logic signed [17:0] a_base;
     logic signed [35:0] a_product;
@@ -426,11 +438,16 @@ module csp (
     logic signed [17:0] h1_value, h2_value;
 
     wire signed [19:0] result = a_product[35:16];
+    // bit 3 makes chaining EXPLICIT. It used to be inferred from program
+    // order -- adjacent entries sharing a target summed, scattered ones did
+    // last-write-wins -- which is a correctness rule the allocator could not
+    // check. With the bit clear an instruction always starts from the
+    // target's initial value, whatever its neighbours do.
     wire signed [17:0] accum_in =
-          (wb_valid && wb_addr == a_dest) ? wb_value
-        : (h1_valid && h1_addr == a_dest) ? h1_value
-        : (h2_valid && h2_addr == a_dest) ? h2_value
-        :                                   a_base;
+          (a_acc_en && wb_valid && wb_addr == a_dest) ? wb_value
+        : (a_acc_en && h1_valid && h1_addr == a_dest) ? h1_value
+        : (a_acc_en && h2_valid && h2_addr == a_dest) ? h2_value
+        :                                               a_base;
     wire signed [20:0] accum_sum =
         {{3{accum_in[17]}}, accum_in} + {result[19], result};
     wire signed [17:0] accum_sat =
@@ -468,8 +485,8 @@ module csp (
     wire [26:0] adsr_level_prev = x_istate[26:0];
     logic [28:0] istate_next;
     always_comb begin
-        if (x_opcode == 4'd1) begin
-            // LFO: free-running phase accumulator in [23:0]
+        if (x_is_lfo) begin
+            // free-running phase accumulator in [24:0]
             istate_next = {x_istate[28:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
         end else if (!x_gate) begin
             istate_next = (adsr_level_prev > {6'b0, x_release_step})
@@ -508,7 +525,7 @@ module csp (
             x_operand <= '0; x_depth <= '0; x_base <= '0; x_gate <= 1'b0;
             x_lfo_rate <= '0; x_attack_step <= '0; x_decay_step <= '0;
             x_release_step <= '0; x_sustain_target <= '0;
-            a_dest <= '0; a_base <= '0; a_product <= '0;
+            a_dest <= '0; a_base <= '0; a_product <= '0; a_acc_en <= 1'b0;
             wb_addr <= '0; wb_value <= '0;
             h1_addr <= '0; h1_value <= '0; h2_addr <= '0; h2_value <= '0;
         end else begin
@@ -529,8 +546,7 @@ module csp (
             r_istate   <= istate_q;
 
             // R -> X: gate / source / base are out; decode and choose
-            x_valid   <= r_valid && (r_opcode == 4'd1 || r_opcode == 4'd2
-                                                      || r_opcode == 4'd3);
+            x_valid   <= r_valid && (r_opcode != synth_pkg::OPC_OFF);
             x_pc      <= r_pc;
             x_opcode  <= r_opcode;
             x_dest    <= r_dest;
@@ -546,15 +562,17 @@ module csp (
             x_decay_step     <= (21'd16 + 21'(r_rate[11:8]))  << r_rate[15:12];
             x_sustain_target <= {r_rate[23:16], 19'b0};
             x_release_step   <= (21'd16 + 21'(r_rate[27:24])) << r_rate[31:28];
-            x_operand <= (r_opcode == 4'd1) ? lfo_wave
-                       : (r_opcode == 4'd3) ? send_src
-                       :                      $signed({2'b0, r_istate[26:11]});
+            x_operand <= r_is_lfo ? lfo_wave
+                       : r_is_env ? $signed({2'b0, r_istate[26:11]})
+                       :            send_src;
 
             // X -> A: the multiply, registered operands, alone in its stage
             a_valid   <= x_valid;
+            a_acc_en  <= x_acc_en;
             a_dest    <= x_dest;
             a_base    <= x_base;
-            a_product <= x_operand * x_depth;
+            a_product <= x_mul_en ? (x_operand * x_depth)
+                                  : $signed({{2{x_operand[17]}}, x_operand, 16'd0});
 
             // A -> W: the saturated sum, and push the forwarding history
             wb_valid <= a_valid && (a_dest != 10'd0);
@@ -584,7 +602,7 @@ module csp (
     end
 
     always_ff @(posedge clk)
-        if (x_valid && (x_opcode == 4'd1 || x_opcode == 4'd2))
+        if (x_valid && x_st_en)
             istate[x_pc] <= istate_next;
 
     //----------------------------------------------------------------
