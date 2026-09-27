@@ -32,7 +32,7 @@ from pathlib import Path
 ENTRIES = 16
 
 script_dir = Path(__file__).resolve().parent
-file_path = script_dir / "../rtl/element/q1_lut.hex"
+file_path = script_dir / "../rtl/dsp/q1_lut.hex"
 
 with open(file_path, "w") as file:
     for i in range(ENTRIES):

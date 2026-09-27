@@ -63,7 +63,7 @@ module svf_tpt #(
 );
     // reciprocal LUT: 256 x UQ0.16, h = 1/D for D in [1,2)
     reg [15:0] recip_lut [0:255];
-    initial $readmemh("element/recip_lut.hex", recip_lut);
+    initial $readmemh("dsp/recip_lut.hex", recip_lut);
 
     function automatic logic signed [17:0] sat_q414(input logic signed [35:0] x);
         logic signed [35:0] s;

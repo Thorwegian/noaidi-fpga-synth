@@ -41,7 +41,7 @@ click, long attacks feel like "nothing… nothing… POP". Convention
 splits the domains: attack in amplitude, decay/release in dB. Our
 decay/release are already right; only the attack segment deviates.
 
-**Gateware fix (small)**: in the walker ADSR's attack branch only,
+**Gateware fix (small)**: in the CSP ADSR's attack branch only,
 step RC-style toward peak — `level += (peak − level) >> n` with `n`
 from the rate byte — instead of the constant increment. In the log
 domain that yields fast-early/slow-late dB growth ≈ convex amplitude,
@@ -82,7 +82,7 @@ attack only.**
 | Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | CC 77 = val<<2 → max ±6 semitones, 4.7-cent steps | **F3** — neither fish nor fowl: too coarse at the bottom for vibrato, oddly capped for FX. Propose two-zone: 0–96 → 0–±100 cents (fine), 96–127 → to ±12 semi (FX). Or settle it inside the #92 matrix's per-destination depth scaling |
 | Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | temporary hardwire → cutoff | already noted → #92 |
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct | ✓ post-round-1 |
-| LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | note for the #92 rung — cheap as a walker ramp or firmware ramp on depth |
+| LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | note for the #92 rung — cheap as a CSP ramp or firmware ramp on depth |
 
 ## Status (end of 2026-09-10)
 

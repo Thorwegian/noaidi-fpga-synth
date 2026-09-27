@@ -94,11 +94,12 @@ never sees.
    timing rule, made structural.
    **Multi-source summing (resolved 2026-09-08, issue #84, Thor's
    steer: summing is default behaviour, no flags):** same-bus sources
-   allocated in CONSECUTIVE walker slots sum automatically — the
-   walker's write-back registers still hold the previous entry's
-   result when the current entry's sum is computed; a target-bus
-   comparator selects it as the addend instead of the firmware base
-   (one comparator + one mux, zero new state). Chains extend to any
+   allocated to the same target sum automatically — the sequencer
+   keeps a short history of completed results, and a target-bus
+   comparator selects the most recent match as the addend instead of
+   the target's initial value. Since #145 that history is three deep,
+   so sources sharing a target no longer have to sit in ADJACENT
+   slots: a chain tolerates gaps of up to three. Chains extend to any
    length. **Allocator rule** (companion to law 3's table order):
    group same-bus sources in adjacent slots; scattered same-bus
    sources remain last-write-wins. First user: LFO 2 → pitch, summing
@@ -194,11 +195,11 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   (the mixing-console aux send — the fabric's first PROCESSOR, vs
   the generators LFO/ADSR). A send entry is stateless: CFG names a
   SOURCE bus
-  (in the field the ADSR uses for its gate bus, so the walker's read
+  (in the field the ADSR uses for its gate bus, so the sequencer's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
   target like any source. Since 2026-09-11 (#92/#98) the read is of
-  the bus's **OUTPUT SUM** (`bus_sum_ram`, a walker-facing mirror
+  the bus's **OUTPUT SUM** (`bus_sum_ram`, a sequencer-facing mirror
   written by the same strobes as the replicas): firmware base plus
   every source contribution written so far — a send ordered after
   its sources relays them same-sample, which is what makes the node
@@ -211,7 +212,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   to 32 LFOs + sends + margin. One entry = type + config + state.
   Budget since #138: ONE cycle per instruction → 256 of the sample's
   768 cycles for a full 256-entry pass.
-- **Half-rate walker — APPROVED (Thor, 2026-09-11, #98), SUPERSEDED
+- **Half-rate sequencer — APPROVED (Thor, 2026-09-11, #98), SUPERSEDED
   by #138**: it walked alternate halves of the table each sample, so
   every source updated at 48 kHz effective, on Thor's reasoning that
   "any zipper noise will be at 24 kHz and thus likely inaudible,
@@ -273,9 +274,9 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   OSC-word writes.
   *Verification: velocity-to-loudness and velocity-to-brightness by
   ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
-- **B4 — Producer walker + LFO producer.** ✅ (2026-08-31, Thor: "it
+- **B4 — Producer sequencer + LFO producer.** ✅ (2026-08-31, Thor: "it
   works"). The idle-slot table executor: 128 producers × 2 words at
-  0x0100 (banked — wiring), stride-2 walk in ~256 idle slots, five
+  0x0100 (banked — wiring), stride-2 pass in ~256 idle slots, five
   overlapped stages with the one producer multiply in its own
   registered stage; osc_core reused for shapes. Bus = base RAM +
   producer contribution realized (bend and vibrato coexist on the

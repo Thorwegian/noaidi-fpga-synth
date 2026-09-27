@@ -147,7 +147,7 @@ module csp (
     // takes cannot make the second write repeat it.
     //
     // This does not weaken atomicity where it matters: the property we
-    // need is that the WALKER's sweep is seen as one complete
+    // need is that the SEQUENCER's pass is seen as one complete
     // generation. Firmware writes were always asynchronous and
     // mid-sample, before ping-pong and after it.
     logic dmem_commit_phase;

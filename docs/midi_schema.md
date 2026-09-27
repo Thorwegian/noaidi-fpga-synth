@@ -99,7 +99,7 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper (#94 — linear over the full span was 3 semitones/click): ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (authority rule #88). The walker DEPTH word is signed |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper (#94 — linear over the full span was 3 semitones/click): ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (authority rule #88). The CSP's DEPTH word is signed |
 | 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
 
 **LFOs** (2)
@@ -108,7 +108,7 @@ equal-ratio ladder.
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
 | 77 | LFO 1 depth | standard "vibrato depth" |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
-| 114 | LFO 1 destination | DEFERRED to the mod matrix — LFO 1 is the pitch vibrato (one producer per bus in the walker) |
+| 114 | LFO 1 destination | DEFERRED to the mod matrix — LFO 1 is the pitch vibrato (one producer per bus in the CSP) |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
 | 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance and cutoff `val<<5` (up to ~±4 oct), pitch `val<<2` |
 | 111 | LFO 2 shape | discrete, `val >> 5` |

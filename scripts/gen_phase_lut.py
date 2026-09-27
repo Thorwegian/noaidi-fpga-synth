@@ -16,7 +16,7 @@ def midiToHz(note):
 
 script_dir = Path(__file__).resolve().parent
 
-file_path = script_dir / "../rtl/element/phase_lut.hex"
+file_path = script_dir / "../rtl/dsp/phase_lut.hex"
 
 with open(file_path, "w") as file:
     # plain range instead of numpy.arange (same doubles: start + i*step)

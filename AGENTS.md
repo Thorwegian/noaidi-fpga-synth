@@ -342,7 +342,7 @@ FIFO recenters every ~1.65 s as periodic clicking (#86).
 - `rtl/drum.sv`: sole timebase. 10-bit slot counter, 768 sysclk = 1 sample
   (96 kHz at 73.728 MHz), SPDIF cell every 6 slots. `sample_tick` at slot 0,
   `lane_enter` slots 0..255.
-- `rtl/element/element_pipeline.sv`: 16 stages × 256 elements, one per cycle:
+- `rtl/dsp/element_pipeline.sv`: 16 stages × 256 elements, one per cycle:
   S1 state/param RAM read → S2 LUT reads → S3 oscillator → S3B K-shift (timing
   split) → S4–S6 SVF1 (S5B) → S7–S9 SVF2 (S8B) → S9B gain decode → S10
   attenuation multiply → S11 mix accumulate + writeback.
@@ -358,7 +358,7 @@ FIFO recenters every ~1.65 s as periodic clicking (#86).
 - Outputs: `i2s_tx.sv` = I2S master (BCLK sysclk/16, LRCLK /64), latches on
   `sample_tick`. `spdif_tx.sv` consumes `sample_tick`. `audio_clock.sv` deleted
   (timing in drum + i2s_tx).
-- Boot image: `scripts/gen_boot_image.py` → `element/boot_p{0..3}.hex`
+- Boot image: `scripts/gen_boot_image.py` → `dsp/boot_p{0..3}.hex`
   (C-major chord, 32 notes × 8 unison, hard-panned by unison index with
   inter-channel detune, −36 dB/voice). Parameters then live over SPI
   (write-shadow + bank swap).

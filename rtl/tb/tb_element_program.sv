@@ -207,7 +207,7 @@ module tb_element_program;
         end else
             $display("gain restored: peak=%0d", peak);
 
-        // ---- LFO walker + ADSR (bench D phases) ---------------------
+        // ---- LFO + ADSR instructions (bench D phases) ---------------
         spi_word_write(src_addr(0, 0), SRC_LFO_TREMOLO);
         spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
         flip;

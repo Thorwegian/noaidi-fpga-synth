@@ -61,7 +61,7 @@ module osc_core (
     // (A real parabolic waveform returns as its own type in #66.)
     //----------------------------------------------------------------
     reg [23:0] sine_lut [0:255];
-    initial $readmemh("element/sine_lut.hex", sine_lut);
+    initial $readmemh("dsp/sine_lut.hex", sine_lut);
 
     logic [1:0]  quadrant;
     logic [7:0]  q_idx;

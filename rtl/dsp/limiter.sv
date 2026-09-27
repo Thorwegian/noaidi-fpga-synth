@@ -48,8 +48,8 @@ module limiter #(
     reg [3:0]  log_lut [0:15];
     reg [16:0] att_lut [0:15];
     initial begin
-        $readmemh("element/log_lut.hex", log_lut);
-        $readmemh("element/att_lut.hex", att_lut);
+        $readmemh("dsp/log_lut.hex", log_lut);
+        $readmemh("dsp/att_lut.hex", att_lut);
     end
 
     // ---- S1a: octave = index of the leading 1 ----
