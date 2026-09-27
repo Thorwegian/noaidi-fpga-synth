@@ -24,7 +24,7 @@ from pathlib import Path
 N = 256
 FRAC = 16
 
-out = Path(__file__).resolve().parent / "../rtl/element/recip_lut.hex"
+out = Path(__file__).resolve().parent / "../rtl/dsp/recip_lut.hex"
 with open(out, "w") as f:
     for i in range(N):
         D = 1.0 + (i + 0.5) / N

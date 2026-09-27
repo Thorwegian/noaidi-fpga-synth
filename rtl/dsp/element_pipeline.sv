@@ -59,10 +59,10 @@ module element_pipeline #(
     // images; testbenches override with rtl/tb/ref_boot_* (committed
     // fixtures) so bench expectations never depend on bench-local
     // experiments in scripts/gen_boot_image.py.
-    parameter P0_HEX = "element/boot_p0.hex",
-    parameter P1_HEX = "element/boot_p1.hex",
-    parameter P2_HEX = "element/boot_p2.hex",
-    parameter P3_HEX = "element/boot_p3.hex"
+    parameter P0_HEX = "dsp/boot_p0.hex",
+    parameter P1_HEX = "dsp/boot_p1.hex",
+    parameter P2_HEX = "dsp/boot_p2.hex",
+    parameter P3_HEX = "dsp/boot_p3.hex"
 ) (
     input  logic           clk,
     input  logic           rst_n,
@@ -136,11 +136,11 @@ module element_pipeline #(
                                        // attenuation, UQ0.16 (dual)
 
     initial begin
-        $readmemh("element/phase_lut.hex", phase_lut);
-        $readmemh("element/svf_k_lut.hex", k_lut);
-        $readmemh("element/q1_lut.hex", q1_lut);
-        $readmemh("element/att_lut.hex", att_lut);
-        $readmemh("element/reso_att_lut.hex", reso_att_lut);
+        $readmemh("dsp/phase_lut.hex", phase_lut);
+        $readmemh("dsp/svf_k_lut.hex", k_lut);
+        $readmemh("dsp/q1_lut.hex", q1_lut);
+        $readmemh("dsp/att_lut.hex", att_lut);
+        $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
     end
 
     //----------------------------------------------------------------
@@ -716,7 +716,7 @@ module element_pipeline #(
     //   g = k>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
     //   Streaming, latency 17; states/phase/gains carried through.
-    //   See rtl/element/svf_tpt.sv.
+    //   See rtl/dsp/svf_tpt.sv.
     //----------------------------------------------------------------
     wire               s9_act;
     wire [VW-1:0]      s9_idx;

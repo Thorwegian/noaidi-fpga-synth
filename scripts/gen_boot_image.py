@@ -4,7 +4,7 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-# Writes (into rtl/element/):
+# Writes (into rtl/dsp/):
 #   boot_p0.hex .. boot_p3.hex — per-element parameter RAM init
 #
 # (The attenuation LUT lives in gen_att_lut.py — it is a fixed synth
@@ -35,7 +35,7 @@ NUM_ELEMENTS = 256
 UNISON = 8
 POLYPHONY = 32
 
-out_dir = Path(__file__).resolve().parent.parent / "rtl" / "element"
+out_dir = Path(__file__).resolve().parent.parent / "rtl" / "dsp"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------

@@ -8,12 +8,12 @@ TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
-	drum.sv \
-	output_tilt.sv \
-	limiter.sv \
-	element/element_pipeline.sv csp.sv \
-	element/svf_tpt.sv \
-	element/osc_core.sv \
+	dsp/drum.sv \
+	dsp/output_tilt.sv \
+	dsp/limiter.sv \
+	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
+	dsp/svf_tpt.sv \
+	dsp/osc_core.sv \
 	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
 	i2s/i2s_tx.sv
@@ -22,46 +22,46 @@ SRC = $(PKG) $(MOD) constraints.cst
 
 # Generated LUTs / boot image
 LUTS = \
-	element/phase_lut.hex \
-	element/svf_k_lut.hex \
-	element/q1_lut.hex \
-	element/recip_lut.hex \
-	element/att_lut.hex \
-	element/log_lut.hex \
-	element/reso_att_lut.hex \
-	element/sine_lut.hex \
-	element/boot_p0.hex \
-	element/boot_p1.hex \
-	element/boot_p2.hex \
-	element/boot_p3.hex
+	dsp/phase_lut.hex \
+	dsp/svf_k_lut.hex \
+	dsp/q1_lut.hex \
+	dsp/recip_lut.hex \
+	dsp/att_lut.hex \
+	dsp/log_lut.hex \
+	dsp/reso_att_lut.hex \
+	dsp/sine_lut.hex \
+	dsp/boot_p0.hex \
+	dsp/boot_p1.hex \
+	dsp/boot_p2.hex \
+	dsp/boot_p3.hex
 
 all: pack.fs
 
-element/phase_lut.hex: ../scripts/gen_phase_lut.py
+dsp/phase_lut.hex: ../scripts/gen_phase_lut.py
 	python3 $<
 
-element/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+dsp/svf_k_lut.hex: ../scripts/gen_svf_lut.py
 	python3 $<
 
-element/q1_lut.hex: ../scripts/gen_q1_lut.py
+dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
-element/recip_lut.hex: ../scripts/gen_recip_lut.py
+dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
-element/att_lut.hex: ../scripts/gen_att_lut.py
+dsp/att_lut.hex: ../scripts/gen_att_lut.py
 	python3 $<
 
-element/log_lut.hex: ../scripts/gen_log_lut.py
+dsp/log_lut.hex: ../scripts/gen_log_lut.py
 	python3 $<
 
-element/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
+dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
-element/sine_lut.hex: ../scripts/gen_sine_lut.py
+dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 	python3 $<
 
-element/boot_p%.hex: ../scripts/gen_boot_image.py
+dsp/boot_p%.hex: ../scripts/gen_boot_image.py
 	python3 $<
 
 yosys.json: $(SRC) $(LUTS) Makefile
@@ -136,7 +136,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) drum.sv limiter.sv element/element_pipeline.sv csp.sv element/svf_tpt.sv element/osc_core.sv
+SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
@@ -149,7 +149,7 @@ tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
 sim-elem: tb/tb_element_pipeline.vvp
 	vvp tb/tb_element_pipeline.vvp > tb/sim-elem.out 2>&1
 
-SIM_OUT_MOD = $(PKG) drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
+SIM_OUT_MOD = $(PKG) dsp/drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
 TB_OUT = tb/tb_outputs.sv
 
 tb/tb_outputs.vvp: $(SIM_OUT_MOD) $(TB_OUT) Makefile
@@ -159,8 +159,8 @@ sim-outputs: tb/tb_outputs.vvp
 	vvp tb/tb_outputs.vvp > tb/sim-outputs.out 2>&1
 
 TB_SPDIF = tb/tb_spdif_block.sv
-tb/tb_spdif_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	iverilog -g2012 -o $@ $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
+tb/tb_spdif_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
+	iverilog -g2012 -o $@ $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
@@ -168,8 +168,8 @@ sim-spdif: tb/tb_spdif_block.vvp
 # 48 kHz test transmitter (#101): drum's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
-tb/tb_spdif48_block.vvp: $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
-	iverilog -g2012 -o $@ $(PKG) drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+tb/tb_spdif48_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
+	iverilog -g2012 -o $@ $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
 
 sim-spdif48: tb/tb_spdif48_block.vvp
 	vvp tb/tb_spdif48_block.vvp > tb/sim-spdif48.out 2>&1
@@ -217,8 +217,8 @@ sim-prog-limiter: tb/tb_prog_limiter.vvp
 
 # #136: the CSP alone -- seconds, not minutes, because it does
 # not elaborate the SVF, the oscillators or the limiter.
-tb/tb_csp.vvp: $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv Makefile
-	iverilog -g2012 -I. -o $@ $(PKG) csp.sv element/osc_core.sv tb/tb_csp.sv
+tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
+	iverilog -g2012 -I. -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv
 
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
@@ -260,8 +260,8 @@ sim-svfmod: tb/tb_svf_modulation.vvp
 # Output tilt error feedback (#102): exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_TILT = tb/tb_tilt.sv
-tb/tb_tilt.vvp: output_tilt.sv $(TB_TILT) Makefile
-	iverilog -g2012 -o $@ output_tilt.sv $(TB_TILT)
+tb/tb_tilt.vvp: dsp/output_tilt.sv $(TB_TILT) Makefile
+	iverilog -g2012 -o $@ dsp/output_tilt.sv $(TB_TILT)
 
 sim-tilt: tb/tb_tilt.vvp
 	vvp tb/tb_tilt.vvp > tb/sim-tilt.out 2>&1
@@ -269,8 +269,8 @@ sim-tilt: tb/tb_tilt.vvp
 # Oscillator waveform shapes + pulse duty response (osc_core in
 # isolation — the coverage gap behind the issue #70 waveform reports).
 TB_OSC = tb/tb_osc_core.sv
-tb/tb_osc_core.vvp: element/osc_core.sv $(TB_OSC) element/sine_lut.hex Makefile
-	iverilog -g2012 -o $@ element/osc_core.sv $(TB_OSC)
+tb/tb_osc_core.vvp: dsp/osc_core.sv $(TB_OSC) dsp/sine_lut.hex Makefile
+	iverilog -g2012 -o $@ dsp/osc_core.sv $(TB_OSC)
 
 sim-osc: tb/tb_osc_core.vvp
 	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
@@ -278,8 +278,8 @@ sim-osc: tb/tb_osc_core.vvp
 # Log-domain limiter unit bench (#121): the per-step function in
 # isolation -- transparency, proportional attack, release, saturation.
 TB_LIM = tb/tb_limiter.sv
-tb/tb_limiter.vvp: limiter.sv $(TB_LIM) element/log_lut.hex element/att_lut.hex Makefile
-	iverilog -g2012 -o $@ limiter.sv $(TB_LIM)
+tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Makefile
+	iverilog -g2012 -o $@ dsp/limiter.sv $(TB_LIM)
 
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
@@ -295,4 +295,4 @@ sim: sim-csp sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-sp
 	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out tb/sim-limiter.out
 
 clean:
-	rm -rf *.log *.json *.fs element/svf_k_lut.hex
+	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex

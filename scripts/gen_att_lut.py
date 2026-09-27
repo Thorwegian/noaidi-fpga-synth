@@ -13,7 +13,7 @@
 
 from pathlib import Path
 
-out_dir = Path(__file__).resolve().parent.parent / "rtl" / "element"
+out_dir = Path(__file__).resolve().parent.parent / "rtl" / "dsp"
 
 with open(out_dir / "att_lut.hex", "w") as f:
     for i in range(16):

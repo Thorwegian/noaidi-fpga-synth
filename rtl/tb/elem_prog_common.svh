@@ -123,16 +123,17 @@ localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 // source-table words, composed from the CFG/RATES/DEPTH fields
 // (memory_map.md) instead of opaque hex
 localparam [31:0] SRC_OFF         = 32'h0;
+// opcodes are bitmasks since #145: OPC_LFO/ADSR/SEND in synth_pkg
 localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
-    32'd1 | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
-          | (32'd32768 << 16);                      // 93.75 Hz at the
-                                                    // 48 kHz walk (#100)
+    32'hE | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
+          | (32'd32768 << 16);                      // 93.75 Hz -- unchanged
+                                                    // by the full-rate move
 localparam [31:0] SRC_ADSR_BUS3_GATE5 =
-    32'd2 | (32'd3 << 6) | (32'd5 << 16);           // ADSR type
+    32'hF | (32'd3 << 6) | (32'd5 << 16);           // envelope: state+gate
 localparam [31:0] SRC_BUS3_FROM6 =                  // SEND (#44/#98):
-    32'd3 | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
+    32'hD | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
 localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
-    32'd1 | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
+    32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
 localparam [31:0] BENCH_ADSR_RATES = 32'hF4F000F0;  // fast sim rates
 localparam [31:0] DEPTH_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
 localparam [31:0] DEPTH_HALF  = 32'h00008000;       // 0.5

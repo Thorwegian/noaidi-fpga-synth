@@ -52,7 +52,7 @@ def raw_pole2(q1_16):
         if a>pk: pk=a
     return pk
 RAW_TARGET=5.5; N=64
-out=Path(__file__).resolve().parent/"../rtl/element/reso_att_lut.hex"
+out=Path(__file__).resolve().parent/"../rtl/dsp/reso_att_lut.hex"
 with open(out,"w") as f:
     for i in range(N):
         eff=min((i<<8)+128,0x3FFF)

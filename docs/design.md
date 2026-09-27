@@ -50,12 +50,12 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
 - **Generators vs processors** (Thor, 2026-09-11, blessed):
   GENERATORS output signal without signal inputs (LFO: no inputs;
   ADSR: one gate input only). PROCESSORS take signal in and put
-  signal out. The first processor is the **SEND** (walker type 3) —
+  signal out. The first processor is the **SEND** (opcode `0xD`) —
   the mixing-console aux send: taps a bus's signal, applies a level
   (DEPTH; sign = polarity flip), routes into another bus's sum.
   C = A·x + B·y is two sends sharing a target bus.
 - **The fabric IS a node graph** (Thor + agent, 2026-09-11): a bus
-  is a processor with many sinks summed to one source; the walker
+  is a processor with many sinks summed to one source; the instruction
   table is a topological sort (the allocator owns the order), one
   evaluation pass per sample; "no cycles, ever" keeps it a DAG. The
   hardware bus/processor distinction is an optimization of the
@@ -281,7 +281,7 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 **Codified as [bus_architecture.md](bus_architecture.md)**
 (2026-08-30) — the spec with justifications, rejected alternatives,
 sizing and build milestones B0–B6. **Built**: B1–B5 ear-verified and
-merged (buses, all sinks, firmware routes, LFO walker, per-voice
+merged (buses, all sinks, firmware routes, LFO instructions, per-voice
 ADSRs), plus log-domain Q (approved 2026-09-03).
 
 As built, in brief: elements are dumb sinks — waveform, filter type,
@@ -302,7 +302,7 @@ live in git history rather than here). Still genuinely open, kept
 from the old notes: the shared per-element configuration table (the
 deliberately unnamed) for one-to-many wiring changes. The combiner
 source type was BUILT 2026-09-10 as Thor's simpler reframing —
-"a bus is already a combiner of sources" — walker type 3, bus-as-
+"a bus is already a combiner of sources" — opcode `0xD`, bus-as-
 source (#44, bus_architecture.md); first real use is the channel
 cutoff bus fanning out to the per-voice buses.
 
@@ -394,7 +394,7 @@ bench-verified) milestone. One rung in flight at a time.
    [bus_architecture.md](bus_architecture.md): spec sign-off →
    cutoff-class pilot → all sinks → firmware-routed buses (velocity →
    gain/cutoff, bend → pitch; Thor: basic routing before ADSR) →
-   producer walker + LFOs → ADSR producers (where note clicks die,
+   producer sequencer + LFOs → ADSR producers (where note clicks die,
    absorbing the old smoothing rung's goal) → deferred tier on
    measured traffic.
    ADSR/LFO/routes/smoothing rungs from earlier drafts fold into it.

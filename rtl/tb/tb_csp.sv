@@ -72,7 +72,10 @@ module tb_csp;
         repeat (4) @(posedge clk); rst_n = 1;
         repeat (CYC) @(posedge clk);
 
-        // 1. generation cadence: one flip per sequencer pass (two samples)
+        // 1. generation cadence: one flip per sequencer pass. Since #138 a
+        //    pass is 256 instructions x 1 cycle = 256 cycles, so it completes
+        //    inside ONE sample and the cadence is one flip per sample. Before
+        //    #138 the sequencer was half-rate (#100) and a pass spanned two.
         toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
@@ -80,8 +83,8 @@ module tb_csp;
             gen_prev = dut.dmem_gen;
             if (sample_tick) ticks = ticks + 1;
         end
-        if (toggles !== ticks/2) begin
-            $display("FAIL: %0d toggles over %0d samples, want %0d", toggles, ticks, ticks/2);
+        if (toggles !== ticks) begin
+            $display("FAIL: %0d toggles over %0d samples, want %0d", toggles, ticks, ticks);
             errors = errors + 1;
         end else
             $display("gen cadence: %0d toggles / %0d samples", toggles, ticks);

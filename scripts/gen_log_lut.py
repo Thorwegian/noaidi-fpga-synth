@@ -14,7 +14,7 @@
 from pathlib import Path
 import math
 
-out = Path(__file__).resolve().parent.parent / "rtl" / "element" / "log_lut.hex"
+out = Path(__file__).resolve().parent.parent / "rtl" / "dsp" / "log_lut.hex"
 with open(out, "w") as f:
     for m in range(16):
         v = min(15, round(16 * math.log2(1 + m / 16)))

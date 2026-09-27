@@ -71,8 +71,8 @@ module tb_element_pipeline;
         $readmemh("tb/ref_boot_p0.hex", p0);
         $readmemh("tb/ref_boot_p2.hex", p2);
         $readmemh("tb/ref_boot_p3.hex", p3);
-        $readmemh("element/phase_lut.hex", pl);
-        $readmemh("element/att_lut.hex", al);
+        $readmemh("dsp/phase_lut.hex", pl);
+        $readmemh("dsp/att_lut.hex", al);
     end
 
     //----------------------------------------------------------------

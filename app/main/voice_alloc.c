@@ -459,7 +459,7 @@ static uint16_t lfo_rate_from_cc(uint8_t val)
 static void update_lfo1(void)
 {
     engine_link_prod_write(0, 0,
-        1u | ((uint32_t)(g_patch.lfo[0].shape & 3) << 4)
+        CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[0].shape & 3) << 4)
            | ((uint32_t)BUS_PITCH_GLOBAL << 6)
            | ((uint32_t)g_patch.lfo[0].rate << 16));
     engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
@@ -493,7 +493,7 @@ static void update_lfo2(void)
         prev_bus = bus;
     }
     engine_link_prod_write(PROD_LFO2, 0,
-        1u | ((uint32_t)(g_patch.lfo[1].shape & 3) << 4)
+        CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[1].shape & 3) << 4)
            | ((uint32_t)bus << 6)
            | ((uint32_t)g_patch.lfo[1].rate << 16));
     engine_link_prod_write(PROD_LFO2, 2,
@@ -515,7 +515,7 @@ static void update_mod_env(void)
     uint32_t depth = (uint32_t)(int32_t)g_patch.env1_depth & 0x3FFFF;
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_MODENV(v), 0,
-            2u | ((uint32_t)BUS_CUT(v) << 6)
+            CSP_OPC_ADSR | ((uint32_t)BUS_CUT(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_MODENV(v), 1, rates);
         engine_link_prod_write(PROD_MODENV(v), 2, depth);
@@ -580,16 +580,16 @@ static void refresh_cut_buses(void)
     engine_link_bus_write(BUS_CH_CUT, ch_cut_value());
 }
 
-// Boot wiring for the fan-out (#44): 32 stateless type-3 sources,
+// Boot wiring for the fan-out (#44): 32 stateless SEND sources,
 // entry PROD_FANOUT(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
 // slot adjacent to its voice's MOD env (same target bus — #84 chain
 // summing requires consecutive slots). Word 1 (RATES) is meaningless
-// for type 3.
+// for a SEND.
 static void init_fanout_sources(void)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_FANOUT(v), 0,
-            3u | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
+            CSP_OPC_SEND | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
         engine_link_prod_write(PROD_FANOUT(v), 2, 0x10000u);   // unity
     }
 }
@@ -1023,7 +1023,7 @@ void voice_alloc_init(void)
     // live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_ADSR(v), 0,
-            2u | ((uint32_t)BUS_GAIN(v) << 6)
+            CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word(&g_patch.env[0]));
         engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);

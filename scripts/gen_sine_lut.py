@@ -34,7 +34,7 @@ ENTRIES = 256
 PEAK = (1 << 23) - 1
 
 script_dir = Path(__file__).resolve().parent
-file_path = script_dir / "../rtl/element/sine_lut.hex"
+file_path = script_dir / "../rtl/dsp/sine_lut.hex"
 
 with open(file_path, "w") as f:
     for i in range(ENTRIES):
