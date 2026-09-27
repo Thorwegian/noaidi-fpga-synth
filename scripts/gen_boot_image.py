@@ -35,7 +35,7 @@ NUM_ELEMENTS = 256
 UNISON = 8
 POLYPHONY = 32
 
-out_dir = Path(__file__).resolve().parent.parent / "rtl" / "element"
+out_dir = Path(__file__).resolve().parent.parent / "rtl" / "dsp"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------
