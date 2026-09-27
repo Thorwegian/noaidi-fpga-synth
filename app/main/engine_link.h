@@ -86,6 +86,18 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
                                     // entries 0..127 = half A,
                                     // 128..255 = half B; a chain must
                                     // live within one half
+// CSP opcode = CFG[3:0], a BITMASK of enables since #145, not an enum:
+//   bit 0 reads a source operand      bit 2 multiplies by DEPTH
+//   bit 1 has persistent state        bit 3 accumulates onto the target
+// An envelope is the instruction that watches a gate, so state+source means
+// envelope and state alone means phase accumulator. These must match
+// synth_pkg.sv's OPC_* exactly -- a stale value here is silent: the gateware
+// decodes it as some other instruction rather than rejecting it.
+#define CSP_OPC_OFF   0x0u
+#define CSP_OPC_LFO   0xEu   // state + multiply + accumulate
+#define CSP_OPC_ADSR  0xFu   // source (gate) + state + multiply + accumulate
+#define CSP_OPC_SEND  0xDu   // source + multiply + accumulate
+
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
 // Total dropped commands (queue-full across all engine queues). A
