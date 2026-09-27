@@ -11,7 +11,7 @@ MOD = \
 	dsp/drum.sv \
 	dsp/output_tilt.sv \
 	dsp/limiter.sv \
-	dsp/element_pipeline.sv dsp/csp.sv \
+	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
 	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
@@ -136,7 +136,7 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
-SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/svf_tpt.sv dsp/osc_core.sv
+SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
@@ -217,8 +217,8 @@ sim-prog-limiter: tb/tb_prog_limiter.vvp
 
 # #136: the CSP alone -- seconds, not minutes, because it does
 # not elaborate the SVF, the oscillators or the limiter.
-tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
-	iverilog -g2012 -I. -o $@ $(PKG) dsp/csp.sv dsp/osc_core.sv tb/tb_csp.sv
+tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
+	iverilog -g2012 -I. -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv
 
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1

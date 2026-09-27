@@ -249,16 +249,12 @@ module csp (
     // sine's internal multiply and the instruction multiply fed by registers
     // only.
     //
-    // ADSR state word: [28:27] stage (0 idle, 1 attack, 2 decay/sustain,
-    // 3 release), [26:0] level in UQ22.5. Gate is LEVEL-sensitive on the
-    // watched bus (> 0 = held), so note-on/off is one live bus write.
-    //
-    // FIVE fractional bits since #138, not four. A pass runs every sample
-    // now instead of every other one, so an unchanged step would have halved
-    // every envelope time. One more fractional bit restores the wall-clock
-    // rate exactly while keeping all 256 codes distinct -- halving the
-    // decoded step instead would collide codes in pairs at high4 = 0 and
-    // break the equal-ratio ladder.
+    // ADSR state word: [27:26] stage, [25:0] level in UQ12.14 -- the RC
+    // envelope's format (#127), now living in dsp/adsr.sv. The envelope is
+    // the one instruction with a real state machine, so it is its own module
+    // (Thor, #146); the LFO is an adder and the SEND is a wire, and both stay
+    // here. An LFO uses [24:0] as its phase accumulator and leaves [27:25]
+    // alone, so the two never collide -- an instruction is one or the other.
     //----------------------------------------------------------------
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
@@ -285,7 +281,7 @@ module csp (
     // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
     // cc << 1). The fractional bits ARE the "binary point moved four
     // left" — in the accumulator, where it belongs.
-    reg [28:0] istate [0:synth_pkg::NUM_INSTR-1];
+    reg [27:0] istate [0:synth_pkg::NUM_INSTR-1];
     integer wi;
     initial begin
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
@@ -294,7 +290,7 @@ module csp (
             imem_depth[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
-            istate[wi] = 29'd0;
+            istate[wi] = 28'd0;
     end
 
     // Route the word to its RAM by the low address bits. Same wire format.
@@ -371,7 +367,7 @@ module csp (
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
     logic [31:0] cfg_q, rate_q, depth_q;
-    logic [28:0] istate_q;
+    logic [27:0] istate_q;
     logic signed [17:0] gate_q, src_q, base_q;
     logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
     logic        d_valid;
@@ -390,8 +386,9 @@ module csp (
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_lfo_rate;
+    logic        r_sus_log;      // CFG[26]: sustain decoded log or linear
     logic [31:0] r_rate, r_depth;
-    logic [28:0] r_istate;
+    logic [27:0] r_istate;
 
     // ---- R stage registers ---------------------------------------------
     logic        x_valid;
@@ -402,17 +399,19 @@ module csp (
     wire x_acc_en = x_opcode[synth_pkg::OPC_ACCUM];
     wire x_is_lfo = x_st_en && !x_opcode[synth_pkg::OPC_SOURCE];
     logic [9:0]  x_dest;
-    logic [28:0] x_istate;
+    logic [27:0] x_istate;
     logic signed [17:0] x_operand, x_depth, x_base;
-    logic        x_gate;
     logic [15:0] x_lfo_rate;
-    logic [20:0] x_attack_step, x_decay_step, x_release_step;
-    logic [26:0] x_sustain_target;
 
     // ---- X stage registers ---------------------------------------------
     logic        a_valid;
     logic        a_acc_en;
     logic [9:0]  a_dest;
+    // the state write rides to A so the envelope's two-cycle result and the
+    // LFO's one-cycle accumulate land together, from one port
+    logic        a_st_en, a_is_lfo;
+    logic [7:0]  a_st_pc;
+    logic [27:0] a_lfo_next;
     logic signed [17:0] a_base;
     logic signed [35:0] a_product;
 
@@ -466,6 +465,22 @@ module csp (
         : (h2_valid && h2_addr == r_src) ? h2_value
         :                                  src_q;
 
+    // ---- the envelope, in its own module ---------------------------------
+    // Fed at R from registers; its state_out lands two cycles later, at A.
+    wire signed [17:0] adsr_level;
+    wire [27:0]        adsr_state_out;
+    adsr u_adsr (
+        .clk(clk), .rst_n(rst_n),
+        .step_en   (r_valid && r_is_env),
+        .state_in  (r_istate),
+        .gate      (gate_q > 18'sd0),
+        .rates     (r_rate),
+        .sus_log   (r_sus_log),
+        .level_out (adsr_level),
+        .state_out (adsr_state_out),
+        .state_we  ()                  // the CSP tracks validity itself
+    );
+
     // LFO waveform on the registered phase (law 1: registered operands).
     // Named wire: a $signed() cast in the port connection crashes yosys's
     // genrtlil signedness assert.
@@ -480,34 +495,16 @@ module csp (
         .sample_out (lfo_wave)
     );
 
-    // next state, from X-stage registers only
-    wire [1:0]  adsr_stage_prev = x_istate[28:27];
-    wire [26:0] adsr_level_prev = x_istate[26:0];
-    logic [28:0] istate_next;
-    always_comb begin
-        if (x_is_lfo) begin
-            // free-running phase accumulator in [24:0]
-            istate_next = {x_istate[28:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
-        end else if (!x_gate) begin
-            istate_next = (adsr_level_prev > {6'b0, x_release_step})
-                ? {AST_REL, adsr_level_prev - 27'(x_release_step)}
-                : {AST_IDLE, 27'd0};
-        end else begin
-            case (adsr_stage_prev)
-                AST_ATT: istate_next =
-                    ({1'b0, adsr_level_prev} + 28'(x_attack_step) > 28'h7FFFFFF)
-                        ? {AST_DEC, 27'h7FFFFFF}
-                        : {AST_ATT, adsr_level_prev + 27'(x_attack_step)};
-                AST_DEC: istate_next =
-                    (adsr_level_prev > x_sustain_target + 27'(x_decay_step))
-                        ? {AST_DEC, adsr_level_prev - 27'(x_decay_step)}
-                        : (adsr_level_prev > x_sustain_target)
-                              ? {AST_DEC, x_sustain_target}
-                              : {AST_DEC, adsr_level_prev};
-                default: istate_next = {AST_ATT, adsr_level_prev};
-            endcase
-        end
-    end
+    // the LFO's next phase: a plain accumulate, so it needs no stage of
+    // its own. The envelope's next state comes out of u_adsr, two cycles
+    // after its inputs, which is why both are written at the accumulate
+    // stage rather than here.
+    logic [27:0] lfo_next;
+    always_comb
+        // free-running phase accumulator in [24:0]; the extra low bit is the
+        // fractional half-step that keeps the frequency unchanged now that a
+        // pass runs every sample (#145)
+        lfo_next = {x_istate[27:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
 
     //----------------------------------------------------------------
     // The pipeline.
@@ -520,12 +517,12 @@ module csp (
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
             r_src <= '0; r_lfo_rate <= '0; r_rate <= '0; r_depth <= '0;
-            r_istate <= '0;
+            r_istate <= '0; r_sus_log <= 1'b0;
             x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_istate <= '0;
-            x_operand <= '0; x_depth <= '0; x_base <= '0; x_gate <= 1'b0;
-            x_lfo_rate <= '0; x_attack_step <= '0; x_decay_step <= '0;
-            x_release_step <= '0; x_sustain_target <= '0;
+            x_operand <= '0; x_depth <= '0; x_base <= '0;
+            x_lfo_rate <= '0;
             a_dest <= '0; a_base <= '0; a_product <= '0; a_acc_en <= 1'b0;
+            a_st_en <= 1'b0; a_is_lfo <= 1'b0; a_st_pc <= '0; a_lfo_next <= '0;
             wb_addr <= '0; wb_value <= '0;
             h1_addr <= '0; h1_value <= '0; h2_addr <= '0; h2_value <= '0;
         end else begin
@@ -541,6 +538,8 @@ module csp (
             r_dest     <= cfg_q[15:6];
             r_src      <= cfg_q[25:16];
             r_lfo_rate <= cfg_q[31:16];
+            // An ADSR uses CFG[25:16] as its gate bus, so bit 26 is free.
+            r_sus_log  <= cfg_q[26];
             r_rate     <= rate_q;
             r_depth    <= depth_q;
             r_istate   <= istate_q;
@@ -553,23 +552,19 @@ module csp (
             x_istate  <= r_istate;
             x_base    <= base_q;
             x_depth   <= $signed(r_depth[17:0]);
-            x_gate    <= (gate_q > 18'sd0);
             x_lfo_rate <= r_lfo_rate;
-            // Increment is (16 + low4) << high4 in 1/16-LSB units -- one
-            // uniform expression, no truncating right shift, so all 256
-            // codes are distinct equal-ratio steps of a log2 ladder.
-            x_attack_step    <= (21'd16 + 21'(r_rate[3:0]))   << r_rate[7:4];
-            x_decay_step     <= (21'd16 + 21'(r_rate[11:8]))  << r_rate[15:12];
-            x_sustain_target <= {r_rate[23:16], 19'b0};
-            x_release_step   <= (21'd16 + 21'(r_rate[27:24])) << r_rate[31:28];
             x_operand <= r_is_lfo ? lfo_wave
-                       : r_is_env ? $signed({2'b0, r_istate[26:11]})
+                       : r_is_env ? adsr_level
                        :            send_src;
 
             // X -> A: the multiply, registered operands, alone in its stage
-            a_valid   <= x_valid;
-            a_acc_en  <= x_acc_en;
-            a_dest    <= x_dest;
+            a_valid    <= x_valid;
+            a_acc_en   <= x_acc_en;
+            a_dest     <= x_dest;
+            a_st_en    <= x_valid && x_st_en;
+            a_is_lfo   <= x_is_lfo;
+            a_st_pc    <= x_pc;
+            a_lfo_next <= lfo_next;
             a_base    <= x_base;
             a_product <= x_mul_en ? (x_operand * x_depth)
                                   : $signed({{2{x_operand[17]}}, x_operand, 16'd0});
@@ -601,9 +596,11 @@ module csp (
         base_q   <= dmem_init[cfg_q[15:6]];    // the target's initial value
     end
 
+    // one write port, two producers: the LFO's accumulate and the
+    // envelope's recurrence, both valid at A for the same instruction
     always_ff @(posedge clk)
-        if (x_valid && x_st_en)
-            istate[x_pc] <= istate_next;
+        if (a_st_en)
+            istate[a_st_pc] <= a_is_lfo ? a_lfo_next : adsr_state_out;
 
     //----------------------------------------------------------------
     // Sink read ports. One BSRAM read port per replica, addressed by
