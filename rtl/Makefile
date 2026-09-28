@@ -234,6 +234,26 @@ tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefi
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
 
+# #147 benches. All of these elaborate the CSP alone, like tb_csp.
+CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
+
+# The two soaks that eliminated the envelope logic and the real program mix.
+# STANDALONE, not in the default gate: both came back clean, so they carry no
+# coverage the gate lacks, and tb_prog_soak's 4000 samples would add minutes to
+# every run. Kept because re-running them is how you re-check that those two
+# candidates are still dead.
+tb/tb_adsr_soak.vvp: $(CSP_SIM) tb/tb_adsr_soak.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv
+
+sim-adsr-soak: tb/tb_adsr_soak.vvp
+	vvp tb/tb_adsr_soak.vvp
+
+tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_prog_soak.sv
+
+sim-prog-soak: tb/tb_prog_soak.vvp
+	vvp tb/tb_prog_soak.vvp
+
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
