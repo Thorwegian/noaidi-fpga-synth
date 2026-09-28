@@ -55,7 +55,13 @@ module csp (
     output logic signed [17:0] rd_gl_d,
     output logic signed [17:0] rd_gr_d,
 
-    output logic        test_tone_en
+    output logic        test_tone_en,
+
+    // #147 instrumentation: sticky, because the event is rare
+    output logic        dbg_retrig,      // gated envelope DECAY -> ATTACK
+    output logic        dbg_armed,       // a gated envelope was stepped at all
+    output logic        dbg_slot_hi,     // offender was slot >= 64
+    output logic        dbg_slot_amp     // offender was slot 32..63
 );
     //----------------------------------------------------------------
     // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
@@ -152,12 +158,34 @@ module csp (
     // mid-sample, before ping-pong and after it.
     logic dmem_commit_phase;
     logic dmem_commit_half;
+    // #147: the word being committed, latched at take 1. Take 2 must NOT read
+    // the mailbox pair: a toggle edge arriving while take 2 is stalled behind
+    // the sequencer overwrites it, and take 2 then writes the new word into
+    // the old word's unused half -- two words each in one generation, which
+    // alternates with stale data on every swap. With the word held here, an
+    // arriving edge only refills the mailbox, which is what it is for.
+    logic [9:0]  dmem_cm_addr;
+    logic [17:0] dmem_cm_data;
     // Mailbox commits happen in any idle slot where the sequencer is not
-    // writing the replicas THIS cycle (dmem_we below): lane reads issue
-    // during slots 1..~257, and a commit colliding with a sequencer
-    // write simply defers one cycle. The window stays ~500 slots
-    // wide, so a 10 MHz SPI burst can never overrun the 1-deep
-    // mailbox (word period 5.6 us >> max wait).
+    // writing the replicas THIS cycle (dmem_we below); a commit colliding
+    // with a sequencer write defers a cycle.
+    //
+    // How long that defer can last is the whole safety argument, and it is
+    // NOT the one that used to be written here. That text claimed a ~500-slot
+    // window and a one-in-three collision rate, which was true when an entry
+    // took three cycles. Since landing 1 the sequencer retires one instruction
+    // per cycle, so its write-backs are CONTIGUOUS: the real program's
+    // pc 32..127 (32 amp envelopes, 32 mod envelopes, 32 fan-out sends) holds
+    // dmem_we for 96 cycles straight = 1.30 us. tb_mbox_burst measures that
+    // run rather than trusting this comment.
+    //
+    //   worst take-2 stall   96 cycles  = 1.30 us
+    //   10 MHz SPI word      32 bits    = 3.20 us
+    //
+    // 2.5x, down from ~85x before landing 1. That margin is what keeps a word
+    // from arriving mid-commit, and nothing enforces it -- a denser
+    // instruction table or a faster SPI clock eats it silently. So the commit
+    // no longer DEPENDS on it (see dmem_cm_addr below).
     // dmem_mbox_take is the SINGLE condition for both committing and
     // clearing pending. An earlier version cleared pending on
     // dmem_wr_window alone while the commit also required !dmem_we — when a
@@ -169,8 +197,15 @@ module csp (
     // A commit still defers a cycle when the sequencer is writing, since
     // they share the write port.
     wire  dmem_wr_window   = 1'b1;
-    wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
-    wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
+    // phase 1 means take 2 is owed, and it is owed whether or not the mailbox
+    // has since been refilled -- so the in-flight commit, not pending, keeps
+    // the engine going.
+    wire  dmem_mbox_take   = (dmem_mbox_pending || dmem_commit_phase)
+                             && dmem_wr_window && !dmem_we;
+    // take 1 commits the mailbox word; take 2 commits the in-flight copy
+    wire [9:0]  dmem_cw_addr = dmem_commit_phase ? dmem_cm_addr : dmem_mbox_addr;
+    wire [17:0] dmem_cw_data = dmem_commit_phase ? dmem_cm_data : dmem_mbox_data;
+    wire  dmem_commit = dmem_mbox_take && (dmem_cw_addr != 10'd0);
     wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_gen;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -184,9 +219,9 @@ module csp (
                 dmem_mbox_pending <= 1'b1;         // payload is stable: it was
                 dmem_mbox_addr   <= dmem_wr_addr;      // written before the toggle,
                 dmem_mbox_data   <= dmem_wr_data;      // 2 sync FFs ago
-            end else if (dmem_mbox_take && dmem_commit_phase) begin
-                dmem_mbox_pending <= 1'b0;
-            end
+            end else if (dmem_mbox_take && !dmem_commit_phase) begin
+                dmem_mbox_pending <= 1'b0;   // freed at take 1: the in-flight
+            end                              // copy carries it through take 2
         end
     end
 
@@ -194,9 +229,13 @@ module csp (
         if (!rst_n) begin
             dmem_commit_phase <= 1'b0;
             dmem_commit_half  <= 1'b0;
+            dmem_cm_addr      <= '0;
+            dmem_cm_data      <= '0;
         end else if (dmem_mbox_take) begin
             if (!dmem_commit_phase) begin
                 dmem_commit_half  <= ~dmem_gen;   // the half written now
+                dmem_cm_addr      <= dmem_mbox_addr;
+                dmem_cm_data      <= dmem_mbox_data;
                 dmem_commit_phase <= 1'b1;
             end else
                 dmem_commit_phase <= 1'b0;
@@ -204,38 +243,38 @@ module csp (
     end
 
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit) dmem_init[dmem_cw_addr] <= $signed(dmem_cw_data);
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit) dmem_gate[dmem_cw_addr] <= $signed(dmem_cw_data);
 
     // Bus 1023 doubles as the test-tone control latch (issue #81).
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
-        else if (dmem_commit && dmem_mbox_addr == 10'd1023)
-            test_tone_en <= dmem_mbox_data[0];
+        else if (dmem_commit && dmem_cw_addr == 10'd1023)
+            test_tone_en <= dmem_cw_data[0];
 
     // Replica writes: one physical port, two writers — the sequencer
     // owns its cycle (dmem_we), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_pitch[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_duty[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_fc[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_gl[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_gr[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_local[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit)   dmem_local[dmem_cw_addr] <= $signed(dmem_cw_data);
         else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
 
     //----------------------------------------------------------------
@@ -469,6 +508,7 @@ module csp (
     // Fed at R from registers; its state_out lands two cycles later, at A.
     wire signed [17:0] adsr_level;
     wire [27:0]        adsr_state_out;
+    wire               adsr_dbg_up, adsr_dbg_step;
     adsr u_adsr (
         .clk(clk), .rst_n(rst_n),
         .step_en   (r_valid && r_is_env),
@@ -478,8 +518,32 @@ module csp (
         .sus_log   (r_sus_log),
         .level_out (adsr_level),
         .state_out (adsr_state_out),
-        .state_we  ()                  // the CSP tracks validity itself
+        .state_we  (),                 // the CSP tracks validity itself
+        .dbg_left_decay_up(adsr_dbg_up),
+        .dbg_gated_step   (adsr_dbg_step)
     );
+
+    // Latch the first offence and where it happened. a_st_en/a_is_lfo already
+    // say "this cycle writes an envelope's state", which is exactly when the
+    // adsr flags are meaningful.
+    wire dbg_env_wb = a_st_en && !a_is_lfo;
+    wire dbg_hit     = dbg_env_wb && adsr_dbg_up;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dbg_retrig <= 1'b0; dbg_armed <= 1'b0;
+            dbg_slot_hi <= 1'b0; dbg_slot_amp <= 1'b0;
+        end else begin
+            // armed first and unconditionally: it must light even on a run
+            // where the fault never occurs, or a dark fault lamp proves
+            // nothing.
+            if (dbg_env_wb && adsr_dbg_step) dbg_armed <= 1'b1;
+            if (dbg_hit) begin
+                dbg_retrig <= 1'b1;
+                if (a_st_pc >= 8'd64)                    dbg_slot_hi  <= 1'b1;
+                if (a_st_pc >= 8'd32 && a_st_pc < 8'd64) dbg_slot_amp <= 1'b1;
+            end
+        end
+    end
 
     // LFO waveform on the registered phase (law 1: registered operands).
     // Named wire: a $signed() cast in the port connection crashes yosys's

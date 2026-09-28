@@ -237,6 +237,13 @@ sim-csp: tb/tb_csp.vvp
 # #147 benches. All of these elaborate the CSP alone, like tb_csp.
 CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 
+# The mailbox's two-take commit under back-to-back traffic. IN the gate.
+tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv
+
+sim-mbox-burst: tb/tb_mbox_burst.vvp
+	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
+
 # The two soaks that eliminated the envelope logic and the real program mix.
 # STANDALONE, not in the default gate: both came back clean, so they carry no
 # coverage the gate lacks, and tb_prog_soak's 4000 samples would add minutes to
@@ -315,10 +322,11 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-csp sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
+	@cat tb/sim-csp.out tb/sim-mbox-burst.out \
+	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
