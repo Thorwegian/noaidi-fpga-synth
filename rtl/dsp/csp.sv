@@ -153,11 +153,25 @@ module csp (
     logic dmem_commit_phase;
     logic dmem_commit_half;
     // Mailbox commits happen in any idle slot where the sequencer is not
-    // writing the replicas THIS cycle (dmem_we below): lane reads issue
-    // during slots 1..~257, and a commit colliding with a sequencer
-    // write simply defers one cycle. The window stays ~500 slots
-    // wide, so a 10 MHz SPI burst can never overrun the 1-deep
-    // mailbox (word period 5.6 us >> max wait).
+    // writing the replicas THIS cycle (dmem_we below); a commit colliding
+    // with a sequencer write defers a cycle.
+    //
+    // How long that defer can last is the whole safety argument, and it is
+    // NOT the one that used to be written here. That text claimed a ~500-slot
+    // window and a one-in-three collision rate, which was true when an entry
+    // took three cycles. Since landing 1 the sequencer retires one instruction
+    // per cycle, so its write-backs are CONTIGUOUS: the real program's
+    // pc 32..127 (32 amp envelopes, 32 mod envelopes, 32 fan-out sends) holds
+    // dmem_we for 96 cycles straight = 1.30 us. tb_mbox_burst measures that
+    // run rather than trusting this comment.
+    //
+    //   worst take-2 stall   96 cycles  = 1.30 us
+    //   10 MHz SPI word      32 bits    = 3.20 us
+    //
+    // 2.5x, down from ~85x before landing 1. That margin is what keeps a word
+    // from arriving mid-commit, and nothing enforces it -- a denser
+    // instruction table or a faster SPI clock eats it silently. So the commit
+    // no longer DEPENDS on it (see dmem_cm_addr below).
     // dmem_mbox_take is the SINGLE condition for both committing and
     // clearing pending. An earlier version cleared pending on
     // dmem_wr_window alone while the commit also required !dmem_we — when a

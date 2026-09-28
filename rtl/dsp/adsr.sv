@@ -121,16 +121,19 @@ module adsr #(
     logic [1:0]         stage_q;
     logic [25:0]        level_q;
     logic               gate_q, v1;
+    logic [1:0]         stg_in_q;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             delta_q <= '0; mant_q <= '0; shift_q <= '0;
             stage_q <= AST_IDLE; level_q <= '0; gate_q <= 1'b0; v1 <= 1'b0;
+            stg_in_q <= AST_IDLE;
         end else begin
             v1      <= step_en;
             delta_q <= $signed({1'b0, target}) - $signed({1'b0, level_prev});
             mant_q  <= 5'd16 + {1'b0, nib[3:0]};
             shift_q <= 5'(SHIFT_BIAS) + 5'(4'd15 - nib[7:4]);
             stage_q <= stage_sel;
+            stg_in_q <= stage_prev;
             level_q <= level_prev;
             gate_q  <= gate;
         end
@@ -142,10 +145,11 @@ module adsr #(
     logic [1:0]         stg_q;
     logic [25:0]        lvl_q;
     logic               gt_q, v2;
+    logic [1:0]         stg_in_d;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             product_q <= '0; sh_q <= '0; stg_q <= AST_IDLE;
-            lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0;
+            lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0; stg_in_d <= AST_IDLE;
         end else begin
             v2        <= v1;
             product_q <= delta_q * $signed({1'b0, mant_q});
@@ -153,6 +157,7 @@ module adsr #(
             stg_q     <= stage_q;
             lvl_q     <= level_q;
             gt_q      <= gate_q;
+            stg_in_d  <= stg_in_q;
         end
     end
 
@@ -186,5 +191,6 @@ module adsr #(
 
     assign state_out = next;
     assign state_we  = v2;
+
 endmodule
 `default_nettype wire

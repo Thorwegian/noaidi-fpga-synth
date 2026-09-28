@@ -3,6 +3,10 @@
 
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
+# bash, because the yosys recipe needs `set -o pipefail` to notice a
+# failed synthesis instead of silently routing a stale netlist.
+SHELL := /bin/bash
+
 # Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
@@ -65,7 +69,14 @@ dsp/boot_p%.hex: ../scripts/gen_boot_image.py
 	python3 $<
 
 yosys.json: $(SRC) $(LUTS) Makefile
-	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
+	# pipefail matters: without it this recipe's status is tee's, so a FAILED
+	# yosys leaves the PREVIOUS $@ in place, nextpnr routes that stale
+	# netlist, and pack.fs is produced and PASSES the timing gate.
+	# Observed 2026-09-28: a wrong port name in top.sv yielded a
+	# byte-identical bitstream with identical Fmax. yosys writes errors to
+	# stderr, which tee never received, so yosys.log looked clean too --
+	# hence 2>&1.
+	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
 
 # Placement seed is PINNED: nextpnr's router is seed-sensitive, and
 # the q1-LUT shrink (issue #41) made the default seed fail routing
@@ -223,6 +234,33 @@ tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefi
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
 
+# #147 benches. All of these elaborate the CSP alone, like tb_csp.
+CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
+
+# The mailbox's two-take commit under back-to-back traffic. IN the gate.
+tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv
+
+sim-mbox-burst: tb/tb_mbox_burst.vvp
+	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
+
+# The two soaks that eliminated the envelope logic and the real program mix.
+# STANDALONE, not in the default gate: both came back clean, so they carry no
+# coverage the gate lacks, and tb_prog_soak's 4000 samples would add minutes to
+# every run. Kept because re-running them is how you re-check that those two
+# candidates are still dead.
+tb/tb_adsr_soak.vvp: $(CSP_SIM) tb/tb_adsr_soak.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv
+
+sim-adsr-soak: tb/tb_adsr_soak.vvp
+	vvp tb/tb_adsr_soak.vvp
+
+tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
+	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_prog_soak.sv
+
+sim-prog-soak: tb/tb_prog_soak.vvp
+	vvp tb/tb_prog_soak.vvp
+
 TB_BUS = tb/tb_spi_bus.sv
 tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
@@ -284,10 +322,11 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-csp sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
+	@cat tb/sim-csp.out tb/sim-mbox-burst.out \
+	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
