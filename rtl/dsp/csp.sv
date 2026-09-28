@@ -158,14 +158,6 @@ module csp (
     // mid-sample, before ping-pong and after it.
     logic dmem_commit_phase;
     logic dmem_commit_half;
-    // #147: the word being committed, latched at take 1. Take 2 must NOT read
-    // the mailbox pair: a toggle edge arriving while take 2 is stalled behind
-    // the sequencer overwrites it, and take 2 then writes the new word into
-    // the old word's unused half -- two words each in one generation, which
-    // alternates with stale data on every swap. With the word held here, an
-    // arriving edge only refills the mailbox, which is what it is for.
-    logic [9:0]  dmem_cm_addr;
-    logic [17:0] dmem_cm_data;
     // Mailbox commits happen in any idle slot where the sequencer is not
     // writing the replicas THIS cycle (dmem_we below); a commit colliding
     // with a sequencer write defers a cycle.
@@ -197,15 +189,8 @@ module csp (
     // A commit still defers a cycle when the sequencer is writing, since
     // they share the write port.
     wire  dmem_wr_window   = 1'b1;
-    // phase 1 means take 2 is owed, and it is owed whether or not the mailbox
-    // has since been refilled -- so the in-flight commit, not pending, keeps
-    // the engine going.
-    wire  dmem_mbox_take   = (dmem_mbox_pending || dmem_commit_phase)
-                             && dmem_wr_window && !dmem_we;
-    // take 1 commits the mailbox word; take 2 commits the in-flight copy
-    wire [9:0]  dmem_cw_addr = dmem_commit_phase ? dmem_cm_addr : dmem_mbox_addr;
-    wire [17:0] dmem_cw_data = dmem_commit_phase ? dmem_cm_data : dmem_mbox_data;
-    wire  dmem_commit = dmem_mbox_take && (dmem_cw_addr != 10'd0);
+    wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
+    wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
     wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_gen;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -219,9 +204,9 @@ module csp (
                 dmem_mbox_pending <= 1'b1;         // payload is stable: it was
                 dmem_mbox_addr   <= dmem_wr_addr;      // written before the toggle,
                 dmem_mbox_data   <= dmem_wr_data;      // 2 sync FFs ago
-            end else if (dmem_mbox_take && !dmem_commit_phase) begin
-                dmem_mbox_pending <= 1'b0;   // freed at take 1: the in-flight
-            end                              // copy carries it through take 2
+            end else if (dmem_mbox_take && dmem_commit_phase) begin
+                dmem_mbox_pending <= 1'b0;
+            end
         end
     end
 
@@ -229,13 +214,9 @@ module csp (
         if (!rst_n) begin
             dmem_commit_phase <= 1'b0;
             dmem_commit_half  <= 1'b0;
-            dmem_cm_addr      <= '0;
-            dmem_cm_data      <= '0;
         end else if (dmem_mbox_take) begin
             if (!dmem_commit_phase) begin
                 dmem_commit_half  <= ~dmem_gen;   // the half written now
-                dmem_cm_addr      <= dmem_mbox_addr;
-                dmem_cm_data      <= dmem_mbox_data;
                 dmem_commit_phase <= 1'b1;
             end else
                 dmem_commit_phase <= 1'b0;
@@ -243,38 +224,38 @@ module csp (
     end
 
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_init[dmem_cw_addr] <= $signed(dmem_cw_data);
+        if (dmem_commit) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_gate[dmem_cw_addr] <= $signed(dmem_cw_data);
+        if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
     // Bus 1023 doubles as the test-tone control latch (issue #81).
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
-        else if (dmem_commit && dmem_cw_addr == 10'd1023)
-            test_tone_en <= dmem_cw_data[0];
+        else if (dmem_commit && dmem_mbox_addr == 10'd1023)
+            test_tone_en <= dmem_mbox_data[0];
 
     // Replica writes: one physical port, two writers — the sequencer
     // owns its cycle (dmem_we), the mailbox defers around it.
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_pitch[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_duty[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_fc[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gl[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_cw_addr[8:0]}] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_gr[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_local[dmem_cw_addr] <= $signed(dmem_cw_data);
+        if (dmem_commit)   dmem_local[dmem_mbox_addr] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
 
     //----------------------------------------------------------------

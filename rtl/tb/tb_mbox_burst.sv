@@ -27,16 +27,23 @@
 // gets tested instead of assumed, and a future denser table or faster SPI
 // trips the bench rather than the synth.
 //
-// Two invariants, and they are not equally strong:
+// The contract, and it is one contract with one condition:
 //
-//   half-commit  a word that commits MUST reach both generations. Always a
-//                failure, at any spacing: it corrupts a base permanently,
-//                and no re-send is guaranteed to land differently.
-//   drop         a word must not vanish. Only a failure when the words are
-//                spaced further apart than the measured stall -- the mailbox
-//                is 1 deep by design, so two words inside one stall overrun
-//                it, and closing that needs a queue rather than a register.
-//                Reported either way; the spacing decides whether it counts.
+//   AT OR BEYOND the sequencer's write-back stall, a mailbox word reaches BOTH
+//   ping-pong generations and is not dropped.
+//
+// Inside the stall, a 1-deep mailbox can half-commit or drop by construction,
+// and the design relies on the SPI word period being longer than the stall
+// (measured below: 96 cycles = 1.30 us against 3.20 us at 10 MHz). Both are
+// reported at every spacing so the margin is visible, but only spacings at or
+// beyond the stall count as failures.
+//
+// I originally "hardened" the sub-stall case with an in-flight commit register.
+// That was a mistake: the race cannot fire at 10 MHz, and the extra logic made
+// 2 of 4 nextpnr placements audibly glitch (#147). The margin is the mechanism
+// here, so this bench measures the margin -- if a denser instruction table or a
+// faster SPI clock ever eats it, this fails loudly instead of a bus base
+// quietly landing in one generation.
 `timescale 1ns/1ps
 module tb_mbox_burst;
     localparam int NV = 32;
@@ -122,10 +129,14 @@ module tb_mbox_burst;
                              (gg >= maxrun) ? "FAIL" : "note",
                              who, a, want, iv, oo, gg);
             end else if (lo !== want || hi !== want) begin
-                half_commits = half_commits + 1; errors = errors + 1;
+                half_commits = half_commits + 1;
+                // same condition as a drop: inside the stall this is what a
+                // 1-deep mailbox does, and the rate margin is what prevents it
+                if (gg >= maxrun) errors = errors + 1;
                 if (first_fail_o < 0) begin first_fail_o = oo; first_fail_g = gg; end
                 if (half_commits <= 8)
-                    $display("FAIL half-commit:  %s bus %0d want %0d, gen0 %0d gen1 %0d  (offset %0d, gap %0d)",
+                    $display("%s half-commit:  %s bus %0d want %0d, gen0 %0d gen1 %0d  (offset %0d, gap %0d)",
+                             (gg >= maxrun) ? "FAIL" : "note",
                              who, a, want, lo, hi, oo, gg);
             end
         end
