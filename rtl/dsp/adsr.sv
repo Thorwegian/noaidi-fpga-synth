@@ -63,7 +63,21 @@ module adsr #(
 
     // next state, valid two cycles after step_en
     output wire [27:0] state_out,
-    output wire        state_we
+    output wire        state_we,
+
+    // #147 instrumentation, valid with state_out. dbg_left_decay_up is the
+    // fault itself: this step takes a GATED envelope out of DECAY and upward,
+    // which cannot happen legitimately -- with the gate held, decay either
+    // holds at sustain or stays in decay.
+    //
+    // dbg_gated_step says only that a gated envelope was stepped at all. It
+    // exists because a dark fault lamp is ambiguous between "no fault" and
+    // "the detector never ran", and those two want opposite next moves. The
+    // DECAY -> IDLE case that used to sit on this port is unreachable by
+    // construction -- AST_IDLE is only ever selected under !gt_q below, and
+    // yosys folds the term to constant 0 -- so it was not worth a pin.
+    output wire        dbg_left_decay_up,
+    output wire        dbg_gated_step
 );
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
@@ -121,16 +135,19 @@ module adsr #(
     logic [1:0]         stage_q;
     logic [25:0]        level_q;
     logic               gate_q, v1;
+    logic [1:0]         stg_in_q;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             delta_q <= '0; mant_q <= '0; shift_q <= '0;
             stage_q <= AST_IDLE; level_q <= '0; gate_q <= 1'b0; v1 <= 1'b0;
+            stg_in_q <= AST_IDLE;
         end else begin
             v1      <= step_en;
             delta_q <= $signed({1'b0, target}) - $signed({1'b0, level_prev});
             mant_q  <= 5'd16 + {1'b0, nib[3:0]};
             shift_q <= 5'(SHIFT_BIAS) + 5'(4'd15 - nib[7:4]);
             stage_q <= stage_sel;
+            stg_in_q <= stage_prev;
             level_q <= level_prev;
             gate_q  <= gate;
         end
@@ -142,10 +159,11 @@ module adsr #(
     logic [1:0]         stg_q;
     logic [25:0]        lvl_q;
     logic               gt_q, v2;
+    logic [1:0]         stg_in_d;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             product_q <= '0; sh_q <= '0; stg_q <= AST_IDLE;
-            lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0;
+            lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0; stg_in_d <= AST_IDLE;
         end else begin
             v2        <= v1;
             product_q <= delta_q * $signed({1'b0, mant_q});
@@ -153,6 +171,7 @@ module adsr #(
             stg_q     <= stage_q;
             lvl_q     <= level_q;
             gt_q      <= gate_q;
+            stg_in_d  <= stg_in_q;
         end
     end
 
@@ -186,5 +205,11 @@ module adsr #(
 
     assign state_out = next;
     assign state_we  = v2;
+
+    // gate held, was in DECAY, and the step climbs out of it: illegal.
+    assign dbg_left_decay_up = v2 && gt_q && (stg_in_d == AST_DEC)
+                                        && (next[27:26] == AST_ATT);
+    // the detector's own liveness: a gated envelope reached this stage.
+    assign dbg_gated_step    = v2 && gt_q;
 endmodule
 `default_nettype wire
