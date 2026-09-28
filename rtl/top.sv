@@ -100,11 +100,7 @@ module top (
         .swap_req    (swap_req),
         .mix_left    (sample_left),
         .mix_right   (sample_right),
-        .test_tone_en (test_tone_en),
-        .dbg_retrig  (dbg_retrig),
-        .dbg_armed   (dbg_armed),
-        .dbg_slot_hi (dbg_slot_hi),
-        .dbg_slot_amp(dbg_slot_amp)
+        .test_tone_en (test_tone_en)
     );
 
     //----------------------------------------------------------------
@@ -120,10 +116,6 @@ module top (
     // above 1/4096 of the fundamental (−72.2 dBc) rings alarms.
     //----------------------------------------------------------------
     logic        test_tone_en;
-    // #147: the CSP's own verdict on whether it ever retriggers a gated
-    // envelope. Sticky, on the four spare LEDs, so a playtest answers it
-    // without any capture path and without touching the audio outputs.
-    logic        dbg_retrig, dbg_armed, dbg_slot_hi, dbg_slot_amp;
     logic [23:0] tone_phase;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n)           tone_phase <= '0;
@@ -268,15 +260,7 @@ module top (
         if (!rst_n)           beat <= '0;
         else if (sample_tick) beat <= beat + 1'b1;
 
-    // led[5:2] are the #147 instrument, sticky and active low. Read led[3]
-    // FIRST: it is the detector's liveness, and while it is dark the other
-    // three mean nothing.
-    //   3 lit: a gated envelope was stepped -- the detector ran
-    //   2 lit: a gated envelope went DECAY -> ATTACK -- the fault, in the CSP
-    //   4 lit: offender slot >= 64 (mod env / send region)
-    //   5 lit: offender slot 32..63 (amp envelope region)
-    assign led = {~dbg_slot_amp, ~dbg_slot_hi, ~dbg_armed, ~dbg_retrig,
-                  ~rst, ~beat[16]};
+    assign led = {4'b1111, ~rst, ~beat[16]};
 
 endmodule
 `default_nettype wire

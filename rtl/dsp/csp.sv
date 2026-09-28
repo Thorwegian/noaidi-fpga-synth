@@ -55,13 +55,7 @@ module csp (
     output logic signed [17:0] rd_gl_d,
     output logic signed [17:0] rd_gr_d,
 
-    output logic        test_tone_en,
-
-    // #147 instrumentation: sticky, because the event is rare
-    output logic        dbg_retrig,      // gated envelope DECAY -> ATTACK
-    output logic        dbg_armed,       // a gated envelope was stepped at all
-    output logic        dbg_slot_hi,     // offender was slot >= 64
-    output logic        dbg_slot_amp     // offender was slot 32..63
+    output logic        test_tone_en
 );
     //----------------------------------------------------------------
     // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
@@ -489,7 +483,6 @@ module csp (
     // Fed at R from registers; its state_out lands two cycles later, at A.
     wire signed [17:0] adsr_level;
     wire [27:0]        adsr_state_out;
-    wire               adsr_dbg_up, adsr_dbg_step;
     adsr u_adsr (
         .clk(clk), .rst_n(rst_n),
         .step_en   (r_valid && r_is_env),
@@ -499,32 +492,8 @@ module csp (
         .sus_log   (r_sus_log),
         .level_out (adsr_level),
         .state_out (adsr_state_out),
-        .state_we  (),                 // the CSP tracks validity itself
-        .dbg_left_decay_up(adsr_dbg_up),
-        .dbg_gated_step   (adsr_dbg_step)
+        .state_we  ()                  // the CSP tracks validity itself
     );
-
-    // Latch the first offence and where it happened. a_st_en/a_is_lfo already
-    // say "this cycle writes an envelope's state", which is exactly when the
-    // adsr flags are meaningful.
-    wire dbg_env_wb = a_st_en && !a_is_lfo;
-    wire dbg_hit     = dbg_env_wb && adsr_dbg_up;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            dbg_retrig <= 1'b0; dbg_armed <= 1'b0;
-            dbg_slot_hi <= 1'b0; dbg_slot_amp <= 1'b0;
-        end else begin
-            // armed first and unconditionally: it must light even on a run
-            // where the fault never occurs, or a dark fault lamp proves
-            // nothing.
-            if (dbg_env_wb && adsr_dbg_step) dbg_armed <= 1'b1;
-            if (dbg_hit) begin
-                dbg_retrig <= 1'b1;
-                if (a_st_pc >= 8'd64)                    dbg_slot_hi  <= 1'b1;
-                if (a_st_pc >= 8'd32 && a_st_pc < 8'd64) dbg_slot_amp <= 1'b1;
-            end
-        end
-    end
 
     // LFO waveform on the registered phase (law 1: registered operands).
     // Named wire: a $signed() cast in the port connection crashes yosys's

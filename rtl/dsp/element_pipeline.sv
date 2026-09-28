@@ -113,12 +113,7 @@ module element_pipeline #(
     // top-level 187.5 Hz full-scale sine that replaces the mix at the
     // outputs. Latched here because the bus mailbox already has the
     // sclk→sysclk CDC; no pointer ever references bus 1023.
-    output logic           test_tone_en,
-    // #147 instrumentation, straight to the spare LEDs
-    output logic           dbg_retrig,
-    output logic           dbg_armed,
-    output logic           dbg_slot_hi,
-    output logic           dbg_slot_amp
+    output logic           test_tone_en
 );
 
     localparam int VW = $clog2(NUM_ELEMENTS);   // element index width
@@ -403,9 +398,7 @@ module element_pipeline #(
         .rd_gr_a   (s1_ptrs1_word[28:20]),
         .rd_pitch_d(s2_dmem_pitch), .rd_duty_d(s2_dmem_duty), .rd_fc_d(s2_dmem_fc),
         .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gl), .rd_gr_d(s2_dmem_gr),
-        .test_tone_en(test_tone_en),
-        .dbg_retrig(dbg_retrig), .dbg_armed(dbg_armed),
-        .dbg_slot_hi(dbg_slot_hi), .dbg_slot_amp(dbg_slot_amp)
+        .test_tone_en(test_tone_en)
     );
 
 

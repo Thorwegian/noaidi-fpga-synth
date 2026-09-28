@@ -63,21 +63,7 @@ module adsr #(
 
     // next state, valid two cycles after step_en
     output wire [27:0] state_out,
-    output wire        state_we,
-
-    // #147 instrumentation, valid with state_out. dbg_left_decay_up is the
-    // fault itself: this step takes a GATED envelope out of DECAY and upward,
-    // which cannot happen legitimately -- with the gate held, decay either
-    // holds at sustain or stays in decay.
-    //
-    // dbg_gated_step says only that a gated envelope was stepped at all. It
-    // exists because a dark fault lamp is ambiguous between "no fault" and
-    // "the detector never ran", and those two want opposite next moves. The
-    // DECAY -> IDLE case that used to sit on this port is unreachable by
-    // construction -- AST_IDLE is only ever selected under !gt_q below, and
-    // yosys folds the term to constant 0 -- so it was not worth a pin.
-    output wire        dbg_left_decay_up,
-    output wire        dbg_gated_step
+    output wire        state_we
 );
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
@@ -206,10 +192,5 @@ module adsr #(
     assign state_out = next;
     assign state_we  = v2;
 
-    // gate held, was in DECAY, and the step climbs out of it: illegal.
-    assign dbg_left_decay_up = v2 && gt_q && (stg_in_d == AST_DEC)
-                                        && (next[27:26] == AST_ATT);
-    // the detector's own liveness: a gated envelope reached this stage.
-    assign dbg_gated_step    = v2 && gt_q;
 endmodule
 `default_nettype wire
