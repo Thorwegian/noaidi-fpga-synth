@@ -11,7 +11,7 @@ They say plugins won. We're proving it wrong.
 
 ## License
 
-[CERN-OHL-S](LICENSE.txt)
+[CERN-OHL-S v2](LICENSE.txt)
 
 ## Architecture
 
@@ -25,10 +25,9 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
                                          ──► SPDIF + I2S @ 96 kHz
 ```
 
-- **Gateware** (SystemVerilog, `rtl/`): a 768-slot "drum" pipeline at
+- **Gateware** (SystemVerilog, `rtl/`): a 768-slot pipeline at
   73.728 MHz (= 768 × 96 kHz) computes 256 elements per sample —
-  oscillator (saw/pulse/tri/sine), two Chamberlin SVFs, stereo log
-  attenuation. Parameters live in ping-pong BSRAM banks written over
+  oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. Parameters live in ping-pong BSRAM banks written over
   SPI; dynamic values ride **modulation buses** written by a
   **producer table** (LFOs, ADSRs) walked in the drum's idle slots.
   See [docs/bus_architecture.md](docs/bus_architecture.md).
