@@ -3,6 +3,10 @@
 
 export PATH := /opt/oss-cad-suite/bin:$(PATH)
 
+# bash, because the yosys recipe needs `set -o pipefail` to notice a
+# failed synthesis instead of silently routing a stale netlist.
+SHELL := /bin/bash
+
 # Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
@@ -65,7 +69,14 @@ dsp/boot_p%.hex: ../scripts/gen_boot_image.py
 	python3 $<
 
 yosys.json: $(SRC) $(LUTS) Makefile
-	yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' | tee yosys.log
+	# pipefail matters: without it this recipe's status is tee's, so a FAILED
+	# yosys leaves the PREVIOUS $@ in place, nextpnr routes that stale
+	# netlist, and pack.fs is produced and PASSES the timing gate.
+	# Observed 2026-09-28: a wrong port name in top.sv yielded a
+	# byte-identical bitstream with identical Fmax. yosys writes errors to
+	# stderr, which tee never received, so yosys.log looked clean too --
+	# hence 2>&1.
+	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
 
 # Placement seed is PINNED: nextpnr's router is seed-sensitive, and
 # the q1-LUT shrink (issue #41) made the default seed fail routing
