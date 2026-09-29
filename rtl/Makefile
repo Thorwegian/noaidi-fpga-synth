@@ -256,6 +256,19 @@ CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 # behavioural models: the pipeline depth adsr.sv's caller aligns to, and
 # bit-exactness against the fabric arithmetic they replace. Depends on no repo
 # RTL -- it tests the vendor cells, which is the point.
+# A voice stolen mid-release must attack from silence, not continue from where
+# the release had got to (#89). This is the case the board cannot isolate: the
+# allocator only steals once all 32 voices are busy, and those other 31 are
+# ringing into the same microphone while the measurement is taken, so the
+# stolen voice's level IS the interference. Presenting the state directly is
+# both cleaner and decisive -- without the fix this bench reports 2 FAILURES.
+tb/tb_adsr_retrig.vvp: tb/tb_adsr_retrig.sv $(PKG) dsp/adsr.sv Makefile
+	iverilog -g2012 -s tb_adsr_retrig -o $@ $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(IVL_DSP)
+
+sim-adsr-retrig: tb/tb_adsr_retrig.vvp
+	@vvp $< > tb/sim-adsr-retrig.out 2>&1 || true
+	@cat tb/sim-adsr-retrig.out
+
 tb/tb_dsp_char.vvp: tb/tb_dsp_char.sv Makefile
 	iverilog -g2012 -s tb_dsp_char -o $@ tb/tb_dsp_char.sv $(GOWIN_SIM)
 
@@ -347,10 +360,10 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-dsp-char sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-dsp-char sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-dsp-char.out tb/sim-csp.out tb/sim-mbox-burst.out \
+	@cat tb/sim-dsp-char.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
 	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \

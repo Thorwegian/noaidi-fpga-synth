@@ -136,6 +136,26 @@ module adsr #(
                          : (stage_prev == AST_DEC) ? AST_DEC
                          :                           AST_ATT;   // from idle
 
+    // RETRIGGER. The gate is a LEVEL and the stage is this envelope's only
+    // memory, so a voice stolen mid-release arrives here as AST_REL with a
+    // non-zero level and the attack above continues FROM that level instead of
+    // from silence -- audibly, an attack that starts part-way up and is much
+    // shorter, because the attack charges toward 1.3x full scale. Thor heard it
+    // playing chords in succession, which is exactly the case that hits it:
+    // each chord's note-offs leave releasing voices for the next chord to
+    // steal. A released envelope whose gate goes high again is a NEW NOTE, so
+    // it starts from zero.
+    //
+    // AST_IDLE does not need this -- the release latches {AST_IDLE, 26'd0} on
+    // arrival, so an idle envelope's level is already 0.
+    //
+    // Not fixed here, and deliberately: stealing a voice that is still HELD.
+    // Its gate never drops, so nothing in the gateware can tell that apart from
+    // the same note continuing; that one needs firmware to drop the gate for a
+    // pass first.
+    wire retrig = gate && (stage_prev == AST_REL);
+    wire [25:0] level_now = retrig ? 26'd0 : level_prev;
+
     // kD straddles the two words: 14 bits in one, 4 in the other. Firmware
     // packs it that way because three 18-bit coefficients plus a sustain
     // level do not fit into 64 bits any other way.
@@ -181,7 +201,7 @@ module adsr #(
         .ALU_RESET_MODE  ("SYNC")
     ) u_delta (
         .A       ({28'd0, target}),
-        .B       ({28'd0, level_prev}),
+        .B       ({28'd0, level_now}),
         .ASIGN   (1'b0),
         .BSIGN   (1'b0),
         .ACCLOAD (1'b0),
@@ -208,7 +228,7 @@ module adsr #(
             k_q      <= k_seg;
             stage_q  <= stage_sel;
             stg_in_q <= stage_prev;
-            level_q  <= level_prev;
+            level_q  <= level_now;
             gate_q   <= gate;
         end
     end
