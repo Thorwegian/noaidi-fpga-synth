@@ -124,11 +124,13 @@ module tb_prog_soak;
         for (v = 0; v < NV; v++) begin
             // amp envelope: gate 80+v -> gain bus 16+v
             iwrite(10'((32+v)*4 + 0), OPC_ADSR | (32'(16+v) << 6) | (32'(80+v) << 16));
-            iwrite(10'((32+v)*4 + 1), 32'hF4F000F0);
+            iwrite(10'((32+v)*4 + 1), 32'h00120000);
+            iwrite(10'((32+v)*4 + 3), 32'hF0280000);
             iwrite(10'((32+v)*4 + 2), 32'h00002800);          // ENV_SPAN
             // MOD envelope: gate 80+v -> cut bus 48+v
             iwrite(10'((64+2*v)*4 + 0), OPC_ADSR | (32'(48+v) << 6) | (32'(80+v) << 16));
-            iwrite(10'((64+2*v)*4 + 1), 32'hE2E00080);
+            iwrite(10'((64+2*v)*4 + 1), 32'h00100400);
+            iwrite(10'((64+2*v)*4 + 3), 32'hE0120000);
             iwrite(10'((64+2*v)*4 + 2), 32'h00001000);
             // fan-out SEND: bus 4 -> cut bus 48+v, CHAINED after the MOD env
             iwrite(10'((65+2*v)*4 + 0), OPC_SEND | (32'(48+v) << 6) | (32'd4 << 16));

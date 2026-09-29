@@ -24,12 +24,59 @@ patch_t g_patch;
 // the byte) doubles the increment and restores wall-clock times
 // exactly. Saturating: the 16 fastest codes flatten onto the ceiling
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
-uint32_t patch_adsr_word(const adsr_t *e)
+// The historical rate byte: mantissa in the low nibble, exponent in the
+// high one. The +0x10 is the #100 half-rate compensation, and it used to
+// cancel against the gateware's SHIFT_BIAS of 11. Both cancellations are
+// folded into adsr_k() below, so the resulting coefficient matches what
+// the old gateware computed -- that equivalence is the test.
+uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 {
-    uint32_t a = e->attack  > 0xEF ? 0xFF : (uint32_t)e->attack  + 0x10;
-    uint32_t d = e->decay   > 0xEF ? 0xFF : (uint32_t)e->decay   + 0x10;
-    uint32_t r = e->release > 0xEF ? 0xFF : (uint32_t)e->release + 0x10;
-    return a | (d << 8) | ((uint32_t)e->sustain << 16) | (r << 24);
+    return patch_rate > 0xEF ? 0xFF : (uint8_t)(patch_rate + 0x10);
+}
+
+// One rate byte -> the linear coefficient the CSP multiplies by.
+//
+//   old gateware:  k = (16 + low4) / 2^(26 - high4)
+//   now:           k = round(that * 2^ADSR_K_SHIFT), never zero
+//
+// For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
+// those codes come through bit-for-bit. Slower ones round, which costs
+// resolution above ~11 s and nothing below it.
+static uint32_t adsr_k(uint8_t rate_byte)
+{
+    uint32_t mant  = 16u + (rate_byte & 0x0Fu);
+    uint32_t shift = 26u - ((uint32_t)rate_byte >> 4);
+    if (shift <= ADSR_K_SHIFT)
+        return mant << (ADSR_K_SHIFT - shift);
+    uint32_t s = shift - ADSR_K_SHIFT;
+    uint32_t k = (mant + (1u << (s - 1))) >> s;   // round to nearest
+    return k ? k : 1u;        // a zero coefficient would freeze the envelope
+}
+
+// Sustain as a plain level. The gateware used to decode this with a
+// second barrel shift; firmware knows the destination, so it decodes
+// here. Only the linear form is used -- nothing has ever set CFG[26].
+static uint32_t adsr_sustain(const adsr_t *e)
+{
+    uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
+    if (lvl > 0x3FFFFFu) lvl = 0x3FFFFFu;
+    return lvl >> ADSR_SUS_SHIFT;
+}
+
+uint32_t patch_adsr_rate1(const adsr_t *e)
+{
+    uint32_t ka = adsr_k(patch_adsr_rate_byte(e->attack));
+    uint32_t kd = adsr_k(patch_adsr_rate_byte(e->decay));
+    return (ka & 0x3FFFFu) | ((kd & 0x3FFFu) << 18);
+}
+
+uint32_t patch_adsr_rate2(const adsr_t *e)
+{
+    uint32_t kd = adsr_k(patch_adsr_rate_byte(e->decay));
+    uint32_t kr = adsr_k(patch_adsr_rate_byte(e->release));
+    return ((kd >> 14) & 0xFu)
+         | ((kr & 0x3FFFFu) << 4)
+         | ((adsr_sustain(e) & 0x3FFu) << 22);
 }
 
 void patch_default(patch_t *p)

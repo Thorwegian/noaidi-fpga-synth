@@ -332,6 +332,14 @@ sim: sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
 	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out tb/sim-limiter.out
+	@# A bench that FAILS must fail the build. Before this, `make sim`
+	@# printed "3 FAILURE(S)" and still exited 0, because this target only
+	@# cats the output -- the same shape as a failed yosys still producing a
+	@# bitstream. Checked here rather than per-target so one grep covers all.
+	@if grep -qE 'FAILURE|^FAIL' tb/sim-*.out; then \
+	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \
+	    exit 1; \
+	fi
 
 clean:
 	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex

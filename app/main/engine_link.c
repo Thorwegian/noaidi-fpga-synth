@@ -65,8 +65,9 @@ typedef struct {
 } prod_cmd_t;
 
 static QueueHandle_t s_prod_queue;
-static uint32_t s_prod[ENGINE_NUM_PRODUCERS][3];
-#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 3 / 32)
+static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // #145: word 3 is the
+                                                   // second ADSR rate word
+#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 4 / 32)
 static uint32_t s_pdirty_now[PDIRTY_WORDS];
 static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 
@@ -140,12 +141,12 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
             // entry is uint8_t = 0..255 — exactly the #100 pool, so
             // the old entry bound is vacuous (the type IS the bound)
-            if (pc.word >= 3)
+            if (pc.word >= 4)
                 continue;
             if (s_prod[pc.entry][pc.word] == pc.value)   // no-op elision
                 continue;
             s_prod[pc.entry][pc.word] = pc.value;
-            int bit = pc.entry * 3 + pc.word;
+            int bit = pc.entry * 4 + pc.word;
             s_pdirty_now[bit >> 5] |= 1u << (bit & 31);
             changed = true;
         }
@@ -188,8 +189,10 @@ static void engine_task(void *arg)
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
                 int idx = i * 32 + b;              // entry*3 + word
-                fpga_word_write(PROD_BASE_ADDR + (idx / 3) * 4 + idx % 3,
-                                s_prod[idx / 3][idx % 3]);
+                // four words per entry and a stride of four, so the
+                // producer address IS the bit index
+                fpga_word_write(PROD_BASE_ADDR + idx,
+                                s_prod[idx / 4][idx % 4]);
             }
         }
         fpga_swap();
@@ -302,7 +305,7 @@ uint32_t engine_link_drops(void)
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
 {
-    if (s_prod_queue == NULL || word >= 3)   // uint8_t entry spans the pool
+    if (s_prod_queue == NULL || word >= 4)   // uint8_t entry spans the pool
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
     // Drops stay possible under a wedged flush (blocking here was

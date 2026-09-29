@@ -25,18 +25,21 @@
 // RC charge, which is convex, instead of the tail, which flattens into a soft
 // attack nobody wants.
 //
-// k = (16 + low4) >> (SHIFT_BIAS + 15 - high4): the same 5-bit mantissa and
-// barrel shift the linear rates used, mirrored from an increment into a
-// fraction. 16 codes per octave over 16 octaves = 256 distinct equal-ratio
-// rates with no table. The high nibble is SUBTRACTED because it used to scale
-// an increment and now scales a fraction; leaving it as a plain shift would
-// silently invert every rate byte the firmware already sends.
+// RATES ARRIVE AS COEFFICIENTS (#145). Firmware sends an 18-bit k per segment
+// and this module multiplies by it and shifts by a FIXED K_SHIFT. It used to
+// decode a mantissa and a variable barrel shift here, and that shifter -- a
+// LUT mux tree feeding a fabric carry chain -- was the design's critical path
+// (#147: it is where the ~8 MHz of headroom went, and placement moved it
+// enough that 2 of 4 seeds glitched audibly). Rate decoding is control-rate
+// work; it belongs on the ESP32, which is where it now lives.
 //
-// SHIFT_BIAS is 11, not the 10 of #127. k is a fraction of the remaining
-// distance PER STEP, and since #145 the CSP runs a pass every sample instead
-// of every other one, so an unchanged k would halve every envelope time. One
-// more bit of shift halves k and restores the wall-clock rate exactly, and
-// unlike scaling the mantissa it cannot collide two rate codes.
+// Wire format, MIRRORED IN app/main/patch.h -- change both or neither:
+//
+//   rates   [17:0] kA          [31:18] kD[13:0]
+//   rates2  [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
+//
+// Sustain arrives as a plain 10-bit level too. Two decodes went with it: the
+// linear one, and a log one selected by CFG[26] that nothing has ever set.
 //
 // PIPELINING. Subtract, then multiply, then shift-and-add; the silicon rule
 // says a multiply stands alone in its stage, so state_out lands TWO cycles
@@ -46,7 +49,8 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module adsr #(
-    parameter int SHIFT_BIAS = 11
+    parameter int K_SHIFT   = 24,     // firmware scales k by 2**K_SHIFT
+    parameter int SUS_SHIFT = 12      // = ADSR_SUS_SHIFT in patch.h
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -55,8 +59,8 @@ module adsr #(
     input  wire        step_en,      // advance this envelope now
     input  wire [27:0] state_in,     // {stage[1:0], level[25:0]}
     input  wire        gate,         // watched bus level > 0 = held
-    input  wire [31:0] rates,        // A, D, S, R: [7:0] [15:8] [23:16] [31:24]
-    input  wire        sus_log,      // CFG[26]
+    input  wire [31:0] rates,        // kA and the low 14 bits of kD
+    input  wire [31:0] rates2,       // the rest of kD, then kR and sustain
 
     // the envelope's contribution, combinational from state_in
     output wire signed [17:0] level_out,
@@ -91,47 +95,41 @@ module adsr #(
                          : (stage_prev == AST_DEC) ? AST_DEC
                          :                           AST_ATT;   // from idle
 
-    // the rate byte for that segment
-    wire [7:0] nib = !gate                   ? rates[31:24]     // release
-                   : (stage_sel == AST_ATT)  ? rates[7:0]       // attack
-                   :                           rates[15:8];     // decay
+    // kD straddles the two words: 14 bits in one, 4 in the other. Firmware
+    // packs it that way because three 18-bit coefficients plus a sustain
+    // level do not fit into 64 bits any other way.
+    wire [17:0] k_dec = {rates2[3:0], rates[31:18]};
+    wire [17:0] k_seg = !gate                   ? rates2[21:4]   // release
+                      : (stage_sel == AST_ATT)  ? rates[17:0]    // attack
+                      :                           k_dec;         // decay
 
-    // SUSTAIN, decoded two ways, because the same generator feeds two kinds
-    // of destination and the log-ness of an analog envelope never lived in
-    // the pot -- it lived in what the CV was plugged into.
-    //   sus_log = 0  the CUTOFF bus is already log2/octave, so it IS the
-    //               V/oct input: send the byte linearly
-    //   sus_log = 1  the linear gain bus is AMPLITUDE, the one place with no
-    //               analog counterpart to the exponential VCA
-    // Larger = louder either way. The log form is the mantissa and barrel
-    // shift a third time, so still no table: ~96 dB of range, 0xFF landing
-    // 3% under full scale.
-    wire [25:0] sus_lin = {4'b0, rates[23:16], 14'b0};
-    wire [25:0] sus_log_v = (26'd16 + 26'(rates[19:16])) << 17
-                            >> (4'd15 - rates[23:20]);
+    // Sustain is a plain level now: the top 10 bits of the 22-bit envelope
+    // scale. SUS_SHIFT must equal ADSR_SUS_SHIFT in app/main/patch.h -- I had
+    // 13 here against firmware's 12 and every sustain came out twice its
+    // level, which for a high sustain sits above full scale and makes the
+    // decay segment climb instead of settle.
+    wire [25:0] sus = 26'(rates2[31:22]) << SUS_SHIFT;
 
     wire [25:0] target = !gate                  ? 26'd0
                        : (stage_sel == AST_ATT) ? ENV_OVER
-                       : sus_log                ? sus_log_v
-                       :                          sus_lin;
+                       :                          sus;
 
-    // ---- stage 1: the subtract, and the rate split into mantissa+shift --
+    // ---- stage 1: the subtract, and the coefficient carried alongside ----
     logic signed [26:0] delta_q;
-    logic [4:0]         mant_q, shift_q;
+    logic [17:0]        k_q;
     logic [1:0]         stage_q;
     logic [25:0]        level_q;
     logic               gate_q, v1;
     logic [1:0]         stg_in_q;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            delta_q <= '0; mant_q <= '0; shift_q <= '0;
+            delta_q <= '0; k_q <= '0;
             stage_q <= AST_IDLE; level_q <= '0; gate_q <= 1'b0; v1 <= 1'b0;
             stg_in_q <= AST_IDLE;
         end else begin
             v1      <= step_en;
             delta_q <= $signed({1'b0, target}) - $signed({1'b0, level_prev});
-            mant_q  <= 5'd16 + {1'b0, nib[3:0]};
-            shift_q <= 5'(SHIFT_BIAS) + 5'(4'd15 - nib[7:4]);
+            k_q     <= k_seg;
             stage_q <= stage_sel;
             stg_in_q <= stage_prev;
             level_q <= level_prev;
@@ -140,20 +138,21 @@ module adsr #(
     end
 
     // ---- stage 2: the multiply, alone ------------------------------------
-    logic signed [31:0] product_q;
-    logic [4:0]         sh_q;
+    // 27-bit delta x 18-bit coefficient. This is the multiply-accumulate
+    // MULTALU36X18 implements; MULTADDALU18X18 cannot take it, because delta
+    // is ~24 bits and narrowing it would make slow segments stall.
+    logic signed [44:0] product_q;
     logic [1:0]         stg_q;
     logic [25:0]        lvl_q;
     logic               gt_q, v2;
     logic [1:0]         stg_in_d;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            product_q <= '0; sh_q <= '0; stg_q <= AST_IDLE;
+            product_q <= '0; stg_q <= AST_IDLE;
             lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0; stg_in_d <= AST_IDLE;
         end else begin
             v2        <= v1;
-            product_q <= delta_q * $signed({1'b0, mant_q});
-            sh_q      <= shift_q;
+            product_q <= delta_q * $signed({1'b0, k_q});
             stg_q     <= stage_q;
             lvl_q     <= level_q;
             gt_q      <= gate_q;
@@ -161,16 +160,17 @@ module adsr #(
         end
     end
 
-    // ---- stage 3: shift, add, and decide the segment ---------------------
-    // product's sign IS delta's sign, because the mantissa is always positive.
-    wire signed [31:0] step = product_q >>> sh_q;
+    // ---- stage 3: add and decide the segment -----------------------------
+    // product's sign IS delta's sign, because k is always positive. The shift
+    // is a constant now, so it is wiring rather than a mux tree.
+    wire signed [44:0] step = product_q >>> K_SHIFT;
     // Fixed-point RC STALLS: once the step truncates to zero the level
     // freezes short of its target, and on release that is a DC tail and a
     // voice that never frees -- heard as a stuck note, not as an envelope
     // bug. One LSB of creep bounds the arrival, and 1 LSB of 26 is far below
     // anything audible.
-    wire signed [26:0] creep = product_q[31] ? -27'sd1 : 27'sd1;
-    wire signed [26:0] inc   = (step == 32'sd0 && product_q != 32'sd0)
+    wire signed [26:0] creep = product_q[44] ? -27'sd1 : 27'sd1;
+    wire signed [26:0] inc   = (step == 45'sd0 && product_q != 45'sd0)
                                ? creep : step[26:0];
     wire signed [27:0] y     = $signed({2'b0, lvl_q}) + 28'(inc);
 

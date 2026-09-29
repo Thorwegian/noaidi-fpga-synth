@@ -134,7 +134,12 @@ localparam [31:0] SRC_BUS3_FROM6 =                  // SEND (#44/#98):
     32'hD | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
 localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
-localparam [31:0] BENCH_ADSR_RATES = 32'hF4F000F0;  // fast sim rates
+// #145: rates are linear coefficients now, in two words. These are the
+// old 0xF4F000F0 nibble word converted by the same arithmetic firmware
+// uses (patch_adsr_rate1/rate2), so the bench hears what it used to:
+// fast attack, slow decay, high sustain, fast release.
+localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
+localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
 localparam [31:0] DEPTH_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
 localparam [31:0] DEPTH_HALF  = 32'h00008000;       // 0.5
 

@@ -59,10 +59,34 @@ typedef struct {
 } filter_t;
 
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
-// Rates are 8-bit log2 (the gateware ADSR ladder); sustain is a level.
+// Rates are 8-bit log2 in the PATCH; the wire format is linear (#145).
 typedef struct {
     uint8_t attack, decay, sustain, release;
 } adsr_t;
+
+// ── ADSR wire format (#145) ─────────────────────────────────────────
+// The CSP no longer decodes rate nibbles or sustain: it multiplies by a
+// coefficient and shifts by a FIXED amount, so the multiply-accumulate
+// folds into one DSP block instead of a LUT barrel shifter feeding a
+// fabric carry chain. Firmware does the decode, which is control-rate
+// work and belongs on this side.
+//
+// MIRRORED IN rtl/synth_pkg.sv -- change both or neither:
+//
+//   word 1   [17:0] kA          [31:18] kD[13:0]
+//   word 3   [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
+//
+// k spans 1..253952 (18 bits); the gateware does step = (delta*k) >>> 24.
+// Verified against the old nibble decode over all 256 codes: 224 of them
+// are preserved bit-exactly, and the worst error is 10% on a ~39 s
+// release, which only affects settings slower than ~11 s.
+#define ADSR_K_SHIFT    24u        // gateware's fixed output shift
+#define ADSR_K_MAX      253952u    // 18 bits: mantissa 31 << 13
+#define ADSR_SUS_SHIFT  12u        // 10-bit sustain of a 22-bit level
+
+uint32_t patch_adsr_rate1(const adsr_t *e);
+uint32_t patch_adsr_rate2(const adsr_t *e);
+uint8_t  patch_adsr_rate_byte(uint8_t patch_rate);
 
 // ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
@@ -139,4 +163,3 @@ typedef struct {
 // ── The active patch (issue #69) ────────────────────────────────────
 extern patch_t g_patch;
 void     patch_default(patch_t *p);
-uint32_t patch_adsr_word(const adsr_t *e);

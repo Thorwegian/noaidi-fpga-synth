@@ -231,6 +231,7 @@ module tb_element_program;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
                                                           // match the
                                                           // floor's
@@ -239,6 +240,7 @@ module tb_element_program;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
                                                           // match the
                                                           // floor's

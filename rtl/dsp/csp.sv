@@ -287,6 +287,10 @@ module csp (
     reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {bank, entry[7:0]}
     reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
     reg [31:0] imem_depth [0:2*synth_pkg::NUM_INSTR-1];
+    // #145: word 3, the second ADSR rate word. The address encoding always
+    // had this slot -- imem_write_addr is {entry, word[1:0]} and only 0/1/2
+    // were decoded -- and firmware's flush already strided by four.
+    reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
     // BITS, so rate increments are in 1/16-LSB units and the 8-bit
@@ -302,6 +306,7 @@ module csp (
             imem_cfg[wi]   = 32'd0;            // opcode 0 = off
             imem_rate[wi]  = 32'd0;
             imem_depth[wi] = 32'd0;
+            imem_rate2[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
             istate[wi] = 28'd0;
@@ -315,6 +320,7 @@ module csp (
                 2'd0: imem_cfg[imem_wr_entry]   <= imem_write_data;
                 2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
                 2'd2: imem_depth[imem_wr_entry] <= imem_write_data;
+                2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
                 default: ;                      // word 3 unused (stride 4)
             endcase
         end
@@ -380,7 +386,7 @@ module csp (
     end
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
-    logic [31:0] cfg_q, rate_q, depth_q;
+    logic [31:0] cfg_q, rate_q, depth_q, rate2_q;
     logic [27:0] istate_q;
     logic signed [17:0] gate_q, src_q, base_q;
     logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
@@ -400,8 +406,7 @@ module csp (
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_lfo_rate;
-    logic        r_sus_log;      // CFG[26]: sustain decoded log or linear
-    logic [31:0] r_rate, r_depth;
+    logic [31:0] r_rate, r_depth, r_rate2;
     logic [27:0] r_istate;
 
     // ---- R stage registers ---------------------------------------------
@@ -489,7 +494,7 @@ module csp (
         .state_in  (r_istate),
         .gate      (gate_q > 18'sd0),
         .rates     (r_rate),
-        .sus_log   (r_sus_log),
+        .rates2    (r_rate2),
         .level_out (adsr_level),
         .state_out (adsr_state_out),
         .state_we  ()                  // the CSP tracks validity itself
@@ -531,7 +536,7 @@ module csp (
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
             r_src <= '0; r_lfo_rate <= '0; r_rate <= '0; r_depth <= '0;
-            r_istate <= '0; r_sus_log <= 1'b0;
+            r_istate <= '0; r_rate2 <= '0;
             x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_istate <= '0;
             x_operand <= '0; x_depth <= '0; x_base <= '0;
             x_lfo_rate <= '0;
@@ -553,7 +558,7 @@ module csp (
             r_src      <= cfg_q[25:16];
             r_lfo_rate <= cfg_q[31:16];
             // An ADSR uses CFG[25:16] as its gate bus, so bit 26 is free.
-            r_sus_log  <= cfg_q[26];
+            r_rate2    <= rate2_q;
             r_rate     <= rate_q;
             r_depth    <= depth_q;
             r_istate   <= istate_q;
@@ -596,14 +601,15 @@ module csp (
     assign dmem_waddr = wb_addr;
     assign dmem_we    = wb_valid;
 
-    // Memory reads. The three imem RAMs share one address, so CFG, RATES and
-    // DEPTH all arrive together instead of over three cycles. dmem_gate and
+    // Memory reads. The four imem RAMs share one address, so CFG, both RATE
+    // words and DEPTH all arrive together instead of over three cycles. dmem_gate and
     // dmem_init are the same image read at two different addresses in the
     // same cycle, which is the other thing that used to cost a phase.
     always_ff @(posedge clk) begin
         cfg_q    <= imem_cfg[{bank_active, pc_addr}];
         rate_q   <= imem_rate[{bank_active, pc_addr}];
         depth_q  <= imem_depth[{bank_active, pc_addr}];
+        rate2_q  <= imem_rate2[{bank_active, pc_addr}];
         istate_q <= istate[pc_addr];
         gate_q   <= dmem_gate[cfg_q[25:16]];   // watched gate bus
         src_q    <= dmem_local[cfg_q[25:16]];  // SEND source: bus output sum
