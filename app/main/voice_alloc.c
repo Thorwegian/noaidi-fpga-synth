@@ -82,7 +82,9 @@ static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
-static int32_t  s_vel_cut[NUM_VOICES];   // per-voice velocity→cutoff term
+// #89 round 2: velocity scales the ENVELOPE AMOUNT, so there is no static
+// per-voice velocity term on the cutoff bus any more -- s_vel_cut retired.
+// The g(vel) helpers live further down, below ENV_SPAN.
 static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 
 // Live CC edits COALESCE (issue #70 crash fix): a CC just marks what
@@ -159,6 +161,45 @@ static int64_t  s_last_apply;
 // agent's suggestion, not a decision. With volume semantics the bus
 // base is MINUS this span and the source depth is PLUS it.
 #define ENV_SPAN      0x2800 // 60 dB (Thor's by-ear pick)
+
+// ---- #89 round 2: velocity scales the envelope AMOUNT -------------------
+//
+// c(vel), Q16. Linear today, which is the base shape Thor picked; it is a
+// TABLE rather than an expression so the curve is an ear-tuning surface that
+// can change without touching the amount arithmetic.
+static uint32_t vel_curve_q16(uint8_t vel)
+{
+    return ((uint32_t)vel * 65536u) / 127u;
+}
+
+// g(vel) = 1 - (amt/127) * (1 - c(vel)), Q16.
+//   amt = 0    -> g = 1 for every note: velocity OFF, full patch amount
+//                 (the true-zero/isolation rule, design.md)
+//   vel = 127  -> g = 1 whatever the amount: full velocity, full amount
+// One-sided by construction -- no neutral point, the OB-8/DX7 convention.
+static uint32_t vel_gain_q16(uint8_t vel, uint8_t amt)
+{
+    uint32_t c = vel_curve_q16(vel);
+    return 65536u - ((uint32_t)amt * (65536u - c)) / 127u;
+}
+
+// The amp envelope's DEPTH for this note: the full 60 dB span scaled by
+// g(vel). Base is -ENV_SPAN, so a soft note rises from the same silence to a
+// LOWER peak rather than starting higher -- smaller excursion, same ramp rate,
+// hence the shorter perceived attack.
+static uint32_t amp_depth_for(uint8_t vel)
+{
+    return (uint32_t)(((int64_t)ENV_SPAN * vel_gain_q16(vel, g_patch.vel_amp_amt)) >> 16);
+}
+
+// The MOD envelope's DEPTH for this note. Signed: CC 107 is bipolar, so the
+// scaling must preserve the sign and the 18-bit mask is applied after.
+static uint32_t mod_depth_for(uint8_t vel)
+{
+    int32_t d = (int32_t)g_patch.env1_depth;
+    int64_t scaled = ((int64_t)d * vel_gain_q16(vel, g_patch.vel_mod_amt)) >> 16;
+    return (uint32_t)(int32_t)scaled & 0x3FFFF;
+}
 // RATES word in the universal A, D, S, R order: bytes 0/1/3 are
 // 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
 // units (the envelope level carries 4 fractional bits: that IS the
@@ -173,13 +214,15 @@ static int64_t  s_last_apply;
 // coefficients the CSP multiplies by (#145).
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
-// The per-voice cutoff bus BASE carries only the velocity term (#44):
-// the channel-wide terms moved to BUS_CH_CUT, fanned out by the
-// walker's type-3 sources — a wheel/CC74 sweep is now ONE bus write
-// instead of 32.
+// The per-voice cutoff bus BASE is now ZERO (#89 round 2). It used to carry
+// the velocity term; velocity moved onto the MOD envelope's DEPTH word, where
+// it scales the excursion instead of offsetting the starting point. The
+// channel-wide terms live on BUS_CH_CUT, fanned out by the walker's type-3
+// sources. The write is kept so a re-used voice cannot inherit a stale base.
 static uint32_t cut_bus_value(int v)
 {
-    return (uint32_t)s_vel_cut[v];   // engine masks to 18 bits (Q8.10)
+    (void)v;
+    return 0u;
 }
 
 // The CHANNEL cutoff value: wheel opens up to ~+5 octaves (Thor
@@ -328,10 +371,12 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     // are LOWER values). MASTER volume is NOT here — it rides the
     // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
-    // Sensitivity (#89, CC 86): 64 = the historical (127−vel)>>1 span
-    // (−23.6 dB at vel 1), 127 ≈ double (−47 dB), 0 = velocity OFF.
-    int32_t vol = (int32_t)VOL_REF
-                - (((int32_t)(127 - vel) * g_patch.vel_amp_sens) >> 7);
+    // #89 round 2: velocity is NOT here any more. The ceiling is the same for
+    // every note; velocity scales the amp envelope's DEPTH so a soft note
+    // reaches a lower peak from the same floor. vel stays in the signature
+    // because note_on and the live re-render both pass it.
+    (void)vel;
+    int32_t vol = (int32_t)VOL_REF;
 
     // GAIN word carries the mode byte (filter type/dual) from the patch
     // so CC 29/30 render on re-program (#70).
@@ -429,6 +474,12 @@ static void update_amp_env(void)
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_ADSR(v), 1, r1);
         engine_link_prod_write(PROD_ADSR(v), 3, r2);
+        // #89 round 2: re-apply this voice's OWN velocity scaling. Without
+        // it, editing any amp-envelope CC while notes are held would push
+        // the unscaled patch depth to every voice and snap held notes back
+        // to full amount -- audible as a jump in level mid-note.
+        engine_link_prod_write(PROD_ADSR(v), 2,
+                               amp_depth_for(s_voices[v].vel));
     }
 }
 
@@ -517,13 +568,14 @@ static void update_mod_env(void)
 {
     uint32_t rates  = patch_adsr_rate1(&g_patch.env[1]);
     uint32_t rates2 = patch_adsr_rate2(&g_patch.env[1]);
-    uint32_t depth = (uint32_t)(int32_t)g_patch.env1_depth & 0x3FFFF;
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_MODENV(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_CUT(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_MODENV(v), 1, rates);
-        engine_link_prod_write(PROD_MODENV(v), 2, depth);
+        // per-voice velocity scaling, same reason as update_amp_env
+        engine_link_prod_write(PROD_MODENV(v), 2,
+                               mod_depth_for(s_voices[v].vel));
         engine_link_prod_write(PROD_MODENV(v), 3, rates2);
     }
 }
@@ -563,14 +615,12 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
                                .channel = channel, .stamp = ++s_stamp};
 
-    // Velocity → cutoff stays on the bus (brightening, ~+6 octaves at
-    // vel 127 with sens 64 — the historical vel*48); velocity → gain
-    // bakes into the GAIN word (B5: the gain bus belongs to the amp
-    // envelope now). Sensitivity (#89, CC 87): 0 = velocity OFF for
-    // isolation testing (Thor 2026-09-10 — could not judge key track
-    // under the hardwired brightening). The gate bus write triggers
-    // the ADSR — one write, level-sensitive.
-    s_vel_cut[pick] = ((int32_t)vel * g_patch.vel_cut_sens * 3) >> 2;
+    // #89 round 2: velocity scales the AMOUNT of both envelopes. Both DEPTH
+    // words are written BEFORE the gate, so the envelope that the gate
+    // triggers is already the right size for this note -- writing them after
+    // would let the first pass run at the previous note's amount.
+    engine_link_prod_write(PROD_ADSR(pick),   2, amp_depth_for(vel));
+    engine_link_prod_write(PROD_MODENV(pick), 2, mod_depth_for(vel));
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
     engine_link_bus_write(BUS_VGATE(pick), 1);
 
@@ -800,8 +850,11 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     // Velocity sensitivity (#89): read at note_on — new notes pick the
     // change up; held notes keep their velocity terms until re-struck.
-    case 86: g_patch.vel_amp_sens = val; break;
-    case 87: g_patch.vel_cut_sens = val; break;
+    // #89 round 2: amounts, not sensitivities. A live edit has to re-push
+    // both envelopes' DEPTH words or the change is inaudible until the next
+    // note-on -- which is exactly how a knob feels broken.
+    case 86: g_patch.vel_amp_amt = val; s_dirty |= D_ENV;  break;
+    case 87: g_patch.vel_mod_amt = val; s_dirty |= D_ENV2; break;
     case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
                g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
                s_dirty |= D_RENDER; } break;

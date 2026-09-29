@@ -97,8 +97,12 @@ void patch_default(patch_t *p)
     p->unison_stereo = 127;    // full stereo spread = the historical
                                // hard pan (CC 28 continuous since #98)
 
-    p->vel_amp_sens = 64;              // = historical (127-vel)>>1 feel
-    p->vel_cut_sens = 64;              // = historical vel*48 brightening
+    // #89 round 2: these scale the ENVELOPE AMOUNT now, not a static send,
+    // so they cannot reproduce round 1 bit-for-bit and the ticket says as
+    // much -- new values by ear. 64 is a starting point: at full amount a
+    // vel-1 note would be silent, at 64 it peaks ~30 dB down.
+    p->vel_amp_amt = 64;               // vel -> amp-env amount
+    p->vel_mod_amt = 64;               // vel -> MOD-env amount
 
     p->filter.key_track = 64;          // center = 100% tracking = the
                                        // historical voice_fc behavior
