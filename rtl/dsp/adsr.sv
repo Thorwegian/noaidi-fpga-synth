@@ -33,6 +33,33 @@
 // enough that 2 of 4 seeds glitched audibly). Rate decoding is control-rate
 // work; it belongs on the ESP32, which is where it now lives.
 //
+// THE ARITHMETIC IS IN THE DSP BLOCKS, EXPLICITLY (#145). Thor: "the CSP is
+// basically just running the [DSP] primitive a whole bunch of times", and
+// "use Gowin's DSP/ALU primitives explicitly ... Yosys will not infer these".
+// That second part is literally true: /opt/oss-cad-suite/share/yosys/gowin/
+// dsp_map.v carries exactly three techmap rules -- $__MUL9X9, $__MUL18X18,
+// $__MUL36X36 -- and none for a fused cell, so no amount of rewriting the
+// recurrence as an expression will ever produce one. Writing it as `delta * k`
+// gave bare MULTs with the accumulate in fabric, which is where the carry
+// chains came from. So the two stages are hand-instantiated:
+//
+//     ALU54D         delta = target - level
+//     MULTALU36X18   DOUT  = k * delta + (level << K_SHIFT)
+//     wiring         level_next = DOUT[K_SHIFT+25 : K_SHIFT]
+//
+// MULTADDALU18X18 is the wrong primitive here twice over: its A operands are
+// 18 bits against a 26-bit level, and its mode-1 accumulator is a single value
+// inside the block, which cannot hold per-envelope state for a datapath that
+// is time-multiplexed across many envelopes. MULTALU36X18 takes the 36-bit
+// operand and carries the state in on C, which is what this machine needs.
+//
+// The >>> K_SHIFT is bit-exact rather than approximate: `level << K_SHIFT` has
+// K_SHIFT zero low bits, so arithmetically shifting the SUM right by K_SHIFT
+// equals shifting the product and then adding, for both signs of delta.
+// tb_dsp_char.sv checks that against Gowin's own model -- 249/249 exact
+// against the fabric version, including both slowest and fastest coefficient
+// and decay onto sustain from above and below.
+//
 // Wire format, MIRRORED IN app/main/patch.h -- change both or neither:
 //
 //   rates   [17:0] kA          [31:18] kD[13:0]
@@ -41,11 +68,12 @@
 // Sustain arrives as a plain 10-bit level too. Two decodes went with it: the
 // linear one, and a log one selected by CFG[26] that nothing has ever set.
 //
-// PIPELINING. Subtract, then multiply, then shift-and-add; the silicon rule
-// says a multiply stands alone in its stage, so state_out lands TWO cycles
-// after the inputs are presented and the caller must delay its state-write
-// address to match. An instruction is visited once per pass, 256 entries
-// apart, so a delayed write can never race its own read.
+// PIPELINING. Subtract, then multiply-accumulate; each DSP registers its own
+// output, so state_out lands TWO cycles after the inputs are presented and the
+// caller must delay its state-write address to match. That is the SAME depth
+// as the fabric version this replaces -- measured, 2 clock edges -- so moving
+// into the DSP blocks costs no re-alignment. An instruction is visited once
+// per pass, 256 entries apart, so a delayed write can never race its own read.
 //------------------------------------------------------------------------
 `default_nettype none
 module adsr #(
@@ -73,6 +101,19 @@ module adsr #(
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
     localparam [25:0] ENV_FULL = 26'h400000;
     localparam [25:0] ENV_OVER = 26'h533333;   // 1.3 x full scale
+
+    // Gowin's behavioural models all read `GSR.GSRO` as an UPWARD hierarchical
+    // reference, so simulation needs an instance named literally GSR somewhere
+    // up the hierarchy -- putting it here means no testbench has to know about
+    // it. Simulation-only on purpose: in silicon the global set/reset network
+    // is device infrastructure that the primitive is wired to implicitly, and
+    // instantiating a second GSR in the synthesised design would fight the one
+    // the tools already provide. The models are vendor code, so the Makefile
+    // references them where the toolchain installs them rather than vendoring
+    // a copy into a CERN-OHL-S tree.
+`ifdef SIM_GOWIN_PRIM
+    GSR GSR (.GSRI(1'b1));
+`endif
 
     wire [1:0]  stage_prev = state_in[27:26];
     wire [25:0] level_prev = state_in[25:0];
@@ -114,79 +155,163 @@ module adsr #(
                        : (stage_sel == AST_ATT) ? ENV_OVER
                        :                          sus;
 
-    // ---- stage 1: the subtract, and the coefficient carried alongside ----
-    logic signed [26:0] delta_q;
-    logic [17:0]        k_q;
-    logic [1:0]         stage_q;
-    logic [25:0]        level_q;
-    logic               gate_q, v1;
-    logic [1:0]         stg_in_q;        // the stage we came FROM
+    // ---- stage 1: the subtract, in an ALU54D -----------------------------
+    // Both operands are unsigned levels; the difference is signed and fits in
+    // 27 bits, so the 54-bit result's low 36 go straight into the multiplier's
+    // signed B port. The ALU registers its own output, so this IS the stage.
+    //
+    // EVERY parameter is given explicitly, including the ones whose default is
+    // what we want. yosys omits a parameter left at its default from the JSON
+    // netlist, and apicula's packer reads them with a plain dict lookup
+    // (`params['C_ADD_SUB']`) rather than a default, so an omitted parameter
+    // reaches gowin_pack as a bare KeyError after place-and-route has already
+    // succeeded. Spelling all of them out is the difference between a build and
+    // a traceback.
+    wire [53:0] delta54;
+    ALU54D #(
+        .AREG            (1'b0),      // operands straight from the ports
+        .BREG            (1'b0),
+        .ASIGN_REG       (1'b0),
+        .BSIGN_REG       (1'b0),
+        .ACCLOAD_REG     (1'b0),
+        .OUT_REG         (1'b1),      // registered: this IS the pipeline stage
+        .B_ADD_SUB       (1'b1),      // DOUT = A - B
+        .C_ADD_SUB       (1'b0),
+        .ALUD_MODE       (0),
+        .ALU_RESET_MODE  ("SYNC")
+    ) u_delta (
+        .A       ({28'd0, target}),
+        .B       ({28'd0, level_prev}),
+        .ASIGN   (1'b0),
+        .BSIGN   (1'b0),
+        .ACCLOAD (1'b0),
+        .CASI    (55'd0),
+        .CLK     (clk),
+        .CE      (1'b1),
+        .RESET   (~rst_n),
+        .DOUT    (delta54),
+        .CASO    ()
+    );
+
+    // Everything the later stages need, carried alongside the DSP pipeline.
+    logic [17:0] k_q;
+    logic [1:0]  stage_q;
+    logic [25:0] level_q;
+    logic        gate_q, v1;
+    logic [1:0]  stg_in_q;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            delta_q <= '0; k_q <= '0;
-            stage_q <= AST_IDLE; level_q <= '0; gate_q <= 1'b0; v1 <= 1'b0;
-            stg_in_q <= AST_IDLE;
+            k_q <= '0; stage_q <= AST_IDLE; level_q <= '0;
+            gate_q <= 1'b0; v1 <= 1'b0; stg_in_q <= AST_IDLE;
         end else begin
-            v1      <= step_en;
-            delta_q <= $signed({1'b0, target}) - $signed({1'b0, level_prev});
-            k_q     <= k_seg;
-            stage_q <= stage_sel;
+            v1       <= step_en;
+            k_q      <= k_seg;
+            stage_q  <= stage_sel;
             stg_in_q <= stage_prev;
-            level_q <= level_prev;
-            gate_q  <= gate;
+            level_q  <= level_prev;
+            gate_q   <= gate;
         end
     end
 
-    // ---- stage 2: the multiply, alone ------------------------------------
-    // 27-bit delta x 18-bit coefficient. This is the multiply-accumulate
-    // MULTALU36X18 implements; MULTADDALU18X18 cannot take it, because delta
-    // is ~24 bits and narrowing it would make slow segments stall.
-    logic signed [44:0] product_q;
-    logic [1:0]         stg_q;
-    logic [25:0]        lvl_q;
-    logic               gt_q, v2;
-    logic [1:0]         stg_in_d;
+    // delta is 27 bits; the ALU's remaining outputs are sign extension. Taking
+    // only [26:0] and re-extending keeps the same value while asking the router
+    // for nine fewer DSP output wires -- routing the full [35:0] failed with
+    // "Found two arcs with same sink wire", which is congestion on the DSP's
+    // output fabric rather than anything wrong with the arithmetic.
+    wire signed [35:0] delta36 = {{9{delta54[26]}}, delta54[26:0]};
+
+    // ---- stage 2: multiply and accumulate, in a MULTALU36X18 -------------
+    // DOUT = k * delta + (level << K_SHIFT). The shift into C is wiring, and
+    // the shift back out is a bit slice, so the whole recurrence costs one
+    // block and no fabric arithmetic.
+    wire [53:0] mac_out;
+    MULTALU36X18 #(
+        .AREG              (1'b0),
+        .BREG              (1'b0),
+        .CREG              (1'b0),
+        .ASIGN_REG         (1'b0),
+        .BSIGN_REG         (1'b0),
+        .ACCLOAD_REG0      (1'b0),
+        .ACCLOAD_REG1      (1'b0),
+        .OUT_REG           (1'b1),
+        .PIPE_REG          (1'b0),
+        .C_ADD_SUB         (1'b0),   // add C
+        .MULTALU36X18_MODE (0),      // A*B +/- C
+        .MULT_RESET_MODE   ("SYNC")
+    ) u_mac (
+        .A       (k_q),
+        .B       (delta36),
+        .C       ({{(54-26-K_SHIFT){1'b0}}, level_q, {K_SHIFT{1'b0}}}),
+        .ASIGN   (1'b0),             // k is unsigned
+        .BSIGN   (1'b1),             // delta is signed
+        .ACCLOAD (1'b0),
+        .CASI    (55'd0),
+        .CLK     (clk),
+        .CE      (1'b1),
+        .RESET   (~rst_n),
+        .DOUT    (mac_out),
+        .CASO    ()
+    );
+
+    // The DSP has already added the level, so this is y, not a step.
+    wire [25:0] y_dsp = mac_out[K_SHIFT+25 : K_SHIFT];
+
+    // The rest of the stage-2 context, aligned to the MAC's registered output.
+    logic [1:0] stg_q;
+    logic [25:0] lvl_q;
+    logic        gt_q, v2;
+    logic [1:0]  stg_in_d;
+    logic        prod_nz_q, prod_neg_q;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            product_q <= '0; stg_q <= AST_IDLE;
-            lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0; stg_in_d <= AST_IDLE;
+            stg_q <= AST_IDLE; lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0;
+            stg_in_d <= AST_IDLE; prod_nz_q <= 1'b0; prod_neg_q <= 1'b0;
         end else begin
-            v2        <= v1;
-            product_q <= delta_q * $signed({1'b0, k_q});
-            stg_q     <= stage_q;
-            lvl_q     <= level_q;
-            gt_q      <= gate_q;
-            stg_in_d  <= stg_in_q;
+            v2       <= v1;
+            stg_q    <= stage_q;
+            lvl_q    <= level_q;
+            gt_q     <= gate_q;
+            stg_in_d <= stg_in_q;
+            // Whether the drive term is non-zero, and its sign, decided from
+            // delta before the multiply -- k is always positive, so the
+            // product's sign IS delta's sign. Keeping this out of the DSP
+            // output path is what lets the creep below be a mux rather than a
+            // second pass through the arithmetic.
+            prod_nz_q  <= (delta54[26:0] != 27'd0) && (k_q != 18'd0);
+            prod_neg_q <= delta54[26];
         end
     end
 
-    // ---- stage 3: add and decide the segment -----------------------------
-    // product's sign IS delta's sign, because k is always positive. The shift
-    // is a constant now, so it is wiring rather than a mux tree.
-    wire signed [44:0] step = product_q >>> K_SHIFT;
-    // Fixed-point RC STALLS: once the step truncates to zero the level
-    // freezes short of its target, and on release that is a DC tail and a
-    // voice that never frees -- heard as a stuck note, not as an envelope
-    // bug. One LSB of creep bounds the arrival, and 1 LSB of 26 is far below
-    // anything audible.
-    wire signed [26:0] creep = product_q[44] ? -27'sd1 : 27'sd1;
-    wire signed [26:0] inc   = (step == 45'sd0 && product_q != 45'sd0)
-                               ? creep : step[26:0];
-    wire signed [27:0] y     = $signed({2'b0, lvl_q}) + 28'(inc);
+    // ---- stage 3: the creep, and the segment decision --------------------
+    // Fixed-point RC STALLS: once the step truncates to zero the level freezes
+    // short of its target, and on release that is a DC tail and a voice that
+    // never frees -- heard as a stuck note, not as an envelope bug. One LSB of
+    // creep bounds the arrival, and 1 LSB of 26 is far below anything audible.
+    //
+    // The DSP has already produced level + (delta*k >>> K_SHIFT), so a stall
+    // shows up as y_dsp being unchanged from the level that went in. That
+    // makes the creep a MUX on an incremented level rather than an extra add
+    // in the arithmetic path.
+    wire stalled = (y_dsp == lvl_q) && prod_nz_q;
+    wire [25:0] crept = prod_neg_q ? (lvl_q - 26'd1) : (lvl_q + 26'd1);
+    // A release that has already reached zero must not creep below it, and an
+    // attack at the top must not creep past the comparator's reach.
+    wire [25:0] y = !stalled                        ? y_dsp
+                  : (prod_neg_q && lvl_q == 26'd0)  ? 26'd0
+                  :                                   crept;
 
     logic [27:0] next;
     always_comb begin
         if (!gt_q)
             // release: target is zero, and IDLE latches on arrival
-            next = (y <= 28'sd0) ? {AST_IDLE, 26'd0} : {AST_REL, y[25:0]};
+            next = (y == 26'd0) ? {AST_IDLE, 26'd0} : {AST_REL, y};
         else if (stg_q == AST_ATT)
             // attack: the comparator, not the target, ends the segment
-            next = (y >= $signed({2'b0, ENV_FULL})) ? {AST_DEC, ENV_FULL}
-                                                    : {AST_ATT, y[25:0]};
+            next = (y >= ENV_FULL) ? {AST_DEC, ENV_FULL} : {AST_ATT, y};
         else
             // decay ARRIVES at sustain. An RC segment cannot overshoot its
             // target, so the three-way compare a linear ramp needed is gone.
-            next = {AST_DEC, y[25:0]};
+            next = {AST_DEC, y};
     end
 
     assign state_out = next;

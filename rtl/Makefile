@@ -147,11 +147,25 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (iverilog)
 #----------------------------------------------------------------------
+# Gowin's behavioural models for the DSP primitives adsr.sv instantiates
+# explicitly (#145: yosys cannot infer a fused DSP cell, so they are written out
+# by hand). Vendor code, so it is referenced where the toolchain installs it
+# rather than vendored into this CERN-OHL-S tree. Override on the command line
+# if your Gowin EDA lives somewhere else.
+GOWIN_SIM ?= /opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v
+
+# -s is MANDATORY with prim_sim.v: without an explicit elaboration root
+# iverilog elaborates every primitive in that 16770-line file, including the
+# ones we never touch, and fails on their GSR references. -DSIM_GOWIN_PRIM
+# turns on the GSR instance inside adsr.sv, which the models need to exist
+# somewhere up the hierarchy.
+IVL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
+
 SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
-	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_ELEM)
+	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_ELEM) $(IVL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a
@@ -193,7 +207,7 @@ sim-spdif48: tb/tb_spdif48_block.vvp
 # (issue #58).
 TB_PROG = tb/tb_element_program.sv
 tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) tb/elem_prog_common.svh $(LUTS) Makefile
-	iverilog -g2012 -I. -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG)
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(IVL_DSP)
 
 sim-prog-full: tb/tb_element_program.vvp
 	vvp tb/tb_element_program.vvp
@@ -201,7 +215,7 @@ sim-prog-full: tb/tb_element_program.vvp
 PROG_COMMON = tb/elem_prog_common.svh
 
 tb/tb_prog_%.vvp: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
-	iverilog -g2012 -I. -o $@ $(SIM_MOD) spi/spi_bus.sv $<
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $< $(IVL_DSP)
 
 sim-prog-boot: tb/tb_prog_boot.vvp
 	vvp tb/tb_prog_boot.vvp > tb/sim-prog-boot.out 2>&1
@@ -229,7 +243,7 @@ sim-prog-limiter: tb/tb_prog_limiter.vvp
 # #136: the CSP alone -- seconds, not minutes, because it does
 # not elaborate the SVF, the oscillators or the limiter.
 tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
-	iverilog -g2012 -I. -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv $(IVL_DSP)
 
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
@@ -238,8 +252,19 @@ sim-csp: tb/tb_csp.vvp
 CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 
 # The mailbox's two-take commit under back-to-back traffic. IN the gate.
+# Characterises the hand-instantiated Gowin DSP primitives against Gowin's own
+# behavioural models: the pipeline depth adsr.sv's caller aligns to, and
+# bit-exactness against the fabric arithmetic they replace. Depends on no repo
+# RTL -- it tests the vendor cells, which is the point.
+tb/tb_dsp_char.vvp: tb/tb_dsp_char.sv Makefile
+	iverilog -g2012 -s tb_dsp_char -o $@ tb/tb_dsp_char.sv $(GOWIN_SIM)
+
+sim-dsp-char: tb/tb_dsp_char.vvp
+	@vvp $< > tb/sim-dsp-char.out 2>&1 || true
+	@cat tb/sim-dsp-char.out
+
 tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
-	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv $(IVL_DSP)
 
 sim-mbox-burst: tb/tb_mbox_burst.vvp
 	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
@@ -250,13 +275,13 @@ sim-mbox-burst: tb/tb_mbox_burst.vvp
 # every run. Kept because re-running them is how you re-check that those two
 # candidates are still dead.
 tb/tb_adsr_soak.vvp: $(CSP_SIM) tb/tb_adsr_soak.sv Makefile
-	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv $(IVL_DSP)
 
 sim-adsr-soak: tb/tb_adsr_soak.vvp
 	vvp tb/tb_adsr_soak.vvp
 
 tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
-	iverilog -g2012 -I. -o $@ $(CSP_SIM) tb/tb_prog_soak.sv
+	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_prog_soak.sv $(IVL_DSP)
 
 sim-prog-soak: tb/tb_prog_soak.vvp
 	vvp tb/tb_prog_soak.vvp
@@ -279,7 +304,7 @@ sim-spi: tb/tb_spi_slave_regs.vvp
 # bench — part of the regular suite).
 TB_STAB = tb/tb_svf_stability.sv
 tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
-	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_STAB)
+	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_STAB) $(IVL_DSP)
 
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
@@ -290,7 +315,7 @@ sim-stab: tb/tb_svf_stability.vvp
 # is made unconditionally stable. Run with: make sim-svfmod
 TB_SVFMOD = tb/tb_svf_modulation.sv
 tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
-	iverilog -g2012 -o $@ $(SIM_MOD) $(TB_SVFMOD)
+	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_SVFMOD) $(IVL_DSP)
 
 sim-svfmod: tb/tb_svf_modulation.vvp
 	vvp tb/tb_svf_modulation.vvp
@@ -322,10 +347,10 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-dsp-char sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-csp.out tb/sim-mbox-burst.out \
+	@cat tb/sim-dsp-char.out tb/sim-csp.out tb/sim-mbox-burst.out \
 	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \
