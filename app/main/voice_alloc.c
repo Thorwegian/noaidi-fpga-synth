@@ -169,7 +169,8 @@ static int64_t  s_last_apply;
 // LEVEL, one LSB = span/256 below peak (0.1875 dB at the 48 dB
 // span).
 // The amp envelope's A,D,S,R now lives in g_patch.env[0]
-// (patch.h, #69); patch_adsr_word() packs it into the RATES word.
+// (patch.h, #69); patch_adsr_rate1/rate2() convert it into the linear
+// coefficients the CSP multiplies by (#145).
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
 // The per-voice cutoff bus BASE carries only the velocity term (#44):
@@ -194,12 +195,12 @@ static int s_sub_id = -1;
 // using the gateware decode's own formula: the level spans 2^22 LSB
 // and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK — and
 // since the half-rate walker (#100) an entry is walked every OTHER
-// sample, i.e. at 48 kHz. patch_adsr_word already bakes the ×2 rate
+// sample, i.e. at 48 kHz. patch_adsr_rate_byte already bakes the ×2 rate
 // compensation into the byte, so the samples count is in 48 kHz
 // walks: 1 walk = 1/48000 s ≈ 20.83 µs.
 static int64_t release_tail_us(void)
 {
-    uint32_t r    = (patch_adsr_word(&g_patch.env[0]) >> 24) & 0xFF;
+    uint32_t r    = patch_adsr_rate_byte(g_patch.env[0].release);
     uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
     uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
     return (int64_t)(samples * 125u / 6u);            // µs at 48 kHz
@@ -423,9 +424,12 @@ static void render_active_voices(void)
 // reads the patch, so tail bookkeeping follows automatically.
 static void update_amp_env(void)
 {
-    for (int v = 0; v < NUM_VOICES; v++)
-        engine_link_prod_write(PROD_ADSR(v), 1,
-                               patch_adsr_word(&g_patch.env[0]));
+    uint32_t r1 = patch_adsr_rate1(&g_patch.env[0]);
+    uint32_t r2 = patch_adsr_rate2(&g_patch.env[0]);
+    for (int v = 0; v < NUM_VOICES; v++) {
+        engine_link_prod_write(PROD_ADSR(v), 1, r1);
+        engine_link_prod_write(PROD_ADSR(v), 3, r2);
+    }
 }
 
 // CC → LFO phase increment. The gateware increment is LINEAR in
@@ -511,7 +515,8 @@ static void update_lfo2(void)
 // cutoff is the implemented destination).
 static void update_mod_env(void)
 {
-    uint32_t rates = patch_adsr_word(&g_patch.env[1]);
+    uint32_t rates  = patch_adsr_rate1(&g_patch.env[1]);
+    uint32_t rates2 = patch_adsr_rate2(&g_patch.env[1]);
     uint32_t depth = (uint32_t)(int32_t)g_patch.env1_depth & 0x3FFFF;
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_MODENV(v), 0,
@@ -519,6 +524,7 @@ static void update_mod_env(void)
                | ((uint32_t)BUS_VGATE(v) << 16));
         engine_link_prod_write(PROD_MODENV(v), 1, rates);
         engine_link_prod_write(PROD_MODENV(v), 2, depth);
+        engine_link_prod_write(PROD_MODENV(v), 3, rates2);
     }
 }
 
@@ -1025,8 +1031,9 @@ void voice_alloc_init(void)
         engine_link_prod_write(PROD_ADSR(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
-        engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word(&g_patch.env[0]));
+        engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_rate1(&g_patch.env[0]));
         engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
+        engine_link_prod_write(PROD_ADSR(v), 3, patch_adsr_rate2(&g_patch.env[0]));
     }
     refresh_gain_buses();   // gain-bus bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);

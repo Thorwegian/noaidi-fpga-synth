@@ -62,6 +62,15 @@ RTL_DIR = "rtl"
 FAULT_MINMEAN = 0.15
 FAULT_DEPTH = 0.15
 
+# A working build plays a held note at roughly -24 dBFS with the default patch.
+# Checked because the fault metric above measures MODULATION and will happily
+# call a silent or 28 dB-quiet synth "clean" -- which it did, on a build whose
+# gateware expected the #145 coefficient format while the ESP was still sending
+# the old nibble rates. Level is a different failure from modulation and needs
+# its own assertion.
+LEVEL_NOMINAL_DB = -24.0
+LEVEL_TOLERANCE_DB = 8.0
+
 
 # ---------------------------------------------------------------- board
 
@@ -153,12 +162,22 @@ def is_faulty(sig):
     return sig is not None and sig[0] <= FAULT_MINMEAN and sig[1] >= FAULT_DEPTH
 
 
+def level_ok(sig):
+    """Is the level anywhere near what a working build produces?"""
+    return sig is not None and abs(sig[3] - LEVEL_NOMINAL_DB) <= LEVEL_TOLERANCE_DB
+
+
 def fmt(sig):
     if sig is None:
         return "silent"
     mm, depth, hz, rms = sig
+    verdict = "FAULT" if is_faulty(sig) else "clean"
+    if not level_ok(sig):
+        verdict += (f"  ** LEVEL {rms:+.1f} dB, expected "
+                    f"{LEVEL_NOMINAL_DB:+.0f} +/-{LEVEL_TOLERANCE_DB:.0f} -- "
+                    f"is the firmware's wire format matched to the gateware? **")
     return (f"min/mean {mm:5.3f}  depth {100*depth:5.1f}%  at {hz:6.2f} Hz  "
-            f"rms {rms:+6.1f} dB  {'FAULT' if is_faulty(sig) else 'clean'}")
+            f"rms {rms:+6.1f} dB  {verdict}")
 
 
 # ---------------------------------------------------------------- stimulus
@@ -255,6 +274,10 @@ def probe(rounds=6, note=84, secs=5):
                 worst = sig
             if is_faulty(sig):
                 print("  VERDICT: FAULT reproduced")
+                return 1
+            if not level_ok(sig):
+                print("  VERDICT: level wrong -- not a modulation fault, but "
+                      "this build is not working correctly")
                 return 1
     print("  VERDICT: clean")
     return 0

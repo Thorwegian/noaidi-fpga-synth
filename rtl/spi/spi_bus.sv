@@ -244,9 +244,13 @@ module spi_bus #(
     localparam [15:0] PROD_BASE = synth_pkg::MAP_IMEM_BASE;
     localparam [15:0] PROD_END  = synth_pkg::MAP_IMEM_BASE
                                 + 16'(4 * synth_pkg::NUM_INSTR);
+    // All FOUR words per entry are writable since #145: word 3 carries the
+    // second ADSR rate word (kD's high bits, kR and sustain). It used to be
+    // excluded here even though the address map reserved the slot, so a write
+    // to it was silently dropped -- which showed up as an envelope that would
+    // not release, because kR stayed zero.
     wire in_instruction_range = (word_addr >= PROD_BASE)
-                          && (word_addr <  PROD_END)
-                          && (word_addr[1:0] != 2'd3);  // word 3 reserved
+                          && (word_addr <  PROD_END);
     assign imem_write_enable = byte_end && (frame_phase == 3'd4)
                                    && (data_byte_index == 2'd3)
                                    && !is_read && in_instruction_range;
