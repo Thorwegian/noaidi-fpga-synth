@@ -130,37 +130,48 @@ module adsr #(
     // +8 octave envelope moved the bus by 2, not 8).
     assign level_out = $signed({1'b0, level_prev[22:6]});
 
+    // ---- RETRIGGER: a gate POSEDGE means a new note ----------------------
+    // The gate is a LEVEL and the stage is this envelope's only memory, so a
+    // voice re-gated mid-release arrives as AST_REL with a non-zero level. Left
+    // alone the attack continues FROM that level, which is the wrong envelope
+    // (#159 first half). Zeroing it outright is the wrong CURE: it truncates a
+    // voice that is still sounding inside one control sample, and an amplitude
+    // step is a click -- Thor's "loud pop", and mine.
+    //
+    // So: still loud, fade to silence first at the fastest rate the coefficient
+    // format allows, then restart. Already quiet, restart at once.
+    //
+    // K_FAST is the largest 18-bit coefficient: 1.5% per pass against 2^24, so
+    // 90% of the level is gone in ~150 passes, 1.6 ms at the 96 kHz control
+    // rate -- inaudible as delay, and no cliff. RETRIG_FLOOR is ~0.8% of full
+    // scale, about 42 dB down, where truncating cannot be heard.
+    //
+    // The common case costs nothing: the allocator hands out the voice whose
+    // gate has been low longest, which is the most decayed one there is.
+    //
+    // Still not fixed here, deliberately: stealing a voice that is still HELD.
+    // Its gate never drops, so nothing in the gateware can tell it from the same
+    // note continuing.
+    localparam [25:0] RETRIG_FLOOR = ENV_FULL >> 7;
+    localparam [17:0] K_FAST       = 18'd253952;
+
+    wire posedge_gate = gate && (stage_prev == AST_REL || stage_prev == AST_IDLE);
+    wire retrig_fade  = posedge_gate && (level_prev >  RETRIG_FLOOR);
+    wire retrig_now   = posedge_gate && (level_prev <= RETRIG_FLOOR);
+    wire [25:0] level_now = retrig_now ? 26'd0 : level_prev;
+
     // ---- which segment this step belongs to -----------------------------
-    wire [1:0] stage_sel = !gate                  ? AST_REL
+    wire [1:0] stage_sel = (!gate || retrig_fade) ? AST_REL
                          : (stage_prev == AST_ATT) ? AST_ATT
                          : (stage_prev == AST_DEC) ? AST_DEC
                          :                           AST_ATT;   // from idle
-
-    // RETRIGGER. The gate is a LEVEL and the stage is this envelope's only
-    // memory, so a voice stolen mid-release arrives here as AST_REL with a
-    // non-zero level and the attack above continues FROM that level instead of
-    // from silence -- audibly, an attack that starts part-way up and is much
-    // shorter, because the attack charges toward 1.3x full scale. Thor heard it
-    // playing chords in succession, which is exactly the case that hits it:
-    // each chord's note-offs leave releasing voices for the next chord to
-    // steal. A released envelope whose gate goes high again is a NEW NOTE, so
-    // it starts from zero.
-    //
-    // AST_IDLE does not need this -- the release latches {AST_IDLE, 26'd0} on
-    // arrival, so an idle envelope's level is already 0.
-    //
-    // Not fixed here, and deliberately: stealing a voice that is still HELD.
-    // Its gate never drops, so nothing in the gateware can tell that apart from
-    // the same note continuing; that one needs firmware to drop the gate for a
-    // pass first.
-    wire retrig = gate && (stage_prev == AST_REL);
-    wire [25:0] level_now = retrig ? 26'd0 : level_prev;
 
     // kD straddles the two words: 14 bits in one, 4 in the other. Firmware
     // packs it that way because three 18-bit coefficients plus a sustain
     // level do not fit into 64 bits any other way.
     wire [17:0] k_dec = {rates2[3:0], rates[31:18]};
-    wire [17:0] k_seg = !gate                   ? rates2[21:4]   // release
+    wire [17:0] k_seg = retrig_fade              ? K_FAST         // #159 fade
+                      : !gate                   ? rates2[21:4]   // release
                       : (stage_sel == AST_ATT)  ? rates[17:0]    // attack
                       :                           k_dec;         // decay
 
@@ -171,7 +182,7 @@ module adsr #(
     // decay segment climb instead of settle.
     wire [25:0] sus = 26'(rates2[31:22]) << SUS_SHIFT;
 
-    wire [25:0] target = !gate                  ? 26'd0
+    wire [25:0] target = (!gate || retrig_fade) ? 26'd0
                        : (stage_sel == AST_ATT) ? ENV_OVER
                        :                          sus;
 
@@ -218,11 +229,12 @@ module adsr #(
     logic [1:0]  stage_q;
     logic [25:0] level_q;
     logic        gate_q, v1;
+    logic        fade_q;   // #159: this pass is a retrigger fade
     logic [1:0]  stg_in_q;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             k_q <= '0; stage_q <= AST_IDLE; level_q <= '0;
-            gate_q <= 1'b0; v1 <= 1'b0; stg_in_q <= AST_IDLE;
+            gate_q <= 1'b0; v1 <= 1'b0; stg_in_q <= AST_IDLE; fade_q <= 1'b0;
         end else begin
             v1       <= step_en;
             k_q      <= k_seg;
@@ -230,6 +242,7 @@ module adsr #(
             stg_in_q <= stage_prev;
             level_q  <= level_now;
             gate_q   <= gate;
+            fade_q   <= retrig_fade;
         end
     end
 
@@ -280,17 +293,19 @@ module adsr #(
     logic [1:0] stg_q;
     logic [25:0] lvl_q;
     logic        gt_q, v2;
+    logic        fade_d;   // #159, aligned with the MAC output
     logic [1:0]  stg_in_d;
     logic        prod_nz_q, prod_neg_q;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            stg_q <= AST_IDLE; lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0;
+            stg_q <= AST_IDLE; lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0; fade_d <= 1'b0;
             stg_in_d <= AST_IDLE; prod_nz_q <= 1'b0; prod_neg_q <= 1'b0;
         end else begin
             v2       <= v1;
             stg_q    <= stage_q;
             lvl_q    <= level_q;
             gt_q     <= gate_q;
+            fade_d   <= fade_q;
             stg_in_d <= stg_in_q;
             // Whether the drive term is non-zero, and its sign, decided from
             // delta before the multiply -- k is always positive, so the
@@ -322,8 +337,12 @@ module adsr #(
 
     logic [27:0] next;
     always_comb begin
-        if (!gt_q)
-            // release: target is zero, and IDLE latches on arrival
+        if (!gt_q || fade_d)
+            // Release, and the #159 retrigger fade: both fall toward zero.
+            // Latching IDLE on arrival is what hands the fade back to the
+            // restart path -- the next pass sees IDLE with the gate still high,
+            // so posedge_gate fires with the level at zero and the attack
+            // begins from silence.
             next = (y == 26'd0) ? {AST_IDLE, 26'd0} : {AST_REL, y};
         else if (stg_q == AST_ATT)
             // attack: the comparator, not the target, ends the segment

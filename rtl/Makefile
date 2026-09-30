@@ -83,7 +83,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # on an unrelated u_spi net while seed 2 routes with full timing
 # margin. Bump SEED if a future netlist hits "Failed to find a
 # route" — it is placement luck, not (necessarily) real congestion.
-SEED ?= 2
+SEED ?= 3
 
 # ---------------------------------------------------------------- #128
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means

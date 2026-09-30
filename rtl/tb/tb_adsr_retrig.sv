@@ -1,34 +1,40 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_adsr_retrig.sv -- a re-gated envelope must restart from silence (#89)
+// tb_adsr_retrig.sv -- a re-gated envelope restarts, WITHOUT a click (#159)
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor, playtesting #89: "the envelopes don't always appear to reset when
-// playing several chords in succession. Attacks start from a higher value than
-// zero. I suspect the voice stealing doesn't reset the ADSR envelopes properly."
+// This bench asserted the wrong contract, and the wrong contract is what Thor
+// heard as "a loud pop where none was called for".
 //
-// This is the one question a bench answers better than the board: whether a
-// specific state transition does the right thing. The hardware version needs
-// all 32 voices occupied before the allocator will steal anything, and those 31
-// other voices are ringing on a long release while the measurement is taken --
-// the stolen voice's level IS the interference, so the signal and the noise are
-// the same thing. Here the state is simply presented.
+// The first version required a re-gated envelope to be at zero one pass later.
+// That is correct about WHERE it must end up and wrong about HOW: slamming the
+// level to zero truncates a voice that is still sounding inside one control
+// sample, and an amplitude step is a click. The bench passed happily while the
+// synth popped, because nothing here looked at the SIZE of the step.
 //
-// The case: stage_prev = AST_REL with a high level and the gate HIGH. That is a
-// voice stolen mid-release. The next level must come back at (or near) zero and
-// the stage must be ATTACK, not a continuation from where the release had got
-// to.
+// So the contract now has three parts, and the third is the one that matters:
 //
-// The control case is what must NOT change: gate high with stage_prev = AST_DEC
-// is a note that is simply still held, and its level must carry on.
+//   1. a re-gated envelope ends up at zero and attacks from there
+//   2. it gets there quickly -- a couple of milliseconds, not a release tail
+//   3. IT NEVER STEPS. No single pass may move the level by more than a few
+//      percent of full scale, because that step is the click.
+//
+// Plus the three cases that must not change at all: a held note keeps decaying,
+// an attack in progress is undisturbed, a release still falls.
 //------------------------------------------------------------------------
 module tb_adsr_retrig;
 
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
     localparam [25:0] ENV_FULL = 26'h400000;
+
+    // No pass may move the level by more than this. K_FAST is 1.5% per pass, so
+    // 3% leaves headroom for the fade while still failing an instant reset by a
+    // factor of thirty.
+    localparam [25:0] MAX_STEP = ENV_FULL / 32;
+    localparam [25:0] FLOOR    = ENV_FULL / 64;   // "arrived" threshold
 
     reg clk = 0, rst_n = 0;
     always #5 clk = ~clk;
@@ -51,8 +57,6 @@ module tb_adsr_retrig;
 
     integer errors = 0;
 
-    // Present a state for one cycle and read what comes back two edges later,
-    // which is the pipeline depth adsr.sv documents.
     task step(input [1:0] stg, input [25:0] lvl, input g,
               output [1:0] o_stg, output [25:0] o_lvl);
         begin
@@ -68,11 +72,11 @@ module tb_adsr_retrig;
     endtask
 
     reg [1:0]  ostg;
-    reg [25:0] olvl;
+    reg [25:0] olvl, prev;
+    integer    n;
+    reg [25:0] worst_step;
 
     initial begin
-        // A mid-speed coefficient in every segment so a step is visible but
-        // small: kA, kD and kR all 0x08000, sustain high.
         rates  = {14'h0800, 18'h08000};
         rates2 = {10'h300, 18'h08000, 4'h0};
 
@@ -80,58 +84,82 @@ module tb_adsr_retrig;
         rst_n = 1;
         repeat (2) @(posedge clk);
 
-        $display("  #89 retrigger: a voice stolen mid-release must attack from silence");
+        $display("  #159: a re-gated envelope restarts from silence, without a step");
 
-        // ---- the bug: releasing, high level, gate raised -------------------
-        step(AST_REL, 26'h300000, 1'b1, ostg, olvl);
-        $display("    stolen mid-release, level 0x300000, gate HIGH");
-        $display("      -> stage %0d, level 0x%06X", ostg, olvl);
+        // ---- the fade: re-gate a LOUD envelope and follow it to zero -------
+        prev = 26'h300000;
+        ostg = AST_REL;
+        worst_step = 0;
+        for (n = 0; n < 600; n = n + 1) begin
+            step(ostg, prev, 1'b1, ostg, olvl);
+            // Measure the step on EVERY transition, including the one into
+            // ATTACK. Measuring only between fade passes left a hole exactly
+            // where the click is: without the fade the very first pass jumps
+            // straight to ATTACK, the loop exited before recording anything, and
+            // the bench reported ALL PASS on the popping build.
+            if (prev > olvl && (prev - olvl) > worst_step) worst_step = prev - olvl;
+            if (olvl > prev && (olvl - prev) > worst_step) worst_step = olvl - prev;
+            if (ostg == AST_ATT) begin
+                // arrived: it must have restarted from silence, not from height
+                if (olvl > FLOOR) begin
+                    errors = errors + 1;
+                    $display("    FAILURE: attack began at 0x%06X, not from silence", olvl);
+                end
+                $display("    re-gated at 0x300000: ATTACK after %0d passes = %0.2f ms, worst single step 0x%06X",
+                         n + 1, (n + 1) / 96.0, worst_step);
+                prev = olvl;
+                n = 1000;
+            end else begin
+                prev = olvl;
+            end
+        end
+        if (n != 1001) begin
+            errors = errors + 1;
+            $display("    FAILURE: never reached ATTACK; stuck at stage %0d, 0x%06X",
+                     ostg, prev);
+        end
+        // THE anti-click assertion
+        if (worst_step > MAX_STEP) begin
+            errors = errors + 1;
+            $display("    FAILURE: stepped 0x%06X in one pass (limit 0x%06X) -- that step IS the click",
+                     worst_step, MAX_STEP);
+        end
+
+        // ---- a QUIET re-gate restarts immediately, paying nothing ----------
+        step(AST_REL, 26'h002000, 1'b1, ostg, olvl);
+        $display("    re-gated at 0x002000 (already quiet) -> stage %0d, level 0x%06X",
+                 ostg, olvl);
         if (ostg !== AST_ATT) begin
             errors = errors + 1;
-            $display("      FAILURE: stage should be ATTACK (%0d)", AST_ATT);
-        end
-        if (olvl > 26'h010000) begin
-            errors = errors + 1;
-            $display("      FAILURE: level should restart near zero, got 0x%06X", olvl);
+            $display("    FAILURE: a quiet re-gate should attack at once");
         end
 
-        // the same from a nearly-full release, which is the worst case
-        step(AST_REL, ENV_FULL, 1'b1, ostg, olvl);
-        $display("    stolen at full level, gate HIGH -> stage %0d, level 0x%06X",
-                 ostg, olvl);
-        if (ostg !== AST_ATT || olvl > 26'h010000) begin
+        // ---- and from IDLE, which is already silent ------------------------
+        step(AST_IDLE, 26'd0, 1'b1, ostg, olvl);
+        if (ostg !== AST_ATT) begin
             errors = errors + 1;
-            $display("      FAILURE: did not restart from silence");
+            $display("    FAILURE: a gate on an IDLE envelope should attack");
         end
 
-        // ---- the control: a held note must NOT be reset -------------------
+        // ---- the three that must NOT change -------------------------------
         step(AST_DEC, 26'h300000, 1'b1, ostg, olvl);
         $display("    still held, decaying from 0x300000 -> stage %0d, level 0x%06X",
                  ostg, olvl);
-        if (ostg !== AST_DEC) begin
+        if (ostg !== AST_DEC || olvl < 26'h200000) begin
             errors = errors + 1;
-            $display("      FAILURE: a held note's stage changed");
-        end
-        if (olvl < 26'h200000) begin
-            errors = errors + 1;
-            $display("      FAILURE: a held note's level was reset -- it must carry on");
+            $display("    FAILURE: a held note was disturbed");
         end
 
-        // an attack in progress must also carry on
         step(AST_ATT, 26'h100000, 1'b1, ostg, olvl);
-        $display("    attack in progress from 0x100000 -> stage %0d, level 0x%06X",
-                 ostg, olvl);
         if (ostg !== AST_ATT || olvl < 26'h0F0000) begin
             errors = errors + 1;
-            $display("      FAILURE: an attack in progress was disturbed");
+            $display("    FAILURE: an attack in progress was disturbed");
         end
 
-        // ---- and a release must still release ------------------------------
         step(AST_REL, 26'h300000, 1'b0, ostg, olvl);
-        $display("    releasing, gate LOW -> stage %0d, level 0x%06X", ostg, olvl);
         if (olvl >= 26'h300000) begin
             errors = errors + 1;
-            $display("      FAILURE: a release did not fall");
+            $display("    FAILURE: a release did not fall");
         end
 
         $display("");
