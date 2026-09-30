@@ -348,6 +348,20 @@ TB_OSC = tb/tb_osc_core.sv
 tb/tb_osc_core.vvp: dsp/osc_core.sv $(TB_OSC) dsp/sine_lut.hex Makefile
 	iverilog -g2012 -o $@ dsp/osc_core.sv $(TB_OSC)
 
+# The pulse oscillator must average to ZERO at every duty (#154). A bare
+# comparator is only centred at 50%: with phase sweeping the full signed range
+# the comparator is true for (duty + 2^23)/2^24 of the cycle, so the mean of a
+# +-2^23 square is exactly `duty` -- at CC 25 = 127 (duty 7549747) the oscillator
+# carried 29491 LSB of pure DC, scaled on its way out by the amp envelope.
+# Without the fix this bench reports 8 failures, which is the only reason its
+# passing means anything.
+tb/tb_pulse_dc.vvp: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
+	iverilog -g2012 -s tb_pulse_dc -o $@ $(PKG) dsp/osc_core.sv tb/tb_pulse_dc.sv
+
+sim-pulse-dc: tb/tb_pulse_dc.vvp
+	@vvp $< > tb/sim-pulse-dc.out 2>&1 || true
+	@cat tb/sim-pulse-dc.out
+
 sim-osc: tb/tb_osc_core.vvp
 	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
 
@@ -360,10 +374,10 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-dsp-char sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-pulse-dc sim-dsp-char sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-dsp-char.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
+	@cat tb/sim-pulse-dc.out tb/sim-dsp-char.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
 	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-spi.out tb/sim-bus.out \

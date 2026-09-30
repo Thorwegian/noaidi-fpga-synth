@@ -39,9 +39,33 @@ module osc_core (
     //----------------------------------------------------------------
     // Pulse: signed comparator — phase < duty
     //   duty = -1.0 → never high, 0.0 → 50%, +1.0 → always high
+    //
+    // #154: DC-FREE AT EVERY DUTY. A bare comparator is only centred at 50%.
+    // phase_next sweeps the full signed range, so the comparator is true for
+    // frac = (duty + 2^23)/2^24 of the cycle and the mean of a ±2^23 square
+    // with that duty is
+    //
+    //     2^23 · (2·frac − 1)  =  duty
+    //
+    // exactly — the offset IS the duty word, so removing it is one subtract
+    // and no multiply. At CC 25 = 127 firmware sends duty = +7549747, which is
+    // 0.9 of full scale of pure DC: tens of thousands of PCM units, scaled by
+    // the amp envelope on its way out, which is why it read as an envelope
+    // leaking into the offset. Largely inaudible, but it spent headroom
+    // permanently and a lowered cutoff removes the pulse and leaves the offset
+    // behind.
+    //
+    // At duty 0 the correction subtracts nothing, so a square is bit-identical
+    // to before.
+    //
+    // 25 bits because a corrected narrow pulse reaches ~2^24. After the >>> 8
+    // below that is at most ±2^16, and Q2.16 spans ±2.0 against a nominal
+    // oscillator's ±0.5, so it fits without a clamp — and no clamp is added on
+    // purpose, since one here would mask a width error instead of showing it.
     //----------------------------------------------------------------
-    logic signed [23:0] pul;
-    assign pul = (phase_next < duty) ? 24'sh7FFFFF : 24'sh800000;
+    logic signed [24:0] pul;
+    assign pul = ((phase_next < duty) ? 25'sd8388607 : -25'sd8388608)
+                 - 25'(duty);
 
     //----------------------------------------------------------------
     // Triangle: fold sawtooth at midpoint (phase = 2^23)
@@ -76,16 +100,18 @@ module osc_core (
     //----------------------------------------------------------------
     // Waveform select
     //----------------------------------------------------------------
-    logic signed [23:0] muxed;
+    // 25 bits so the DC-corrected pulse (#154) survives the mux; the other
+    // three are sign-extended and unchanged.
+    logic signed [24:0] muxed;
     always_comb begin
         case (wave)
-            2'd0:    muxed = saw;
+            2'd0:    muxed = 25'(saw);
             2'd1:    muxed = pul;
-            2'd2:    muxed = triw;
-            default: muxed = sine;
+            2'd2:    muxed = 25'(triw);
+            default: muxed = 25'(sine);
         endcase
     end
 
-    assign sample_out = muxed >>> 8;    // Q0.24 → Q2.16
+    assign sample_out = 18'(muxed >>> 8);   // Q0.24 → Q2.16
 
 endmodule
