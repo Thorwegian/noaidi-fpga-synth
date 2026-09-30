@@ -74,7 +74,8 @@ typedef struct {
     uint8_t  note;
     uint8_t  vel;           // stored so a live CC edit can re-render (#70)
     uint8_t  channel;       // stored for later multi-timbrality; omni today
-    uint32_t stamp;         // allocation order, for oldest-steal
+    uint32_t stamp;         // allocation order: note-off FIFO pairing,
+                            // and the all-keys-down steal fallback
     int64_t  release_until; // esp_timer µs when the release tail is done
     int64_t  gate_low_us;   // esp_timer µs when this voice's GATE went LOW
                             // (#159). Stealing picks the SMALLEST of these,
@@ -589,12 +590,20 @@ static void update_mod_env(void)
 }
 
 // Every note-on gets a FRESH voice — allocation never matches on the
-// note. Preference: least-recently-used IDLE voice; else the
-// most-decayed RELEASING voice (earliest tail end — the least
-// audible casualty); else steal the oldest HELD voice. Only the
-// steal cases start their attack from a non-silent level (the gate
-// is level-sensitive), and they only happen when all 32 voices are
-// genuinely in use.
+// note. Preference (#159, Thor: "it picks the voice that got its GATE
+// lowered earliest"): the voice whose GATE has been low the longest,
+// with V_IDLE and V_RELEASING ranked TOGETHER — what matters is when
+// the gate dropped, not whether the tail expired — and a never-played
+// voice (gate_low_us == 0) ahead of both. Only when all 32 keys are
+// genuinely down does it fall back to stealing the oldest HELD voice.
+//
+// That fallback is the one case whose gate never goes low, so the
+// envelope sees no POSEDGE and does not restart, and nothing here can
+// change it: the CSP samples each gate once per 96 kHz sample
+// (10.417 µs), so a low and a high written back-to-back from firmware
+// fall between two reads and are invisible. A voice stolen while
+// RELEASING is still sounding when its envelope is reset to zero; that
+// amplitude step is the click tracked on #159.
 static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 {
     int64_t now = esp_timer_get_time();
@@ -736,8 +745,9 @@ static void note_off(uint8_t note)
     if (pick < 0)
         return;   // off without a matching held on (steal ate it)
     s_voices[pick].state = V_RELEASING;
-    s_voices[pick].release_until = esp_timer_get_time() + release_tail_us();
-    s_voices[pick].gate_low_us  = esp_timer_get_time();   // #159
+    int64_t now = esp_timer_get_time();
+    s_voices[pick].release_until = now + release_tail_us();
+    s_voices[pick].gate_low_us   = now;   // #159: one gate-low, one instant
     engine_link_bus_write(BUS_VGATE(pick), 0);
 }
 
@@ -900,10 +910,10 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 123:                          // all notes off: release held voices
         for (int v = 0; v < NUM_VOICES; v++)
             if (s_voices[v].state == V_HELD) {
+                int64_t now = esp_timer_get_time();
                 s_voices[v].state = V_RELEASING;
-                s_voices[v].release_until =
-                    esp_timer_get_time() + release_tail_us();
-                s_voices[v].gate_low_us = esp_timer_get_time();   // #159
+                s_voices[v].release_until = now + release_tail_us();
+                s_voices[v].gate_low_us   = now;   // #159
                 engine_link_bus_write(BUS_VGATE(v), 0);
             }
         break;

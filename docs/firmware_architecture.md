@@ -65,8 +65,13 @@ different facts:
 | `V_RELEASING` | key up, gate bus 0, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
 
-- **Allocation preference** (note-on): least-recently-used IDLE →
-  most-decayed RELEASING (earliest tail end) → steal oldest HELD.
+- **Allocation preference** (note-on, #159): the voice whose GATE has
+  been low the LONGEST — `V_IDLE` and `V_RELEASING` ranked together,
+  never-played first → steal oldest HELD once all 32 keys are down.
+  Ordering by gate-lowered-earliest maximises the interval between a
+  voice's gate falling and rising again, which is what the envelope's
+  POSEDGE reset needs: the CSP reads each gate only once per sample
+  (10.417 µs), so a shorter low is never seen.
   RELEASING promotes to IDLE lazily during the allocation scan when
   `esp_timer` passes the tail deadline (computed from the RATES
   release byte with the gateware decode's own formula) — no timer
@@ -74,11 +79,20 @@ different facts:
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
-- **Known limitation**: the ADSR gate is level-sensitive, so a voice
-  stolen while HELD keeps its envelope stage (no fresh attack), and
-  one stolen while RELEASING attacks from the tail's level. Both only
-  occur with all 32 voices in use; a true retrigger needs a gateware
-  edge/pulse mechanism ("retrig reserved" under the GATE rung).
+- **Retrigger, and what is still missing**: since `94d75c4` the ADSR
+  zeroes its level whenever it sees a gate POSEDGE, so a voice stolen
+  while RELEASING does start a fresh attack from silence — no gateware
+  edge/pulse mechanism was needed, the level comparison does it. Two
+  things remain. A voice stolen while HELD never has a low gate, so
+  there is no posedge and it keeps its envelope stage; that one is
+  unfixable from firmware (the CSP reads a gate once per 10.417 µs
+  sample, so a low written between two reads is invisible) and it
+  only happens with all 32 keys genuinely down. And the reset itself
+  truncates a still-sounding tail inside one control sample, up to
+  74.7% of full scale, which is audible as a click — **#159, open**.
+  Ordering the steal by gate-lowered-earliest hands out the most
+  decayed voice available, which makes the step smaller far more
+  often, but does not remove it.
 
 ## Sequencers / arpeggiators (later)
 
