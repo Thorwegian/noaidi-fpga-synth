@@ -211,8 +211,9 @@ root_widgets = [
         # it becomes a routable per-channel destination (#92 note).
         knob(7, "Volume", 100),
         knob(10, "Pan", 64, bipolar=True),
-        knob(86, "Vel>Amp", 64),        # 64 = historical, 0 = OFF (#89)
-        knob(87, "Vel>Cutoff", 64),
+        knob(86, "Vel>Vol", 64),        # #89 r2: amp-env AMOUNT (OB-8 "Vol")
+        knob(87, "Vel>Filt", 64),       # #89 r2: MOD-env AMOUNT (OB-8 "Filt")
+                                        # 0 = velocity OFF, full patch amount
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),

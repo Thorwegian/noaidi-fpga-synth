@@ -139,8 +139,8 @@ typedef struct {
 
     // Velocity sensitivity (#89): 64 = the historical hardwired feel,
     // 0 = OFF (isolation testing), 127 = double. CC 86/87.
-    uint8_t         vel_amp_sens;
-    uint8_t         vel_cut_sens;
+    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT (#89)
+    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT (#89)
 
     uint8_t         bend_range;      // 1..12 semitones
     uint8_t         volume;          // per-channel/part volume (UQ4.4)
