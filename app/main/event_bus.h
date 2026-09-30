@@ -34,6 +34,9 @@ extern "C" {
 
 typedef enum {
     EVT_MIDI = 1,
+    // #159: a stolen voice's fade has finished and its note can start.
+    // Carries no payload -- voice_alloc rescans its own pending list.
+    EVT_VOICE_RESUME = 2,
 } evt_kind_t;
 
 // Tagged union: extend with new kinds and members as the system grows.

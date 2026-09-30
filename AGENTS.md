@@ -71,7 +71,12 @@ the architecture changes. Agent will neatly summarise.
   `shakedown_check.py` (CC smoke + measured pan), `voice_cycle_check.py`
   (pool uniformity), `modenv_uniformity_check.py` (config under CC storms),
   `bus_source_check.py` (fan-out path), `filter_pain_check.py` (reso sweep),
-  `mash_check.py` (chaos-in-silence-out, see next bullet).
+  `mash_check.py` (chaos-in-silence-out, see next bullet),
+  `steal_click_check.py` (#159: forces a SOUNDING voice to be stolen and
+  measures the amplitude discontinuity — it exhausts the voice pool with
+  31 notes at velocity 1 so exactly one loud voice is stealable, and uses
+  parabolic-sine oscillators because a sawtooth's own wrap would swamp the
+  measurement).
 - **The mash test runs after ANY change to the synth** (Thor,
   2026-09-11): `tools/mash_check.py` — both-board reset, then random
   notes/velocities/CCs over BLE, plain note-offs, then poll the

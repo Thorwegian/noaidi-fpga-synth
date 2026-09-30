@@ -65,9 +65,13 @@ static const int8_t SPREAD4[4] = {-3, -1, 1, 3};
 //   V_HELD      key is down, envelope gated on
 //   V_RELEASING key is up, release tail still audible
 //   V_IDLE      tail done (or never started) — free for allocation
+//   V_FADING    being stolen: gate low, amp envelope walking to zero on
+//               a fast release coefficient, with the note that asked for
+//               it held in the voice's pending fields until it arrives
+//               (#159). Not allocatable, and not a release tail.
 // RELEASING promotes to IDLE lazily during allocation scans, once
 // esp_timer says the tail has run out — no timer task.
-typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
+typedef enum { V_IDLE = 0, V_HELD, V_RELEASING, V_FADING } voice_state_t;
 
 typedef struct {
     voice_state_t state;
@@ -85,10 +89,47 @@ typedef struct {
                             // (10.417 µs), so a short low is invisible and the
                             // envelope misses its POSEDGE reset. 0 = never
                             // played, which sorts first and should.
+    // #159, the clickless steal. A note that arrives for a voice which
+    // may still be sounding waits here while that voice fades out.
+    bool     steal_pending;
+    uint8_t  pending_note;
+    uint8_t  pending_vel;
+    uint8_t  pending_channel;
+    int64_t  pending_due_us;   // esp_timer µs when the fade is over
 } voice_t;
 
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
+
+// ---- #159: stealing a voice without a click ----
+//
+// The amp envelope resets its level to zero when it sees a gate POSEDGE.
+// If the voice being re-gated is still sounding, that reset moves the
+// output by up to 74.7% of full scale inside one control sample, which is
+// a click by definition.
+//
+// So an audible steal happens in two steps. Step one writes a fast
+// release coefficient to this voice's amp envelope and leaves the gate
+// low, which walks the level down to zero through the release path the
+// envelope already has. Step two, once that has happened, restores the
+// patch's own coefficients and starts the note: depths, cutoff bus,
+// pitch, then gate.
+//
+// The point is the ORDER. An earlier attempt (reverted, see #159) faded
+// the envelope in gateware but let note_on reprogram the pitch at once,
+// so the voice played the NEW pitch at the OLD amplitude for the length
+// of the fade -- a spectral jump at full level, which is worse than the
+// amplitude step it replaced. Deferring the pitch as well puts both
+// halves of the transition at the same instant.
+//
+// A voice that promote_idle() has already retired is silent, so it skips
+// both steps and starts immediately. That is the common case, because the
+// allocator hands out the voice whose gate has been low the longest.
+#define STEAL_FADE_K   253952u   // largest 18-bit release coefficient
+#define STEAL_FADE_US  4000      // fade duration, measured on hardware
+
+static esp_timer_handle_t s_steal_timer;
+
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 // #89 round 2: velocity scales the ENVELOPE AMOUNT, so there is no static
@@ -481,6 +522,11 @@ static void update_amp_env(void)
     uint32_t r1 = patch_adsr_rate1(&g_patch.env[0]);
     uint32_t r2 = patch_adsr_rate2(&g_patch.env[0]);
     for (int v = 0; v < NUM_VOICES; v++) {
+        // #159: a voice mid-fade is running the fast release coefficient
+        // on purpose. Writing the patch's release back now would stall
+        // the fade; step two restores it anyway.
+        if (s_voices[v].steal_pending)
+            continue;
         engine_link_prod_write(PROD_ADSR(v), 1, r1);
         engine_link_prod_write(PROD_ADSR(v), 3, r2);
         // #89 round 2: re-apply this voice's OWN velocity scaling. Without
@@ -589,6 +635,100 @@ static void update_mod_env(void)
     }
 }
 
+// #159 step two: the voice is silent now, so start the note. Called either
+// straight from note_on (the voice was already idle) or from service_steals()
+// once the fade has finished.
+//
+// The pitch is programmed BEFORE the gate is raised. The envelope restarts on
+// the gate, so writing the pitch first means the oscillator is already on the
+// new note at the instant the attack begins, rather than a write or two later.
+static void start_note(int v, uint8_t channel, uint8_t note, uint8_t vel)
+{
+    // Undo the fast release coefficient that step one may have written.
+    engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_rate1(&g_patch.env[0]));
+    engine_link_prod_write(PROD_ADSR(v), 3, patch_adsr_rate2(&g_patch.env[0]));
+
+    // gate_low_us is deliberately NOT cleared: it is the timestamp of the last
+    // gate LOW on this voice, and a voice that has just been re-gated must not
+    // look freshly-released to the next steal.
+    s_voices[v].state   = V_HELD;
+    s_voices[v].note    = note;
+    s_voices[v].vel     = vel;
+    s_voices[v].channel = channel;
+    s_voices[v].stamp   = ++s_stamp;
+
+    // #89 round 2: velocity scales the AMOUNT of both envelopes. Both DEPTH
+    // words are written BEFORE the gate, so the envelope that the gate
+    // triggers is already the right size for this note -- writing them after
+    // would let the first pass run at the previous note's amount.
+    engine_link_prod_write(PROD_ADSR(v),   2, amp_depth_for(vel));
+    engine_link_prod_write(PROD_MODENV(v), 2, mod_depth_for(vel));
+    engine_link_bus_write(BUS_CUT(v), cut_bus_value(v));
+    voice_program(v, note, vel);
+    engine_link_bus_write(BUS_VGATE(v), 1);
+}
+
+// Wake the voice_alloc task when the earliest outstanding fade is due. The
+// task's own 20 ms sweep also services pendings, so a dropped post costs
+// latency and never a lost note.
+static void steal_timer_cb(void *arg)
+{
+    (void)arg;
+    evt_t e = { .kind = EVT_VOICE_RESUME };
+    xQueueSend(s_queue, &e, 0);
+}
+
+static void arm_steal_timer(int64_t now)
+{
+    int64_t next = INT64_MAX;
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].steal_pending && s_voices[v].pending_due_us < next)
+            next = s_voices[v].pending_due_us;
+    if (next == INT64_MAX || s_steal_timer == NULL)
+        return;
+    int64_t in_us = next - now;
+    if (in_us < 100)
+        in_us = 100;
+    esp_timer_stop(s_steal_timer);            // not running yet: harmless
+    esp_timer_start_once(s_steal_timer, (uint64_t)in_us);
+}
+
+// #159 step one: this voice may still be sounding, so walk it to zero before
+// the new note touches it. Fast release coefficient, gate low, note parked.
+static void begin_steal_fade(int v, uint8_t channel, uint8_t note,
+                             uint8_t vel, int64_t now)
+{
+    uint32_t r2 = patch_adsr_rate2(&g_patch.env[0]);
+    r2 = (r2 & ~(0x3FFFFu << 4)) | ((STEAL_FADE_K & 0x3FFFFu) << 4);
+    engine_link_prod_write(PROD_ADSR(v), 3, r2);
+
+    if (s_voices[v].state == V_HELD) {   // all keys down: drop the gate now
+        engine_link_bus_write(BUS_VGATE(v), 0);
+        s_voices[v].gate_low_us = now;
+    }
+
+    s_voices[v].state           = V_FADING;
+    s_voices[v].steal_pending   = true;
+    s_voices[v].pending_channel = channel;
+    s_voices[v].pending_note    = note;
+    s_voices[v].pending_vel     = vel;
+    s_voices[v].pending_due_us  = now + STEAL_FADE_US;
+    arm_steal_timer(now);
+}
+
+// Start every note whose voice has finished fading, then re-arm for the rest.
+static void service_steals(int64_t now)
+{
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (!s_voices[v].steal_pending || now < s_voices[v].pending_due_us)
+            continue;
+        s_voices[v].steal_pending = false;
+        start_note(v, s_voices[v].pending_channel,
+                      s_voices[v].pending_note, s_voices[v].pending_vel);
+    }
+    arm_steal_timer(now);
+}
+
 // Every note-on gets a FRESH voice — allocation never matches on the
 // note. Preference (#159, Thor: "it picks the voice that got its GATE
 // lowered earliest"): the voice whose GATE has been low the longest,
@@ -619,12 +759,26 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     // microseconds after its own note-off; the CSP reads each gate once per
     // sample (10.417 µs), the low fell between two reads, and the envelope
     // never saw the POSEDGE that resets it to zero.
+    //
+    // A voice already mid-fade for an earlier steal is skipped: it is in the
+    // middle of a transition, and taking it would strand that note.
     int64_t earliest = INT64_MAX;
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state != V_HELD && s_voices[v].gate_low_us < earliest)
+        if (s_voices[v].state != V_HELD && s_voices[v].state != V_FADING &&
+            s_voices[v].gate_low_us < earliest)
             { earliest = s_voices[v].gate_low_us; pick = v; }
-    // Every key is down: no low gate exists to be seen, so this one cannot be
-    // made safe from here. Oldest held, as before.
+
+    // Every key is down: no low gate exists to be seen. Oldest held, as
+    // before -- but the fade now gives even this case a gate low long enough
+    // for the CSP to sample, so its envelope does restart.
+    if (pick < 0) {
+        uint32_t oldest = UINT32_MAX;
+        for (int v = 0; v < NUM_VOICES; v++)
+            if (s_voices[v].state == V_HELD && s_voices[v].stamp < oldest)
+                { oldest = s_voices[v].stamp; pick = v; }
+    }
+    // Every voice is either held or already fading: take the oldest fading one
+    // and replace its pending note. The newest note wins.
     if (pick < 0) {
         uint32_t oldest = UINT32_MAX;
         for (int v = 0; v < NUM_VOICES; v++)
@@ -632,23 +786,15 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
                 { oldest = s_voices[v].stamp; pick = v; }
     }
 
-    // gate_low_us is deliberately NOT cleared: it is the timestamp of the
-    // last gate LOW on this voice, and a voice that has just been re-gated
-    // must not look freshly-released to the next steal.
-    s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
-                               .channel = channel, .stamp = ++s_stamp,
-                               .gate_low_us = s_voices[pick].gate_low_us};
+    // A voice promote_idle() has retired is silent: nothing to fade, so no
+    // added latency. This is the common case.
+    if (s_voices[pick].state == V_IDLE) {
+        s_voices[pick].steal_pending = false;
+        start_note(pick, channel, note, vel);
+        return;
+    }
 
-    // #89 round 2: velocity scales the AMOUNT of both envelopes. Both DEPTH
-    // words are written BEFORE the gate, so the envelope that the gate
-    // triggers is already the right size for this note -- writing them after
-    // would let the first pass run at the previous note's amount.
-    engine_link_prod_write(PROD_ADSR(pick),   2, amp_depth_for(vel));
-    engine_link_prod_write(PROD_MODENV(pick), 2, mod_depth_for(vel));
-    engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
-    engine_link_bus_write(BUS_VGATE(pick), 1);
-
-    voice_program(pick, note, vel);
+    begin_steal_fade(pick, channel, note, vel, now);
 }
 
 // Refresh the cutoff buses of active voices — the wheel and bend
@@ -742,8 +888,23 @@ static void note_off(uint8_t note)
         if (s_voices[v].state == V_HELD && s_voices[v].note == note &&
             s_voices[v].stamp < oldest)
             { oldest = s_voices[v].stamp; pick = v; }
-    if (pick < 0)
+    if (pick < 0) {
+        // The key may have been released inside STEAL_FADE_US, before the note
+        // it asked for has started (#159). Cancel that pending note: the voice
+        // is already walking to zero on the fast coefficient, so it keeps going
+        // and retires. Without this the note would start after its own note-off
+        // had passed, and sound forever.
+        int64_t fade_now = esp_timer_get_time();
+        for (int v = 0; v < NUM_VOICES; v++)
+            if (s_voices[v].steal_pending && s_voices[v].pending_note == note) {
+                s_voices[v].steal_pending = false;
+                s_voices[v].state         = V_RELEASING;
+                s_voices[v].release_until = fade_now + STEAL_FADE_US;
+                s_voices[v].gate_low_us   = fade_now;
+                return;
+            }
         return;   // off without a matching held on (steal ate it)
+    }
     s_voices[pick].state = V_RELEASING;
     int64_t now = esp_timer_get_time();
     s_voices[pick].release_until = now + release_tail_us();
@@ -916,11 +1077,20 @@ static void handle_cc(uint8_t num, uint8_t val)
                 s_voices[v].gate_low_us   = now;   // #159
                 engine_link_bus_write(BUS_VGATE(v), 0);
             }
+        // #159: a note still waiting for a fade never sounds at all.
+        for (int v = 0; v < NUM_VOICES; v++)
+            if (s_voices[v].steal_pending) {
+                s_voices[v].steal_pending = false;
+                s_voices[v].state         = V_RELEASING;
+                s_voices[v].release_until =
+                    esp_timer_get_time() + STEAL_FADE_US;
+            }
         break;
     case 120:                          // all sound off: immediate silence
         for (int v = 0; v < NUM_VOICES; v++)
             if (s_voices[v].state != V_IDLE) {
                 s_voices[v].state = V_IDLE;
+                s_voices[v].steal_pending = false;                // #159
                 s_voices[v].gate_low_us = esp_timer_get_time();   // #159
                 engine_link_bus_write(BUS_VGATE(v), 0);
                 hard_mute_voice(v);
@@ -1036,6 +1206,7 @@ static void voice_alloc_task(void *arg)
         }
         int64_t now = esp_timer_get_time();
         promote_idle(now);   // retire + mute tails
+        service_steals(now); // #159: start notes whose voice has faded out
         apply_dirty(now);    // coalesced CC edits (#70)
 
         // Single-core backpressure (#70). The ESP32-C3 has one core; a
@@ -1117,6 +1288,14 @@ void voice_alloc_init(void)
         engine_link_prod_write(PROD_ADSR(v), 3, patch_adsr_rate2(&g_patch.env[0]));
     }
     refresh_gain_buses();   // gain-bus bases from g_patch.volume
+    const esp_timer_create_args_t steal_args = {
+        .callback = steal_timer_cb, .name = "voice_steal",
+    };
+    if (esp_timer_create(&steal_args, &s_steal_timer) != ESP_OK) {
+        ESP_LOGE(TAG, "no steal timer; steals fall back to the 20 ms sweep");
+        s_steal_timer = NULL;
+    }
+
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");

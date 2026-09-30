@@ -64,14 +64,17 @@ different facts:
 | `V_HELD` | key down, gate bus 1, envelope gated on |
 | `V_RELEASING` | key up, gate bus 0, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
+| `V_FADING` | being stolen: gate low, amp envelope walking to zero on a fast release coefficient, with the note that asked for it parked in the voice's pending fields (#159). Not allocatable, and not a release tail |
 
 - **Allocation preference** (note-on, #159): the voice whose GATE has
   been low the LONGEST — `V_IDLE` and `V_RELEASING` ranked together,
-  never-played first → steal oldest HELD once all 32 keys are down.
-  Ordering by gate-lowered-earliest maximises the interval between a
-  voice's gate falling and rising again, which is what the envelope's
-  POSEDGE reset needs: the CSP reads each gate only once per sample
-  (10.417 µs), so a shorter low is never seen.
+  never-played first → steal oldest HELD once all 32 keys are down →
+  and, if every voice is held or already fading, the oldest fading one,
+  whose parked note is replaced (the newest note wins). Ordering by
+  gate-lowered-earliest maximises the interval between a voice's gate
+  falling and rising again, which is what the envelope's POSEDGE reset
+  needs: the CSP reads each gate only once per sample (10.417 µs), so a
+  shorter low is never seen.
   RELEASING promotes to IDLE lazily during the allocation scan when
   `esp_timer` passes the tail deadline (computed from the RATES
   release byte with the gateware decode's own formula) — no timer
@@ -79,20 +82,45 @@ different facts:
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
-- **Retrigger, and what is still missing**: since `94d75c4` the ADSR
-  zeroes its level whenever it sees a gate POSEDGE, so a voice stolen
-  while RELEASING does start a fresh attack from silence — no gateware
-  edge/pulse mechanism was needed, the level comparison does it. Two
-  things remain. A voice stolen while HELD never has a low gate, so
-  there is no posedge and it keeps its envelope stage; that one is
-  unfixable from firmware (the CSP reads a gate once per 10.417 µs
-  sample, so a low written between two reads is invisible) and it
-  only happens with all 32 keys genuinely down. And the reset itself
-  truncates a still-sounding tail inside one control sample, up to
-  74.7% of full scale, which is audible as a click — **#159, open**.
-  Ordering the steal by gate-lowered-earliest hands out the most
-  decayed voice available, which makes the step smaller far more
-  often, but does not remove it.
+- **Retrigger**: since `94d75c4` the ADSR zeroes its level whenever it
+  sees a gate POSEDGE, so a re-gated voice starts a fresh attack from
+  silence. No gateware edge or pulse mechanism was needed — the level
+  comparison does it.
+- **Stealing a voice takes two steps** (#159), because that same reset
+  is a click when the voice it lands on is still audible: it moves the
+  output by up to 74.7% of full scale inside one control sample.
+  1. At note-on, if the chosen voice may still be sounding (anything but
+     `V_IDLE`, which `promote_idle()` has already muted), firmware
+     writes the largest 18-bit release coefficient to that voice's amp
+     envelope and leaves the gate low. The level walks to zero through
+     the release path the envelope already has, in about 4 ms. The
+     note waits in the voice's pending fields; state is `V_FADING`.
+  2. A one-shot `esp_timer` wakes the task when the fade is due. It
+     restores the patch's own coefficients and starts the note: depths,
+     cutoff bus, **pitch, then gate**.
+
+  The order is the whole point. An earlier attempt faded the envelope in
+  gateware but let `note_on` reprogram the pitch immediately, so the
+  voice played the NEW pitch at the OLD amplitude for the length of the
+  fade — a spectral jump at full level, worse than the amplitude step it
+  replaced. Deferring the pitch puts both halves of the transition at
+  the same instant.
+
+  A voice that is already silent skips both steps, so the common case
+  carries no added latency — and it is the common case, because the
+  allocator hands out the voice whose gate has been low the longest.
+
+  Two consequences. The fade drives the gate low for 4 ms even in the
+  all-keys-down case, which the CSP samples comfortably, so **that
+  case now retriggers too** — it was previously unfixable from
+  firmware. And a key released inside the fade window has to cancel its
+  own parked note (`note_off`, CC 123, CC 120 all do), or the note would
+  start after its own note-off had passed and sound forever.
+
+  Measured on hardware with `tools/steal_click_check.py`, stealing a
+  voice at full level: largest sample-to-sample step **0.0198 → 0.0065
+  of full scale**, which is 12.5 dB above the waveform's own slew before
+  and 2.1 dB after. Not zero; the residue is tracked on #159.
 
 ## Sequencers / arpeggiators (later)
 
