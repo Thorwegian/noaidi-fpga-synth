@@ -114,6 +114,12 @@ def first_onset(st, thresh=0.01):
     return None if loud.size == 0 else loud[0] / float(RATE)
 
 
+def window_peak(st, t0, t1):
+    a, b = max(int(t0 * RATE), 0), min(int(t1 * RATE), st.shape[0])
+    seg = st[a:b]
+    return 0.0 if seg.shape[0] == 0 else float(np.abs(seg).max())
+
+
 def max_step(st, t0, t1):
     a, b = max(int(t0 * RATE), 0), min(int(t1 * RATE), st.shape[0])
     seg = st[a:b]
@@ -136,12 +142,30 @@ def report(st, label, t_first_on, t_steal):
 
     ref_step, _ = max_step(st, steal_at - 0.18, steal_at - 0.02)
     stl_step, stl_at = max_step(st, steal_at - 0.01, steal_at + 0.12)
-    lvl, _ = max_step(st, steal_at - 0.02, steal_at)
+
+    # Validity. The whole point is to observe a LOUD voice being truncated, so
+    # the voice has to still be loud when the steal lands. Compare the signal
+    # present just before the steal with the reference window it is measured
+    # against: if the level has collapsed, either the calibration put the
+    # window in the wrong place or the tail had already ended, and the step
+    # number means nothing. Reporting it anyway is how a measurement tool
+    # tells a comfortable lie.
+    ref_level = window_peak(st, steal_at - 0.18, steal_at - 0.02)
+    stl_level = window_peak(st, steal_at - 0.02, steal_at)
 
     print("  %s" % label)
     print("    peak level                        %7.1f dBFS" % db(peak))
     print("    steal expected in the capture at  %7.3f s  (calibrated)"
           % steal_at)
+    print("    level in the reference window     %7.1f dBFS" % db(ref_level))
+    print("    level just before the steal       %7.1f dBFS" % db(stl_level))
+
+    if ref_level < 0.02 or stl_level < 0.25 * ref_level:
+        print("    INVALID: the voice was not loud at the steal "
+              "(%.1f dB below the reference). Discard this run."
+              % (db(ref_level) - db(stl_level)))
+        return False
+
     print("    max step, tail only               %7.1f dBFS  (%.4f FS)"
           % (db(ref_step), ref_step))
     print("    max step, across the steal        %7.1f dBFS  (%.4f FS)"
@@ -149,6 +173,14 @@ def report(st, label, t_first_on, t_steal):
     print("    largest step is at                %7.3f s" % stl_at)
     print("    the steal exceeds the waveform by %7.1f dB"
           % (db(stl_step) - db(ref_step)))
+
+    # The headline number. The absolute step scales with how loud the voice
+    # happened to be when it was stolen, and that varies by several dB between
+    # runs because the tail is still decaying. Dividing by the level just
+    # before the steal removes that, so runs are comparable to each other and
+    # across builds.
+    print("    STEP AS A FRACTION OF THE VOICE   %7.2f %%"
+          % (100.0 * stl_step / max(stl_level, 1e-9)))
     return True
 
 
@@ -203,18 +235,27 @@ def main():
         t_rec = time.time()
         time.sleep(0.40)
 
-        print("[seq] one loud note, so exactly one voice is audible")
-        t_first_on = time.time() - t_rec
-        send(NoteOnEvent(note=LOUD_NOTE, channel=0, velocity=127))
-        time.sleep(0.50)
-        send(NoteOffEvent(note=LOUD_NOTE, channel=0))
-        print("[seq] released; it is now a slow release tail, still loud")
-
-        time.sleep(0.10)
-        print("[seq] 31 held notes at velocity 1: pool exhausted, inaudible")
+        # Fill the pool FIRST. Sending 31 notes over BLE takes 200 ms or
+        # more, and an earlier version of this script did it between the loud
+        # note's note-off and the steal. That put the steal near the end of
+        # the release tail, so promote_idle() sometimes retired and hard-muted
+        # the voice before the steal arrived: nothing left to truncate, and a
+        # missed experiment that looked like a clean result. Doing it first
+        # makes the gap 30 ms and the observation reliable.
+        print("[seq] 31 held notes at velocity 1: pool filled, inaudible")
         for n in QUIET_NOTES:
             send(NoteOnEvent(note=n, channel=0, velocity=1))
             time.sleep(0.002)
+
+        # The loud note takes the one remaining voice. It is also the first
+        # AUDIBLE event in the capture, which is what the calibration needs.
+        time.sleep(0.05)
+        print("[seq] one loud note into the last free voice")
+        t_first_on = time.time() - t_rec
+        send(NoteOnEvent(note=LOUD_NOTE, channel=0, velocity=127))
+        time.sleep(0.45)
+        send(NoteOffEvent(note=LOUD_NOTE, channel=0))
+        print("[seq] released: now the ONLY voice whose gate is low, and loud")
 
         if a.steal_attack is not None:
             # The tail is already established at full level; the releasing
@@ -224,7 +265,7 @@ def main():
                                     value=a.steal_attack))
             time.sleep(0.02)
 
-        time.sleep(0.05)
+        time.sleep(0.03)
         t_steal = time.time() - t_rec
         print("[seq] the steal: the only candidate is the loud tail")
         send(NoteOnEvent(note=STEAL_NOTE, channel=0, velocity=127))
