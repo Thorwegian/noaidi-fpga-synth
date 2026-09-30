@@ -128,6 +128,18 @@ static uint32_t s_stamp;
 #define STEAL_FADE_K   253952u   // largest 18-bit release coefficient
 #define STEAL_FADE_US  4000      // fade duration, measured on hardware
 
+// At most this many parked notes start in one pass of the task loop.
+// start_note() queues about 40 element words per voice (5 words for each
+// of 8 elements) and engine_link holds 1024, so 32 voices coming due at
+// the same instant -- a hard 32-note cluster, or a flood -- would push
+// ~1280 words inside one 1 kHz engine tick and overflow it. Overflow is
+// silent from here (engine_link_send() counts a drop and returns false),
+// and a lost element word means the wrong pitch or gain on whichever
+// voice lost it. Eight per pass is 320 words; the remainder is re-armed a
+// full tick later so each batch gets its own drain. This is the same
+// backpressure reasoning as #70, at a new batching point.
+#define STEAL_STARTS_PER_PASS  8
+
 static esp_timer_handle_t s_steal_timer;
 
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
@@ -678,7 +690,11 @@ static void steal_timer_cb(void *arg)
     xQueueSend(s_queue, &e, 0);
 }
 
-static void arm_steal_timer(int64_t now)
+// spread_over_ticks: the previous pass hit STEAL_STARTS_PER_PASS, so the
+// notes still waiting are already overdue. Wake a whole engine tick later
+// rather than immediately, so this batch's element words are drained before
+// the next batch is queued.
+static void arm_steal_timer(int64_t now, bool spread_over_ticks)
 {
     int64_t next = INT64_MAX;
     for (int v = 0; v < NUM_VOICES; v++)
@@ -687,8 +703,9 @@ static void arm_steal_timer(int64_t now)
     if (next == INT64_MAX || s_steal_timer == NULL)
         return;
     int64_t in_us = next - now;
-    if (in_us < 100)
-        in_us = 100;
+    int64_t floor_us = spread_over_ticks ? 1000 : 100;
+    if (in_us < floor_us)
+        in_us = floor_us;
     esp_timer_stop(s_steal_timer);            // not running yet: harmless
     esp_timer_start_once(s_steal_timer, (uint64_t)in_us);
 }
@@ -713,20 +730,27 @@ static void begin_steal_fade(int v, uint8_t channel, uint8_t note,
     s_voices[v].pending_note    = note;
     s_voices[v].pending_vel     = vel;
     s_voices[v].pending_due_us  = now + STEAL_FADE_US;
-    arm_steal_timer(now);
+    arm_steal_timer(now, false);
 }
 
 // Start every note whose voice has finished fading, then re-arm for the rest.
 static void service_steals(int64_t now)
 {
+    int started = 0;
+    bool capped = false;
     for (int v = 0; v < NUM_VOICES; v++) {
         if (!s_voices[v].steal_pending || now < s_voices[v].pending_due_us)
             continue;
+        if (started == STEAL_STARTS_PER_PASS) {
+            capped = true;       // the rest wait one engine tick
+            break;
+        }
         s_voices[v].steal_pending = false;
         start_note(v, s_voices[v].pending_channel,
                       s_voices[v].pending_note, s_voices[v].pending_vel);
+        started++;
     }
-    arm_steal_timer(now);
+    arm_steal_timer(now, capped);
 }
 
 // Every note-on gets a FRESH voice — allocation never matches on the
