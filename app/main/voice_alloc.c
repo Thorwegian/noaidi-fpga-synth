@@ -76,6 +76,14 @@ typedef struct {
     uint8_t  channel;       // stored for later multi-timbrality; omni today
     uint32_t stamp;         // allocation order, for oldest-steal
     int64_t  release_until; // esp_timer µs when the release tail is done
+    int64_t  gate_low_us;   // esp_timer µs when this voice's GATE went LOW
+                            // (#159). Stealing picks the SMALLEST of these,
+                            // i.e. the gate that has been low longest, which
+                            // maximises the gap before it is raised again --
+                            // the CSP only reads a gate once per sample
+                            // (10.417 µs), so a short low is invisible and the
+                            // envelope misses its POSEDGE reset. 0 = never
+                            // played, which sorts first and should.
 } voice_t;
 
 static voice_t s_voices[NUM_VOICES];
@@ -594,17 +602,20 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 
     promote_idle(now);   // retire + hard-mute any finished tails
 
-    uint32_t best = UINT32_MAX;
+    // #159, Thor: "it picks the voice that got its GATE lowered earliest".
+    // V_IDLE and V_RELEASING both have a LOW gate and stop being separate
+    // tiers -- what matters is WHEN it dropped, not whether the tail has
+    // expired. The old order (idle by stamp, else the release closest to
+    // finishing) was unrelated to that, so a voice could be re-gated a few
+    // microseconds after its own note-off; the CSP reads each gate once per
+    // sample (10.417 µs), the low fell between two reads, and the envelope
+    // never saw the POSEDGE that resets it to zero.
+    int64_t earliest = INT64_MAX;
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_IDLE && s_voices[v].stamp < best)
-            { best = s_voices[v].stamp; pick = v; }
-    if (pick < 0) {
-        int64_t soonest = INT64_MAX;
-        for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].state == V_RELEASING &&
-                s_voices[v].release_until < soonest)
-                { soonest = s_voices[v].release_until; pick = v; }
-    }
+        if (s_voices[v].state != V_HELD && s_voices[v].gate_low_us < earliest)
+            { earliest = s_voices[v].gate_low_us; pick = v; }
+    // Every key is down: no low gate exists to be seen, so this one cannot be
+    // made safe from here. Oldest held, as before.
     if (pick < 0) {
         uint32_t oldest = UINT32_MAX;
         for (int v = 0; v < NUM_VOICES; v++)
@@ -612,8 +623,12 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
                 { oldest = s_voices[v].stamp; pick = v; }
     }
 
+    // gate_low_us is deliberately NOT cleared: it is the timestamp of the
+    // last gate LOW on this voice, and a voice that has just been re-gated
+    // must not look freshly-released to the next steal.
     s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
-                               .channel = channel, .stamp = ++s_stamp};
+                               .channel = channel, .stamp = ++s_stamp,
+                               .gate_low_us = s_voices[pick].gate_low_us};
 
     // #89 round 2: velocity scales the AMOUNT of both envelopes. Both DEPTH
     // words are written BEFORE the gate, so the envelope that the gate
@@ -722,6 +737,7 @@ static void note_off(uint8_t note)
         return;   // off without a matching held on (steal ate it)
     s_voices[pick].state = V_RELEASING;
     s_voices[pick].release_until = esp_timer_get_time() + release_tail_us();
+    s_voices[pick].gate_low_us  = esp_timer_get_time();   // #159
     engine_link_bus_write(BUS_VGATE(pick), 0);
 }
 
@@ -887,6 +903,7 @@ static void handle_cc(uint8_t num, uint8_t val)
                 s_voices[v].state = V_RELEASING;
                 s_voices[v].release_until =
                     esp_timer_get_time() + release_tail_us();
+                s_voices[v].gate_low_us = esp_timer_get_time();   // #159
                 engine_link_bus_write(BUS_VGATE(v), 0);
             }
         break;
@@ -894,6 +911,7 @@ static void handle_cc(uint8_t num, uint8_t val)
         for (int v = 0; v < NUM_VOICES; v++)
             if (s_voices[v].state != V_IDLE) {
                 s_voices[v].state = V_IDLE;
+                s_voices[v].gate_low_us = esp_timer_get_time();   // #159
                 engine_link_bus_write(BUS_VGATE(v), 0);
                 hard_mute_voice(v);
             }
