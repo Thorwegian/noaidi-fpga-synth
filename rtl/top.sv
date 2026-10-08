@@ -76,8 +76,8 @@ module top (
     logic        dmem_wr_toggle;
     logic        imem_write_enable;
     logic [9:0]  imem_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
-                            //; a too-narrow wire here silently
-                            // truncated entries before — size from the pool
+                            // wide: a too-narrow wire here silently
+                            // truncates entries, so size it from the pool
     logic [31:0] imem_write_data;
 
     element_pipeline u_elem_pipeline (

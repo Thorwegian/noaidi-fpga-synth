@@ -63,8 +63,7 @@ module tb_svf_stability;
             u_pipe.duty_param_ram[e] = 36'h0;
             u_pipe.filter_param_ram[e] = 36'h0;
             u_pipe.gain_param_ram[e] = 36'h000000000;      // mute L+R
-                                                           // (volume 0,
-                                                           //)
+                                                           // (volume 0)
             u_pipe.gate_param_ram[e] = 2'b01;              // gate on
             u_pipe.ptrs0_param_ram[e] = 30'd0;
             u_pipe.ptrs1_param_ram[e] = 30'd0;
