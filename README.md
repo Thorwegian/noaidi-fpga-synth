@@ -7,8 +7,6 @@ musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison elements per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz audio out on SPDIF and I2S.
 
-They say plugins won. We're proving it wrong.
-
 ## License
 
 [CERN-OHL-S v2](LICENSE.txt)
