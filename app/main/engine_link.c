@@ -167,7 +167,7 @@ static void engine_task(void *arg)
         // SPI-master driver cost is per-TRANSACTION (bus lock, ISR,
         // semaphore), so the old per-word path turned a re-render into
         // hundreds of transactions and pinned this task until the
-        // watchdog fired (#70). Untouched words in the row are already
+        // watchdog fired. Untouched words in the row are already
         // current in s_image, so re-sending them is free.
         for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
             bool row_dirty = false;
@@ -216,7 +216,7 @@ static void engine_task(void *arg)
             s_drops = 0;
         }
 
-        // Single-core guard (#70). If this wake ran long (a flood of
+        // Single-core guard. If this wake ran long (a flood of
         // dirty rows to burst over SPI), the 1 kHz notify is already
         // pending, so the ulTaskNotifyTake above would return at once
         // and we would never block — starving IDLE (priority 0) on this

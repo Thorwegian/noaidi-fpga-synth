@@ -25,7 +25,7 @@ extern "C" {
 
 #define ENGINE_NUM_ELEMENTS 256
 #define ENGINE_WORDS_PER_ELEMENT 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
-// GAIN word: volume UQ4.4 per channel (issue #40) — 0x00 = silence/
+// GAIN word: volume UQ4.4 per channel — 0x00 = silence/
 // exact mute, 0xFF = loudest; positive gain-bus values mean LOUDER.
 // FILTER word: [13:0] cutoff UQ4.10 log2; [27:14] resonance UQ4.10
 // log2 — octaves of Q above Butterworth (0 = Butterworth, ~1 integer
@@ -82,7 +82,7 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
 // Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
 // envelope subtracts silence.
-#define ENGINE_NUM_PRODUCERS 256   // half-rate walker pool (#100):
+#define ENGINE_NUM_PRODUCERS 256   // half-rate walker pool:
                                     // entries 0..127 = half A,
                                     // 128..255 = half B; a chain must
                                     // live within one half

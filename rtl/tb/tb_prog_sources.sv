@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_sources.sv — split bench D (issue #58): the source sequencer —
+// tb_prog_sources.sv — split bench D: the source sequencer —
 // LFO tremolo on a gain bus, then ADSR + gate-bus triggering.
 // Preamble rebuilds the B2 end-state (C4 sines with gains on bus 3).
 //------------------------------------------------------------------------
@@ -66,7 +66,7 @@ module tb_prog_sources;
 
         // B5: ADSR + gate bus. LFO off, gain bus base to the envelope
         // floor, source 1 = ADSR watching gate bus 5, depth -0x2000.
-        // volume semantics (#40): base = quiet floor (negative),
+        // volume semantics: base = quiet floor (negative),
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
@@ -111,7 +111,7 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
-        // BUS SUMMING (issue #84, law 1): two ADSR sources in
+        // BUS SUMMING (law 1): two ADSR sources in
         // CONSECUTIVE slots (1 and 2), same gate, same target bus 3,
         // +4 oct depth each over a −8 oct base. Summed: −8+4+4 = 0
         // (full loudness). Last-write-wins would leave −8+4 = −4 oct
@@ -195,7 +195,7 @@ module tb_prog_sources;
             errors = errors + 1;
         end
 
-        // FIRMWARE-SHAPED TRIPLE (issue #44 real wiring): the exact
+        // FIRMWARE-SHAPED TRIPLE (real wiring): the exact
         // per-voice chain the ESP32 programs — even slot = MOD env
         // (ADSR, depth 0 here), odd slot = fan-out (type 3, unity,
         // from the channel bus) — and a hierarchical peek asserts the
@@ -227,7 +227,7 @@ module tb_prog_sources;
             $display("triple chain replica = 4708 exact (base+0+channel)");
         end
 
-        // SEND READS THE OUTPUT SUM (#92/#98): a CSP source's
+        // SEND READS THE OUTPUT SUM: a CSP source's
         // contribution must propagate through a send — the property
         // the firmware-base read could not provide. LFO tremolo
         // (entry 0) writes bus 6; the send (entry 2, after it) relays

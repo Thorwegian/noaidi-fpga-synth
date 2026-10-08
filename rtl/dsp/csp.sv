@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// csp.sv -- the Control Signal Processor (#136)
+// csp.sv -- the Control Signal Processor
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -77,7 +77,7 @@ module csp (
     reg signed [17:0] dmem_gl    [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_gr    [0:2*synth_pkg::DMEM_WORDS-1];
     integer bi;
-    // BOTH generations -- the arrays are 2*DMEM_WORDS deep (#134) and an
+    // BOTH generations -- the arrays are 2*DMEM_WORDS deep and an
     // uninitialised shadow half reads X the first time dmem_gen flips.
     initial for (bi = 0; bi < 2*synth_pkg::DMEM_WORDS; bi = bi + 1) begin
         dmem_pitch[bi] = 18'sd0;
@@ -108,7 +108,7 @@ module csp (
         dmem_gate[bbi] = 18'sd0;
     end
 
-    // BUS-SUM RAM (#92/#98): the sequencer-facing mirror of a bus's
+    // BUS-SUM RAM: the sequencer-facing mirror of a bus's
     // OUTPUT SUM — written by the same strobes as the replicas, read
     // at P1 by SEND entries. This is what makes the node graph's
     // edges real (Thor, #98): a send references the bus's summed
@@ -222,7 +222,7 @@ module csp (
     always_ff @(posedge clk)
         if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
-    // Bus 1023 doubles as the test-tone control latch (issue #81).
+    // Bus 1023 doubles as the test-tone control latch.
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
         else if (dmem_commit && dmem_mbox_addr == 10'd1023)
@@ -264,7 +264,7 @@ module csp (
     // only.
     //
     // ADSR state word: [27:26] stage, [25:0] level in UQ12.14 -- the RC
-    // envelope's format (#127), now living in dsp/adsr.sv. The envelope is
+    // envelope's format, now living in dsp/adsr.sv. The envelope is
     // the one instruction with a real state machine, so it is its own module
     // (Thor, #146); the LFO is an adder and the SEND is a wire, and both stay
     // here. An LFO uses [24:0] as its phase accumulator and leaves [27:25]
@@ -273,7 +273,7 @@ module csp (
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    // THE 3-CYCLE BOTTLENECK, REMOVED (#138). This was one RAM holding
+    // THE 3-CYCLE BOTTLENECK, REMOVED. This was one RAM holding
     // {bank, entry, word} and read through a single port with the address
     // muxed by phase: CFG at P0, RATES at P1, DEPTH at P2. Three words
     // through one port costs three cycles however the logic is arranged, so
@@ -325,7 +325,7 @@ module csp (
             endcase
         end
 
-    // ONE INSTRUCTION PER CYCLE (#138). Six stages, one instruction deep
+    // ONE INSTRUCTION PER CYCLE. Six stages, one instruction deep
     // each, retiring one per cycle once full:
     //
     //   F  present pc to imem_cfg/rate/depth and istate
@@ -522,7 +522,7 @@ module csp (
     always_comb
         // free-running phase accumulator in [24:0]; the extra low bit is the
         // fractional half-step that keeps the frequency unchanged now that a
-        // pass runs every sample (#145)
+        // pass runs every sample
         lfo_next = {x_istate[27:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
 
     //----------------------------------------------------------------

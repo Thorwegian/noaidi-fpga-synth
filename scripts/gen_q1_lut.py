@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # q1 (SVF damping) decode LUT for the log2-encoded resonance
-# parameter (bus_architecture.md; issue #41 shrank it 1024 -> 16).
+# parameter (bus_architecture.md; shrank it 1024 -> 16).
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2

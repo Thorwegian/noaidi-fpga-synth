@@ -19,7 +19,7 @@
 // which already understands running status and the Note-On-vel-0
 // convention.
 //
-// Threading (#83): the GATT access callback (NimBLE host task) only
+// Threading: the GATT access callback (NimBLE host task) only
 // COPIES the packet into a ring buffer; a lower-priority ble_rx task
 // drains it, strips the BLE-MIDI framing, feeds the shared parser and
 // publishes to the event bus. Parsing in the host task starved IDLE
@@ -79,7 +79,7 @@ static int s_conn_count;
 
 static midi_parser_t g_ble_parser;
 
-// Ingress ring buffer (#83): NOSPLIT keeps packet boundaries, which
+// Ingress ring buffer: NOSPLIT keeps packet boundaries, which
 // the BLE-MIDI framing needs. 4 KB ≈ 8 max-MTU packets or hundreds of
 // typical 5-byte ones.
 #define BLE_RX_RB_SIZE   4096
@@ -119,7 +119,7 @@ static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n)
 }
 
 // Drain the ingress ring buffer, with the standard single-core yield
-// guard (#70/#83): after ~2 ms of unbroken work, give IDLE a tick.
+// guard: after ~2 ms of unbroken work, give IDLE a tick.
 static void ble_rx_task(void *arg)
 {
     int64_t busy_since = esp_timer_get_time();
@@ -153,7 +153,7 @@ static void ble_rx_task(void *arg)
 // ── GATT access callback ───────────────────────────────────────────
 // Writes carry one BLE MIDI packet (possibly several MIDI messages
 // under running status). COPY into the ring buffer and return — never
-// parse in the NimBLE host task (#83).
+// parse in the NimBLE host task.
 static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
                                struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -184,7 +184,7 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 //   NOTIFY characteristic. The hand-declared one here produced TWO
 //   CCCDs on the characteristic — a GATT violation some centrals
 //   punish with a disconnect.
-// - Encryption is SUPPORTED, not REQUIRED (issue #79). The SM config
+// - Encryption is SUPPORTED, not REQUIRED. The SM config
 //   in ble_midi_init() lets Apple pair+encrypt by its own BLE-MIDI
 //   policy — that (not a characteristic flag) is what fixed the
 //   macOS reason-531 drops. Adding _ENC flags to REQUIRE encryption
@@ -219,7 +219,7 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg);
 
 // Log the parameters actually in effect on a connection — the
 // supervision timeout is what a reason-520 (0x08) drop hinges on
-// (issue #67). Units per HCI: interval 1.25 ms, timeout 10 ms.
+//. Units per HCI: interval 1.25 ms, timeout 10 ms.
 static void log_conn_params(uint16_t conn_handle)
 {
     struct ble_gap_conn_desc d;
@@ -236,7 +236,7 @@ static void log_conn_params(uint16_t conn_handle)
 // brief RF hiccup can't trip a reason-520 timeout). MUST run AFTER
 // encryption — requesting it in the CONNECT event collided with
 // macOS's own pairing procedure (observed status=554 = HCI 0x2A,
-// different transaction collision) and was rejected (issue #67).
+// different transaction collision) and was rejected.
 static void request_conn_params(uint16_t conn_handle)
 {
     struct ble_gap_upd_params up = {
@@ -282,7 +282,7 @@ static void ble_midi_advertise(void)
 static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
 {
     // Parser resets ride the rx ring as a 1-byte sentinel so the
-    // parser stays owned by ble_rx alone (#83).
+    // parser stays owned by ble_rx alone.
     static const uint8_t RESET_SENTINEL = 0;
 
     switch (event->type) {
@@ -297,7 +297,7 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG, "MIDI connection established");
             log_conn_params(event->connect.conn_handle);
             // params requested AFTER encryption (see ENC_CHANGE) to
-            // avoid the pairing-time collision (issue #67)
+            // avoid the pairing-time collision
         }
         return 0;
 
@@ -314,7 +314,7 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
 
     // A central re-pairing while it holds a stale bond (our side lost
     // or rotated keys): NimBLE's default REJECTS it, which the
-    // central answers by disconnecting (issue #67). Delete our stale
+    // central answers by disconnecting. Delete our stale
     // peer entry and let the pairing retry.
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
         struct ble_gap_conn_desc desc;
@@ -389,7 +389,7 @@ void ble_midi_init(void)
 {
     midi_parser_init(&g_ble_parser, ble_msg_to_bus, NULL);
 
-    // Ingress decoupling (#83): ring buffer + drain task, so the
+    // Ingress decoupling: ring buffer + drain task, so the
     // NimBLE host task never parses or publishes.
     s_rx_rb = xRingbufferCreate(BLE_RX_RB_SIZE, RINGBUF_TYPE_NOSPLIT);
     if (s_rx_rb == NULL) {
@@ -426,7 +426,7 @@ void ble_midi_init(void)
     ble_hs_cfg.reset_cb = NULL;
     ble_hs_cfg.sync_cb = ble_midi_on_sync;
 
-    // Security manager (issue #67): Apple BLE-MIDI requires an
+    // Security manager: Apple BLE-MIDI requires an
     // encrypted link. Just-Works pairing (no IO), bonded, LE Secure
     // Connections, encryption + identity keys both ways; bonds
     // persist in NVS (CONFIG_BT_NIMBLE_NVS_PERSIST=y +

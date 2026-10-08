@@ -95,7 +95,7 @@ module element_pipeline #(
 
     // Instruction table writes (sclk domain, banked — wiring per law 4)
     input  logic           imem_write_enable,
-    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]} (#100)
+    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]}
     input  logic [31:0]    imem_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
@@ -108,7 +108,7 @@ module element_pipeline #(
                                              // every consumer latches it
     output logic signed [23:0] mix_right,
 
-    // Test-tone control (audio-chain purity check, issue #81): bus
+    // Test-tone control (audio-chain purity check): bus
     // address 1023 is reserved as a control latch — bit 0 enables the
     // top-level 187.5 Hz full-scale sine that replaces the mix at the
     // outputs. Latched here because the bus mailbox already has the
@@ -129,7 +129,7 @@ module element_pipeline #(
                                        // 1/16-octave steps — the
                                        // attenuation-LUT grid, ear-
                                        // proven for loudness-class
-                                       // percepts (issue #41); fabric
+                                       // percepts; fabric
                                        // LUTs, no BSRAM block
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
     reg [15:0] reso_att_lut [0:63];    // #43 resonance-indexed input
@@ -165,7 +165,7 @@ module element_pipeline #(
     //   p3[7:0]   volume L UQ4.4   p3[15:8] volume R UQ4.4
     //             (0x00 = silence/exact mute .. 0xFF = loudest;
     //              inverted to the attenuation code at the effective-
-    //              parameter seam — issue #40)
+    //              parameter seam —)
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
     // Doubled for ping-pong: {bank, voice} addressing, both halves
@@ -338,7 +338,7 @@ module element_pipeline #(
     assign s1_duty  = s1_duty_word[23:0];
     assign s1_fc    = s1_filter_word[13:0];
     assign s1_reso  = s1_filter_word[27:14];
-    // GAIN word carries VOLUME (issue #40, 0x00 = silence .. 0xFF =
+    // GAIN word carries VOLUME (0x00 = silence.. 0xFF =
     // loudest): a zeroed parameter word is now silent-by-default
     // instead of full-blast. GATE off = volume zero, which the
     // effective-parameter stage maps onto the existing exact-mute
@@ -377,7 +377,7 @@ module element_pipeline #(
 
     //----------------------------------------------------------------
     // The Control Signal Processor now lives in its own module
-    // (#136). Six read ports: S1 pointers in, S2 data out.
+    //. Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
     logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
@@ -451,7 +451,7 @@ module element_pipeline #(
     //          for resonance that is one octave of Q ≈ +6 dB of peak)
     //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
     //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
-    //          bus = LOUDER — volume semantics, issue #40). A base of
+    //          bus = LOUDER — volume semantics). A base of
     //          0x00 (exact mute — hard-panned channels, gated
     //          elements) is preserved regardless of the bus, and the
     //          bus alone can never reach exact mute (sums clamp to
@@ -502,7 +502,7 @@ module element_pipeline #(
         $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
     wire signed [18:0] gr_sum =
         $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
-    // volume in, attenuation code out (the one subtract of issue #40)
+    // volume in, attenuation code out (the one subtract of)
     wire [7:0] eff_gl =
         (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins
         (gl_sum[18] || gl_sum == 19'sd0)
@@ -610,7 +610,7 @@ module element_pipeline #(
     wire signed [23:0] phase_next = s3_phase + delta;
 
     //----------------------------------------------------------------
-    // S3B/S3C -- resonance-dependent INPUT attenuation (#43). Scale the
+    // S3B/S3C -- resonance-dependent INPUT attenuation. Scale the
     // oscillator sample down as resonance rises so the 24 dB/oct dual
     // cascade never overdrives its internal +-8 guardrail (sat_q414).
     // Register-then-multiply: S3B registers osc + the (dual-gated) atten
@@ -619,7 +619,7 @@ module element_pipeline #(
     // dB/oct) never overdrives, so its atten is unity (0xffff).
     //----------------------------------------------------------------
     // S3B registers the ADVANCED PHASE (and duty/wave alongside it); the
-    // waveform is generated from the registered value in S3B->S3C (#128).
+    // waveform is generated from the registered value in S3B->S3C.
     logic               s3b_act;   logic [VW-1:0] s3b_idx;
     logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
@@ -647,7 +647,7 @@ module element_pipeline #(
 
     // Waveform generation now stands alone in its own stage, driven by
     // the REGISTERED phase. This is the half of the old critical path
-    // that was chained behind the adder: sine LUT read + 4:1 mux (#128).
+    // that was chained behind the adder: sine LUT read + 4:1 mux.
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),

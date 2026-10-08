@@ -1,4 +1,4 @@
-// patch.c — the active-patch instance and its default (issue #69).
+// patch.c — the active-patch instance and its default.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -17,7 +17,7 @@ patch_t g_patch;
 // Pack an ADSR into the source-table RATES word (A | D<<8 | S<<16 |
 // R<<24) — the gateware's universal A,D,S,R byte order.
 //
-// HALF-RATE COMPENSATION (#100): the walker advances each envelope
+// HALF-RATE COMPENSATION: the walker advances each envelope
 // every OTHER sample now (48 kHz effective), which alone would double
 // every attack/decay/release time. The rate decode is
 // (16+low4) << high4, so adding 1 to the exponent nibble (+0x10 on
@@ -83,7 +83,7 @@ void patch_default(patch_t *p)
 {
     memset(p, 0, sizeof(*p));
 
-    // ---- oscillators (both rendered now, issue #72) ----
+    // ---- oscillators (both rendered now) ----
     // Default voice (Thor, 2026-09-08): the "7+1" structure — a
     // 7-voice supersaw (osc1) plus a single pure sine (osc2) one
     // octave below. The sine sub fattens the saws without muddying
@@ -135,7 +135,7 @@ void patch_default(patch_t *p)
     // LFO 2 (#73, source 1): triangle, ~1 Hz, depth 0 = OFF; default
     // destination is PWM (duty bus) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
-    p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk (#100)
+    p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
     p->lfo[1].depth = 0;
     p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance.
                                        // (pitch is LFO 1's bus — one

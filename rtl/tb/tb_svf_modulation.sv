@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_svf_modulation.sv — SVF stability under a MOVING cutoff (#117)
+// tb_svf_modulation.sv — SVF stability under a MOVING cutoff
 //
 // tb_svf_stability.sv proves the filter is stable when the cutoff is set
 // once and HELD. This bench proves the missing case: a cutoff that MOVES,

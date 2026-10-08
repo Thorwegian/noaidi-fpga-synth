@@ -177,7 +177,7 @@ module tb_element_pipeline;
 
         // latch check: one cycle after the tick, mix regs hold the
         // latched sums (L and R independently — the boot image is hard-panned)
-        // S11 master limiter (#121) publishes mix_* 10 cycles after the
+        // S11 master limiter publishes mix_* 10 cycles after the
         // tick (feedforward needs the finished sum first); read at slot 16.
         // Stimulus peaks ~-12 dBFS, under the -1 dBFS threshold, so the
         // limiter gain is unity and the sum is still bit-exact.

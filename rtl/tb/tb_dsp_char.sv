@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_dsp_char.sv -- characterise ALU54D + MULTALU36X18 for the CSP (#145)
+// tb_dsp_char.sv -- characterise ALU54D + MULTALU36X18 for the CSP
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0

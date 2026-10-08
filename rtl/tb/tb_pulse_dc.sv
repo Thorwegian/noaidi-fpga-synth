@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_pulse_dc.sv -- the pulse oscillator must be DC-free at every duty (#154)
+// tb_pulse_dc.sv -- the pulse oscillator must be DC-free at every duty
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0

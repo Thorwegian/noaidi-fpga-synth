@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// svf_tpt.sv -- ZDF/TPT state-variable filter, two poles (#117 / #118)
+// svf_tpt.sv -- ZDF/TPT state-variable filter, two poles
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -75,7 +75,7 @@ module svf_tpt #(
         end
     endfunction
 
-    // State saturator (#43): the integrator state is the one datapath node
+    // State saturator: the integrator state is the one datapath node
     // that WRAPPED instead of saturating -- at top-of-dial resonance the
     // undamped Q8.28 state diverged past the 36-bit rail and wrapped (the
     // two's-complement sign-flip = the scream). Clamp it so it SATURATES

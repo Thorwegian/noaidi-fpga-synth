@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_adsr_retrig.sv -- a re-gated envelope must restart from silence (#89)
+// tb_adsr_retrig.sv -- a re-gated envelope must restart from silence
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0

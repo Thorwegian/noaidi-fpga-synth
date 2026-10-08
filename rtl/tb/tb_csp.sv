@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_csp.sv -- the Control Signal Processor on its own (#136)
+// tb_csp.sv -- the Control Signal Processor on its own
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -75,7 +75,7 @@ module tb_csp;
         // 1. generation cadence: one flip per sequencer pass. Since #138 a
         //    pass is 256 instructions x 1 cycle = 256 cycles, so it completes
         //    inside ONE sample and the cadence is one flip per sample. Before
-        //    #138 the sequencer was half-rate (#100) and a pass spanned two.
+        //    #138 the sequencer was half-rate and a pass spanned two.
         toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);

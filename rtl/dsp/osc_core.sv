@@ -76,7 +76,7 @@ module osc_core (
         : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
 
     //----------------------------------------------------------------
-    // Sine: true sine from a quarter-wave LUT (issue #65 — the old
+    // Sine: true sine from a quarter-wave LUT (— the old
     // y=4x(1-x) parabola read as a noisy tone on hardware). One
     // quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
     // cycle is rebuilt from the top two phase bits — quadrant[0]
@@ -100,7 +100,7 @@ module osc_core (
     //----------------------------------------------------------------
     // Waveform select
     //----------------------------------------------------------------
-    // 25 bits so the DC-corrected pulse (#154) survives the mux; the other
+    // 25 bits so the DC-corrected pulse survives the mux; the other
     // three are sign-extended and unchanged.
     logic signed [24:0] muxed;
     always_comb begin

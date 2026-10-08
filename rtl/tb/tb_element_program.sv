@@ -226,7 +226,7 @@ module tb_element_program;
             errors = errors + 1;
         end
 
-        // volume semantics (#40): base = quiet floor (negative),
+        // volume semantics: base = quiet floor (negative),
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);

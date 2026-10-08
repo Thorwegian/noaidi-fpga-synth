@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# gen_log_lut.py — limiter log2 fractional-part LUT (#121)
+# gen_log_lut.py — limiter log2 fractional-part LUT
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2

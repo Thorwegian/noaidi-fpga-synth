@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// adsr.sv -- the RC envelope, as its own module (#146)
+// adsr.sv -- the RC envelope, as its own module
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
@@ -25,7 +25,7 @@
 // RC charge, which is convex, instead of the tail, which flattens into a soft
 // attack nobody wants.
 //
-// RATES ARRIVE AS COEFFICIENTS (#145). Firmware sends an 18-bit k per segment
+// RATES ARRIVE AS COEFFICIENTS. Firmware sends an 18-bit k per segment
 // and this module multiplies by it and shifts by a FIXED K_SHIFT. It used to
 // decode a mantissa and a variable barrel shift here, and that shifter -- a
 // LUT mux tree feeding a fabric carry chain -- was the design's critical path

@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_tilt.sv — the output tilt's error-feedback fix (#102).
+// tb_tilt.sv — the output tilt's error-feedback fix.
 //
 // The bug this guards: a truncating one-pole (out += (in-out)>>>3)
 // PARKS at a small nonzero residual when the input falls silent —

@@ -79,7 +79,7 @@ module spi_bus #(
     // Instruction config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
     output logic        imem_write_enable,
-    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]} (#100)
+    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
     output logic [31:0] imem_write_data,
     output logic [7:0]  elem_write_index,
     output logic [31:0] elem_write_data,

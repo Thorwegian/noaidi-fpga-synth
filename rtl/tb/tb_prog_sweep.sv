@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_sweep.sv — split bench B (issue #58): the click hunt
+// tb_prog_sweep.sv — split bench B: the click hunt
 // (cutoff sweep with bank flips on a sine) and the chord-retrigger
 // stress. The longest of the four split benches.
 //------------------------------------------------------------------------

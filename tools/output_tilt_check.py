@@ -106,7 +106,7 @@ def main():
         n = len(rec.stdout) // 2
         s = struct.unpack(f"<{n}h", rec.stdout)
         frame = s[0::2][RATE // 2: RATE // 2 + N]
-        dc = sum(frame) / len(frame)      # capture-path DC offset (#81)
+        dc = sum(frame) / len(frame)      # capture-path DC offset
         mag = hann_fft_mag([v - dc for v in frame])
 
         # harmonic levels: peak bin within +/-3 of each ideal position

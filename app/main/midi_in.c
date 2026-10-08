@@ -9,7 +9,7 @@
 // and publishes complete messages to the event bus. Never prints in
 // the hot path and never blocks on a consumer.
 //
-// Port roles (#90): UART1/GPIO0 is the DIN MIDI jack (keyboard);
+// Port roles: UART1/GPIO0 is the DIN MIDI jack (keyboard);
 // UART0/GPIO2 is the dev-host panel port, reserved for Open Stage
 // Control exclusively (Thor, 2026-09-10) — test scripts stay on
 // BLE/DIN so panel traffic never contends with them.

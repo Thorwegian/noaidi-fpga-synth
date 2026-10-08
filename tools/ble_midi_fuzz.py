@@ -161,7 +161,7 @@ def main():
         print(f"[midi] sent {n} messages -- survived")
     finally:
         # ALWAYS free the Noaidi's single connection, and untrust so
-        # BlueZ does not auto-grab it away from the phone (#82).
+        # BlueZ does not auto-grab it away from the phone.
         try:
             bt(f"disconnect {NOAIDI_MAC}", btctl)
             time.sleep(1.5)

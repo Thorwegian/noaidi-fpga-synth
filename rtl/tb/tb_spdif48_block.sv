@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_spdif48_block.sv — the 48 kHz test transmitter (#101), decoded the
+// tb_spdif48_block.sv — the 48 kHz test transmitter, decoded the
 // same way tb_spdif_block.sv decodes the 96 kHz stream.
 //
 // This bench deliberately takes BOTH half-rate ticks from the drum

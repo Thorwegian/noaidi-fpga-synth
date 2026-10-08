@@ -76,7 +76,7 @@ module top (
     logic        dmem_wr_toggle;
     logic        imem_write_enable;
     logic [9:0]  imem_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
-                            // (#100); a too-narrow wire here silently
+                            //; a too-narrow wire here silently
                             // truncated entries before — size from the pool
     logic [31:0] imem_write_data;
 
@@ -104,7 +104,7 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // Test tone (audio-chain purity check, issue #81): 1500 Hz sine,
+    // Test tone (audio-chain purity check): 1500 Hz sine,
     // 64-sample period at 96 kHz (phase step 2^18 = 262144 EXACTLY),
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
     // Midband per Thor — coupling caps in the analog chain attenuate
@@ -123,7 +123,7 @@ module top (
 
     logic signed [17:0] tone_q216;
     osc_core u_tone_osc (
-        .phase_next (tone_phase),      // advanced above, not here (#128)
+        .phase_next (tone_phase),      // advanced above, not here
         .duty       (24'sd0),
         .wave       (2'd3),            // sine (quarter-wave LUT)
         .sample_out (tone_q216)
@@ -136,7 +136,7 @@ module top (
     // Output tilt (output_tilt.sv): one-pole 6 dB/oct lowpass on the
     // mix, corner ≈ 2 kHz — Thor's ear-tuned warm stop. Error
     // feedback inside the module makes it settle to EXACT zero on
-    // silence (#102). Sits BEFORE the test-tone mux so the purity
+    // silence. Sits BEFORE the test-tone mux so the purity
     // reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;

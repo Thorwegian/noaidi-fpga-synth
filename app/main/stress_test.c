@@ -1,4 +1,4 @@
-// stress_test.c — synthetic MIDI flood to reproduce load crashes (#70).
+// stress_test.c — synthetic MIDI flood to reproduce load crashes.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2

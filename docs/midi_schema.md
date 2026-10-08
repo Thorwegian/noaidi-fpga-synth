@@ -54,13 +54,13 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
-| 10 | pan | IMPLEMENTED (#91): per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
+| 10 | pan | IMPLEMENTED: per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
 | 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface. Today's wheel→cutoff IS a temporary hardwiring (Thor 2026-09-10: to become a routable per-channel destination like the LFO dests, see #92) |
-| RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
+| RPN 0/0 | pitch-bend range | IMPLEMENTED: CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 86 | vel→amp-env AMOUNT | (#89 round 2) OB-8 "Vol": scales the amp ADSR's DEPTH word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing). Round 1's static GAIN-word subtract is retired |
 | 87 | vel→MOD-env AMOUNT | (#89 round 2) OB-8 "Filt": scales the MOD env's signed DEPTH word at note-on by the same `g(vel)`, so velocity sets how far the filter envelope travels in octaves rather than offsetting where it starts. **0 = OFF**. Round 1's static per-voice cutoff-bus term (`s_vel_cut`) is retired — the per-voice cutoff bus base is now zero |
 | 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
-| 119 | TEST TONE (#81) | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
+| 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**
 | CC | Target | Notes |
@@ -73,7 +73,7 @@ units live in patch.h).
 | 23 | osc 2 fine | full travel ±0.5 semitone, center 64 (was ±1.5, retuned Thor 2026-09-10) |
 | 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (#91 — the log-gain mix term alone tops out at ~23.6 dB) |
 | 25 | osc 1 pulse width / duty | UNIPOLAR log taper (#94, Thor: the bipolar halves sound identical): 0 = square (50%), 127 = 5% pulse, equal duty ratio per step, never the degenerate 0/100%. Pulse ONLY today (saw/tri/sine ignore duty); parabola skew is #66 |
-| 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
+| 85 | osc 2 pulse width / duty | same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
 | 28 | unison stereo spread | CONTINUOUS since #98 (was a de-facto on/off bool): 0 = centered, far side attenuated 0.375 dB/step, 127 = hard pan / exact far-side mute (the historical On, default) |
@@ -100,7 +100,7 @@ equal-ratio ladder.
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
 | 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper (#94 — linear over the full span was 3 semitones/click): ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (authority rule #88). The CSP's DEPTH word is signed |
-| 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
+| 108 | MOD env destination | stored; cutoff is the implemented destination |
 
 **LFOs** (2)
 | CC | Target | Notes |

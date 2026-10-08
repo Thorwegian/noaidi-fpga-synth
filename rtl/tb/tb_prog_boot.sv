@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_boot.sv — split bench A (issue #58): boot image, mute-all,
+// tb_prog_boot.sv — split bench A: boot image, mute-all,
 // programmed tone over SPI. The boot/mute phases ARE the test here,
 // so this bench does its own raw reset instead of the common preamble.
 //------------------------------------------------------------------------

@@ -71,7 +71,7 @@ journal/notes/log thing."). Entries are append-only history — never
 
 - **The "combiner source" as a concept**: dissolved by Thor — "a bus
   is already a combiner of sources; all we really need is other-bus
-  as a possible source." Built as walker type 3 (#44); the planned
+  as a possible source." Built as walker type 3; the planned
   C = A·x + B·y device never existed as hardware, only as two
   bus-source entries in adjacent slots.
 - **Blocking producer sends** (50 ms backpressure in

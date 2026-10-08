@@ -151,20 +151,20 @@ root_widgets = [
                 switch(20, "Wave", WAVES, 0),
                 knob(14, "Pitch", 64, bipolar=True),
                 knob(15, "Fine", 64, bipolar=True),
-                knob(25, "Pulse Width", 0),   # unipolar: 0=square, 127=5% (#94)
+                knob(25, "Pulse Width", 0),   # unipolar: 0=square, 127=5%
             ]),
             section("Oscillator 2", [
                 switch(21, "Wave", WAVES, 96),
                 knob(22, "Pitch", 64, bipolar=True),
                 knob(23, "Fine", 64, bipolar=True),
-                knob(85, "Pulse Width", 0),   # unipolar (#94)
+                knob(85, "Pulse Width", 0),   # unipolar
             ]),
             section("Mix and Unison", [
                 knob(24, "Osc Balance", 64, bipolar=True),
                 switch(26, "Voice Mode",
                        {"2 plain": 0, "7+1": 64, "4+4": 127}, 64),
                 knob(27, "Unison Spread", 24),
-                knob(28, "Stereo Spread", 127),   # continuous (#98):
+                knob(28, "Stereo Spread", 127),   # continuous:
                                                   # 0 centered, 127 hard pan
             ]),
         ],
@@ -175,7 +175,7 @@ root_widgets = [
         knob(71, "Resonance", 4),            # boot reso r=0x200 = cc 4
         switch(29, "Type", {"LP": 0, "BP": 64, "HP": 127}, 0),
         switch(30, "Slope", {"12 dB": 0, "24 dB": 127}, 127),
-        knob(31, "Key Track", 64, bipolar=True),   # center = 100% (#94)
+        knob(31, "Key Track", 64, bipolar=True),   # center = 100%
     ]),
     section("Amp Envelope  -  knob up = longer", [
         knob(73, "Attack", 51),
@@ -189,9 +189,9 @@ root_widgets = [
         knob(104, "Sustain", 120),
         knob(105, "Release", 107),
         knob(107, "Env>Cutoff", 87, bipolar=True),  # 64 = off; square-law
-                                                    # (#94): 87 ~ boot +2 oct
+                                                    #: 87 ~ boot +2 oct
         # CC 108 (env dest) deliberately absent: stored-only in firmware,
-        # cutoff is the sole implemented destination (#42) - a knob that
+        # cutoff is the sole implemented destination - a knob that
         # does nothing erodes trust in the panel (Thor, 2026-09-10).
     ]),
     section("LFOs", [

@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// limiter.sv -- log-domain peak limiter, PIPELINED per-step function (#121).
+// limiter.sv -- log-domain peak limiter, PIPELINED per-step function.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2

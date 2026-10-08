@@ -9,7 +9,7 @@
 // and >>>2 (~4.4 kHz, too bright). A convex combination never
 // overflows 24 bits.
 //
-// ERROR FEEDBACK (#102): a plain truncating >>> parks the integrator
+// ERROR FEEDBACK: a plain truncating >>> parks the integrator
 // at a small nonzero residual when the input falls silent — updates
 // smaller than 2^SHIFT truncate to nothing, so the output never
 // reaches zero (measured on the #101 digital capture path as a

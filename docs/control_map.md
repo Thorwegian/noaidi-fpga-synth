@@ -116,8 +116,8 @@ The list fits the engine as built:
 
 - The stored-configuration structure (deliberately unnamed) that
   presets/program-change need — prerequisite for the panel work.
-- MIDI schema close-out (#49): cutoff 7-vs-14-bit, SysEx scope.
-- Filter envelope (#42) = the second per-voice ADSR above.
+- MIDI schema close-out: cutoff 7-vs-14-bit, SysEx scope.
+- Filter envelope = the second per-voice ADSR above.
 - How channel-level LFOs, key tracking and pedals allocate buses.
 - The chord-aware pattern engine's place in the firmware layout
   (a sequencer is "just another producer into the command queue"

@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_limiter.sv -- the S11 master limiter (#121) ACTIVE, in situ,
+// tb_prog_limiter.sv -- the S11 master limiter ACTIVE, in situ,
 // through the real programming path. The pipeline bench never crosses
 // the threshold (unity gain), so the active limiter path had no in-situ
 // coverage -- and the first hardware load sputtered at -63 dBFS median.

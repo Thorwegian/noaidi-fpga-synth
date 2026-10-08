@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //--------------------------------------------------------------------
-// tb_osc_core.sv — oscillator waveform bench (was missing; issue #70
+// tb_osc_core.sv — oscillator waveform bench (was missing;
 // ear reports: wave 3 "noisy tone", pulse duty "does nothing"). Drives
 // a phase accumulator into osc_core the way the pipeline does
 // (phase_next = phase + delta, now added in the bench since #128 moved

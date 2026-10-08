@@ -38,7 +38,7 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   write buses are SOURCES; the parameters that read buses are SINKS.
   "Producer" was a third wheel that snuck into code and docs — being
   retired. Code identifiers (`producer_*`, `MAP_PROD_BASE`,
-  `engine_link_prod_write`, ...) still carry the old word until #50
+  `engine_link_prod_write`,...) still carry the old word until #50
   (now on the #93 roadmap; renames to `source_*`); docs use
   source/sink and quote code names only as code.
 - **The full terminal triad — source / sink (drain) / gate** (Thor +
@@ -213,7 +213,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed SVF-K LUT), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth (decided 2026-09-02, "break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (issue #40 inverted the code to volume; the binary point stays at UQ4.4 — the 0.375 dB grid is the ear-proven resolution, answering the parked question by ratification) |
+| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (inverted the code to volume; the binary point stays at UQ4.4 — the 0.375 dB grid is the ear-proven resolution, answering the parked question by ratification) |
 | Envelope times | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave, decoded by the same LUT+shift machinery (📋) |
 
 ## The drum — SCMO pipeline ✅
@@ -470,7 +470,7 @@ bench-verified) milestone. One rung in flight at a time.
    check; the check's first run caught (and fixed) a −54 dBc
    quarter-wave-mirror bug in the sine LUT.
 14. **Sampled/tracker sound — "save the rabbit" (Thor, 2026-09-07,
-   issue #85)**: the Amiga/Paula character (Jazz Jackrabbit lineage)
+)**: the Amiga/Paula character (Jazz Jackrabbit lineage)
    as a direction: whole-spectrum rate-pitching, zero-order hold
    aliasing, 8-bit crush, tick-quantized modulation. Tiers: tracker
    idioms in firmware (rides the arp epic) → wavetable oscillator

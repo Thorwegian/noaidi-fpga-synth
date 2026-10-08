@@ -51,7 +51,7 @@ package synth_pkg;
 
     //--- Bus fabric (docs/bus_architecture.md) ----------------------
     parameter logic [15:0] MAP_BUS_BASE = 16'h0800;    // bus base registers
-    parameter int          DMEM_WORDS    = 512;         // uniform pool (#134)
+    parameter int          DMEM_WORDS    = 512;         // uniform pool
     parameter int          BUS_W        = 18;          // signed Q8.10
 
     //--- Instruction table (B4/B5) -------------------------------------
@@ -67,12 +67,12 @@ package synth_pkg;
     //             (level fraction, 8 bits), [31:24] RELEASE — byte
     //             order matches patch_adsr_word(), the pipeline
     //             decode and memory_map.md (a swapped S/R in this
-    //             comment was issue #105). Rates are 8-bit log2:
+    //             comment was). Rates are 8-bit log2:
     //             increment = (16+frac) << oct on the 22-bit level
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
     // A instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
-    // Pool 256, FULL RATE (#145): the CSP retires one instruction per
+    // Pool 256, FULL RATE: the CSP retires one instruction per
     // cycle, so all 256 entries execute every sample — 256 of the
     // sample's 768 cycles — and every source updates at 96 kHz. This
     // replaces the half-rate sequencer (#100, Thor 2026-09-11), which
@@ -86,7 +86,7 @@ package synth_pkg;
     parameter logic [15:0] MAP_IMEM_BASE = 16'h0100;
     parameter int          NUM_INSTR = 256;
 
-    // CSP opcode = a bitmask of enables (#145), not an enum. Each bit turns
+    // CSP opcode = a bitmask of enables, not an enum. Each bit turns
     // on one part of the datapath, so decode is enables rather than a mux
     // tree and a new instruction is an encoding rather than a new case.
     parameter int OPC_SOURCE = 0;   // reads a source operand (SEND, ADSR gate)
@@ -125,7 +125,7 @@ package synth_pkg;
 
     parameter int CTRL_W = 14;      // UQ4.10 pitch/cutoff
 
-    parameter int AUDIO_W = 18;     // Q4.14 audio transport (#63)
+    parameter int AUDIO_W = 18;     // Q4.14 audio transport
     typedef logic signed [AUDIO_W-1:0] sample_t;
 
     parameter int SVF_W = 36;       // Q8.28 filter states

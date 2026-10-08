@@ -58,7 +58,7 @@ module tb_prog_pingpong;
         // sequencer retires one instruction per cycle, so a full 256-entry
         // pass costs 256 of the sample's 768 cycles and completes inside one
         // sample: the cadence is one toggle per sample. Under the old
-        // half-rate scheme (#100) a pass spanned two samples, and flipping
+        // half-rate scheme a pass spanned two samples, and flipping
         // per sample would have published a half-written generation --
         // halved modulation depth and broken chains. The invariant is
         // unchanged; what changed is how long a pass takes.

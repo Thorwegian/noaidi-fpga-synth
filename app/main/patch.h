@@ -1,4 +1,4 @@
-// patch.h — the currently-active sound, in RAM (issue #69).
+// patch.h — the currently-active sound, in RAM.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -28,7 +28,7 @@
 
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum {                     // matches OSC word waveform field
-    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT (#65)
+    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT
     // future gateware waveforms: #64 noise; #66 a real parabola as its own type
 } waveform_t;
 
@@ -59,12 +59,12 @@ typedef struct {
 } filter_t;
 
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
-// Rates are 8-bit log2 in the PATCH; the wire format is linear (#145).
+// Rates are 8-bit log2 in the PATCH; the wire format is linear.
 typedef struct {
     uint8_t attack, decay, sustain, release;
 } adsr_t;
 
-// ── ADSR wire format (#145) ─────────────────────────────────────────
+// ── ADSR wire format ─────────────────────────────────────────
 // The CSP no longer decodes rate nibbles or sustain: it multiplies by a
 // coefficient and shifts by a FIXED amount, so the multiply-accumulate
 // folds into one DSP block instead of a LUT barrel shifter feeding a
@@ -137,10 +137,10 @@ typedef struct {
 
     mod_route_t     mod[PATCH_MOD_ROUTES];
 
-    // Velocity sensitivity (#89): 64 = the historical hardwired feel,
+    // Velocity sensitivity: 64 = the historical hardwired feel,
     // 0 = OFF (isolation testing), 127 = double. CC 86/87.
-    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT (#89)
-    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT (#89)
+    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT
+    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT
 
     uint8_t         bend_range;      // 1..12 semitones
     uint8_t         volume;          // per-channel/part volume (UQ4.4)
@@ -160,6 +160,6 @@ typedef struct {
     // key/velocity split ranges, layer enables: TBD with the feature
 } performance_t;
 
-// ── The active patch (issue #69) ────────────────────────────────────
+// ── The active patch ────────────────────────────────────
 extern patch_t g_patch;
 void     patch_default(patch_t *p);

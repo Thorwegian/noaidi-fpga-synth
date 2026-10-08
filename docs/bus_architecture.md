@@ -31,7 +31,7 @@ it far better than reading it as a fabric:
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
-| opcode | `CFG[3:0]` — a bitmask of enables (#145): bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
+| opcode | `CFG[3:0]` — a bitmask of enables: bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
 | source operand | `CFG[25:16]` — the data-memory word an instruction reads |
 | destination | `CFG[15:6]` — the word it writes |
 | immediate | `DEPTH` — a coefficient |
@@ -50,7 +50,7 @@ instruction is not pure.
 
 Inside the processor there are no buses — the pool is data memory.
 Outside it, firmware and [memory_map.md](memory_map.md) still say "bus"
-(see #139). The module is `rtl/csp.sv`.
+. The module is `rtl/csp.sv`.
 
 ## Terminology used in this document
 
@@ -204,7 +204,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   every source contribution written so far — a send ordered after
   its sources relays them same-sample, which is what makes the node
   graph's edges real. C = A·x + B·y is two sends targeting the same
-  bus in adjacent slots (#84). Real uses: the channel cutoff bus
+  bus in adjacent slots. Real uses: the channel cutoff bus
   (bus 4) fanning out to the 32 per-voice cutoff buses; LFO 2's
   CUTOFF destination riding that fan-out.
 - **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note

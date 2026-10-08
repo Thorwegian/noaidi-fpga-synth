@@ -40,7 +40,7 @@
 //
 // I originally "hardened" the sub-stall case with an in-flight commit register.
 // That was a mistake: the race cannot fire at 10 MHz, and the extra logic made
-// 2 of 4 nextpnr placements audibly glitch (#147). The margin is the mechanism
+// 2 of 4 nextpnr placements audibly glitch. The margin is the mechanism
 // here, so this bench measures the margin -- if a denser instruction table or a
 // faster SPI clock ever eats it, this fails loudly instead of a bus base
 // quietly landing in one generation.
