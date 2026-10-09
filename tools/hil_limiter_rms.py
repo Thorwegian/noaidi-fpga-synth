@@ -4,14 +4,15 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Thor's acceptance criterion, verbatim: "the RMS over a window long enough
-to cover about a 20 Hz sine wave cycle-long window should not deviate by
-more than ~3 dB". 20 Hz -> 50 ms windows.
+The acceptance criterion: the RMS over a window long enough to cover
+about one cycle of a 20 Hz sine must not deviate by more than ~3 dB.
+20 Hz -> 50 ms windows.
 
-This is the metric that FAILED on 2026-09-18 with the pre-pipeline
-limiter: regn-telt.wav "sputters like the background noise on a vinyl
-record". The sim bench (tb_prog_limiter) reported 0.23 dB on the same
-design class. That disagreement is the whole point of the match.
+This metric is the one that catches a limiter which "sputters like the
+background noise on a vinyl record" while the sim bench
+(tb_prog_limiter) reports 0.23 dB on the same design class. That
+disagreement between board and simulation is the whole point of
+measuring it here.
 
     ~/.noaidi-blenv/bin/python3 tools/hil_limiter_rms.py
 

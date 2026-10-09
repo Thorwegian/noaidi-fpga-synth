@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Automated check for the #91 shakedown batch, over BLE MIDI.
+"""Automated shakedown check, over BLE MIDI.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Runs BEFORE Thor's ear pass (his rule, 2026-09-10): drive the synth
+Runs BEFORE the ear pass: drive the synth
 through the sanctioned test transport (BLE - the panel port is Open
 Stage Control's exclusively), watch the ESP console for ingress and
 crashes, and MEASURE the pan implementation on the analog capture
@@ -95,13 +95,13 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        # ---- 1. ingress smoke on every new #91 CC ----
+        # ---- 1. ingress smoke on the shakedown CCs ----
         print("[smoke] CC 10/31/85/107 ...")
         for num, val in ((10, 32), (31, 64), (85, 96), (107, 72)):
             cc(num, val)
             time.sleep(0.15)
         cc(31, 64)               # restore key tracking default
-                                 # (64 = 100% since the #94 0-200% scale)
+                                 # (64 = 100% on the 0-200% scale)
 
         # ---- 2. measured pan check ----
         results = {}

@@ -354,9 +354,8 @@ module csp (
     //   DEPTH [17:0] signed coefficient, 0x10000 = unity
     logic [8:0] pc;             // 0..NUM_INSTR, one per cycle
 
-    // The generation now flips once per SAMPLE, because a complete pass is
-    // once per sample again. Under half rate it had to flip every other
-    // sample (a pass spanned two), and flipping early published a
+    // The generation flips once per SAMPLE, because a complete pass is one
+    // sample long. Flipping more often than a pass completes publishes a
     // half-written generation -- halved depth and a stale link in any chain.
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)           dmem_gen <= 1'b0;

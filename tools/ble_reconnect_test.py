@@ -80,7 +80,7 @@ def wait_disconnected(timeout=10):
     """Wait for the REAL link teardown, not just the ALSA port vanishing.
     (BlueZ's disconnect is async: a connect issued before completion gets
     'Connection successful' for the dying link, which the finishing
-    disconnect then tears down — the exact first-reconnect race, #78.)"""
+    disconnect then tears down — the first-reconnect race.)"""
     t0 = time.time()
     while time.time() - t0 < timeout:
         out = subprocess.run(["bluetoothctl", "info", NOAIDI_MAC],

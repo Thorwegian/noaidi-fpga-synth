@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mash test (#97, Thor 2026-09-11): chaos in, silence out.
+"""Mash test: chaos in, silence out.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -140,8 +140,8 @@ def capture_probe(secs=1):
     """Return (rms_db, ac_nonzero, (dc_l, dc_r)) from a short capture.
 
     ac_nonzero counts samples that deviate from their channel's median
-    - the parked-DC-tolerant silence metric (#102: the output tilt
-    parks a ~1-LSB DC; that is not a stuck voice)."""
+    - the parked-DC-tolerant silence metric: the output tilt parks a
+    ~1-LSB DC, and that is not a stuck voice."""
     subprocess.run(["amixer", "-c", "1", "cset", "numid=16", "2"],
                    capture_output=True)
     subprocess.run(["amixer", "-c", "1", "cset", "numid=13", "on"],
@@ -283,7 +283,7 @@ def main():
               f"AC-deviating {ac}  DC {dcs}")
         if ac == 0 and max(abs(dcs[0]), abs(dcs[1])) <= 4:
             print(f"RESULT: PASS - AC-silent after mash (seed {seed}; "
-                  f"parked DC {dcs} is the known #102 tilt residual)")
+                  f"parked DC {dcs} is the known tilt residual)")
             reboot_esp_clean()   # never leave the patch scrambled
             return 0
         time.sleep(5)

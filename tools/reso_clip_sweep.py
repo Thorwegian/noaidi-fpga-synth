@@ -57,7 +57,7 @@ def capture(device, seconds):
 
 def stats(ch):
     # Remove DC first: the analog capture path carries a significant
-    # offset (#81, measured 2026-09-09) that inflates peak and RMS.
+    # measured offset that inflates peak and RMS.
     dc = sum(ch) / len(ch)
     ch = [v - dc for v in ch]
     peak = max(max(ch), -min(ch))

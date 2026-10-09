@@ -6,7 +6,7 @@
  
 Enables the gateware test tone over BLE MIDI (CC 119): a full-scale
 sine with a 64-sample period at 96 kHz = 1500 Hz (midband, so coupling
-caps in the analog chain don't skew it — Thor), which at 48 kHz
+caps in the analog chain don't skew it), which at 48 kHz
 capture lands EXACTLY on bin 32 of a 1024-point FFT — coherent, no
 window, harmonics on exact bins (64, 96, ...).
 

@@ -228,10 +228,9 @@ static int s_sub_id = -1;
 
 // How long a release tail stays audible, from the RATES release byte
 // using the gateware decode's own formula: the level spans 2^22 LSB
-// and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK — and
-// since the half-rate walker an entry is walked every OTHER
-// sample, i.e. at 48 kHz. patch_adsr_rate_byte already bakes the ×2 rate
-// compensation into the byte, so the samples count is in 48 kHz
+// and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK, with an
+// entry walked at 48 kHz. patch_adsr_rate_byte already bakes the ×2
+// rate compensation into the byte, so the samples count is in 48 kHz
 // walks: 1 walk = 1/48000 s ≈ 20.83 µs.
 static int64_t release_tail_us(void)
 {
@@ -488,8 +487,7 @@ static int32_t duty_from_cc(uint8_t val)
     return (int32_t)((0.5f - duty) * 16777216.0f);
 }
 
-#define LFO_FS_HZ   48000.0f   // half-rate walker: an LFO's
-                               // phase advances every OTHER sample
+#define LFO_FS_HZ   48000.0f   // the rate an LFO's phase advances at
 static uint16_t lfo_rate_from_cc(uint8_t val)
 {
     float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz

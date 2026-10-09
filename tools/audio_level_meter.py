@@ -104,8 +104,8 @@ def main():
                 print("capture stream ended early"); break
             n = len(data) // 2
             samples = struct.unpack(f"<{n}h", data)
-            # Peak is measured around the block's DC offset (#81: the
-            # analog path carries one); clipping is still judged on the
+            # Peak is measured around the block's DC offset, which the
+            # analog path carries; clipping is still judged on the
             # RAW codes — the ADC rails at +/-32768 regardless of DC.
             dc = sum(samples) / n
             dc_worst = max(dc_worst, abs(dc))

@@ -5,7 +5,7 @@
  
 Robust cutoff diagnosis: prove sound is present (RMS) and track the
 spectral CENTROID (Hz) as a cutoff proxy across a CC 74 sweep, with a
-velocity control to match Thor's 'only velocity works' observation."""
+velocity control to test the 'only velocity works' report."""
 import subprocess, sys, time, wave
 import numpy as np
 sys.path.insert(0, __file__.rsplit("/", 1)[0])

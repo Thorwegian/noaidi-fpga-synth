@@ -4,10 +4,10 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Thor's repro recipe (2026-09-10, panel screenshot): a 7+1 patch with
-velocity fully OFF, MOD env off, cutoff CC74=52 + 100% key track -
-the corner rides a constant ~1 octave BELOW the fundamental, which he
-found glitches hardest. Only resonance and the 12/24 dB slope vary.
+The repro recipe: a 7+1 patch with velocity fully OFF, MOD env off,
+cutoff CC74=52 + 100% key track - the corner rides a constant ~1
+octave BELOW the fundamental, which is where it glitches hardest.
+Only resonance and the 12/24 dB slope vary.
 Reported by ear: stable to reso ~35 at 24 dB/oct, ~70 at 12 dB/oct;
 beyond that it "clips and goes into a BRRR glitchy kind of sound".
 
@@ -15,17 +15,17 @@ This sweeps CC 71 at both slopes and measures, per step:
   peak/RMS dBFS, crest, and FLAT-TOP fraction - the share of samples
   within 2% of that capture's own peak. A clean resonant tone keeps a
   tiny fraction; hard saturation parks the waveform at the rails and
-  the fraction jumps. DC removed per #81; CC 120 between steps per
-  the capture-hygiene rule.
+  the fraction jumps. DC is removed, and CC 120 goes out between
+  steps, per the capture-hygiene rule.
 
     ~/.noaidi-blenv/bin/python3 tools/filter_pain_check.py [cutoff_cc]
 
-cutoff_cc overrides CC 74 (default 52 = Thor's recipe, corner ~1 oct
-below the fundamental). Run with e.g. 96 to probe the BRIGHT corner -
-hypothesis (Thor 2026-09-10: the physical slider on a bright patch
-could near-max resonance, "just glassy"): SVF stress is the
-low-cutoff/high-Q corner, where integrator states scale ~1/K into
-the clamps; high fc keeps states small and stable.
+cutoff_cc overrides CC 74 (default 52 = the recipe above, corner ~1
+oct below the fundamental). Run with e.g. 96 to probe the BRIGHT
+corner, where a near-maximum resonance sounds "just glassy": SVF
+stress is the low-cutoff/high-Q corner, where integrator states
+scale ~1/K into the clamps, while a high fc keeps states small and
+stable.
 
 BLE transport; console untouched (the polite logger keeps running).
 """
@@ -42,7 +42,7 @@ AUDIO_DEV = "hw:1,0"
 RATE = 48000
 NOTE = 57
 
-# Thor's screenshot state, verbatim (only 71/30 vary in the sweep)
+# The recipe's patch state, verbatim (only 71/30 vary in the sweep)
 PATCH = [
     (20, 0), (14, 64), (15, 64), (25, 64),          # osc1: saw, centered
     (21, 96), (22, 64), (23, 64), (85, 64),         # osc2: sine, unison

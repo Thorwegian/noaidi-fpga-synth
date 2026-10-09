@@ -12,7 +12,7 @@
 # high r     -> barrel shift underflows toward q1 = 0: self-oscillation
 #              is the natural top of scale, no special case.
 #
-# 16 entries per octave (the attenuation-LUT precedent, Thor):
+# 16 entries per octave, following the attenuation LUT:
 # resonance is a loudness-class percept (peak height in dB), and the
 # ~0.375 dB grid is ear-proven silky on the gain path — unlike pitch,
 # which needs the 1024-entry treatment. Bus/wire format keeps the

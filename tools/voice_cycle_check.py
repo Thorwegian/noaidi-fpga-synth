@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Voice-pool uniformity check (the every-32-note-ons bug, 2026-09-10).
+"""Voice-pool uniformity check: the every-32-note-ons bug.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Thor: 'every 32 note-ons, the cutoff goes low.' Cause: the engine
-prod queue overflowed during the init burst and silently dropped the
-TAIL - voices 30/31's amp-envelope configs - so notes landing on
-those voices played at the gain floor. LRU voice cycling made it
-periodic with NUM_VOICES.
+The symptom: every 32 note-ons, the cutoff goes low. The cause is
+the engine prod queue overflowing during the init burst and silently
+dropping the TAIL - voices 30/31's amp-envelope configs - so notes
+landing on those voices play at the gain floor. LRU voice cycling
+makes it periodic with NUM_VOICES.
 
 This plays 36 short identical notes (a full pool cycle plus wrap),
 measures each one's level, and asserts the spread stays inside 8 dB -

@@ -9,7 +9,7 @@ sweeps (voice mode / volume / mix) interleaved with note on/off -- over
 the REAL Linux BLE-MIDI path, while capturing the ESP32 serial and
 reporting crash indicators.
 
-How the path works (learned the hard way, #82): BlueZ has a built-in
+How the path works: BlueZ has a built-in
 BLE-MIDI plugin that CLAIMS the MIDI service the moment the Noaidi
 connects, exposing an ALSA sequencer port ("Noaidi Bluetooth") and
 marking the service read-only for D-Bus GATT clients -- raw

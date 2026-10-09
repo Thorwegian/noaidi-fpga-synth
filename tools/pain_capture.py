@@ -4,7 +4,7 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Companion to filter_pain_check.py: same Thor-recipe patch, but records
+Companion to filter_pain_check.py: same recipe patch, but records
 a few representative (slope, resonance) settings as WAV files for
 listening review (publish with tools/publish_capture.sh).
 

@@ -17,17 +17,16 @@ patch_t g_patch;
 // Pack an ADSR into the source-table RATES word (A | D<<8 | S<<16 |
 // R<<24) — the gateware's universal A,D,S,R byte order.
 //
-// HALF-RATE COMPENSATION: the walker advances each envelope
-// every OTHER sample now (48 kHz effective), which alone would double
-// every attack/decay/release time. The rate decode is
+// RATE COMPENSATION: the envelope walk these bytes are calibrated
+// against runs at 48 kHz, half the sample rate, which alone would
+// double every attack/decay/release time. The rate decode is
 // (16+low4) << high4, so adding 1 to the exponent nibble (+0x10 on
 // the byte) doubles the increment and restores wall-clock times
 // exactly. Saturating: the 16 fastest codes flatten onto the ceiling
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
 // The rate byte: mantissa in the low nibble, exponent in the high one.
-// The +0x10 is the half-rate compensation, and it cancels against the
-// gateware's SHIFT_BIAS of 11. Both cancellations are folded into
-// adsr_k() below.
+// The +0x10 cancels against the gateware's SHIFT_BIAS of 11; both
+// cancellations are folded into adsr_k() below.
 uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 {
     return patch_rate > 0xEF ? 0xFF : (uint8_t)(patch_rate + 0x10);
@@ -35,8 +34,9 @@ uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 
 // One rate byte -> the linear coefficient the CSP multiplies by.
 //
-//   old gateware:  k = (16 + low4) / 2^(26 - high4)
-//   now:           k = round(that * 2^ADSR_K_SHIFT), never zero
+//   k = round( (16 + low4) / 2^(26 - high4) * 2^ADSR_K_SHIFT )
+//
+// never zero.
 //
 // For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
 // those codes come through bit-for-bit. Slower ones round, which costs
@@ -52,9 +52,9 @@ static uint32_t adsr_k(uint8_t rate_byte)
     return k ? k : 1u;        // a zero coefficient would freeze the envelope
 }
 
-// Sustain as a plain level. The gateware used to decode this with a
-// second barrel shift; firmware knows the destination, so it decodes
-// here. Only the linear form is used -- nothing has ever set CFG[26].
+// Sustain as a plain level. Firmware knows the destination, so it
+// decodes here rather than costing the gateware a second barrel
+// shift. Only the linear form is used -- CFG[26] is never set.
 static uint32_t adsr_sustain(const adsr_t *e)
 {
     uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
