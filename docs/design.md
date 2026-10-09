@@ -436,8 +436,3 @@ bench-verified) milestone. One rung in flight at a time.
    PSRAM as real sampler memory. Deliberately NOT correcting the
    artifacts — they are the sound.
 
-## History
-
-Corrections, rejected alternatives, and abandoned concepts live in
-[journal.md](journal.md) — this document describes only what the
-design IS.

@@ -139,11 +139,6 @@ never sees.
 | ADSR snappiness vs smoothing dilemma | Smoothing is a per-producer property: firmware-written buses can be smoothed (producer-side), envelope buses never are |
 | FPGA complexity vs bandwidth balance | Tiered build; every deferred feature has a firmware fallback costing only SPI traffic; the line moves on measured link utilization |
 
-## Alternatives considered and rejected
-
-Moved to [journal.md](journal.md): abandoned ideas are journal
-material, not design material.
-
 ## Sizing (initial allocations; address space reserves ≥2×)
 
 Derivations use the drum budget (768 slots, 271 used by lanes, ~497
