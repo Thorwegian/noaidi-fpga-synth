@@ -5,14 +5,14 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor: "The time-averaged value of the pulse oscillator should remain 0 at all
-// duty cycles."
+// The requirement: the time-averaged value of the pulse oscillator must
+// remain 0 at every duty cycle.
 //
 // Sweeps the phase over an exact whole cycle at each duty and averages the
 // output. A whole cycle matters: averaging a partial one leaves a fraction of
-// the waveform in the result and reads as DC, which is exactly the artefact that
-// made me measure +-0.003 of full scale on a real capture and chase the wrong
-// cause. Here the phase is generated, so the average is exact.
+// the waveform in the result and reads as DC -- an artefact of the
+// measurement worth ~0.003 of full scale, large enough to be mistaken for a
+// real offset. Here the phase is generated, so the average is exact.
 //
 // Also checks the two things that must not regress: a square (duty 0) is
 // bit-identical to the old bare comparator, and saw/tri/sine are untouched.
@@ -72,7 +72,7 @@ module tb_pulse_dc;
         duties[7] =  24'sd8000000;       // beyond what firmware sends
         duties[8] = -24'sd8000000;
 
-        $display("  #154: pulse time-average must be 0 at every duty");
+        $display("  pulse time-average must be 0 at every duty");
         $display("    duty          mean(LSB Q2.16)");
         for (k = 0; k <= 8; k = k + 1) begin
             mean_at(2'd1, duties[k], m);

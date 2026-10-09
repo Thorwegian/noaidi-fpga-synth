@@ -190,7 +190,7 @@ module tb_element_program;
         spi_word_write(bus_addr(2), 32'h00000000);
 
         spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -48 dB (volume
-                                                      // bus, #40)
+                                                      // bus)
         observe(60);
         observe(400);
         if (peak > worst * 2 / 5) begin

@@ -5,13 +5,14 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor (#145): use Gowin's DSP/ALU primitives explicitly; yosys will not infer
-// them. Before any RTL depends on them, two things have to be MEASURED against
-// Gowin's own behavioural model rather than read off a datasheet:
+// Gowin's DSP/ALU primitives are instantiated explicitly, because yosys will
+// not infer them. Before any RTL depends on them, two things have to be
+// MEASURED against Gowin's own behavioural model rather than read off a
+// datasheet:
 //
-//   1. THE PIPELINE DEPTH. The ADSR's result arrives later than it does today,
-//      and the CSP's state write-back has to be re-aligned by exactly that
-//      much. A guess here is a race.
+//   1. THE PIPELINE DEPTH. The primitive delays the ADSR's result, and the
+//      CSP's state write-back has to be re-aligned by exactly that much.
+//      A guess here is a race.
 //
 //   2. BIT-EXACTNESS. The recurrence must produce the same level as today's
 //      fabric arithmetic, across the whole rate range, or existing patches

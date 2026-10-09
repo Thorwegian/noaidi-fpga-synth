@@ -4,11 +4,12 @@
 //------------------------------------------------------------------------
 // tb_prog_limiter.sv -- the S11 master limiter ACTIVE, in situ,
 // through the real programming path. The pipeline bench never crosses
-// the threshold (unity gain), so the active limiter path had no in-situ
-// coverage -- and the first hardware load sputtered at -63 dBFS median.
-// Thor's acceptance criterion (2026-09-18): RMS over ~50 ms windows (one
-// 20 Hz cycle) must not jump by more than ~3 dB. Plus: never rail, and
-// never go near-silent (the failure signature).
+// the threshold (unity gain), so this bench is the only in-situ
+// coverage of the active limiter path.
+//
+// The acceptance criterion: RMS over ~50 ms windows (one 20 Hz cycle)
+// must not jump by more than ~3 dB. Plus: never rail, and never go
+// near-silent (the failure signature).
 //
 // NOTE on windows: the criterion's 50 ms windows are the HARDWARE gate
 // (the sputter is a silicon-timing artefact sim cannot see by

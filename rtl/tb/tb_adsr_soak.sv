@@ -1,11 +1,11 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// tb_adsr_soak.sv -- reproduce #147: envelopes "rewind" or "retrigger"
-// randomly on long notes, plus discontinuities.
+// tb_adsr_soak.sv -- envelopes "rewind" or "retrigger" randomly on long
+// notes, plus discontinuities.
 //
-// Thor heard it with the real program, 32 voices x 2 envelopes, and called it
-// random -- which points at interaction between instruction slots rather than
+// The fault is audible with the real program, 32 voices x 2 envelopes, and
+// its randomness points at interaction between instruction slots rather than
 // at one envelope's arithmetic. So: 64 envelopes on distinct gate and target
 // buses, with DIFFERENT rates and gates turning on at DIFFERENT samples, so
 // the slots sit in different stages at any moment. 64 identical envelopes in
@@ -15,8 +15,8 @@
 // an envelope that has reached DECAY must never go back to ATTACK or IDLE, and
 // its level must not climb. Note the attack's last step legitimately clamps UP
 // to ENV_FULL as it latches DECAY, so the level check only applies once the
-// envelope is already in decay -- getting that wrong made this bench report 64
-// failures that were the attack working correctly.
+// envelope is already in decay; applied earlier it reports the attack working
+// correctly as 64 failures.
 `timescale 1ns/1ps
 module tb_adsr_soak;
     localparam int N_ENV   = 64;

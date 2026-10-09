@@ -11,7 +11,7 @@
 //   4. SVF dynamics: both filter state pairs leave zero
 //   5. attenuation: s10_out == (s9_elem * lin) >>> 16, exact
 //   6. mixer: mix_left/right == sat24(sum of s10 outputs << 8)
-//      (through the #121 limiter at unity gain: levels stay under
+//      (through the master limiter at unity gain: levels stay under
 //      its -1 dBFS threshold; published 3 cycles after the tick),
 //      exactly, over a full sample period; L == R (equal gains)
 //   7. signal energy: the mix is not silent
@@ -157,8 +157,8 @@ module tb_element_pipeline;
                 errors = errors + 1;
             end
             if (period >= 1) begin
-                // Q4.14 → Q0.24 is << 10 (repoint #63; mirrors the RTL's
-                // sat24(mix_acc <<< 10)). Was << 8 in the Q2.16 era.
+                // Q4.14 → Q0.24 is << 10 (mirrors the RTL's
+                // sat24(mix_acc <<< 10)).
                 exp_lat_l = sat24_impl(exp_acc_l << 10);
                 exp_lat_r = sat24_impl(exp_acc_r << 10);
             end
