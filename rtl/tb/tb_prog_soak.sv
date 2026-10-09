@@ -3,8 +3,7 @@
 //
 // tb_prog_soak.sv -- the envelope glitch hunt, with the REAL program loaded.
 //
-// tb_adsr_soak runs 64 envelopes and comes back clean, so an interaction
-// glitch needs the actual slot map from voice_alloc.c:
+// An interaction glitch needs the actual slot map from voice_alloc.c:
 //
 //   slot 0        LFO 1            -> bus 2   (global pitch)
 //   slot 1        LFO 2            -> bus 1   (global duty)
