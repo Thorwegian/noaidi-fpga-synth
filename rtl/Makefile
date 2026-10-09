@@ -158,14 +158,16 @@ GOWIN_SIM ?= /opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v
 # iverilog elaborates every primitive in that 16770-line file, including the
 # ones we never touch, and fails on their GSR references. -DSIM_GOWIN_PRIM
 # turns on the GSR instance inside adsr.sv, which the models need to exist
-# somewhere up the hierarchy.
-IVL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
+# somewhere up the hierarchy. The define goes before the source files:
+# iverilog on macOS stops parsing options at the first file name.
+IVL_DSP_DEF = -DSIM_GOWIN_PRIM
+IVL_DSP = $(GOWIN_SIM)
 
 SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
-	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_ELEM) $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_ELEM) $(IVL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a
@@ -207,7 +209,7 @@ sim-spdif48: tb/tb_spdif48_block.vvp
 #.
 TB_PROG = tb/tb_element_program.sv
 tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) tb/elem_prog_common.svh $(LUTS) Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(IVL_DSP)
 
 sim-prog-full: tb/tb_element_program.vvp
 	vvp tb/tb_element_program.vvp
@@ -215,7 +217,7 @@ sim-prog-full: tb/tb_element_program.vvp
 PROG_COMMON = tb/elem_prog_common.svh
 
 tb/tb_prog_%.vvp: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $< $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $< $(IVL_DSP)
 
 sim-prog-boot: tb/tb_prog_boot.vvp
 	vvp tb/tb_prog_boot.vvp > tb/sim-prog-boot.out 2>&1
@@ -243,7 +245,7 @@ sim-prog-limiter: tb/tb_prog_limiter.vvp
 # The CSP alone -- seconds rather than minutes, because it does not
 # elaborate the SVF, the oscillators or the limiter.
 tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv $(IVL_DSP)
 
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
@@ -263,7 +265,7 @@ CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 # stolen voice's level IS the interference. Presenting the state directly is
 # both cleaner and decisive -- without the fix this bench reports 2 FAILURES.
 tb/tb_adsr_retrig.vvp: tb/tb_adsr_retrig.sv $(PKG) dsp/adsr.sv Makefile
-	iverilog -g2012 -s tb_adsr_retrig -o $@ $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -s tb_adsr_retrig -o $@ $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(IVL_DSP)
 
 sim-adsr-retrig: tb/tb_adsr_retrig.vvp
 	@vvp $< > tb/sim-adsr-retrig.out 2>&1 || true
@@ -277,7 +279,7 @@ sim-dsp-char: tb/tb_dsp_char.vvp
 	@cat tb/sim-dsp-char.out
 
 tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv $(IVL_DSP)
 
 sim-mbox-burst: tb/tb_mbox_burst.vvp
 	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
@@ -288,13 +290,13 @@ sim-mbox-burst: tb/tb_mbox_burst.vvp
 # every run. Kept because re-running them is how you re-check that those two
 # candidates are still dead.
 tb/tb_adsr_soak.vvp: $(CSP_SIM) tb/tb_adsr_soak.sv Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv $(IVL_DSP)
 
 sim-adsr-soak: tb/tb_adsr_soak.vvp
 	vvp tb/tb_adsr_soak.vvp
 
 tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
-	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_prog_soak.sv $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_prog_soak.sv $(IVL_DSP)
 
 sim-prog-soak: tb/tb_prog_soak.vvp
 	vvp tb/tb_prog_soak.vvp
@@ -317,7 +319,7 @@ sim-spi: tb/tb_spi_slave_regs.vvp
 # bench — part of the regular suite).
 TB_STAB = tb/tb_svf_stability.sv
 tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
-	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_STAB) $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_STAB) $(IVL_DSP)
 
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
@@ -328,7 +330,7 @@ sim-stab: tb/tb_svf_stability.vvp
 # is made unconditionally stable. Run with: make sim-svfmod
 TB_SVFMOD = tb/tb_svf_modulation.sv
 tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
-	iverilog -g2012 -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_SVFMOD) $(IVL_DSP)
+	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_SVFMOD) $(IVL_DSP)
 
 sim-svfmod: tb/tb_svf_modulation.vvp
 	vvp tb/tb_svf_modulation.vvp
