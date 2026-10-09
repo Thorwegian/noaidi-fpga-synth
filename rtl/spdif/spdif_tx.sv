@@ -9,11 +9,11 @@
 // internally consistent at ANY tick rate, and a receiver locks to the
 // actual bit rate. Only the channel-status frequency byte (CS_FREQ
 // parameter) must be told what rate that is: 0x0A = 96 kHz (default,
-// the main output), 0x02 = 48 kHz (the #101 LED test output).
+// the main output), 0x02 = 48 kHz (the LED-driven capture output).
 //
-// What a receiver needs from this module (all four, not just the first
-// two — the earlier version stopped after 2 and pro interfaces refused
-// to lock):
+// What a receiver needs from this module — all four, not just the
+// first two: stop after two and professional interfaces refuse to
+// lock.
 //   1. biphase-mark data cells with even parity        — always had
 //   2. M/W preambles for subframe sync                 — always had
 //   3. a B preamble every 192 frames (block sync):     — added

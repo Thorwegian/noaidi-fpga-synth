@@ -6,7 +6,7 @@
 //
 // Replaces the Chamberlin recurrence with the topology-preserving
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
-// stable under cutoff modulation at resonance (the #117 fix). Streaming,
+// stable under cutoff modulation at resonance. Streaming,
 // one element per cycle, fully pipelined; one multiply OR the adds per
 // stage (the silicon timing rule that gave the Chamberlin its S5B/S8B
 // splits). Fixed-point locked and bit-verified against a Python model

@@ -11,10 +11,9 @@
 //   gain_q     slews toward target<<SUB (attack up / release down)
 //   gain_lin   = att_lut[code[3:0]] >> code[7:4]       (UQ0.16)
 //
-// FIVE registered stages -- the silicon timing rule (AGENTS.md): never
-// chain a LUT + barrel shift into arithmetic in one cycle; the first,
-// combinational version of this module did exactly that and sputtered
-// on hardware (2026-09-18) while STA passed.
+// FIVE registered stages -- the silicon timing rule: never chain a
+// LUT + barrel shift into arithmetic in one cycle. A combinational
+// form of this module sputters on hardware even where STA passes.
 //   S1a  octave: priority encoder            (decode)
 //   S1b  mantissa shift + log_lut -> code    (barrel shift + LUT)
 //   S2a  target = code - threshold, clamped  (adds)

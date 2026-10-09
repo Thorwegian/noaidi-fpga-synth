@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_prog_pingpong.sv -- #134: the ping-pong bus generation.
+// tb_prog_pingpong.sv -- the ping-pong bus generation.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -9,7 +9,7 @@
 // that reads the right generation. These are the invariants the scheme
 // must hold, and NONE of them is visible on hardware -- S/PDIF carries
 // the mix, not the bus, so a wrong-generation read surfaces only as an
-// occasional subtly-stale modulation value (Thor, #134).
+// occasional subtly-stale modulation value.
 //
 //   1. dmem_gen toggles exactly once per sample
 //   2. an SPI bus write lands in the SHADOW half, so sinks keep reading
@@ -54,7 +54,7 @@ module tb_prog_pingpong;
             gen_prev = u_pipe.u_csp.dmem_gen;
             if (sample_tick) ticks = ticks + 1;
         end
-        // One generation == one COMPLETE sequencer pass. Since #138 the
+        // One generation == one COMPLETE sequencer pass. The
         // sequencer retires one instruction per cycle, so a full 256-entry
         // pass costs 256 of the sample's 768 cycles and completes inside one
         // sample: the cadence is one toggle per sample. Under the old
@@ -85,7 +85,7 @@ module tb_prog_pingpong;
 
         // A MAILBOX write is immediate by design: it must reach both
         // halves (see dmem_commit_phase in element_pipeline.sv), or its
-        // value dies on the second swap. That is the pre-#134 behaviour
+        // value dies on the second swap. That is the un-ping-ponged behaviour
         // restored, not a concession -- firmware writes have always
         // landed mid-sample. The atomicity that matters is the SEQUENCER's,
         // which writes only the shadow half; test 7 covers persistence
@@ -187,7 +187,7 @@ module tb_prog_pingpong;
             $display("unproduced bus: base persists with nothing refreshing it");
 
         //---------------------------------------------------------------
-        // 9. NO STRADDLE (Thor, #134): a swap must not land inside a lane
+        // 9. NO STRADDLE: a swap must not land inside a lane
         //    pass. Elements enter at slots 0..255 and read the bus at S2,
         //    slots 1..256, so dmem_gen constant across that window means
         //    every element of the pass saw one generation. Several passes,

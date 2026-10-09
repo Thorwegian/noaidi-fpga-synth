@@ -6,7 +6,7 @@
 //
 // tb_svf_stability.sv proves the filter is stable when the cutoff is set
 // once and HELD. This bench proves the missing case: a cutoff that MOVES,
-// as mod-envelope -> cutoff drives it in play. It first REPRODUCED #117 on
+// as mod-envelope -> cutoff drives it in play. It reproduced the fault on
 // the Chamberlin SVF, and is now the GUARD for the ZDF/TPT fix.
 //
 // Method: element 0 plays a saw at 375 Hz (period 256 samples), gain
@@ -20,14 +20,14 @@
 // FINDINGS:
 //   - Chamberlin (before the fix): state diverged to the rail once
 //     resonance passed ~q1=2.0 (r=0x600..0x800) under a full-range sweep --
-//     an ordinary musical resonance, and a SMOOTH sweep sufficed (no #106
-//     bus glitch needed). That is the #117 "screaming".
-//   - TPT (the fix, #118): state stays ~1.75 at r=0x800 where the
+//     an ordinary musical resonance, and a SMOOTH sweep sufficed, with no
+//     bus glitch needed. That is the "screaming".
+//   - TPT (the fix): state stays ~1.75 at r=0x800 where the
 //     Chamberlin railed -- unconditionally stable, matching the pole-radius
 //     proof and the Python fixed-point model. Output peak grows with
 //     resonance (legitimate resonant gain) but the state is bounded.
 //
-// The #117 guard corner asserts bounded STATE at r=0x800 under a smooth
+// The guard corner asserts bounded STATE at r=0x800 under a smooth
 // full-range sweep. It FAILS on the Chamberlin (reproduction) and PASSES on
 // the TPT (the fix). Standalone target `make sim-svfmod` (heavy, ~3 min).
 //------------------------------------------------------------------------
@@ -250,7 +250,7 @@ module tb_svf_modulation;
         // EVIDENCE — resonance ladder under full-range modulation. The
         // divergence threshold sits between q1=1.4 (r=0x400) and q1=2.0
         // (r=0x600) — an ordinary musical resonance. tri = smooth sweep;
-        // slam = one-sample jump lo<->hi (what a #106 glitch would add).
+        // slam = one-sample jump lo<->hi (what a bus glitch would add).
         // SMOOTH sweeps diverge on their own: no bus glitch required.
         rlad[0]=14'h0400; rlad[1]=14'h0600; rlad[2]=14'h0800;
         for (li = 0; li < 3; li = li + 1) begin
@@ -266,25 +266,25 @@ module tb_svf_modulation;
                      (pk_state > STATE_RAIL) ? "STATE UNBOUNDED" : "state bounded");
         end
 
-        // #117 GUARD — moderate musical resonance (r=0x800, q1~=0.35,
+        // GUARD — moderate musical resonance (r=0x800, q1~=0.35,
         // Q~=2.8) under a SMOOTH full-range cutoff sweep must NOT rail.
         // On today's Chamberlin filter this FAILS: it is the deterministic
-        // reproduction of #117. When a ZDF/TPT filter lands, this flips to
+        // reproduction of the fault. When a ZDF/TPT filter lands, this flips to
         // PASS and the whole bench moves into the default `sim` gate.
         arm_sweep(14'h0040, synth_pkg::FC_MAX, 14'h0200, 14'h0800, 1'b0);
         measure(r, peak);
-        $display("#117 guard r=800 mod (tri)      : peak=%0d state=%.2f %s",
+        $display("guard r=800 mod (tri)      : peak=%0d state=%.2f %s",
                  peak, $itor(pk_state)/268435456.0,
                  (pk_state > STATE_RAIL) ? "UNBOUNDED" : "state bounded");
         if (pk_state > STATE_RAIL) begin
-            $display("FAIL #117: filter STATE diverges under cutoff modulation (r=0x800, smooth sweep, dual)");
+            $display("FAIL: filter STATE diverges under cutoff modulation (r=0x800, smooth sweep, dual)");
             errors = errors + 1;
         end
 
         if (errors == 0)
             $display("ALL PASS (filter stable under cutoff modulation)");
         else
-            $display("%0d FAILURE(S) - #117 reproduced (expected until the filter is made unconditionally stable)", errors);
+            $display("%0d FAILURE(S) - fault reproduced (expected until the filter is made unconditionally stable)", errors);
         $finish;
     end
 

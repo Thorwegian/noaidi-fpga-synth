@@ -6,15 +6,15 @@
 //
 // The FC_MAX clamp (synth_pkg) holds the effective cutoff just below
 // fs/6 = 16 kHz, from the stability criterion sin(pi*fc/fs) < Q with
-// the musical worst case Q = 0.5 (Thor). Resonance is log2-encoded
-// (2026-09-02): FILTER[27:14] = r, octaves of Q above Butterworth,
+// the musical worst case Q = 0.5. Resonance is log2-encoded:
+// FILTER[27:14] = r, octaves of Q above Butterworth,
 // q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
 // damping (the old clamp, now structural), and the top of the range
 // underflows to q1 = 0 (self-oscillation, a feature). Corners: the
 // measured-safe worst case (r = 0 at FC_MAX), today's timbre
 // (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
-// Stability metric (Thor's definition): normalized autocorrelation at
+// Stability metric: normalized autocorrelation at
 // the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
 // 375.03 Hz, period 255.98 samples, so the lag is exactly 256. A
 // stable filtered saw scores near 1000 milli-r; atonal roaring scores
@@ -71,7 +71,7 @@ module tb_svf_stability;
         u_pipe.osc_param_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
         u_pipe.osc_param_ram[256] = 36'h000001614;
         u_pipe.gain_param_ram[0]   = 36'h0000000DF;        // L -12 dB, R mute
-        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume, #40)
+        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume)
     end
 
     // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth

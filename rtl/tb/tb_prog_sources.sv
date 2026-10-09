@@ -148,11 +148,11 @@ module tb_prog_sources;
         $display("bus summing, one source:  peak=%0d", peak);
         if (peak == 0) peak = 1;
         if (wmax / peak < 8) begin
-            $display("FAIL: consecutive same-bus sources do not sum (#84)");
+            $display("FAIL: consecutive same-bus sources do not sum");
             errors = errors + 1;
         end
 
-        // BUS AS SOURCE (issue #44, Thor: a bus is already a combiner
+        // BUS AS SOURCE (a bus is already a combiner
         // of sources — the only new thing is "other bus" as a source).
         // ADSRs off; type-3 entry reads bus 6, multiplies by DEPTH,
         // adds to gain bus 3. Bus 3 base = −8 oct floor. Bus 6 = 0 →
@@ -179,7 +179,7 @@ module tb_prog_sources;
         wmax = peak;
         $display("bus source, unity copy: peak=%0d", wmax);
         if (wmax / worst < 8) begin
-            $display("FAIL: bus source did not copy bus 6 into bus 3 (#44)");
+            $display("FAIL: bus source did not copy bus 6 into bus 3");
             errors = errors + 1;
         end
 
@@ -191,7 +191,7 @@ module tb_prog_sources;
         $display("bus source, half depth: peak=%0d", peak);
         if (peak == 0) peak = 1;
         if (!(peak > worst && peak < wmax && wmax / peak >= 2)) begin
-            $display("FAIL: bus-source DEPTH does not scale (#44)");
+            $display("FAIL: bus-source DEPTH does not scale");
             errors = errors + 1;
         end
 
@@ -220,7 +220,7 @@ module tb_prog_sources;
         observe(60);
         observe(60);
         if ($signed(u_pipe.u_csp.dmem_fc[3]) !== 18'sd4708) begin
-            $display("FAIL: triple chain replica = %0d, expected 4708 (#44)",
+            $display("FAIL: triple chain replica = %0d, expected 4708",
                      $signed(u_pipe.u_csp.dmem_fc[3]));
             errors = errors + 1;
         end else begin
@@ -256,11 +256,11 @@ module tb_prog_sources;
         end
         $display("LFO through send: window peaks max=%0d min=%0d", wmax, wmin);
         if (wmin == 0 || (wmax * 2) / wmin < 5) begin
-            $display("FAIL: sequencer contribution not visible through the send (#92)");
+            $display("FAIL: sequencer contribution not visible through the send");
             errors = errors + 1;
         end
 
-        // UPPER HALF EXECUTES (#100 half-rate sequencer): move the send
+        // UPPER HALF EXECUTES: move the send
         // to entry 130 — half B, walked on alternate samples. The
         // LFO (entry 0, half A) writes bus 6 on even passes; the
         // half-B send relays the sum on odd passes (one sample
@@ -283,7 +283,7 @@ module tb_prog_sources;
         end
         $display("upper-half send: window peaks max=%0d min=%0d", wmax, wmin);
         if (wmin == 0 || (wmax * 2) / wmin < 5) begin
-            $display("FAIL: upper-half entry not executing (#100)");
+            $display("FAIL: upper-half entry not executing");
             errors = errors + 1;
         end
 
