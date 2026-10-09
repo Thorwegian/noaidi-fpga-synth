@@ -4,7 +4,7 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 Register/address-space map for the ESP32-C3 ↔ FPGA SPI control interface.
-Status: **NEEDS CONSOLIDATION (Thor, 2026-09-03)** — this document is
+Status: **NEEDS CONSOLIDATION** — this document is
 behind actual progress: much of what it still calls "proposal" is
 built and hardware-verified (wire protocol, per-element words,
 buses, the source table), the diagrams are stale, and "producer"
@@ -126,7 +126,7 @@ flowchart LR
   boundary, in an idle drum slot where no voice reads occur — that is
   the one critical cycle, and nothing but the bank pointer changes in
   it. `STATUS` reports swap completion. There is no "patch" vs "live"
-  parameter class (correction from Thor, design doc): swaps run
+  parameter class: swaps run
   thousands of times per second, everything is live, and every change
   is effected through a swap. Whether GATE and CV cells also route
   through the banks or stay single-banked is an implementation choice
@@ -163,7 +163,7 @@ No MIDI interpretation: the FPGA stores anonymous control voltages and
 knows nothing of wheels, pedals or CC numbers — every musical decision
 and every mapping stays in firmware.
 
-## Instruction memory — `0x0100–0x04FF` (live, B4/B5; pool doubled #100)
+## Instruction memory — `0x0100–0x04FF` (live, B4/B5)
 
 The CSP's program. See [bus_architecture.md](bus_architecture.md) —
 entries are **instructions**, `CFG[3:0]` is the **opcode**, and the
@@ -174,34 +174,30 @@ parameters (config is wiring — takes effect at the swap). See
 [bus_architecture.md](bus_architecture.md). **Full rate**: the
 CSP retires one instruction per cycle, so all 256 entries execute every
 sample — 256 of the sample's 768 cycles — and every source updates at
-96 kHz. #100's half-rate split is retired, and with it the rule that a
-chain (sources + their sends sharing a target) had to live within ONE
-half: a chain now tolerates gaps of up to three slots, the depth of the
-accumulator's forwarding history. A source's output uses the previous
+96 kHz. A chain (sources plus the sends sharing their target)
+tolerates gaps of up to three slots, the depth of the accumulator's
+forwarding history. A source's output uses the previous
 pass's state (registered multiplies). LFO rate steps are still 2.9 mHz
 per code — the phase accumulator gained a fractional bit when the pass
 rate doubled, so the same code means the same frequency.
 
 | Offset | Word | Contents |
 |---|---|---|
-| `+0` | `CFG` | `[3:0]` **opcode bitmask** — bit 0 reads a source operand, bit 1 has persistent state, bit 2 multiplies by DEPTH, bit 3 accumulates onto the target rather than starting from its initial value. An envelope is the instruction that watches a gate, so state+source means envelope and state alone means phase accumulator: `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND (#44/#98: the bus processor). Bit 3 makes chaining explicit — it used to be inferred from program order, which the allocator could not check. `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held); SEND: `[25:16]` SOURCE bus — stateless, reads the bus's OUTPUT SUM (`bus_sum_ram`, #92/#98: firmware base + every contribution written so far; sources ordered before their sends propagate same-sample), × DEPTH (`0x10000` = unity, sign inverts), chain-adds to target |
-| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) << high4 in 1/32-LSB units — the level carries 5 fractional bits (UQ22.5, widened from 4 by #138 when the pass rate doubled, so envelope times are unchanged), which is the down-bias so gentle decays exist (decay only traverses peak→sustain). One uniform expression, no truncating shift: all 256 codes are distinct equal-ratio steps of a log₂ ladder, so a MIDI CC maps perceptually linearly as `cc << 1`. Full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware; `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
-| `+2` | `DEPTH` | `[17:0]` signed **Q2.16** — the instruction's coefficient (immediate). **Unity is `0x10000`**: the product is taken as `>>> 16`, so the field spans about −2.0…+2.0. (Earlier revisions of this table said Q8.10, which contradicted the `0x10000` unity stated on the same line and did not match the RTL — corrected #136.) **TODO:** the gain-path format unification may move this — #132 proposes Q4.14 end to end for audio, log-decoded gain and the linear gain bus, which would make this coefficient's requantization `>>14` and its unity `0x4000`. Do not treat Q2.16 as settled until #132 is decided. Amp-envelope idiom: initial image = full attenuation, coefficient negative — the envelope subtracts silence |
+| `+0` | `CFG` | `[3:0]` **opcode bitmask** — bit 0 reads a source operand, bit 1 has persistent state, bit 2 multiplies by DEPTH, bit 3 accumulates onto the target rather than starting from its initial value. An envelope is the instruction that watches a gate, so state+source means envelope and state alone means phase accumulator: `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND, the bus processor. Bit 3 makes chaining explicit, so the allocator can check it. `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target bus; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (5.7 mHz steps, 375 Hz max); ADSR: `[25:16]` gate bus (level-sensitive, > 0 = held); SEND: `[25:16]` SOURCE bus — stateless, reads the bus's OUTPUT SUM (`bus_sum_ram`: firmware base plus every contribution written so far; sources ordered before their sends propagate same-sample), × DEPTH (`0x10000` = unity, sign inverts), chain-adds to target |
+| `+1` | `RATES` (ADSR) | Universal **A, D, S, R** order: `[7:0]` attack, `[15:8]` decay, `[31:24]` release — 8-bit log₂ RATES, increment = (16+low4) << high4 in 1/32-LSB units — the level carries 5 fractional bits (UQ22.5), which is the down-bias so gentle decays exist (decay only traverses peak→sustain). One uniform expression, no truncating shift: all 256 codes are distinct equal-ratio steps of a log₂ ladder, so a MIDI CC maps perceptually linearly as `cc << 1`. Full-range ~44 s … ~0.7 ms; rates, not durations — no 1/x in gateware; `[23:16]` **sustain level** — one LSB = envelope span / 256 below peak |
+| `+2` | `DEPTH` | `[17:0]` signed **Q2.16** — the instruction's coefficient (immediate). **Unity is `0x10000`**: the product is taken as `>>> 16`, so the field spans about −2.0…+2.0. **TODO:** a gain-path format unification may move this — the proposal is Q4.14 end to end for audio, log-decoded gain and the linear gain bus, which would make this coefficient's requantization `>>14` and its unity `0x4000`. Do not treat Q2.16 as settled until that is decided. Amp-envelope idiom: initial image = full attenuation, coefficient negative — the envelope subtracts silence |
 
 An instruction ADDS to its destination (word value = initial image +
 results), so firmware writes and modulation coexist on one word.
 **Multiple instructions targeting one word sum automatically** when
 allocated in adjacent slots — the accumulator carries between them
 . Scattered instructions sharing a destination remain
-last-write-wins, which is why the allocator groups them. (Earlier
-revisions said "one producer per bus... the combiner's job (B6)";
-superseded by #84 — there is no combiner and no flag.) Disabling an
-instruction leaves
+last-write-wins, which is why the allocator groups them. There is no
+combiner and no flag. Disabling an instruction leaves
 its last value on the bus until the next base write refreshes it.
 
-> **SUPERSEDED (2026-08-30):** the old LFO bank, CV table and
-> per-element routing sections below are replaced by the bus
-> architecture. They remain here as design history.
+> **SUPERSEDED:** the LFO bank, CV table and per-element routing
+> sections below are replaced by the bus architecture.
 
 ## LFO bank — `0x0100–0x02FF` (superseded, see above)
 
@@ -298,14 +294,14 @@ Voice v base address: `0x2000 + v × 64`.
 
 | Offset | Register | Contents | Status |
 |--------|----------|----------|--------|
-| `+0` | `OSC` | `[13:0]` pitch UQ4.10, `[15:14]` waveform (0 saw, 1 pulse, 2 tri, 3 sine — wider codes for noise/wavetable/sample take reserved bits when they land, #64/#85), `[31:16]` reserved. (An earlier draft documented type at `[19:16]` + a phase-reset bit — never what the pipeline decoded; corrected per #110.) | implemented |
+| `+0` | `OSC` | `[13:0]` pitch UQ4.10, `[15:14]` waveform (0 saw, 1 pulse, 2 tri, 3 sine — wider codes for noise/wavetable/sample take reserved bits when they land), `[31:16]` reserved. | implemented |
 | `+1` | `DUTY` | `[23:0]` duty Q0.24 signed, `[31:24]` reserved | implemented |
-| `+2` | `FILTER` | `[13:0]` cutoff UQ4.10, `[27:14]` resonance UQ4.10 **log₂** — octaves of Q above Butterworth (0 = Butterworth = heaviest decodable damping; one integer ≈ +6 dB of resonant peak; top of range underflows the decode to q1 = 0 = self-oscillation), `[31:28]` reserved. Decided 2026-09-02 ("break with convention"); decodes via q1_lut + barrel shift, the cutoff-K pattern | implemented |
+| `+2` | `FILTER` | `[13:0]` cutoff UQ4.10, `[27:14]` resonance UQ4.10 **log₂** — octaves of Q above Butterworth (0 = Butterworth = heaviest decodable damping; one integer ≈ +6 dB of resonant peak; top of range underflows the decode to q1 = 0 = self-oscillation), `[31:28]` reserved. Decodes via q1_lut + barrel shift, on the cutoff-K pattern | implemented |
 | `+3` | `GAIN` | `[7:0]` **volume** L UQ4.4, `[15:8]` volume R UQ4.4 (0x00 = silence/exact mute, 0xFF = loudest — a zeroed word is silent-by-default; inverted to the attenuation decode at the effective-parameter seam), `[23:16]` mode byte: `[16]` 12/24 dB, `[18:17]` filter type, `[19]` smoothing coeff select, `[23:20]` reserved | implemented |
-| `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run — a control input, NEVER an envelope trigger: envelopes are gated by their own gate-bus reads in the source table, #98; the register is slated for removal in #100), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
+| `+4` | `GATE` | `[0]` gate (0 = silent: gain decode forced to exact mute, oscillator/filters free-run — a control input, NEVER an envelope trigger: envelopes are gated by their own gate-bus reads in the source table, and the register is slated for removal), `[1]` retrig (reserved), `[31:2]` reserved | bit 0 implemented |
 | `+5` | `PTRS0` | bus pointers ([bus_architecture.md](bus_architecture.md)): `[9:0]` pitch, `[19:10]` duty, `[29:20]` cutoff — 0 = bus 0 = no modulation | cutoff live (B1) |
 | `+6` | `PTRS1` | bus pointers: `[9:0]` filter 1/Q, `[19:10]` gain L, `[29:20]` gain R | live (B2) |
-| `+7..+15` | — | reserved. (A pre-bus draft placed per-element ADSR words at +5/+6, colliding with PTRS0/PTRS1 — removed per #110; envelopes live in the SOURCE TABLE at `0x0100–0x04FF`, shared between elements by design.) | reserved |
+| `+7..+15` | — | reserved. Envelopes live in the SOURCE TABLE at `0x0100–0x04FF`, shared between elements by design. | reserved |
 | `+16..+23` | `ROUTE[0..7]` | patch cables: `[3:0]` source type, `[14:4]` source index, `[17:15]` sink (0 pitch, 1 duty, 2 cutoff, 3 Q, 4 gain L, 5 gain R, 6–7 reserved), `[31:18]` amount sQ2.12 | TBD |
 | `+24..+63` | — | per-element LFO, glide, FM amount, sample position, ... | reserved |
 
@@ -340,10 +336,8 @@ Notes:
 
 ## SPI speed budget
 
-- Current firmware default: **10 MHz** (engine_link era), one CS frame
-  per transaction. (The 1 MHz / 8-bit-addressing figure this line once
-  carried was the bring-up configuration — #110.)
-- **Measured on hardware (2026-08-28): clean at every rate from 1 MHz to
+- Firmware default: **10 MHz**, one CS frame per transaction.
+- **Measured on hardware: clean at every rate from 1 MHz to
   40 MHz.** 88/88 transactions correct — write four registers, burst-read
   them back, check the ID byte and all four values, ×8 repetitions at each
   of 11 rates. 40 MHz is the ESP32-C3's ceiling for SPI2 through the GPIO
@@ -402,8 +396,8 @@ Notes:
    was measured error-free at 40 MHz, the ESP32-C3's maximum, so the
    link has margin to spare at any rate the design would actually use.
 7. **Ping-pong**: from the start for parameter data, swapped at the
-   sample boundary in an idle slot. Risk note (2026-08-28,
-   partially retired): yosys *does* infer dual-clock BSRAM and the
+   sample boundary in an idle slot. Risk note: yosys *does* infer
+   dual-clock BSRAM and the
    ping-pong bank-select bit does not disturb it — the variant maps to
    the same 4 blocks. What remains open is not inference but
    **verification**: the toolchain cannot simulate what it generates, so

@@ -3,7 +3,7 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-Approved 2026-08-30 (Thor). Three modules on the existing event bus;
+Three modules on the existing event bus;
 one owner for SPI and the bank-swap discipline.
 
 ```
@@ -46,7 +46,7 @@ once this exists (`main.c`'s direct writes migrate here).
   swap rate, natural batching; revisit event-driven only if the tick
   latency (≤1 ms) ever matters musically.
 
-## Voice lifecycle (settled 2026-09-01, Thor)
+## Voice lifecycle
 
 **A voice is an instance of a keystroke, not a key.** Hitting the
 same key again does NOT deallocate or recycle the voice still

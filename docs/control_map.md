@@ -3,15 +3,13 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
  
-**Status: WORKING NOTES, deliberately incomplete** (started
-2026-09-03, Thor: "This is not a final list. I just want to get one
-started and written down for now."). This document grows into the
-flowchart/map of the virtual-analog / MIDI / control side that
-frames #49 (MIDI schema) and #42 (filter envelope). The framing
+**Status: WORKING NOTES, deliberately incomplete.** This document
+grows into the flowchart/map of the virtual-analog / MIDI / control
+side that frames the MIDI schema and the filter envelope. The framing
 rule stands: the user side is a fairly conventional virtual analog
 synthesizer; the unconventional machinery stays under the hood.
 
-## The starting list (Thor, 2026-09-03)
+## The starting list
 
 Per **voice**:
 - 2 ADSR envelopes
@@ -31,7 +29,7 @@ Controllers:
 - sustain pedal support
 - aftertouch and expression pedal as mod sources
 
-Input transports (Thor, 2026-09-06):
+Input transports:
 - **Wired MIDI** (5-pin DIN → optocoupler → UART1 on GPIO0) is the
   primary PLAYING input.
 - **BLE MIDI** is for control surfaces — up to 3 bonded devices
@@ -41,12 +39,12 @@ Input transports (Thor, 2026-09-06):
   agnostic; a control-surface CC over BLE and the same CC over the
   wire are indistinguishable downstream.
 
-Constraint (Thor): **shouldn't require any FPGA changes.** (The two
+Constraint: **shouldn't require any FPGA changes.** (The two
 new oscillator waveforms wanted alongside — white noise, sine — are
 tracked as gateware issues separately and are not part of this
 firmware-side map.)
 
-## Decisions (Thor, 2026-09-06)
+## Decisions
 
 Informed by comparing the 21st-century Prophet line (depth via a mod
 matrix) to the Roland JP-8000 (immediacy via fixed routing + the
@@ -61,10 +59,9 @@ a Prophet-capable engine, staged:
    the deliberately-unnamed stored-configuration structure and the
    buses already support it, so exposing flexible routing later is
    additive, not a rewrite.
-2. **Oscillator UNISON is a mode, not a fixed "supersaw"** (Thor,
-   2026-09-06 clarification): the fat/unison spread is a selectable
-   oscillator mode that works with ANY waveform (not saw-specific —
-   it's really UNISON/FAT). Three voice-structure modes, all within
+2. **Oscillator UNISON is a mode rather than a fixed "supersaw"**:
+   the fat/unison spread is a selectable oscillator mode that works
+   with ANY waveform. Three voice-structure modes, all within
    the 8-element/voice budget:
    - **Mode 1 — 2 plain oscillators** (2 elements/voice). Uses only
      2 of 8 slots → opportunity for higher polyphony in this mode
@@ -77,14 +74,13 @@ a Prophet-capable engine, staged:
    Unison spread = per-oscillator detune + stereo spread. Nothing on
    the FPGA changes (element detune/pan are already per-element).
 3. **Step sequencer** — in.
-5. **MIDI channels — implement channel awareness** (Thor,
-   2026-09-06: "pretty inexpensive for us, and also allows for
-   layering/key split later"). The engine is omni today, but
-   `voice_t.channel` already carries the groundwork. Making the
+5. **MIDI channels — implement channel awareness.** The engine is
+   omni, and `voice_t.channel` already carries the groundwork. Making
+   the
    synth model channel-aware is cheap and unlocks multi-timbral
    layering and key splits — each channel becomes a "part" that can
    hold its own patch. Near-term easy win.
-6. **Active-patch data structure — start now** (Thor, 2026-09-06):
+6. **Active-patch data structure — start now**:
    program change stays deferred until the stored-configuration
    format is settled, but begin an in-RAM `patch_t` (drafted in
    `app/main/patch.h`) that holds the whole currently-active sound.
