@@ -54,9 +54,6 @@
 // The >>> K_SHIFT is bit-exact rather than approximate: `level << K_SHIFT` has
 // K_SHIFT zero low bits, so arithmetically shifting the SUM right by K_SHIFT
 // equals shifting the product and then adding, for both signs of delta.
-// tb_dsp_char.sv checks that against Gowin's own model -- 249/249 exact
-// against the fabric version, including both slowest and fastest coefficient
-// and decay onto sustain from above and below.
 //
 // Wire format, MIRRORED IN app/main/patch.h -- change both or neither:
 //

@@ -1,10 +1,9 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// elem_prog_common.svh — shared body for the split element-program
-// benches (the monolithic tb_element_program was ~95% of
-// suite wall time; four independent benches let make -j4 and CI
-// matrix jobs actually parallelize). Include INSIDE a module.
+// elem_prog_common.svh — shared body for the tb_prog_* element-program
+// benches, which are independent so make -j can run them in parallel.
+// Include INSIDE a module.
 //
 // Provides: clocks/reset, drum + spi_bus + element_pipeline (ref
 // boot fixtures), the ~20 MHz Mode-0 SPI master, the mix observer,

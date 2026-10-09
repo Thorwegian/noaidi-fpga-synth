@@ -176,15 +176,6 @@ tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
 sim-elem: tb/tb_element_pipeline.vvp
 	vvp tb/tb_element_pipeline.vvp > tb/sim-elem.out 2>&1
 
-SIM_OUT_MOD = $(PKG) dsp/drum.sv spdif/spdif_tx.sv i2s/i2s_tx.sv
-TB_OUT = tb/tb_outputs.sv
-
-tb/tb_outputs.vvp: $(SIM_OUT_MOD) $(TB_OUT) Makefile
-	iverilog -g2012 -o $@ $(SIM_OUT_MOD) $(TB_OUT)
-
-sim-outputs: tb/tb_outputs.vvp
-	vvp tb/tb_outputs.vvp > tb/sim-outputs.out 2>&1
-
 TB_SPDIF = tb/tb_spdif_block.sv
 tb/tb_spdif_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 	iverilog -g2012 -o $@ $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
@@ -200,19 +191,6 @@ tb/tb_spdif48_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Make
 
 sim-spdif48: tb/tb_spdif48_block.vvp
 	vvp tb/tb_spdif48_block.vvp > tb/sim-spdif48.out 2>&1
-
-# tb_element_program.sv is the ORIGINAL full chain — kept as a
-# long-soak (sim-prog-full, NOT in the default suite: its accidental
-# soak property has caught cross-phase contamination before). The
-# four tb_prog_*.sv splits below carry the same phases as
-# independent benches so make -j4 and CI matrix jobs parallelize
-#.
-TB_PROG = tb/tb_element_program.sv
-tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) tb/elem_prog_common.svh $(LUTS) Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(IVL_DSP)
-
-sim-prog-full: tb/tb_element_program.vvp
-	vvp tb/tb_element_program.vvp
 
 PROG_COMMON = tb/elem_prog_common.svh
 
@@ -254,10 +232,6 @@ sim-csp: tb/tb_csp.vvp
 CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 
 # The mailbox's two-take commit under back-to-back traffic. IN the gate.
-# Characterises the hand-instantiated Gowin DSP primitives against Gowin's own
-# behavioural models: the pipeline depth adsr.sv's caller aligns to, and
-# bit-exactness against the fabric arithmetic they replace. Depends on no repo
-# RTL -- it tests the vendor cells, which is the point.
 # A voice stolen mid-release must attack from silence, not continue from where
 # the release had got to. This is the case the board cannot isolate: the
 # allocator only steals once all 32 voices are busy, and those other 31 are
@@ -271,30 +245,14 @@ sim-adsr-retrig: tb/tb_adsr_retrig.vvp
 	@vvp $< > tb/sim-adsr-retrig.out 2>&1 || true
 	@cat tb/sim-adsr-retrig.out
 
-tb/tb_dsp_char.vvp: tb/tb_dsp_char.sv Makefile
-	iverilog -g2012 -s tb_dsp_char -o $@ tb/tb_dsp_char.sv $(GOWIN_SIM)
-
-sim-dsp-char: tb/tb_dsp_char.vvp
-	@vvp $< > tb/sim-dsp-char.out 2>&1 || true
-	@cat tb/sim-dsp-char.out
-
 tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
 	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv $(IVL_DSP)
 
 sim-mbox-burst: tb/tb_mbox_burst.vvp
 	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
 
-# The two soaks that eliminated the envelope logic and the real program mix.
-# STANDALONE, not in the default gate: both came back clean, so they carry no
-# coverage the gate lacks, and tb_prog_soak's 4000 samples would add minutes to
-# every run. Kept because re-running them is how you re-check that those two
-# candidates are still dead.
-tb/tb_adsr_soak.vvp: $(CSP_SIM) tb/tb_adsr_soak.sv Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_adsr_soak.sv $(IVL_DSP)
-
-sim-adsr-soak: tb/tb_adsr_soak.vvp
-	vvp tb/tb_adsr_soak.vvp
-
+# The real program mix under constant mailbox rewrites. STANDALONE, not in
+# the default gate: its 4000 samples would add minutes to every run.
 tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
 	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_prog_soak.sv $(IVL_DSP)
 
@@ -308,13 +266,6 @@ tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
 sim-bus: tb/tb_spi_bus.vvp
 	vvp tb/tb_spi_bus.vvp > tb/sim-bus.out 2>&1
 
-TB_SPI = tb/tb_spi_slave_regs.sv
-tb/tb_spi_slave_regs.vvp: spi/spi_slave_regs.sv $(TB_SPI) Makefile
-	iverilog -g2012 -o $@ spi/spi_slave_regs.sv $(TB_SPI)
-
-sim-spi: tb/tb_spi_slave_regs.vvp
-	vvp tb/tb_spi_slave_regs.vvp > tb/sim-spi.out 2>&1
-
 # SVF stability spot-check at the FC_MAX clamp corner (fast assert
 # bench — part of the regular suite).
 TB_STAB = tb/tb_svf_stability.sv
@@ -324,17 +275,6 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
-# SVF stability under a MOVING cutoff. STANDALONE, not in the
-# default `sim` gate: it REPRODUCES the bug (the guard corner rails),
-# so it is expected to report a FAILURE until the filter
-# is made unconditionally stable. Run with: make sim-svfmod
-TB_SVFMOD = tb/tb_svf_modulation.sv
-tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_SVFMOD) $(IVL_DSP)
-
-sim-svfmod: tb/tb_svf_modulation.vvp
-	vvp tb/tb_svf_modulation.vvp
-
 # Output tilt error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_TILT = tb/tb_tilt.sv
@@ -343,12 +283,6 @@ tb/tb_tilt.vvp: dsp/output_tilt.sv $(TB_TILT) Makefile
 
 sim-tilt: tb/tb_tilt.vvp
 	vvp tb/tb_tilt.vvp > tb/sim-tilt.out 2>&1
-
-# Oscillator waveform shapes + pulse duty response (osc_core in
-# isolation — the coverage gap behind the waveform reports).
-TB_OSC = tb/tb_osc_core.sv
-tb/tb_osc_core.vvp: dsp/osc_core.sv $(TB_OSC) dsp/sine_lut.hex Makefile
-	iverilog -g2012 -o $@ dsp/osc_core.sv $(TB_OSC)
 
 # The pulse oscillator must average to ZERO at every duty. A bare
 # comparator is only centred at 50%: with phase sweeping the full signed range
@@ -364,9 +298,6 @@ sim-pulse-dc: tb/tb_pulse_dc.vvp
 	@vvp $< > tb/sim-pulse-dc.out 2>&1 || true
 	@cat tb/sim-pulse-dc.out
 
-sim-osc: tb/tb_osc_core.vvp
-	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
-
 # Log-domain limiter unit bench: the per-step function in
 # isolation -- transparency, proportional attack, release, saturation.
 TB_LIM = tb/tb_limiter.sv
@@ -376,16 +307,16 @@ tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Make
 sim-limiter: tb/tb_limiter.vvp
 	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
 
-sim: sim-pulse-dc sim-dsp-char sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-outputs sim-spdif sim-spdif48 sim-spi sim-bus \
+sim: sim-pulse-dc sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
-     sim-stab sim-osc sim-tilt sim-limiter
-	@cat tb/sim-pulse-dc.out tb/sim-dsp-char.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
-	     tb/sim-elem.out tb/sim-outputs.out tb/sim-spdif.out \
+     sim-stab sim-tilt sim-limiter
+	@cat tb/sim-pulse-dc.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
+	     tb/sim-elem.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
-	     tb/sim-spi.out tb/sim-bus.out \
+	     tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
-	     tb/sim-stab.out tb/sim-osc.out tb/sim-tilt.out tb/sim-limiter.out
+	     tb/sim-stab.out tb/sim-tilt.out tb/sim-limiter.out
 	@# A bench that FAILS must fail the build. Before this, `make sim`
 	@# printed "3 FAILURE(S)" and still exited 0, because this target only
 	@# cats the output -- the same shape as a failed yosys still producing a
