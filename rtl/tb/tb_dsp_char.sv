@@ -182,8 +182,9 @@ module tb_dsp_char;
         check_one(26'h300000, 26'h100000, 18'd8192,   "decay UP to sustain");
         check_one(26'h200000, 26'h200000, 18'd65536,  "at the fixed point");
 
-        // and a sweep, because the corners are where I look and the middle is
-        // where fixed-point rounding actually differs
+        // and a sweep: the corners above are the obvious cases, while the
+        // middle of the range is where fixed-point rounding actually
+        // differs
         for (i = 0; i < 240; i = i + 1) begin
             tv_t = $random; tv_l = $random; tv_k = $random;
             if (tv_k == 0) tv_k = 1;

@@ -154,28 +154,26 @@ module csp (
     // writing the replicas THIS cycle (dmem_we below); a commit colliding
     // with a sequencer write defers a cycle.
     //
-    // How long that defer can last is the whole safety argument, and it is
-    // NOT the one that used to be written here. That text claimed a ~500-slot
-    // window and a one-in-three collision rate, which was true when an entry
-    // took three cycles. Since landing 1 the sequencer retires one instruction
-    // per cycle, so its write-backs are CONTIGUOUS: the real program's
-    // pc 32..127 (32 amp envelopes, 32 mod envelopes, 32 fan-out sends) holds
-    // dmem_we for 96 cycles straight = 1.30 us. tb_mbox_burst measures that
-    // run rather than trusting this comment.
+    // How long that defer can last is the whole safety argument. The
+    // sequencer retires one instruction per cycle, so its write-backs are
+    // CONTIGUOUS: the real program's pc 32..127 (32 amp envelopes, 32 mod
+    // envelopes, 32 fan-out sends) holds dmem_we for 96 cycles straight =
+    // 1.30 us. tb_mbox_burst measures that run rather than trusting this
+    // comment.
     //
     //   worst take-2 stall   96 cycles  = 1.30 us
     //   10 MHz SPI word      32 bits    = 3.20 us
     //
-    // 2.5x, down from ~85x before landing 1. That margin is what keeps a word
-    // from arriving mid-commit, and nothing enforces it -- a denser
-    // instruction table or a faster SPI clock eats it silently. So the commit
-    // no longer DEPENDS on it (see dmem_cm_addr below).
+    // 2.5x. That margin is what keeps a word from arriving mid-commit, and
+    // nothing enforces it -- a denser instruction table or a faster SPI
+    // clock eats it silently. So the commit does not DEPEND on it (see
+    // dmem_cm_addr below).
     // dmem_mbox_take is the SINGLE condition for both committing and
-    // clearing pending. An earlier version cleared pending on
-    // dmem_wr_window alone while the commit also required !dmem_we — when a
-    // write's first idle cycle coincided with a sequencer write (~1 in
-    // 3 during the sequencer span), the write was silently dropped:
-    // a lost gate-off was a stuck note, a lost gate-on a dead key.
+    // clearing pending. Clearing pending on dmem_wr_window alone, while
+    // the commit also requires !dmem_we, silently drops any write whose
+    // first idle cycle coincides with a sequencer write (~1 in 3 during
+    // the sequencer span): a lost gate-off is a stuck note, a lost
+    // gate-on a dead key.
     // Ping-pong puts reads and writes in different generations, so no
     // scheduling window is needed to keep them apart. A commit still
     // defers a cycle when the sequencer is writing, since they share
@@ -336,15 +334,13 @@ module csp (
     //   A  value = addend + contribution, saturated
     //   W  write the replicas
     //
-    // FULL RATE. At three cycles per instruction, 256 instructions x 3
-    // = 768 would not fit beside the lane pipeline in a 768-cycle
-    // sample. At one per cycle a full 256-entry
-    // pass costs 256 cycles, so every instruction runs every sample: 96 kHz
-    // control instead of 48, and the allocator's "a chain must live inside
-    // one half" rule is gone along with pc_half itself.
+    // FULL RATE. One instruction per cycle, so a full 256-entry pass costs
+    // 256 cycles and every instruction runs every sample: 96 kHz control,
+    // and no constraint on where in the table a chain may sit. Three cycles
+    // per instruction would not fit -- 256 x 3 = 768 leaves no room beside
+    // the lane pipeline in a 768-cycle sample.
     //
-    // Field map, unchanged from the 3-cycle version so the firmware format
-    // is untouched (traced from the old phase-delayed reads):
+    // Field map:
     //   CFG   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
     //         bus (also the ADSR's watched gate), [31:16] LFO phase
     //         increment -- overlapping the source field, which an LFO does
@@ -452,11 +448,11 @@ module csp (
     logic signed [17:0] h1_value, h2_value;
 
     wire signed [19:0] result = a_product[35:16];
-    // bit 3 makes chaining EXPLICIT. It used to be inferred from program
-    // order -- adjacent entries sharing a target summed, scattered ones did
-    // last-write-wins -- which is a correctness rule the allocator could not
-    // check. With the bit clear an instruction always starts from the
-    // target's initial value, whatever its neighbours do.
+    // bit 3 makes chaining EXPLICIT rather than inferred from program
+    // order. Inferred, it would be a correctness rule the allocator cannot
+    // check: adjacent entries sharing a target would sum while scattered
+    // ones did last-write-wins. With the bit clear an instruction always
+    // starts from the target's initial value, whatever its neighbours do.
     wire signed [17:0] accum_in =
           (a_acc_en && wb_valid && wb_addr == a_dest) ? wb_value
         : (a_acc_en && h1_valid && h1_addr == a_dest) ? h1_value
@@ -598,9 +594,9 @@ module csp (
     assign dmem_we    = wb_valid;
 
     // Memory reads. The four imem RAMs share one address, so CFG, both RATE
-    // words and DEPTH all arrive together instead of over three cycles. dmem_gate and
-    // dmem_init are the same image read at two different addresses in the
-    // same cycle, which is the other thing that used to cost a phase.
+    // words and DEPTH all arrive together rather than over three cycles.
+    // dmem_gate and dmem_init are the same image read at two different
+    // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
         cfg_q    <= imem_cfg[{bank_active, pc_addr}];
         rate_q   <= imem_rate[{bank_active, pc_addr}];

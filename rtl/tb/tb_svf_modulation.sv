@@ -18,12 +18,12 @@
 // stable; state running to the Q8.28 rail = the pole left the unit circle.
 //
 // FINDINGS:
-//   - Chamberlin (before the fix): state diverged to the rail once
-//     resonance passed ~q1=2.0 (r=0x600..0x800) under a full-range sweep --
-//     an ordinary musical resonance, and a SMOOTH sweep sufficed, with no
-//     bus glitch needed. That is the "screaming".
-//   - TPT (the fix): state stays ~1.75 at r=0x800 where the
-//     Chamberlin railed -- unconditionally stable, matching the pole-radius
+//   - Chamberlin: state diverges to the rail once resonance passes
+//     ~q1=2.0 (r=0x600..0x800) under a full-range sweep -- an ordinary
+//     musical resonance, and a SMOOTH sweep suffices, with no bus glitch
+//     needed. That is the "screaming".
+//   - TPT: state stays ~1.75 at r=0x800 where the Chamberlin
+//     rails -- unconditionally stable, matching the pole-radius
 //     proof and the Python fixed-point model. Output peak grows with
 //     resonance (legitimate resonant gain) but the state is bounded.
 //

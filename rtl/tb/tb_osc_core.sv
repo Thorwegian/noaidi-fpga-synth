@@ -92,7 +92,7 @@ module tb_osc_core;
         check(pk_sine > 30000, "sine reaches near full scale (LUT)");
 
         // Sine cardinal points: 0 at phase 0, +peak at 1/4, 0 at 1/2,
-        // -peak at 3/4 (a true sine, not the old parabola).
+        // -peak at 3/4 -- a true sine, not a parabolic approximation.
         sample_at(2'd3, 24'h000000, s_q0);
         sample_at(2'd3, 24'h400000, s_q1);
         sample_at(2'd3, 24'h800000, s_q2);

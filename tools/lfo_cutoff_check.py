@@ -5,10 +5,10 @@
     License: CERN-OHL-S v2
  
 The first route that NEEDS the bus-sum read: LFO2 (a walker source)
-writes the channel cut bus; the 32 per-voice sends relay its
-contribution into the voice cutoff buses. With the old firmware-base
-read this was invisible by construction - so a measured filter
-wobble IS the bus-sum RAM working on silicon.
+writes the channel cut bus, and the 32 per-voice sends relay its
+contribution into the voice cutoff buses. Reading the firmware-held
+base instead of the bus sum makes this invisible by construction, so
+a measured filter wobble IS the bus-sum RAM working on silicon.
 
 Method: saw pad, corner mid-dark, velocity off; hold one note 3 s
 and slice the capture into 100 ms windows. With LFO2 -> cutoff at

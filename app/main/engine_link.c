@@ -165,9 +165,9 @@ static void engine_task(void *arg)
         // the WHOLE element row (7 consecutive words, one CS-framed
         // transaction) whenever any of its words changed. The ESP-IDF
         // SPI-master driver cost is per-TRANSACTION (bus lock, ISR,
-        // semaphore), so the old per-word path turned a re-render into
-        // hundreds of transactions and pinned this task until the
-        // watchdog fired. Untouched words in the row are already
+        // semaphore), so sending word by word would turn a re-render
+        // into hundreds of transactions and pin this task until the
+        // watchdog fires. Untouched words in the row are already
         // current in s_image, so re-sending them is free.
         for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
             bool row_dirty = false;

@@ -45,9 +45,9 @@ WAVE_SAW = 0x0
 
 #FC = 0x2AF8          # UQ4.10 ≈ 14 kHz, open LP
 RESO = 0x200         # log2 resonance UQ4.10: 0.5 octave of Q above
-                     # Butterworth -> q1 = 1.0 (the old Q1 = 0x10000)
-VOL = 0x9F           # volume UQ4.4 (0x00 = silence): the
-                     # old -36 dB mixdown headroom as 0xFF - 0x60
+                     # Butterworth -> q1 = 1.0
+VOL = 0x9F           # volume UQ4.4 (0x00 = silence): -36 dB of
+                     # mixdown headroom, as 0xFF - 0x60
 FTYPE_LP = 0x0
 DUAL = 0             # 12 dB/oct single-filter mode
 MUTE = 0x00          # volume 0 = exact mute — hard-pan off channel

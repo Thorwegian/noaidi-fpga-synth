@@ -719,10 +719,9 @@ static void note_off(uint8_t note)
 // s_cut_off carries the CC74/106 cutoff brightness; env inversions
 // follow the schema ((127-cc)<<1, panel convention).
 //
-// STORED-but-not-yet-rendered (their own issues): MOD env,
-// osc 2 / unison, 2nd LFO + LFO shape/dest, key
-// tracking, arp, pan. A controller may set them; they render
-// when those rungs land.
+// STORED-but-not-yet-rendered: MOD env, osc 2 / unison, 2nd LFO +
+// LFO shape/dest, key tracking, arp, pan. A controller may set
+// them, and they take effect once each is rendered.
 static uint8_t  s_cut_coarse, s_cut_fine;   // CC74 / CC106
 static void apply_cutoff(void)
 {
@@ -1033,8 +1032,7 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
-    patch_default(&g_patch);   // active sound — the former
-                               // hardcoded timbre, now in one struct
+    patch_default(&g_patch);   // the active sound, in one struct
     wire_pointers();
     // Null buses. The duty pointer (PTRS0[19:10]) and every other
     // pointer left at its default target bus 0 — the intended "zero"
@@ -1061,9 +1059,8 @@ void voice_alloc_init(void)
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
     // quiet floor (−ENV_SPAN) shifted by master volume, the envelope
-    // level ADDS up to the note's GAIN word ceiling (volume semantics,
-    // — the subtracts-silence trick is retired). Bases are
-    // live bus writes; config rides the swap.
+    // level ADDS up to the note's GAIN word ceiling (volume
+    // semantics). Bases are live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_ADSR(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)

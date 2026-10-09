@@ -37,10 +37,10 @@
 // reported at every spacing so the margin is visible, but only spacings at or
 // beyond the stall count as failures.
 //
-// I originally "hardened" the sub-stall case with an in-flight commit register.
-// That was a mistake: the race cannot fire at 10 MHz, and the extra logic made
-// 2 of 4 nextpnr placements audibly glitch. The margin is the mechanism
-// here, so this bench measures the margin -- if a denser instruction table or a
+// Do NOT "harden" the sub-stall case with an in-flight commit register: the
+// race cannot fire at 10 MHz, and the extra logic is enough to make 2 of 4
+// nextpnr placements audibly glitch. The margin is the mechanism here, so
+// this bench measures the margin -- if a denser instruction table or a
 // faster SPI clock ever eats it, this fails loudly instead of a bus base
 // quietly landing in one generation.
 `timescale 1ns/1ps

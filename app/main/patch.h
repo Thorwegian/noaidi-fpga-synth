@@ -64,7 +64,7 @@ typedef struct {
 } adsr_t;
 
 // ── ADSR wire format ─────────────────────────────────────────
-// The CSP no longer decodes rate nibbles or sustain: it multiplies by a
+// The CSP does not decode rate nibbles or sustain: it multiplies by a
 // coefficient and shifts by a FIXED amount, so the multiply-accumulate
 // folds into one DSP block instead of a LUT barrel shifter feeding a
 // fabric carry chain. Firmware does the decode, which is control-rate
@@ -76,9 +76,9 @@ typedef struct {
 //   word 3   [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
 //
 // k spans 1..253952 (18 bits); the gateware does step = (delta*k) >>> 24.
-// Verified against the old nibble decode over all 256 codes: 224 of them
-// are preserved bit-exactly, and the worst error is 10% on a ~39 s
-// release, which only affects settings slower than ~11 s.
+// Of the 256 rate codes, 224 land bit-exactly on the coefficient grid;
+// the worst error is 10% on a ~39 s release, affecting only settings
+// slower than ~11 s.
 #define ADSR_K_SHIFT    24u        // gateware's fixed output shift
 #define ADSR_K_MAX      253952u    // 18 bits: mantissa 31 << 13
 #define ADSR_SUS_SHIFT  12u        // 10-bit sustain of a 22-bit level

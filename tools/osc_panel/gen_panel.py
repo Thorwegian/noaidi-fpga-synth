@@ -26,9 +26,9 @@ import os
 TARGET = "midi:noaidi"
 CH = 1
 
-# Widget labels turned out not to render for knobs/faders/switches in
-# v1.31 (buttons and text widgets do), so
-# every control is wrapped with an explicit text caption underneath.
+# Widget labels do not render for knobs/faders/switches in v1.31
+# (buttons and text widgets do), so every control is wrapped with an
+# explicit text caption underneath.
 # The caption's @{ccNN} reference is o-s-c's live-value syntax: the
 # readout updates as the control moves.
 

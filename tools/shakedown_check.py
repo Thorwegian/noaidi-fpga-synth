@@ -4,11 +4,11 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Runs BEFORE the ear pass: drive the synth
-through the sanctioned test transport (BLE - the panel port is Open
-Stage Control's exclusively), watch the ESP console for ingress and
-crashes, and MEASURE the pan implementation on the analog capture
-chain: stereo RMS at pan hard-left / center / hard-right.
+Runs BEFORE the ear pass: drive the synth through the sanctioned test
+transport (BLE - the panel port is Open Stage Control's exclusively),
+watch the ESP console for ingress and crashes, and MEASURE the pan
+implementation on the analog capture chain: stereo RMS at pan
+hard-left / center / hard-right.
 
     ~/.noaidi-blenv/bin/python3 tools/shakedown_check.py
 

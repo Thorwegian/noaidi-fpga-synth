@@ -27,7 +27,7 @@ THREE RULES THIS ENCODES, each learned the hard way:
    without the ESP knowing, so every matching write is then silently skipped.
    Nothing in firmware enforces the reboot, so this harness does — and it
    CHECKS the boot banner rather than trusting the reset, because an esptool
-   reset over the C3's USB-JTAG has left the old app running before.
+   reset over the C3's USB-JTAG can leave the old app running.
 
 2. VALIDATE THE METRIC BEFORE TRUSTING IT.
    A metric can report faults on provably clean audio, and can print the worst

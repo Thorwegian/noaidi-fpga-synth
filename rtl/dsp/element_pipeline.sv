@@ -644,9 +644,9 @@ module element_pipeline #(
         end
     end
 
-    // Waveform generation now stands alone in its own stage, driven by
-    // the REGISTERED phase. This is the half of the old critical path
-    // that was chained behind the adder: sine LUT read + 4:1 mux.
+    // Waveform generation stands alone in its own stage, driven by the
+    // REGISTERED phase: a sine LUT read plus a 4:1 mux, which must not
+    // be chained behind the phase adder.
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),

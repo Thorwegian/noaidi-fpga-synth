@@ -9,9 +9,9 @@
 // the musical worst case Q = 0.5. Resonance is log2-encoded:
 // FILTER[27:14] = r, octaves of Q above Butterworth,
 // q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
-// damping (the old clamp, now structural), and the top of the range
-// underflows to q1 = 0 (self-oscillation, a feature). Corners: the
-// measured-safe worst case (r = 0 at FC_MAX), today's timbre
+// damping, structurally rather than by a clamp, and the top of the
+// range underflows to q1 = 0 (self-oscillation, a feature). Corners:
+// the measured-safe worst case (r = 0 at FC_MAX), the default timbre
 // (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
 // Stability metric: normalized autocorrelation at
@@ -20,10 +20,10 @@
 // stable filtered saw scores near 1000 milli-r; atonal roaring scores
 // near 0. A moderate-cutoff baseline combo guards the metric itself.
 //
-// (An earlier exhaustive-grid version of this bench was retired: it
-// ran for hours, and its Q = 0.5 row was wrong anyway — 18'h20000 is
-// NEGATIVE q1 in the signed Q2.16 field. The theory + this corner
-// check replace it.)
+// Deliberately corners rather than an exhaustive grid: a grid runs for
+// hours, and a Q = 0.5 row cannot be expressed in the first place —
+// 18'h20000 is NEGATIVE q1 in the signed Q2.16 field. The stability
+// criterion plus these corners cover the same ground.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -144,8 +144,8 @@ module tb_svf_stability;
         end
 
         // Corner 1 — heaviest decodable damping: r = 0 decodes to
-        // q1 = sqrt(2) (Butterworth — the old clamp, now structural)
-        // and the 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz).
+        // q1 = sqrt(2) (Butterworth, the structural limit) and the
+        // 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz).
         // Must be tonal AND un-railed — the characterization runs
         // showed a limit cycle can fake a perfect r while clipping
         // at full scale, so both criteria are asserted.

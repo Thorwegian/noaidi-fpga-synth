@@ -178,9 +178,9 @@ module top (
     // input (bit-perfect capture); its CM106 receiver caps at 48 kHz,
     // hence the second transmitter instead of a tap on the 96 kHz one.
     // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
-    // sits at 48 kHz — content near the new Nyquist (24 kHz) is
-    // already crushed by the 2 kHz master tilt, so no longer filter
-    // is warranted. sample_tick48 coincides with a sample_tick, so
+    // sits at 48 kHz — content near that Nyquist (24 kHz) is already
+    // crushed by the 2 kHz master tilt, so a longer filter is not
+    // warranted. sample_tick48 coincides with a sample_tick, so
     // out_left/out_right below are the very values the 96 kHz
     // transmitter latches on the same edge: the held register is the
     // previous sample, the wire is the current one.

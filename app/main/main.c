@@ -25,8 +25,9 @@ void app_main(void)
 {
     // Boot banner: WHICH build is running (esp_app_desc is regenerated
     // every build — version is git-describe, date/time is the compile).
-    // Exists because a hash-verified flash once left the old app running
-    // (USB-JTAG hard-reset quirk): trust this line, not esptool's exit.
+    // Exists because a hash-verified flash can leave the old app
+    // running (a USB-JTAG hard-reset quirk): trust this line, not
+    // esptool's exit code.
     const esp_app_desc_t *ad = esp_app_get_description();
     printf("=== noaidi fw %s (built %s %s) ===\n",
            ad->version, ad->date, ad->time);

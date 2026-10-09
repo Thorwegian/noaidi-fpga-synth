@@ -4,10 +4,9 @@
 // License: CERN-OHL-S v2
 //
 // Foundation of the VA surface: g_patch is the single source of
-// truth for the active sound. patch_default() reproduces the former
-// hardcoded timbre EXACTLY, so wiring voice_alloc to render from it
-// is behavior-identical (verify: sounds the same). Later issues move
-// more constants into the struct and add CC/SysEx mutation.
+// truth for the active sound, and voice_alloc renders from it rather
+// than from constants of its own. patch_default() holds the boot
+// timbre.
 
 #include "patch.h"
 #include <string.h>

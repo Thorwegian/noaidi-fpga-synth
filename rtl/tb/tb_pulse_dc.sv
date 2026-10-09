@@ -15,18 +15,18 @@
 // real offset. Here the phase is generated, so the average is exact.
 //
 // Also checks the two things that must not regress: a square (duty 0) is
-// bit-identical to the old bare comparator, and saw/tri/sine are untouched.
+// bit-identical to a bare comparator, and saw/tri/sine are unaffected.
 //------------------------------------------------------------------------
 module tb_pulse_dc;
 
-    // STEPS sets the MEASUREMENT's resolution, and its first value was too
-    // coarse to judge the thing being measured. At 4096 steps each sample covers
-    // 4096 phase units, so a duty boundary that falls between samples misplaces
-    // the transition by up to half a step -- worth ~16 LSB of apparent DC, which
-    // is how the fixed design still read +12 at the narrowest duty. The same
-    // grid also biases the SAW: 4096 points from -2^23 miss the top of the
-    // range, so their mean sits half a step low and the saw read -8 LSB when it
-    // is in fact centred. 65536 steps puts both under an LSB.
+    // STEPS sets the MEASUREMENT's resolution, and it has to be finer than
+    // the thing being measured. At 4096 steps each sample covers 4096 phase
+    // units, so a duty boundary falling between samples misplaces the
+    // transition by up to half a step -- worth ~16 LSB of apparent DC, enough
+    // to read +12 at the narrowest duty on a correct design. The same grid
+    // also biases the SAW: 4096 points from -2^23 miss the top of the range,
+    // so their mean sits half a step low and a centred saw reads -8 LSB.
+    // 65536 steps puts both under an LSB.
     localparam int STEPS = 65536;
     localparam int TOL   = 4;             // LSB of Q2.16: truncation + grid only
 
@@ -92,10 +92,11 @@ module tb_pulse_dc;
             end
         end
 
-        // A square must be UNCHANGED by the fix, which is the property that
-        // keeps existing patches bit-identical. Note the polarity: the
-        // comparator is `phase < duty`, so the LOW half of the phase range is
-        // the HIGH output. I had this backwards first time and blamed the RTL.
+        // A square must be bit-identical to a bare comparator, which is the
+        // property that keeps existing patches unchanged. Note the polarity,
+        // which is easy to get backwards and then blame on the RTL: the
+        // comparator is `phase < duty`, so the LOW half of the phase range
+        // is the HIGH output.
         wave = 2'd1; duty = 24'sd0;
         phase = -24'sd8388608; #1;
         if ($signed(sample) !== 18'sd32767) begin

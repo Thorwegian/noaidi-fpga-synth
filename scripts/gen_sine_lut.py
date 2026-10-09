@@ -23,8 +23,7 @@
 # With it, worst harmonic is -105.6 dBc.
 #
 # Values are Q0.24 magnitude (0 .. 2^23-1) so sample_out (muxed >>> 8)
-# peaks at full scale, matching saw/tri -- the old parabola sat ~6 dB
-# low.
+# peaks at full scale, matching saw/tri.
 #   sine_lut[i] = round(sin(pi/2 * (i+0.5)/256) * (2^23 - 1))
 
 import math

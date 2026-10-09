@@ -63,13 +63,13 @@
 //   rates   [17:0] kA          [31:18] kD[13:0]
 //   rates2  [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
 //
-// Sustain arrives as a plain 10-bit level too. Two decodes went with it: the
-// linear one, and a log one selected by CFG[26] that nothing has ever set.
+// Sustain arrives as a plain 10-bit level too. Only the linear decode is
+// used; the log decode CFG[26] would select is never selected.
 //
 // PIPELINING. Subtract, then multiply-accumulate; each DSP registers its own
 // output, so state_out lands TWO cycles after the inputs are presented and the
-// caller must delay its state-write address to match. That is the SAME depth
-// as the fabric version this replaces -- measured, 2 clock edges -- so moving
+// caller must delay its state-write address to match. That is the same depth
+// a fabric implementation needs -- measured, 2 clock edges -- so moving
 // into the DSP blocks costs no re-alignment. An instruction is visited once
 // per pass, 256 entries apart, so a delayed write can never race its own read.
 //------------------------------------------------------------------------
@@ -160,11 +160,11 @@ module adsr #(
                       : (stage_sel == AST_ATT)  ? rates[17:0]    // attack
                       :                           k_dec;         // decay
 
-    // Sustain is a plain level now: the top 10 bits of the 22-bit envelope
-    // scale. SUS_SHIFT must equal ADSR_SUS_SHIFT in app/main/patch.h -- I had
-    // 13 here against firmware's 12 and every sustain came out twice its
-    // level, which for a high sustain sits above full scale and makes the
-    // decay segment climb instead of settle.
+    // Sustain is a plain level: the top 10 bits of the 22-bit envelope
+    // scale. SUS_SHIFT must equal ADSR_SUS_SHIFT in app/main/patch.h. A
+    // mismatch of one scales every sustain by two, and a high sustain then
+    // sits above full scale and makes the decay segment climb instead of
+    // settle.
     wire [25:0] sus = 26'(rates2[31:22]) << SUS_SHIFT;
 
     wire [25:0] target = !gate                  ? 26'd0
