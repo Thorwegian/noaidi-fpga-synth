@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_limiter.sv -- unit bench for the PIPELINED limiter.sv (#121 M1). The
+// tb_limiter.sv -- unit bench for the PIPELINED limiter.sv. The
 // bench owns the gain_q state like an instantiator would: present a level
 // (held), wait for the 5-stage pipeline to settle, latch gain_q_out back
 // as gain_q_in, read gain_lin. Checks: transparency below threshold,

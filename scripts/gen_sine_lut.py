@@ -3,7 +3,7 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-# Quarter-wave sine LUT for osc_core (issue #65). Replaces the
+# Quarter-wave sine LUT for osc_core. Replaces the
 # parabolic sine approximation (y = 4x(1-x)), which read as a noisy
 # tone on hardware, with a true sine reconstructed from one quarter
 # by symmetry.
@@ -23,8 +23,7 @@
 # With it, worst harmonic is -105.6 dBc.
 #
 # Values are Q0.24 magnitude (0 .. 2^23-1) so sample_out (muxed >>> 8)
-# peaks at full scale, matching saw/tri -- the old parabola sat ~6 dB
-# low.
+# peaks at full scale, matching saw/tri.
 #   sine_lut[i] = round(sin(pi/2 * (i+0.5)/256) * (2^23 - 1))
 
 import math

@@ -6,7 +6,7 @@ config NOAIDI_STRESS_TEST
     help
         Spawns a task at boot that floods the event bus with CC sweeps
         (voice mode / volume / mix) and note on/off for ~60 s, to
-        reproduce load-related crashes (issue #70) deterministically
+        reproduce load-related crashes deterministically
         without an external MIDI source. Leave OFF for normal firmware.
 
 endmenu

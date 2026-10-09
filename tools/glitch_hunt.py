@@ -3,8 +3,8 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
 
-#97 characterization: play one fixed pitch many times (mono, so the
-allocator cycles the 32-voice pool) and measure each note's spectral
+Cutoff-glitch characterization: play one fixed pitch many times (mono, so
+the allocator cycles the 32-voice pool) and measure each note's spectral
 centroid. A voice whose cutoff config goes stale shows as a periodic
 dark note (every 32nd). Prints the series and flags outliers + period."""
 import subprocess, sys, time, wave

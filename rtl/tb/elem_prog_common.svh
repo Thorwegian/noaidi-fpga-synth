@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 // elem_prog_common.svh — shared body for the split element-program
-// benches (issue #58: the monolithic tb_element_program was ~95% of
+// benches (the monolithic tb_element_program was ~95% of
 // suite wall time; four independent benches let make -j4 and CI
 // matrix jobs actually parallelize). Include INSIDE a module.
 //
@@ -63,7 +63,7 @@ element_pipeline #(
 
 integer errors = 0;
 
-// ---- single source of truth (Thor, 2026-09-03) ---------------------
+// ---- single source of truth -----------------------------------------
 // Addresses come from synth_pkg (the map's one home); parameter and
 // source-table words are composed from named fields here, ONCE, and
 // every bench in the family uses these. No magic hex in benches.
@@ -96,7 +96,7 @@ localparam [13:0] RESO_R200       = 14'h0200;      // r: q1 = 1.0
 localparam [31:0] FILTER_OPEN     = {4'b0, RESO_R200, FC_OPEN};
 localparam [31:0] OSC_SINE_A4     = 32'h0000D700;  // sine, A4
 localparam [31:0] OSC_SINE_C4     = 32'h0000D400;  // sine, C4
-// volume semantics (issue #40): 0x00 = silence, 0xFF = loudest
+// volume semantics: 0x00 = silence, 0xFF = loudest
 localparam [31:0] GAIN_12DB_BOTH  = 32'h0000DFDF;  // -12 dB L+R
 localparam [31:0] GAIN_MUTE_BOTH  = 32'h00000000;  // exact mute L+R —
                                                    // a zeroed word IS
@@ -123,18 +123,18 @@ localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 // source-table words, composed from the CFG/RATES/DEPTH fields
 // (memory_map.md) instead of opaque hex
 localparam [31:0] SRC_OFF         = 32'h0;
-// opcodes are bitmasks since #145: OPC_LFO/ADSR/SEND in synth_pkg
+// opcodes are bitmasks: OPC_LFO/ADSR/SEND in synth_pkg
 localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
     32'hE | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
           | (32'd32768 << 16);                      // 93.75 Hz -- unchanged
                                                     // by the full-rate move
 localparam [31:0] SRC_ADSR_BUS3_GATE5 =
     32'hF | (32'd3 << 6) | (32'd5 << 16);           // envelope: state+gate
-localparam [31:0] SRC_BUS3_FROM6 =                  // SEND (#44/#98):
+localparam [31:0] SRC_BUS3_FROM6 =                  // SEND:
     32'hD | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
 localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
-// #145: rates are linear coefficients now, in two words. These are the
+// Rates are linear coefficients, in two words. These are the
 // old 0xF4F000F0 nibble word converted by the same arithmetic firmware
 // uses (patch_adsr_rate1/rate2), so the bench hears what it used to:
 // fast attack, slow decay, high sustain, fast release.
@@ -237,11 +237,6 @@ function automatic signed [15:0] detune(input integer u);
     endcase
 endfunction
 
-// (Historical note: the chord's FILTER word used to be
-// 32'h40000000 | fc — a stale artifact of the OLD linear-q1
-// encoding whose set bit landed in reserved space, silently running
-// the chord at r = 0. Caught by the single-source-of-truth sweep,
-// 2026-09-03; it now uses the shared timbre's resonance.)
 task automatic program_chord;
     integer v, u;
     reg signed [15:0] pit;

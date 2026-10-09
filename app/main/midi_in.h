@@ -22,10 +22,9 @@ extern "C" {
 // must run AFTER midi_in_init() so the SPI driver re-claims GPIO7.
 void midi_in_init(int rx_pin);
 
-// Configure UART0 as the dev-host panel MIDI port (#90) and start its
-// RX task. Reserved for Open Stage Control exclusively (Thor,
-// 2026-09-10). Requires the console to be off UART0 (it lives on the
-// USB-Serial/JTAG controller since the same date).
+// Configure UART0 as the dev-host panel MIDI port and start its
+// RX task. Reserved for Open Stage Control exclusively. Requires the
+// console to be off UART0; it lives on the USB-Serial/JTAG controller.
 //
 // rx_pin — GPIO wired to the panel MIDI-IN circuit (e.g. 2).
 void midi_panel_init(int rx_pin);

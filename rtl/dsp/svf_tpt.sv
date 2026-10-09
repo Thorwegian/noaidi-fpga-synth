@@ -1,12 +1,12 @@
 //------------------------------------------------------------------------
-// svf_tpt.sv -- ZDF/TPT state-variable filter, two poles (#117 / #118)
+// svf_tpt.sv -- ZDF/TPT state-variable filter, two poles
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Replaces the Chamberlin recurrence with the topology-preserving
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
-// stable under cutoff modulation at resonance (the #117 fix). Streaming,
+// stable under cutoff modulation at resonance. Streaming,
 // one element per cycle, fully pipelined; one multiply OR the adds per
 // stage (the silicon timing rule that gave the Chamberlin its S5B/S8B
 // splits). Fixed-point locked and bit-verified against a Python model
@@ -75,7 +75,7 @@ module svf_tpt #(
         end
     endfunction
 
-    // State saturator (#43): the integrator state is the one datapath node
+    // State saturator: the integrator state is the one datapath node
     // that WRAPPED instead of saturating -- at top-of-dial resonance the
     // undamped Q8.28 state diverged past the 36-bit rail and wrapped (the
     // two's-complement sign-flip = the scream). Clamp it so it SATURATES

@@ -1,10 +1,10 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// tb_prog_soak.sv -- #147, with the REAL program loaded.
+// tb_prog_soak.sv -- the envelope glitch hunt, with the REAL program loaded.
 //
-// tb_adsr_soak ran 64 envelopes and came back clean, so if the glitch is an
-// interaction it needs the actual slot map from voice_alloc.c:
+// tb_adsr_soak runs 64 envelopes and comes back clean, so an interaction
+// glitch needs the actual slot map from voice_alloc.c:
 //
 //   slot 0        LFO 1            -> bus 2   (global pitch)
 //   slot 1        LFO 2            -> bus 1   (global duty)
@@ -13,7 +13,7 @@
 //   slot 65+2v    cutoff fan-out   source bus 4, target 48+v   <-- CHAINED,
 //                                  adjacent to the MOD env on the same target
 //
-// That adjacency is the #84 chain: the MOD envelope writes BUS_CUT(v) and the
+// That adjacency is a chain: the MOD envelope writes BUS_CUT(v) and the
 // fan-out accumulates the channel cutoff onto it. Two envelopes share each
 // gate bus, and a send reads a bus while envelopes write others -- none of
 // which the envelope-only soak exercised.

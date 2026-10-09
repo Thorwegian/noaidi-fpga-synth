@@ -17,7 +17,7 @@
 //   S3  LUT data → delta, K, q1; phase_next = phase + delta (ONE adder)
 //   S3B register phase_next / barrel-shifted K / q1 / duty / wave
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
-//   S3D #43 resonance attenuation multiply on registered operands (DSP)
+//   S3D resonance attenuation multiply on registered operands (DSP)
 //   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
 //   S5  SVF1 B1: lp1/hp1 adder tree
 //   S5B SVF1 B2: m3 = K*hp1 on registered hp1        (DSP)
@@ -35,15 +35,15 @@
 // real silicon at 98.304 MHz (audible corruption, clean at half
 // clock) — paths nextpnr's approximate timing model passes. Rule: a
 // stage is adds/decode-only or multiply-only, never both chained.
-// S3B was the last of the class (2026-08-30): once per-element fc gave
-// consecutive lanes different K shift amounts, chords screamed in the
-// left channel — the glitched lane after a group boundary is a
+// S3B is the last of the class: when per-element fc gives consecutive
+// lanes different K shift amounts, a chord screams in the left
+// channel, because the glitched lane after a group boundary is a
 // left-panned element. No known residual of this class remains.
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
-//   audio      Q4.14   (18-bit; repointed from Q2.16 in #63 — same
-//              word, clamp ±8.0, +12 dB resonance headroom)
+//   audio      Q4.14   (18-bit; clamp ±8.0, which is +12 dB of
+//              resonance headroom)
 //   SVF states Q8.28   (36-bit)
 //   pitch/fc   UQ4.10  (14-bit)
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
@@ -95,7 +95,7 @@ module element_pipeline #(
 
     // Instruction table writes (sclk domain, banked — wiring per law 4)
     input  logic           imem_write_enable,
-    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]} (#100)
+    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]}
     input  logic [31:0]    imem_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
@@ -103,12 +103,12 @@ module element_pipeline #(
 
     output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
                                              // after sample_tick (S11
-                                             // limiter, #121); stable by
+                                             // limiter); stable by
                                              // the next tick, which is when
                                              // every consumer latches it
     output logic signed [23:0] mix_right,
 
-    // Test-tone control (audio-chain purity check, issue #81): bus
+    // Test-tone control (audio-chain purity check): bus
     // address 1023 is reserved as a control latch — bit 0 enables the
     // top-level 187.5 Hz full-scale sine that replaces the mix at the
     // outputs. Latched here because the bus mailbox already has the
@@ -129,10 +129,10 @@ module element_pipeline #(
                                        // 1/16-octave steps — the
                                        // attenuation-LUT grid, ear-
                                        // proven for loudness-class
-                                       // percepts (issue #41); fabric
+                                       // percepts; fabric
                                        // LUTs, no BSRAM block
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
-    reg [15:0] reso_att_lut [0:63];    // #43 resonance-indexed input
+    reg [15:0] reso_att_lut [0:63];    // resonance-indexed input
                                        // attenuation, UQ0.16 (dual)
 
     initial begin
@@ -165,7 +165,7 @@ module element_pipeline #(
     //   p3[7:0]   volume L UQ4.4   p3[15:8] volume R UQ4.4
     //             (0x00 = silence/exact mute .. 0xFF = loudest;
     //              inverted to the attenuation code at the effective-
-    //              parameter seam — issue #40)
+    //              parameter seam —)
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
     // Doubled for ping-pong: {bank, voice} addressing, both halves
@@ -192,13 +192,12 @@ module element_pipeline #(
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
     // Gate 0 silences the element (gain decode forced to exact mute);
-    // the oscillator and filters free-run regardless. NOTE (Thor,
-    // #98): this never became and will never become an ADSR trigger —
-    // envelopes are sequencer SOURCES, gated by a control input (a gate
-    // bus shared across a voice's elements), not element traits.
-    // Today GATE's only job
-    // is the exact-mute path (#68); Thor has proposed dropping GATE
-    // and RETRIG as element parameters entirely (#98 discussion).
+    // the oscillator and filters free-run regardless. This is NOT an
+    // ADSR trigger: envelopes are sequencer SOURCES, gated by a control
+    // input (a gate bus shared across a voice's elements), rather than
+    // element traits. GATE's only job is the exact-mute path, and
+    // dropping GATE and RETRIG as element parameters entirely is under
+    // discussion.
     // Both banks boot gated ON so the boot image keeps sounding (the
     // power-up liveness check).
     reg [1:0] gate_param_ram [0:2*NUM_ELEMENTS-1];
@@ -338,7 +337,7 @@ module element_pipeline #(
     assign s1_duty  = s1_duty_word[23:0];
     assign s1_fc    = s1_filter_word[13:0];
     assign s1_reso  = s1_filter_word[27:14];
-    // GAIN word carries VOLUME (issue #40, 0x00 = silence .. 0xFF =
+    // GAIN word carries VOLUME (0x00 = silence.. 0xFF =
     // loudest): a zeroed parameter word is now silent-by-default
     // instead of full-blast. GATE off = volume zero, which the
     // effective-parameter stage maps onto the existing exact-mute
@@ -377,7 +376,7 @@ module element_pipeline #(
 
     //----------------------------------------------------------------
     // The Control Signal Processor now lives in its own module
-    // (#136). Six read ports: S1 pointers in, S2 data out.
+    //. Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
     logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
@@ -451,7 +450,7 @@ module element_pipeline #(
     //          for resonance that is one octave of Q ≈ +6 dB of peak)
     //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
     //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
-    //          bus = LOUDER — volume semantics, issue #40). A base of
+    //          bus = LOUDER — volume semantics). A base of
     //          0x00 (exact mute — hard-panned channels, gated
     //          elements) is preserved regardless of the bus, and the
     //          bus alone can never reach exact mute (sums clamp to
@@ -459,11 +458,11 @@ module element_pipeline #(
     //          the attenuation code here, at ONE seam, so everything
     //          downstream (S9B decode, mute == 0xFF) is untouched.
     //----------------------------------------------------------------
-    // Resonance is log2-encoded (Thor, 2026-09-02: "break with
-    // convention"): r = octaves of Q above Butterworth, UQ4.10;
-    // q1 = sqrt(2) * 2^-r via q1_lut + barrel shift, the same decode
-    // shape as cutoff K. The old [0, sqrt2] damping clamp is now
-    // STRUCTURAL: r = 0 IS Butterworth and nothing decodes heavier;
+    // Resonance is log2-encoded, breaking with convention: r =
+    // octaves of Q above Butterworth, UQ4.10; q1 = sqrt(2) * 2^-r via
+    // q1_lut + barrel shift, the same decode shape as cutoff K. The
+    // [0, sqrt2] damping clamp is STRUCTURAL: r = 0 IS Butterworth and
+    // nothing decodes heavier;
     // at the top of the range the shift underflows q1 toward zero,
     // so self-oscillation is the natural top of scale — reachable as
     // a feature, no special code.
@@ -502,7 +501,7 @@ module element_pipeline #(
         $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
     wire signed [18:0] gr_sum =
         $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
-    // volume in, attenuation code out (the one subtract of issue #40)
+    // volume in, attenuation code out (the one subtract of)
     wire [7:0] eff_gl =
         (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins
         (gl_sum[18] || gl_sum == 19'sd0)
@@ -534,7 +533,7 @@ module element_pipeline #(
     logic [7:0]  s3_gl, s3_gr;
     logic        s3_dual;
     logic [1:0]  s3_ftype;
-    logic [15:0] s3_reso_att;   // #43 input-atten gain (UQ0.16)
+    logic [15:0] s3_reso_att;   // input-atten gain (UQ0.16)
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -591,7 +590,7 @@ module element_pipeline #(
     assign delta = $signed(s3_delta_lut) >>> (11 - s3_pitch_oct);
     // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
     // LUT+shift expands to ~22+ bits of real precision, needed later
-    // for the noise oscillator and whistling-filter melodies (Thor).
+    // for the noise oscillator and whistling-filter melodies.
     assign k     = $signed({20'd0, s3_k_lut}) <<< (3 + s3_fc_oct);
     // Resonance decode: q1 = sqrt(2) * 2^-r in Q2.16. Same
     // LUT+barrel-shift shape as K; registered into S3B before the
@@ -600,17 +599,17 @@ module element_pipeline #(
     wire signed [17:0] q1_decoded =
         $signed({1'b0, s3_q1_lut}) >>> s3_reso_oct;
 
-    // #128: the phase advance is ONE adder now, here, and its result is
+    // The phase advance is ONE adder, here, and its result is
     // REGISTERED (s3b_phase) before any waveform is generated from it.
-    // It used to be computed twice -- once inside osc_core feeding the
-    // waveforms, once again below for the writeback -- and the waveform
-    // path hung off the combinational sum, giving one cycle of
+    // Computing it twice -- once inside osc_core feeding the
+    // waveforms, once below for the writeback -- hangs the waveform
+    // path off the combinational sum, giving one cycle of
     // BSRAM read -> octave shift -> 24-bit add -> sine LUT -> mux.
     // That was the critical path of the whole design.
     wire signed [23:0] phase_next = s3_phase + delta;
 
     //----------------------------------------------------------------
-    // S3B/S3C -- resonance-dependent INPUT attenuation (#43). Scale the
+    // S3B/S3C -- resonance-dependent INPUT attenuation. Scale the
     // oscillator sample down as resonance rises so the 24 dB/oct dual
     // cascade never overdrives its internal +-8 guardrail (sat_q414).
     // Register-then-multiply: S3B registers osc + the (dual-gated) atten
@@ -619,7 +618,7 @@ module element_pipeline #(
     // dB/oct) never overdrives, so its atten is unity (0xffff).
     //----------------------------------------------------------------
     // S3B registers the ADVANCED PHASE (and duty/wave alongside it); the
-    // waveform is generated from the registered value in S3B->S3C (#128).
+    // waveform is generated from the registered value in S3B->S3C.
     logic               s3b_act;   logic [VW-1:0] s3b_idx;
     logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
@@ -645,9 +644,9 @@ module element_pipeline #(
         end
     end
 
-    // Waveform generation now stands alone in its own stage, driven by
-    // the REGISTERED phase. This is the half of the old critical path
-    // that was chained behind the adder: sine LUT read + 4:1 mux (#128).
+    // Waveform generation stands alone in its own stage, driven by the
+    // REGISTERED phase: a sine LUT read plus a 4:1 mux, which must not
+    // be chained behind the phase adder.
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),
@@ -681,10 +680,10 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // S3D -- the #43 attenuation multiply, on REGISTERED operands.
-    // It used to sit at S3C; the waveform stage inserted by #128 pushed
-    // it one stage later so that no cycle chains the waveform mux into
-    // a DSP. Element latency is therefore 17 -> 18; the state writeback
+    // S3D -- the attenuation multiply, on REGISTERED operands. It sits
+    // one stage after the waveform stage so that no cycle chains the
+    // waveform mux into a DSP. Element latency is 18; the state
+    // writeback
     // lands 14 cycles after the read, against a 256-slot half, so read
     // and write still cannot collide.
     //----------------------------------------------------------------
@@ -712,7 +711,7 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // SVF core (TPT, #117/#118) -- replaces the Chamberlin S3B..S9.
+    // SVF core (TPT), spanning S3B..S9.
     //   g = k>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
     //   Streaming, latency 17; states/phase/gains carried through.
@@ -844,9 +843,8 @@ module element_pipeline #(
     // design exactly as the Q2.16 era was (256 × ±2.0 vs ±512). The
     // output limiter (sat24) converts Q4.14 → Q0.24 (<< 10) and clips
     // only in the pathological all-aligned-at-the-rail case; overall
-    // loudness is set by the per-element UQ4.4 gains and is IDENTICAL
-    // to the Q2.16 era at zero resonance (repoint #63: −2 bits of
-    // audio scale cancel the +2 bits of conversion shift).
+    // loudness is set by the per-element UQ4.4 gains: −2 bits of audio
+    // scale cancel the +2 bits of conversion shift.
     //----------------------------------------------------------------
     function automatic logic signed [23:0] sat24(input logic signed [35:0] x);
         if (x > 36'sd8388607)
@@ -860,14 +858,14 @@ module element_pipeline #(
     logic signed [25:0] mix_l_acc, mix_r_acc;   // Q4.14 audio + 8 guard bits
 
     //----------------------------------------------------------------
-    // S11 master limiter (#121, deployment A): log-domain peak limiter
-    // on the PRE-clip accumulators (attenuate before the clamp -- the
-    // #43 lesson), stereo-linked on max(|L|,|R|), FEEDFORWARD (this
+    // S11 master limiter: log-domain peak limiter on the PRE-clip
+    // accumulators, attenuating before the clamp, stereo-linked on
+    // max(|L|,|R|), FEEDFORWARD (this
     // sample's level gates this sample), then sat24. Fully registered,
     // one operation class per stage (the silicon timing rule): the first
     // cut computed abs -> max -> lzc -> shift -> LUT -> adds -> LUT ->
     // shift in ONE cycle, passed STA, and sputtered at -63 dBFS on the
-    // board (2026-09-18). 768 cycles of slack per sample, so the phase
+    // board. 768 cycles of slack per sample, so the phase
     // walk is free:  p1 abs | p2 max -> level | p3..p7 limiter pipeline
     // settles (5 stages) | p8 latch gain_q + gain | p9 multiply | p10
     // sat24 publish. Every consumer latches mix_* at the NEXT tick, so

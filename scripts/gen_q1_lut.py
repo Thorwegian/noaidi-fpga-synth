@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # q1 (SVF damping) decode LUT for the log2-encoded resonance
-# parameter (bus_architecture.md; issue #41 shrank it 1024 -> 16).
+# parameter (bus_architecture.md; shrank it 1024 -> 16).
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
@@ -12,7 +12,7 @@
 # high r     -> barrel shift underflows toward q1 = 0: self-oscillation
 #              is the natural top of scale, no special case.
 #
-# 16 entries per octave (the attenuation-LUT precedent, Thor):
+# 16 entries per octave, following the attenuation LUT:
 # resonance is a loudness-class percept (peak height in dB), and the
 # ~0.375 dB grid is ear-proven silky on the gain path — unlike pitch,
 # which needs the 1024-entry treatment. Bus/wire format keeps the

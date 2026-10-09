@@ -25,7 +25,7 @@ extern "C" {
 
 #define ENGINE_NUM_ELEMENTS 256
 #define ENGINE_WORDS_PER_ELEMENT 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
-// GAIN word: volume UQ4.4 per channel (issue #40) — 0x00 = silence/
+// GAIN word: volume UQ4.4 per channel — 0x00 = silence/
 // exact mute, 0xFF = loudest; positive gain-bus values mean LOUDER.
 // FILTER word: [13:0] cutoff UQ4.10 log2; [27:14] resonance UQ4.10
 // log2 — octaves of Q above Butterworth (0 = Butterworth, ~1 integer
@@ -82,11 +82,9 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
 // Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
 // envelope subtracts silence.
-#define ENGINE_NUM_PRODUCERS 256   // half-rate walker pool (#100):
-                                    // entries 0..127 = half A,
-                                    // 128..255 = half B; a chain must
-                                    // live within one half
-// CSP opcode = CFG[3:0], a BITMASK of enables since #145, not an enum:
+#define ENGINE_NUM_PRODUCERS 256   // instruction pool; all 256 entries
+                                    // execute every sample
+// CSP opcode = CFG[3:0], a BITMASK of enables rather than an enum:
 //   bit 0 reads a source operand      bit 2 multiplies by DEPTH
 //   bit 1 has persistent state        bit 3 accumulates onto the target
 // An envelope is the instruction that watches a gate, so state+source means
@@ -102,8 +100,8 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
 // Total dropped commands (queue-full across all engine queues). A
 // nonzero value after an init burst means silently missing config —
-// exactly the class of bug that made voices 30/31 lose their amp
-// envelopes (2026-09-10). Callers of init bursts must check and LOG.
+// exactly the class of bug that costs the last voices their amp
+// envelopes. Callers of init bursts must check and LOG.
 uint32_t engine_link_drops(void);
 
 #ifdef __cplusplus

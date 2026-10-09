@@ -1,13 +1,13 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_adsr_retrig.sv -- a re-gated envelope must restart from silence (#89)
+// tb_adsr_retrig.sv -- a re-gated envelope must restart from silence
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor, playtesting #89: "the envelopes don't always appear to reset when
-// playing several chords in succession. Attacks start from a higher value than
-// zero. I suspect the voice stealing doesn't reset the ADSR envelopes properly."
+// The reported symptom: playing several chords in succession, the envelopes
+// do not always reset, and attacks start from a level above zero -- which
+// points at voice stealing failing to reset the ADSR envelopes.
 //
 // This is the one question a bench answers better than the board: whether a
 // specific state transition does the right thing. The hardware version needs
@@ -80,7 +80,7 @@ module tb_adsr_retrig;
         rst_n = 1;
         repeat (2) @(posedge clk);
 
-        $display("  #89 retrigger: a voice stolen mid-release must attack from silence");
+        $display("  retrigger: a voice stolen mid-release must attack from silence");
 
         // ---- the bug: releasing, high level, gate raised -------------------
         step(AST_REL, 26'h300000, 1'b1, ostg, olvl);

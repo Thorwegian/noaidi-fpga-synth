@@ -6,24 +6,24 @@
 //
 // The FC_MAX clamp (synth_pkg) holds the effective cutoff just below
 // fs/6 = 16 kHz, from the stability criterion sin(pi*fc/fs) < Q with
-// the musical worst case Q = 0.5 (Thor). Resonance is log2-encoded
-// (2026-09-02): FILTER[27:14] = r, octaves of Q above Butterworth,
+// the musical worst case Q = 0.5. Resonance is log2-encoded:
+// FILTER[27:14] = r, octaves of Q above Butterworth,
 // q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
-// damping (the old clamp, now structural), and the top of the range
-// underflows to q1 = 0 (self-oscillation, a feature). Corners: the
-// measured-safe worst case (r = 0 at FC_MAX), today's timbre
+// damping, structurally rather than by a clamp, and the top of the
+// range underflows to q1 = 0 (self-oscillation, a feature). Corners:
+// the measured-safe worst case (r = 0 at FC_MAX), the default timbre
 // (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
-// Stability metric (Thor's definition): normalized autocorrelation at
+// Stability metric: normalized autocorrelation at
 // the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
 // 375.03 Hz, period 255.98 samples, so the lag is exactly 256. A
 // stable filtered saw scores near 1000 milli-r; atonal roaring scores
 // near 0. A moderate-cutoff baseline combo guards the metric itself.
 //
-// (An earlier exhaustive-grid version of this bench was retired: it
-// ran for hours, and its Q = 0.5 row was wrong anyway — 18'h20000 is
-// NEGATIVE q1 in the signed Q2.16 field. The theory + this corner
-// check replace it.)
+// Deliberately corners rather than an exhaustive grid: a grid runs for
+// hours, and a Q = 0.5 row cannot be expressed in the first place —
+// 18'h20000 is NEGATIVE q1 in the signed Q2.16 field. The stability
+// criterion plus these corners cover the same ground.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -63,8 +63,7 @@ module tb_svf_stability;
             u_pipe.duty_param_ram[e] = 36'h0;
             u_pipe.filter_param_ram[e] = 36'h0;
             u_pipe.gain_param_ram[e] = 36'h000000000;      // mute L+R
-                                                           // (volume 0,
-                                                           // issue #40)
+                                                           // (volume 0)
             u_pipe.gate_param_ram[e] = 2'b01;              // gate on
             u_pipe.ptrs0_param_ram[e] = 30'd0;
             u_pipe.ptrs1_param_ram[e] = 30'd0;
@@ -72,7 +71,7 @@ module tb_svf_stability;
         u_pipe.osc_param_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
         u_pipe.osc_param_ram[256] = 36'h000001614;
         u_pipe.gain_param_ram[0]   = 36'h0000000DF;        // L -12 dB, R mute
-        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume, #40)
+        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume)
     end
 
     // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth
@@ -145,8 +144,8 @@ module tb_svf_stability;
         end
 
         // Corner 1 — heaviest decodable damping: r = 0 decodes to
-        // q1 = sqrt(2) (Butterworth — the old clamp, now structural)
-        // and the 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz).
+        // q1 = sqrt(2) (Butterworth, the structural limit) and the
+        // 0x3FFF cutoff word clamps to FC_MAX (14.4 kHz).
         // Must be tonal AND un-railed — the characterization runs
         // showed a limit cycle can fake a perfect r while clipping
         // at full scale, so both criteria are asserted.

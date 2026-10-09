@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Timing-headroom gate: nextpnr reporting PASS is not enough (#128).
+"""Timing-headroom gate: nextpnr reporting PASS is not enough.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -102,13 +102,13 @@ def main():
         print(f"  WARNING: {clk} has only {mhz:.2f} MHz ({pct:.1f}%) of headroom.")
     if warned and not failed:
         print(f"  Placement noise on this design is sigma ~2 MHz, so anything under")
-        print(f"  {a.warn_mhz:.0f} MHz is a coin flip on the next build. See issue #128.")
+        print(f"  {a.warn_mhz:.0f} MHz is a coin flip on the next build.")
 
     if failed:
         print(f"  FAILED: {len(failed)} clock(s) under the {a.min_mhz:.1f} MHz floor:")
         for clk, fmax, target, mhz, pct in failed:
             print(f"    {clk}: {fmax:.2f} vs {target:.2f} MHz required = {mhz:.2f} MHz ({pct:.1f}%)")
-        print("  Do NOT lower the floor to go green -- fix the path (#128).")
+        print("  Do NOT lower the floor to go green -- fix the path.")
         return 1
     return 0
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Is the bad corner CLIPPING at all? (#125)
+"""Is the bad corner CLIPPING at all?
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -18,8 +18,8 @@ what limits it. Before guessing at another node, settle the category:
 
 Same patch and metric as tools/hil_filter_imd.py, but the grid is drive
 level at the ONE corner that reproduces (five runs, +-0.1 dB). Also runs
-12 dB/oct for contrast: Thor reports 24 dB/oct is far easier to overdrive,
-so a single pole should sit lower if this is the cascade's doing.
+12 dB/oct for contrast: 24 dB/oct is far easier to overdrive by ear, so a
+single pole should sit lower if this is the cascade's doing.
 """
 import subprocess
 import sys

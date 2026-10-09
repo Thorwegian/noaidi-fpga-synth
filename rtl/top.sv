@@ -6,18 +6,18 @@
 // License: CERN-OHL-S v2
 //
 // Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S.
-//         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path
-//         (#101, Thor 2026-09-11): Focusrite coax for listening AND
-//         an LED-TOSLINK tap into the dev box for bit-perfect
-//         capture. The 96 kHz SPDIF is parked on pin 86.
+//         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path:
+//         coax for listening AND an LED-TOSLINK tap into the dev
+//         box for bit-perfect capture. The 96 kHz SPDIF is parked
+//         on pin 86.
 // Timing: drum.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the SPDIF cell boundary
 //         (6 sysclk = 1 cell), and their half-rate 48 kHz
 //         counterparts — all counted from one reset.
 // Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 73.728 MHz = 768×96 kHz
 //         (per-board setup: pll_clk O0=73728K -s on the BL616).
-//         Stepped down from 98.304 MHz after five ear-verified timing
-//         failures STA missed — margin for the 36×36 DSP cascades.
+//         Not faster: the 36×36 DSP cascades need the margin, and
+//         STA alone does not catch where they run out of it.
 //
 //--------------------------------------------------------------------
 
@@ -76,8 +76,8 @@ module top (
     logic        dmem_wr_toggle;
     logic        imem_write_enable;
     logic [9:0]  imem_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
-                            // (#100); a too-narrow wire here silently
-                            // truncated entries before — size from the pool
+                            // wide: a too-narrow wire here silently
+                            // truncates entries, so size it from the pool
     logic [31:0] imem_write_data;
 
     element_pipeline u_elem_pipeline (
@@ -104,15 +104,15 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // Test tone (audio-chain purity check, issue #81): 1500 Hz sine,
+    // Test tone (audio-chain purity check): 1500 Hz sine,
     // 64-sample period at 96 kHz (phase step 2^18 = 262144 EXACTLY),
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
-    // Midband per Thor — coupling caps in the analog chain attenuate
-    // low tones; 1500 Hz measures the chain flat. Enabled by
+    // Midband deliberately: coupling caps in an analog chain
+    // attenuate low tones, and 1500 Hz measures flat. Enabled by
     // bus-address-1023 writes (firmware maps CC 119); replaces the mix
     // at BOTH outputs. At 48 kHz capture the tone lands exactly on
     // bin 32 of a 1024-point FFT — coherent, no window, harmonics on
-    // exact bins (64, 96, ...). Thor's purity criterion: any harmonic
+    // exact bins (64, 96, ...). The purity criterion: any harmonic
     // above 1/4096 of the fundamental (−72.2 dBc) rings alarms.
     //----------------------------------------------------------------
     logic        test_tone_en;
@@ -123,7 +123,7 @@ module top (
 
     logic signed [17:0] tone_q216;
     osc_core u_tone_osc (
-        .phase_next (tone_phase),      // advanced above, not here (#128)
+        .phase_next (tone_phase),      // advanced above, not here
         .duty       (24'sd0),
         .wave       (2'd3),            // sine (quarter-wave LUT)
         .sample_out (tone_q216)
@@ -134,9 +134,9 @@ module top (
 
     //----------------------------------------------------------------
     // Output tilt (output_tilt.sv): one-pole 6 dB/oct lowpass on the
-    // mix, corner ≈ 2 kHz — Thor's ear-tuned warm stop. Error
+    // mix, corner ≈ 2 kHz — the ear-tuned warm stop. Error
     // feedback inside the module makes it settle to EXACT zero on
-    // silence (#102). Sits BEFORE the test-tone mux so the purity
+    // silence. Sits BEFORE the test-tone mux so the purity
     // reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;
@@ -172,15 +172,15 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 48 kHz SPDIF (#101) — THE PRIMARY AUDIO PATH (Thor 2026-09-11):
-    // pin 27 feeds the Focusrite coax (listening) and a red LED
+    // 48 kHz SPDIF — THE PRIMARY AUDIO PATH:
+    // pin 27 feeds the coax (listening) and a red LED
     // (68 Ω series) taped into the dev box's ICUSBAUDIO7D optical
     // input (bit-perfect capture); its CM106 receiver caps at 48 kHz,
     // hence the second transmitter instead of a tap on the 96 kHz one.
     // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
-    // sits at 48 kHz — content near the new Nyquist (24 kHz) is
-    // already crushed by the 2 kHz master tilt, so no longer filter
-    // is warranted. sample_tick48 coincides with a sample_tick, so
+    // sits at 48 kHz — content near that Nyquist (24 kHz) is already
+    // crushed by the 2 kHz master tilt, so a longer filter is not
+    // warranted. sample_tick48 coincides with a sample_tick, so
     // out_left/out_right below are the very values the 96 kHz
     // transmitter latches on the same edge: the held register is the
     // previous sample, the wire is the current one.

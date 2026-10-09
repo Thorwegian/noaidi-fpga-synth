@@ -22,7 +22,7 @@
 //                 sole timebase, output stages included.
 //   slot        : current drum slot (scheduling / debug).
 //   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
-//                 48 kHz test S/PDIF output (#101): sample boundary
+//                 48 kHz test S/PDIF output: sample boundary
 //                 every second wrap (1536 sysclk), cell boundary every
 //                 second cell (12 sysclk). Derived from the same
 //                 counters, so 1536 = 128 cells × 12 and sample_tick48
@@ -68,7 +68,7 @@ module drum #(
             cell_cnt <= (cell_cnt == CELLDIV - 1) ? '0 : cell_cnt + 1'b1;
     end
 
-    // ── 48 kHz derivation (#101): two half toggles ──
+    // ── 48 kHz derivation: two half toggles ──
     // half48: which CYCLES-long period of the 48 kHz frame this is
     // (0 = first). cell_half48: which CELLDIV-long cell of the
     // doubled cell this is (0 = first). Both flip at their boundary;

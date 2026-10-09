@@ -146,8 +146,8 @@ module tb_spi_slave_regs;
         #(2*TCK);
 
         // -- 1. link check on the very first transaction ---------------
-        // This is the case the old slave got right and everything else
-        // wrong, so it is worth asserting on its own.
+        // The ID byte is the link check, so it is worth asserting on
+        // its own before anything else is trusted.
         $display("--- 1. MISO byte 0 is the ID on the first transaction ---");
         write_reg(7'h00, 8'h55);
         check8("first-ever MISO[0]", rx_buf[0], ID_BYTE);
@@ -165,7 +165,8 @@ module tb_spi_slave_regs;
         end
 
         // -- 3. read the same value back over MISO ---------------------
-        // The old slave could not do this at all: byte 1 was always 0x00.
+        // Byte 1 carries memory contents, not a constant latched before
+        // CS fell.
         $display("--- 3. SPI read-back ---");
         read_regs(7'h00, 1);
         check8("MISO[0] (ID)",   rx_buf[0], ID_BYTE);

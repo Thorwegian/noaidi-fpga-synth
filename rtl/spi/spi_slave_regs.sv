@@ -4,44 +4,41 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Replaces spi_slave.sv + reg_banks.sv.  Those two had one structural
-// fault per direction, and both came from the same root cause: the
-// transceiver had no notion of a *byte boundary*, so it could neither
-// commit a received byte nor load a byte to send at one.
+// The transceiver and the register file are ONE module on purpose.  Split
+// across two, neither has a shared notion of a *byte boundary*, and each
+// direction then acquires a structural fault:
 //
-//   RX: spi_slave raised `done` on the FALLING edge and reg_banks
-//       consumed it on the RISING edge.  A real Mode 0 master's last
-//       edge in a transaction is a falling edge, so the rising edge
-//       reg_banks needed to commit the *final* byte never happened —
-//       every register write was dropped.  (The old testbench clocked
-//       negedge-then-posedge per bit, i.e. a falling-edge-first master
-//       that does not exist in hardware.  That manufactured the missing
-//       edge and hid the bug in simulation.)
+//   RX: a transceiver that raises `done` on the FALLING edge, consumed by
+//       a register file on the RISING edge, loses every register write.
+//       A real Mode 0 master's last edge in a transaction is a falling
+//       edge, so the rising edge needed to commit the *final* byte never
+//       happens.  Simulation hides this if the bench clocks
+//       negedge-then-posedge per bit — a falling-edge-first master that
+//       does not exist in hardware — because that manufactures the
+//       missing edge.
 //
-//   TX: spi_slave loaded its output shift register only on the CS
-//       rising edge, then shifted in zeros.  MISO byte 0 carried the
-//       constant latched before CS fell; every later byte read back
-//       0x00.  A value computed *during* the transaction — mem[addr],
-//       a loopback of the received byte — had no load opportunity at
-//       all, which is why "a constant byte works, anything else
-//       returns 0x00".
+//   TX: a transceiver that loads its output shift register only on the CS
+//       rising edge, then shifts in zeros, returns the constant latched
+//       before CS fell as MISO byte 0 and 0x00 for every later byte.  A
+//       value computed *during* the transaction — mem[addr], a loopback
+//       of the received byte — has no load opportunity at all, giving the
+//       signature "a constant byte works, anything else returns 0x00".
 //
-// Merging the two into one module makes both impossible: the bit
-// counter, the protocol decode and both shift registers see the same
-// byte boundary, and nothing is handed across a clock edge.
+// In one module both are impossible: the bit counter, the protocol decode
+// and both shift registers see the same byte boundary, and nothing is
+// handed across a clock edge.
 //
 // SPI Mode 0 (CPOL=0, CPHA=0), MSB first.  The master drives MOSI on
 // the falling edge of SCLK and samples MISO on the rising edge, so the
 // slave does the opposite:
 //
 //     MOSI sampled on the RISING  edge — stable mid-bit, full margin.
-//                                        (The old slave sampled on the
-//                                        falling edge, racing the
-//                                        master's own MOSI transition;
-//                                        it worked at 1 MHz only
-//                                        because the master's
-//                                        clock-to-out delay covered
-//                                        the slave's hold time.)
+//                                        Sampling on the falling edge
+//                                        races the master's own MOSI
+//                                        transition, and survives at
+//                                        1 MHz only because the
+//                                        master's clock-to-out delay
+//                                        covers the slave's hold time.
 //     MISO driven  on the FALLING edge — settled before the master
 //                                        looks at it.
 //

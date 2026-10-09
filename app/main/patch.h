@@ -1,4 +1,4 @@
-// patch.h — the currently-active sound, in RAM (issue #69).
+// patch.h — the currently-active sound, in RAM.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -14,8 +14,7 @@
 // Fields mirror docs/control_map.md and docs/midi_schema.md. Units
 // are the ENGINE's (log2 UQ4.10 pitch/cutoff/resonance, UQ4.4
 // volume, 8-bit log2 ADSR rates) so rendering is add-not-convert;
-// MIDI scaling happens in the CC handlers, not here. Nothing is
-// final — this is for Thor to tear apart.
+// MIDI scaling happens in the CC handlers, not here.
 
 #pragma once
 #include <stdint.h>
@@ -28,8 +27,8 @@
 
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum {                     // matches OSC word waveform field
-    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT (#65)
-    // future gateware waveforms: #64 noise; #66 a real parabola as its own type
+    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT
+    // future gateware waveforms: noise, and a real parabola as its own type
 } waveform_t;
 
 // Voice structure — how the 2 oscillators map onto the 8 elements
@@ -59,13 +58,13 @@ typedef struct {
 } filter_t;
 
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
-// Rates are 8-bit log2 in the PATCH; the wire format is linear (#145).
+// Rates are 8-bit log2 in the PATCH; the wire format is linear.
 typedef struct {
     uint8_t attack, decay, sustain, release;
 } adsr_t;
 
-// ── ADSR wire format (#145) ─────────────────────────────────────────
-// The CSP no longer decodes rate nibbles or sustain: it multiplies by a
+// ── ADSR wire format ─────────────────────────────────────────
+// The CSP does not decode rate nibbles or sustain: it multiplies by a
 // coefficient and shifts by a FIXED amount, so the multiply-accumulate
 // folds into one DSP block instead of a LUT barrel shifter feeding a
 // fabric carry chain. Firmware does the decode, which is control-rate
@@ -77,9 +76,9 @@ typedef struct {
 //   word 3   [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
 //
 // k spans 1..253952 (18 bits); the gateware does step = (delta*k) >>> 24.
-// Verified against the old nibble decode over all 256 codes: 224 of them
-// are preserved bit-exactly, and the worst error is 10% on a ~39 s
-// release, which only affects settings slower than ~11 s.
+// Of the 256 rate codes, 224 land bit-exactly on the coefficient grid;
+// the worst error is 10% on a ~39 s release, affecting only settings
+// slower than ~11 s.
 #define ADSR_K_SHIFT    24u        // gateware's fixed output shift
 #define ADSR_K_MAX      253952u    // 18 bits: mantissa 31 << 13
 #define ADSR_SUS_SHIFT  12u        // 10-bit sustain of a 22-bit level
@@ -137,10 +136,10 @@ typedef struct {
 
     mod_route_t     mod[PATCH_MOD_ROUTES];
 
-    // Velocity sensitivity (#89): 64 = the historical hardwired feel,
+    // Velocity sensitivity: 64 = the historical hardwired feel,
     // 0 = OFF (isolation testing), 127 = double. CC 86/87.
-    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT (#89)
-    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT (#89)
+    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT
+    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT
 
     uint8_t         bend_range;      // 1..12 semitones
     uint8_t         volume;          // per-channel/part volume (UQ4.4)
@@ -160,6 +159,6 @@ typedef struct {
     // key/velocity split ranges, layer enables: TBD with the feature
 } performance_t;
 
-// ── The active patch (issue #69) ────────────────────────────────────
+// ── The active patch ────────────────────────────────────
 extern patch_t g_patch;
 void     patch_default(patch_t *p);

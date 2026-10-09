@@ -1,7 +1,7 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// tb_mbox_burst.sv -- #147: the mailbox's two-take commit under back-to-back
+// tb_mbox_burst.sv -- the mailbox's two-take commit under back-to-back
 // traffic.
 //
 // A mailbox word commits over TWO takes, one per ping-pong generation, and
@@ -18,14 +18,13 @@
 //   stall  = the longest contiguous dmem_we run  (measured below)
 //   spacing = cycles between two mailbox words   (swept below)
 //
-// At the time of writing the real program gives a 96-cycle stall and 10 MHz
-// SPI gives ~236 cycles between words in a burst, so there is ~2.5x margin
-// and the clobber does not fire on Thor's synth. That margin is not enforced
-// anywhere, and landing 1 cut it from ~85x to 2.5x while leaving behind a
-// comment asserting safety that was written for the 3-cycle CSP. So this
-// bench sweeps the spacing DOWN THROUGH the stall on purpose: the invariant
-// gets tested instead of assumed, and a future denser table or faster SPI
-// trips the bench rather than the synth.
+// The real program gives a 96-cycle stall and 10 MHz SPI gives ~236 cycles
+// between words in a burst, so there is ~2.5x margin and the clobber does not
+// fire on the synth. That margin is not enforced anywhere, and it is thin
+// enough that a denser table or a faster SPI would consume it. So this bench
+// sweeps the spacing DOWN THROUGH the stall on purpose: the invariant gets
+// tested instead of assumed, and such a change trips the bench rather than
+// the synth.
 //
 // The contract, and it is one contract with one condition:
 //
@@ -38,10 +37,10 @@
 // reported at every spacing so the margin is visible, but only spacings at or
 // beyond the stall count as failures.
 //
-// I originally "hardened" the sub-stall case with an in-flight commit register.
-// That was a mistake: the race cannot fire at 10 MHz, and the extra logic made
-// 2 of 4 nextpnr placements audibly glitch (#147). The margin is the mechanism
-// here, so this bench measures the margin -- if a denser instruction table or a
+// Do NOT "harden" the sub-stall case with an in-flight commit register: the
+// race cannot fire at 10 MHz, and the extra logic is enough to make 2 of 4
+// nextpnr placements audibly glitch. The margin is the mechanism here, so
+// this bench measures the margin -- if a denser instruction table or a
 // faster SPI clock ever eats it, this fails loudly instead of a bus base
 // quietly landing in one generation.
 `timescale 1ns/1ps

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# TPT reciprocal LUT (#118): h = 1/D, D = 1 + R2*g + g*g.
+# TPT reciprocal LUT: h = 1/D, D = 1 + R2*g + g*g.
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2

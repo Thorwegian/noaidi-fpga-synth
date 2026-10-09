@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// tb_csp.sv -- the Control Signal Processor on its own (#136)
+// tb_csp.sv -- the Control Signal Processor on its own
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -72,10 +72,9 @@ module tb_csp;
         repeat (4) @(posedge clk); rst_n = 1;
         repeat (CYC) @(posedge clk);
 
-        // 1. generation cadence: one flip per sequencer pass. Since #138 a
-        //    pass is 256 instructions x 1 cycle = 256 cycles, so it completes
-        //    inside ONE sample and the cadence is one flip per sample. Before
-        //    #138 the sequencer was half-rate (#100) and a pass spanned two.
+        // 1. generation cadence: one flip per sequencer pass. A pass is
+        //    256 instructions x 1 cycle = 256 cycles, so it completes inside
+        //    ONE sample and the cadence is one flip per sample.
         toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
@@ -101,7 +100,7 @@ module tb_csp;
         end else
             $display("write-through: present in both generations");
 
-        // 3. persistence across many swaps -- the bug that silenced #134
+        // 3. persistence across many swaps -- a lost value here is silence
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
             if (dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin

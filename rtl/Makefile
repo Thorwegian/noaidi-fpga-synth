@@ -72,20 +72,20 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	# pipefail matters: without it this recipe's status is tee's, so a FAILED
 	# yosys leaves the PREVIOUS $@ in place, nextpnr routes that stale
 	# netlist, and pack.fs is produced and PASSES the timing gate.
-	# Observed 2026-09-28: a wrong port name in top.sv yielded a
-	# byte-identical bitstream with identical Fmax. yosys writes errors to
+	# A wrong port name in top.sv yields a byte-identical bitstream with
+	# identical Fmax. yosys writes errors to
 	# stderr, which tee never received, so yosys.log looked clean too --
 	# hence 2>&1.
 	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
 
 # Placement seed is PINNED: nextpnr's router is seed-sensitive, and
-# the q1-LUT shrink (issue #41) made the default seed fail routing
+# the q1-LUT shrink made the default seed fail routing
 # on an unrelated u_spi net while seed 2 routes with full timing
 # margin. Bump SEED if a future netlist hits "Failed to find a
 # route" — it is placement luck, not (necessarily) real congestion.
 SEED ?= 2
 
-# ---------------------------------------------------------------- #128
+# ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
 # "met the constraint on this placement, with this seed", and placement
 # moves. Measured on unchanged RTL over 11 seeds (main @ 00471db):
@@ -112,7 +112,7 @@ pack.fs: pnr.json
 	gowin_pack -d GW2A-18C -o $@ $<
 	@python3 ../scripts/check_timing.py pnr.log \
 		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
-		{ echo "*** timing gate FAILED -- bitstream discarded, see #128 ***"; \
+		{ echo "*** timing gate FAILED -- bitstream discarded ***"; \
 		  rm -f $@; exit 1; }
 
 # Strict check: demands the TARGET headroom, not just the floor. Use it
@@ -148,7 +148,7 @@ flash: pack.fs
 # Simulation (iverilog)
 #----------------------------------------------------------------------
 # Gowin's behavioural models for the DSP primitives adsr.sv instantiates
-# explicitly (#145: yosys cannot infer a fused DSP cell, so they are written out
+# explicitly (yosys cannot infer a fused DSP cell, so they are written out
 # by hand). Vendor code, so it is referenced where the toolchain installs it
 # rather than vendored into this CERN-OHL-S tree. Override on the command line
 # if your Gowin EDA lives somewhere else.
@@ -190,7 +190,7 @@ tb/tb_spdif_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
 sim-spdif: tb/tb_spdif_block.vvp
 	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
 
-# 48 kHz test transmitter (#101): drum's half-rate ticks + CS_FREQ
+# 48 kHz test transmitter: drum's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
 tb/tb_spdif48_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
@@ -204,7 +204,7 @@ sim-spdif48: tb/tb_spdif48_block.vvp
 # soak property has caught cross-phase contamination before). The
 # four tb_prog_*.sv splits below carry the same phases as
 # independent benches so make -j4 and CI matrix jobs parallelize
-# (issue #58).
+#.
 TB_PROG = tb/tb_element_program.sv
 tb/tb_element_program.vvp: $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) tb/elem_prog_common.svh $(LUTS) Makefile
 	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $(TB_PROG) $(IVL_DSP)
@@ -229,26 +229,26 @@ sim-prog-bus: tb/tb_prog_bus.vvp
 sim-prog-sources: tb/tb_prog_sources.vvp
 	vvp tb/tb_prog_sources.vvp > tb/sim-prog-sources.out 2>&1
 
-# #134: the ping-pong bus generation. Timing and resource numbers
+# The ping-pong bus generation. Timing and resource numbers
 # cannot tell a right-generation read from a wrong one, and hardware
 # cannot see the bus at all -- these invariants only exist in sim.
 sim-prog-pingpong: tb/tb_prog_pingpong.vvp
 	vvp tb/tb_prog_pingpong.vvp > tb/sim-prog-pingpong.out 2>&1
 
-# Active master limiter in situ (#121): hot chord must not rail, must not
-# go near-silent, and 50 ms RMS must not jump > 3 dB (Thor's criterion).
+# Active master limiter in situ: hot chord must not rail, must not
+# go near-silent, and 50 ms RMS must not jump > 3 dB.
 sim-prog-limiter: tb/tb_prog_limiter.vvp
 	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
 
-# #136: the CSP alone -- seconds, not minutes, because it does
-# not elaborate the SVF, the oscillators or the limiter.
+# The CSP alone -- seconds rather than minutes, because it does not
+# elaborate the SVF, the oscillators or the limiter.
 tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
 	iverilog -g2012 -I. -s $(notdir $(basename $@)) -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv $(IVL_DSP)
 
 sim-csp: tb/tb_csp.vvp
 	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
 
-# #147 benches. All of these elaborate the CSP alone, like tb_csp.
+# All of these elaborate the CSP alone, like tb_csp.
 CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 
 # The mailbox's two-take commit under back-to-back traffic. IN the gate.
@@ -257,7 +257,7 @@ CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 # bit-exactness against the fabric arithmetic they replace. Depends on no repo
 # RTL -- it tests the vendor cells, which is the point.
 # A voice stolen mid-release must attack from silence, not continue from where
-# the release had got to (#89). This is the case the board cannot isolate: the
+# the release had got to. This is the case the board cannot isolate: the
 # allocator only steals once all 32 voices are busy, and those other 31 are
 # ringing into the same microphone while the measurement is taken, so the
 # stolen voice's level IS the interference. Presenting the state directly is
@@ -322,9 +322,9 @@ tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: tb/tb_svf_stability.vvp
 	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
 
-# SVF stability under a MOVING cutoff (#117). STANDALONE, not in the
-# default `sim` gate: it currently REPRODUCES the bug (the #117 guard
-# corner rails), so it is expected to report a FAILURE until the filter
+# SVF stability under a MOVING cutoff. STANDALONE, not in the
+# default `sim` gate: it REPRODUCES the bug (the guard corner rails),
+# so it is expected to report a FAILURE until the filter
 # is made unconditionally stable. Run with: make sim-svfmod
 TB_SVFMOD = tb/tb_svf_modulation.sv
 tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
@@ -333,7 +333,7 @@ tb/tb_svf_modulation.vvp: $(SIM_MOD) $(TB_SVFMOD) $(LUTS) Makefile
 sim-svfmod: tb/tb_svf_modulation.vvp
 	vvp tb/tb_svf_modulation.vvp
 
-# Output tilt error feedback (#102): exact-zero convergence on
+# Output tilt error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_TILT = tb/tb_tilt.sv
 tb/tb_tilt.vvp: dsp/output_tilt.sv $(TB_TILT) Makefile
@@ -343,12 +343,12 @@ sim-tilt: tb/tb_tilt.vvp
 	vvp tb/tb_tilt.vvp > tb/sim-tilt.out 2>&1
 
 # Oscillator waveform shapes + pulse duty response (osc_core in
-# isolation — the coverage gap behind the issue #70 waveform reports).
+# isolation — the coverage gap behind the waveform reports).
 TB_OSC = tb/tb_osc_core.sv
 tb/tb_osc_core.vvp: dsp/osc_core.sv $(TB_OSC) dsp/sine_lut.hex Makefile
 	iverilog -g2012 -o $@ dsp/osc_core.sv $(TB_OSC)
 
-# The pulse oscillator must average to ZERO at every duty (#154). A bare
+# The pulse oscillator must average to ZERO at every duty. A bare
 # comparator is only centred at 50%: with phase sweeping the full signed range
 # the comparator is true for (duty + 2^23)/2^24 of the cycle, so the mean of a
 # +-2^23 square is exactly `duty` -- at CC 25 = 127 (duty 7549747) the oscillator
@@ -365,7 +365,7 @@ sim-pulse-dc: tb/tb_pulse_dc.vvp
 sim-osc: tb/tb_osc_core.vvp
 	vvp tb/tb_osc_core.vvp > tb/sim-osc.out 2>&1
 
-# Log-domain limiter unit bench (#121): the per-step function in
+# Log-domain limiter unit bench: the per-step function in
 # isolation -- transparency, proportional attack, release, saturation.
 TB_LIM = tb/tb_limiter.sv
 tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Makefile

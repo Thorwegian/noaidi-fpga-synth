@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_sweep.sv — split bench B (issue #58): the click hunt
+// tb_prog_sweep.sv — split bench B: the click hunt
 // (cutoff sweep with bank flips on a sine) and the chord-retrigger
 // stress. The longest of the four split benches.
 //------------------------------------------------------------------------
@@ -24,9 +24,9 @@ module tb_prog_sweep;
         // the click hunt as an assertion: sweep fc via write-shadow +
         // flip; a sine at 440 Hz moves at most ~66k counts/sample, so
         // any collision garbage or flip glitch shows as a huge step.
-        // (The sweep's FILTER word previously carried the same stale
-        // old-encoding bit as the chord task — see the note in the
-        // common file; now composed from the shared fields.)
+        // The FILTER word is composed from the shared fields in the
+        // common file, so the sweep and the chord task cannot drift
+        // apart on the encoding.
         worst = 0;
         for (step = 0; step < 40; step = step + 1) begin
             spi_word_write(elem_addr(0, W_FILTER),

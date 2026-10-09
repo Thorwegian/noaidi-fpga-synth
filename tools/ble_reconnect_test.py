@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BLE reconnect soak test (issue #78: "first reconnect sometimes
+"""BLE reconnect soak test ("first reconnect sometimes
 drops, second is stable").
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
@@ -14,7 +14,7 @@ log.
 
     python3 ble_reconnect_test.py [cycles] [--port /dev/ttyACM0]
 
-Run on the dev host. Always disconnects and untrusts at the end (#82).
+Run on the dev host. Always disconnects and untrusts at the end.
 """
 import argparse
 import subprocess
@@ -80,7 +80,7 @@ def wait_disconnected(timeout=10):
     """Wait for the REAL link teardown, not just the ALSA port vanishing.
     (BlueZ's disconnect is async: a connect issued before completion gets
     'Connection successful' for the dying link, which the finishing
-    disconnect then tears down — the exact first-reconnect race, #78.)"""
+    disconnect then tears down — the first-reconnect race.)"""
     t0 = time.time()
     while time.time() - t0 < timeout:
         out = subprocess.run(["bluetoothctl", "info", NOAIDI_MAC],

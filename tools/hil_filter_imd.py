@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FPGA-in-the-loop filter distortion probe (#123, for #121 M3).
+"""FPGA-in-the-loop filter distortion probe.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -7,9 +7,9 @@
 WHY NOT flat-top: tools/filter_pain_check.py measures the share of samples
 at the output rails. That detects clipping of the MASTER bus -- but the
 element's internal sat_q414 clip is attenuated downstream by the per-element
-gain and the master limiter, so it never reaches the rails. Since the #121
-master limiter landed, a rail metric reports "clean" no matter how badly an
-element distorts. It is now blind to the thing we are hunting.
+gain and the master limiter, so it never reaches the rails. With the master
+limiter in the chain, a rail metric reports "clean" no matter how badly an
+element distorts -- it is blind to the thing being hunted.
 
 THE METRIC: intermodulation. A LINEAR filter driven by two notes can only
 emit harmonics of those two notes -- n*f1 and m*f2. Any energy elsewhere is
@@ -22,8 +22,8 @@ A clean filter sits at the capture noise floor; internal clipping lifts it
 tens of dB. Two notes a tritone apart (irrational ratio) keep the two
 harmonic series from colliding, so intermod products land in clear space.
 
-Model prediction under test (2026-09-18): the failure corner is the cutoff
-sitting ON the fundamental, where the resonant peak catches the whole note
+Model prediction under test: the failure corner is the cutoff sitting ON
+the fundamental, where the resonant peak catches the whole note
 instead of one weak harmonic -- the reso_att LUT is indexed by RESONANCE
 ONLY and is calibrated where the peak caught the 11th harmonic, so it
 under-attenuates by ~20 dB here. CC74 = 64 with 100% key tracking puts the
@@ -33,7 +33,7 @@ cutoff on the key-tracked base, i.e. on the fundamental.
 
 slope: 24 (default) or 12. Capture hygiene per AGENTS.md: CC 120 between
 steps, every CC the measurement depends on is set explicitly, BLE is
-disconnected and untrusted on exit (#82).
+disconnected and untrusted on exit.
 """
 import struct
 import subprocess
@@ -60,8 +60,8 @@ PATCH = [
                 #
                 # Do NOT use unison to raise the level here, though it is
                 # tempting: much of this grid sits below the -55 dBFS trust
-                # threshold. Measured 2026-09-18, plain vs 7+1 unison at
-                # detune 0, same cells, back-to-back runs:
+                # threshold. Measured, plain vs 7+1 unison at detune 0,
+                # same cells, back-to-back runs:
                 #     plain   cutoff 64/r127:  -12.2 -12.2 -12.3 -12.4
                 #     unison  cutoff 64/r127:   -7.1 -12.4 -13.4 -18.7
                 # Eight coherent elements sum PHASE-DEPENDENTLY on whatever
@@ -82,10 +82,10 @@ PATCH = [
     (107, 64),  # MOD env depth centre = OFF
     (77, 0),    # vibrato depth 0
     (110, 0),   # LFO2 depth 0
-    (7, 127),   # volume MAX -- drive hard on purpose: the #121 master limiter
+    (7, 127),   # volume MAX -- drive hard on purpose: the master limiter
                 # holds the bus at -1 dBFS, so this buys the full 16 bits of
-                # capture instead of measuring distortion down in the noise
-                # (the first run sat at -47..-78 dBFS = ~6 bits of signal).
+                # capture instead of measuring distortion down in the noise,
+                # which leaves only ~6 bits of signal.
     (10, 64),   # pan centre
 ]
 
@@ -105,7 +105,7 @@ def capture(seconds=1.0):
 
 def spectrum(x):
     """-> (harmonic energy, non-harmonic energy, peak dBFS)."""
-    x = x - x.mean()                            # DC per #81
+    x = x - x.mean()                            # remove DC
     peak = np.abs(x).max()
     pk_db = 20 * np.log10(peak / 32768.0) if peak > 0 else -96.0
     X = np.abs(np.fft.rfft(x * np.hanning(len(x)))) ** 2

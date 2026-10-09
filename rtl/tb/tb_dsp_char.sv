@@ -1,17 +1,18 @@
 `timescale 1ns/1ps
 //------------------------------------------------------------------------
-// tb_dsp_char.sv -- characterise ALU54D + MULTALU36X18 for the CSP (#145)
+// tb_dsp_char.sv -- characterise ALU54D + MULTALU36X18 for the CSP
 //
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor (#145): use Gowin's DSP/ALU primitives explicitly; yosys will not infer
-// them. Before any RTL depends on them, two things have to be MEASURED against
-// Gowin's own behavioural model rather than read off a datasheet:
+// Gowin's DSP/ALU primitives are instantiated explicitly, because yosys will
+// not infer them. Before any RTL depends on them, two things have to be
+// MEASURED against Gowin's own behavioural model rather than read off a
+// datasheet:
 //
-//   1. THE PIPELINE DEPTH. The ADSR's result arrives later than it does today,
-//      and the CSP's state write-back has to be re-aligned by exactly that
-//      much. A guess here is a race.
+//   1. THE PIPELINE DEPTH. The primitive delays the ADSR's result, and the
+//      CSP's state write-back has to be re-aligned by exactly that much.
+//      A guess here is a race.
 //
 //   2. BIT-EXACTNESS. The recurrence must produce the same level as today's
 //      fabric arithmetic, across the whole rate range, or existing patches
@@ -181,8 +182,9 @@ module tb_dsp_char;
         check_one(26'h300000, 26'h100000, 18'd8192,   "decay UP to sustain");
         check_one(26'h200000, 26'h200000, 18'd65536,  "at the fixed point");
 
-        // and a sweep, because the corners are where I look and the middle is
-        // where fixed-point rounding actually differs
+        // and a sweep: the corners above are the obvious cases, while the
+        // middle of the range is where fixed-point rounding actually
+        // differs
         for (i = 0; i < 240; i = i + 1) begin
             tv_t = $random; tv_l = $random; tv_k = $random;
             if (tv_k == 0) tv_k = 1;

@@ -1,5 +1,5 @@
 // spi_regs.c — ESP32-C3 SPI transport init + LEGACY byte-protocol
-// reference (#109)
+// reference
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -67,7 +67,7 @@ static void fpga_xfer_bytes(const uint8_t *tx, size_t nbytes)
     // the sole SPI owner, and these are tiny frequent frames. The
     // interrupt driver's per-transaction cost (bus-lock bg request,
     // esp_intr_enable, a semaphore wait) dominated and pinned
-    // engine_link under a CC flood (#70). Polling busy-waits the ~5 µs
+    // engine_link under a CC flood. Polling busy-waits the ~5 µs
     // of wire time instead — far less overhead per word burst.
     ESP_ERROR_CHECK(spi_device_polling_transmit(g_spi, &t));
 }

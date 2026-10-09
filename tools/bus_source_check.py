@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Hardware test of the type-3 bus source (#44).
+"""Hardware test of the type-3 bus source.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Since #44's firmware half, CC 74 travels the new path end to end:
-CC 74 -> channel cutoff bus (BUS_CH_CUT) BASE -> 32 type-3 walker
-entries -> per-voice cutoff buses -> element cutoff. If the fan-out
-works, sweeping CC 74 dark/bright changes the saw's spectrum through
-the filter; if it is broken, cutoff stops responding entirely (the
-per-voice base now carries only velocity, which this patch zeroes).
+CC 74 travels the fan-out path end to end: CC 74 -> channel cutoff
+bus (BUS_CH_CUT) BASE -> 32 type-3 walker entries -> per-voice cutoff
+buses -> element cutoff. If the fan-out works, sweeping CC 74
+dark/bright changes the saw's spectrum through the filter; if it is
+broken, cutoff stops responding entirely, because the per-voice base
+carries only velocity, which this patch zeroes.
 
 Metric: brightness index = RMS(first difference)/RMS - a first
 difference emphasizes HF, so an open filter scores several times a
@@ -90,11 +90,12 @@ def main():
             cc(num, val)
             time.sleep(0.03)
 
-        # Operating points chosen so BOTH captures carry tonal signal
-        # (first run's dark=10 closed ~7 oct down = chain-floor noise,
-        # whose diff-RMS index reads HIGH and inverts the comparison):
-        # dark = 52 (corner ~1 oct below the note, Thor's pain-recipe
-        # value, ~-53 dBFS measured), bright = 100 (corner ~+4 oct).
+        # Operating points chosen so BOTH captures carry tonal signal.
+        # A dark value closed ~7 octaves down leaves only chain-floor
+        # noise, whose diff-RMS index reads HIGH and inverts the
+        # comparison. So: dark = 52 (corner ~1 oct below the note, the
+        # pain-recipe value, ~-53 dBFS measured), bright = 100
+        # (corner ~+4 oct).
         results = {}
         for label, cut in (("dark", 52), ("bright", 100)):
             cc(74, cut)
@@ -148,7 +149,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("PASS: channel -> voice -> element fan-out works on hardware (#44)")
+    print("PASS: channel -> voice -> element fan-out works on hardware")
     return 0
 
 

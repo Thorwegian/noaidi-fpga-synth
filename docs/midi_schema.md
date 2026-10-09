@@ -3,15 +3,14 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: DRAFT — under Thor's review** (first review round
-2026-09-02 folded in below).
+**Status: DRAFT.**
 
 The firmware rung this schema governs: mapping the synth's live
 parameters onto MIDI CCs and SysEx, entirely in the synth model
 (firmware). The FPGA continues to know nothing of MIDI
 ([design.md](design.md) topology).
 
-**Framing (Thor, 2026-09-02): the MIDI/user side is CONVENTIONAL.**
+**Framing: the MIDI/user side is CONVENTIONAL.**
 The FPGA sound generator is ultra-flexible and unconventional, but
 what the ESP32 presents right now is a fairly conventional virtual
 analog synthesizer — "a virtual analog synth with a massive sound."
@@ -24,7 +23,7 @@ the unconventional machinery stays under the hood.
   map through the log₂ encodings the gateware already speaks. The
   canonical rate mapping is **`cc << 1`** (7-bit CC → 8-bit log₂ rate
   byte): every CC step is one equal-ratio step on the uniform ladder
-  (Thor, 2026-09-01, the rule that drove the fractional-level decode).
+  (the rule behind the fractional-level decode).
 - **All musical mapping lives in the synth model** — the FPGA sees
   only parameter/bus/producer writes through the engine link
   ([firmware_architecture.md](firmware_architecture.md)).
@@ -42,7 +41,7 @@ state (`s_wheel`, `s_bend`, envelope rates) becomes per-channel then.
 
 ## CC map (proposal)
 
-Goal (Thor, 2026-09-06): **enough CCs to program a basic patch
+Goal: **enough CCs to program a basic patch
 without SysEx** — the whole of patch.h reachable from a controller.
 Standard/quasi-standard CC numbers where they exist; the MIDI
 undefined block (20–31, 102–119) for everything else. All 7-bit
@@ -54,44 +53,44 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
-| 10 | pan | IMPLEMENTED (#91): per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
-| 1 | mod wheel | PATCH-ASSIGNED destination+amount (not hardwired to cutoff); the first mod-matrix slot to surface. Today's wheel→cutoff IS a temporary hardwiring (Thor 2026-09-10: to become a routable per-channel destination like the LFO dests, see #92) |
-| RPN 0/0 | pitch-bend range | IMPLEMENTED (#74): CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
-| 86 | vel→amp-env AMOUNT | (#89 round 2) OB-8 "Vol": scales the amp ADSR's DEPTH word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing). Round 1's static GAIN-word subtract is retired |
-| 87 | vel→MOD-env AMOUNT | (#89 round 2) OB-8 "Filt": scales the MOD env's signed DEPTH word at note-on by the same `g(vel)`, so velocity sets how far the filter envelope travels in octaves rather than offsetting where it starts. **0 = OFF**. Round 1's static per-voice cutoff-bus term (`s_vel_cut`) is retired — the per-voice cutoff bus base is now zero |
+| 10 | pan | IMPLEMENTED: per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
+| 1 | mod wheel | PATCH-ASSIGNED destination+amount; the first mod-matrix slot to surface. The wheel→cutoff route is a temporary hardwiring, to become a routable per-channel destination like the LFO destinations |
+| RPN 0/0 | pitch-bend range | IMPLEMENTED: CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
+| 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's DEPTH word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
+| 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed DEPTH word at note-on by the same `g(vel)`, so velocity sets how far the filter envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff bus base is zero |
 | 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
-| 119 | TEST TONE (#81) | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
+| 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**
 | CC | Target | Notes |
 |---|---|---|
-| 20 | osc 1 waveform | discrete, 4 today: 0 saw / 1 pulse / 2 tri / 3 parabolic-sine (osc_core `y=4x(1−x)`, a ROUGH sine — true bandlimited sine is #65, noise is #64) |
+| 20 | osc 1 waveform | discrete, 4 of them: 0 saw / 1 pulse / 2 tri / 3 sine, read from a quarter-wave LUT in `osc_core` and mirrored into the full cycle. None are bandlimited; noise is planned |
 | 21 | osc 2 waveform | discrete |
-| 14 | osc 1 coarse (interval) | (Thor 2026-09-10) ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22 |
+| 14 | osc 1 coarse (interval) | ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22 |
 | 15 | osc 1 fine | full travel ±0.5 semitone, center 64 |
-| 22 | osc 2 coarse (interval) | ±12 semitones in whole-semitone steps, center 64, ~5 CC steps/semitone (was ±63 — too sensitive for hand-tuning, Thor 2026-09-07) |
-| 23 | osc 2 fine | full travel ±0.5 semitone, center 64 (was ±1.5, retuned Thor 2026-09-10) |
-| 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (#91 — the log-gain mix term alone tops out at ~23.6 dB) |
-| 25 | osc 1 pulse width / duty | UNIPOLAR log taper (#94, Thor: the bipolar halves sound identical): 0 = square (50%), 127 = 5% pulse, equal duty ratio per step, never the degenerate 0/100%. Pulse ONLY today (saw/tri/sine ignore duty); parabola skew is #66 |
-| 85 | osc 2 pulse width / duty | (#91) same mapping as CC 25, for osc 2 |
+| 22 | osc 2 coarse (interval) | ±12 semitones in whole-semitone steps, center 64, ~5 CC steps/semitone |
+| 23 | osc 2 fine | full travel ±0.5 semitone, center 64 |
+| 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (the log-gain mix term alone tops out at ~23.6 dB) |
+| 25 | osc 1 pulse width / duty | UNIPOLAR log taper (the bipolar halves sound identical): 0 = square (50%), 127 = 5% pulse, equal duty ratio per step, never the degenerate 0/100%. Pulse only (saw/tri/sine ignore duty) |
+| 85 | osc 2 pulse width / duty | same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
-| 28 | unison stereo spread | CONTINUOUS since #98 (was a de-facto on/off bool): 0 = centered, far side attenuated 0.375 dB/step, 127 = hard pan / exact far-side mute (the historical On, default) |
+| 28 | unison stereo spread | CONTINUOUS: 0 = centered, far side attenuated 0.375 dB/step, 127 = hard pan / exact far-side mute (the default) |
 
 **Filter**
 | CC | Target | Notes |
 |---|---|---|
-| 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (authority rule #88, Thor 2026-09-10 — full deflection reaches the closed rail; was ±2 then ±4) |
+| 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
 | 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
-| 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 pre-schema (2026-09-03) |
+| 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
-| 31 | key tracking amount | IMPLEMENTED (#91, rescaled #94): 0..200% with CENTER 64 = 100% (the historical hardwired behavior, default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
+| 31 | key tracking amount | IMPLEMENTED: 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
 
 **Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
 MOD (undefined block; standard CCs only ever covered one envelope).
 All four ADSR CCs per envelope invert — knob up = longer/louder
-(Thor 2026-09-02, panel convention), which keeps every step on the
+(panel convention), which keeps every step on the
 equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
@@ -99,8 +98,8 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper (#94 — linear over the full span was 3 semitones/click): ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (authority rule #88). The CSP's DEPTH word is signed |
-| 108 | MOD env destination | stored; cutoff is the implemented destination (#42) |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's DEPTH word is signed |
+| 108 | MOD env destination | stored; cutoff is the implemented destination |
 
 **LFOs** (2)
 | CC | Target | Notes |
@@ -112,14 +111,14 @@ equal-ratio ladder.
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
 | 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance and cutoff `val<<5` (up to ~±4 oct), pitch `val<<2` |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1, #84 — dual vibrato) / **CUTOFF** (#92 first route: channel cut bus → per-voice sends; needs the bus-sum read, 2026-09-11) |
+| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1 — dual vibrato) / **CUTOFF** (channel cut bus → per-voice sends) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |
 |---|---|---|
 | 117 | arp/seq on/off | |
 | 118 | arp mode | discrete: up/down/updown/random/pattern/chord |
-| TBD | arp octave range | CC 119 was double-booked here — it is the TEST TONE (live, #81); the arp gets a new number when the arp rung lands |
+| TBD | arp octave range | CC 119 is the TEST TONE; the arp gets a new number when the arp rung lands |
 | — | rate | follows the clock (Auto/Internal); step rate is a division, not a free CC |
 
 Deferred to the mod-matrix stage (not basic-patch CCs): the full
@@ -131,7 +130,7 @@ Changed rates are pushed to all 32 amp-ADSR producers (32 banked
 `engine_link_prod_write`s riding one swap) and `release_tail_us()`
 switches from the compile-time `ADSR_RATES` macro to the live value.
 
-**Open question 2 — RESOLVED (Thor, 2026-09-06): both.** Cutoff base
+**Open question 2 — RESOLVED: both.** Cutoff base
 is UQ4.10; use CC 74 (coarse, 7-bit MSB) + CC 106 (fine, 7-bit LSB)
 for the full 14 bits, per the MIDI MSB/LSB convention. Fine is
 optional — coarse alone (≈1/8 octave steps) is already musical, and
@@ -161,7 +160,7 @@ structure discussion first. The raw ops make everything reachable
 today; the structured layer comes when a later rung defines what a
 stored configuration *is*.
 
-**Open question 3 — RESOLVED (Thor, 2026-09-06): basic raw ops now,
+**Open question 3 — RESOLVED: basic raw ops now,
 grow later.** Ship the raw escape hatch (the op table above) for the
 first rung. But the step sequencer WILL need more — pattern data,
 per-step events, chord-mode config don't fit the raw

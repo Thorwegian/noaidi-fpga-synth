@@ -28,23 +28,20 @@
 #define NUM_VOICES     32
 #define ELEMS_PER_VOICE 8
 
-// The active sound now lives in g_patch (patch.h, issue #69);
-// WAVE_SAW / resonance / base volume / ADSR come from there. Only
-// the exact-mute code stays a local constant.
-// (Resonance is log2-encoded, FILTER[27:14] = octaves of Q above
-// Butterworth; volume is UQ4.4, 0x00 = silence since #40.)
+// The active sound lives in g_patch (patch.h); WAVE_SAW / resonance /
+// base volume / ADSR come from there. Only the exact-mute code stays
+// a local constant. Resonance is log2-encoded, FILTER[27:14] =
+// octaves of Q above Butterworth; volume is UQ4.4, 0x00 = silence.
 #define VOL_MUTE   0x00               // exact mute (special-cased in RTL)
 
 // Master volume rides the per-voice gain-bus BASE, summed with the
-// amp-envelope producer — exactly what the mod buses are for (Thor):
-// one cheap bus write per voice, no swap and no element re-render,
-// instead of re-baking every GAIN word. The GAIN word carries a
-// FIXED per-note ceiling (VOL_REF minus velocity); g_patch.volume
-// moves the gain-bus base around it. VOL_REF is the unity anchor
-// (the former default volume) so a bus offset of 0 reproduces the
-// old sound exactly: the RTL adds (gain_bus >>> 6) to the UQ4.4 word
-// gain, so 64 bus LSB = one UQ4.4 step, and off = (vol−VOL_REF)·64
-// makes word+bus == the old (vol−vel) code bit-for-bit.
+// amp-envelope producer — exactly what the mod buses are for: one
+// cheap bus write per voice, no swap and no element re-render. The
+// GAIN word carries a FIXED per-note ceiling (VOL_REF minus
+// velocity); g_patch.volume moves the gain-bus base around it.
+// VOL_REF is the unity anchor, so a bus offset of 0 is unity gain:
+// the RTL adds (gain_bus >>> 6) to the UQ4.4 word gain, so 64 bus
+// LSB = one UQ4.4 step, and off = (vol−VOL_REF)·64.
 #define VOL_REF    0xCF               // unity anchor = patch_default volume
 
 // One semitone in the UQ4.10 log2 pitch (1024 LSB per octave).
@@ -56,9 +53,8 @@
 static const int8_t SPREAD7[7] = {-3, -2, -1, 0, 1, 2, 3};
 static const int8_t SPREAD4[4] = {-3, -1, 1, 3};
 
-// Voice lifecycle (Thor, 2026-09-01: "hitting the same key does NOT
-// mean deallocating a voice with the same key"). A voice is an
-// instance of a KEYSTROKE, not a key: every note-on allocates a
+// Voice lifecycle. A voice is an instance of a KEYSTROKE: every
+// note-on allocates a
 // fresh voice; the previous strike of the same key keeps ringing its
 // release tail underneath. Three states, because "key held" and
 // "voice in use" are different facts:
@@ -72,8 +68,8 @@ typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
 typedef struct {
     voice_state_t state;
     uint8_t  note;
-    uint8_t  vel;           // stored so a live CC edit can re-render (#70)
-    uint8_t  channel;       // stored for later multi-timbrality; omni today
+    uint8_t  vel;           // stored so a live CC edit can re-render
+    uint8_t  channel;       // stored for later multi-timbrality; omni
     uint32_t stamp;         // allocation order, for oldest-steal
     int64_t  release_until; // esp_timer µs when the release tail is done
 } voice_t;
@@ -82,23 +78,22 @@ static voice_t s_voices[NUM_VOICES];
 static uint32_t s_stamp;
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
-// #89 round 2: velocity scales the ENVELOPE AMOUNT, so there is no static
-// per-voice velocity term on the cutoff bus any more -- s_vel_cut retired.
-// The g(vel) helpers live further down, below ENV_SPAN.
+// Velocity scales the ENVELOPE AMOUNT, so there is no per-voice
+// velocity term on the cutoff bus. The g(vel) helpers live further
+// down, below ENV_SPAN.
 static int32_t  s_cut_off; // CC 74/106 cutoff brightness offset (Q8.10)
 
-// Live CC edits COALESCE (issue #70 crash fix): a CC just marks what
-// changed; apply_dirty() does the heavy work at a bounded rate.
-// Rendering per-CC flooded engine_link and starved the CPU (task
-// watchdog) when a controller swept — render_active_voices() alone
-// is ~320 element writes.
+// Live CC edits COALESCE: a CC just marks what changed; apply_dirty()
+// does the heavy work at a bounded rate. Rendering per-CC floods
+// engine_link and starves the CPU (task watchdog) when a controller
+// sweeps — render_active_voices() alone is ~320 element writes.
 #define D_RENDER 1u   // re-render sounding voices (element words)
 #define D_ENV    2u   // push amp env to producers
 #define D_CUT    4u   // refresh cutoff buses
 #define D_LFO    8u   // push LFO 1
 #define D_GAIN  16u   // refresh gain-bus bases (master volume)
-#define D_ENV2  32u   // push MOD env producers (#42)
-#define D_LFO2  64u   // push LFO 2 (#73)
+#define D_ENV2  32u   // push MOD env producers
+#define D_LFO2  64u   // push LFO 2
 static uint32_t s_dirty;
 static int64_t  s_last_apply;
 #define APPLY_MIN_US 15000   // ≤66 Hz apply rate, whatever the CC rate
@@ -107,34 +102,33 @@ static int64_t  s_last_apply;
 // bus 2:      global pitch offset — the pitch wheel. Every element's
 //             pitch pointer references it.
 // bus 3:      global resonance offset — TEMPORARY CC 71 assignment
-//             (Thor, 2026-09-03) until the MIDI schema is nailed
-//             down. Every element's Q pointer references it; the
+//             until the MIDI schema is nailed down. Every element's
+//             Q pointer references it; the
 //             knob writes (cc << 7) − RESO so the effective code is
 //             exactly cc << 7 (0 = Butterworth .. 127 ≈ self-osc).
 // bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5;
-//             volume semantics since issue #40): base = −ENV_SPAN
+//             volume semantics): base = −ENV_SPAN
 //             (the quiet floor), the ADSR source adds level ×
 //             (+ENV_SPAN) — the level simply ADDS volume: floor at
-//             level 0, the note's full volume at level 1. No
-//             negative-depth trick. Velocity is note-static and
+//             level 0, the note's full volume at level 1. Velocity
+//             is note-static and
 //             bakes into the GAIN (volume) word instead.
-// bus 4:      CHANNEL cutoff bus (#44, the scope ladder made real):
+// bus 4:      CHANNEL cutoff bus — the scope ladder made real:
 //             wheel + bend + CC74/106 — ONE firmware write, fanned
 //             out to the 32 per-voice cutoff buses by type-3 bus
 //             sources in the walker (channel → voice → element).
-// bus 48+v:   voice v's cutoff offset — per-voice base carries ONLY
-//             the velocity term now; the walker adds the MOD env and
-//             the channel-bus fan-out on top (#84 chaining).
+// bus 48+v:   voice v's cutoff offset — the walker adds the MOD env
+//             and the channel-bus fan-out on top, by chaining.
 // bus 80+v:   voice v's GATE bus — the ADSR watches it (level-
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
-// follows bends (Thor).
-#define BUS_DUTY_GLOBAL  1   // global PWM bus (#73) — was null; every
-                             // duty pointer references it (bus 0 stays
-                             // the strict null bus)
+// follows bends.
+#define BUS_DUTY_GLOBAL  1   // global PWM bus; every duty pointer
+                             // references it (bus 0 stays the strict
+                             // null bus)
 #define BUS_PITCH_GLOBAL 2
 #define BUS_RESO_GLOBAL  3
-#define BUS_CH_CUT       4   // channel cutoff bus (#44)
+#define BUS_CH_CUT       4   // channel cutoff bus
 #define BUS_GAIN(v)   (16 + (v))
 #define BUS_CUT(v)    (48 + (v))
 #define BUS_VGATE(v)  (80 + (v))
@@ -142,31 +136,29 @@ static int64_t  s_last_apply;
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
 // (MOD env, channel-cut fan-out) — the pair MUST be adjacent: both
-// write BUS_CUT(v), and #84 chain-summing requires same-bus writers
-// in consecutive walker slots.
+// write BUS_CUT(v), and chain-summing requires same-bus writers in
+// consecutive walker slots.
 #define PROD_ADSR(v)   (32 + (v))
-#define PROD_MODENV(v) (64 + 2 * (v))  // MOD env (#42): 2nd ADSR per
+#define PROD_MODENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
                                        // voice, watches the gate bus,
                                        // drives the voice's CUTOFF bus
-#define PROD_FANOUT(v) (65 + 2 * (v))  // type-3 bus source (#44):
+#define PROD_FANOUT(v) (65 + 2 * (v))  // type-3 bus source:
                                        // BUS_CH_CUT → BUS_CUT(v), unity
-#define PROD_LFO2     1            // global LFO 2 (#73)
-// Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB (Thor, iterating
-// by ear — -96 dB buried attacks below audibility, 48 dB proved too
-// shallow, 72 dB tried briefly; sustain LSB = span/256 = 0.234 dB).
-// The linear level ramp into the log-encoded gain IS an
-// exponential-amplitude curve (Thor) — slow-then-fast. Whether the
-// attack should additionally be LINEARIZED in amplitude (RC-style
-// fast-then-slow) is an OPEN QUESTION for discussion/testing — the
-// agent's suggestion, not a decision. With volume semantics the bus
-// base is MINUS this span and the source depth is PLUS it.
-#define ENV_SPAN      0x2800 // 60 dB (Thor's by-ear pick)
+#define PROD_LFO2     1            // global LFO 2
+// Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
+// sustain LSB = span/256 = 0.234 dB. The linear level ramp into the
+// log-encoded gain is an exponential-amplitude curve, slow-then-fast.
+// Whether the attack should additionally be LINEARIZED in amplitude
+// (RC-style, fast-then-slow) is an OPEN QUESTION. With volume
+// semantics the bus base is MINUS this span and the source depth is
+// PLUS it.
+#define ENV_SPAN      0x2800 // 60 dB
 
-// ---- #89 round 2: velocity scales the envelope AMOUNT -------------------
+// ---- velocity scales the envelope AMOUNT -------------------------------
 //
-// c(vel), Q16. Linear today, which is the base shape Thor picked; it is a
-// TABLE rather than an expression so the curve is an ear-tuning surface that
-// can change without touching the amount arithmetic.
+// c(vel), Q16. Linear, and a TABLE rather than an expression so the curve is
+// an ear-tuning surface that can change without touching the amount
+// arithmetic.
 static uint32_t vel_curve_q16(uint8_t vel)
 {
     return ((uint32_t)vel * 65536u) / 127u;
@@ -209,24 +201,24 @@ static uint32_t mod_depth_for(uint8_t vel)
 // CC maps perceptually linearly as (cc << 1). Byte 2 is the SUSTAIN
 // LEVEL, one LSB = span/256 below peak (0.1875 dB at the 48 dB
 // span).
-// The amp envelope's A,D,S,R now lives in g_patch.env[0]
-// (patch.h, #69); patch_adsr_rate1/rate2() convert it into the linear
-// coefficients the CSP multiplies by (#145).
+// The amp envelope's A,D,S,R lives in g_patch.env[0] (patch.h);
+// patch_adsr_rate1/rate2() convert it into the linear coefficients
+// the CSP multiplies by.
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
-// The per-voice cutoff bus BASE is now ZERO (#89 round 2). It used to carry
-// the velocity term; velocity moved onto the MOD envelope's DEPTH word, where
-// it scales the excursion instead of offsetting the starting point. The
-// channel-wide terms live on BUS_CH_CUT, fanned out by the walker's type-3
-// sources. The write is kept so a re-used voice cannot inherit a stale base.
+// The per-voice cutoff bus BASE is ZERO: velocity rides the MOD
+// envelope's DEPTH word, where it scales the excursion rather than
+// offsetting the starting point. The channel-wide terms live on
+// BUS_CH_CUT, fanned out by the walker's type-3 sources. The write is
+// kept so a re-used voice cannot inherit a stale base.
 static uint32_t cut_bus_value(int v)
 {
     (void)v;
     return 0u;
 }
 
-// The CHANNEL cutoff value: wheel opens up to ~+5 octaves (Thor
-// 2026-09-08), bend tracks ±2 semitones, CC 74/106 spans ±8 oct (#88).
+// The CHANNEL cutoff value: the wheel opens up to ~+5 octaves, bend
+// tracks ±2 semitones, CC 74/106 spans ±8 octaves.
 static uint32_t ch_cut_value(void)
 {
     return (uint32_t)((int32_t)s_wheel * 40 + s_bend + s_cut_off);
@@ -236,10 +228,9 @@ static int s_sub_id = -1;
 
 // How long a release tail stays audible, from the RATES release byte
 // using the gateware decode's own formula: the level spans 2^22 LSB
-// and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK — and
-// since the half-rate walker (#100) an entry is walked every OTHER
-// sample, i.e. at 48 kHz. patch_adsr_rate_byte already bakes the ×2 rate
-// compensation into the byte, so the samples count is in 48 kHz
+// and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK, with an
+// entry walked at 48 kHz. patch_adsr_rate_byte already bakes the ×2
+// rate compensation into the byte, so the samples count is in 48 kHz
 // walks: 1 walk = 1/48000 s ≈ 20.83 µs.
 static int64_t release_tail_us(void)
 {
@@ -264,15 +255,14 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
 }
 
 // Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
-// wheel's contribution no longer touches the FILTER words at all —
-// it rides cutoff bus 1, which every element's cutoff pointer
-// references (see engine_link_init).
+// wheel rides cutoff bus 1, which every element's cutoff pointer
+// references (see engine_link_init); it does not touch the FILTER
+// words.
 static uint16_t voice_fc(uint8_t note)
 {
-    // Key tracking (#91/#94, CC 31): 0..200% with CENTER 64 = 100% =
-    // the historical hardwired tracking (Thor 2026-09-10: capping at
-    // 100% felt undersensitive — convention overtracks to 200%).
-    // 0 pins the cutoff at the C4 reference regardless of note.
+    // Key tracking (CC 31): 0..200% with CENTER 64 = 100%; convention
+    // overtracks to 200%. 0 pins the cutoff at the C4 reference
+    // regardless of note.
     int32_t p   = (int32_t)midi_to_pitch(note);
     int32_t ref = (int32_t)midi_to_pitch(60);
     int32_t kt  = g_patch.filter.key_track;
@@ -282,7 +272,7 @@ static uint16_t voice_fc(uint8_t note)
 }
 
 // How each of the 8 elements maps onto the two oscillators for the
-// active voice structure (issue #72). osc = which oscillator (0/1),
+// active voice structure. osc = which oscillator (0/1),
 // detune = unison spread in pitch LSBs, l/r = channel enables (both =
 // centre), active = sounding (else GATE-muted).
 typedef struct {
@@ -301,9 +291,8 @@ static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
     int  n  = 0;
 
     // l/r mark which side a unison element LEANS (alternating). How
-    // FAR it leans is continuous now — voice_program scales the far
-    // side by g_patch.unison_stereo (#98: CC 28 is a spread AMOUNT
-    // per the schema, not the on/off the old bool made of it).
+    // FAR it leans is continuous: voice_program scales the far side
+    // by g_patch.unison_stereo, CC 28 being a spread AMOUNT.
     switch (g_patch.voice_struct) {
     case VOICE_2_PLAIN:                       // osc1 + osc2, centred
         p[0] = (evoice_t){0, 0, true, true, true};
@@ -331,8 +320,8 @@ static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
 }
 
 // Hard-mute a voice's elements via the per-element GATE word (exact
-// mute in the gateware). Issue #68: the amp envelope's floor lives on
-// the gain BUS, which bottoms at the "quietest audible" code, never
+// mute in the gateware). The amp envelope's floor lives on the gain
+// BUS, which bottoms at the "quietest audible" code, never
 // true silence — inaudible per element but 256 elements sum ~48 dB
 // and hum at high volume. So a fully-released voice gets GATE off,
 // the ONE path that reaches exact zero; note_on re-gates via
@@ -358,12 +347,12 @@ static void promote_idle(int64_t now)
         }
 }
 
-// Render a voice from the two-oscillator plan (issue #72). Each active
+// Render a voice from the two-oscillator plan. Each active
 // element takes its oscillator's wave / duty / pitch (note + coarse +
 // fine + unison detune); pan and velocity bake into the GAIN word, the
 // amp envelope articulates on the gain bus above it. Inactive elements
 // (2-plain uses only 2 of 8) are GATE-muted. note_on re-gates here; a
-// released voice was GATE-muted by promote_idle (#68).
+// released voice was GATE-muted by promote_idle.
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
@@ -371,24 +360,24 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
     // are LOWER values). MASTER volume is NOT here — it rides the
     // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
-    // #89 round 2: velocity is NOT here any more. The ceiling is the same for
-    // every note; velocity scales the amp envelope's DEPTH so a soft note
-    // reaches a lower peak from the same floor. vel stays in the signature
+    // Velocity is not here: the ceiling is the same for every note, and
+    // velocity scales the amp envelope's DEPTH so a soft note reaches a
+    // lower peak from the same floor. vel stays in the signature
     // because note_on and the live re-render both pass it.
     (void)vel;
     int32_t vol = (int32_t)VOL_REF;
 
     // GAIN word carries the mode byte (filter type/dual) from the patch
-    // so CC 29/30 render on re-program (#70).
+    // so CC 29/30 render on re-program.
     uint32_t mode = ((uint32_t)(g_patch.filter.dual & 1) << 16)
                   | ((uint32_t)(g_patch.filter.type & 3) << 17);
 
     evoice_t plan[ELEMS_PER_VOICE];
     int active = build_voicing(plan);
     // Loudness make-up: fewer summed elements are quieter. Gentle
-    // UQ4.4 step boost (≈0.375 dB/step) — a conservative first pass so
-    // 2-plain is not jarringly quiet vs the 8-element modes; Thor tunes
-    // by ear (or we fold it into per-patch volume).
+    // UQ4.4 step boost (≈0.375 dB/step), conservative, so 2-plain is
+    // not jarringly quiet beside the 8-element modes. Tuned by ear, or
+    // folded into per-patch volume.
     int32_t makeup = (active <= 2) ? 8 : (active <= 4) ? 4 : 0;
     int32_t base   = (int32_t)midi_to_pitch(note);
     int      mix   = g_patch.osc_mix;      // ±: + favours osc2, − osc1
@@ -408,12 +397,12 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         int32_t ovol = vol + makeup;
         if (plan[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
         if (plan[u].osc == 1 && mix < 0) ovol += mix;   // favour osc1
-        // Balance extremes are a MUTE (#91): the mix term above tops
+        // Balance extremes are a MUTE: the mix term above tops
         // out at ~23.6 dB of attenuation (63 UQ4.4 steps), so CC 24 at
         // the rails must silence the disfavored oscillator outright.
         bool bal_mute = (plan[u].osc == 0 && mix >= 63)
                      || (plan[u].osc == 1 && mix <= -63);
-        // Pan (#91, CC 10): log-domain per-side attenuation, full
+        // Pan (CC 10): log-domain per-side attenuation, full
         // deflection mutes the far side (same shape as balance).
         int32_t pan  = g_patch.pan;
         int32_t lvol = ovol - (pan > 0 ?  pan : 0);
@@ -422,11 +411,10 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         if (lvol > 0xFF) lvol = 0xFF;
         if (rvol < 0x01) rvol = 0x01;
         if (rvol > 0xFF) rvol = 0xFF;
-        // Continuous stereo spread (#98, CC 28): a leaning unison
-        // element keeps its near side at full and attenuates the FAR
-        // side by spread>>1 log-gain steps (0.375 dB each) — spread 0
-        // = centered, 126 = −23.6 dB, 127 = exact far-side mute (the
-        // historical hard pan, bit-for-bit at the default).
+        // Continuous stereo spread (CC 28): a leaning unison element
+        // keeps its near side at full and attenuates the FAR side by
+        // spread>>1 log-gain steps (0.375 dB each) — spread 0 =
+        // centered, 126 = −23.6 dB, 127 = exact far-side mute.
         int32_t spread = g_patch.unison_stereo & 0x7F;
         bool    lean   = plan[u].l != plan[u].r;
         bool l_en = plan[u].l || (lean && spread < 127);
@@ -451,10 +439,10 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
 }
 
 // Re-render HELD voices' element words from the current patch — the
-// render half of live CC editing (#70). Only keys still down: a
+// render half of live CC editing. Only keys still down: a
 // releasing tail is fading out, so re-programming its element words on
-// every CC is inaudible and just multiplies the SPI load that pinned
-// engine_link (#70 watchdog) — bus params (pitch/cutoff/reso/gain)
+// every CC is inaudible and just multiplies the SPI load on
+// engine_link — bus params (pitch/cutoff/reso/gain)
 // still track tails, only the element-word rewrite is skipped. Needs
 // the per-voice note+vel, which note_on stores.
 static void render_active_voices(void)
@@ -465,7 +453,7 @@ static void render_active_voices(void)
 }
 
 // Push the amp envelope (patch env[0]) to all per-voice amp ADSR
-// sources — live envelope editing (#70). release_tail_us() already
+// sources — live envelope editing. release_tail_us() already
 // reads the patch, so tail bookkeeping follows automatically.
 static void update_amp_env(void)
 {
@@ -474,10 +462,10 @@ static void update_amp_env(void)
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_ADSR(v), 1, r1);
         engine_link_prod_write(PROD_ADSR(v), 3, r2);
-        // #89 round 2: re-apply this voice's OWN velocity scaling. Without
-        // it, editing any amp-envelope CC while notes are held would push
-        // the unscaled patch depth to every voice and snap held notes back
-        // to full amount -- audible as a jump in level mid-note.
+        // Re-apply this voice's OWN velocity scaling. Without it,
+        // editing any amp-envelope CC while notes are held pushes the
+        // unscaled patch depth to every voice and snaps held notes back
+        // to full amount, audible as a jump in level mid-note.
         engine_link_prod_write(PROD_ADSR(v), 2,
                                amp_depth_for(s_voices[v].vel));
     }
@@ -485,12 +473,12 @@ static void update_amp_env(void)
 
 // CC → LFO phase increment. The gateware increment is LINEAR in
 // frequency (freq = inc * Fs / 2^24, Fs = 96 kHz), so an even-sounding
-// control needs the log2/exponential mapping HERE (Thor: the old
-// linear val<<7 crammed the useful slow range into the bottom and made
-// everything past ~40 uselessly fast). Exponential 0.03 Hz .. 30 Hz
+// control needs the log2/exponential mapping HERE: a linear val<<7
+// crams the useful slow range into the bottom and makes everything
+// past ~40 uselessly fast. Exponential 0.03 Hz .. 30 Hz
 // across the CC — one equal frequency RATIO per step.
 //   inc = freq * 2^24 / 96000  ≈ freq * 174.76
-// CC → pulse-width duty offset, Q0.24 (#94 F2): duty = 0.5·10^(−v),
+// CC → pulse-width duty offset, Q0.24: duty = 0.5·10^(−v),
 // v = val/127 — equal duty RATIO per step, 50% down to 5%, never the
 // degenerate 0%/100%. Offset from square = 0.5 − duty.
 static int32_t duty_from_cc(uint8_t val)
@@ -499,8 +487,7 @@ static int32_t duty_from_cc(uint8_t val)
     return (int32_t)((0.5f - duty) * 16777216.0f);
 }
 
-#define LFO_FS_HZ   48000.0f   // half-rate walker (#100): an LFO's
-                               // phase advances every OTHER sample
+#define LFO_FS_HZ   48000.0f   // the rate an LFO's phase advances at
 static uint16_t lfo_rate_from_cc(uint8_t val)
 {
     float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz
@@ -520,13 +507,13 @@ static void update_lfo1(void)
     engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
 }
 
-// LFO 2 = source 1 (#73), global. CC 109/110/111/112. Destinations:
-// duty (PWM), resonance, PITCH (rides bus summing #84 — dual vibrato
-// with LFO 1), or CUTOFF (#92 first route: the channel cut bus, whose
-// 32 per-voice sends relay the LFO's contribution — possible since
-// sends read the bus OUTPUT SUM). When the destination moves, the old
-// bus's effective value would go stale (nothing writes it any more),
-// so restore its firmware base.
+// LFO 2 = source 1, global. CC 109/110/111/112. Destinations:
+// duty (PWM), resonance, PITCH (rides bus summing — dual vibrato
+// with LFO 1), or CUTOFF (the channel cut bus, whose 32 per-voice
+// sends relay the LFO's contribution, because sends read the bus
+// OUTPUT SUM). When the destination moves, the vacated bus's
+// effective value would go stale, since nothing writes it, so restore
+// its firmware base.
 static int32_t s_reso_off;   // CC 71's last bus offset (for restore)
 static void refresh_cut_buses(void);   // defined below (dest restore)
 static void update_lfo2(void)
@@ -555,9 +542,9 @@ static void update_lfo2(void)
         (uint32_t)(uint16_t)g_patch.lfo[1].depth);
 }
 
-// MOD envelope (#42) = the even slots of the 64..127 pairs (#44
-// layout: each voice's MOD env sits adjacent to its fan-out bus
-// source — both write BUS_CUT(v), and #84 summing needs consecutive
+// MOD envelope = the even slots of the 64..127 pairs (each voice's
+// MOD env sits adjacent to its fan-out bus
+// source — both write BUS_CUT(v), and summing needs consecutive
 // slots), one per voice: watches
 // the voice's gate bus (same gate the amp env watches), drives the
 // voice's CUTOFF bus with a SIGNED depth (the walker DEPTH word is
@@ -615,10 +602,10 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
                                .channel = channel, .stamp = ++s_stamp};
 
-    // #89 round 2: velocity scales the AMOUNT of both envelopes. Both DEPTH
-    // words are written BEFORE the gate, so the envelope that the gate
-    // triggers is already the right size for this note -- writing them after
-    // would let the first pass run at the previous note's amount.
+    // Velocity scales the AMOUNT of both envelopes. Both DEPTH words
+    // are written BEFORE the gate, so the envelope the gate triggers is
+    // already the right size for this note; writing them after would let
+    // the first pass run at the previous note's amount.
     engine_link_prod_write(PROD_ADSR(pick),   2, amp_depth_for(vel));
     engine_link_prod_write(PROD_MODENV(pick), 2, mod_depth_for(vel));
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
@@ -628,17 +615,17 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 }
 
 // Refresh the cutoff buses of active voices — the wheel and bend
-// terms are shared, so both events land here. Since #44 this is ONE
-// channel-bus write — the walker's type-3 fan-out entries distribute
-// it to every voice (channel → voice → element).
+// terms are shared, so both events land here. This is ONE channel-bus
+// write: the walker's type-3 fan-out entries distribute it to every
+// voice (channel → voice → element).
 static void refresh_cut_buses(void)
 {
     engine_link_bus_write(BUS_CH_CUT, ch_cut_value());
 }
 
-// Boot wiring for the fan-out (#44): 32 stateless SEND sources,
+// Boot wiring for the fan-out: 32 stateless SEND sources,
 // entry PROD_FANOUT(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
-// slot adjacent to its voice's MOD env (same target bus — #84 chain
+// slot adjacent to its voice's MOD env (same target bus, and chain
 // summing requires consecutive slots). Word 1 (RATES) is meaningless
 // for a SEND.
 static void init_fanout_sources(void)
@@ -669,11 +656,11 @@ static void refresh_gain_buses(void)
 // octaves of Q = self-oscillation. Conventional knob: up = more.
 static void reso_update(uint8_t val)
 {
-    // Tempered scale (#43, Thor 2026-09-17): the cc<<7 mapping described
-    // above ran Q up to ~15.9 octaves (Q~42000) at the top -- a
-    // hair-trigger into the undamped/static zone. Rescale so CC 127 tops
-    // out at r = 5.5 octaves = Q~32 (a sharp but stable peak), still
-    // linear in log2(Q) so each step is an equal Q ratio (~3%/step).
+    // Tempered scale: a plain cc<<7 would run Q to ~15.9 octaves
+    // (Q~42000) at the top, a hair-trigger into the undamped/static
+    // zone. CC 127 tops out at r = 5.5 octaves = Q~32, a sharp but
+    // stable peak, still linear in log2(Q) so each step is an equal Q
+    // ratio (~3%/step).
     int32_t code   = ((int32_t)val * 5632) / 127;   // 5632 = r 5.5 oct -> Q 32
     int32_t offset = code - (int32_t)g_patch.filter.resonance;
     s_reso_off = offset;   // remembered so LFO 2 dest changes can restore
@@ -689,11 +676,11 @@ static void wheel_update(uint8_t val)
     s_dirty |= D_CUT;   // coalesced (was refresh_cut_buses per CC)
 }
 
-// Pitch wheel: ±bend_range semitones (RPN 0, #74; default ±2). Q8.10
+// Pitch wheel: ±bend_range semitones (RPN 0; default ±2). Q8.10
 // has 1024/12 ≈ 85.3 LSB per semitone: off = delta × range × 85.33 /
 // 8192 = delta × range / 96. ONE write to the global pitch bus moves
 // every element; the cutoff buses get the same term so filter key
-// tracking follows the bend (Thor).
+// tracking follows the bend.
 static void bend_update(uint16_t bend14)
 {
     int16_t off = (int16_t)(((int32_t)bend14 - 8192)
@@ -725,32 +712,30 @@ static void note_off(uint8_t note)
     engine_link_bus_write(BUS_VGATE(pick), 0);
 }
 
-// Program the active patch over MIDI CCs (#70, docs/midi_schema.md).
+// Program the active patch over MIDI CCs (docs/midi_schema.md).
 // The whole basic-patch surface without SysEx. Each CC mutates
 // g_patch and renders: bus params update a bus live, producer params
 // update a source, element-word params re-render sounding voices.
 // s_cut_off carries the CC74/106 cutoff brightness; env inversions
 // follow the schema ((127-cc)<<1, panel convention).
 //
-// STORED-but-not-yet-rendered (their own issues): MOD env (#42),
-// osc 2 / unison (#72), 2nd LFO + LFO shape/dest (#71), key
-// tracking, arp (#76), pan. A controller may set them; they render
-// when those rungs land.
+// STORED-but-not-yet-rendered: MOD env, osc 2 / unison, 2nd LFO +
+// LFO shape/dest, key tracking, arp, pan. A controller may set
+// them, and they take effect once each is rendered.
 static uint8_t  s_cut_coarse, s_cut_fine;   // CC74 / CC106
 static void apply_cutoff(void)
 {
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so
     // coarse spans a few octaves, fine interpolates.
     int32_t v14 = ((int32_t)s_cut_coarse << 7) | s_cut_fine;   // 0..16383
-    s_cut_off = v14 - 8192;          // ±8 octaves — authority rule (#88):
+    s_cut_off = v14 - 8192;          // ±8 octaves — authority rule:
                                      // full deflection must reach the
-                                     // rails; Thor 2026-09-10 could not
-                                     // dial cutoff to 0 at the old ±4
-                                     // (was >>2/±2, then >>1/±4)
+                                     // rails, so cutoff can be dialled
+                                     // to 0
     s_dirty |= D_CUT;   // coalesced
 }
 
-// RPN state (#74): CC 101/100 select an RPN, CC 6 (data entry MSB)
+// RPN state: CC 101/100 select an RPN, CC 6 (data entry MSB)
 // writes it. RPN 0/0 = pitch-bend range, the standard mechanism.
 // 127/127 is RPN null; an NRPN select (99/98) also deselects.
 static uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
@@ -764,7 +749,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 74: s_cut_coarse = val; apply_cutoff(); break;
     case 106:s_cut_fine   = val; apply_cutoff(); break;
 
-    // ---- RPN 0: pitch-bend range (#74) ----
+    // ---- RPN 0: pitch-bend range ----
     case 101: s_rpn_msb = val; break;
     case 100: s_rpn_lsb = val; break;
     case 99: case 98: s_rpn_msb = s_rpn_lsb = 127; break;  // NRPN deselects
@@ -779,8 +764,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- live: amp envelope (producers) ----
     // A/D/R are log2 RATES (higher byte = faster), so invert →
     // knob up = longer. Sustain is a LEVEL (higher byte = louder),
-    // so it is NOT inverted → knob up = louder (Thor: 79 was upside
-    // down when uniformly inverted).
+    // so it is NOT inverted → knob up = louder.
     case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
     case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV; break;
     case 79: g_patch.env[0].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV; break;
@@ -791,7 +775,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_dirty |= D_LFO; break;
     case 113: g_patch.lfo[0].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO; break;
 
-    // ---- live: LFO 2 (source 1, #73) ----
+    // ---- live: LFO 2 (source 1) ----
     case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_dirty |= D_LFO2; break;
     // Depth scale is per-destination: duty bus decodes <<<13 (1024 LSB
     // = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q),
@@ -803,18 +787,18 @@ static void handle_cc(uint8_t num, uint8_t val)
                                                      : val << 4);
               s_dirty |= D_LFO2; break;
     case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO2; break;
-    // Four destinations (#92 first route — the send fan-out makes
-    // cutoff reachable): 0..31 duty/PWM, 32..63 resonance,
-    // 64..95 pitch (sums with LFO 1, #84), 96..127 CUTOFF (channel
+    // Four destinations (the send fan-out makes cutoff reachable):
+    // 0..31 duty/PWM, 32..63 resonance,
+    // 64..95 pitch (sums with LFO 1), 96..127 CUTOFF (channel
     // cut bus → the 32 per-voice sends → every voice's filter).
     case 112: g_patch.lfo[1].dest  = (uint8_t)((val * 4) >> 7); s_dirty |= D_LFO2; break;
 
     // ---- live: master volume → gain-bus base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
              s_dirty |= D_GAIN; break;
-    case 10: g_patch.pan = (int8_t)((int)val - 64);     // pan (#91)
+    case 10: g_patch.pan = (int8_t)((int)val - 64);     // pan
              s_dirty |= D_RENDER; break;
-    case 31: g_patch.filter.key_track = (int16_t)val;   // key track (#91)
+    case 31: g_patch.filter.key_track = (int16_t)val;   // key track
              s_dirty |= D_RENDER; break;
 
     // ---- live: element-word params (re-render sounding voices) ----
@@ -823,14 +807,13 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 21: g_patch.osc[1].wave = (waveform_t)(val >> 5);   // osc2 wave
              s_dirty |= D_RENDER; break;
     // Coarse: ±12 semitones in WHOLE semitone steps, ~5 CC steps per
-    // semitone, center = 64 (val-64 was ±63 — far too sensitive for
-    // hand-tuning an interval; Thor 2026-09-07). Same mapping both
-    // oscillators (osc1 pitch/fine added Thor 2026-09-10: CC 14/15).
+    // semitone, center = 64 — fine enough to hand-tune an interval.
+    // Same mapping on both oscillators.
     case 14: g_patch.osc[0].coarse = (int16_t)((val * 25) / 128 - 12);
              s_dirty |= D_RENDER; break;
     case 22: g_patch.osc[1].coarse = (int16_t)((val * 25) / 128 - 12);
              s_dirty |= D_RENDER; break;
-    // Fine: full travel = ±0.5 semitone (Thor 2026-09-10; was ±1.5).
+    // Fine: full travel = ±0.5 semitone.
     // 0.5 semi = 1024/24 ≈ 42.7 LSB → (val−64)*2/3 spans ±42.
     case 15: g_patch.osc[0].fine = (int16_t)((((int)val - 64) * 2) / 3);
              s_dirty |= D_RENDER; break;
@@ -838,19 +821,19 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
     case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
              s_dirty |= D_RENDER; break;
-    // Pulse width (#94 F2, Thor 2026-09-10): UNIPOLAR — the two halves
-    // of the old bipolar range sound identical (duty d and 1−d are the
-    // same spectrum, inverted), and the rails reached silent 0%/100%.
-    // Now 0 = square (50%), 127 = 5% pulse, EQUAL-RATIO duty steps
+    // Pulse width: UNIPOLAR, because duty d and 1−d are the same
+    // spectrum inverted, and a bipolar range would reach silent
+    // 0%/100% at the rails.
+    // 0 = square (50%), 127 = 5% pulse, EQUAL-RATIO duty steps
     // (log taper: duty = 0.5·10^(−val/127)) — fine resolution at the
     // thin end where the effect is dramatic, never degenerate.
     case 25: g_patch.osc[0].duty = duty_from_cc(val);
              s_dirty |= D_RENDER; break;
-    case 85: g_patch.osc[1].duty = duty_from_cc(val);   // osc2 PW (#91)
+    case 85: g_patch.osc[1].duty = duty_from_cc(val);   // osc2 PW
              s_dirty |= D_RENDER; break;
-    // Velocity sensitivity (#89): read at note_on — new notes pick the
+    // Velocity sensitivity: read at note_on — new notes pick the
     // change up; held notes keep their velocity terms until re-struck.
-    // #89 round 2: amounts, not sensitivities. A live edit has to re-push
+    // These are amounts. A live edit has to re-push
     // both envelopes' DEPTH words or the change is inaudible until the next
     // note-on -- which is exactly how a knob feels broken.
     case 86: g_patch.vel_amp_amt = val; s_dirty |= D_ENV;  break;
@@ -870,7 +853,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 30: g_patch.filter.dual = val >= 64;
              s_dirty |= D_RENDER; break;
 
-    // ---- test tone (#81): ≥64 replaces BOTH outputs with the
+    // ---- test tone: ≥64 replaces BOTH outputs with the
     // gateware's full-scale 187.5 Hz sine (bus-1023 control latch) —
     // the audio-chain purity reference, remotely switchable so the
     // test suite needs no console. ----
@@ -899,16 +882,16 @@ static void handle_cc(uint8_t num, uint8_t val)
             }
         break;
 
-    // ---- MOD env (#42): live on the cutoff buses ----
+    // ---- MOD env: live on the cutoff buses ----
     case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
     case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
     case 104: g_patch.env[1].sustain = (uint8_t)(val << 1);         s_dirty |= D_ENV2; break;
     case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); s_dirty |= D_ENV2; break;
-    // Depth: BIPOLAR, centre 64 = off. Square-law taper (Thor
-    // 2026-09-10: linear over ±16 oct was 3 semitones per click —
+    // Depth: BIPOLAR, centre 64 = off. Square-law taper (linear over
+    // ±16 oct would be 3 semitones per click —
     // overly sensitive): d·|d|·4 gives ~±1 oct at a quarter turn,
     // ±4 oct at half, ±16 oct at the rails — fine near centre, full
-    // authority (#88) at the ends.
+    // authority at the ends.
     case 107: {
         int d = (int)val - 64;
         g_patch.env1_depth = (int16_t)((d * (d < 0 ? -d : d)) << 2);
@@ -944,7 +927,7 @@ static void handle_midi(const midi_message_t *m)
     }
 }
 
-// Apply coalesced CC edits at a bounded rate (issue #70 crash fix).
+// Apply coalesced CC edits at a bounded rate (crash fix).
 // A CC burst sets dirty bits cheaply; here the heavy work runs at
 // most every APPLY_MIN_US, so no controller sweep can flood
 // engine_link or starve the CPU. Called from the task loop.
@@ -952,11 +935,11 @@ static void apply_dirty(int64_t now)
 {
     if (!s_dirty || now - s_last_apply < APPLY_MIN_US)
         return;
-    // Lossless-config guarantee (2026-09-10, the stale-RATES drag
-    // bug): a wedged engine flush can overflow the queues and DROP
-    // part of a config burst — which left tail voices with stale
-    // MOD-env rates ("random notes have a longer MOD envelope",
-    // Thor). Snapshot the drop counter; if anything dropped during
+    // Lossless-config guarantee: a wedged engine flush can overflow
+    // the queues and DROP part of a config burst, which leaves tail
+    // voices with stale
+    // MOD-env rates, heard as random notes having a longer MOD
+    // envelope. Snapshot the drop counter; if anything dropped during
     // this apply, RE-ARM the same dirty bits so the whole batch
     // retries at the next bounded-rate apply until it lands whole.
     uint32_t applied = s_dirty;
@@ -976,7 +959,7 @@ static void apply_dirty(int64_t now)
     s_last_apply = now;
 }
 
-// Poll period for the idle sweep (#68): a released voice must reach
+// Poll period for the idle sweep: a released voice must reach
 // true silence within this of its tail ending, even if no further
 // notes arrive. 50 ms is well below noticeable and negligible load.
 // It also bounds how long a pending coalesced CC edit waits.
@@ -1008,9 +991,9 @@ static void voice_alloc_task(void *arg)
         }
         int64_t now = esp_timer_get_time();
         promote_idle(now);   // retire + mute tails
-        apply_dirty(now);    // coalesced CC edits (#70)
+        apply_dirty(now);    // coalesced CC edits
 
-        // Single-core backpressure (#70). The ESP32-C3 has one core; a
+        // Single-core backpressure. The ESP32-C3 has one core; a
         // sustained MIDI flood keeps this queue non-empty, so the
         // receive above never blocks and IDLE (priority 0) is never
         // scheduled → task watchdog. If we have run this long without
@@ -1034,7 +1017,7 @@ static void wire_pointers(void)
         int v = e / ELEMS_PER_VOICE;
         send((uint8_t)e, 5,
              (uint32_t)BUS_PITCH_GLOBAL
-             | ((uint32_t)BUS_DUTY_GLOBAL << 10)   // PWM bus (#73)
+             | ((uint32_t)BUS_DUTY_GLOBAL << 10)   // PWM bus
              | ((uint32_t)BUS_CUT(v) << 20));
         send((uint8_t)e, 6,
              (uint32_t)BUS_RESO_GLOBAL
@@ -1049,8 +1032,7 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
-    patch_default(&g_patch);   // active sound (#69) — the former
-                               // hardcoded timbre, now in one struct
+    patch_default(&g_patch);   // the active sound, in one struct
     wire_pointers();
     // Null buses. The duty pointer (PTRS0[19:10]) and every other
     // pointer left at its default target bus 0 — the intended "zero"
@@ -1069,17 +1051,16 @@ void voice_alloc_init(void)
     // B4: source 0 — the boot vibrato (LFO 1), from patch.lfo[0].
     // CC 76/77/113 retune it live via update_lfo1().
     update_lfo1();
-    update_lfo2();     // source 1 (#73): PWM/reso wobble, depth 0 at boot
-    update_mod_env();  // MOD envs, even slots of the 64..127 pairs (#42/#44)
-    init_fanout_sources();  // fan-out bus sources, odd slots (#44)
+    update_lfo2();     // source 1: PWM/reso wobble, depth 0 at boot
+    update_mod_env();  // MOD envs, even slots of the 64..127 pairs
+    init_fanout_sources();  // fan-out bus sources, odd slots
     refresh_cut_buses();    // channel cutoff bus base (wheel/bend/CC74 = 0)
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
     // quiet floor (−ENV_SPAN) shifted by master volume, the envelope
-    // level ADDS up to the note's GAIN word ceiling (volume semantics,
-    // issue #40 — the subtracts-silence trick is retired). Bases are
-    // live bus writes; config rides the swap.
+    // level ADDS up to the note's GAIN word ceiling (volume
+    // semantics). Bases are live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_prod_write(PROD_ADSR(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)
@@ -1099,9 +1080,9 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
-    // Tripwire (2026-09-10): a full engine queue during the init burst
-    // silently drops config — voices 30/31 lost their amp envelopes
-    // exactly this way. Scream if ANY init write was dropped.
+    // Tripwire: a full engine queue during the init burst silently
+    // drops config, which costs the last voices their amp envelopes.
+    // Scream if ANY init write was dropped.
     if (engine_link_drops() > 0)
         ESP_LOGE(TAG, "INIT DROPPED %u engine writes — config incomplete!",
                  (unsigned)engine_link_drops());

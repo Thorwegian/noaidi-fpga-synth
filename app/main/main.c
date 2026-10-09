@@ -25,8 +25,9 @@ void app_main(void)
 {
     // Boot banner: WHICH build is running (esp_app_desc is regenerated
     // every build — version is git-describe, date/time is the compile).
-    // Exists because a hash-verified flash once left the old app running
-    // (USB-JTAG hard-reset quirk): trust this line, not esptool's exit.
+    // Exists because a hash-verified flash can leave the old app
+    // running (a USB-JTAG hard-reset quirk): trust this line, not
+    // esptool's exit code.
     const esp_app_desc_t *ad = esp_app_get_description();
     printf("=== noaidi fw %s (built %s %s) ===\n",
            ad->version, ad->date, ad->time);
@@ -64,7 +65,7 @@ void app_main(void)
     // the SPI CS pin, so the SPI init must run last and re-claim it.
     midi_in_init(0);
 
-    // Panel MIDI (#90): UART0 on GPIO2, from the dev host via USB-MIDI.
+    // Panel MIDI: UART0 on GPIO2, from the dev host via USB-MIDI.
     // Open Stage Control exclusively — test scripts stay on BLE/DIN.
     midi_panel_init(2);
 
@@ -103,7 +104,7 @@ void app_main(void)
     // the BUS POOL (0x0800-0x0BFF): the store dropped it as intended,
     // but spi_bus fired the bus mailbox and parked bus 5 at a large
     // negative base every boot - a self-test moving a live fader
-    // (issue #103). Probe addresses must miss EVERY decode window:
+    //. Probe addresses must miss EVERY decode window:
     // backed 0x0000-0x07FF, bus 0x0800-0x0BFF, elements 0x2000-0x5FFF.
     fpga_word_write(0x1005, 0xBAD0BAD0);      // would alias 0x0005 if broken
     uint32_t z = fpga_word_read(0x1005);
@@ -125,10 +126,9 @@ void app_main(void)
     slider_init();   // panel slider -> CC71 (resonance); 'c' = calibrate
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
 #if CONFIG_NOAIDI_STRESS_TEST
-    stress_test_start();  // synthetic MIDI flood (#70 repro); off by default
+    stress_test_start();  // synthetic MIDI flood; off by default
 #endif
     // NOTE: boot-capture tooling waits for the "play the keyboard"
     // marker - keep the prefix if this line ever changes.
-    printf("play the keyboard\n");   // (the gate-by-gain/clicks caveat
-                                     // predates the ADSR era - #110)
+    printf("play the keyboard\n");
 }

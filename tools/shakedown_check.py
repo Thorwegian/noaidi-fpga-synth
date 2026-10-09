@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Automated check for the #91 shakedown batch, over BLE MIDI.
+"""Automated shakedown check, over BLE MIDI.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Runs BEFORE Thor's ear pass (his rule, 2026-09-10): drive the synth
-through the sanctioned test transport (BLE - the panel port is Open
-Stage Control's exclusively), watch the ESP console for ingress and
-crashes, and MEASURE the pan implementation on the analog capture
-chain: stereo RMS at pan hard-left / center / hard-right.
+Runs BEFORE the ear pass: drive the synth through the sanctioned test
+transport (BLE - the panel port is Open Stage Control's exclusively),
+watch the ESP console for ingress and crashes, and MEASURE the pan
+implementation on the analog capture chain: stereo RMS at pan
+hard-left / center / hard-right.
 
     ~/.noaidi-blenv/bin/python3 tools/shakedown_check.py
 
 Reuses ble_midi_fuzz.py's helpers (persistent bluetoothctl session,
 ALSA port wait, serial capture, disconnect+untrust discipline).
 Audio: ICUSBAUDIO7D LINE IN (hw:1,0) per AGENTS.md, DC removed before
-RMS (#81). Pass criteria: >=15 dB toward the panned side at the
+RMS. Pass criteria: >=15 dB toward the panned side at the
 rails (far side is VOL_MUTEd - the chain floor decides the margin),
 <=3 dB imbalance at center.
 """
@@ -43,7 +43,7 @@ def esp_port():
 
 
 def record_stereo(seconds=1.0):
-    """Return (rms_l_db, rms_r_db), DC-removed (#81)."""
+    """Return (rms_l_db, rms_r_db), DC-removed."""
     rec = subprocess.run(
         ["arecord", "-D", AUDIO_DEV, "-f", "S16_LE", "-r", str(RATE),
          "-c", "2", "-t", "raw", "-q", "-d", str(int(seconds))],
@@ -95,13 +95,13 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        # ---- 1. ingress smoke on every new #91 CC ----
+        # ---- 1. ingress smoke on the shakedown CCs ----
         print("[smoke] CC 10/31/85/107 ...")
         for num, val in ((10, 32), (31, 64), (85, 96), (107, 72)):
             cc(num, val)
             time.sleep(0.15)
         cc(31, 64)               # restore key tracking default
-                                 # (64 = 100% since the #94 0-200% scale)
+                                 # (64 = 100% on the 0-200% scale)
 
         # ---- 2. measured pan check ----
         results = {}

@@ -10,10 +10,10 @@
 # Run on the dev host:  nohup tools/console_logger.sh &
 # Follow live:          tail -f /tmp/noaidi_console.log
 #
-# POLITE MODE (2026-09-10, after the first version's 2 s reconnect
-# loop raced esptool and Thor had to unplug the board): the logger
-# only attaches when the port is FREE, backs off the moment anything
-# else wants it, and quietly re-attaches after flashes/monitors end.
+# POLITE MODE: the logger only attaches when the port is FREE, backs
+# off the moment anything else wants it, and quietly re-attaches after
+# flashes/monitors end. A logger that reconnects on a tight loop races
+# esptool and can leave the board needing a replug.
 # The ESP console port re-enumerates across replugs — discovered by
 # vendor, never hardcoded.
 LOG=/tmp/noaidi_console.log

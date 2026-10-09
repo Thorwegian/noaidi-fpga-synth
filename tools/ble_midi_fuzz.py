@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Automated BLE-MIDI stress test for Noaidi (issues #70/#80/#82).
+"""Automated BLE-MIDI stress test for Noaidi.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Floods the Noaidi with the abuse that used to crash it -- continuous CC
-sweeps (voice mode / volume / mix) interleaved with note on/off -- over
+Floods the Noaidi with the abuse a player inflicts by hand -- continuous
+CC sweeps (voice mode / volume / mix) interleaved with note on/off -- over
 the REAL Linux BLE-MIDI path, while capturing the ESP32 serial and
 reporting crash indicators.
 
-How the path works (learned the hard way, #82): BlueZ has a built-in
+How the path works: BlueZ has a built-in
 BLE-MIDI plugin that CLAIMS the MIDI service the moment the Noaidi
 connects, exposing an ALSA sequencer port ("Noaidi Bluetooth") and
 marking the service read-only for D-Bus GATT clients -- raw
@@ -161,7 +161,7 @@ def main():
         print(f"[midi] sent {n} messages -- survived")
     finally:
         # ALWAYS free the Noaidi's single connection, and untrust so
-        # BlueZ does not auto-grab it away from the phone (#82).
+        # BlueZ does not auto-grab it away from the phone.
         try:
             bt(f"disconnect {NOAIDI_MAC}", btctl)
             time.sleep(1.5)

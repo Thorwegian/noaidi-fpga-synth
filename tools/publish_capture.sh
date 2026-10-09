@@ -1,7 +1,7 @@
 #!/bin/bash
-# Publish an audio capture to the rolling GitHub release so Thor can
-# review it on his phone (public repo -> release assets are one tap
-# from the GitHub notification).
+# Publish an audio capture to the rolling GitHub release for listening
+# review on a phone: the repo is public, so release assets are one tap
+# from the GitHub notification.
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2

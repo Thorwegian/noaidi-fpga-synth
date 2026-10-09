@@ -1,19 +1,21 @@
 // output_tilt.sv — one-pole 6 dB/oct lowpass on the mix (the master
+// "tilt")
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// "tilt", Thor 2026-09-07..09, by ear): out += (in − out) >>> SHIFT.
-// α = 1/2^SHIFT per sample → corner ≈ 2 kHz at SHIFT=3, 96 kHz —
-// the warm stop, settled after >>>4 (~950 Hz, muffled the supersaw)
+//   out += (in − out) >>> SHIFT
+//
+// α = 1/2^SHIFT per sample → corner ≈ 2 kHz at SHIFT=3, 96 kHz — the
+// warm stop, tuned by ear against >>>4 (~950 Hz, muffles a supersaw)
 // and >>>2 (~4.4 kHz, too bright). A convex combination never
 // overflows 24 bits.
 //
-// ERROR FEEDBACK (#102): a plain truncating >>> parks the integrator
+// ERROR FEEDBACK: a plain truncating >>> parks the integrator
 // at a small nonzero residual when the input falls silent — updates
 // smaller than 2^SHIFT truncate to nothing, so the output never
-// reaches zero (measured on the #101 digital capture path as a
-// constant ~1-LSB16 DC). Keeping the truncated-away remainder and
+// reaches zero (visible on the digital capture path as a constant
+// ~1-LSB16 DC). Keeping the truncated-away remainder and
 // adding it back next sample (first-order error feedback) makes the
 // accumulated step exact: the integrator converges to EXACT zero on
 // silence — and to the exact input value on DC — while the passband

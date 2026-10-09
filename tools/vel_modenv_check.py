@@ -3,13 +3,13 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-"""#89 round 2: does CC 87 actually scale the MOD envelope's amount?
+"""Does CC 87 actually scale the MOD envelope's amount?
 
-The velocity sweep verified the amp path and showed NO brightness trend -- which
-is correct and uninformative, because the default patch has CC 107 at centre, so
-the mod envelope's depth is zero and CC 87 has nothing to scale. Reporting that
-as "the filter path works" would have been the same mistake as measuring a
-detector against a signal it cannot see.
+A velocity sweep on the DEFAULT patch cannot answer this: it has CC 107 at
+centre, so the mod envelope's depth is zero and CC 87 has nothing to scale.
+The sweep then shows no brightness trend, which is correct and uninformative
+-- a detector measured against a signal it cannot see. So this check opens
+the depth first.
 
 So: give the mod envelope real depth, then check the centroid tracks velocity
 at amount 127 and does NOT at amount 0. Level is reported too, because a
@@ -23,7 +23,7 @@ import wave
 
 import numpy as np
 
-sys.path.insert(0, "/home/thor/Documents/Code/noaidi-fpga-synth/tools")
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
 
 RATE, DEV, NOTE = 48000, "hw:1,0", 60

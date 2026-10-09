@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resonance clipping onset measurement (issue #63).
+"""Resonance clipping onset measurement.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -57,7 +57,7 @@ def capture(device, seconds):
 
 def stats(ch):
     # Remove DC first: the analog capture path carries a significant
-    # offset (#81, measured 2026-09-09) that inflates peak and RMS.
+    # measured offset that inflates peak and RMS.
     dc = sum(ch) / len(ch)
     ch = [v - dc for v in ch]
     peak = max(max(ch), -min(ch))

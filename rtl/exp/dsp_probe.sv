@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// dsp_probe.sv -- what nextpnr makes of MULTADDALU18X18 at 73.728 MHz (#138)
+// dsp_probe.sv -- what nextpnr makes of MULTADDALU18X18 at 73.728 MHz
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2

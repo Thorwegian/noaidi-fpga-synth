@@ -3,12 +3,11 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-"""#89 round 2: does velocity actually control the envelope amount?
+"""Does velocity actually control the envelope amount?
 
-hil.py probe plays ONE velocity, so it can only say the synth is not broken --
-it cannot say anything about the thing this change is for. This plays a velocity
-ramp at three amount settings and checks the two properties the re-scope
-specifies:
+The hil.py probe plays ONE velocity, so it can only say the synth is not
+broken -- it cannot speak to the velocity-to-amount mapping at all. This
+plays a velocity ramp at three amount settings and checks two properties:
 
   amt = 0    every velocity must give the SAME level. That is the true-zero /
              isolation rule from design.md: velocity off, full patch amount.
@@ -26,7 +25,7 @@ import wave
 
 import numpy as np
 
-sys.path.insert(0, "/home/thor/Documents/Code/noaidi-fpga-synth/tools")
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
 
 RATE, DEV, NOTE = 48000, "hw:1,0", 60

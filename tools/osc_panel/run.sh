@@ -1,5 +1,5 @@
 #!/bin/bash
-# run.sh -- launch the Noaidi Open Stage Control panel headless (#90).
+# run.sh -- launch the Noaidi Open Stage Control panel headless.
 #
 # Serves http://<devhost>:8080 with noaidi-panel.json, driving the
 # CH345 USB-MIDI adapter into the synth's panel MIDI IN (UART0/GPIO2,

@@ -79,7 +79,7 @@ module spi_bus #(
     // Instruction config is wiring: it rides the ping-pong banks and
     // takes effect at the swap, same as the per-element words.
     output logic        imem_write_enable,
-    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]} (#100)
+    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
     output logic [31:0] imem_write_data,
     output logic [7:0]  elem_write_index,
     output logic [31:0] elem_write_data,
@@ -240,15 +240,14 @@ module spi_bus #(
                                && (elem_offset[2:0] < 3'd7);
     assign elem_write_word   = elem_offset[2:0];
 
-    // ---- instruction table write decode (0x0100..0x04FF, #100) --------
+    // ---- instruction table write decode (0x0100..0x04FF) -------------
     localparam [15:0] PROD_BASE = synth_pkg::MAP_IMEM_BASE;
     localparam [15:0] PROD_END  = synth_pkg::MAP_IMEM_BASE
                                 + 16'(4 * synth_pkg::NUM_INSTR);
-    // All FOUR words per entry are writable since #145: word 3 carries the
-    // second ADSR rate word (kD's high bits, kR and sustain). It used to be
-    // excluded here even though the address map reserved the slot, so a write
-    // to it was silently dropped -- which showed up as an envelope that would
-    // not release, because kR stayed zero.
+    // All FOUR words per entry are writable. Word 3 carries the second ADSR
+    // rate word (kD's high bits, kR and sustain); excluding it here while the
+    // address map reserves the slot drops writes to it silently, which shows
+    // up as an envelope that will not release, because kR stays zero.
     wire in_instruction_range = (word_addr >= PROD_BASE)
                           && (word_addr <  PROD_END);
     assign imem_write_enable = byte_end && (frame_phase == 3'd4)

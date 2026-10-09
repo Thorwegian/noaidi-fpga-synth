@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_prog_bus.sv — split bench C (issue #58): GATE semantics, the B1
+// tb_prog_bus.sv — split bench C: GATE semantics, the B1
 // bus pilot (live cutoff bus, click-free sweep), and the B2 sink
 // classes (pitch and gain buses). Preamble rebuilds the chord state
 // the gate test needs.
@@ -125,7 +125,7 @@ module tb_prog_bus;
 
         spi_word_write(bus_addr(3), OFFS_MINUS_8OCT); // -48 dB (volume
                                                       // bus: negative =
-                                                      // quieter, #40)
+                                                      // quieter)
         observe(60);
         observe(400);
         if (peak > worst * 2 / 5) begin

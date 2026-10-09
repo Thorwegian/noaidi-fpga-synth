@@ -10,16 +10,15 @@
 //
 //   sample_out — selected waveform, scaled Q0.24 → Q2.16
 //
-// #128: the phase adder used to live HERE, and its phase_next output
-// was left unconnected at all three call sites while element_pipeline
-// computed `s3_phase + delta` a SECOND time for the writeback — two
-// 24-bit adders for one value. Worse, keeping the adder inside meant
-// one cycle had to carry BSRAM read -> octave shift -> 24-bit add ->
-// sine LUT read -> 4:1 mux, which was this design's critical path
-// (13.04 ns against a 13.56 ns period, i.e. 4% margin). The adder now
-// belongs to the caller, which can register its result before asking
-// for a waveform. Callers that advance phase elsewhere just pass their
-// own phase in.
+// The phase adder belongs to the CALLER, not to this module, for two
+// reasons. The caller needs the advanced phase anyway, for the state
+// writeback, so holding the adder here would mean two 24-bit adders
+// computing one value. And a single cycle carrying BSRAM read ->
+// octave shift -> 24-bit add -> sine LUT read -> 4:1 mux is this
+// design's critical path (13.04 ns against a 13.56 ns period, i.e. 4%
+// margin); the caller can register the sum before asking for a
+// waveform. Callers that advance phase elsewhere pass their own phase
+// in.
 //--------------------------------------------------------------------
 `default_nettype none
 module osc_core (
@@ -40,7 +39,7 @@ module osc_core (
     // Pulse: signed comparator — phase < duty
     //   duty = -1.0 → never high, 0.0 → 50%, +1.0 → always high
     //
-    // #154: DC-FREE AT EVERY DUTY. A bare comparator is only centred at 50%.
+    // DC-FREE AT EVERY DUTY. A bare comparator is only centred at 50%.
     // phase_next sweeps the full signed range, so the comparator is true for
     // frac = (duty + 2^23)/2^24 of the cycle and the mean of a ±2^23 square
     // with that duty is
@@ -76,13 +75,13 @@ module osc_core (
         : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
 
     //----------------------------------------------------------------
-    // Sine: true sine from a quarter-wave LUT (issue #65 — the old
+    // Sine: true sine from a quarter-wave LUT (— the old
     // y=4x(1-x) parabola read as a noisy tone on hardware). One
     // quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
     // cycle is rebuilt from the top two phase bits — quadrant[0]
     // mirrors the falling quarters, quadrant[1] negates the lower
-    // half. Full-scale like saw/tri (the parabola sat ~6 dB low).
-    // (A real parabolic waveform returns as its own type in #66.)
+    // half. Full-scale like saw/tri. (A true parabolic waveform,
+    // should one be wanted, belongs as its own waveform type.)
     //----------------------------------------------------------------
     reg [23:0] sine_lut [0:255];
     initial $readmemh("dsp/sine_lut.hex", sine_lut);
@@ -100,7 +99,7 @@ module osc_core (
     //----------------------------------------------------------------
     // Waveform select
     //----------------------------------------------------------------
-    // 25 bits so the DC-corrected pulse (#154) survives the mux; the other
+    // 25 bits so the DC-corrected pulse survives the mux; the other
     // three are sign-extended and unchanged.
     logic signed [24:0] muxed;
     always_comb begin

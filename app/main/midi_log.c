@@ -73,7 +73,7 @@ static void midi_log_task(void *arg)
             continue;
         }
 
-        // Single-core guard (#70): under a MIDI flood this queue never
+        // Single-core guard: under a MIDI flood this queue never
         // empties, so the receive above never blocks and this printf
         // loop (priority 4) starves IDLE → task watchdog. If we have
         // run this long without blocking, yield a tick; the event bus

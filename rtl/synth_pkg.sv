@@ -3,8 +3,8 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The single home for the design's constants (Thor: modules should
-// not carry hardcoded numbers). Modules import what they need; module
+// The single home for the design's constants; no module carries
+// hardcoded numbers. Modules import what they need, and module
 // parameters default from here so testbenches can still override.
 
 package synth_pkg;
@@ -51,7 +51,7 @@ package synth_pkg;
 
     //--- Bus fabric (docs/bus_architecture.md) ----------------------
     parameter logic [15:0] MAP_BUS_BASE = 16'h0800;    // bus base registers
-    parameter int          DMEM_WORDS    = 512;         // uniform pool (#134)
+    parameter int          DMEM_WORDS    = 512;         // uniform pool
     parameter int          BUS_W        = 18;          // signed Q8.10
 
     //--- Instruction table (B4/B5) -------------------------------------
@@ -67,26 +67,22 @@ package synth_pkg;
     //             (level fraction, 8 bits), [31:24] RELEASE — byte
     //             order matches patch_adsr_word(), the pipeline
     //             decode and memory_map.md (a swapped S/R in this
-    //             comment was issue #105). Rates are 8-bit log2:
+    //             comment was). Rates are 8-bit log2:
     //             increment = (16+frac) << oct on the 22-bit level
     //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
     // A instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
-    // Pool 256, FULL RATE (#145): the CSP retires one instruction per
+    // Pool 256, FULL RATE: the CSP retires one instruction per
     // cycle, so all 256 entries execute every sample — 256 of the
-    // sample's 768 cycles — and every source updates at 96 kHz. This
-    // replaces the half-rate sequencer (#100, Thor 2026-09-11), which
-    // walked alternate halves for 48 kHz effective because an
-    // instruction then cost three cycles. Its allocator rule — a chain
-    // (sources + their sends sharing a target) must live within ONE
-    // half — is retired with it; a chain now tolerates gaps of up to
-    // three slots, the depth of the accumulator's forwarding history.
-    // Region 0x0100..0x04FF (stride 4). INSTR_PER_PASS is gone: a pass
-    // is the whole table.
+    // sample's 768 cycles — and every source updates at 96 kHz.
+    // A chain (sources plus the sends sharing their target) may be
+    // placed anywhere in the table and tolerates gaps of up to three
+    // slots, the depth of the accumulator's forwarding history.
+    // Region 0x0100..0x04FF (stride 4); a pass is the whole table.
     parameter logic [15:0] MAP_IMEM_BASE = 16'h0100;
     parameter int          NUM_INSTR = 256;
 
-    // CSP opcode = a bitmask of enables (#145), not an enum. Each bit turns
+    // CSP opcode = a bitmask of enables, not an enum. Each bit turns
     // on one part of the datapath, so decode is enables rather than a mux
     // tree and a new instruction is an encoding rather than a new case.
     parameter int OPC_SOURCE = 0;   // reads a source operand (SEND, ADSR gate)
@@ -101,20 +97,20 @@ package synth_pkg;
     parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum
     parameter logic [3:0] OPC_SEND = 4'hD;  // source + mul + accum
 
-    //--- Filter stability clamp (Thor's call, 2026-08-31) ------------
+    //--- Filter stability clamp --------------------------------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not
     // from resonance — theory and the autocorrelation bench agree.
     //
-    //   FC_MAX = 0x2B20 = 14.4 kHz (Thor's pick): one measured-clean
-    //   step of margin below the resonance bloom that precedes the
+    //   FC_MAX = 0x2B20 = 14.4 kHz: one measured-clean step of
+    //   margin below the resonance bloom that precedes the
     //   16 kHz wall. Measured at q1 = sqrt(2), the heaviest damping
     //   any resonance code decodes to: clean through 15.7 kHz,
     //   limit-cycles at 16.4 kHz, chaos at 19.5 kHz.
     //
-    // The old Q1_MAX = sqrt(2) clamp is retired (2026-09-02): with
-    // log2-encoded resonance (r octaves of Q above Butterworth,
-    // q1 = sqrt2 * 2^-r via q1_lut), r = 0 IS Butterworth and no
-    // code decodes heavier — the clamp became structural. The high-Q
+    // No separate q1 clamp is needed: with log2-encoded resonance
+    // (r octaves of Q above Butterworth, q1 = sqrt2 * 2^-r via
+    // q1_lut), r = 0 IS Butterworth and no code decodes heavier, so
+    // the sqrt(2) bound is structural. The high-Q
     // end stays open by design: at the top of the range the decode
     // underflows q1 to zero — self-oscillation as a feature.
     parameter logic [13:0] FC_MAX = 14'h2B20;
@@ -125,7 +121,7 @@ package synth_pkg;
 
     parameter int CTRL_W = 14;      // UQ4.10 pitch/cutoff
 
-    parameter int AUDIO_W = 18;     // Q4.14 audio transport (#63)
+    parameter int AUDIO_W = 18;     // Q4.14 audio transport
     typedef logic signed [AUDIO_W-1:0] sample_t;
 
     parameter int SVF_W = 36;       // Q8.28 filter states

@@ -1,13 +1,12 @@
-// patch.c — the active-patch instance and its default (issue #69).
+// patch.c — the active-patch instance and its default.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Foundation of the VA surface: g_patch is the single source of
-// truth for the active sound. patch_default() reproduces the former
-// hardcoded timbre EXACTLY, so wiring voice_alloc to render from it
-// is behavior-identical (verify: sounds the same). Later issues move
-// more constants into the struct and add CC/SysEx mutation.
+// truth for the active sound, and voice_alloc renders from it rather
+// than from constants of its own. patch_default() holds the boot
+// timbre.
 
 #include "patch.h"
 #include <string.h>
@@ -17,18 +16,16 @@ patch_t g_patch;
 // Pack an ADSR into the source-table RATES word (A | D<<8 | S<<16 |
 // R<<24) — the gateware's universal A,D,S,R byte order.
 //
-// HALF-RATE COMPENSATION (#100): the walker advances each envelope
-// every OTHER sample now (48 kHz effective), which alone would double
-// every attack/decay/release time. The rate decode is
+// RATE COMPENSATION: the envelope walk these bytes are calibrated
+// against runs at 48 kHz, half the sample rate, which alone would
+// double every attack/decay/release time. The rate decode is
 // (16+low4) << high4, so adding 1 to the exponent nibble (+0x10 on
 // the byte) doubles the increment and restores wall-clock times
 // exactly. Saturating: the 16 fastest codes flatten onto the ceiling
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
-// The historical rate byte: mantissa in the low nibble, exponent in the
-// high one. The +0x10 is the #100 half-rate compensation, and it used to
-// cancel against the gateware's SHIFT_BIAS of 11. Both cancellations are
-// folded into adsr_k() below, so the resulting coefficient matches what
-// the old gateware computed -- that equivalence is the test.
+// The rate byte: mantissa in the low nibble, exponent in the high one.
+// The +0x10 cancels against the gateware's SHIFT_BIAS of 11; both
+// cancellations are folded into adsr_k() below.
 uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 {
     return patch_rate > 0xEF ? 0xFF : (uint8_t)(patch_rate + 0x10);
@@ -36,8 +33,9 @@ uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 
 // One rate byte -> the linear coefficient the CSP multiplies by.
 //
-//   old gateware:  k = (16 + low4) / 2^(26 - high4)
-//   now:           k = round(that * 2^ADSR_K_SHIFT), never zero
+//   k = round( (16 + low4) / 2^(26 - high4) * 2^ADSR_K_SHIFT )
+//
+// never zero.
 //
 // For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
 // those codes come through bit-for-bit. Slower ones round, which costs
@@ -53,9 +51,9 @@ static uint32_t adsr_k(uint8_t rate_byte)
     return k ? k : 1u;        // a zero coefficient would freeze the envelope
 }
 
-// Sustain as a plain level. The gateware used to decode this with a
-// second barrel shift; firmware knows the destination, so it decodes
-// here. Only the linear form is used -- nothing has ever set CFG[26].
+// Sustain as a plain level. Firmware knows the destination, so it
+// decodes here rather than costing the gateware a second barrel
+// shift. Only the linear form is used -- CFG[26] is never set.
 static uint32_t adsr_sustain(const adsr_t *e)
 {
     uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
@@ -83,8 +81,8 @@ void patch_default(patch_t *p)
 {
     memset(p, 0, sizeof(*p));
 
-    // ---- oscillators (both rendered now, issue #72) ----
-    // Default voice (Thor, 2026-09-08): the "7+1" structure — a
+    // ---- oscillators (both rendered) ----
+    // Default voice: the "7+1" structure — a
     // 7-voice supersaw (osc1) plus a single pure sine (osc2) one
     // octave below. The sine sub fattens the saws without muddying
     // the midrange; the ×7 detune gives the classic supersaw width.
@@ -94,30 +92,28 @@ void patch_default(patch_t *p)
     p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
     p->unison_detune = 6;      // LSB per spread step (supersaw spread)
-    p->unison_stereo = 127;    // full stereo spread = the historical
-                               // hard pan (CC 28 continuous since #98)
+    p->unison_stereo = 127;    // full stereo spread = hard pan
+                               // (CC 28 is continuous)
 
-    // #89 round 2: these scale the ENVELOPE AMOUNT now, not a static send,
-    // so they cannot reproduce round 1 bit-for-bit and the ticket says as
-    // much -- new values by ear. 64 is a starting point: at full amount a
+    // These scale the ENVELOPE AMOUNT rather than a static send, so the
+    // values are set by ear. 64 is a starting point: at full amount a
     // vel-1 note would be silent, at 64 it peaks ~30 dB down.
     p->vel_amp_amt = 64;               // vel -> amp-env amount
     p->vel_mod_amt = 64;               // vel -> MOD-env amount
 
-    p->filter.key_track = 64;          // center = 100% tracking = the
-                                       // historical voice_fc behavior
-                                       // (#91; 0..200% scale since #94)
-    p->filter.resonance = 0x200;       // was RESO (q1 = 1.0)
+    p->filter.key_track = 64;          // center = 100% tracking, on a
+                                       // 0..200% scale
+    p->filter.resonance = 0x200;       // q1 = 1.0
     p->filter.type      = 0;           // LP
-    p->filter.dual      = 1;           // 24 dB/oct default (Thor, 2026-09-08)
+    p->filter.dual      = 1;           // 24 dB/oct default
 
-    // amp env — was ADSR_RATES (0x98/0x20/0xF0/0x28, A,D,S,R)
+    // amp env (A,D,S,R)
     p->env[0].attack  = 0x98;
     p->env[0].decay   = 0x20;
     p->env[0].sustain = 0xF0;
     p->env[0].release = 0x28;
 
-    // MOD env (#87, Thor 2026-09-09): ON by default in the boot patch —
+    // MOD env: ON by default in the boot patch —
     // same initial params as the AMP envelope, sent to the cutoff bus.
     // The filter contour tracks the loudness contour: opens with the
     // attack, settles bright at sustain, closes on release.
@@ -128,14 +124,13 @@ void patch_default(patch_t *p)
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (increment per 48 kHz
-                                       // walk since #100 — was 175
-                                       // at the 96 kHz walk)
+                                       // walk)
     p->lfo[0].depth = 16;
 
-    // LFO 2 (#73, source 1): triangle, ~1 Hz, depth 0 = OFF; default
+    // LFO 2 (source 1): triangle, ~1 Hz, depth 0 = OFF; default
     // destination is PWM (duty bus) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
-    p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk (#100)
+    p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
     p->lfo[1].depth = 0;
     p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance.
                                        // (pitch is LFO 1's bus — one

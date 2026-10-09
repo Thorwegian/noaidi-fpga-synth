@@ -3,26 +3,22 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
  
-Codified 2026-08-30 from planning between Thor and the agent.
 Supersedes the modulation half of [memory_map.md](memory_map.md)
 (generic cable matrix, shared LFO bank, per-element ADSR registers).
 The verified wire protocol and per-element parameter ABI stand.
 
 Status: **BUILT — the ladder is complete through B5 (all
-ear-verified and merged), plus the log-domain Q rung (approved
-2026-09-03) and the bus-as-source type (#44, 2026-09-10 — in real
-use for channel→voice cutoff fan-out)**. Settled during the B0
-review era: one bus format (signed Q8.10, octaves.fraction — law 5),
-detune stays a per-element static offset, producer pool raised to
-128, and (2026-09-02) Q's convention: log₂ resonance, bus taken
-as-is like pitch/cutoff. Formally still open: B0's explicit spec
-sign-off (largely overtaken by events — the design has been proven
-in silicon rung by rung) and the worst-case performance patch that
-finalizes sizing.
+ear-verified and merged), plus the log-domain Q rung and the
+bus-as-source type, in use for channel→voice cutoff fan-out**.
+Settled: one bus format (signed Q8.10, octaves.fraction — law 5),
+detune is a per-element static offset, the producer pool is 128, and
+Q's convention is log₂ resonance with the bus taken as-is like
+pitch/cutoff. Formally open: B0's explicit spec sign-off, and the
+worst-case performance patch that finalizes sizing.
 
 ## What this actually is
 
-It is a **processor** (Thor, 2026-09-24), and reading it as one explains
+It is a **processor**, and reading it as one explains
 it far better than reading it as a fabric:
 
 | processor term | in this design |
@@ -31,7 +27,7 @@ it far better than reading it as a fabric:
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
-| opcode | `CFG[3:0]` — a bitmask of enables (#145): bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
+| opcode | `CFG[3:0]` — a bitmask of enables: bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` SEND |
 | source operand | `CFG[25:16]` — the data-memory word an instruction reads |
 | destination | `CFG[15:6]` — the word it writes |
 | immediate | `DEPTH` — a coefficient |
@@ -50,7 +46,7 @@ instruction is not pure.
 
 Inside the processor there are no buses — the pool is data memory.
 Outside it, firmware and [memory_map.md](memory_map.md) still say "bus"
-(see #139). The module is `rtl/csp.sv`.
+. The module is `rtl/csp.sv`.
 
 ## Terminology used in this document
 
@@ -60,15 +56,13 @@ the physical FPGA chip, and is used only when discussing its
 electrical or timing behavior. **Element**, **lane** and **voice**
 are as defined in [design.md](design.md): the FPGA generates elements
 via lanes; firmware groups elements into voices. Bus fan-out scope
-follows the **scope ladder** (Thor, 2026-09-10, see design.md):
+follows the **scope ladder** (see design.md):
 **Global** = all channels, **Channel** = all voices on one channel,
 **Voice** = all elements on one voice. Nothing in the current fabric
-is Global by intent — buses this document historically calls "global"
-(resonance, duty, bend) are CHANNEL buses that coincide with global
-scope only while a single channel exists. The deferred shared
-configuration table (milestone B6) has no name — deliberately
-(Thor, 2026-09-03: the modulation-bus configuration "has no specific
-name"; earlier drafts misattributed a name to it).
+is Global by intent — buses named "global" (resonance, duty, bend)
+are CHANNEL buses that coincide with global scope only while a single
+channel exists. The deferred shared configuration table (milestone
+B6) has no name, deliberately.
 
 ## The model in one paragraph
 
@@ -92,22 +86,21 @@ never sees.
    instruction, in the processor. This keeps every multiply out of
    the audio pipeline and out of summing structures — the silicon
    timing rule, made structural.
-   **Multi-source summing (resolved 2026-09-08, issue #84, Thor's
-   steer: summing is default behaviour, no flags):** same-bus sources
+   **Multi-source summing** — summing is default behaviour, with no
+   flags: same-bus sources
    allocated to the same target sum automatically — the sequencer
    keeps a short history of completed results, and a target-bus
    comparator selects the most recent match as the addend instead of
-   the target's initial value. Since #145 that history is three deep,
-   so sources sharing a target no longer have to sit in ADJACENT
-   slots: a chain tolerates gaps of up to three. Chains extend to any
-   length. **Allocator rule** (companion to law 3's table order):
+   the target's initial value. That history is three deep, so sources
+   sharing a target need not sit in adjacent slots: a chain tolerates
+   gaps of up to three, and extends to any length. **Allocator rule** (companion to law 3's table order):
    group same-bus sources in adjacent slots; scattered same-bus
    sources remain last-write-wins. First user: LFO 2 → pitch, summing
    with LFO 1 (slots 0 and 1).
 2. **The audio pipeline freezes** once the pointer-fetch stage lands.
-   All future features are new opcodes -- and since #145 an opcode is a
-   combination of enable bits, so most of them are an encoding rather
-   than a new case in the datapath. (Justification: five
+   All future features are new opcodes, and an opcode is a
+   combination of enable bits, so most are an encoding rather than a
+   new case in the datapath. (Justification: five
    ear-verified timing failures that STA passed, all in pipeline
    growth. The fragile thing must stop changing.)
 3. **Instructions execute in program order, once per pass**, reading
@@ -119,18 +112,17 @@ never sees.
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are live and single-banked — each pipeline read is one word, so
    there is no multi-word tear to protect against.
-5. **One data-memory word format: signed Q8.10** (Thor). 8 integer bits (sign
+5. **One data-memory word format: signed Q8.10**. 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every
    log₂ sink — pitch, cutoff, AND volume (gain octave = 6 dB;
-   positive gain bus = LOUDER since the volume inversion, #40) —
+   positive gain bus = LOUDER) —
    so a producer needn't know its consumer; sinks take what they
    need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
    resolution — accepted; revisit on audible evidence only). Q's
-   convention (settled 2026-09-02 with log₂ resonance): the bus is
-   taken AS-IS, like pitch and cutoff — one integer = one octave of
-   Q ≈ +6 dB of resonant peak, positive = more resonance. (The
-   earlier `<<< 6`-into-linear-q1 slice is superseded.) Consumers
+   convention: the bus is taken AS-IS, like pitch and cutoff — one
+   integer = one octave of Q ≈ +6 dB of resonant peak, positive =
+   more resonance. Consumers
    use SATURATING adds into each parameter's legal range (adds-only,
    timing-clean). Read bandwidth via replicas of one uniform pool
    (broadcast writes); a bus may feed different sink types.
@@ -141,16 +133,11 @@ never sees.
 |---|---|
 | SPI bandwidth: the firmware mod wheel costs 256 writes ≈ 2 ms per CC tick | One-to-many: parameters point at shared buses; a patch-wide change is one base-register write |
 | Five silicon timing failures in pipeline growth; STA untrustworthy | Pipeline gains one add-only stage, then freezes; all logic moves to idle slots (law 2) |
-| DSP cost of scaled bus sums (Thor) | Law 1: producers pre-scale, buses only add; ~150 small multiplies/sample fits one time-multiplexed 18×18 lane in a third of the idle budget |
-| Fixed, known sinks per element (Thor) | One uniform Q8.10 bus pool; each sink takes a fixed bit-slice; static summing, no crossbar (an earlier sink-typed-memories draft was superseded by the uniform format) |
-| Envelope sharing across element groups (Thor) | ADSR is a producer from a pool; group sharing = allocation, not architecture |
+| DSP cost of scaled bus sums | Law 1: producers pre-scale, buses only add; ~150 small multiplies/sample fits one time-multiplexed 18×18 lane in a third of the idle budget |
+| Fixed, known sinks per element | One uniform Q8.10 bus pool; each sink takes a fixed bit-slice; static summing, no crossbar |
+| Envelope sharing across element groups | ADSR is a producer from a pool; group sharing = allocation, not architecture |
 | ADSR snappiness vs smoothing dilemma | Smoothing is a per-producer property: firmware-written buses can be smoothed (producer-side), envelope buses never are |
-| FPGA complexity vs bandwidth balance (Thor) | Tiered build; every deferred feature has a firmware fallback costing only SPI traffic; the line moves on measured link utilization |
-
-## Alternatives considered and rejected
-
-Moved to [journal.md](journal.md) (2026-09-03: abandoned ideas are
-journal material, not design material).
+| FPGA complexity vs bandwidth balance | Tiered build; every deferred feature has a firmware fallback costing only SPI traffic; the line moves on measured link utilization |
 
 ## Sizing (initial allocations; address space reserves ≥2×)
 
@@ -159,7 +146,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 
 - **Bus word**: signed Q8.10 — 18 bits, native BSRAM width; ±128
   octaves of range, 1 LSB ≈ 1.17 cents. Gain consumes the top
-  fraction bits (0.375 dB decode grid today; buses already carry the
+  fraction bits (0.375 dB decode grid; buses already carry the
   precision if the grid ever refines).
 - **Bus pool**: one uniform pool of 1024 buses. The six sinks are
   oscillator pitch, oscillator duty cycle, filter cutoff, filter 1/Q,
@@ -179,56 +166,45 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   allocation across all sinks — no per-class exhaustion. Bus 0 is
   hardwired zero.
 - **Pointers**: 10 bits per parameter, full width from day one — the
-  pool is 1024, so pointers address 1024 (Thor: no held-back address
-  bits; partial widths create weird bugs later). Six pointers pack
+  pool is 1024, so pointers address 1024 (no held-back address bits;
+  partial widths create weird bugs later). Six pointers pack
   three per word into two new per-element words (map offsets +5, +6;
   3 × 10 bits + 2 spare per word).
-- **Detune** (Thor, decided): a static per-element offset — detune is
+- **Detune**: a static per-element offset — detune is
   conceptually a bus fed by a base and a source, but it is so common
   that a dedicated per-element offset is the pragmatic form. All 8
   elements of a voice share one pitch bus; note-on writes one base,
   not eight.
-- **The SEND — type 3 (#44, built 2026-09-10; named 2026-09-11,
-  #98)**: Thor's reframing killed the "combiner" as a concept — *a
-  bus is already a combiner of sources*; the only new thing needed
-  is **"other bus" as a source**, and its blessed name is the SEND
+- **The SEND — type 3**: *a bus is already a combiner of sources*, so
+  the only thing needed is **"other bus" as a source**, named the SEND
   (the mixing-console aux send — the fabric's first PROCESSOR, vs
   the generators LFO/ADSR). A send entry is stateless: CFG names a
   SOURCE bus
   (in the field the ADSR uses for its gate bus, so the sequencer's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
-  target like any source. Since 2026-09-11 (#92/#98) the read is of
-  the bus's **OUTPUT SUM** (`bus_sum_ram`, a sequencer-facing mirror
+  target like any source. The read is of the bus's **OUTPUT SUM** (`bus_sum_ram`, a sequencer-facing mirror
   written by the same strobes as the replicas): firmware base plus
   every source contribution written so far — a send ordered after
   its sources relays them same-sample, which is what makes the node
   graph's edges real. C = A·x + B·y is two sends targeting the same
-  bus in adjacent slots (#84). Real uses: the channel cutoff bus
+  bus in adjacent slots. Real uses: the channel cutoff bus
   (bus 4) fanning out to the 32 per-voice cutoff buses; LFO 2's
   CUTOFF destination riding that fan-out.
-- **Producer pool**: 128 table entries (Thor: 64 is eaten by 32-note
-  polyphony's ADSR pairs alone — LFOs need room too). 64 ADSRs + up
-  to 32 LFOs + sends + margin. One entry = type + config + state.
-  Budget since #138: ONE cycle per instruction → 256 of the sample's
-  768 cycles for a full 256-entry pass.
-- **Half-rate sequencer — APPROVED (Thor, 2026-09-11, #98), SUPERSEDED
-  by #138**: it walked alternate halves of the table each sample, so
-  every source updated at 48 kHz effective, on Thor's reasoning that
-  "any zipper noise will be at 24 kHz and thus likely inaudible,
-  especially after our master bus LPF" (the output tilt). It bought
-  the entry budget that made the ~226-entry per-osc graph fit at three
-  cycles per instruction. #138 made an instruction cost one cycle, so
-  a full 256-entry pass is 256 cycles and the trade is no longer
-  needed: **all 256 entries run every sample, at 96 kHz**, and the
-  allocator rule it imposed (a chain must live inside one half) is
-  retired.
+- **Producer pool**: 128 table entries (64 is eaten by 32-note
+  polyphony's ADSR pairs alone, and LFOs need room too). 64 ADSRs +
+  up to 32 LFOs + sends + margin. One entry = type + config + state.
+  Budget: ONE cycle per instruction → 256 of the sample's 768 cycles
+  for a full 256-entry pass.
+- **Sequencer rate**: an instruction costs one cycle, so a full
+  256-entry pass is 256 cycles and **all 256 entries run every
+  sample, at 96 kHz**. No chain has to live inside half the table.
 - **Producer multiplies**: ≤200/sample on one 18×18 DSP lane
   (envelope scaling ~64, LFO depths ~32, combiner terms, margin).
   Escape hatch: shift-add amounts (~1.5 dB steps, zero DSP).
 - **The worst-case performance** that finalizes these numbers is
-  still to be written (Thor's "derive, don't assert"); the above are
-  buildable initials, not final claims.
+  still to be written — derive, don't assert; the above are buildable
+  initials.
 
 ## What firmware sees (sketch — final addresses at milestone B1)
 
@@ -241,10 +217,10 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 
 ## Build milestones (one branch each, merged on verification)
 
-- **B0 — Spec sign-off.** Thor reviews this document; disagreements
-  are edits, approval starts B1. *Verification: his word.*
-- **B1 — Bus fabric pilot, cutoff class only.** ✅ (2026-08-31,
-  Thor's ears: "B1 works"). Bus RAM + base registers at 0x0800,
+- **B0 — Spec sign-off.** Review of this document; disagreements are
+  edits, and approval starts B1.
+- **B1 — Bus fabric pilot, cutoff class only.** ✅ Bus RAM + base
+  registers at 0x0800,
   pointer word at +5, effective-cutoff saturating add — which cost
   ZERO new pipeline stages (the pointer rides the S1 param read, the
   bus fetch lands at S2). SPI bus writes cross via a toggle mailbox
@@ -252,30 +228,27 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   wheel is one base write instead of 256 FILTER rewrites; the bench's
   live bus sweep measured SMOOTHER than the swap sweep (worst step
   10240 vs 38144) because commits land atomically between lane reads.
-- **B2 — All sink classes.** ✅ (2026-08-31, ear-verified and
-  merged). Pitch (with the detune decision), duty, Q, gains on
+- **B2 — All sink classes.** ✅ Pitch (with the detune decision),
+  duty, Q, gains on
   buses; voice_alloc rewired; the six-replica bus pool and per-sink
   slices live.
-- **B3 — Firmware-routed buses** ✅ (2026-08-31, Thor playing: "it
-  works. No problems, even at high pitches with a wide open filter").
-  Velocity → per-voice gain and cutoff buses (his tuning: brightening
-  up to +4 octaves at full velocity), pitch wheel → global pitch bus
+- **B3 — Firmware-routed buses** ✅. Velocity → per-voice gain and
+  cutoff buses (brightening up to +4 octaves at full velocity), pitch
+  wheel → global pitch bus
   AND the cutoff buses (key tracking follows bends), base cutoff at
-  +1/2 octave, q1 = 0.5 (Q = 2). Original design notes follow:
-  No producers yet — firmware writes bus bases to realize the first
-  real routes: velocity → gain and velocity → filter cutoff (a
+  +1/2 octave, q1 = 0.5 (Q = 2). Firmware writes bus bases to realize
+  the routes: velocity → gain and velocity → filter cutoff (a
   per-voice bus each, allocated by firmware at note-on) and pitch
   wheel → pitch offset (one shared bus every voice's pitch pointer
-  references). Bend must also move filter key tracking (Thor): the
+  references). Bend must also move filter key tracking: the
   cutoff bus carries the same value as the pitch bus plus the wheel
   contribution — firmware writes bend to the pitch bus and bend+wheel
-  to the cutoff bus, two writes per bend event. This replaces today's
-  rewrite storms: a pitch bend becomes two base writes instead of 256
-  OSC-word writes.
+  to the cutoff bus, two writes per bend event. A pitch bend is two
+  base writes rather than 256 OSC-word writes.
   *Verification: velocity-to-loudness and velocity-to-brightness by
   ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
-- **B4 — Producer sequencer + LFO producer.** ✅ (2026-08-31, Thor: "it
-  works"). The idle-slot table executor: 128 producers × 2 words at
+- **B4 — Producer sequencer + LFO producer.** ✅ The idle-slot table
+  executor: 128 producers × 2 words at
   0x0100 (banked — wiring), stride-2 pass in ~256 idle slots, five
   overlapped stages with the one producer multiply in its own
   registered stage; osc_core reused for shapes. Bus = base RAM +
@@ -284,21 +257,19 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   a one-constant knob in voice_alloc — deliberately oversized for
   the verification listen). Bench: 93.75 Hz square tremolo, ±12 dB,
   zero SPI during measurement.
-- **B5 — ADSR producer + gate-bus triggering.** ✅ (2026-09-01,
-  Thor: "this is a good result"; merged). Amp envelopes as producers
+- **B5 — ADSR producer + gate-bus triggering.** ✅ Amp envelopes as
+  producers
   32–63, one per voice, gate buses 80+v, the envelope-subtracts-
   silence idiom, the uniform log₂ rate ladder (fractional-level
   decode), and the keystroke-instance voice lifecycle in firmware.
-  Note clicks died as planned. Still open from the B5 ladder text:
-  the FILTER envelope (a second ADSR pool onto the cutoff buses) —
-  now a follow-on rung of its own, not part of the B5 milestone.
+  Still open: the FILTER envelope, a second ADSR pool onto the cutoff
+  buses, as a follow-on rung of its own.
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (deliberately
   unnamed), source-side smoothing for
   firmware-written buses, bus read-back diagnostics. ✅ **The
-  log-domain Q parameter — APPROVED (Thor, 2026-09-03) and merged**
-  (decided 2026-09-02: "Let's break with convention and do log2
-  encoded resonance."). Suite + timing green, self-oscillation
+  log-domain Q parameter — merged** ("break with convention and do
+  log2 encoded resonance"). Suite + timing green, self-oscillation
   corner bench passes with cross-element isolation, zero new
   pipeline stages (the decode rides the cutoff-K stage budget);
   temporary CC 71 and the panel fader drive it live. Deferred
@@ -306,8 +277,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   pattern, ~0.375 dB grid — loudness-class percept, per the
   attenuation precedent; reclaims a BSRAM block; wire format
   unchanged) as its own small bench-verified rung.
-  Original decision record:
-  Context for the decision: synth tradition is linear-in-feedback
+  Context: synth tradition is linear-in-feedback
   (a circuit accident, not a design argument); parametric EQs step Q
   geometrically; resonant peak height in dB is linear in log Q, so
   one bus integer step ≈ +6 dB of peak — parallel to gain's 6 dB and
@@ -319,22 +289,22 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   resonance like pitch/cutoff/gain, sum in log domain, decode to
   linear q1 via the LUT+barrel-shift machinery after the bus add.
   Equal bus steps then mean equal resonance ratios, and CC 71 maps
-  on the standard ladder. While in there, revisit high-Q behavior
-  (Thor, 2026-08-31): the current clamps leave the high-Q end open
+  on the standard ladder. While in there, revisit high-Q behavior:
+  the clamps leave the high-Q end open
   (eff_q1 floors at zero; self-oscillation reachable) and only bound
   the heavy-damping end at Butterworth. Silicon timing rule applies —
   the decode lands in the most timing-fragile path; budget a
   pipeline stage for it.
-  And (Thor, 2026-08-31): **invert the GAIN word to volume
+  Also: **invert the GAIN word to volume
   semantics** — 0x00 = silence/max attenuation, larger = louder, so
   programming stops being backwards AND the p3 = 0x00000000 footgun
-  (currently FULL volume) becomes safe-by-default. Agreed as a small
+  (FULL volume) becomes safe-by-default. A small
   bench-verified rung right after B5 merges: one subtract in the gain
   decode, the exact-mute code moves to 0x00, the amp-envelope depth
   turns positive (level ADDS volume — no negative-depth trick), plus
   firmware bakes, benches and the boot image generator inverted
-  together. Deliberately NOT mixed into the in-flight ADSR debugging.
-  And (Thor, 2026-08-31): **Q-loss compensation** — by ear, the LP
+  together.
+  Also: **Q-loss compensation** — by ear, the LP
   output loses low-frequency energy as Q rises; the HP output is
   expected to mirror this at the high end. Investigation order when
   picked up: MEASURE first (extend the characterization bench: LP
@@ -347,8 +317,8 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   perceptual → loudness compensation in gain staging, possibly
   firmware-side. Classic analog synths split exactly this way (Moog
   ladders genuinely lose bass with resonance; SVFs mostly don't).
-  And (2026-09-03, from the first high-Q listening session):
-  **soft saturation in the SVF resonance path** — candidate for one
+  Also, from a high-Q listening session: **soft saturation in the
+  SVF resonance path** — candidate for one
   of the next milestones. At CC 64 (Q ≈ 181, resonant peak ~+45 dB,
   ring ~50–100 ms) the sound goes glassy/waterphone: 8 detuned saws
   into near-undamped resonators parked at 1.41× the note (between
@@ -356,7 +326,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   hard-clip crunch: +45 dB of resonant gain walks over the −18 dB
   gain-staging headroom and the sat24 mix limiter clips HARD —
   clip-generated harmonics near Nyquist genuinely alias ("aliasing/
-  bit crushing", Thor's ears, correctly). A second quieter layer is
+  bit crushing"). A second quieter layer is
   fixed-point limit-cycle grain in the nearly-lossless SVF, amplified
   by the resonant gain (separable test: limiter crunch scales with
   velocity, limit-cycle grain doesn't). The classic fix is also THE
@@ -366,14 +336,14 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   musical self-oscillation — half of every famous analog filter's
   character. Adjacent to the Q-loss measure-first plan; do them
   together. (The waterphone itself is arguably a keeper preset.)
-  And (Thor, 2026-09-01): **revisit where the binary point of
-  attenuation values actually needs to be.** The envelope level's
-  fractional bits (UQ22.5 since #138, UQ22.4 before it) were placed
-  for rate continuity, not from an analysis of what resolution the
+  Also: **revisit where the binary point of attenuation values
+  actually needs to be.** The envelope level's fractional bits
+  (UQ22.5) were placed for rate continuity rather than from an
+  analysis of what resolution the
   attenuation path itself wants; when the GAIN inversion rung (above)
   reworks the gain decode anyway, work out the right point position
   from the attenuator's actual step size instead of inheriting it.
-  And (Thor, 2026-09-01): **consider an artificial noise floor — a
+  Also: **consider an artificial noise floor — a
   very quiet one.** Analog character and a graceful bottom for
   envelope tails; would live somewhere in the output mix path.
   Unscoped: level, spectrum (white/filtered), and whether it gates
