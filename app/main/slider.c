@@ -39,15 +39,15 @@
 // vTaskDelay rounds to zero ticks and busy-spins).
 #define POLL_US        2000   // slider poll period
 #define WIN_LEN        8      // rolling-average window (power of 2)
-// CC-level backlash hysteresis (Thor's design: "a change of 1 isn't
-// enough — a window of 2 that is allowed to move in steps of 1").
+// CC-level backlash hysteresis: a change of 1 is not enough, so the
+// window is 2 and is allowed to move in steps of 1.
 // The sent value owns a ±1 window; a candidate inside it changes
 // nothing, a candidate beyond it drags the sent value to the window
 // edge. Parked ±1 flicker is structurally silent; slow travel steps
 // by 1. Rails adopt exactly so 0 and 127 stay reachable.
-// Two-point settled calibration (Thor's design: the continuous
-// min/max "seen" capture grabbed transients — pressure against an
-// end stop reads ~50 counts beyond where that end rests). Each end
+// Two-point settled calibration: a continuous min/max "seen" capture
+// grabs transients, because pressure against an end stop reads ~50
+// counts beyond where that end rests. Each end
 // is captured deliberately: park the fader, press the key, the
 // firmware averages a full second (500 raw samples — noise settles
 // to a fraction of a count), and that RESTING value becomes the
@@ -78,7 +78,7 @@ static uint16_t s_end_max = DEFAULT_RAW_MAX;
 static volatile uint8_t s_capture_end = 0;     // 0 idle, 1 min, 2 max
 static TaskHandle_t s_poll_task;
 
-// Slider parked 2026-09-15 (Thor): the resonance fader fires spurious
+// Slider parked: the resonance fader fires spurious
 // CC71 on the prototype board and isn't needed right now, so it stops
 // emitting CC71. The poll task, ADC and console keys stay live -- '1'/
 // '2'/'r' (slider) and 'p' (BLE status/re-advertise) still work, and
@@ -121,7 +121,7 @@ static void publish_cc(uint8_t value)
     event_bus_publish(&evt);
 }
 
-// The calibration's job is to FIND the range (Thor) — the settled
+// The calibration's job is to FIND the range — the settled
 // ends ARE the working range, no margin. Edge noise is the backlash
 // hysteresis's job, and round-to-nearest mapping means the rails
 // bind within half a step of the settled resting values.
@@ -239,7 +239,7 @@ static void slider_task(void *arg)
             continue;                           // inside the window
 
         last_cc = send;
-        if (s_slider_active)       // parked: spurious firing (2026-09-15)
+        if (s_slider_active)       // parked: spurious firing
             publish_cc(send);
     }
 }

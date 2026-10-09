@@ -23,7 +23,7 @@
                                   // push alone is 512 commands
 #define ENGINE_TASK_STACK  3072
 #define ENGINE_TASK_PRIO   6          // above midi_log, below midi_in
-// 1 kHz control rate (Thor). Paced by an esp_timer notifying the
+// 1 kHz control rate. Paced by an esp_timer notifying the
 // task, NOT vTaskDelayUntil: the FreeRTOS tick is 100 Hz, so a 1 ms
 // delay would round to 0 ticks and assert.
 #define ENGINE_TICK_US     1000
@@ -50,8 +50,8 @@ static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
                                   // drain. 256 silently dropped the
                                   // tail = voices 30/31's amp-env
                                   // configs = gain floor forever =
-                                  // Thor's "every 32 note-ons it goes
-                                  // low" (2026-09-10). Headroom 2x.
+                                  // heard as the level dropping every
+                                  // 32 note-ons. Headroom 2x.
 
 typedef struct {
     uint16_t bus;
@@ -65,8 +65,8 @@ typedef struct {
 } prod_cmd_t;
 
 static QueueHandle_t s_prod_queue;
-static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // #145: word 3 is the
-                                                   // second ADSR rate word
+static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // word 3 is the second
+                                                   // ADSR rate word
 #define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 4 / 32)
 static uint32_t s_pdirty_now[PDIRTY_WORDS];
 static uint32_t s_pdirty_prev[PDIRTY_WORDS];
@@ -123,13 +123,13 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
             if (cmd.word >= ENGINE_WORDS_PER_ELEMENT)
                 continue;   // elem is uint8_t: 0..255 by construction
-            // No-op elision (Thor's Big-O/lazy principle, 2026-09-11):
+            // No-op elision, so the cost tracks what actually changed:
             // the image IS the FPGA's state (the FPGA-reload → ESP-
             // reboot rule guarantees it), so a write of the value
             // already there is pure waste. voice_program re-renders
             // resend every word; skipping the unchanged ones turns a
             // one-knob re-render's flush from all 256 rows (~15 ms of
-            // SPI — the wedge pressuring #97) into just the touched
+            // SPI, enough to wedge the link) into just the touched
             // rows.
             if (s_image[cmd.elem][cmd.word] == cmd.value)
                 continue;
@@ -139,8 +139,8 @@ static void engine_task(void *arg)
         }
         prod_cmd_t pc;
         while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
-            // entry is uint8_t = 0..255 — exactly the #100 pool, so
-            // the old entry bound is vacuous (the type IS the bound)
+            // entry is uint8_t = 0..255 — exactly the pool size, so
+            // the type IS the bound
             if (pc.word >= 4)
                 continue;
             if (s_prod[pc.entry][pc.word] == pc.value)   // no-op elision
@@ -203,7 +203,7 @@ static void engine_task(void *arg)
         memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
 
         // Drop visibility, always on (not just at init): a silent drop
-        // is a voice configured wrong forever (2026-09-10, twice).
+        // is a voice configured wrong forever.
         static uint32_t s_drops_reported;
         if (s_drops != s_drops_reported) {
             ESP_LOGW(TAG, "engine writes dropped: %u total",
@@ -232,9 +232,7 @@ void engine_link_init(void)
     // Image: every element gated off (and gain-muted for belt and
     // braces at boot), benign params otherwise. ALL pointers start on
     // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
-    // at note-on. (An earlier era parked cutoff pointers on bus 1 for
-    // a hardwired wheel; the wheel rides BUS_CH_CUT since #44 and the
-    // stale claim here was #110.)
+    // at note-on. The wheel rides BUS_CH_CUT.
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;
@@ -308,9 +306,9 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
     if (s_prod_queue == NULL || word >= 4)   // uint8_t entry spans the pool
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    // Drops stay possible under a wedged flush (blocking here was
-    // tried 2026-09-10 and reverted the same hour — risk containment
-    // after a new symptom appeared with it live). The LOSSLESSNESS
+    // Drops stay possible under a wedged flush; blocking here is not
+    // the answer, since it trades a dropped write for a stall. The
+    // LOSSLESSNESS
     // guarantee lives one level up instead: voice_alloc's apply_dirty
     // checks engine_link_drops() around each config burst and RE-ARMS
     // the dirty bit when anything dropped, so the coalescer retries at

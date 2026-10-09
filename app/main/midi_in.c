@@ -11,7 +11,7 @@
 //
 // Port roles: UART1/GPIO0 is the DIN MIDI jack (keyboard);
 // UART0/GPIO2 is the dev-host panel port, reserved for Open Stage
-// Control exclusively (Thor, 2026-09-10) — test scripts stay on
+// Control exclusively — test scripts stay on
 // BLE/DIN so panel traffic never contends with them.
 
 #include "midi_in.h"
@@ -151,8 +151,8 @@ void midi_in_init(int rx_pin)
 void midi_panel_init(int rx_pin)
 {
     // UART0 is free for this since the console moved wholly to the
-    // USB-Serial/JTAG controller (sdkconfig: ESP_CONSOLE_UART_NUM=-1,
-    // Thor 2026-09-10). RX moves to rx_pin (GPIO2 — idles high via the
+    // USB-Serial/JTAG controller (sdkconfig: ESP_CONSOLE_UART_NUM=-1).
+    // RX moves to rx_pin (GPIO2 — idles high via the
     // MIDI opto, which suits the C3 strap sampling at reset); TX stays
     // on UART0's default pin, unused.
     //

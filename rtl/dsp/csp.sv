@@ -6,11 +6,9 @@
 //
 // Split out of element_pipeline.sv, which was carrying two unrelated
 // jobs in 1,473 lines: the element DSP lane pipeline, and this. They
-// shared a file because they shared the drum schedule -- the sequencer was
-// armed at slot 299 purely so its writes could not collide with lane
-// reads on a single-ported RAM. #134 removed that coupling by
-// double-buffering the bus generation, so the two are now genuinely
-// independent: this module references the drum's slot counter nowhere.
+// Double-buffering the bus generation removes any coupling to the drum
+// schedule, so the sequencer and the lanes are genuinely independent:
+// this module references the drum's slot counter nowhere.
 //
 // What lives here: the six bus replicas plus dmem_init and dmem_local,
 // the SPI mailbox, the ping-pong generation bit, the instruction and
@@ -111,9 +109,9 @@ module csp (
     // BUS-SUM RAM: the sequencer-facing mirror of a bus's
     // OUTPUT SUM — written by the same strobes as the replicas, read
     // at P1 by SEND entries. This is what makes the node graph's
-    // edges real (Thor, #98): a send references the bus's summed
-    // output (firmware base + every source contribution written so
-    // far), not the firmware base alone. With sources ordered before
+    // edges real: a send references the bus's summed output (firmware
+    // base plus every source contribution written so far) rather than
+    // the firmware base alone. With sources ordered before
     // their sends in the table, propagation is same-sample.
     reg signed [17:0] dmem_local [0:2*synth_pkg::DMEM_WORDS-1];
     integer bsi;
@@ -125,7 +123,7 @@ module csp (
     logic [9:0]         dmem_waddr;
     logic signed [17:0] dmem_wdata;
 
-    // #134: ping-pong generation bit. The sequencer writes generation
+    // Ping-pong generation bit. The sequencer writes generation
     // ~dmem_gen while the pipeline reads dmem_gen, and they swap at the
     // sample boundary -- so every element sees one coherent generation
     // and a read can never collide with a write. Costs no extra BSRAM:
@@ -137,7 +135,7 @@ module csp (
     logic dmem_mbox_pending;
     logic [9:0]  dmem_mbox_addr;
     logic [17:0] dmem_mbox_data;
-    // #134: a mailbox entry commits over TWO takes, one per generation.
+    // A mailbox entry commits over TWO takes, one per generation.
     // The sequencer rewrites its target buses every sample, so ITS writes
     // can live in one half. A mailbox write sets a PERSISTENT base that
     // nothing refreshes, so a single-half write alternates with stale
@@ -178,10 +176,10 @@ module csp (
     // write's first idle cycle coincided with a sequencer write (~1 in
     // 3 during the sequencer span), the write was silently dropped:
     // a lost gate-off was a stuck note, a lost gate-on a dead key.
-    // #134: ping-pong put reads and writes in different generations,
-    // so the window that used to keep them apart by schedule is gone.
-    // A commit still defers a cycle when the sequencer is writing, since
-    // they share the write port.
+    // Ping-pong puts reads and writes in different generations, so no
+    // scheduling window is needed to keep them apart. A commit still
+    // defers a cycle when the sequencer is writing, since they share
+    // the write port.
     wire  dmem_wr_window   = 1'b1;
     wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
     wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
@@ -255,7 +253,7 @@ module csp (
     //----------------------------------------------------------------
     // Program counter (B4/B5, bus_architecture.md) -- the table executor.
     // 256 entries x 3 config words (stride 4 in the RAM), ONE cycle per
-    // entry since #138; the six-stage pipeline is documented at the pc
+    // entry; the six-stage pipeline is documented at the pc
     // below. Law 1: the one instruction multiply sits alone in its stage
     // with registered operands. Law 3: entries execute in table order, once
     // per sample. An instruction's OUTPUT uses the PREVIOUS sample's state --
@@ -266,7 +264,7 @@ module csp (
     // ADSR state word: [27:26] stage, [25:0] level in UQ12.14 -- the RC
     // envelope's format, now living in dsp/adsr.sv. The envelope is
     // the one instruction with a real state machine, so it is its own module
-    // (Thor, #146); the LFO is an adder and the SEND is a wire, and both stay
+    // of its own; the LFO is an adder and the SEND is a wire, and both stay
     // here. An LFO uses [24:0] as its phase accumulator and leaves [27:25]
     // alone, so the two never collide -- an instruction is one or the other.
     //----------------------------------------------------------------
@@ -287,16 +285,16 @@ module csp (
     reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {bank, entry[7:0]}
     reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
     reg [31:0] imem_depth [0:2*synth_pkg::NUM_INSTR-1];
-    // #145: word 3, the second ADSR rate word. The address encoding always
-    // had this slot -- imem_write_addr is {entry, word[1:0]} and only 0/1/2
-    // were decoded -- and firmware's flush already strided by four.
+    // Word 3, the second ADSR rate word. The address encoding carries
+    // this slot: imem_write_addr is {entry, word[1:0]}, and firmware's
+    // flush strides by four.
     reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
     // BITS, so rate increments are in 1/16-LSB units and the 8-bit
     // log2 rate byte decodes as ONE uniform expression with no
     // truncation anywhere: all 256 codes are distinct equal-ratio
-    // steps (Thor's perceptual-linearity rule; a MIDI CC maps as
+    // steps, for perceptual linearity (a MIDI CC maps as
     // cc << 1). The fractional bits ARE the "binary point moved four
     // left" — in the accumulator, where it belongs.
     reg [27:0] istate [0:synth_pkg::NUM_INSTR-1];
@@ -338,9 +336,9 @@ module csp (
     //   A  value = addend + contribution, saturated
     //   W  write the replicas
     //
-    // FULL RATE IS BACK. #100 put the sequencer on half rate because
-    // 256 instructions x 3 cycles = 768 did not fit beside the lane
-    // pipeline in a 768-cycle sample. At one per cycle a full 256-entry
+    // FULL RATE. At three cycles per instruction, 256 instructions x 3
+    // = 768 would not fit beside the lane pipeline in a 768-cycle
+    // sample. At one per cycle a full 256-entry
     // pass costs 256 cycles, so every instruction runs every sample: 96 kHz
     // control instead of 48, and the allocator's "a chain must live inside
     // one half" rule is gone along with pc_half itself.
@@ -366,9 +364,8 @@ module csp (
 
     wire pc_active = (pc < 9'(synth_pkg::NUM_INSTR));
     // Drain: the last instruction fetched still has to reach W, which is the
-    // full pipeline depth now rather than the 2 slots the 3-cycle version
-    // needed. Without it the final entries' writes never land -- #97's
-    // stale-cutoff bug was exactly this off-by-a-pipeline-length.
+    // full pipeline depth. Without it the final entries' writes never
+    // land, which shows up as a stale cutoff.
     localparam int PIPE_DRAIN = 5;
     logic [2:0] drain_cnt;
     wire pc_running = pc_active || (drain_cnt != 3'd0);

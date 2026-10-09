@@ -82,11 +82,9 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
 // Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
 // envelope subtracts silence.
-#define ENGINE_NUM_PRODUCERS 256   // half-rate walker pool:
-                                    // entries 0..127 = half A,
-                                    // 128..255 = half B; a chain must
-                                    // live within one half
-// CSP opcode = CFG[3:0], a BITMASK of enables since #145, not an enum:
+#define ENGINE_NUM_PRODUCERS 256   // instruction pool; all 256 entries
+                                    // execute every sample
+// CSP opcode = CFG[3:0], a BITMASK of enables rather than an enum:
 //   bit 0 reads a source operand      bit 2 multiplies by DEPTH
 //   bit 1 has persistent state        bit 3 accumulates onto the target
 // An envelope is the instruction that watches a gate, so state+source means
@@ -102,8 +100,8 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
 // Total dropped commands (queue-full across all engine queues). A
 // nonzero value after an init burst means silently missing config —
-// exactly the class of bug that made voices 30/31 lose their amp
-// envelopes (2026-09-10). Callers of init bursts must check and LOG.
+// exactly the class of bug that costs the last voices their amp
+// envelopes. Callers of init bursts must check and LOG.
 uint32_t engine_link_drops(void);
 
 #ifdef __cplusplus

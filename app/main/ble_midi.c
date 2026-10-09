@@ -100,7 +100,7 @@ static void ble_msg_to_bus(const midi_message_t *m, void *user)
     event_bus_publish(&evt);
 }
 
-// ── Packet processing (ble_rx task context, #83) ───────────────────
+// ── Packet processing (ble_rx task context) ────────────────────────
 // Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
 // set = timestamp present and a status byte follows; clear =
 // running status continues.
@@ -179,18 +179,18 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     return 0;
 }
 
-// Issue #67 notes:
+// Two constraints this service has to respect:
 // - NO manual CCCD descriptor: NimBLE auto-creates the CCCD for any
-//   NOTIFY characteristic. The hand-declared one here produced TWO
-//   CCCDs on the characteristic — a GATT violation some centrals
-//   punish with a disconnect.
-// - Encryption is SUPPORTED, not REQUIRED. The SM config
-//   in ble_midi_init() lets Apple pair+encrypt by its own BLE-MIDI
-//   policy — that (not a characteristic flag) is what fixed the
-//   macOS reason-531 drops. Adding _ENC flags to REQUIRE encryption
-//   then broke Android, which connects without pairing (BLE MIDI
-//   Engineer Lite: connects but writes rejected, no MIDI). Plain
-//   READ/WRITE serves both: Apple still encrypts, Android works.
+//   NOTIFY characteristic. Declaring one by hand produces TWO CCCDs
+//   on the characteristic, a GATT violation some centrals punish
+//   with a disconnect.
+// - Encryption is SUPPORTED, not REQUIRED. The SM config in
+//   ble_midi_init() lets Apple pair and encrypt by its own BLE-MIDI
+//   policy, which is what keeps macOS from dropping the link;
+//   a characteristic flag does not. Adding _ENC flags to REQUIRE
+//   encryption breaks Android, which connects without pairing and
+//   then has its writes rejected. Plain READ/WRITE serves both:
+//   Apple still encrypts, Android works.
 static const struct ble_gatt_chr_def gatt_svr_chrs[] = {
     {
         .uuid = &gatt_svr_chr_midi_io_uuid.u,

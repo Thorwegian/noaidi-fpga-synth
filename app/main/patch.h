@@ -14,8 +14,7 @@
 // Fields mirror docs/control_map.md and docs/midi_schema.md. Units
 // are the ENGINE's (log2 UQ4.10 pitch/cutoff/resonance, UQ4.4
 // volume, 8-bit log2 ADSR rates) so rendering is add-not-convert;
-// MIDI scaling happens in the CC handlers, not here. Nothing is
-// final — this is for Thor to tear apart.
+// MIDI scaling happens in the CC handlers, not here.
 
 #pragma once
 #include <stdint.h>
@@ -29,7 +28,7 @@
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum {                     // matches OSC word waveform field
     WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT
-    // future gateware waveforms: #64 noise; #66 a real parabola as its own type
+    // future gateware waveforms: noise, and a real parabola as its own type
 } waveform_t;
 
 // Voice structure — how the 2 oscillators map onto the 8 elements

@@ -24,11 +24,10 @@ patch_t g_patch;
 // the byte) doubles the increment and restores wall-clock times
 // exactly. Saturating: the 16 fastest codes flatten onto the ceiling
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
-// The historical rate byte: mantissa in the low nibble, exponent in the
-// high one. The +0x10 is the #100 half-rate compensation, and it used to
-// cancel against the gateware's SHIFT_BIAS of 11. Both cancellations are
-// folded into adsr_k() below, so the resulting coefficient matches what
-// the old gateware computed -- that equivalence is the test.
+// The rate byte: mantissa in the low nibble, exponent in the high one.
+// The +0x10 is the half-rate compensation, and it cancels against the
+// gateware's SHIFT_BIAS of 11. Both cancellations are folded into
+// adsr_k() below.
 uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 {
     return patch_rate > 0xEF ? 0xFF : (uint8_t)(patch_rate + 0x10);
@@ -83,8 +82,8 @@ void patch_default(patch_t *p)
 {
     memset(p, 0, sizeof(*p));
 
-    // ---- oscillators (both rendered now) ----
-    // Default voice (Thor, 2026-09-08): the "7+1" structure — a
+    // ---- oscillators (both rendered) ----
+    // Default voice: the "7+1" structure — a
     // 7-voice supersaw (osc1) plus a single pure sine (osc2) one
     // octave below. The sine sub fattens the saws without muddying
     // the midrange; the ×7 detune gives the classic supersaw width.
@@ -94,30 +93,28 @@ void patch_default(patch_t *p)
     p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
     p->unison_detune = 6;      // LSB per spread step (supersaw spread)
-    p->unison_stereo = 127;    // full stereo spread = the historical
-                               // hard pan (CC 28 continuous since #98)
+    p->unison_stereo = 127;    // full stereo spread = hard pan
+                               // (CC 28 is continuous)
 
-    // #89 round 2: these scale the ENVELOPE AMOUNT now, not a static send,
-    // so they cannot reproduce round 1 bit-for-bit and the ticket says as
-    // much -- new values by ear. 64 is a starting point: at full amount a
+    // These scale the ENVELOPE AMOUNT rather than a static send, so the
+    // values are set by ear. 64 is a starting point: at full amount a
     // vel-1 note would be silent, at 64 it peaks ~30 dB down.
     p->vel_amp_amt = 64;               // vel -> amp-env amount
     p->vel_mod_amt = 64;               // vel -> MOD-env amount
 
-    p->filter.key_track = 64;          // center = 100% tracking = the
-                                       // historical voice_fc behavior
-                                       // (#91; 0..200% scale since #94)
-    p->filter.resonance = 0x200;       // was RESO (q1 = 1.0)
+    p->filter.key_track = 64;          // center = 100% tracking, on a
+                                       // 0..200% scale
+    p->filter.resonance = 0x200;       // q1 = 1.0
     p->filter.type      = 0;           // LP
-    p->filter.dual      = 1;           // 24 dB/oct default (Thor, 2026-09-08)
+    p->filter.dual      = 1;           // 24 dB/oct default
 
-    // amp env — was ADSR_RATES (0x98/0x20/0xF0/0x28, A,D,S,R)
+    // amp env (A,D,S,R)
     p->env[0].attack  = 0x98;
     p->env[0].decay   = 0x20;
     p->env[0].sustain = 0xF0;
     p->env[0].release = 0x28;
 
-    // MOD env (#87, Thor 2026-09-09): ON by default in the boot patch —
+    // MOD env: ON by default in the boot patch —
     // same initial params as the AMP envelope, sent to the cutoff bus.
     // The filter contour tracks the loudness contour: opens with the
     // attack, settles bright at sustain, closes on release.
@@ -128,11 +125,10 @@ void patch_default(patch_t *p)
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (increment per 48 kHz
-                                       // walk since #100 — was 175
-                                       // at the 96 kHz walk)
+                                       // walk)
     p->lfo[0].depth = 16;
 
-    // LFO 2 (#73, source 1): triangle, ~1 Hz, depth 0 = OFF; default
+    // LFO 2 (source 1): triangle, ~1 Hz, depth 0 = OFF; default
     // destination is PWM (duty bus) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
     p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk

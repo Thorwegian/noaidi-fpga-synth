@@ -4,11 +4,10 @@
 // Copyright (C) 2026  Thor Johannes Hoeyer
 // SPDX-License-Identifier: CERN-OHL-S-2.0
 //
-// Thor (#146): the envelope should be separated out. It is the one
-// instruction with a real state machine, so it earns a module; the LFO is an
-// adder and the SEND is a wire.
+// The envelope is the one instruction with a real state machine, so it
+// earns a module; the LFO is an adder and the SEND is a wire.
 //
-// THE RECURRENCE (#127, Thor: "RC for everything, no more LUTs for ADSR").
+// THE RECURRENCE. RC for everything, and no LUTs for the ADSR.
 // The level is a LINEAR AMPLITUDE in UQ12.14 across [25:0]; full scale
 // 0x400000 is the gain bus's Q4.14 unity (0x4000) carrying eight extra
 // fractional bits so a slow step does not truncate away. Every segment is
@@ -29,14 +28,13 @@
 // and this module multiplies by it and shifts by a FIXED K_SHIFT. It used to
 // decode a mantissa and a variable barrel shift here, and that shifter -- a
 // LUT mux tree feeding a fabric carry chain -- was the design's critical path
-// (#147: it is where the ~8 MHz of headroom went, and placement moved it
-// enough that 2 of 4 seeds glitched audibly). Rate decoding is control-rate
-// work; it belongs on the ESP32, which is where it now lives.
+// -- it costs about 8 MHz of headroom, and placement moves it enough that
+// seeds glitch audibly. Rate decoding is control-rate work; it belongs on
+// the ESP32, which is where it lives.
 //
-// THE ARITHMETIC IS IN THE DSP BLOCKS, EXPLICITLY (#145). Thor: "the CSP is
-// basically just running the [DSP] primitive a whole bunch of times", and
-// "use Gowin's DSP/ALU primitives explicitly ... Yosys will not infer these".
-// That second part is literally true: /opt/oss-cad-suite/share/yosys/gowin/
+// THE ARITHMETIC IS IN THE DSP BLOCKS, EXPLICITLY, because Gowin's DSP and
+// ALU primitives have to be instantiated by hand: yosys will not infer
+// them. /opt/oss-cad-suite/share/yosys/gowin/
 // dsp_map.v carries exactly three techmap rules -- $__MUL9X9, $__MUL18X18,
 // $__MUL36X36 -- and none for a fused cell, so no amount of rewriting the
 // recurrence as an expression will ever produce one. Writing it as `delta * k`
@@ -123,11 +121,10 @@ module adsr #(
     // move the bus by exactly +8 octaves. ENV_FULL is 2^22, so the level
     // shifts right by 6 to land on 2^16 at full scale.
     //
-    // #127 took level[24:8] here, which lands on 0x4000 -- the gain bus's
-    // Q4.14 unity. That went with #127's phase-1 linear-gain work, which is
-    // not on this branch, and against the current bus convention it makes
-    // every envelope a quarter of its intended depth (measured: the bench's
-    // +8 octave envelope moved the bus by 2, not 8).
+    // Taking level[24:8] here would land on 0x4000, the gain bus's
+    // Q4.14 unity. Against this bus convention that makes every
+    // envelope a quarter of its intended depth: a +8 octave envelope
+    // moves the bus by 2.
     assign level_out = $signed({1'b0, level_prev[22:6]});
 
     // ---- which segment this step belongs to -----------------------------
@@ -140,10 +137,9 @@ module adsr #(
     // memory, so a voice stolen mid-release arrives here as AST_REL with a
     // non-zero level and the attack above continues FROM that level instead of
     // from silence -- audibly, an attack that starts part-way up and is much
-    // shorter, because the attack charges toward 1.3x full scale. Thor heard it
-    // playing chords in succession, which is exactly the case that hits it:
-    // each chord's note-offs leave releasing voices for the next chord to
-    // steal. A released envelope whose gate goes high again is a NEW NOTE, so
+    // shorter, because the attack charges toward 1.3x full scale. Chords
+    // played in succession are the case that hits it: each chord's
+    // note-offs leave releasing voices for the next chord to steal. A released envelope whose gate goes high again is a NEW NOTE, so
     // it starts from zero.
     //
     // AST_IDLE does not need this -- the release latches {AST_IDLE, 26'd0} on

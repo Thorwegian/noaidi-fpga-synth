@@ -125,10 +125,9 @@ void app_main(void)
     slider_init();   // panel slider -> CC71 (resonance); 'c' = calibrate
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
 #if CONFIG_NOAIDI_STRESS_TEST
-    stress_test_start();  // synthetic MIDI flood (#70 repro); off by default
+    stress_test_start();  // synthetic MIDI flood; off by default
 #endif
     // NOTE: boot-capture tooling waits for the "play the keyboard"
     // marker - keep the prefix if this line ever changes.
-    printf("play the keyboard\n");   // (the gate-by-gain/clicks caveat
-                                     // predates the ADSR era - #110)
+    printf("play the keyboard\n");
 }

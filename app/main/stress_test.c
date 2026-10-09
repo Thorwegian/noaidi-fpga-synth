@@ -3,7 +3,7 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Publishes the exact abuse Thor hits by hand -- continuous CC sweeps
+// Publishes the abuse a player inflicts by hand -- continuous CC sweeps
 // (voice mode 26, volume 7, mix 24) interleaved with note on/off so the
 // voice pool stays busy with release tails -- straight onto the event
 // bus, the same path midi_in/ble_midi feed. Deterministic repro with no
