@@ -15,7 +15,7 @@ chain: stereo RMS at pan hard-left / center / hard-right.
 Reuses ble_midi_fuzz.py's helpers (persistent bluetoothctl session,
 ALSA port wait, serial capture, disconnect+untrust discipline).
 Audio: ICUSBAUDIO7D LINE IN (hw:1,0) per AGENTS.md, DC removed before
-RMS (#81). Pass criteria: >=15 dB toward the panned side at the
+RMS. Pass criteria: >=15 dB toward the panned side at the
 rails (far side is VOL_MUTEd - the chain floor decides the margin),
 <=3 dB imbalance at center.
 """
@@ -43,7 +43,7 @@ def esp_port():
 
 
 def record_stereo(seconds=1.0):
-    """Return (rms_l_db, rms_r_db), DC-removed (#81)."""
+    """Return (rms_l_db, rms_r_db), DC-removed."""
     rec = subprocess.run(
         ["arecord", "-D", AUDIO_DEV, "-f", "S16_LE", "-r", str(RATE),
          "-c", "2", "-t", "raw", "-q", "-d", str(int(seconds))],

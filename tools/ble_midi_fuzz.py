@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Automated BLE-MIDI stress test for Noaidi (issues #70/#80/#82).
+"""Automated BLE-MIDI stress test for Noaidi.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

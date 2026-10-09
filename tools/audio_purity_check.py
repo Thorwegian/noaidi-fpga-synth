@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audio-chain purity self-check (issue #81).
+"""Audio-chain purity self-check.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

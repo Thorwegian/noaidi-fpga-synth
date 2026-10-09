@@ -3,7 +3,7 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-"""gen_panel.py -- generate the Noaidi Open Stage Control session (#90).
+"""gen_panel.py -- generate the Noaidi Open Stage Control session.
 
 The panel IS the CC map (docs/midi_schema.md) rendered as knobs: each
 entry below is one widget, so extending the schema means adding a line
@@ -27,7 +27,7 @@ TARGET = "midi:noaidi"
 CH = 1
 
 # Widget labels turned out not to render for knobs/faders/switches in
-# v1.31 (buttons and text widgets do - measured on Thor's screen), so
+# v1.31 (buttons and text widgets do), so
 # every control is wrapped with an explicit text caption underneath.
 # The caption's @{ccNN} reference is o-s-c's live-value syntax: the
 # readout updates as the control moves.
@@ -135,18 +135,17 @@ WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}
 
 root_widgets = [
     {
-        # three oscillator subsections sharing one row (Thor: each
-        # oscillator its own subsection)
+        # three oscillator subsections sharing one row, one per
+        # oscillator
         "type": "panel",
         "id": "osc_row",
         "layout": "horizontal",
         "expand": True,
         "widgets": [
             # PITCH/FINE default 64 = center: double-tap is the way
-            # back to unison (Thor 2026-09-10). NOTE: osc2 BOOTS at
-            # -12 (the sine sub), so its Pitch dial reads center until
-            # first touched - the double-tap home wins over boot-state
-            # display, per Thor.
+            # back to unison. NOTE: osc2 BOOTS at -12 (the sine sub),
+            # so its Pitch dial reads center until first touched: the
+            # double-tap home wins over boot-state display.
             section("Oscillator 1", [
                 switch(20, "Wave", WAVES, 0),
                 knob(14, "Pitch", 64, bipolar=True),
@@ -192,7 +191,7 @@ root_widgets = [
                                                     #: 87 ~ boot +2 oct
         # CC 108 (env dest) deliberately absent: stored-only in firmware,
         # cutoff is the sole implemented destination - a knob that
-        # does nothing erodes trust in the panel (Thor, 2026-09-10).
+        # does nothing erodes trust in the panel.
     ]),
     section("LFOs", [
         knob(76, "Vibrato Rate", 64),
@@ -205,22 +204,22 @@ root_widgets = [
                {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 0),
     ]),
     section("Global", [
-        # knobs, not faders (Thor: vertical sliders nearly unusable).
-        # No mod-wheel control here: Thor has it on the physical
-        # keyboard, and wheel→cutoff is a temporary hardwiring anyway —
-        # it becomes a routable per-channel destination (#92 note).
+        # knobs, because vertical sliders are nearly unusable here.
+        # No mod-wheel control: the physical keyboard has it, and
+        # wheel→cutoff is a temporary hardwiring anyway, due to become
+        # a routable per-channel destination.
         knob(7, "Volume", 100),
         knob(10, "Pan", 64, bipolar=True),
-        knob(86, "Vel>Vol", 64),        # #89 r2: amp-env AMOUNT (OB-8 "Vol")
-        knob(87, "Vel>Filt", 64),       # #89 r2: MOD-env AMOUNT (OB-8 "Filt")
+        knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
+        knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
                                         # 0 = velocity OFF, full patch amount
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
     ]),
-    # No virtual keyboard: Thor's physical keyboard covers notes /
-    # velocity / both wheels — the panel exists precisely for the MIDI
-    # the physical keyboard CANNOT send (Thor, 2026-09-10).
+    # No virtual keyboard: the physical keyboard covers notes,
+    # velocity and both wheels. This panel exists precisely for the
+    # MIDI a keyboard CANNOT send.
 ]
 
 session = {

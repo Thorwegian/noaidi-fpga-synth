@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""First-light check for the LED-TOSLINK digital capture path (#101).
+"""First-light check for the LED-TOSLINK digital capture path.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

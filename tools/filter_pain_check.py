@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Filter pain test (#43): measure where high resonance turns to BRRR.
+"""Filter pain test: measure where high resonance turns to BRRR.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

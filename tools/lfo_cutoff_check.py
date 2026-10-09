@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware test: LFO2 -> CUTOFF through the send graph (#92/#98).
+"""Hardware test: LFO2 -> CUTOFF through the send graph.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -135,7 +135,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("PASS: LFO2 contribution relayed through the send graph (#92)")
+    print("PASS: LFO2 contribution relayed through the send graph")
     return 0
 
 

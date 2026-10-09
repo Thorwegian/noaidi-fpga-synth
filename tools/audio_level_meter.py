@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live capture-level meter for the Noaidi audio chain (issue #81).
+"""Live capture-level meter for the Noaidi audio chain.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

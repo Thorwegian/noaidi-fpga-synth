@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resonance clipping onset measurement (issue #63).
+"""Resonance clipping onset measurement.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

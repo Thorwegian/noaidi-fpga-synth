@@ -17,7 +17,7 @@ design class. That disagreement is the whole point of the match.
 
 Capture hygiene per AGENTS.md: CC 120 between steps, every CC the
 measurement depends on is set explicitly, BLE disconnected + untrusted on
-exit (#82).
+exit.
 """
 import struct
 import subprocess

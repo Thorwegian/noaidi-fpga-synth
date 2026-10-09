@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Is the bad corner CLIPPING at all? (#125)
+"""Is the bad corner CLIPPING at all?
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2

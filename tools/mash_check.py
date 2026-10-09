@@ -21,7 +21,7 @@ Sequence:
      each channel's parked constant, and that constant (DC) is within
      4 LSB of zero. The DC tolerance exists because the output tilt's
      truncating integrator parks a ~1-LSB DC after signal decays
-     (#102) - pure DC, inaudible, and NOT a stuck voice. Anything
+ - pure DC, inaudible, and NOT a stuck voice. Anything
      with actual AC energy at the deadline = FAIL, spectrum printed.
 
 CCs excluded from randomization - each would MASK a stuck voice:

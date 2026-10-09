@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BLE reconnect soak test (issue #78: "first reconnect sometimes
+"""BLE reconnect soak test ("first reconnect sometimes
 drops, second is stable").
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
@@ -14,7 +14,7 @@ log.
 
     python3 ble_reconnect_test.py [cycles] [--port /dev/ttyACM0]
 
-Run on the dev host. Always disconnects and untrusts at the end (#82).
+Run on the dev host. Always disconnects and untrusts at the end.
 """
 import argparse
 import subprocess

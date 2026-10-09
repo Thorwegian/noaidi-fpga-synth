@@ -33,7 +33,7 @@ cutoff on the key-tracked base, i.e. on the fundamental.
 
 slope: 24 (default) or 12. Capture hygiene per AGENTS.md: CC 120 between
 steps, every CC the measurement depends on is set explicitly, BLE is
-disconnected and untrusted on exit (#82).
+disconnected and untrusted on exit.
 """
 import struct
 import subprocess

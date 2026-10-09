@@ -3,15 +3,15 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-"""FPGA-in-the-loop harness (#123): the board as the test instrument.
+"""FPGA-in-the-loop harness: the board as the test instrument.
 
 One command does the whole loop — load SRAM, reboot the ESP, stimulate over
 MIDI, capture S/PDIF, assert — so a gateware question gets a silicon-true
 answer in minutes instead of a testbench that cannot see the answer at all.
 
-This exists because #147 was a placement-sensitive fault: 2 of 4 nextpnr seeds
-of the same RTL glitched audibly, every build passed STA and the #128 headroom
-gate comfortably, and no simulation reproduced it. The board found it in an
+This exists because of a placement-sensitive fault: 2 of 4 nextpnr seeds of
+the same RTL glitched audibly, every build passed STA and the headroom gate
+comfortably, and no simulation reproduced it. The board found it in an
 afternoon.
 
     ~/.noaidi-blenv/bin/python3 tools/hil.py probe
@@ -19,7 +19,7 @@ afternoon.
     ~/.noaidi-blenv/bin/python3 tools/hil.py seeds 2 3 4 5
     ~/.noaidi-blenv/bin/python3 tools/hil.py selftest ref_clean.wav ref_bad.wav
 
-THREE RULES THIS ENCODES, each learned the hard way on #147:
+THREE RULES THIS ENCODES, each learned the hard way:
 
 1. RELOADING THE FPGA INVALIDATES THE ESP'S SHADOW IMAGE.
    engine_link keeps `s_image` as a copy of the FPGA's state and elides any
@@ -30,13 +30,13 @@ THREE RULES THIS ENCODES, each learned the hard way on #147:
    reset over the C3's USB-JTAG has left the old app running before.
 
 2. VALIDATE THE METRIC BEFORE TRUSTING IT.
-   Two metrics I wrote during #147 reported faults on provably clean audio, and
-   one printed the worst build in the set as clean because I had hard-coded the
-   fault's frequency band. `selftest` runs the metric against a known-good and
+   A metric can report faults on provably clean audio, and can print the worst
+   build in a set as clean if the fault's frequency band is hard-coded into
+   it. `selftest` runs the metric against a known-good and
    a known-bad capture and refuses to proceed if it cannot separate them.
 
 3. NEVER PANIC BETWEEN NOTES IN A REPRODUCTION.
-   CC120 between notes suppressed #147 entirely and cost hours. The probe plays
+   CC120 between notes suppresses the fault entirely. The probe plays
    the way a person plays: repeated notes, note-offs, default release, no panic.
    It also always sends CC123+CC120 BEFORE dropping BLE, because a note-off
    that races the disconnect strands a voice sounding forever.
@@ -54,7 +54,7 @@ AUDIO_DEV = "hw:1,0"
 ESP_PORT = "/dev/ttyACM0"
 RTL_DIR = "rtl"
 
-# Reference signature, measured on captures Thor confirmed by ear (#147):
+# Reference signature, measured on captures confirmed by ear:
 #   clean    min/mean ~0.40-0.62, nothing above 8.5 Hz in the envelope
 #   faulty   min/mean <0.09, envelope modulation 15-49% deep at 31-58 Hz
 # min/mean and depth are the discriminators. The RATE IS NOT: the two faulty
@@ -65,8 +65,8 @@ FAULT_DEPTH = 0.15
 # A working build plays a held note at roughly -24 dBFS with the default patch.
 # Checked because the fault metric above measures MODULATION and will happily
 # call a silent or 28 dB-quiet synth "clean" -- which it did, on a build whose
-# gateware expected the #145 coefficient format while the ESP was still sending
-# the old nibble rates. Level is a different failure from modulation and needs
+# gateware expected the linear coefficient format while the ESP was sending
+# nibble rates. Level is a different failure from modulation and needs
 # its own assertion.
 LEVEL_NOMINAL_DB = -24.0
 LEVEL_TOLERANCE_DB = 8.0
@@ -139,7 +139,7 @@ def signature(x, hop=96):
     """Envelope signature: (min/mean, depth, rate_hz, rms_db) or None if silent.
 
     hop=96 is 2 ms, so the envelope Nyquist is 250 Hz — comfortably above any
-    modulation seen on #147 (31-58 Hz).
+    modulation this hunts for (31-58 Hz).
     """
     n = (len(x) // hop) * hop
     if n == 0:
@@ -252,7 +252,7 @@ class Synth:
 # ---------------------------------------------------------------- tests
 
 def probe(rounds=6, note=84, secs=5):
-    """The #147 reproduction: repeated notes, no panic between them."""
+    """The reproduction: repeated notes, no panic between them."""
     with Synth() as s:
         time.sleep(2.0)
         print("  control: one note, nothing played before it")
@@ -305,8 +305,8 @@ def selftest(clean_wav, bad_wav):
 
 
 def seeds(seed_list, note=84):
-    """Build each placement seed and test it on the hardware. #147 needed this:
-    2 of 4 seeds of identical RTL were audibly broken."""
+    """Build each placement seed and test it on the hardware: 2 of 4 seeds
+    of identical RTL have been audibly broken."""
     rc = 0
     for sd in seed_list:
         print(f"######## seed {sd} ########")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware test of the type-3 bus source (#44).
+"""Hardware test of the type-3 bus source.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
@@ -148,7 +148,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("PASS: channel -> voice -> element fan-out works on hardware (#44)")
+    print("PASS: channel -> voice -> element fan-out works on hardware")
     return 0
 
 
