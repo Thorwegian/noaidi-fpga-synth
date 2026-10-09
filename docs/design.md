@@ -79,9 +79,9 @@ of parameter mappings); on the software side Sylenth1 and Surge XT.
 - **"A controllable machine"**, the roadmap's stated goal: every
   contribution to the sound — velocity, wheel,
   envelopes, LFOs — becomes a parameter with a true zero, so each can
-  be isolated when testing and nothing is hardwired. "Once I can
-  control how much each contributes, it's easier to pinpoint when
-  ranges are off."
+  be isolated when testing and nothing is hardwired. Once the amount
+  each contributes is controllable, a range that is off can be
+  pinpointed.
 
 - **The overall design goal is a TABLETOP synthesizer**.
 - **The direction: "a virtual analog synth with a massive sound"**.
@@ -357,9 +357,8 @@ bench-verified) milestone. One rung in flight at a time.
    [bus_architecture.md](bus_architecture.md): spec sign-off →
    cutoff-class pilot → all sinks → firmware-routed buses (velocity →
    gain/cutoff, bend → pitch; basic routing before ADSR) →
-   producer sequencer + LFOs → ADSR producers (where note clicks die,
-   absorbing the old smoothing rung's goal) → deferred tier on
-   measured traffic.
+   producer sequencer + LFOs → ADSR producers, which is where note
+   clicks die → deferred tier on measured traffic.
    Still separate: 36-bit summing (bench-verified rung, pending
    approval), per-element SPI read-back (B6 diagnostics candidate).
 5. **Identifier overhaul, some point later**: a

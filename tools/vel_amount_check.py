@@ -25,7 +25,7 @@ import wave
 
 import numpy as np
 
-sys.path.insert(0, "/home/thor/Documents/Code/noaidi-fpga-synth/tools")
+sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
 
 RATE, DEV, NOTE = 48000, "hw:1,0", 60

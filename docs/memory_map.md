@@ -275,7 +275,7 @@ per cell. The FPGA knows nothing of wheels, pedals or CC numbers.
   (4 stages) → 8 cables (≈10 stages) → smoothing (1) → osc LUTs +
   waveform (2) → SVF1 (3) → SVF2 (3) → atten (1) → mix + writeback (1)
   ≈ **27–28 stages**. Span = 256 + K − 1 ≈ 283 slots (~28% of the drum
-  rotation; today 12 stages / 267 slots). The critical path stays the
+  rotation, against 16 stages / 271 slots). The critical path stays the
   SVF combine, so fmax is ~unchanged.
 - BSRAM: ~21–26 blocks of 46 with 8 cables + packed ADSR params. The
   binding constraint is *read-port width* (≈660+ bits read simultaneously
