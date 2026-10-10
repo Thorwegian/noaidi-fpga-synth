@@ -3,7 +3,7 @@
 //
 //------------------------------------------------------------------------
 // tb_spdif_block.sv — decode TWO FULL IEC 60958 BLOCKS (384+ frames)
-// from drum + spdif_tx and check everything a receiver needs:
+// from timebase + spdif_tx and check everything a receiver needs:
 //
 //   1. biphase-mark cells, even parity, every subframe
 //   2. M preamble on left, W on right
@@ -12,8 +12,8 @@
 //      consumer PCM, 96 kHz, 24-bit — identical on both subframes
 //   5. audio payload intact (LSB-first, bits 4..27)
 //
-// The drum is exactly the "counter of 768 per sample" — this bench is
-// the minimal drum→spdif pairing with nothing else in the way.
+// The timebase is exactly the "counter of 768 per sample" — this bench is
+// the minimal timebase→spdif pairing with nothing else in the way.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -34,7 +34,7 @@ module tb_spdif_block;
     logic signed [23:0] ar = 24'sh654321;
     wire  spdif_out;
 
-    // integer cell timebase: /6, reset-aligned with the drum so
+    // integer cell timebase: /6, reset-aligned with the timebase so
     // sample_tick coincides with a cell_tick (768 = 128 x 6)
     logic [2:0] cd;
     always @(posedge clk or negedge rst_n)

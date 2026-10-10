@@ -5,12 +5,12 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S.
+// Audio:  256-partial time-division-multiplexed pipeline → SPDIF + I2S.
 //         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path:
 //         coax for listening AND an LED-TOSLINK tap into the dev
 //         box for bit-perfect capture. The 96 kHz SPDIF is parked
 //         on pin 86.
-// Timing: drum.sv owns every timebase — the sample boundary
+// Timing: timebase.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the SPDIF cell boundary
 //         (6 sysclk = 1 cell), and their half-rate 48 kHz
 //         counterparts — all counted from one reset.
@@ -44,7 +44,7 @@ module top (
     wire rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // Drum — the sole timebase
+    // Timebase — the single source of sample and slot timing
     //----------------------------------------------------------------
     logic       sample_tick, slot_issue, cell_tick;
     logic       sample_tick48, cell_tick48;
@@ -62,7 +62,7 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 256-element pipeline
+    // 256-partial pipeline
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
@@ -109,7 +109,7 @@ module top (
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
     // Midband deliberately: coupling caps in an analog chain
     // attenuate low tones, and 1500 Hz measures flat. Enabled by
-    // bus-address-1023 writes (firmware maps CC 119); replaces the mix
+    // DMEM-address-511 writes (firmware maps CC 119); replaces the mix
     // at BOTH outputs. At 48 kHz capture the tone lands exactly on
     // bin 32 of a 1024-point FFT — coherent, no window, harmonics on
     // exact bins (64, 96, ...). The purity criterion: any harmonic
@@ -133,7 +133,7 @@ module top (
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
     //----------------------------------------------------------------
-    // Output tilt (output_lpf.sv): one-pole 6 dB/oct lowpass on the
+    // Output low-pass (output_lpf.sv): one-pole 6 dB/oct lowpass on the
     // mix, corner ≈ 2 kHz — the ear-tuned warm stop. Error
     // feedback inside the module makes it settle to EXACT zero on
     // silence. Sits BEFORE the test-tone mux so the purity
@@ -179,7 +179,7 @@ module top (
     // hence the second transmitter instead of a tap on the 96 kHz one.
     // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
     // sits at 48 kHz — content near that Nyquist (24 kHz) is already
-    // crushed by the 2 kHz master tilt, so a longer filter is not
+    // crushed by the 2 kHz output low-pass, so a longer filter is not
     // warranted. sample_tick48 coincides with a sample_tick, so
     // out_left/out_right below are the very values the 96 kHz
     // transmitter latches on the same edge: the held register is the

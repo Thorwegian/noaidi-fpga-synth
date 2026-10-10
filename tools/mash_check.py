@@ -20,7 +20,7 @@ Sequence:
   5. PASS = the capture reaches AC-SILENCE: zero samples deviate from
      each channel's parked constant, and that constant (DC) is within
      a raw value of 4 of zero. The DC tolerance exists because the output
-     tilt's truncating integrator parks a DC of ~raw 1 after signal decays
+     low-pass's truncating integrator parks a DC of ~raw 1 after signal decays
  - pure DC, inaudible, and NOT a stuck voice. Anything
      with actual AC energy at the deadline = FAIL, spectrum printed.
 
@@ -140,7 +140,7 @@ def capture_probe(secs=1):
     """Return (rms_db, ac_nonzero, (dc_l, dc_r)) from a short capture.
 
     ac_nonzero counts samples that deviate from their channel's median
-    - the parked-DC-tolerant silence metric: the output tilt parks a
+    - the parked-DC-tolerant silence metric: the output low-pass parks a
     DC of ~raw 1, and that is not a stuck voice."""
     subprocess.run(["amixer", "-c", "1", "cset", "numid=16", "2"],
                    capture_output=True)
@@ -283,7 +283,7 @@ def main():
               f"AC-deviating {ac}  DC {dcs}")
         if ac == 0 and max(abs(dcs[0]), abs(dcs[1])) <= 4:
             print(f"RESULT: PASS - AC-silent after mash (seed {seed}; "
-                  f"parked DC {dcs} is the known tilt residual)")
+                  f"parked DC {dcs} is the known output low-pass residual)")
             reboot_esp_clean()   # never leave the patch scrambled
             return 0
         time.sleep(5)

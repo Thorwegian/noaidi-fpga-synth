@@ -25,7 +25,7 @@ module tb_prog_boot;
         end else
             $display("boot image playing, peak=%0d", peak);
 
-        // mute all into the shadow, flip, then mute the other bank too
+        // mute all into the shadow, flip, then mute the other page too
         for (v = 0; v < 256; v = v + 1)
             spi_word_write(partial_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         flip;

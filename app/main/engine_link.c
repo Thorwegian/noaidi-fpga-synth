@@ -42,11 +42,11 @@ static uint32_t s_param_image[ENGINE_NUM_PARTIALS][ENGINE_WORDS_PER_PARTIAL];
 
 #define DMEM_BASE_ADDR      0x0800
 #define DMEM_QUEUE_LEN      128    // init writes 32 envelope floors +
-                                  // 4 global buses in one burst
+                                  // 4 global DMEM words in one burst
 #define IMEM_BASE_ADDR     0x0100
 #define IMEM_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
                                   // + 32 MOD envs + 32 amp ADSRs (4
-                                  // words each) + 32 fan-out sources
+                                  // words each) + 32 MAC instructions
                                   // (2 words) = 324 pushes before the
                                   // 1 kHz tick can drain. A 256-deep
                                   // queue drops the tail = the last
@@ -62,7 +62,7 @@ typedef struct {
 
 typedef struct {
     uint8_t  entry;
-    uint8_t  word;      // 0 CFG, 1 RATES, 2 DEPTH, 3 RATES2
+    uint8_t  word;      // 0 CFG, 1 RATES, 2 COEF, 3 RATES2
     uint32_t value;
 } imem_cmd_t;
 
@@ -85,7 +85,7 @@ static inline void mark_dirty(int partial, int word)
     s_dirty_now[bit >> 5] |= 1u << (bit & 31);
 }
 
-// Write every image word to the current shadow bank. Boot-time only.
+// Write every image word to the current shadow page. Boot-time only.
 static void write_full_image(void)
 {
     for (int e = 0; e < ENGINE_NUM_PARTIALS; e++)
@@ -108,18 +108,17 @@ static void engine_task(void *arg)
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         int64_t wake0 = esp_timer_get_time();
 
-        // Live bus writes first: no banking, no swap — straight out.
+        // Live DMEM writes first: no paging, no swap — straight out.
         // No pacing needed: at 10 MHz one SPI word occupies the wire
         // for 5.6 us, longer than the mailbox's worst-case commit
         // wait (~3.6 us), so back-to-back writes cannot overrun the
-        // 1-deep mailbox. (The stuck notes were a gateware
-        // pending-clear bug, not an overrun.)
+        // 1-deep mailbox.
         dmem_cmd_t bc;
         while (xQueueReceive(s_dmem_queue, &bc, 0) == pdTRUE)
             fpga_word_write(DMEM_BASE_ADDR + bc.dmem_addr, bc.value & 0x3FFFF);
 
-        // Drain the queues into the images (elements + producers —
-        // both banked, both covered by the same swap).
+        // Drain the queues into the images (partials + instructions —
+        // both paged, both covered by the same swap).
         bool changed = false;
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
             if (cmd.word >= ENGINE_WORDS_PER_PARTIAL)
@@ -163,7 +162,7 @@ static void engine_task(void *arg)
             continue;
 
         // Write dirty_now ∪ dirty_prev to the shadow, then swap. Burst
-        // the WHOLE element row (7 consecutive words, one CS-framed
+        // the WHOLE partial row (7 consecutive words, one CS-framed
         // transaction) whenever any of its words changed. The ESP-IDF
         // SPI-master driver cost is per-TRANSACTION (bus lock, ISR,
         // semaphore), so sending word by word would turn a re-render
@@ -191,7 +190,7 @@ static void engine_task(void *arg)
                 bits &= bits - 1;
                 int idx = i * 32 + b;              // entry*4 + word
                 // four words per entry and a stride of four, so the
-                // producer address IS the bit index
+                // instruction address IS the bit index
                 fpga_word_write(IMEM_BASE_ADDR + idx,
                                 s_imem_image[idx / 4][idx % 4]);
             }
@@ -216,9 +215,9 @@ static void engine_task(void *arg)
 
 void engine_link_init(void)
 {
-    // Image: every element gated off (and gain-muted for belt and
+    // Image: every partial gated off (and gain-muted for belt and
     // braces at boot), benign params otherwise. ALL pointers start on
-    // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
+    // DMEM word 0 (the zero word) — voice_alloc owns the plan and repoints
     // at note-on. The wheel rides DMEM_CH_CUT.
     for (int e = 0; e < ENGINE_NUM_PARTIALS; e++) {
         s_param_image[e][0] = 0;
@@ -226,16 +225,16 @@ void engine_link_init(void)
         s_param_image[e][2] = 0;            // Butterworth, fc = 0
         s_param_image[e][3] = GAIN_WORD_MUTE;
         s_param_image[e][4] = 0;            // GATE off
-        s_param_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
+        s_param_image[e][5] = 0;            // PTRS0: all → DMEM 0 (none);
         s_param_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
     }
 
-    // Both banks get the muted image before anything can play.
+    // Both pages get the muted image before anything can play.
     write_full_image();
     fpga_swap();
     write_full_image();
     fpga_swap();
-    ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_PARTIALS);
+    ESP_LOGI(TAG, "both pages muted (%d partials)", ENGINE_NUM_PARTIALS);
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
     s_dmem_queue = xQueueCreate(DMEM_QUEUE_LEN, sizeof(dmem_cmd_t));

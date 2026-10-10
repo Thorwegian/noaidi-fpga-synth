@@ -5,7 +5,7 @@
 #   License: CERN-OHL-S v2
 #
 # Writes (into rtl/dsp/):
-#   boot_p0.hex .. boot_p3.hex — per-element parameter RAM init
+#   boot_p0.hex .. boot_p3.hex — per-partial parameter RAM init
 #
 # (The attenuation LUT lives in gen_att_lut.py — it is a fixed synth
 # resource, not test-patch data.)

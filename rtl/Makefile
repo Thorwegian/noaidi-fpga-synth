@@ -7,7 +7,7 @@ export PATH := /opt/oss-cad-suite/bin:$(PATH)
 # failed synthesis instead of silently routing a stale netlist.
 SHELL := /bin/bash
 
-# Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
+# Mainline: 256-partial pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
@@ -200,7 +200,7 @@ obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF)
 sim-spdif: obj_dir/tb_spdif_block/sim
 	$(call run_sim,$<,tb/sim-spdif.out)
 
-# 48 kHz (primary) transmitter: drum's half-rate ticks + CS_FREQ
+# 48 kHz (primary) transmitter: timebase's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
 obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
@@ -226,9 +226,9 @@ sim-prog-bus: obj_dir/tb_prog_bus/sim
 sim-prog-sources: obj_dir/tb_prog_sources/sim
 	$(call run_sim,$<,tb/sim-prog-sources.out)
 
-# The ping-pong bus generation. Timing and resource numbers
-# cannot tell a right-generation read from a wrong one, and hardware
-# cannot see the bus at all -- these invariants only exist in sim.
+# The ping-pong DMEM page. Timing and resource numbers
+# cannot tell a right-page read from a wrong one, and hardware
+# cannot see DMEM at all -- these invariants only exist in sim.
 sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
 	$(call run_sim,$<,tb/sim-prog-pingpong.out)
 
@@ -277,7 +277,7 @@ obj_dir/tb_svf_stability/sim: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: obj_dir/tb_svf_stability/sim
 	$(call run_sim,$<,tb/sim-stab.out)
 
-# Output tilt error feedback: exact-zero convergence on
+# Output low-pass error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_OUTPUT_LPF = tb/tb_output_lpf.sv
 obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv $(TB_OUTPUT_LPF) Makefile

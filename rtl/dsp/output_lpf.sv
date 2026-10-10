@@ -1,5 +1,5 @@
-// output_lpf.sv — one-pole 6 dB/oct lowpass on the mix (the master
-// "tilt")
+// output_lpf.sv — one-pole 6 dB/oct lowpass on the mix (the output
+// low-pass)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2

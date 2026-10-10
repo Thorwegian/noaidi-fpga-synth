@@ -4,7 +4,7 @@ A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
 musical thinking. Playable today: 32-voice polyphony, 8 detuned
-unison elements per voice, per-voice ADSR amp envelopes in gateware,
+unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 48 kHz SPDIF (primary) and 96 kHz I2S.
 
 ## License
@@ -16,24 +16,26 @@ unison elements per voice, per-voice ADSR amp envelopes in gateware,
 ```
 MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
             (MIDI parse, voice        └─ 256 time-multiplexed
-             allocation, CC/SysEx        elements: osc → dual SVF →
+             allocation, CC/SysEx        partials: osc → 2× SVF →
              mapping — "firmware")       stereo gain, modulation
-                                         buses + source table
+                                         DMEM + instruction table
                                          ("gateware")
                                          ──► SPDIF @ 48 kHz + I2S @ 96 kHz
 ```
 
-- **Gateware** (SystemVerilog, `rtl/`): a 768-slot pipeline at
-  73.728 MHz (= 768 × 96 kHz) computes 256 elements per sample —
-  oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. Parameters live in ping-pong BSRAM banks written over
-  SPI; dynamic values ride **modulation buses** written by a
-  256-entry **source table** (LFOs, ADSRs, sends), run by the CSP
-  independently of the drum schedule, every entry every sample.
-  See [docs/bus_architecture.md](docs/bus_architecture.md).
+- **Gateware** (SystemVerilog, `rtl/`): a time-division-multiplexed
+  partial pipeline on a 768-slot timebase at 73.728 MHz
+  (= 768 × 96 kHz) computes 256 partials per sample —
+  oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. Parameters live in paged (ping-pong) BSRAM written over
+  SPI; dynamic values ride **DMEM words** written by a
+  256-entry **instruction table** (LFOs, ADSRs, MAC instructions), run
+  by the CSP independently of the partial pipeline's issue slots, every
+  instruction every sample.
+  See [docs/dmem_architecture.md](docs/dmem_architecture.md).
 - **Firmware** (ESP-IDF C, `app/`): MIDI in on UART1, an event bus,
-  a voice allocator (a voice = 8 detuned elements, keystroke-instance
+  a voice allocator (a voice = 8 detuned partials, keystroke-instance
   lifecycle), and the engine link — sole owner of the SPI bus and the
-  bank-swap discipline. See
+  page-swap discipline. See
   [docs/firmware_architecture.md](docs/firmware_architecture.md).
 - The FPGA has no concept of notes, MIDI or CCs. Every musical
   decision is firmware. Control plane ABI:

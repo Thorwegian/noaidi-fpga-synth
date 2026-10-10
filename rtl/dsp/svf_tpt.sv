@@ -4,14 +4,14 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Replaces the Chamberlin recurrence with the topology-preserving
+// A topology-preserving
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
 // stable under cutoff modulation at resonance. Streaming,
-// one element per cycle, fully pipelined; one multiply OR the adds per
+// one partial per cycle, fully pipelined; one multiply OR the adds per
 // stage (the silicon timing rule, see partial_pipeline.sv). Fixed-point
 // locked.
 //
-// Coefficients (per element):
+// Coefficients (per partial):
 //   g  = pi*fc/fs = K/2 = in_k >>> 1     (Q8.28, full width -> pitch)
 //   R2 = 1/Q = in_q1                      (Q2.16; R2_28 = q1 <<< 12)
 //   D  = 1 + R2*g + g*g                   (Q.16, computed with a Q2.16 g)
@@ -23,7 +23,7 @@
 //   gyB = (g*yBP) >>> 28 ;  yLP = gyB + s2 ;  s2' = yLP + gyB
 //   out = filter_mode==1 ? yBP : filter_mode==2 ? yHP : yLP   (BP / HP / LP)
 // Section 1 input = in_osc <<< 12 (Q2.16 -> Q8.28). Section 2 input =
-// sat_q414(section 1 out) <<< 14. Element out = dual ? section 2 : section 1
+// sat_q414(section 1 out) <<< 14. Partial out = cascade ? section 2 : section 1
 // (Q4.14).
 //
 // Latency (in_* -> out_*): 1 (input) + 2 (coeff) + 7 (section 1) + 7 (section 2)
@@ -338,7 +338,7 @@ module svf_tpt #(
 
     // ========================== SECTION 2 ===============================
     // Recompute g/R2/h? No -- they were consumed; section 2 needs g, R2, h too.
-    // They are the SAME per element, so carry them. To keep the carry
+    // They are the SAME per partial, so carry them. To keep the carry
     // narrow, section 2 re-derives nothing: g/gR2/h are threaded from CB via a
     // parallel delay line matched to section 1's 7-stage latency.
     localparam int SEC1_LAT = 7;

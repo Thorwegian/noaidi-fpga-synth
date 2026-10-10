@@ -3,8 +3,8 @@
 //
 //------------------------------------------------------------------------
 // tb_prog_bus.sv — split bench C: GATE semantics, the B1
-// bus pilot (live cutoff bus, click-free sweep), and the B2 sink
-// classes (pitch and gain buses). Preamble rebuilds the chord state
+// DMEM pilot (live cutoff DMEM word, click-free sweep), and the B2 sink
+// classes (pitch and gain DMEM words). Preamble rebuilds the chord state
 // the gate test needs.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -37,7 +37,7 @@ module tb_prog_bus;
         end else
             $display("gate off: silent, gains untouched (peak=%0d)", peak);
 
-        for (v = 0; v < 8; v = v + 1)      // regate voice 0's elements
+        for (v = 0; v < 8; v = v + 1)      // regate voice 0's partials
             spi_word_write(partial_addr(v, W_GATE), 32'h00000001);
         flip;
         for (v = 0; v < 8; v = v + 1)
@@ -50,8 +50,8 @@ module tb_prog_bus;
         end else
             $display("gate on: sound restored (peak=%0d)", peak);
 
-        // Bus pilot (B1): elements 0-7 sound voice 0's C4. Point
-        // their cutoff at bus 1, drive the base live (no swaps).
+        // DMEM pilot (B1): partials 0-7 sound voice 0's C4. Point
+        // their cutoff at DMEM word 1, drive the base live (no swaps).
         for (v = 0; v < 8; v = v + 1)
             spi_word_write(partial_addr(v, W_PTRS0), PTRS0_CUT_DMEM1);
         flip;
@@ -93,8 +93,8 @@ module tb_prog_bus;
             errors = errors + 1;
         end
 
-        // B2: remaining sinks — undetuned C4 sine on elements 0-7,
-        // pitch pointer to bus 2, gains to bus 3.
+        // B2: remaining sinks — undetuned C4 sine on partials 0-7,
+        // pitch pointer to DMEM word 2, gains to DMEM word 3.
         spi_word_write(dmem_addr(1), 32'h00000000);
         for (v = 0; v < 8; v = v + 1) begin
             spi_word_write(partial_addr(v, W_OSC),   OSC_SINE_C4);
@@ -124,7 +124,7 @@ module tb_prog_bus;
         spi_word_write(dmem_addr(2), 32'h00000000); // pitch back
 
         spi_word_write(dmem_addr(3), OFFS_MINUS_8OCT); // -48 dB (volume
-                                                      // bus: negative =
+                                                      // DMEM: negative =
                                                       // quieter)
         observe(60);
         observe(400);

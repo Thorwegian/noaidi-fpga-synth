@@ -78,7 +78,7 @@ module spi_slave_regs #(
     input  logic                      mosi,
     output logic                      miso,
 
-    // ---- drum side ----
+    // ---- timebase side ----
     input  logic                      sysclk,
     input  logic                      rst_n,
     input  logic [$clog2(NWORDS)-1:0] read_addr,
@@ -258,7 +258,7 @@ module spi_slave_regs #(
     assign miso = cs ? 1'b0 : tx_sh[7];
 
     //--------------------------------------------------------------------
-    // Read port (sysclk / drum domain)
+    // Read port (sysclk / timebase domain)
     //
     // Synchronous reset only — an async one here would be harmless for
     // read_data itself, but keeping the whole file to one convention

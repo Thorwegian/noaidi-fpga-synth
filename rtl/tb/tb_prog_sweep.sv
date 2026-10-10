@@ -3,7 +3,7 @@
 //
 //------------------------------------------------------------------------
 // tb_prog_sweep.sv — split bench B: the click hunt
-// (cutoff sweep with bank flips on a sine) and the chord-retrigger
+// (cutoff sweep with page flips on a sine) and the chord-retrigger
 // stress. The longest of the four split benches.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -42,7 +42,7 @@ module tb_prog_sweep;
         end
 
         // chord stress — the firmware's exact write pattern: 4 voices
-        // x 8 saw elements, church-organ detune, hard-panned,
+        // x 8 saw partials, church-organ detune, hard-panned,
         // retriggered repeatedly. Screaming = sustained near-clip.
         spi_word_write(partial_addr(0, W_GAIN), GAIN_MUTE_BOTH);
         flip; spi_word_write(partial_addr(0, W_GAIN), GAIN_MUTE_BOTH); flip;

@@ -9,7 +9,7 @@
 # by D's fractional bits (the integer part is always 1): no normalize, no
 # Newton iteration. This replaces an iterative reciprocal with one BSRAM
 # read, in the same "precompute the correction into a LUT" spirit as the
-# K / q1 / phase / att tables.
+# svf_fc / q1 / phase / att tables.
 #
 # 256 entries, mid-tread: entry i is 1/D at D = 1 + (i+0.5)/256, stored
 # UQ0.16 (4 hex digits). D > 1 always (mid-tread), so h < 1 and fits 16

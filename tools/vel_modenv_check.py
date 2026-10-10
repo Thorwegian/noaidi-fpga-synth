@@ -117,7 +117,7 @@ def main():
             print("    -> PASS: velocity scales the MOD envelope's excursion, "
                   "and does not when the amount is 0")
         else:
-            print("    -> FAIL: CC 87 is not changing the filter envelope's "
+            print("    -> FAIL: CC 87 is not changing the MOD envelope's "
                   "velocity response")
             rc = 1
 

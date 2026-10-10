@@ -5,11 +5,11 @@
 // License: CERN-OHL-S v2
 //
 // The envelope is the one instruction with a real state machine, so it
-// earns a module; the LFO is an adder and the SEND is a wire.
+// earns a module; the LFO is an adder and the MAC is a wire.
 //
 // THE RECURRENCE. RC for everything, and no LUTs for the ADSR.
 // The level is a LINEAR AMPLITUDE in UQ4.22 across [25:0]; full scale
-// 0x400000 is the gain bus's Q4.14 unity (0x4000) carrying eight extra
+// 0x400000 is the gain DMEM word's Q4.14 unity (0x4000) carrying eight extra
 // fractional bits so a slow step does not truncate away. Every segment is
 // the same recurrence,
 //
@@ -25,12 +25,10 @@
 // attack nobody wants.
 //
 // RATES ARRIVE AS COEFFICIENTS. Firmware sends an 18-bit k per segment
-// and this module multiplies by it and shifts by a FIXED K_SHIFT. It used to
-// decode a mantissa and a variable barrel shift here, and that shifter -- a
-// LUT mux tree feeding a fabric carry chain -- was the design's critical path
-// -- it costs about 8 MHz of headroom, and placement moves it enough that
-// seeds glitch audibly. Rate decoding is control-rate work; it belongs on
-// the ESP32, which is where it lives.
+// and this module multiplies by it and shifts by a FIXED K_SHIFT. Decoding a
+// mantissa with a variable barrel shift here would put a LUT mux tree in
+// front of a fabric carry chain on the critical path, costing about 8 MHz of
+// headroom. Rate decoding is control-rate work, so it lives on the ESP32.
 //
 // THE ARITHMETIC IS IN THE DSP BLOCKS, EXPLICITLY, because Gowin's DSP and
 // ALU primitives have to be instantiated by hand: yosys will not infer
@@ -81,7 +79,7 @@ module adsr #(
     // presented together, registered by the caller
     input  wire        step_en,      // advance this envelope now
     input  wire [27:0] state_in,     // {stage[1:0], level[25:0]}
-    input  wire        gate,         // watched bus level > 0 = held
+    input  wire        gate,         // watched DMEM word level > 0 = held
     input  wire [31:0] rates,        // kA and the low 14 bits of kD
     input  wire [31:0] rates2,       // the rest of kD, then kR and sustain
 
@@ -113,15 +111,15 @@ module adsr #(
     wire [1:0]  stage_prev = state_in[27:26];
     wire [25:0] level_prev = state_in[25:0];
 
-    // The contribution. The caller computes (operand * DEPTH) >>> 16, so
+    // The contribution. The caller computes (operand * COEF) >>> 16, so
     // "unity" for an operand is 0x10000 -- a depth of +8 octaves must then
-    // move the bus by exactly +8 octaves. ENV_FULL is 2^22, so the level
+    // move the DMEM word by exactly +8 octaves. ENV_FULL is 2^22, so the level
     // shifts right by 6 to land on 2^16 at full scale.
     //
-    // Taking level[24:8] here would land on 0x4000, the gain bus's
-    // Q4.14 unity. Against this bus convention that makes every
+    // Taking level[24:8] here would land on 0x4000, the gain DMEM word's
+    // Q4.14 unity. Against this DMEM convention that makes every
     // envelope a quarter of its intended depth: a +8 octave envelope
-    // moves the bus by 2.
+    // moves the DMEM word by 2.
     assign level_out = $signed({1'b0, level_prev[22:6]});
 
     // ---- which segment this step belongs to -----------------------------

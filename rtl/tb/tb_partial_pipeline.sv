@@ -1,13 +1,13 @@
 //--------------------------------------------------------------------
-// tb_partial_pipeline.sv — 256-element SCMO pipeline testbench
+// tb_partial_pipeline.sv — 256-partial TDM pipeline testbench
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Checks:
-//   1. drum cadence: sample_tick every 768 cycles, high 1 cycle
-//   2. voice span: exactly 256 voices enter per sample period
-//   3. oscillator: per-voice phase advance == LUT delta each period
+//   1. timebase cadence: sample_tick every 768 cycles, high 1 cycle
+//   2. partial span: exactly 256 partials enter per sample period
+//   3. oscillator: per-partial phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
 //   5. attenuation: s10_out == (s9_sample * lin) >>> 16, exact
 //   6. mixer: mix_left/right == sat24(sum of s10 outputs << 10)
@@ -147,8 +147,8 @@ module tb_partial_pipeline;
         prev_s9_sample  = $signed(u_pipe.s9_sample);
         prev_s9_atten_l     = u_pipe.s9_atten_l;
 
-        // drum cadence + span accounting at the sample boundary
-        // (guard with rst_n: the drum sits at slot 0 while held in reset)
+        // timebase cadence + span accounting at the sample boundary
+        // (guard with rst_n: the timebase sits at slot 0 while held in reset)
         if (sample_tick && rst_n) begin
             if (slot != 0) begin
                 $display("FAIL tick: sample_tick with slot=%0d", slot);

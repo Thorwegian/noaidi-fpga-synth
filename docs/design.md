@@ -4,61 +4,62 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 The single reference for the synth's architecture. The SPI/BSRAM
-control plane and per-element words are detailed in
+control plane and per-partial words are detailed in
 [memory_map.md](memory_map.md), the modulation model in
-[bus_architecture.md](bus_architecture.md). For numeric constants the
+[dmem_architecture.md](dmem_architecture.md). For numeric constants the
 code is the source of truth: `rtl/synth_pkg.sv` and the generators in
 `scripts/`.
 
 ## Terminology
 
-- **Element** — what the FPGA *generates*: one oscillator→filter→gain
+- **Partial** — what the FPGA *generates*: one oscillator→filter→gain
   sound unit. The FPGA has 256 of them and no opinion about how they
   are used.
-- **Lane** — how it generates them, technically: one of 256
-  time-multiplexed passes through the drum's pipeline. One lane
-  computes one element; "lane" speaks about hardware, "element" about
-  sound.
-- **Voice** — a firmware-side *grouping* of elements (e.g. 8 detuned
-  elements sounding one keystroke). Grouping is entirely the ESP32's
+- **Issue slot** — how it generates them, technically: one of the 256
+  time slots per sample period in which a partial enters the partial
+  pipeline (`slot_issue`). One issue slot computes one partial; "issue
+  slot" speaks about hardware, "partial" about sound.
+- **Voice** — a firmware-side *grouping* of partials (e.g. 8 detuned
+  partials sounding one keystroke). Grouping is entirely the ESP32's
   business; a voice is one possible grouping, not the only one.
 - The user's scope of action via MIDI/control surfaces is **not yet
   nailed down** — firmware vocabulary above voice level stays open.
 - **Scope ladder**:
   - **Global** — fans out to all channels (whole synth).
   - **Channel** — fans out to all voices on one channel.
-  - **Voice** — fans out to all elements on one voice.
+  - **Voice** — fans out to all partials on one voice.
 
   Each channel is its own little synth; channels just happen to share
-  certain resources. NOTHING in the bus fabric is Global by intent:
-  every bus named "global" (the resonance bus, the duty bus, the bend
-  bus, ...) is a CHANNEL bus that coincides with global scope while
+  certain resources. NOTHING in DMEM is Global by intent:
+  every DMEM word named "global" (the resonance word, the duty word,
+  the bend word, ...) is a CHANNEL word that coincides with global scope while
   exactly one channel exists.
-- **Source / sink is the couple**: things that write buses are
-  SOURCES; the parameters that read buses are SINKS. Code identifiers
-  (`ENGINE_NUM_INSTR`, `engine_link_imem_write`, ...) spell
-  this `prod`; docs use source/sink and quote code names only as
-  code.
+- **Source / sink is the couple**: things that write DMEM words are
+  SOURCES; the parameters that read DMEM words are SINKS. Code
+  identifiers name the writers by their place in instruction memory
+  (`ENGINE_NUM_INSTR`, `engine_link_imem_write`, ...); docs use
+  source/sink for the signal roles and quote code names only as code.
 - **The full terminal triad — source / sink (drain) / gate**:
   source/sink is FET source/drain, and
   the analogy completes with the GATE — a control input that steers
   a source's output without its signal entering the sum. The ADSR's
-  gate-bus read is a gate terminal, making the ADSR a *gated
+  gate-DMEM-word read is a gate terminal, making the ADSR a *gated
   generator*, not a processor.
 - **Generators vs processors**:
   GENERATORS output signal without signal inputs (LFO: no inputs;
   ADSR: one gate input only). PROCESSORS take signal in and put
-  signal out. The first processor is the **SEND** (opcode `0xD`) —
-  the mixing-console aux send: taps a bus's signal, applies a level
-  (DEPTH; sign = polarity flip), routes into another bus's sum.
-  C = A·x + B·y is two sends sharing a target bus.
-- **The fabric IS a node graph**: a bus
+  signal out. The first processor is the **MAC** instruction (opcode `0xD`)
+  — multiply-accumulate, like a mixing-console aux send: it taps a
+  DMEM word's signal, multiplies it by a coefficient (COEF; sign =
+  polarity flip), and accumulates it into another DMEM word's sum.
+  C = A·x + B·y is two MAC instructions sharing a target DMEM word.
+- **The fabric IS a node graph**: a DMEM word
   is a processor with many sinks summed to one source; the instruction
   table is a topological sort (the allocator owns the order), one
   evaluation pass per sample; "no cycles, ever" keeps it a DAG. The
-  hardware bus/processor distinction is an optimization of the
-  common node shape. The bus-sum RAM makes the graph's edges real:
-  sends read true output sums, not firmware bases.
+  hardware DMEM/processor distinction is an optimization of the
+  common node shape. The DMEM-sum RAM makes the graph's edges real:
+  MAC instructions read true DMEM sums, not firmware bases.
 - "Patch" means the active sound (`patch_t` in firmware); it is not
   used for FPGA parameter words, which are all live. "Patch panel"
   survives only as the CV-routing metaphor.
@@ -140,7 +141,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 - **ESP32-C3**: MIDI (UART1, 31250 baud), future display, and every
   *musical* decision — voice allocation, unison grouping, CC mapping.
   Talks to the FPGA as SPI master (measured clean to 40 MHz).
-- **Tang Nano 20K**: a dumb-but-fast 256-element synthesis engine. It has
+- **Tang Nano 20K**: a dumb-but-fast 256-partial synthesis engine. It has
   no concept of notes, MIDI or CCs.
 - **Audio outputs: the 48 kHz S/PDIF on pin 27
   is THE PRIMARY AUDIO PATH** — one pin, two sinks: the coax (through
@@ -151,7 +152,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   **Everything inside the FPGA runs at 96 kHz**; only this output tap
   decimates by 2, currently with pair averaging (a 2-tap boxcar,
   null at 48 kHz). Its stopband is shallow, so 20–28 kHz content
-  folds down attenuated mainly by the 2 kHz master tilt; a
+  folds down attenuated mainly by the 2 kHz output low-pass; a
   windowed-sinc / Lanczos polyphase decimator is the acknowledged
   upgrade, **gated on a listening verdict**. The 96 kHz S/PDIF is
   parked on header pin 86, unwired — a future bit-perfect high-rate
@@ -176,11 +177,8 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   ~500 idle slots per sample.
 - **A gateware PLL is never a valid workaround.** A wrong-frequency
   pin 10 means the clock chip wasn't programmed (or lost its `-s`) —
-  fix the board setup, not the gateware. (An earlier
-  crystal+rPLL+DDS fallback was removed; it lives only in git
-  history.)
-- **The drum is the sole timebase**: one 768-slot counter yields the
-  sample tick, the 256 element-entry slots, the SPDIF cell tick
+  fix the board setup, not the gateware.
+- **One timebase**: one 768-slot counter (`timebase.sv`) yields the sample tick, the 256 issue slots, the SPDIF cell tick
   (every 6 slots; 768 = 128 cells × 6), and their
   half-rate twins for the 48 kHz output (sample every 1536 sysclk,
   cell every 12; same counters, so the 48 kHz frame boundary sits on
@@ -191,39 +189,38 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 | Quantity | Format | Notes |
 |---|---|---|
-| Audio transport | Q4.14 (18-bit) | Gowin DSP register width. The filter-output clamp of ±8.0 gives +12 dB of resonance headroom; zero-resonance loudness is unchanged (the mix shift compensates); 14 fraction bits ≈ 86 dB per-element SNR, under the analog floor |
+| Audio transport | Q4.14 (18-bit) | Gowin DSP register width. The filter-output clamp of ±8.0 gives +12 dB of resonance headroom; zero-resonance loudness is unchanged (the mix shift compensates); 14 fraction bits ≈ 86 dB per-partial SNR, under the analog floor |
 | Filter states | Q8.28 (36-bit) | Gowin DSP register width |
-| Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed SVF-K LUT), recycled per octave via barrel shifts |
+| Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed cutoff-coefficient LUT `svf_fc_lut`), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (inverted the code to volume; the binary point stays at UQ4.4 — the 0.375 dB grid is the ear-proven resolution, answering the parked question by ratification) |
+| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (the 0.375 dB grid is the ear-proven resolution) |
 | Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the patch/CC; decoded in firmware (`patch.c`) to an 18-bit linear RC coefficient k that the gateware multiplies by (`adsr.sv`) |
 
-## The drum — SCMO pipeline
+## The partial pipeline
 
-SCMO ("schmoe" — Single Clock Multiple Operation, i.e. pipelining),
-named for the tilted head drum of a VCR: many operations sweep past a
-single fast mechanism. 768 sysclk per sample; an element enters the
-pipeline on each of slots 0–255.
+The partial pipeline is a time-division-multiplexed (TDM) pipeline:
+one datapath, 256 partials, one per clock. 768 sysclk per sample
+period; a partial enters the pipeline on each of time slots 0–255.
 
-**Element budget**: 32 voices of polyphony × up to 8 elements per
+**Partial budget**: 32 voices of polyphony × up to 8 partials per
 keystroke = 256. The pipeline knows nothing of that grouping — 256
-interchangeable elements; unison is a firmware convention.
+interchangeable partials; unison is a firmware convention.
 
-**Per-element chain** (26 stages): state/param RAM read → LUT reads
+**Per-partial chain** (26 stages): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
-SVF 1 → SVF 2 (shared type/cutoff/resonance; 12/24 dB via single/dual
-mode — a separate filter per element costs nothing in cycles) →
+SVF 1 → SVF 2 (shared type/cutoff/resonance; 12 dB/oct single section or
+24 dB/oct cascade — a separate filter per partial costs nothing in cycles) →
 stereo log attenuation (independent L/R, the mono→stereo point) → mix
 accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 
-**State banks**: semi dual-ported BSRAM, read at pipeline start,
+**State RAM**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, a fixed number of cycles later, so the
 addresses never collide.
 
 **Parameter smoothing**: articulation comes from gateware envelope
-sources on the buses, updating every sample with no SPI timing in the
-loop, so nothing audible needs a smoother. Firmware-written bus bases
+instructions writing DMEM words, updating every sample with no SPI timing in the
+loop, so nothing audible needs a smoother. Firmware-written DMEM bases
 (wheel, bend) are not smoothed.
 
 ## Control plane — SPI + BSRAM
@@ -238,44 +235,46 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   address bytes + 4-byte data words, streaming while CS stays low.
 - CDC: solved structurally, once — dual-clock semi dual-port BSRAM
   (write sclk, read sysclk; true dual-port does not infer on this
-  toolchain) for banked parameters, a toggle mailbox for live bus
+  toolchain) for paged parameters, a toggle mailbox for live DMEM
   writes. With everything register-like ping-pong buffered or
   mailboxed, CDC is not a running design concern.
-- Parameter data is ping-pong double-buffered (half-active/half-shadow
+- Parameter data is paged (ping-pong: active page and shadow page
   in the same blocks), swapped at a sample boundary on request. There
   is no "patch" vs "live" class distinction: swaps are cheap (thousands
   per second) and **every change is effected through a swap**.
   Atomicity is the swap's job — BSRAM does not give read-during-write
   coherency.
-- Bring-up (retired; kept as the A/B reference, not built): a
+- A/B reference (in the tree, not built): a
   16-word byte-wide register file (`spi_slave_regs.sv`) with the
   byte-boundary rules baked in.
 
 ## Modulation
 
-**Codified as [bus_architecture.md](bus_architecture.md)** — the spec
+**Codified as [dmem_architecture.md](dmem_architecture.md)** — the spec
 with justifications, rejected alternatives, sizing and build
-milestones B0–B6. **Built**: B1–B5 ear-verified and merged (buses, all
+milestones B0–B6. Built: B1–B5 (DMEM, all
 sinks, firmware routes, LFO instructions, per-voice ADSRs), plus
 log-domain Q.
 
-As built, in brief: elements are dumb sinks — waveform, filter type,
-static detune, and per-parameter bus pointers. Every dynamic value
-is a bus: `effective = base word + bus[pointer]`, a saturating add,
-zero extra pipeline stages. SOURCES (LFOs, ADSRs, SENDs) live in a
-256-entry table, run by the CSP independently of the drum schedule
-(every entry every sample), and write
-`base register + contribution` to the bus replicas. One bus format
+As built, in brief: partials are dumb sinks — waveform, filter type,
+static detune, and per-parameter DMEM pointers. Every dynamic value
+is a DMEM word: `effective = base word + dmem[pointer]`, a saturating
+add, zero extra pipeline stages. Instructions (LFOs, ADSRs, MACs) live
+in a 256-entry instruction table (IMEM), run by the CSP independently
+of the partial pipeline's issue slots (every instruction every
+sample), and write `DMEM base + contribution` to the DMEM replicas.
+One DMEM format
 (signed Q8.10 log₂ — integer step = octave / 6 dB / octave-of-Q
-depending on sink). Sources execute in table order once per sample;
-ordered chains are zero-lag, and **cyclic bus graphs are simply not
+depending on sink). Instructions execute in table order once per sample;
+ordered chains are zero-lag, and **cyclic DMEM graphs are simply not
 a thing — ever** (firmware never builds one, the hardware defines no
 semantics for one). Velocity and other per-note values are firmware
-writes to per-voice bus bases. Still open: the shared per-element
-configuration table for one-to-many wiring changes. The combiner
-source type is opcode `0xD`, bus-as-source (bus_architecture.md), on
-the reframing that a bus is already a combiner of sources; its first
-use is the channel cutoff bus fanning out to the per-voice buses.
+writes to per-voice DMEM bases. Still open: the shared per-partial
+configuration table for one-to-many wiring changes. The combiner is
+the MAC instruction (opcode `0xD`, dmem_architecture.md), which reads
+a DMEM word as its source operand — a DMEM word is already a combiner
+of instructions. Its first use is the channel cutoff DMEM word fanning
+out to the per-voice cutoff DMEM words.
 
 ### Modulation authority rule
 
@@ -283,7 +282,7 @@ use is the channel cutoff bus fanning out to the per-voice buses.
 destination rail to rail.** The cutoff code is UQ4.10 = 16 encoded
 octaves (~11 audibly useful); an amount CC that can't span that is
 wrong by definition — "if the CC for MOD→CUTOFF is the only input,
-it has to span the full range." Over-authority is safe: base + send
+it has to span the full range." Over-authority is safe: base + modulation
 saturates at the 0..0x3FFF clamp, like an env-amount knob pinning.
 CC 107 has full authority (square-law taper, ±16 octaves at the
 rails); the same rule applies to
@@ -298,7 +297,7 @@ every future pitch/cutoff amount. 7-bit resolution at full span is
 CCs; zero = off, which isolates it when testing. **Velocity scales the
 MOD envelope's depth multiplicatively** (the DX7-through-modern-VA
 convention: soft note = shallower sweep, same shape) — firmware
-scales the per-voice DEPTH word at note-on, no gateware change. The
+scales the MOD envelope instruction's per-voice COEF word at note-on, no gateware change. The
 amp path is already multiplicative-equivalent (log-domain subtract =
 linear scaling) and just gains a sensitivity amount.
 
@@ -309,8 +308,8 @@ linear scaling) and just gains a sensitivity amount.
   valid channel status (consumer PCM / 24-bit). What a receiver requires and
   why is documented in `spdif_tx.sv`.
 - **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/12.
-- Both latch the same stereo mix on the drum's sample tick.
-- **Output tilt**: a one-pole 6 dB/oct lowpass on the mix,
+- Both latch the same stereo mix on the timebase's sample tick.
+- **Output low-pass** (`output_lpf.sv`): a one-pole 6 dB/oct lowpass on the mix,
   `out += (in − out) >>> 3` at 96 kHz → corner ≈ 2 kHz — the
   warm/vintage stop. The shift is ear-tuned: `>>> 4` (~950 Hz) is too
   dark, `>>> 2` (~4.4 kHz) too bright. Sits before the test-tone mux

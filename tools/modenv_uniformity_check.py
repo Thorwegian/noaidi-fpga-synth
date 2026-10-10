@@ -8,11 +8,11 @@ The symptom: with a plucky MOD-env patch, random notes have a longer
 MOD envelope, roughly every 32nd. Suspected cause: a knob DRAG that
 includes a re-render (e.g. PW) wedges the engine task in a long SPI
 flush; meanwhile coalesced applies keep pushing 128-write update_mod_env
-bursts, the prod queue overflows, and the DROPPED TAIL (= the highest
+bursts, the IMEM queue overflows, and the DROPPED TAIL (= the highest
 voices) keeps stale RATES from earlier in the drag.
 
 Reproduction: storm CC 103 (MOD decay, dragged 111 -> 64) interleaved
-with CC 25 (PW - forces 256-element re-renders), like a human
+with CC 25 (PW - forces 256-partial re-renders), like a human
 twiddling two knobs; then play a full 36-note pool cycle and measure
 each note's DECAY RATIO (early RMS 50-200 ms vs late RMS 350-500 ms).
 A stale-long voice decays slower = higher late/early ratio.

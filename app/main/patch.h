@@ -5,7 +5,7 @@
 //
 // This is the single source of truth for the active sound: the
 // CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
-// RENDER it to buses and element words. Program change is deferred
+// RENDER it to DMEM words and partial words. Program change is deferred
 // until the stored-configuration format is settled (docs/
 // control_map.md); when it lands it just loads/stores instances of
 // this. Multi-timbral layering / key split (channel awareness) is an
@@ -31,12 +31,12 @@ typedef enum {                     // matches OSC word waveform field
     // future gateware waveforms: noise, and a real parabola as its own type
 } waveform_t;
 
-// Voice structure — how the 2 oscillators map onto the 8 elements
+// Voice structure — how the 2 oscillators map onto the 8 partials
 // (control_map.md decision 2). UNISON is a mode, any waveform.
 typedef enum {
-    VOICE_2_PLAIN = 0,   // 2 elements/voice (osc1 + osc2, no unison)
-    VOICE_7_PLUS_1,      // osc1 x7 unison + osc2 plain = 8 elements
-    VOICE_4_PLUS_4,      // both oscillators x4 unison = 8 elements
+    VOICE_2_PLAIN = 0,   // 2 partials/voice (osc1 + osc2, no unison)
+    VOICE_7_PLUS_1,      // osc1 x7 unison + osc2 plain = 8 partials
+    VOICE_4_PLUS_4,      // both oscillators x4 unison = 8 partials
 } voice_struct_t;
 
 typedef struct {
@@ -92,14 +92,14 @@ typedef struct {
     uint8_t  shape;         // osc_core shape (saw/pulse/tri/sine)
     uint16_t rate;          // UQ0.24 increment (subsonic..control rate)
     int16_t  depth;         // signed Q8.10 contribution amplitude
-    uint8_t  dest;          // bus/sink selector (mod routing)
+    uint8_t  dest;          // DMEM/sink selector (mod routing)
 } lfo_t;
 
 // ── Modulation routing (the staged mod matrix) ──────────────────────
 // Fixed-function stage exposes only a few; the full matrix is the
 // deferred config structure. dest is a sink selector, amount signed.
 typedef struct {
-    uint8_t source;         // MOD_SRC_* (wheel, aftertouch, expr, env1, lfo0..)
+    uint8_t source;         // MOD_SRC_* (wheel, aftertouch, expr, MOD env, lfo0..)
     uint8_t dest;           // sink selector
     int16_t amount;         // signed
 } mod_route_t;
@@ -129,8 +129,8 @@ typedef struct {
     filter_t        filter;
     adsr_t          env[PATCH_NUM_ENV];   // [0]=amp, [1]=MOD
     uint8_t         mod_env_dest;            // MOD env destination (def: cutoff)
-    int16_t         mod_env_depth;           // MOD env depth, signed raw bus value
-                                          // (walker DEPTH is signed 18-bit;
+    int16_t         mod_env_depth;           // MOD env depth, signed raw DMEM value
+                                          // (the CSP's COEF is signed 18-bit;
                                           // ±4096 = ±4 octaves of cutoff)
     lfo_t           lfo[PATCH_NUM_LFO];
 

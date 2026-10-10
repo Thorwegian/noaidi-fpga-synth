@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Hardware test of the type-3 bus source.
+"""Hardware test of the MAC instruction fan-out.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
 CC 74 travels the fan-out path end to end: CC 74 -> channel cutoff
-bus (DMEM_CH_CUT) BASE -> 32 type-3 walker entries -> per-voice cutoff
-buses -> element cutoff. If the fan-out works, sweeping CC 74
+DMEM word (DMEM_CH_CUT) BASE -> 32 MAC instructions -> per-voice cutoff
+DMEM words -> partial cutoff. If the fan-out works, sweeping CC 74
 dark/bright changes the saw's spectrum through the filter; if it is
 broken, cutoff stops responding entirely, because the per-voice base
 is always zero (cut_dmem_value).

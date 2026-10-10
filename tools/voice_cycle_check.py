@@ -5,7 +5,7 @@
     License: CERN-OHL-S v2
  
 The symptom: every 32 note-ons, the level drops. The cause is
-the engine prod queue overflowing during the init burst and silently
+the engine IMEM queue overflowing during the init burst and silently
 dropping the TAIL - voices 30/31's amp-envelope configs - so notes
 landing on those voices play at the gain floor. LRU voice cycling
 makes it periodic with NUM_VOICES.

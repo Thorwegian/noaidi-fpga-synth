@@ -111,21 +111,21 @@ void patch_default(patch_t *p)
     p->env[0].release = 0x28;
 
     // MOD env: ON by default in the boot patch —
-    // same initial params as the AMP envelope, sent to the cutoff bus.
+    // same initial params as the AMP envelope, sent to the cutoff DMEM word.
     // The filter contour tracks the loudness contour: opens with the
     // attack, settles bright at sustain, closes on release.
     p->env[1] = p->env[0];
     p->mod_env_dest      = 0;             // cutoff (the only dest yet)
     p->mod_env_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
 
-    // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
+    // LFO 1 = the boot vibrato (instruction 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (increment per 48 kHz
                                        // walk)
     p->lfo[0].depth = 16;
 
-    // LFO 2 (source 1): triangle, ~1 Hz, depth 0 = OFF; default
-    // destination is PWM (duty bus) — the thing LFO 1 can't do.
+    // LFO 2 (instruction 1): triangle, ~1 Hz, depth 0 = OFF; default
+    // destination is PWM (duty DMEM word) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
     p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
     p->lfo[1].depth = 0;

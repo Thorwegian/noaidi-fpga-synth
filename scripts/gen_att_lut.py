@@ -7,7 +7,7 @@
 # att_lut[i] = 2^(-i/16) in UQ0.16 (17-bit unsigned)
 #   i = frac 0..15 → 0 dB .. -5.6 dB in 0.375 dB steps
 #
-# Linear gain decode (element_pipeline, stage S10):
+# Linear gain decode (partial_pipeline, stage S10):
 #   gain UQ4.4: lin = att_lut[frac] >>> int
 #   4-bit int  = 6 dB steps, 4-bit frac = 0.375 dB steps.
 

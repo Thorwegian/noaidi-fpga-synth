@@ -15,7 +15,7 @@
 // (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
 // Stability metric: normalized autocorrelation at
-// the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
+// the saw fundamental's lag. Partial 0 plays a saw at pitch 0x1614 —
 // 375.03 Hz, period 255.98 samples, so the lag is exactly 256. A
 // stable filtered saw scores near 1000 milli-r; atonal roaring scores
 // near 0. A moderate-cutoff baseline combo guards the metric itself.
@@ -54,7 +54,7 @@ module tb_svf_stability;
         .mix_left(ml), .mix_right(mr)
     );
 
-    // ---- fixture: element 0 = saw @ 375 Hz, all others muted --------
+    // ---- fixture: partial 0 = saw @ 375 Hz, all others muted --------
     integer e;
     initial begin
         #1;
@@ -89,8 +89,8 @@ module tb_svf_stability;
     integer  di;
     longint  sum_xx, sum_xy;
     longint  pk;
-    longint  pkr;    // peak of |mix_right| — all its elements are
-                     // muted, so any energy here is cross-element leak
+    longint  pkr;    // peak of |mix_right| — all its partials are
+                     // muted, so any energy here is cross-partial leak
 
     task automatic measure(output longint r_milli, output longint peak);
         integer n;
@@ -170,12 +170,12 @@ module tb_svf_stability;
         end
 
         // Corner 3 — self-oscillation: r at the top of the scale
-        // decodes to q1 ~= 0 (zero damping). Element 0 rings freely;
+        // decodes to q1 ~= 0 (zero damping). Partial 0 rings freely;
         // no tonality assert (wrap chaos under sustained drive is
         // possible and audible-by-design), but the mix limiter must
         // bound the output and — the real assert — the OTHER mix
-        // channel (all its elements muted) must stay silent: one
-        // element's self-oscillation must not corrupt its neighbors.
+        // channel (all its partials muted) must stay silent: one
+        // partial's self-oscillation must not corrupt its neighbors.
         set_filter(14'h2000, 14'h3FFF);
         measure(r, peak);
         $display("corner3 fc=2000 r=max:   r=%0d peak=%0d peakR=%0d (self-osc)",

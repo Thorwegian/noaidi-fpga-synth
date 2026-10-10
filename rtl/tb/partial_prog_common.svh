@@ -1,11 +1,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// partial_prog_common.svh — shared body for the tb_prog_* element-program
+// partial_prog_common.svh — shared body for the tb_prog_* partial-program
 // benches, which are independent so make -j can run them in parallel.
 // Include INSIDE a module.
 //
-// Provides: clocks/reset, drum + spi_bus + partial_pipeline (ref
+// Provides: clocks/reset, timebase + spi_bus + partial_pipeline (ref
 // boot fixtures), the ~20 MHz Mode-0 SPI master, the mix observer,
 // flip/mute_all/program helpers, and the report task. Each bench
 // owns its own initial block, preamble and timeout.
@@ -64,17 +64,16 @@ integer errors = 0;
 
 // ---- single source of truth -----------------------------------------
 // Addresses come from synth_pkg (the map's one home); parameter and
-// source-table words are composed from named fields here, ONCE, and
+// instruction-table words are composed from named fields here, ONCE, and
 // every bench in the family uses these. No magic hex in benches.
 localparam [15:0] CTRL_ADDR   = synth_pkg::MAP_CTRL_ADDR;
 localparam [15:0] PARTIAL_BASE   = synth_pkg::MAP_PARTIAL_BASE;
 localparam int    PARTIAL_STRIDE = synth_pkg::MAP_PARTIAL_STRIDE;
 localparam [15:0] DMEM_BASE    = synth_pkg::MAP_DMEM_BASE;
-localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
-                                                            // pending the
-                                                            // source rename
+localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // instruction
+                                                            // table base
 
-// per-element word offsets (memory_map.md +0..+6)
+// per-partial word offsets (memory_map.md +0..+6)
 localparam int W_OSC = 0, W_DUTY = 1, W_FILTER = 2, W_GAIN = 3,
                W_GATE = 4, W_PTRS0 = 5, W_PTRS1 = 6;
 
@@ -84,7 +83,7 @@ endfunction
 function automatic [15:0] dmem_addr(input integer b);
     dmem_addr = 16'(DMEM_BASE + 16'(b));
 endfunction
-// source table: 4 words per entry (CFG, RATES, DEPTH, RATES2), stride 4
+// instruction table: 4 words per entry (CFG, RATES, COEF, RATES2), stride 4
 function automatic [15:0] src_addr(input integer entry, input integer w);
     src_addr = 16'(SRC_BASE + 16'(entry) * 4 + 16'(w));
 endfunction
@@ -103,40 +102,38 @@ localparam [31:0] GAIN_MUTE_BOTH  = 32'h00000000;  // exact mute L+R —
 localparam [31:0] GAIN_CHORD_LEFT = 32'h0000009F;  // L -36 dB, R mute
 localparam [31:0] GAIN_CHORD_RIGHT= 32'h00009F00;  // R -36 dB, L mute
 
-// bus pointer words (PTRS0/PTRS1 field layouts per memory_map.md)
+// DMEM pointer words (PTRS0/PTRS1 field layouts per memory_map.md)
 localparam [31:0] PTRS0_CUT_DMEM1        = 32'd1 << 20;
 localparam [31:0] PTRS0_CUT1_PITCH_DMEM2 = (32'd1 << 20) | 32'd2;
 localparam [31:0] PTRS1_GAINS_DMEM3      = (32'd3 << 10) | (32'd3 << 20);
 
-// Q8.10 bus/depth offsets — ONE name per value, used for bus bases
-// and source depths alike. (The original bench comments called
-// -0x2000 "-2 oct"; it is MINUS EIGHT octaves — the wrong name
-// propagated into a real bug at the gain inversion, so these names
-// are now checked against the value: 1 octave = 0x400.)
+// Q8.10 DMEM/coefficient offsets — ONE name per value, used for DMEM
+// bases and instruction coefficients alike. Each name is checked
+// against its value: 1 octave = 0x400, so -0x2000 is MINUS EIGHT
+// octaves.
 localparam [31:0] OFFS_PLUS_1OCT  = 32'h00000400;
 localparam [31:0] OFFS_PLUS_2OCT  = 32'h00000800;
 localparam [31:0] OFFS_PLUS_4OCT  = 32'h00001000;
 localparam [31:0] OFFS_PLUS_8OCT  = 32'h00002000;
 localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 
-// source-table words, composed from the CFG/RATES/DEPTH fields
+// instruction-table words, composed from the CFG/RATES/COEF fields
 // (memory_map.md) instead of opaque hex
 localparam [31:0] SRC_OFF         = 32'h0;
-// opcodes are bitmasks: OPC_LFO/ADSR/SEND in synth_pkg
+// opcodes are bitmasks: OPC_LFO/ADSR/MAC in synth_pkg
 localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
-    32'hE | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
+    32'hE | (32'd1 << 4) | (32'd3 << 6)             // gain DMEM word 3,
           | (32'd32768 << 16);                      // 93.75 Hz -- unchanged
                                                     // by the full-rate move
 localparam [31:0] SRC_ADSR_DMEM3_GATE5 =
     32'hF | (32'd3 << 6) | (32'd5 << 16);           // envelope: state+gate
-localparam [31:0] SRC_DMEM3_FROM6 =                  // SEND:
-    32'hD | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
-localparam [31:0] SRC_LFO_TREM_DMEM6 =               // pulse LFO -> bus 6
+localparam [31:0] SRC_DMEM3_FROM6 =                  // MAC:
+    32'hD | (32'd3 << 6) | (32'd6 << 16);           // DMEM 6 sum -> DMEM 3
+localparam [31:0] SRC_LFO_TREM_DMEM6 =               // pulse LFO -> DMEM 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
-// Rates are linear coefficients, in two words. These are the
-// old 0xF4F000F0 nibble word converted by the same arithmetic firmware
-// uses (patch_adsr_word1/word3), so the bench hears what it used to:
-// fast attack, slow decay, high sustain, fast release.
+// Rates are linear coefficients, in two words, computed with the same
+// arithmetic the firmware uses (patch_adsr_word1/word3): fast attack,
+// slow decay, high sustain, fast release.
 localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
 localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
 localparam [31:0] COEF_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
@@ -182,7 +179,7 @@ task automatic observe(input integer n);
     end
 endtask
 
-// request a bank flip and wait for it to take effect
+// request a page flip and wait for it to take effect
 task automatic flip;
     begin
         spi_word_write(CTRL_ADDR, 32'h00000001);  // CTRL: swap request
@@ -190,7 +187,7 @@ task automatic flip;
     end
 endtask
 
-// reset + mute both banks (the split benches' common preamble: each
+// reset + mute both pages (the split benches' common preamble: each
 // bench builds its own state from silence)
 task automatic reset_and_mute;
     integer v;

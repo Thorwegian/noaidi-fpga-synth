@@ -5,7 +5,7 @@
 // License: CERN-OHL-S v2
 //
 // The point of this bench is SPEED. tb_prog_pingpong exercises the same
-// invariants, but it elaborates the whole element pipeline -- the SVF,
+// invariants, but it elaborates the whole partial pipeline -- the SVF,
 // the oscillators, the limiter -- and takes minutes. This instantiates
 // csp alone and runs in seconds, which is what makes it usable
 // as a tight loop while working on the engine.
@@ -28,7 +28,7 @@ module tb_csp;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;
 
-    // the drum's sample boundary, without the drum
+    // the timebase's sample boundary, without the timebase
     logic [15:0] slotc = 0;
     logic        sample_tick;
     always_ff @(posedge clk) slotc <= (slotc == CYC-1) ? 16'd0 : slotc + 16'd1;
@@ -73,7 +73,7 @@ module tb_csp;
         repeat (4) @(posedge clk); rst_n = 1;
         repeat (CYC) @(posedge clk);
 
-        // 1. generation cadence: one flip per sequencer pass. A pass is
+        // 1. page cadence: one flip per sequencer pass. A pass is
         //    256 instructions x 1 cycle = 256 cycles, so it completes inside
         //    ONE sample and the cadence is one flip per sample.
         toggles = 0; ticks = 0; gen_prev = dut.dmem_page;
@@ -112,7 +112,7 @@ module tb_csp;
         end
         if (errors == 0) $display("persistence: stable across 12 swaps");
 
-        // 4. a bus nothing refreshes keeps its base
+        // 4. a DMEM word nothing refreshes keeps its base
         dmem_write(10'(QUIET_DMEM), MARK_B);
         repeat (6*CYC) @(posedge clk);
         if (dut.dmem_fc[{dut.dmem_page, QUIET_DMEM[8:0]}] !== MARK_B) begin
@@ -122,7 +122,7 @@ module tb_csp;
         end else
             $display("unproduced bus: base persists");
 
-        // 5. the read port returns what the live generation holds
+        // 5. the read port returns what the live page holds
         @(negedge clk); rd_a = TEST_DMEM[8:0];
         repeat (3) @(posedge clk);
         if (rd_gl_d !== MARK_A) begin

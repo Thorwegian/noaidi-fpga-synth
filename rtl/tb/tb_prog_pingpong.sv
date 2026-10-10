@@ -1,18 +1,18 @@
 //------------------------------------------------------------------------
-// tb_prog_pingpong.sv -- the ping-pong bus generation.
+// tb_prog_pingpong.sv -- the ping-pong DMEM page.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Resource and timing numbers say nothing about correctness: a design
-// that reads the wrong generation places and routes exactly like one
-// that reads the right generation. These are the invariants the scheme
+// that reads the wrong page places and routes exactly like one
+// that reads the right page. These are the invariants the scheme
 // must hold, and NONE of them is visible on hardware -- S/PDIF carries
-// the mix, not the bus, so a wrong-generation read surfaces only as an
+// the mix, not DMEM, so a wrong-page read surfaces only as an
 // occasional subtly-stale modulation value.
 //
 //   1. dmem_page toggles exactly once per sample
-//   2. an SPI bus write reaches BOTH halves at once (write-through),
+//   2. an SPI DMEM write reaches BOTH halves at once (write-through),
 //      so it is visible immediately
 //   3. the new value stays live across the next swap
 //   4. the shadow half actually received the write (it is not dropped)
@@ -53,12 +53,12 @@ module tb_prog_pingpong;
             page_prev = u_pipe.u_csp.dmem_page;
             if (sample_tick) ticks = ticks + 1;
         end
-        // One generation == one COMPLETE sequencer pass. The
+        // One page == one COMPLETE sequencer pass. The
         // sequencer retires one instruction per cycle, so a full 256-entry
         // pass costs 256 of the sample's 768 cycles and completes inside one
         // sample: the cadence is one toggle per sample. Flipping more
         // often than a pass completes would publish a half-written
-        // generation -- halved modulation depth and broken chains.
+        // page -- halved modulation depth and broken chains.
         if (toggles !== ticks) begin
             $display("FAIL: dmem_page toggled %0d times over %0d samples, want %0d",
                      toggles, ticks, ticks);
@@ -116,7 +116,7 @@ module tb_prog_pingpong;
 
         //---------------------------------------------------------------
         // 5. the same again with a negative value, to catch a sign or
-        //    width slip in the {gen, addr} concatenation
+        //    width slip in the {page, addr} concatenation
         //---------------------------------------------------------------
         @(posedge sample_tick);
         wait (slot == 10'd40);
@@ -130,7 +130,7 @@ module tb_prog_pingpong;
             $display("negative value: round-trips through the generation intact");
 
         //---------------------------------------------------------------
-        // 6. a neighbouring bus must be untouched -- catches an address
+        // 6. a neighbouring DMEM word must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
         if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_page, 9'(TEST_DMEM+1)}] === MARK_B) begin
@@ -166,7 +166,7 @@ module tb_prog_pingpong;
         else $display("persistence: value stable across 13 consecutive swaps");
 
         //---------------------------------------------------------------
-        // 8. the same for a bus NO instruction targets -- the exact case
+        // 8. the same for a DMEM word NO instruction targets -- the exact case
         //    that broke. Nothing refreshes it, so it depends entirely on
         //    the mailbox write having reached both halves.
         //---------------------------------------------------------------
@@ -184,10 +184,10 @@ module tb_prog_pingpong;
             $display("unproduced bus: base persists with nothing refreshing it");
 
         //---------------------------------------------------------------
-        // 9. NO STRADDLE: a swap must not land inside a lane
-        //    pass. Elements enter at slots 0..255 and read the bus at S2,
-        //    slots 1..256, so dmem_page constant across that window means
-        //    every element of the pass saw one generation. Several passes,
+        // 9. NO STRADDLE: a swap must not land inside a partial
+        //    pipeline pass. Partials enter at slots 0..255 and read DMEM
+        //    at S2, slots 1..256, so dmem_page constant across that window
+        //    means every partial of the pass saw one page. Several passes,
         //    so a one-off alignment cannot hide a real straddle.
         //---------------------------------------------------------------
         straddles = 0;

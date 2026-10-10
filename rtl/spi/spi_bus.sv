@@ -51,37 +51,37 @@ module spi_bus #(
     input  logic        sysclk,
     input  logic        rst_n,
 
-    // ---- per-element parameter writes (sclk domain) ----------------
+    // ---- per-partial parameter writes (sclk domain) ----------------
     // The memory map's 0x2000 + v*64 range, offsets 0..6 (OSC, DUTY,
     // FILTER, GAIN, GATE, PTRS0, PTRS1). Combinational decode, valid
     // exactly on the sclk edge that completes a data word — the
     // consumer writes its RAM on that same edge (there may be no
     // further edges: a master stops clocking after the last bit).
-    // Offsets 7..63 are dropped for now; per-element read-back is TBD
+    // Offsets 7..63 are dropped for now; per-partial read-back is TBD
     // (reads in this range return zero).
     output logic        partial_write_enable,
     output logic [2:0]  partial_write_word,   // 0..6 = OSC..PTRS1 param RAM
 
-    // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
+    // ---- DMEM base writes (sclk domain, mailbox toward sysclk) -----
     // The write crosses clock domains through this 1-deep toggle
     // mailbox; csp.sv syncs dmem_wr_toggle and commits each write into
-    // both bus generations (see its mailbox notes for the rate margin).
+    // both DMEM pages (see its mailbox notes for the rate margin).
     output logic [9:0]  dmem_wr_addr,
     output logic [17:0] dmem_wr_data,
-    output logic        dmem_wr_toggle,  // toggles once per bus write
+    output logic        dmem_wr_toggle,  // toggles once per DMEM write
 
-    // ---- instruction table writes (sclk domain, banked like params) ---
-    // Instruction config is wiring: it rides the ping-pong banks and
-    // takes effect at the swap, same as the per-element words.
+    // ---- instruction table writes (sclk domain, paged like params) ---
+    // Instruction config is wiring: it rides the ping-pong pages and
+    // takes effect at the swap, same as the per-partial words.
     output logic        imem_write_enable,
     output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
     output logic [31:0] imem_write_data,
     output logic [7:0]  partial_write_index,
     output logic [31:0] partial_write_data,
 
-    // CTRL@0x0002 bit 0: bank swap request. Toggle semantics
+    // CTRL@0x0002 bit 0: page swap request. Toggle semantics
     // (sclk domain); the consumer syncs the toggle and flips its
-    // active bank at the next drum slot 512. The write also lands in
+    // active page at the next time slot 512. The write also lands in
     // the plain window RAM, so reading CTRL back shows the last value.
     output logic        swap_toggle
 );
@@ -219,7 +219,7 @@ module spi_bus #(
                               && (data_byte_index == 2'd3)
                               && !is_read && addr_in_backed;
 
-    // ---- per-element write decode (MAP_PARTIAL_BASE + 256×64 words,
+    // ---- per-partial write decode (MAP_PARTIAL_BASE + 256×64 words,
     //      offsets 0..6) -------------------------------------------
     localparam [15:0] PARTIAL_BASE = synth_pkg::MAP_PARTIAL_BASE;
     localparam [15:0] PARTIAL_END  = synth_pkg::MAP_PARTIAL_BASE
@@ -255,7 +255,7 @@ module spi_bus #(
     assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
     assign imem_write_data = {partial_word, rx_byte};
 
-    // ---- bus base write capture (see mailbox note at the ports) ----
+    // ---- DMEM base write capture (see mailbox note at the ports) ---
     wire in_dmem_range = (word_addr >= synth_pkg::MAP_DMEM_BASE)
                      && (word_addr <  synth_pkg::MAP_DMEM_BASE
                                       + 16'(synth_pkg::DMEM_WORDS));
