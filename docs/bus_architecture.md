@@ -3,15 +3,14 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
  
-Supersedes the modulation half of [memory_map.md](memory_map.md)
-(generic cable matrix, shared LFO bank, per-element ADSR registers).
-The verified wire protocol and per-element parameter ABI stand.
+The modulation half of the design; [memory_map.md](memory_map.md)
+holds the wire protocol, addresses and per-element parameter ABI.
 
 Status: **BUILT — the ladder is complete through B5 (all
 ear-verified and merged), plus the log-domain Q rung and the
 bus-as-source type, in use for channel→voice cutoff fan-out**.
 Settled: one bus format (signed Q8.10, octaves.fraction — law 5),
-detune is a per-element static offset, the producer pool is 128, and
+detune is a per-element static offset, the instruction pool is 256, and
 Q's convention is log₂ resonance with the bus taken as-is like
 pitch/cutoff. Formally open: B0's explicit spec sign-off, and the
 worst-case performance patch that finalizes sizing.
@@ -23,7 +22,7 @@ it far better than reading it as a fabric:
 
 | processor term | in this design |
 |---|---|
-| instruction memory | the instruction table — 256 entries × 3 words |
+| instruction memory | the instruction table — 256 entries × 4 words (stride 4) |
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
@@ -46,7 +45,7 @@ instruction is not pure.
 
 Inside the processor there are no buses — the pool is data memory.
 Outside it, firmware and [memory_map.md](memory_map.md) still say "bus"
-. The module is `rtl/csp.sv`.
+. The module is `rtl/dsp/csp.sv`.
 
 ## Terminology used in this document
 
@@ -86,12 +85,12 @@ never sees.
    instruction, in the processor. This keeps every multiply out of
    the audio pipeline and out of summing structures — the silicon
    timing rule, made structural.
-   **Multi-source summing** — summing is default behaviour, with no
-   flags: same-bus sources
-   allocated to the same target sum automatically — the sequencer
-   keeps a short history of completed results, and a target-bus
-   comparator selects the most recent match as the addend instead of
-   the target's initial value. That history is three deep, so sources
+   **Multi-source summing** — an instruction with opcode bit 3
+   (accumulate) set adds onto the most recent result for the same
+   target: the sequencer keeps a short history of completed results,
+   and a target-bus comparator selects the most recent match as the
+   addend instead of the target's initial value; with bit 3 clear the
+   instruction starts from the initial value. That history is three deep, so sources
    sharing a target need not sit in adjacent slots: a chain tolerates
    gaps of up to three, and extends to any length. **Allocator rule** (companion to law 3's table order):
    group same-bus sources in adjacent slots; scattered same-bus
@@ -110,14 +109,14 @@ never sees.
    firmware's.
 4. **Swap governs wiring; buses carry signal.** Pointer/config words
    ride the existing ping-pong banks (atomic regrouping). Bus values
-   are live and single-banked — each pipeline read is one word, so
-   there is no multi-word tear to protect against.
+   are not swap-banked; data memory is double-buffered per sample
+   (`dmem_gen`), so the lanes always read one complete pass.
 5. **One data-memory word format: signed Q8.10**. 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every
    log₂ sink — pitch, cutoff, AND volume (gain octave = 6 dB;
    positive gain bus = LOUDER) —
-   so a producer needn't know its consumer; sinks take what they
+   so a source needn't know its consumer; sinks take what they
    need. Duty maps −1.0..+1.0 → 0–100% (≈11-bit modulation
    resolution — accepted; revisit on audible evidence only). Q's
    convention: the bus is taken AS-IS, like pitch and cutoff — one
@@ -133,10 +132,10 @@ never sees.
 |---|---|
 | SPI bandwidth: the firmware mod wheel costs 256 writes ≈ 2 ms per CC tick | One-to-many: parameters point at shared buses; a patch-wide change is one base-register write |
 | Five silicon timing failures in pipeline growth; STA untrustworthy | Pipeline gains one add-only stage, then freezes; all logic moves to idle slots (law 2) |
-| DSP cost of scaled bus sums | Law 1: producers pre-scale, buses only add; ~150 small multiplies/sample fits one time-multiplexed 18×18 lane in a third of the idle budget |
+| DSP cost of scaled bus sums | Law 1: sources pre-scale, buses only add; ~150 small multiplies/sample fits one time-multiplexed 18×18 lane in a third of the idle budget |
 | Fixed, known sinks per element | One uniform Q8.10 bus pool; each sink takes a fixed bit-slice; static summing, no crossbar |
-| Envelope sharing across element groups | ADSR is a producer from a pool; group sharing = allocation, not architecture |
-| ADSR snappiness vs smoothing dilemma | Smoothing is a per-producer property: firmware-written buses can be smoothed (producer-side), envelope buses never are |
+| Envelope sharing across element groups | ADSR is an instruction from a pool; group sharing = allocation, not architecture |
+| ADSR snappiness vs smoothing dilemma | Smoothing is a per-source property: firmware-written buses can be smoothed (source-side), envelope buses never are |
 | FPGA complexity vs bandwidth balance | Tiered build; every deferred feature has a firmware fallback costing only SPI traffic; the line moves on measured link utilization |
 
 ## Sizing (initial allocations; address space reserves ≥2×)
@@ -148,7 +147,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   octaves of range, 1 LSB ≈ 1.17 cents. Gain consumes the top
   fraction bits (0.375 dB decode grid; buses already carry the
   precision if the grid ever refines).
-- **Bus pool**: one uniform pool of 1024 buses. The six sinks are
+- **Bus pool**: one uniform pool of 512 buses. The six sinks are
   oscillator pitch, oscillator duty cycle, filter cutoff, filter 1/Q,
   gain L and gain R.
   **Why six replicas**: the pool physically exists as six identical
@@ -165,9 +164,9 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   pure fan-out, no extra logic). Cost: ≈6 blocks of 46. Shared
   allocation across all sinks — no per-class exhaustion. Bus 0 is
   hardwired zero.
-- **Pointers**: 10 bits per parameter, full width from day one — the
-  pool is 1024, so pointers address 1024 (no held-back address bits;
-  partial widths create weird bugs later). Six pointers pack
+- **Pointers**: 10-bit fields per parameter; the low 9 bits are
+  decoded (the pool is 512), and the top bit is reserved for growth
+  to 1024. Six pointers pack
   three per word into two new per-element words (map offsets +5, +6;
   3 × 10 bits + 2 spare per word).
 - **Detune**: a static per-element offset — detune is
@@ -175,7 +174,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   that a dedicated per-element offset is the pragmatic form. All 8
   elements of a voice share one pitch bus; note-on writes one base,
   not eight.
-- **The SEND — type 3**: *a bus is already a combiner of sources*, so
+- **The SEND — opcode `0xD`**: *a bus is already a combiner of sources*, so
   the only thing needed is **"other bus" as a source**, named the SEND
   (the mixing-console aux send — the fabric's first PROCESSOR, vs
   the generators LFO/ADSR). A send entry is stateless: CFG names a
@@ -183,7 +182,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   (in the field the ADSR uses for its gate bus, so the sequencer's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
-  target like any source. The read is of the bus's **OUTPUT SUM** (`bus_sum_ram`, a sequencer-facing mirror
+  target like any source. The read is of the bus's **OUTPUT SUM** (`dmem_local`, a sequencer-facing mirror
   written by the same strobes as the replicas): firmware base plus
   every source contribution written so far — a send ordered after
   its sources relays them same-sample, which is what makes the node
@@ -191,15 +190,13 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   bus in adjacent slots. Real uses: the channel cutoff bus
   (bus 4) fanning out to the 32 per-voice cutoff buses; LFO 2's
   CUTOFF destination riding that fan-out.
-- **Producer pool**: 128 table entries (64 is eaten by 32-note
+- **Instruction pool**: 256 entries (64 is eaten by 32-note
   polyphony's ADSR pairs alone, and LFOs need room too). 64 ADSRs +
-  up to 32 LFOs + sends + margin. One entry = type + config + state.
-  Budget: ONE cycle per instruction → 256 of the sample's 768 cycles
-  for a full 256-entry pass.
+  up to 32 LFOs + sends + margin. One entry = opcode + config + state.
 - **Sequencer rate**: an instruction costs one cycle, so a full
   256-entry pass is 256 cycles and **all 256 entries run every
   sample, at 96 kHz**. No chain has to live inside half the table.
-- **Producer multiplies**: ≤200/sample on one 18×18 DSP lane
+- **Instruction multiplies**: ≤200/sample on one 18×18 DSP lane
   (envelope scaling ~64, LFO depths ~32, combiner terms, margin).
   Escape hatch: shift-add amounts (~1.5 dB steps, zero DSP).
 - **The worst-case performance** that finalizes these numbers is
@@ -209,7 +206,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
 ## What firmware sees (sketch — final addresses at milestone B1)
 
 - Bus base registers: one write = one bus's ESP32 contribution.
-- Producer table: type, config, source/target bus numbers, gate bus.
+- Instruction table: opcode, config, source/target bus numbers, gate bus.
 - Per-element: existing params + two pointer words; GATE stays as the
   hard mute/panic path after envelopes take over articulation.
 - Diagnostics: bus read-back via the drum-serviced idle-slot fetch
@@ -247,23 +244,22 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   base writes rather than 256 OSC-word writes.
   *Verification: velocity-to-loudness and velocity-to-brightness by
   ear; bend by ear; measured SPI traffic for a bend sweep collapses.*
-- **B4 — Producer sequencer + LFO producer.** ✅ The idle-slot table
-  executor: 128 producers × 2 words at
-  0x0100 (banked — wiring), stride-2 pass in ~256 idle slots, five
-  overlapped stages with the one producer multiply in its own
-  registered stage; osc_core reused for shapes. Bus = base RAM +
-  producer contribution realized (bend and vibrato coexist on the
+- **B4 — Instruction sequencer + LFO instruction.** ✅ The table
+  executor: 256 instructions × 4 words at
+  0x0100 (banked — wiring), one instruction per cycle, with the one
+  instruction multiply in its own registered stage; osc_core reused
+  for shapes. Bus = base RAM + source contribution realized (bend and vibrato coexist on the
   pitch bus). Boot demo: 1 Hz triangle vibrato, ±75 cents (depth is
   a one-constant knob in voice_alloc — deliberately oversized for
   the verification listen). Bench: 93.75 Hz square tremolo, ±12 dB,
   zero SPI during measurement.
-- **B5 — ADSR producer + gate-bus triggering.** ✅ Amp envelopes as
-  producers
-  32–63, one per voice, gate buses 80+v, the envelope-subtracts-
-  silence idiom, the uniform log₂ rate ladder (fractional-level
-  decode), and the keystroke-instance voice lifecycle in firmware.
-  Still open: the FILTER envelope, a second ADSR pool onto the cutoff
-  buses, as a follow-on rung of its own.
+- **B5 — ADSR instruction + gate-bus triggering.** ✅ Amp envelopes as
+  instructions
+  32–63, one per voice, gate buses 80+v, the envelope-adds-volume
+  idiom, the log₂ rate ladder (decoded to RC coefficients by
+  firmware), and the keystroke-instance voice lifecycle in firmware.
+  ✅ MOD envelope: a second ADSR per voice (entries 64+2v) onto the
+  voice's cutoff bus.
 - **B6+ (deferred until measured traffic demands them).** Combiner/
   chaining, shared per-element configuration tables (deliberately
   unnamed), source-side smoothing for
@@ -295,15 +291,10 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   the heavy-damping end at Butterworth. Silicon timing rule applies —
   the decode lands in the most timing-fragile path; budget a
   pipeline stage for it.
-  Also: **invert the GAIN word to volume
-  semantics** — 0x00 = silence/max attenuation, larger = louder, so
-  programming stops being backwards AND the p3 = 0x00000000 footgun
-  (FULL volume) becomes safe-by-default. A small
-  bench-verified rung right after B5 merges: one subtract in the gain
-  decode, the exact-mute code moves to 0x00, the amp-envelope depth
-  turns positive (level ADDS volume — no negative-depth trick), plus
-  firmware bakes, benches and the boot image generator inverted
-  together.
+  ✅ **The GAIN word has volume semantics** — 0x00 = silence/exact
+  mute, larger = louder, so a zeroed word is safe-by-default: one
+  subtract in the gain decode, and the amp-envelope depth is positive
+  (the level ADDS volume).
   Also: **Q-loss compensation** — by ear, the LP
   output loses low-frequency energy as Q rises; the HP output is
   expected to mirror this at the high end. Investigation order when
@@ -336,13 +327,6 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   musical self-oscillation — half of every famous analog filter's
   character. Adjacent to the Q-loss measure-first plan; do them
   together. (The waterphone itself is arguably a keeper preset.)
-  Also: **revisit where the binary point of attenuation values
-  actually needs to be.** The envelope level's fractional bits
-  (UQ22.5) were placed for rate continuity rather than from an
-  analysis of what resolution the
-  attenuation path itself wants; when the GAIN inversion rung (above)
-  reworks the gain decode anyway, work out the right point position
-  from the attenuator's actual step size instead of inheriting it.
   Also: **consider an artificial noise floor — a
   very quiet one.** Analog character and a graceful bottom for
   envelope tails; would live somewhere in the output mix path.

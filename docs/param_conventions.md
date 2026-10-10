@@ -28,7 +28,7 @@ are small mapping choices, not architecture.
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| Knob→time law | equal time RATIO per step (SF2 timecents; every classic's knob feel) | 8-bit log₂ ladder, `cc<<1`, all 256 codes distinct equal-ratio steps | ✓ exactly conventional |
+| Knob→time law | equal time RATIO per step (SF2 timecents; every classic's knob feel) | 8-bit log₂ ladder, `cc<<1` → 128 equal-ratio steps (the fastest 8 CC values saturate at the ceiling) | ✓ exactly conventional |
 | Range | ~1 ms – 10..20 s (Juno/JP class) | 0.7 ms – 44 s | ✓ generous, fine |
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
 | **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | linear in **dB** like every other segment | ✗ **F1 — the likely main "feels wrong"** |
@@ -62,7 +62,7 @@ attack only.**
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
 | Gain encoding | centibels (SF2), log pots (analog) | UQ4.4 log₂, 0.375 dB/step, 0xFF exact mute | ✓ |
-| Velocity→amp curve | concave/exponential-ish default, span −30…−40 dB, often selectable | linear dB, span −23.6 dB, hardwired | ~ acceptable; curve select later if the ear asks |
+| Velocity→amp curve | concave/exponential-ish default, span −30…−40 dB, often selectable | linear dB; span 0…−60 dB set by CC 86 (default 64 ≈ −30 dB); curve fixed | ~ acceptable; curve select later if the ear asks |
 | Pan law | equal-power-ish, full deflection mutes far side | log attenuation per side, exact mute at rails (measured ±48 dB) | ✓ |
 
 ## FREQUENCY — pitch, cutoff, resonance
@@ -71,8 +71,8 @@ attack only.**
 |---|---|---|---|
 | Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂, CC 74 ±8 oct around key-tracked base, KT amount CC 31 | ✓ |
 | Osc pitch/fine | semitone steps ±12 / fine ±0.5 semi, center detents | same (round 2) | ✓ |
-| Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `cc<<7` spans ~15.9 oct of Q | **F5 — taper PLACEMENT unverified**: equal-Q-ratio steps are deliberately unconventional-better, but where self-osc lands on the dial is unmeasured; if it onsets mid-dial the top half is a dead scream zone. Measure with the existing CC71 sweep tool, then rescale cc→r so onset sits ≈ 80% |
-| PW range | 50% ↔ ~5/95%, never 0/100 (silence) | (val−64)<<17 reaches TRUE 0%/100% = silence at the rails | **F2** — clamp the CC mapping to ≈5–95%; firmware one-liner per osc |
+| Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `val·5632/127` spans 0–5.5 oct of Q (Q≈32 at the top) | **F5 — taper PLACEMENT unverified**: equal-Q-ratio steps are deliberately unconventional-better, but where self-osc lands on the dial is unmeasured; if it onsets mid-dial the top half is a dead scream zone. Measure with the existing CC71 sweep tool, then rescale cc→r so onset sits ≈ 80% |
+| PW range | 50% ↔ ~5/95%, never 0/100 (silence) | unipolar equal-ratio log taper, 0 = 50% → 127 = 5%, rails unreachable | ✓ (F2 done) |
 
 ## MODULATION — LFOs, depths, routing
 
@@ -98,8 +98,8 @@ attack only.**
   silence / noise — three failure modes at extreme Q).
 - **F3 vibrato-depth zones** — open, awaiting a call on the shape,
   or folds into the matrix's per-destination depths.
-- Velocity curve/span — sens knobs landed (CC 86/87, 0 = off);
-  multiplicative MOD-depth scaling remains open.
+- **F4** — not used.
+- Velocity curve/span — sens knobs landed (CC 86/87, 0 = off).
 - **F6/F7 (added post-audit, by ear)**: MOD-env depth got a
   square-law bipolar taper (fine near centre, ±16 oct rails); key
   track rescaled to 0–200% with centre 64 = 100%.

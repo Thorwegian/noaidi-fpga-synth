@@ -35,7 +35,7 @@ modulation model. Status marks: ✅ implemented & hardware-verified,
   exactly one channel exists.
 - **Source / sink is the couple**: things that write buses are
   SOURCES; the parameters that read buses are SINKS. Code identifiers
-  (`producer_*`, `MAP_PROD_BASE`, `engine_link_prod_write`, ...) spell
+  (`PROD_BASE`, `ENGINE_NUM_PRODUCERS`, `engine_link_prod_write`, ...) spell
   this `prod`, pending a rename to `source_*`; docs use source/sink
   and quote code names only as code.
 - **The full terminal triad — source / sink (drain) / gate**:
@@ -127,8 +127,8 @@ panel traffic and test traffic never contend.
 The power-on `patch_default()` timbre is a **7+1 supersaw with a sine
 sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
 (fattens the saws without muddying the mid), through a **24 dB/oct**
-lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74
-spans ±4 octaves and the mod wheel opens ~+5 octaves — the wheel is
+lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74/106
+spans ±8 octaves and the mod wheel opens ~+5 octaves — the wheel is
 the primary sweep control. Open question: the rest (wheel-down) cutoff
 sits half an octave above the note, so the sweep starts fairly bright;
 lowering the base would give a closed→open travel.
@@ -144,7 +144,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 - **ESP32-C3**: MIDI (UART1, 31250 baud), future display, and every
   *musical* decision — voice allocation, unison grouping, CC mapping.
   Talks to the FPGA as SPI master (measured clean to 40 MHz).
-- **Tang Nano 20K**: a dumb-but-fast 256-voice synthesis engine. It has
+- **Tang Nano 20K**: a dumb-but-fast 256-element synthesis engine. It has
   no concept of notes, MIDI or CCs.
 - **Audio outputs: the 48 kHz S/PDIF on pin 27
   is THE PRIMARY AUDIO PATH** — one pin, two sinks: the coax (through
@@ -201,29 +201,29 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
 | Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (inverted the code to volume; the binary point stays at UQ4.4 — the 0.375 dB grid is the ear-proven resolution, answering the parked question by ratification) |
-| Envelope times | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave, decoded by the same LUT+shift machinery (📋) |
+| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the patch/CC; decoded in firmware (`patch.c`) to an 18-bit linear RC coefficient k that the gateware multiplies by (`adsr.sv`) |
 
 ## The drum — SCMO pipeline ✅
 
 SCMO ("schmoe" — Single Clock Multiple Operation, i.e. pipelining),
 named for the tilted head drum of a VCR: many operations sweep past a
-single fast mechanism. 1024 sysclk per sample; a voice enters the
-pipeline on each of slots 0–255 (~25% of the drum budget; the idle
-slots are reserved for LFOs, CV read-back and future work).
+single fast mechanism. 768 sysclk per sample; an element enters the
+pipeline on each of slots 0–255.
 
-**Voice budget**: 32 voices of polyphony × up to 8 unison voices per
+**Element budget**: 32 voices of polyphony × up to 8 elements per
 keystroke = 256. The pipeline knows nothing of that grouping — 256
-interchangeable voice slots; unison is a firmware convention.
+interchangeable elements; unison is a firmware convention.
 
 **Per-element chain** (16 stages today): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12/24 dB via single/dual
-mode — a separate filter per unison voice costs nothing in cycles) →
+mode — a separate filter per element costs nothing in cycles) →
 stereo log attenuation (independent L/R, the mono→stereo point) → mix
 accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 
 **State banks**: semi dual-ported BSRAM, read at pipeline start,
-written at pipeline end, 11 slots apart — no address collision.
+written at pipeline end, a fixed number of cycles later, so the
+addresses never collide.
 
 **Parameter smoothing** ✅: articulation comes from gateware envelope
 sources on the buses, updating every sample with no SPI timing in the
@@ -252,8 +252,9 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   per second) and **every change is effected through a swap**.
   Atomicity is the swap's job — BSRAM does not give read-during-write
   coherency.
-- Bring-up ✅: a 16-word byte-wide register file
-  (`spi_slave_regs.sv`) with the byte-boundary rules baked in.
+- Bring-up (retired; kept as the A/B reference, not built): a
+  16-word byte-wide register file (`spi_slave_regs.sv`) with the
+  byte-boundary rules baked in.
 
 ## Modulation ✅
 
@@ -266,8 +267,9 @@ log-domain Q.
 As built, in brief: elements are dumb sinks — waveform, filter type,
 static detune, and per-parameter bus pointers. Every dynamic value
 is a bus: `effective = base word + bus[pointer]`, a saturating add,
-zero extra pipeline stages. SOURCES (LFOs, ADSRs; combiners later)
-live in a 128-entry table walked in the drum's idle slots and write
+zero extra pipeline stages. SOURCES (LFOs, ADSRs, SENDs) live in a
+256-entry table, run by the CSP independently of the drum schedule
+(every entry every sample), and write
 `base register + contribution` to the bus replicas. One bus format
 (signed Q8.10 log₂ — integer step = octave / 6 dB / octave-of-Q
 depending on sink). Sources execute in table order once per sample;
@@ -288,8 +290,8 @@ octaves (~11 audibly useful); an amount CC that can't span that is
 wrong by definition — "if the CC for MOD→CUTOFF is the only input,
 it has to span the full range." Over-authority is safe: base + send
 saturates at the 0..0x3FFF clamp, like an env-amount knob pinning.
-CC 107's ±4-octave scale is to be widened to full authority
-(`<<6` → `<<8`); the same rule applies to
+CC 107 has full authority (square-law taper, ±16 octaves at the
+rails); the same rule applies to
 every future pitch/cutoff amount. 7-bit resolution at full span is
 0.25 oct/step — acceptable for depths; the MIDI fine-pair convention
 (as CC 74/106) is the fix if stepping ever becomes audible.
@@ -305,10 +307,13 @@ scales the per-voice DEPTH word at note-on, no gateware change. The
 amp path is already multiplicative-equivalent (log-domain subtract =
 linear scaling) and just gains a sensitivity amount.
 
-- **SPDIF** (pin 27): biphase-mark, M/W/B preambles, valid channel
-  status (consumer PCM / 96 kHz / 24-bit). What a receiver requires and
+## Audio outputs ✅
+
+- **SPDIF**: pin 27 carries the 48 kHz stream (channel status 48 kHz),
+  pin 86 the parked 96 kHz stream; biphase-mark, M/W/B preambles,
+  valid channel status (consumer PCM / 24-bit). What a receiver requires and
   why is documented in `spdif_tx.sv`.
-- **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/16.
+- **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/12.
 - Both latch the same stereo mix on the drum's sample tick.
 - **Output tilt**: a one-pole 6 dB/oct lowpass on the mix,
   `out += (in − out) >>> 3` at 96 kHz → corner ≈ 2 kHz — the
@@ -344,7 +349,7 @@ bench-verified) milestone. One rung in flight at a time.
 1. **Voice concept on the ESP32** ✅ — engine link (sole SPI owner,
    1 kHz tick) + voice allocator per
    [firmware_architecture.md](firmware_architecture.md). 32 voices ×
-   8 elements, church-organ detune, cutoff one octave above the note,
+   8 elements, church-organ detune, cutoff tracking the note,
    velocity → gain, omni, steal-oldest.
 2. **Housekeeping** ✅ — constants live in `synth_pkg.sv`, with
    `*patch*` file names and voice→element/lane identifiers renamed.
@@ -352,7 +357,8 @@ bench-verified) milestone. One rung in flight at a time.
    through the swap; note-off keeps gain state. Mod wheel → cutoff and
    pitch wheel (±2 st) live, firmware-computed. Verified by ear.
    Random per-element phase still pending; retrig reserved.
-4. **The bus architecture** — the agreed forward path, spec and
+4. **The bus architecture** ✅ B1–B5 (B6 deferred) — the agreed
+   forward path, spec and
    milestone ladder B0–B6 in
    [bus_architecture.md](bus_architecture.md): spec sign-off →
    cutoff-class pilot → all sinks → firmware-routed buses (velocity →
@@ -401,8 +407,9 @@ bench-verified) milestone. One rung in flight at a time.
    core if it earns its keep, no LiteX adoption.
 10. **Gowin EDA as a resource shelf**: official
    EDA installed at `/opt/gowin-eda` on the dev machine (Ubuntu
-   needs some effort for the binaries). Most interesting pillage:
-   the simulation primitives in `IDE/simlib/*` — candidate fix for
+   needs some effort for the binaries). `IDE/simlib/gw2a/prim_sim.v`
+   is in use: `make sim` needs it for the hand-instantiated DSP
+   primitives. Still open: the simulation primitives as the fix for
    the standing "the open-source flow cannot simulate the BSRAM it
    generates" gap (post-synthesis netlist sim against vendor
    models). General tips:
