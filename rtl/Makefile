@@ -27,7 +27,7 @@ SRC = $(PKG) $(MOD) constraints.cst
 # Generated LUTs / boot image
 LUTS = \
 	dsp/phase_lut.hex \
-	dsp/svf_k_lut.hex \
+	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
 	dsp/att_lut.hex \
@@ -44,7 +44,7 @@ all: pack.fs
 dsp/phase_lut.hex: ../scripts/gen_phase_lut.py
 	python3 $<
 
-dsp/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+dsp/svf_fc_lut.hex: ../scripts/gen_svf_lut.py
 	python3 $<
 
 dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
@@ -328,4 +328,4 @@ sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif si
 	fi
 
 clean:
-	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex obj_dir
+	rm -rf *.log *.json *.fs dsp/svf_fc_lut.hex obj_dir

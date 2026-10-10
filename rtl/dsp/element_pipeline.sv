@@ -118,7 +118,7 @@ module element_pipeline #(
     // LUT ROMs (combinational reads)
     //----------------------------------------------------------------
     reg [23:0] phase_lut [0:1023];     // osc phase increment, one octave
-    reg [15:0] k_lut     [0:1023];     // SVF K mantissa, one octave
+    reg [15:0] svf_fc_lut     [0:1023];     // SVF K mantissa, one octave
     reg [16:0] q1_lut    [0:15];       // SVF damping mantissa, one
                                        // octave of the log2 resonance
                                        // code (q1 = sqrt2 * 2^-r) in
@@ -133,7 +133,7 @@ module element_pipeline #(
 
     initial begin
         $readmemh("dsp/phase_lut.hex", phase_lut);
-        $readmemh("dsp/svf_k_lut.hex", k_lut);
+        $readmemh("dsp/svf_fc_lut.hex", svf_fc_lut);
         $readmemh("dsp/q1_lut.hex", q1_lut);
         $readmemh("dsp/att_lut.hex", att_lut);
         $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
@@ -516,7 +516,7 @@ module element_pipeline #(
     // S3 — LUT data, phase_inc/K, phase_next, oscillator waveform
     //----------------------------------------------------------------
     logic [23:0] s3_phase_inc_lut;
-    logic [15:0] s3_k_lut;
+    logic [15:0] s3_svf_fc_lut;
     logic [16:0] s3_q1_lut;
     logic [3:0]  s3_reso_oct;
 
@@ -536,7 +536,7 @@ module element_pipeline #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3_phase_inc_lut <= '0;
-            s3_k_lut     <= '0;
+            s3_svf_fc_lut     <= '0;
             s3_q1_lut    <= '0;
             s3_reso_oct  <= '0;
             s3_valid   <= 1'b0;
@@ -557,7 +557,7 @@ module element_pipeline #(
             s3_ic2eq2 <= '0;
         end else begin
             s3_phase_inc_lut <= phase_lut[eff_pitch[9:0]];
-            s3_k_lut     <= k_lut[eff_fc[9:0]];
+            s3_svf_fc_lut     <= svf_fc_lut[eff_fc[9:0]];
             s3_q1_lut    <= q1_lut[eff_reso[9:6]];
             s3_reso_oct  <= eff_reso[13:10];
             s3_valid   <= s2_valid;
@@ -588,7 +588,7 @@ module element_pipeline #(
     // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
     // LUT+shift expands to ~22+ bits of real precision, needed later
     // for the noise oscillator and whistling-filter melodies.
-    assign k     = $signed({20'd0, s3_k_lut}) <<< (3 + s3_fc_oct);
+    assign k     = $signed({20'd0, s3_svf_fc_lut}) <<< (3 + s3_fc_oct);
     // Resonance decode: q1 = sqrt(2) * 2^-r in Q2.16. Same
     // LUT+barrel-shift shape as K; registered into S3B before the
     // S4 multiply (the silicon timing rule). At high octaves the
