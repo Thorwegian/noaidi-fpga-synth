@@ -12,7 +12,7 @@ UART1 ──► midi_in ──event bus──► synth model ──cmd queue─�
                      └──► midi_log, display, ... (other subscribers)
 ```
 
-## midi_in (exists)
+## midi_in
 
 Parses the UART byte stream into MIDI events and publishes them on the
 event bus. Knows nothing about voices or the FPGA.
@@ -24,9 +24,6 @@ musical decision: voice allocation (which of the 256 elements plays which
 note), unison grouping, detune/pan baking, CC → parameter mapping,
 channel programs. Emits abstract engine commands ("voice 17: these
 params, gate on") into a FreeRTOS queue.
-
-Pure logic — no SPI, no hardware includes — so it can be unit-tested
-on the host with scripted MIDI in and expected commands out.
 
 ## engine link
 
@@ -41,21 +38,17 @@ writes directly before that).
   previous generation") is implemented here, in exactly one place:
   after a swap, the link re-writes the words dirtied by the previous
   generation. Callers never think about banks.
-- Runs on a **fixed tick** (initial value 1 kHz — matches MIDI's
-  practical event ceiling): each tick drains the queue, coalesces
-  writes, performs one write-batch + swap if anything changed. Bounded
-  swap rate, natural batching; revisit event-driven only if the tick
-  latency (≤1 ms) ever matters musically.
+- Runs on a **fixed 1 kHz tick** (matches MIDI's practical event
+  ceiling): each tick drains the queue, coalesces writes, performs one
+  write-batch + swap if anything changed. Bounded swap rate, natural
+  batching, at most 1 ms of tick latency.
 
 ## Voice lifecycle
 
 **A voice is an instance of a keystroke, not a key.** Hitting the
 same key again does NOT deallocate or recycle the voice still
 sounding that key's previous strike — every note-on allocates a
-fresh voice and prior tails keep ringing underneath. The earlier
-allocator's same-note-reuse was a logical fallacy (and, combined with
-a lowest-index free scan, made 32 independent gateware envelopes
-sound like one).
+fresh voice and prior tails keep ringing underneath.
 
 Three voice states, because "key held" and "voice in use" are
 different facts:
@@ -67,11 +60,13 @@ different facts:
 | `V_IDLE` | tail finished — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
-  most-decayed RELEASING (earliest tail end) → steal oldest HELD.
-  RELEASING promotes to IDLE lazily during the allocation scan when
-  `esp_timer` passes the tail deadline (computed from the RATES
-  release byte with the gateware decode's own formula) — no timer
-  task.
+  RELEASING with the earliest-ending tail → steal oldest HELD.
+- **Tail end**: at note-off the firmware estimates when the release
+  tail ends, from the amp envelope's release rate, and once
+  `esp_timer` passes that deadline it promotes the voice to IDLE and
+  mutes its elements (GATE off). The check runs in the note-on
+  allocation scan and in the voice task's periodic sweep — no timer
+  task. This estimate-and-mute is to be replaced by linear gain.
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
@@ -80,13 +75,13 @@ different facts:
   stolen while RELEASING restarts from silence (`adsr.sv` treats a
   re-gated release as a new note). It only occurs with all 32 voices
   in use; a true retrigger of a HELD voice needs a gateware
-  edge/pulse mechanism ("retrig reserved" under the GATE rung).
+  edge/pulse mechanism (GATE bit 1, retrig, is reserved for it).
 
-## Sequencers / arpeggiators (later)
+## Sequencers / arpeggiators
 
-Just another producer into the same command queue. Producers own their
-timing (esp_timer); the engine link stays a dumb, fast executor. No
-special path.
+A sequencer or arpeggiator is just another producer into the same
+command queue. Producers own their timing (esp_timer); the engine link
+stays a dumb, fast executor. No special path.
 
 ## Command format
 

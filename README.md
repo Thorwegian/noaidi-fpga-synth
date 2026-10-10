@@ -108,8 +108,7 @@ pll_clk O0=73728K -s
 The `idf.py` invocation is machine-specific for now (Espressif's
 environment activation does not lend itself to standardized
 Makefiles); the top-level Makefile calls a `~/bin/idf` wrapper and
-`IDF=idf.py` overrides it inside an already-activated shell. Tidying
-the build environment is a noted TODO (docs/design.md roadmap).
+`IDF=idf.py` overrides it inside an already-activated shell.
 
 ## Build & run
 

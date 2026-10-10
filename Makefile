@@ -20,8 +20,8 @@
 # button) so the full image is rewritten. Board must match tree.
 
 # idf wrapper that sources the ESP-IDF environment (see README.md
-# "Build requirements" and docs/design.md roadmap item 7); override
-# with IDF=idf.py inside an already-activated shell.
+# "Build requirements"); override with IDF=idf.py inside an
+# already-activated shell.
 IDF ?= $(HOME)/bin/idf
 
 all: pack fw
