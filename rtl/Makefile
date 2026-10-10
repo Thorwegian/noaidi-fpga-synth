@@ -83,7 +83,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # with same sink wire"), others fail with "Failed to find a route".
 # Bump SEED when a netlist change hits either — it is placement luck,
 # not (necessarily) real congestion. `make timing-sweep` compares seeds.
-SEED ?= 8
+SEED ?= 7
 
 # ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
@@ -134,8 +134,9 @@ timing-sweep: yosys.json
 	done; wait
 	@for s in $(SEEDS); do \
 		printf "seed %-4s " $$s; \
-		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {print $$NF, $$0}' \
-			/tmp/tsweep/$$s.log | grep timebase || echo "(no result)"; \
+		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {match($$0, /: [0-9.]+ MHz/); \
+			print substr($$0, RSTART+2, RLENGTH-6), $$0}' /tmp/tsweep/$$s.log | sort -n | head -1 | \
+			cut -d' ' -f2- | grep . || echo "(no result)"; \
 	done
 
 sram: pack.fs
