@@ -16,7 +16,7 @@ measuring it here.
 
     ~/.noaidi-blenv/bin/python3 tools/hil_limiter_rms.py
 
-Capture hygiene per AGENTS.md: CC 120 between steps, every CC the
+Capture hygiene: CC 120 between steps, every CC the
 measurement depends on is set explicitly, BLE disconnected + untrusted on
 exit.
 """

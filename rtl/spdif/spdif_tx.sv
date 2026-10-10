@@ -8,8 +8,8 @@
 // bits/frame = 128 cells per sample period — so the stream is
 // internally consistent at ANY tick rate, and a receiver locks to the
 // actual bit rate. Only the channel-status frequency byte (CS_FREQ
-// parameter) must be told what rate that is: 0x0A = 96 kHz (default,
-// the main output), 0x02 = 48 kHz (the LED-driven capture output).
+// parameter) must be told what rate that is: 0x0A = 96 kHz (default;
+// parked on pin 86), 0x02 = 48 kHz (the primary output, pin 27).
 //
 // What a receiver needs from this module — all four, not just the
 // first two: stop after two and professional interfaces refuse to

@@ -1,13 +1,10 @@
-# Parameter mapping conventions — audit (DRAFT)
+# Parameter mapping conventions
 
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-Requested after the first panel sessions: "a lot
-of these parameters are kind of working, but not exactly behaving as
-one would conventionally expect" — research how time, amplitude,
-modulation and frequency mappings are conventionally implemented, and
-how to map that most closely onto our gateware.
+How time, amplitude, modulation and frequency mappings are
+conventionally implemented, and how the synth's mappings compare.
 
 References: the named inspirations (design.md: Nord Lead, JP-8000,
 Sequential Prophet, EMU10K1 — the latter for its DSP); the
@@ -28,78 +25,52 @@ are small mapping choices, not architecture.
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| Knob→time law | equal time RATIO per step (SF2 timecents; every classic's knob feel) | 8-bit log₂ ladder, `cc<<1`, all 256 codes distinct equal-ratio steps | ✓ exactly conventional |
+| Knob→time law | equal time RATIO per step (SF2 timecents; every classic's knob feel) | 8-bit log₂ ladder, `cc<<1` → 128 equal-ratio steps (the fastest 8 CC values saturate at the ceiling) | ✓ exactly conventional |
 | Range | ~1 ms – 10..20 s (Juno/JP class) | 0.7 ms – 44 s | ✓ generous, fine |
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
 | **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | linear in **dB** like every other segment | ✗ **F1 — the likely main "feels wrong"** |
 | Decay/release curve | exponential amplitude = linear dB (SF2 centibel ramps; analog RC discharge) | linear in dB | ✓ exactly conventional |
-| Sustain | a level, linear-ish dB | level, 0.375 dB/step | ✓ |
+| Sustain | a level, linear-ish dB | a linear envelope level over the 60 dB envelope span (`ENV_SPAN`, raw value 0x2800 on the log gain bus): a fraction of the span, ≈0.47 dB per CC step at full depth | ✓ |
 
 **F1 explained**: a linear-dB attack spends most of its wall-clock
 time below audibility and then arrives all at once — short attacks
 click, long attacks feel like "nothing… nothing… POP". Convention
 splits the domains: attack in amplitude, decay/release in dB. Our
-decay/release are already right; only the attack segment deviates.
+decay/release are right; only the attack segment deviates.
 
-**Gateware fix (small)**: in the CSP ADSR's attack branch only,
-step RC-style toward peak — `level += (peak − level) >> n` with `n`
-from the rate byte — instead of the constant increment. In the log
-domain that yields fast-early/slow-late dB growth ≈ convex amplitude,
-which is the analog shape. One subtract and shift in an existing
-case; bench gets an attack-shape assertion; ear-verify.
+The amp envelope's level is linear, yet it moves volume in dB because
+the gain bus it drives is logarithmic; that holds until gain is
+linear.
 
-**Status: DEFERRED** — "isn't critical right now
-and will greatly complicate things"; parked as its own issue. An
-important scoping refinement found while filing it: SF2's
-*modulation* envelope stages are linear in the MODULATION domain
-(output applied linearly in cents) — which is exactly what our MOD
-envelope already does on the log-domain cutoff bus. **The MOD
-envelope conforms natively; F1's deviation is the AMP envelope's
-attack only.**
+SF2's *modulation* envelope stages are linear in the MODULATION
+domain (output applied linearly in cents) — which is exactly what our
+MOD envelope does on the log-domain cutoff bus. **The MOD envelope
+conforms natively; F1's deviation is the AMP envelope's attack
+only.**
 
 ## AMPLITUDE — gain, velocity, pan
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| Gain encoding | centibels (SF2), log pots (analog) | UQ4.4 log₂, 0.375 dB/step, 0xFF exact mute | ✓ |
-| Velocity→amp curve | concave/exponential-ish default, span −30…−40 dB, often selectable | linear dB, span −23.6 dB, hardwired | ~ acceptable; curve select later if the ear asks |
+| Gain encoding | centibels (SF2), log pots (analog) | UQ4.4 log₂, 0.375 dB/step, 0x00 exact mute | ✓ |
+| Velocity→amp curve | concave/exponential-ish default, span −30…−40 dB, often selectable | linear dB; span 0…−60 dB set by CC 86 (default 64 ≈ −30 dB; 0 = velocity off); curve fixed | ~ acceptable |
 | Pan law | equal-power-ish, full deflection mutes far side | log attenuation per side, exact mute at rails (measured ±48 dB) | ✓ |
 
 ## FREQUENCY — pitch, cutoff, resonance
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂, CC 74 ±8 oct around key-tracked base, KT amount CC 31 | ✓ |
-| Osc pitch/fine | semitone steps ±12 / fine ±0.5 semi, center detents | same (round 2) | ✓ |
-| Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `cc<<7` spans ~15.9 oct of Q | **F5 — taper PLACEMENT unverified**: equal-Q-ratio steps are deliberately unconventional-better, but where self-osc lands on the dial is unmeasured; if it onsets mid-dial the top half is a dead scream zone. Measure with the existing CC71 sweep tool, then rescale cc→r so onset sits ≈ 80% |
-| PW range | 50% ↔ ~5/95%, never 0/100 (silence) | (val−64)<<17 reaches TRUE 0%/100% = silence at the rails | **F2** — clamp the CC mapping to ≈5–95%; firmware one-liner per osc |
+| Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂, CC 74 ±8 oct around key-tracked base, KT amount CC 31 (0–200%, centre 64 = 100%) | ✓ |
+| Osc pitch/fine | semitone steps ±12 / fine ±0.5 semi, center detents | same | ✓ |
+| Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `val·5632/127` spans 0–5.5 oct of Q, equal Q ratio per step | **F5** — a stable top by design: CC 71 tops out at r = 5.5 oct (Q≈32), sharp but stable, rather than running into self-oscillation |
+| PW range | 50% ↔ ~5/95%, never 0/100 (silence) | unipolar equal-ratio log taper, 0 = 50% → 127 = 5%, rails unreachable | ✓ |
 
 ## MODULATION — LFOs, depths, routing
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| LFO rate law | exponential, ~0.03–30 Hz (JP class; Nord Lead reaches audio-rate) | exponential 0.03–30 Hz | ✓ (audio-rate LFO = future note) |
-| Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | CC 77 = val<<2 → max ±6 semitones, 4.7-cent steps | **F3** — neither fish nor fowl: too coarse at the bottom for vibrato, oddly capped for FX. Propose two-zone: 0–96 → 0–±100 cents (fine), 96–127 → to ±12 semi (FX). Or settle it inside the modulation matrix's per-destination depth scaling |
-| Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | temporary hardwire → cutoff | already noted |
-| Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct | ✓ post-round-1 |
-| LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | note for the matrix rung — cheap as a CSP ramp or firmware ramp on depth |
-
-## Status
-
-- **F1 attack curve** — DEFERRED (scoped tighter: the
-  MOD envelope is already linear-in-cents = SF2-conformant; only the
-  AMP attack deviates).
-- **F2 PW** — DONE, better than the clamp: unipolar equal-ratio log
-  taper, 0 = square → 127 = 5%, degenerate rails unreachable (the
-  bipolar halves sound identical).
-- **F5 resonance-taper placement** — open; the reso sweep tooling
-  (filter_pain_check.py) is the instrument. Related measured find:
-  the low-cutoff × high-Q corner is unstable (catalogued as BRRR /
-  silence / noise — three failure modes at extreme Q).
-- **F3 vibrato-depth zones** — open, awaiting a call on the shape,
-  or folds into the matrix's per-destination depths.
-- Velocity curve/span — sens knobs landed (CC 86/87, 0 = off);
-  multiplicative MOD-depth scaling remains open.
-- **F6/F7 (added post-audit, by ear)**: MOD-env depth got a
-  square-law bipolar taper (fine near centre, ±16 oct rails); key
-  track rescaled to 0–200% with centre 64 = 100%.
+| LFO rate law | exponential, ~0.03–30 Hz (JP class; Nord Lead reaches audio-rate) | exponential 0.03–30 Hz | ✓ |
+| Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | CC 77 = val<<2 → max ±6 semitones, 4.7-cent steps | **F3** — neither fish nor fowl: too coarse at the bottom for vibrato, oddly capped for FX |
+| Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | fixed route → cutoff | ~ |
+| Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct, square-law taper (fine near centre) | ✓ |
+| LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | ✗ |

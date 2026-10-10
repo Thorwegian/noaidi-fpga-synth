@@ -25,7 +25,7 @@
 // element RAM for the filter -- so one module serves both; for a
 // streaming instance the stages simply pipeline. `level` and the gained
 // signal are separate ports: feedforward / feedback / external sidechain
-// is wiring, not a mode. Bit-faithful to scripts/limiter_model.py.
+// is wiring, not a mode.
 //------------------------------------------------------------------------
 `default_nettype none
 module limiter #(

@@ -19,9 +19,9 @@
 # image is current — restart the ESP32 (make fw-flash, or its reset
 # button) so the full image is rewritten. Board must match tree.
 
-# idf wrapper that sources the ESP-IDF environment (see
-# docs/firmware_architecture.md tooling notes); override with
-# IDF=idf.py inside an already-activated shell.
+# idf wrapper that sources the ESP-IDF environment (see README.md
+# "Build requirements"); override with IDF=idf.py inside an
+# already-activated shell.
 IDF ?= $(HOME)/bin/idf
 
 all: pack fw

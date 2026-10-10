@@ -11,6 +11,8 @@
 // internal MIDI CC 71 event on the event bus, so the slider IS the
 // resonance knob (voice_alloc's temporary CC 71 handler does the
 // rest; when the MIDI schema lands, only the CC number moves).
+// Currently parked: s_slider_active (slider.c) is false, so no CC is
+// emitted.
 //
 // Serial-monitor keys (USB-Serial-JTAG console) — two-point settled
 // calibration: park the fader at an end, press the key, the reading

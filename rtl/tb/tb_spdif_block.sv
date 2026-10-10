@@ -100,9 +100,8 @@ module tb_spdif_block;
         reg [127:0] c128;
         integer k;
         begin
-            // Frame 1 is an ordinary M-frame whose CS bit is 0, so its
-            // 128 cells must be bit-identical to the 052d920 stream's
-            // (tb_spdif_old prints the same line for A/B comparison).
+            // Frame 1 is an ordinary M-frame whose CS bit is 0; its
+            // 128 cells are printed as a fingerprint of the stream.
             if (f == 1) begin
                 for (k = 0; k < 128; k = k + 1) c128[127-k] = cells[k][0];
                 $display("CELLS1: %032h", c128);

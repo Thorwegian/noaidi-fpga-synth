@@ -171,7 +171,7 @@ root_widgets = [
     section("Filter", [
         knob(74, "Cutoff", 64),
         knob(106, "Cutoff Fine", 0),
-        knob(71, "Resonance", 4),            # boot reso r=0x200 = cc 4
+        knob(71, "Resonance", 12),           # boot reso r=0x200 ≈ cc 12 (532)
         switch(29, "Type", {"LP": 0, "BP": 64, "HP": 127}, 0),
         switch(30, "Slope", {"12 dB": 0, "24 dB": 127}, 127),
         knob(31, "Key Track", 64, bipolar=True),   # center = 100%
@@ -195,7 +195,7 @@ root_widgets = [
     ]),
     section("LFOs", [
         knob(76, "Vibrato Rate", 64),
-        knob(77, "Vibrato Depth", 16),
+        knob(77, "Vibrato Depth", 4),        # boot depth 16 = cc 4
         switch(113, "LFO1 Shape", WAVES, 64),
         knob(109, "LFO2 Rate", 64),
         knob(110, "LFO2 Depth", 0),
@@ -208,7 +208,7 @@ root_widgets = [
         # No mod-wheel control: the physical keyboard has it, and
         # wheel→cutoff is a temporary hardwiring anyway, due to become
         # a routable per-channel destination.
-        knob(7, "Volume", 100),
+        knob(7, "Volume", 103),              # boot volume 0xCF ≈ cc 103 (206)
         knob(10, "Pan", 64, bipolar=True),
         knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
         knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")

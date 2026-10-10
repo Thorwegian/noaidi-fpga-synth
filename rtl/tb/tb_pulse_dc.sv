@@ -2,8 +2,8 @@
 //------------------------------------------------------------------------
 // tb_pulse_dc.sv -- the pulse oscillator must be DC-free at every duty
 //
-// Copyright (C) 2026  Thor Johannes Hoeyer
-// SPDX-License-Identifier: CERN-OHL-S-2.0
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 //
 // The requirement: the time-averaged value of the pulse oscillator must
 // remain 0 at every duty cycle.
@@ -22,13 +22,13 @@ module tb_pulse_dc;
     // STEPS sets the MEASUREMENT's resolution, and it has to be finer than
     // the thing being measured. At 4096 steps each sample covers 4096 phase
     // units, so a duty boundary falling between samples misplaces the
-    // transition by up to half a step -- worth ~16 LSB of apparent DC, enough
+    // transition by up to half a step -- worth a raw value of ~16 of apparent DC, enough
     // to read +12 at the narrowest duty on a correct design. The same grid
     // also biases the SAW: 4096 points from -2^23 miss the top of the range,
-    // so their mean sits half a step low and a centred saw reads -8 LSB.
-    // 65536 steps puts both under an LSB.
+    // so their mean sits half a step low and a centred saw reads a raw value of -8.
+    // 65536 steps puts both under a raw value of 1.
     localparam int STEPS = 65536;
-    localparam int TOL   = 4;             // LSB of Q2.16: truncation + grid only
+    localparam int TOL   = 4;             // raw Q2.16 value: truncation + grid only
 
     logic signed [23:0] phase, duty;
     logic        [1:0]  wave;
@@ -73,7 +73,7 @@ module tb_pulse_dc;
         duties[8] = -24'sd8000000;
 
         $display("  pulse time-average must be 0 at every duty");
-        $display("    duty          mean(LSB Q2.16)");
+        $display("    duty          mean(raw Q2.16)");
         for (k = 0; k <= 8; k = k + 1) begin
             mean_at(2'd1, duties[k], m);
             $display("    %11d  %12.2f%s", $signed(duties[k]), m,

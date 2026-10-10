@@ -1,18 +1,9 @@
-// spi_regs.h — ESP32-C3 driver for spi_slave_regs FPGA peripheral
+// spi_regs.h — ESP32-C3 driver for the FPGA's spi_bus peripheral
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Protocol summary:
-//   Byte 0:  [7]=R/W (1=read, 0=write), [6:0]=7-bit register address
-//   Byte 1+: data bytes, address auto-increments after each byte
-//
-//   Write: 2+N bytes (cmd + N data bytes)
-//   Read:  2+N bytes (cmd + 1 dummy + N data bytes)
-//          The first response byte is the dummy; register data starts
-//          at byte 1 (mem[addr] is combinational, auto-increments).
-//
-// SPI Mode 0 (CPOL=0, CPHA=0), MSB-first, up to ~20 MHz.
+// SPI Mode 0 (CPOL=0, CPHA=0), MSB-first; measured clean to 40 MHz.
 
 #pragma once
 #include <stdint.h>
@@ -29,34 +20,8 @@ extern "C" {
 void fpga_spi_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
                    uint32_t freq_hz);
 
-// ── Single-register operations ──────────────────────────────────────
-
-// Write one byte to a register
-void fpga_reg_write(uint8_t addr, uint8_t data);
-
-// Read one byte from a register
-uint8_t fpga_reg_read(uint8_t addr);
-
-// ── Multi-register (burst) operations ───────────────────────────────
-// addr = starting register, data = buffer, len = number of registers
-
-// Write len bytes starting at addr
-void fpga_reg_write_burst(uint8_t addr, const uint8_t *data, size_t len);
-
-// Read len bytes starting at addr into buf.
-// Internally reads len+1 bytes and discards the first 1.
-void fpga_reg_read_burst(uint8_t addr, uint8_t *buf, size_t len);
-
-// Diagnostic: send 5 bytes, print the raw MISO bytes returned.
-// MISO byte 0 is the slave's ID byte (0xA5) on every transaction — if it
-// is not 0xA5 the physical MISO path is broken, and nothing else here
-// will work.  Check that first.
-void fpga_raw_link_probe(void);
-
 // ── Word protocol (spi_bus.sv / docs/memory_map.md) ─────────────────
 // 16-bit word addresses, 32-bit data, MSB first on the wire.
-// Live only when the loaded bitstream contains spi_bus (not the
-// byte-protocol spi_slave_regs).
 #include <stdbool.h>
 void     fpga_word_write(uint16_t addr, uint32_t value);
 void     fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
@@ -65,7 +30,7 @@ bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 
 // ── Bank swap (ping-pong) ───────────────────────────────────────────
 // Per-element writes land in the SHADOW bank; this requests the swap
-// (CTRL@0x0002 bit 0) and busy-waits one sample period so the swap
+// (CTRL@0x0002 bit 0) and busy-waits two sample periods so the swap
 // (executed at drum slot 512) has taken effect on return. Every
 // parameter change is effected through a swap — swaps are cheap
 // (thousands per second), there is no "live" write path around them.

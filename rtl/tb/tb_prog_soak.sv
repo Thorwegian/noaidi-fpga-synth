@@ -1,5 +1,5 @@
-// Copyright (C) 2026  Thor Johannes Hoeyer
-// SPDX-License-Identifier: CERN-OHL-S-2.0
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 //
 // tb_prog_soak.sv -- the envelope glitch hunt, with the REAL program loaded.
 //

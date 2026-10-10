@@ -10,13 +10,14 @@
 //   3. oscillator: per-voice phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
 //   5. attenuation: s10_out == (s9_elem * lin) >>> 16, exact
-//   6. mixer: mix_left/right == sat24(sum of s10 outputs << 8)
+//   6. mixer: mix_left/right == sat24(sum of s10 outputs << 10)
 //      (through the master limiter at unity gain: levels stay under
-//      its -1 dBFS threshold; published 3 cycles after the tick),
-//      exactly, over a full sample period; L == R (equal gains)
+//      its -6 dBFS threshold; published 10 cycles after the tick),
+//      exactly, over a full sample period; L and R checked
+//      independently (the boot image is hard-panned)
 //   7. signal energy: the mix is not silent
 //
-// Run from rtl/ via `make sim` (vvp needs cwd = rtl for $readmemh).
+// Run from rtl/ via `make sim-elem` ($readmemh paths are relative to rtl/).
 //--------------------------------------------------------------------
 `timescale 1ns / 1ps
 
@@ -176,11 +177,11 @@ module tb_element_pipeline;
             adds_this_period = adds_this_period + 1;
         end
 
-        // latch check: one cycle after the tick, mix regs hold the
+        // latch check: at slot 16, mix regs hold the
         // latched sums (L and R independently — the boot image is hard-panned)
         // S11 master limiter publishes mix_* 10 cycles after the
         // tick (feedforward needs the finished sum first); read at slot 16.
-        // Stimulus peaks ~-12 dBFS, under the -1 dBFS threshold, so the
+        // Stimulus peaks ~-12 dBFS, under the -6 dBFS threshold, so the
         // limiter gain is unity and the sum is still bit-exact.
         if (slot == 16 && period >= 2) begin
             if (mix_left !== exp_lat_l[23:0]) begin

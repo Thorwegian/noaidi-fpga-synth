@@ -89,7 +89,7 @@ static RingbufHandle_t s_rx_rb;
 static uint32_t s_rx_drops;
 
 // ── Parser callback ────────────────────────────────────────────────
-// Runs in the context of the NimBLE host task. Fan-out to consumers
+// Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
 static void ble_msg_to_bus(const midi_message_t *m, void *user)
 {
@@ -444,8 +444,8 @@ void ble_midi_init(void)
     ble_store_config_init();
 
     // nimble_port_freertos_init() in this IDF version wraps
-    // esp_nimble_enable(): controller + host bring-up inside, void
-    // return - errors surface as abort/log from the stack.
+    // esp_nimble_enable(), which only spawns the host task (bring-up
+    // is nimble_port_init() above); void return.
     nimble_port_freertos_init(ble_midi_host_task);
 
     ESP_LOGI(TAG, "BLE MIDI peripheral up, advertising as \"Noaidi\"");

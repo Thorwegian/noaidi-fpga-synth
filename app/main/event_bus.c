@@ -8,13 +8,11 @@
 #include "event_bus.h"
 
 static QueueHandle_t s_subs[EVENT_BUS_MAX_SUBSCRIBERS];
-static uint32_t s_dropped[EVENT_BUS_MAX_SUBSCRIBERS];
 
 void event_bus_init(void)
 {
     for (int i = 0; i < EVENT_BUS_MAX_SUBSCRIBERS; i++) {
         s_subs[i] = NULL;
-        s_dropped[i] = 0;
     }
 }
 
@@ -36,23 +34,7 @@ void event_bus_publish(const evt_t *evt)
         if (q == NULL) {
             continue;
         }
-        if (xQueueSend(q, evt, 0) != pdTRUE) {
-            s_dropped[i]++;
-        }
+        xQueueSend(q, evt, 0);   // full queue: the event is dropped
     }
 }
 
-uint32_t event_bus_dropped(int sub_id)
-{
-    if (sub_id < 0 || sub_id >= EVENT_BUS_MAX_SUBSCRIBERS) {
-        return 0;
-    }
-    return s_dropped[sub_id];
-}
-
-void event_bus_reset_dropped(int sub_id)
-{
-    if (sub_id >= 0 && sub_id < EVENT_BUS_MAX_SUBSCRIBERS) {
-        s_dropped[sub_id] = 0;
-    }
-}

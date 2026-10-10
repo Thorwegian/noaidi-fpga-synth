@@ -34,9 +34,8 @@
 // but a rolling window updated every poll keeps the event rate at
 // 500 Hz with only 8 ms of group delay, unlike the original
 // block-average-then-sleep shape that made a 50 Hz knob.
-// Pacing is an esp_timer notifying the task — same pattern and same
-// reason as engine_link's 1 kHz tick (see engine_link.c: short
-// vTaskDelay rounds to zero ticks and busy-spins).
+// Pacing is an esp_timer notifying the task — the same pattern as
+// engine_link's 1 kHz tick, independent of the FreeRTOS tick rate.
 #define POLL_US        2000   // slider poll period
 #define WIN_LEN        8      // rolling-average window (power of 2)
 // CC-level backlash hysteresis: a change of 1 is not enough, so the

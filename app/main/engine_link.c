@@ -22,18 +22,19 @@
 #define ENGINE_QUEUE_LEN   1024   // voice_alloc's boot-time pointer
                                   // push alone is 512 commands
 #define ENGINE_TASK_STACK  3072
-#define ENGINE_TASK_PRIO   6          // above midi_log, below midi_in
-// 1 kHz control rate. Paced by an esp_timer notifying the
-// task, NOT vTaskDelayUntil: the FreeRTOS tick is 100 Hz, so a 1 ms
-// delay would round to 0 ticks and assert.
+#define ENGINE_TASK_PRIO   6          // highest app task: above midi_in/
+                                      // voice_alloc (5), midi_log/ble_rx (4)
+// 1 kHz control rate. Paced by an esp_timer notifying the task, so the
+// rate does not depend on the FreeRTOS tick (CONFIG_FREERTOS_HZ, pinned
+// to 1000 in sdkconfig.defaults).
 #define ENGINE_TICK_US     1000
 
 #define ELEM_BASE            0x2000
 #define ELEM_STRIDE          64
 
-// GAIN word with both channels at 0xFF = exact mute (0x00000000 is
-// 0 dB full volume — the classic footgun).
-#define P3_MUTE            0x0000FFFFu
+// GAIN word with both channels at 0x00 = exact mute (volume
+// semantics: 0xFF is loudest).
+#define P3_MUTE            0x00000000u
 
 static QueueHandle_t s_queue;
 static QueueHandle_t s_bus_queue;
@@ -41,17 +42,18 @@ static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
 #define BUS_BASE_ADDR      0x0800
 #define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
-                                  // gates in one burst
+                                  // 4 global buses in one burst
 #define PROD_BASE_ADDR     0x0100
-#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs + 32 amp ADSRs
-                                  // + 32 MOD envs (3 words each) + 32
-                                  // fan-out sources (2 words) = 262
-                                  // pushes before the 1 kHz tick can
-                                  // drain. 256 silently dropped the
-                                  // tail = voices 30/31's amp-env
-                                  // configs = gain floor forever =
-                                  // heard as the level dropping every
-                                  // 32 note-ons. Headroom 2x.
+#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
+                                  // + 32 MOD envs + 32 amp ADSRs (4
+                                  // words each) + 32 fan-out sources
+                                  // (2 words) = 324 pushes before the
+                                  // 1 kHz tick can drain. A 256-deep
+                                  // queue drops the tail = the last
+                                  // voices' amp-env configs = gain
+                                  // floor forever = heard as the level
+                                  // dropping every 32 note-ons.
+                                  // Headroom ~1.6x.
 
 typedef struct {
     uint16_t bus;
@@ -60,7 +62,7 @@ typedef struct {
 
 typedef struct {
     uint8_t  entry;
-    uint8_t  word;      // 0 CFG, 1 DEPTH
+    uint8_t  word;      // 0 CFG, 1 RATES, 2 DEPTH, 3 RATES2
     uint32_t value;
 } prod_cmd_t;
 
@@ -71,12 +73,11 @@ static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // word 3 is the second
 static uint32_t s_pdirty_now[PDIRTY_WORDS];
 static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 
-// Dirty bitmaps, one bit per (elem, word): 1024 bits.
+// Dirty bitmaps, one bit per (elem, word): 1792 bits.
 #define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
 static uint32_t s_dirty_now[DIRTY_WORDS];   // changed since last swap
 static uint32_t s_dirty_prev[DIRTY_WORDS];  // written before last swap
 
-static uint32_t s_drops;
 
 static inline void mark_dirty(int elem, int word)
 {
@@ -188,7 +189,7 @@ static void engine_task(void *arg)
             while (bits) {
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
-                int idx = i * 32 + b;              // entry*3 + word
+                int idx = i * 32 + b;              // entry*4 + word
                 // four words per entry and a stride of four, so the
                 // producer address IS the bit index
                 fpga_word_write(PROD_BASE_ADDR + idx,
@@ -201,20 +202,6 @@ static void engine_task(void *arg)
         memset(s_dirty_now, 0, sizeof(s_dirty_now));
         memcpy(s_pdirty_prev, s_pdirty_now, sizeof(s_pdirty_prev));
         memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
-
-        // Drop visibility, always on (not just at init): a silent drop
-        // is a voice configured wrong forever.
-        static uint32_t s_drops_reported;
-        if (s_drops != s_drops_reported) {
-            ESP_LOGW(TAG, "engine writes dropped: %u total",
-                     (unsigned)s_drops);
-            s_drops_reported = s_drops;
-        }
-
-        if (s_drops) {
-            ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
-            s_drops = 0;
-        }
 
         // Single-core guard. If this wake ran long (a flood of
         // dirty rows to burst over SPI), the 1 kHz notify is already
@@ -236,7 +223,7 @@ void engine_link_init(void)
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;
-        s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
+        s_image[e][2] = 0;            // Butterworth, fc = 0
         s_image[e][3] = P3_MUTE;
         s_image[e][4] = 0;            // GATE off
         s_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
@@ -277,11 +264,7 @@ bool engine_link_send(const engine_cmd_t *cmd)
 {
     if (s_queue == NULL)
         return false;
-    if (xQueueSend(s_queue, cmd, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
+    return xQueueSend(s_queue, cmd, 0) == pdTRUE;
 }
 
 bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
@@ -289,16 +272,7 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
     if (s_bus_queue == NULL || bus == 0 || bus >= 1024)
         return false;
     bus_cmd_t bc = {.bus = bus, .value = value_q810};
-    if (xQueueSend(s_bus_queue, &bc, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
-}
-
-uint32_t engine_link_drops(void)
-{
-    return s_drops;
+    return xQueueSend(s_bus_queue, &bc, 0) == pdTRUE;
 }
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
@@ -306,16 +280,5 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
     if (s_prod_queue == NULL || word >= 4)   // uint8_t entry spans the pool
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    // Drops stay possible under a wedged flush; blocking here is not
-    // the answer, since it trades a dropped write for a stall. The
-    // LOSSLESSNESS
-    // guarantee lives one level up instead: voice_alloc's apply_dirty
-    // checks engine_link_drops() around each config burst and RE-ARMS
-    // the dirty bit when anything dropped, so the coalescer retries at
-    // its own bounded pace until the config lands complete.
-    if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
+    return xQueueSend(s_prod_queue, &pc, 0) == pdTRUE;
 }

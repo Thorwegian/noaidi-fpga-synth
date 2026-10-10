@@ -4,9 +4,9 @@
 //------------------------------------------------------------------------
 // tb_svf_stability.sv — SVF stability spot-check at the clamp corner
 //
-// The FC_MAX clamp (synth_pkg) holds the effective cutoff just below
-// fs/6 = 16 kHz, from the stability criterion sin(pi*fc/fs) < Q with
-// the musical worst case Q = 0.5. Resonance is log2-encoded:
+// The FC_MAX clamp (synth_pkg) holds the effective cutoff at 14.4 kHz,
+// one measured-clean step below the ~16 kHz bloom at the heaviest
+// decodable damping (q1 = sqrt2). Resonance is log2-encoded:
 // FILTER[27:14] = r, octaves of Q above Butterworth,
 // q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
 // damping, structurally rather than by a clamp, and the top of the

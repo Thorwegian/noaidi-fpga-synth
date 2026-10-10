@@ -12,7 +12,8 @@
 extern "C" {
 #endif
 
-// Configure UART1 as the DIN MIDI input port and start its RX task.
+// Configure UART1 as the DIN MIDI input port. Its RX task starts with
+// midi_in_start().
 //
 // rx_pin — GPIO to use for MIDI RX (e.g. 0).
 //
@@ -22,12 +23,17 @@ extern "C" {
 // must run AFTER midi_in_init() so the SPI driver re-claims GPIO7.
 void midi_in_init(int rx_pin);
 
-// Configure UART0 as the dev-host panel MIDI port and start its
-// RX task. Reserved for Open Stage Control exclusively. Requires the
-// console to be off UART0; it lives on the USB-Serial/JTAG controller.
+// Configure UART0 as the dev-host panel MIDI port. Its RX task starts
+// with midi_in_start(). Reserved for Open Stage Control exclusively.
+// Requires the console to be off UART0; it lives on the USB-Serial/JTAG
+// controller.
 //
 // rx_pin — GPIO wired to the panel MIDI-IN circuit (e.g. 2).
 void midi_panel_init(int rx_pin);
+
+// Start the RX tasks of the configured ports, so they begin publishing
+// to the event bus. Call after every event-bus subscriber has registered.
+void midi_in_start(void);
 
 #ifdef __cplusplus
 }

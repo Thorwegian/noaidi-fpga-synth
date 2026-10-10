@@ -5,7 +5,7 @@ from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
 musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison elements per voice, per-voice ADSR amp envelopes in gateware,
-96 kHz audio out on SPDIF and I2S.
+96 kHz synthesis, out on 48 kHz SPDIF (primary) and 96 kHz I2S.
 
 ## License
 
@@ -18,16 +18,17 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
             (MIDI parse, voice        └─ 256 time-multiplexed
              allocation, CC/SysEx        elements: osc → dual SVF →
              mapping — "firmware")       stereo gain, modulation
-                                         buses + producer table
+                                         buses + source table
                                          ("gateware")
-                                         ──► SPDIF + I2S @ 96 kHz
+                                         ──► SPDIF @ 48 kHz + I2S @ 96 kHz
 ```
 
 - **Gateware** (SystemVerilog, `rtl/`): a 768-slot pipeline at
   73.728 MHz (= 768 × 96 kHz) computes 256 elements per sample —
   oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. Parameters live in ping-pong BSRAM banks written over
   SPI; dynamic values ride **modulation buses** written by a
-  **producer table** (LFOs, ADSRs) walked in the drum's idle slots.
+  256-entry **source table** (LFOs, ADSRs, sends), run by the CSP
+  independently of the drum schedule, every entry every sample.
   See [docs/bus_architecture.md](docs/bus_architecture.md).
 - **Firmware** (ESP-IDF C, `app/`): MIDI in on UART1, an event bus,
   a voice allocator (a voice = 8 detuned elements, keystroke-instance
@@ -68,7 +69,8 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 | Signal | Pin | Description |
 |---|---|---|
 | sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
-| spdif_out | 27 | SPDIF digital audio |
+| spdif48_out | 27 | SPDIF 48 kHz — the primary audio path |
+| spdif_out | 86 | SPDIF 96 kHz — parked, unwired |
 | i2s_data | 54 | I2S serial data |
 | i2s_lrclk | 55 | I2S word select |
 | i2s_bclk | 56 | I2S bit clock |
@@ -106,8 +108,7 @@ pll_clk O0=73728K -s
 The `idf.py` invocation is machine-specific for now (Espressif's
 environment activation does not lend itself to standardized
 Makefiles); the top-level Makefile calls a `~/bin/idf` wrapper and
-`IDF=idf.py` overrides it inside an already-activated shell. Tidying
-the build environment is a noted TODO (docs/design.md roadmap).
+`IDF=idf.py` overrides it inside an already-activated shell.
 
 ## Build & run
 

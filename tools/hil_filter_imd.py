@@ -31,7 +31,7 @@ cutoff on the key-tracked base, i.e. on the fundamental.
 
     ~/.noaidi-blenv/bin/python3 tools/hil_filter_imd.py [slope]
 
-slope: 24 (default) or 12. Capture hygiene per AGENTS.md: CC 120 between
+slope: 24 (default) or 12. Capture hygiene: CC 120 between
 steps, every CC the measurement depends on is set explicitly, BLE is
 disconnected and untrusted on exit.
 """
