@@ -46,9 +46,9 @@ package synth_pkg;
     parameter int          MAP_ELEM_STRIDE = 64;       // words per element
 
     //--- Bus fabric (docs/bus_architecture.md) ----------------------
-    parameter logic [15:0] MAP_BUS_BASE = 16'h0800;    // bus base registers
+    parameter logic [15:0] MAP_DMEM_BASE = 16'h0800;    // bus base registers
     parameter int          DMEM_WORDS    = 512;         // uniform pool
-    parameter int          BUS_W        = 18;          // signed Q8.10
+    parameter int          DMEM_W        = 18;          // signed Q8.10
 
     //--- Instruction table (B4/B5) -------------------------------------
     // 256 entries x 4 words, stride 4, at 0x0100-0x04FF. Config is

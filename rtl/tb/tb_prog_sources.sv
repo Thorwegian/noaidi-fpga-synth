@@ -28,7 +28,7 @@ module tb_prog_sources;
             spi_word_write(elem_addr(v, W_GAIN),
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
-            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
+            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
@@ -38,7 +38,7 @@ module tb_prog_sources;
             spi_word_write(elem_addr(v, W_GAIN),
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
             spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
-            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_BUS3);
+            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
         end
         observe(60);
 
@@ -69,7 +69,7 @@ module tb_prog_sources;
         // volume semantics: base = quiet floor (negative),
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
@@ -78,20 +78,20 @@ module tb_prog_sources;
                                                           // magnitude
         flip;
         spi_word_write(src_addr(0, 0), SRC_OFF);
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // depth must
                                                           // match the
                                                           // floor's
                                                           // magnitude
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);
+        spi_word_write(dmem_addr(3), OFFS_MINUS_8OCT);
         observe(60);
         observe(300);
         worst = peak;
         $display("ADSR floor: peak=%0d (quiet)", worst);
 
-        spi_word_write(bus_addr(5), 32'h00000001);  // gate on
+        spi_word_write(dmem_addr(5), 32'h00000001);  // gate on
         observe(300);
         observe(400);
         $display("ADSR attack/sustain: peak=%0d", peak);
@@ -102,7 +102,7 @@ module tb_prog_sources;
         end
         wmax = peak;
 
-        spi_word_write(bus_addr(5), 32'h00000000);  // gate off
+        spi_word_write(dmem_addr(5), 32'h00000000);  // gate off
         observe(300);
         observe(300);
         $display("ADSR released: peak=%0d", peak);
@@ -116,25 +116,25 @@ module tb_prog_sources;
         // +4 oct depth each over a −8 oct base. Summed: −8+4+4 = 0
         // (full loudness). Last-write-wins would leave −8+4 = −4 oct
         // = 24 dB quieter. Compare against slot-2-off single-source.
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
-        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(2, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
         flip;
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
-        spi_word_write(src_addr(2, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(2, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(2, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
-        spi_word_write(bus_addr(5), 32'h00000001);      // gate on
+        spi_word_write(dmem_addr(3), OFFS_MINUS_8OCT);   // base: floor
+        spi_word_write(dmem_addr(5), 32'h00000001);      // gate on
         observe(300);
         observe(400);
         wmax = peak;   // two chained sources
@@ -158,22 +158,22 @@ module tb_prog_sources;
         // adds to gain bus 3. Bus 3 base = −8 oct floor. Bus 6 = 0 →
         // floor stays; bus 6 = +8 oct at unity depth → full loudness
         // (≥8× the floor); half depth → +4 oct = clearly in between.
-        spi_word_write(src_addr(1, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(1, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(1, 2), COEF_UNITY);
         spi_word_write(src_addr(2, 0), SRC_OFF);
         flip;
-        spi_word_write(src_addr(1, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(1, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(1, 2), COEF_UNITY);
         spi_word_write(src_addr(2, 0), SRC_OFF);
-        spi_word_write(bus_addr(3), OFFS_MINUS_8OCT);   // base: floor
-        spi_word_write(bus_addr(6), 32'h00000000);      // source: zero
+        spi_word_write(dmem_addr(3), OFFS_MINUS_8OCT);   // base: floor
+        spi_word_write(dmem_addr(6), 32'h00000000);      // source: zero
         observe(60);
         observe(300);
         worst = peak;
         if (worst == 0) worst = 1;
         $display("bus source, src zero:   peak=%0d (floor)", worst);
 
-        spi_word_write(bus_addr(6), OFFS_PLUS_8OCT);    // source: +8 oct
+        spi_word_write(dmem_addr(6), OFFS_PLUS_8OCT);    // source: +8 oct
         observe(60);
         observe(300);
         wmax = peak;
@@ -201,22 +201,22 @@ module tb_prog_sources;
         // from the channel bus) — and a hierarchical peek asserts the
         // replica holds EXACTLY base + 0 + channel. Guards the whole
         // sum against regressions no audio-level assert would pin.
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), 32'h0);          // MOD env depth 0
-        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6); // fan-out, adjacent
+        spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6); // fan-out, adjacent
         spi_word_write(src_addr(2, 2), COEF_UNITY);
         flip;
-        spi_word_write(src_addr(1, 0), SRC_ADSR_BUS3_GATE5);
+        spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
         spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
         spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
         spi_word_write(src_addr(1, 2), 32'h0);
-        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(2, 2), COEF_UNITY);
-        spi_word_write(bus_addr(3), 32'h00000064);      // base = 100
-        spi_word_write(bus_addr(6), 32'h00001200);      // channel = 4608
-        spi_word_write(bus_addr(5), 32'h00000001);      // gate held
+        spi_word_write(dmem_addr(3), 32'h00000064);      // base = 100
+        spi_word_write(dmem_addr(6), 32'h00001200);      // channel = 4608
+        spi_word_write(dmem_addr(5), 32'h00000001);      // gate held
         observe(60);
         observe(60);
         if ($signed(u_pipe.u_csp.dmem_fc[3]) !== 18'sd4708) begin
@@ -234,19 +234,19 @@ module tb_prog_sources;
         // bus 6's SUM into gain bus 3 at unity. The gain must wobble
         // exactly like the direct-LFO case B4: alternating window
         // peaks with ratio >= 5.
-        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_BUS6);
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_DMEM6);
         spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
         spi_word_write(src_addr(1, 0), SRC_OFF);
-        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(2, 2), COEF_UNITY);
         flip;
-        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_BUS6);
+        spi_word_write(src_addr(0, 0), SRC_LFO_TREM_DMEM6);
         spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
         spi_word_write(src_addr(1, 0), SRC_OFF);
-        spi_word_write(src_addr(2, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(2, 2), COEF_UNITY);
-        spi_word_write(bus_addr(3), 32'h00000000);      // gain base 0
-        spi_word_write(bus_addr(6), 32'h00000000);      // sum = LFO only
+        spi_word_write(dmem_addr(3), 32'h00000000);      // gain base 0
+        spi_word_write(dmem_addr(6), 32'h00000000);      // sum = LFO only
         observe(60);
         wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;
         for (step = 0; step < 8; step = step + 1) begin
@@ -266,11 +266,11 @@ module tb_prog_sources;
         // proves entries above 127 are configured, walked, and
         // summing.
         spi_word_write(src_addr(2, 0), SRC_OFF);
-        spi_word_write(src_addr(130, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(130, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(130, 2), COEF_UNITY);
         flip;
         spi_word_write(src_addr(2, 0), SRC_OFF);
-        spi_word_write(src_addr(130, 0), SRC_BUS3_FROM6);
+        spi_word_write(src_addr(130, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(130, 2), COEF_UNITY);
         observe(60);
         wmax = 0; wmin = 64'h7FFFFFFFFFFFFFFF;

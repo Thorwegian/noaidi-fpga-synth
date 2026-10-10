@@ -256,13 +256,13 @@ module spi_bus #(
     assign imem_write_data = {partial_word, rx_byte};
 
     // ---- bus base write capture (see mailbox note at the ports) ----
-    wire in_bus_range = (word_addr >= synth_pkg::MAP_BUS_BASE)
-                     && (word_addr <  synth_pkg::MAP_BUS_BASE
+    wire in_dmem_range = (word_addr >= synth_pkg::MAP_DMEM_BASE)
+                     && (word_addr <  synth_pkg::MAP_DMEM_BASE
                                       + 16'(synth_pkg::DMEM_WORDS));
     initial dmem_wr_toggle = 1'b0;
     always_ff @(posedge sclk) begin
         if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
-            && !is_read && in_bus_range) begin
+            && !is_read && in_dmem_range) begin
             dmem_wr_addr   <= word_addr[9:0];
             dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
             dmem_wr_toggle <= ~dmem_wr_toggle;

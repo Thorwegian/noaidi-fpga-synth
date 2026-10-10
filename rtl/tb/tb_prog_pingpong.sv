@@ -23,11 +23,11 @@ module tb_prog_pingpong;
 
 `include "tb/elem_prog_common.svh"
 
-    localparam int          TESTBUS = 20;          // inside the live range
+    localparam int          TEST_DMEM = 20;          // inside the live range
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;  // negative: sign survives
 
-    localparam int          QUIETBUS = 300;   // no instruction targets this
+    localparam int          QUIET_DMEM = 300;   // no instruction targets this
     integer toggles, ticks, cyc;
     integer persist_ok;
     integer straddles, windows;
@@ -36,8 +36,8 @@ module tb_prog_pingpong;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
     // hierarchical peeks -- the whole point of doing this in simulation
-    `define LIVE   u_pipe.u_csp.dmem_gain_l[{ u_pipe.u_csp.dmem_page, TESTBUS[8:0]}]
-    `define SHADOW u_pipe.u_csp.dmem_gain_l[{~u_pipe.u_csp.dmem_page, TESTBUS[8:0]}]
+    `define LIVE   u_pipe.u_csp.dmem_gain_l[{ u_pipe.u_csp.dmem_page, TEST_DMEM[8:0]}]
+    `define SHADOW u_pipe.u_csp.dmem_gain_l[{~u_pipe.u_csp.dmem_page, TEST_DMEM[8:0]}]
 
     initial begin
         reset_and_mute;
@@ -74,7 +74,7 @@ module tb_prog_pingpong;
         wait (slot == 10'd40);
         live_before = `LIVE;
 
-        spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_A});
+        spi_word_write(16'(DMEM_BASE + TEST_DMEM), {14'b0, MARK_A});
 
         wait (slot == 10'd700);            // same sample, long after the commit
         live_mid   = `LIVE;
@@ -120,7 +120,7 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         @(posedge sample_tick);
         wait (slot == 10'd40);
-        spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_B});
+        spi_word_write(16'(DMEM_BASE + TEST_DMEM), {14'b0, MARK_B});
         @(posedge sample_tick);
         repeat (4) @(posedge clk);
         if (`LIVE !== MARK_B) begin
@@ -133,8 +133,8 @@ module tb_prog_pingpong;
         // 6. a neighbouring bus must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
-        if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_page, 9'(TESTBUS+1)}] === MARK_B) begin
-            $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TESTBUS+1);
+        if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_page, 9'(TEST_DMEM+1)}] === MARK_B) begin
+            $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TEST_DMEM+1);
             errors = errors + 1;
         end else
             $display("no aliasing: neighbouring bus untouched");
@@ -148,7 +148,7 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         @(posedge sample_tick);
         wait (slot == 10'd40);
-        spi_word_write(16'(BUS_BASE + TESTBUS), {14'b0, MARK_A});
+        spi_word_write(16'(DMEM_BASE + TEST_DMEM), {14'b0, MARK_A});
         @(posedge sample_tick);            // first swap: value goes live
 
         persist_ok = 1;
@@ -172,13 +172,13 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         @(posedge sample_tick);
         wait (slot == 10'd40);
-        spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
+        spi_word_write(16'(DMEM_BASE + QUIET_DMEM), {14'b0, MARK_B});
         repeat (6) @(posedge sample_tick);
         repeat (4) @(posedge clk);
-        if (u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIET_DMEM[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus %0d lost its base (got %0d, want %0d)",
-                     QUIETBUS,
-                     u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIETBUS[8:0]}], MARK_B);
+                     QUIET_DMEM,
+                     u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIET_DMEM[8:0]}], MARK_B);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists with nothing refreshing it");

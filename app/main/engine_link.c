@@ -37,11 +37,11 @@
 #define GAIN_WORD_MUTE            0x00000000u
 
 static QueueHandle_t s_queue;
-static QueueHandle_t s_bus_queue;
+static QueueHandle_t s_dmem_queue;
 static uint32_t s_param_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
-#define BUS_BASE_ADDR      0x0800
-#define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
+#define DMEM_BASE_ADDR      0x0800
+#define DMEM_QUEUE_LEN      128    // init writes 32 envelope floors +
                                   // 4 global buses in one burst
 #define IMEM_BASE_ADDR     0x0100
 #define IMEM_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
@@ -56,9 +56,9 @@ static uint32_t s_param_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
                                   // Headroom ~1.6x.
 
 typedef struct {
-    uint16_t bus;
+    uint16_t dmem_addr;
     uint32_t value;
-} bus_cmd_t;
+} dmem_cmd_t;
 
 typedef struct {
     uint8_t  entry;
@@ -114,9 +114,9 @@ static void engine_task(void *arg)
         // wait (~3.6 us), so back-to-back writes cannot overrun the
         // 1-deep mailbox. (The stuck notes were a gateware
         // pending-clear bug, not an overrun.)
-        bus_cmd_t bc;
-        while (xQueueReceive(s_bus_queue, &bc, 0) == pdTRUE)
-            fpga_word_write(BUS_BASE_ADDR + bc.bus, bc.value & 0x3FFFF);
+        dmem_cmd_t bc;
+        while (xQueueReceive(s_dmem_queue, &bc, 0) == pdTRUE)
+            fpga_word_write(DMEM_BASE_ADDR + bc.dmem_addr, bc.value & 0x3FFFF);
 
         // Drain the queues into the images (elements + producers —
         // both banked, both covered by the same swap).
@@ -219,7 +219,7 @@ void engine_link_init(void)
     // Image: every element gated off (and gain-muted for belt and
     // braces at boot), benign params otherwise. ALL pointers start on
     // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
-    // at note-on. The wheel rides BUS_CH_CUT.
+    // at note-on. The wheel rides DMEM_CH_CUT.
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_param_image[e][0] = 0;
         s_param_image[e][1] = 0;
@@ -238,9 +238,9 @@ void engine_link_init(void)
     ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_ELEMENTS);
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
-    s_bus_queue = xQueueCreate(BUS_QUEUE_LEN, sizeof(bus_cmd_t));
+    s_dmem_queue = xQueueCreate(DMEM_QUEUE_LEN, sizeof(dmem_cmd_t));
     s_imem_queue = xQueueCreate(IMEM_QUEUE_LEN, sizeof(imem_cmd_t));
-    if (s_queue == NULL || s_bus_queue == NULL || s_imem_queue == NULL) {
+    if (s_queue == NULL || s_dmem_queue == NULL || s_imem_queue == NULL) {
         ESP_LOGE(TAG, "failed to create command queues");
         return;
     }
@@ -267,12 +267,12 @@ bool engine_link_param_write(const engine_param_cmd_t *cmd)
     return xQueueSend(s_queue, cmd, 0) == pdTRUE;
 }
 
-bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
+bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810)
 {
-    if (s_bus_queue == NULL || bus == 0 || bus >= 1024)
+    if (s_dmem_queue == NULL || dmem_addr == 0 || dmem_addr >= 1024)
         return false;
-    bus_cmd_t bc = {.bus = bus, .value = value_q810};
-    return xQueueSend(s_bus_queue, &bc, 0) == pdTRUE;
+    dmem_cmd_t bc = {.dmem_addr = dmem_addr, .value = value_q810};
+    return xQueueSend(s_dmem_queue, &bc, 0) == pdTRUE;
 }
 
 bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value)

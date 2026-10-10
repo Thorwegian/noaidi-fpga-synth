@@ -5,11 +5,11 @@
     License: CERN-OHL-S v2
  
 CC 74 travels the fan-out path end to end: CC 74 -> channel cutoff
-bus (BUS_CH_CUT) BASE -> 32 type-3 walker entries -> per-voice cutoff
+bus (DMEM_CH_CUT) BASE -> 32 type-3 walker entries -> per-voice cutoff
 buses -> element cutoff. If the fan-out works, sweeping CC 74
 dark/bright changes the saw's spectrum through the filter; if it is
 broken, cutoff stops responding entirely, because the per-voice base
-is always zero (cut_bus_value).
+is always zero (cut_dmem_value).
 
 Metric: brightness index = RMS(first difference)/RMS - a first
 difference emphasizes HF, so an open filter scores several times a

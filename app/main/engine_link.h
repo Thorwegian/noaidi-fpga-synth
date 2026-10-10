@@ -54,7 +54,7 @@ bool engine_link_param_write(const engine_param_cmd_t *cmd);
 // banked and need no swap: the write goes straight to the bus base
 // register (0x0800 + bus) on the next tick. Value is signed Q8.10 in
 // the low 18 bits. Bus 0 is hardwired zero and cannot be written.
-bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
+bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 
 // ── Producer table (B4/B5) ──────────────────────────────────────────
 // 256 instructions x 4 words (stride 4) at 0x0100, banked like

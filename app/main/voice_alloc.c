@@ -122,28 +122,28 @@ static int64_t  s_last_flush;
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides BOTH pitch and cutoff buses so filter key tracking
 // follows bends.
-#define BUS_DUTY_GLOBAL  1   // global PWM bus; every duty pointer
+#define DMEM_DUTY_GLOBAL  1   // global PWM bus; every duty pointer
                              // references it (bus 0 stays the strict
                              // null bus)
-#define BUS_PITCH_GLOBAL 2
-#define BUS_RESO_GLOBAL  3
-#define BUS_CH_CUT       4   // channel cutoff bus
-#define BUS_GAIN(v)   (16 + (v))
-#define BUS_CUT(v)    (48 + (v))
-#define BUS_VGATE(v)  (80 + (v))
-#define BUS_TEST_TONE 511   // gateware test-tone latch (csp.sv)
+#define DMEM_PITCH_GLOBAL 2
+#define DMEM_RESO_GLOBAL  3
+#define DMEM_CH_CUT       4   // channel cutoff bus
+#define DMEM_GAIN(v)   (16 + (v))
+#define DMEM_CUT(v)    (48 + (v))
+#define DMEM_VGATE(v)  (80 + (v))
+#define DMEM_TEST_TONE 511   // gateware test-tone latch (csp.sv)
 
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
 // (MOD env, channel-cut fan-out) — the pair MUST be adjacent: both
-// write BUS_CUT(v), and chain-summing requires same-bus writers in
+// write DMEM_CUT(v), and chain-summing requires same-bus writers in
 // consecutive walker slots.
 #define INSTR_AMP_ENV(v)   (32 + (v))
 #define INSTR_MOD_ENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
                                        // voice, watches the gate bus,
                                        // drives the voice's CUTOFF bus
 #define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))  // type-3 bus source:
-                                       // BUS_CH_CUT → BUS_CUT(v), unity
+                                       // DMEM_CH_CUT → DMEM_CUT(v), unity
 #define INSTR_LFO2     1            // global LFO 2
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
 // one sustain step = span/256 = 0.234 dB. The linear level ramp into the
@@ -201,9 +201,9 @@ static uint32_t mod_env_coef(uint8_t vel)
 // The per-voice cutoff bus BASE is ZERO: velocity rides the MOD
 // envelope's DEPTH word, where it scales the excursion rather than
 // offsetting the starting point. The channel-wide terms live on
-// BUS_CH_CUT, fanned out by the walker's type-3 sources. The write is
+// DMEM_CH_CUT, fanned out by the walker's type-3 sources. The write is
 // kept so a re-used voice cannot inherit a stale base.
-static uint32_t cut_bus_value(int v)
+static uint32_t cut_dmem_value(int v)
 {
     (void)v;
     return 0u;
@@ -247,7 +247,7 @@ static void param_write(uint8_t elem, uint8_t word, uint32_t value)
 }
 
 // Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
-// wheel rides BUS_CH_CUT, fanned out to each voice's BUS_CUT(v),
+// wheel rides DMEM_CH_CUT, fanned out to each voice's DMEM_CUT(v),
 // which its elements' cutoff pointers reference (init_param_pointers); it
 // does not touch the FILTER words.
 static uint16_t voice_cutoff(uint8_t note)
@@ -349,7 +349,7 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_cutoff(note);
     // Per-note ceiling only: fixed VOL_REF. MASTER volume is NOT here — it rides the
-    // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
+    // gain-bus base (refresh_gain_dmem), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
     // Velocity is not here: the ceiling is the same for every note, and
     // velocity scales the amp envelope's DEPTH so a soft note reaches a
@@ -493,7 +493,7 @@ static void update_lfo1(void)
 {
     engine_link_imem_write(0, 0,
         CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[0].shape & 3) << 4)
-           | ((uint32_t)BUS_PITCH_GLOBAL << 6)
+           | ((uint32_t)DMEM_PITCH_GLOBAL << 6)
            | ((uint32_t)g_patch.lfo[0].rate << 16));
     engine_link_imem_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
 }
@@ -506,28 +506,28 @@ static void update_lfo1(void)
 // effective value would go stale, since nothing writes it, so restore
 // its firmware base.
 static int32_t s_resonance_offset;   // CC 71's last bus offset (for restore)
-static void refresh_cut_buses(void);   // defined below (dest restore)
+static void refresh_cut_dmem(void);   // defined below (dest restore)
 static void update_lfo2(void)
 {
-    static uint16_t prev_bus = BUS_DUTY_GLOBAL;
-    uint16_t bus = (g_patch.lfo[1].dest == 1) ? BUS_RESO_GLOBAL
-                 : (g_patch.lfo[1].dest == 2) ? BUS_PITCH_GLOBAL
-                 : (g_patch.lfo[1].dest == 3) ? BUS_CH_CUT
-                                              : BUS_DUTY_GLOBAL;
-    if (bus != prev_bus) {
-        if (prev_bus == BUS_DUTY_GLOBAL)
-            engine_link_bus_write(BUS_DUTY_GLOBAL, 0);
-        else if (prev_bus == BUS_RESO_GLOBAL)
-            engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)s_resonance_offset);
-        else if (prev_bus == BUS_CH_CUT)
-            refresh_cut_buses();   // rewrite the base → sum un-freezes
+    static uint16_t prev_dmem_addr = DMEM_DUTY_GLOBAL;
+    uint16_t dmem_addr = (g_patch.lfo[1].dest == 1) ? DMEM_RESO_GLOBAL
+                 : (g_patch.lfo[1].dest == 2) ? DMEM_PITCH_GLOBAL
+                 : (g_patch.lfo[1].dest == 3) ? DMEM_CH_CUT
+                                              : DMEM_DUTY_GLOBAL;
+    if (dmem_addr != prev_dmem_addr) {
+        if (prev_dmem_addr == DMEM_DUTY_GLOBAL)
+            engine_link_dmem_write(DMEM_DUTY_GLOBAL, 0);
+        else if (prev_dmem_addr == DMEM_RESO_GLOBAL)
+            engine_link_dmem_write(DMEM_RESO_GLOBAL, (uint32_t)s_resonance_offset);
+        else if (prev_dmem_addr == DMEM_CH_CUT)
+            refresh_cut_dmem();   // rewrite the base → sum un-freezes
         // prev == pitch needs no restore: LFO 1 (slot 0) rewrites the
         // pitch bus every sample, so it never goes stale.
-        prev_bus = bus;
+        prev_dmem_addr = dmem_addr;
     }
     engine_link_imem_write(INSTR_LFO2, 0,
         CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[1].shape & 3) << 4)
-           | ((uint32_t)bus << 6)
+           | ((uint32_t)dmem_addr << 6)
            | ((uint32_t)g_patch.lfo[1].rate << 16));
     engine_link_imem_write(INSTR_LFO2, 2,
         (uint32_t)(uint16_t)g_patch.lfo[1].depth);
@@ -535,7 +535,7 @@ static void update_lfo2(void)
 
 // MOD envelope = the even slots of the 64..127 pairs (each voice's
 // MOD env sits adjacent to its fan-out bus
-// source — both write BUS_CUT(v), and summing needs consecutive
+// source — both write DMEM_CUT(v), and summing needs consecutive
 // slots), one per voice: watches
 // the voice's gate bus (same gate the amp env watches), drives the
 // voice's CUTOFF bus with a SIGNED depth (the walker DEPTH word is
@@ -548,8 +548,8 @@ static void update_mod_env(void)
     uint32_t rates2 = patch_adsr_word3(&g_patch.env[1]);
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_MOD_ENV(v), 0,
-            CSP_OPC_ADSR | ((uint32_t)BUS_CUT(v) << 6)
-               | ((uint32_t)BUS_VGATE(v) << 16));
+            CSP_OPC_ADSR | ((uint32_t)DMEM_CUT(v) << 6)
+               | ((uint32_t)DMEM_VGATE(v) << 16));
         engine_link_imem_write(INSTR_MOD_ENV(v), 1, rates);
         // per-voice velocity scaling, same reason as update_amp_env
         engine_link_imem_write(INSTR_MOD_ENV(v), 2,
@@ -599,8 +599,8 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     // the first pass run at the previous note's amount.
     engine_link_imem_write(INSTR_AMP_ENV(pick),   2, amp_env_coef(vel));
     engine_link_imem_write(INSTR_MOD_ENV(pick), 2, mod_env_coef(vel));
-    engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
-    engine_link_bus_write(BUS_VGATE(pick), 1);
+    engine_link_dmem_write(DMEM_CUT(pick), cut_dmem_value(pick));
+    engine_link_dmem_write(DMEM_VGATE(pick), 1);
 
     render_voice(pick, note, vel);
 }
@@ -609,13 +609,13 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 // terms are shared, so both events land here. This is ONE channel-bus
 // write: the walker's type-3 fan-out entries distribute it to every
 // voice (channel → voice → element).
-static void refresh_cut_buses(void)
+static void refresh_cut_dmem(void)
 {
-    engine_link_bus_write(BUS_CH_CUT, ch_cut_value());
+    engine_link_dmem_write(DMEM_CH_CUT, ch_cut_value());
 }
 
 // Boot wiring for the fan-out: 32 stateless SEND sources,
-// entry INSTR_CUTOFF_MAC(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
+// entry INSTR_CUTOFF_MAC(v) = DMEM_CH_CUT × unity → DMEM_CUT(v), each in the
 // slot adjacent to its voice's MOD env (same target bus, and chain
 // summing requires consecutive slots). Word 1 (RATES) is meaningless
 // for a SEND.
@@ -623,7 +623,7 @@ static void init_fanout_sources(void)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_CUTOFF_MAC(v), 0,
-            CSP_OPC_MAC | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
+            CSP_OPC_MAC | ((uint32_t)DMEM_CUT(v) << 6) | ((uint32_t)DMEM_CH_CUT << 16));
         engine_link_imem_write(INSTR_CUTOFF_MAC(v), 2, 0x10000u);   // unity
     }
 }
@@ -633,12 +633,12 @@ static void init_fanout_sources(void)
 // −ENV_SPAN + (g_patch.volume − VOL_REF)·64: at VOL_REF the offset is
 // 0 and the base is the plain envelope floor. No swap, no rewrite —
 // the amp-ADSR producer keeps adding the envelope on top.
-static void refresh_gain_buses(void)
+static void refresh_gain_dmem(void)
 {
     int32_t off  = ((int32_t)g_patch.volume - VOL_REF) * 64;
     int32_t base = -(int32_t)ENV_SPAN + off;
     for (int v = 0; v < NUM_VOICES; v++)
-        engine_link_bus_write(BUS_GAIN(v), (uint32_t)base & 0x3FFFF);
+        engine_link_dmem_write(DMEM_GAIN(v), (uint32_t)base & 0x3FFFF);
 }
 
 // CC 71 → global resonance bus (TEMPORARY assignment, see bus plan).
@@ -655,7 +655,7 @@ static void resonance_update(uint8_t val)
     int32_t code   = ((int32_t)val * 5632) / 127;   // 5632 = r 5.5 oct -> Q 32
     int32_t offset = code - (int32_t)g_patch.filter.resonance;
     s_resonance_offset = offset;   // remembered so LFO 2 dest changes can restore
-    engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
+    engine_link_dmem_write(DMEM_RESO_GLOBAL, (uint32_t)offset);
 }
 
 // Mod wheel → cutoff term (0 to ~+5 octaves, raw Q8.10 value wheel*40).
@@ -664,7 +664,7 @@ static void mod_wheel_update(uint8_t val)
     if (val == s_wheel)
         return;
     s_wheel = val;
-    s_pending |= DIRTY_CUTOFF;   // coalesced (was refresh_cut_buses per CC)
+    s_pending |= DIRTY_CUTOFF;   // coalesced (was refresh_cut_dmem per CC)
 }
 
 // Pitch wheel: ±bend_range semitones (RPN 0; default ±2). Q8.10
@@ -679,7 +679,7 @@ static void pitch_bend_update(uint16_t bend14)
     if (off == s_bend)
         return;
     s_bend = off;
-    engine_link_bus_write(BUS_PITCH_GLOBAL, (uint32_t)(int32_t)off);  // 1 write
+    engine_link_dmem_write(DMEM_PITCH_GLOBAL, (uint32_t)(int32_t)off);  // 1 write
     s_pending |= DIRTY_CUTOFF;   // cut-bus refresh coalesced
 }
 
@@ -700,7 +700,7 @@ static void note_off(uint8_t note)
         return;   // off without a matching held on (steal ate it)
     s_voices[pick].state = V_RELEASING;
     s_voices[pick].release_until = esp_timer_get_time() + release_tail_us();
-    engine_link_bus_write(BUS_VGATE(pick), 0);
+    engine_link_dmem_write(DMEM_VGATE(pick), 0);
 }
 
 // Program the active patch over MIDI CCs (docs/midi_schema.md).
@@ -844,7 +844,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     // the audio-chain purity reference, remotely switchable so the
     // test suite needs no console. ----
     case 119:
-        engine_link_bus_write(BUS_TEST_TONE, val >= 64 ? 1u : 0u);
+        engine_link_dmem_write(DMEM_TEST_TONE, val >= 64 ? 1u : 0u);
         break;
 
     // ---- panic (found via the BLE fuzzer's stuck notes: its final
@@ -856,14 +856,14 @@ static void handle_cc(uint8_t num, uint8_t val)
                 s_voices[v].state = V_RELEASING;
                 s_voices[v].release_until =
                     esp_timer_get_time() + release_tail_us();
-                engine_link_bus_write(BUS_VGATE(v), 0);
+                engine_link_dmem_write(DMEM_VGATE(v), 0);
             }
         break;
     case 120:                          // all sound off: immediate silence
         for (int v = 0; v < NUM_VOICES; v++)
             if (s_voices[v].state != V_IDLE) {
                 s_voices[v].state = V_IDLE;
-                engine_link_bus_write(BUS_VGATE(v), 0);
+                engine_link_dmem_write(DMEM_VGATE(v), 0);
                 hard_mute_voice(v);
             }
         break;
@@ -923,10 +923,10 @@ static void flush_pending_edits(int64_t now)
         return;
     if (s_pending & DIRTY_AMP_ENV)    update_amp_env();
     if (s_pending & DIRTY_MOD_ENV)   update_mod_env();
-    if (s_pending & DIRTY_CUTOFF)    refresh_cut_buses();
+    if (s_pending & DIRTY_CUTOFF)    refresh_cut_dmem();
     if (s_pending & DIRTY_LFO1)    update_lfo1();
     if (s_pending & DIRTY_LFO2)   update_lfo2();
-    if (s_pending & DIRTY_VOLUME)   refresh_gain_buses();
+    if (s_pending & DIRTY_VOLUME)   refresh_gain_dmem();
     if (s_pending & DIRTY_VOICES) render_active_voices();
     s_pending = 0;
     s_last_flush = now;
@@ -978,12 +978,12 @@ static void init_param_pointers(void)
     for (int e = 0; e < NUM_VOICES * ELEMS_PER_VOICE; e++) {
         int v = e / ELEMS_PER_VOICE;
         param_write((uint8_t)e, 5,
-             (uint32_t)BUS_PITCH_GLOBAL
-             | ((uint32_t)BUS_DUTY_GLOBAL << 10)   // PWM bus
-             | ((uint32_t)BUS_CUT(v) << 20));
+             (uint32_t)DMEM_PITCH_GLOBAL
+             | ((uint32_t)DMEM_DUTY_GLOBAL << 10)   // PWM bus
+             | ((uint32_t)DMEM_CUT(v) << 20));
         param_write((uint8_t)e, 6,
-             (uint32_t)BUS_RESO_GLOBAL
-             | ((uint32_t)BUS_GAIN(v) << 10) | ((uint32_t)BUS_GAIN(v) << 20));
+             (uint32_t)DMEM_RESO_GLOBAL
+             | ((uint32_t)DMEM_GAIN(v) << 10) | ((uint32_t)DMEM_GAIN(v) << 20));
     }
 }
 
@@ -1003,9 +1003,9 @@ void voice_alloc_init(void)
     // NOT guaranteed zero on the GW2AR, so buses 1-3 get explicit zero
     // bases here; without that, eff_duty = word + (garbage << 13)
     // saturates and CC 25 pulse-width does nothing.
-    engine_link_bus_write(BUS_DUTY_GLOBAL, 0);
-    engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
-    engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
+    engine_link_dmem_write(DMEM_DUTY_GLOBAL, 0);
+    engine_link_dmem_write(DMEM_PITCH_GLOBAL, 0);
+    engine_link_dmem_write(DMEM_RESO_GLOBAL, 0);   // baseline = RESO
 
     // B4: source 0 — the boot vibrato (LFO 1), from patch.lfo[0].
     // CC 76/77/113 retune it live via update_lfo1().
@@ -1013,7 +1013,7 @@ void voice_alloc_init(void)
     update_lfo2();     // source 1: PWM/reso wobble, depth 0 at boot
     update_mod_env();  // MOD envs, even slots of the 64..127 pairs
     init_fanout_sources();  // fan-out bus sources, odd slots
-    refresh_cut_buses();    // channel cutoff bus base (wheel/bend/CC74 = 0)
+    refresh_cut_dmem();    // channel cutoff bus base (wheel/bend/CC74 = 0)
 
     // B5: per-voice amp envelopes — sources 32..63. Each watches its
     // voice's gate bus and drives its voice's gain bus: base is the
@@ -1022,13 +1022,13 @@ void voice_alloc_init(void)
     // semantics). Bases are live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_AMP_ENV(v), 0,
-            CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)
-               | ((uint32_t)BUS_VGATE(v) << 16));
+            CSP_OPC_ADSR | ((uint32_t)DMEM_GAIN(v) << 6)
+               | ((uint32_t)DMEM_VGATE(v) << 16));
         engine_link_imem_write(INSTR_AMP_ENV(v), 1, patch_adsr_word1(&g_patch.env[0]));
         engine_link_imem_write(INSTR_AMP_ENV(v), 2, ENV_SPAN);
         engine_link_imem_write(INSTR_AMP_ENV(v), 3, patch_adsr_word3(&g_patch.env[0]));
     }
-    refresh_gain_buses();   // gain-bus bases from g_patch.volume
+    refresh_gain_dmem();   // gain-bus bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");

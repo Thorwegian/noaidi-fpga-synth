@@ -19,8 +19,8 @@
 module tb_csp;
 
     localparam int CYC     = synth_pkg::CYCLES_PER_SAMPLE;
-    localparam int TESTBUS = 20;
-    localparam int QUIETBUS= 300;
+    localparam int TEST_DMEM = 20;
+    localparam int QUIET_DMEM= 300;
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;
 
@@ -59,7 +59,7 @@ module tb_csp;
     logic   gen_prev;
 
     // a mailbox write: payload then a toggle edge, as spi_bus does it
-    task automatic bus_write(input [9:0] a, input signed [17:0] d);
+    task automatic dmem_write(input [9:0] a, input signed [17:0] d);
         begin
             @(negedge clk);
             dmem_wr_addr = a; dmem_wr_data = d;
@@ -90,13 +90,13 @@ module tb_csp;
             $display("gen cadence: %0d toggles / %0d samples", toggles, ticks);
 
         // 2. write-through: the value must be in BOTH halves
-        bus_write(10'(TESTBUS), MARK_A);
+        dmem_write(10'(TEST_DMEM), MARK_A);
         repeat (2*CYC) @(posedge clk);
-        if (dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
-            dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
+        if (dut.dmem_gain_l[{1'b0, TEST_DMEM[8:0]}] !== MARK_A ||
+            dut.dmem_gain_l[{1'b1, TEST_DMEM[8:0]}] !== MARK_A) begin
             $display("FAIL: write-through -- halves read %0d / %0d, want %0d",
-                     dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}],
-                     dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}], MARK_A);
+                     dut.dmem_gain_l[{1'b0, TEST_DMEM[8:0]}],
+                     dut.dmem_gain_l[{1'b1, TEST_DMEM[8:0]}], MARK_A);
             errors = errors + 1;
         end else
             $display("write-through: present in both generations");
@@ -104,7 +104,7 @@ module tb_csp;
         // 3. persistence across many swaps -- a lost value here is silence
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
-            if (dut.dmem_gain_l[{dut.dmem_page, TESTBUS[8:0]}] !== MARK_A) begin
+            if (dut.dmem_gain_l[{dut.dmem_page, TEST_DMEM[8:0]}] !== MARK_A) begin
                 $display("FAIL: value lost on swap %0d", i + 1);
                 errors = errors + 1;
                 i = 99;
@@ -113,17 +113,17 @@ module tb_csp;
         if (errors == 0) $display("persistence: stable across 12 swaps");
 
         // 4. a bus nothing refreshes keeps its base
-        bus_write(10'(QUIETBUS), MARK_B);
+        dmem_write(10'(QUIET_DMEM), MARK_B);
         repeat (6*CYC) @(posedge clk);
-        if (dut.dmem_fc[{dut.dmem_page, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (dut.dmem_fc[{dut.dmem_page, QUIET_DMEM[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus lost its base (got %0d)",
-                     dut.dmem_fc[{dut.dmem_page, QUIETBUS[8:0]}]);
+                     dut.dmem_fc[{dut.dmem_page, QUIET_DMEM[8:0]}]);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists");
 
         // 5. the read port returns what the live generation holds
-        @(negedge clk); rd_a = TESTBUS[8:0];
+        @(negedge clk); rd_a = TEST_DMEM[8:0];
         repeat (3) @(posedge clk);
         if (rd_gl_d !== MARK_A) begin
             $display("FAIL: read port returned %0d, want %0d", rd_gl_d, MARK_A);

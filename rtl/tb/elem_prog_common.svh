@@ -69,7 +69,7 @@ integer errors = 0;
 localparam [15:0] CTRL_ADDR   = synth_pkg::MAP_CTRL_ADDR;
 localparam [15:0] ELEM_BASE   = synth_pkg::MAP_ELEM_BASE;
 localparam int    ELEM_STRIDE = synth_pkg::MAP_ELEM_STRIDE;
-localparam [15:0] BUS_BASE    = synth_pkg::MAP_BUS_BASE;
+localparam [15:0] DMEM_BASE    = synth_pkg::MAP_DMEM_BASE;
 localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
                                                             // pending the
                                                             // source rename
@@ -81,8 +81,8 @@ localparam int W_OSC = 0, W_DUTY = 1, W_FILTER = 2, W_GAIN = 3,
 function automatic [15:0] elem_addr(input integer e, input integer w);
     elem_addr = 16'(ELEM_BASE + 16'(e) * ELEM_STRIDE + 16'(w));
 endfunction
-function automatic [15:0] bus_addr(input integer b);
-    bus_addr = 16'(BUS_BASE + 16'(b));
+function automatic [15:0] dmem_addr(input integer b);
+    dmem_addr = 16'(DMEM_BASE + 16'(b));
 endfunction
 // source table: 4 words per entry (CFG, RATES, DEPTH, RATES2), stride 4
 function automatic [15:0] src_addr(input integer entry, input integer w);
@@ -104,9 +104,9 @@ localparam [31:0] GAIN_CHORD_LEFT = 32'h0000009F;  // L -36 dB, R mute
 localparam [31:0] GAIN_CHORD_RIGHT= 32'h00009F00;  // R -36 dB, L mute
 
 // bus pointer words (PTRS0/PTRS1 field layouts per memory_map.md)
-localparam [31:0] PTRS0_CUT_BUS1        = 32'd1 << 20;
-localparam [31:0] PTRS0_CUT1_PITCH_BUS2 = (32'd1 << 20) | 32'd2;
-localparam [31:0] PTRS1_GAINS_BUS3      = (32'd3 << 10) | (32'd3 << 20);
+localparam [31:0] PTRS0_CUT_DMEM1        = 32'd1 << 20;
+localparam [31:0] PTRS0_CUT1_PITCH_DMEM2 = (32'd1 << 20) | 32'd2;
+localparam [31:0] PTRS1_GAINS_DMEM3      = (32'd3 << 10) | (32'd3 << 20);
 
 // Q8.10 bus/depth offsets — ONE name per value, used for bus bases
 // and source depths alike. (The original bench comments called
@@ -127,11 +127,11 @@ localparam [31:0] SRC_LFO_TREMOLO =                 // pulse LFO,
     32'hE | (32'd1 << 4) | (32'd3 << 6)             // gain bus 3,
           | (32'd32768 << 16);                      // 93.75 Hz -- unchanged
                                                     // by the full-rate move
-localparam [31:0] SRC_ADSR_BUS3_GATE5 =
+localparam [31:0] SRC_ADSR_DMEM3_GATE5 =
     32'hF | (32'd3 << 6) | (32'd5 << 16);           // envelope: state+gate
-localparam [31:0] SRC_BUS3_FROM6 =                  // SEND:
+localparam [31:0] SRC_DMEM3_FROM6 =                  // SEND:
     32'hD | (32'd3 << 6) | (32'd6 << 16);           // bus 6 sum -> bus 3
-localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
+localparam [31:0] SRC_LFO_TREM_DMEM6 =               // pulse LFO -> bus 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
 // Rates are linear coefficients, in two words. These are the
 // old 0xF4F000F0 nibble word converted by the same arithmetic firmware
