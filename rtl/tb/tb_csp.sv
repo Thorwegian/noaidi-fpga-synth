@@ -92,11 +92,11 @@ module tb_csp;
         // 2. write-through: the value must be in BOTH halves
         bus_write(10'(TESTBUS), MARK_A);
         repeat (2*CYC) @(posedge clk);
-        if (dut.dmem_gl[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
-            dut.dmem_gl[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
+        if (dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
+            dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
             $display("FAIL: write-through -- halves read %0d / %0d, want %0d",
-                     dut.dmem_gl[{1'b0, TESTBUS[8:0]}],
-                     dut.dmem_gl[{1'b1, TESTBUS[8:0]}], MARK_A);
+                     dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}],
+                     dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}], MARK_A);
             errors = errors + 1;
         end else
             $display("write-through: present in both generations");
@@ -104,7 +104,7 @@ module tb_csp;
         // 3. persistence across many swaps -- a lost value here is silence
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
-            if (dut.dmem_gl[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
+            if (dut.dmem_gain_l[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
                 $display("FAIL: value lost on swap %0d", i + 1);
                 errors = errors + 1;
                 i = 99;
