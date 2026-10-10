@@ -26,8 +26,8 @@ module csp (
     input  wire         rst_n,
     input  wire         sample_tick,
     input  wire         sclk,
-    input  wire         bank_active,
-    input  wire         bank_shadow,
+    input  wire         page_active,
+    input  wire         page_shadow,
 
     // SPI bus-base mailbox (sclk domain, crossed by a toggle)
     input  wire [9:0]   dmem_wr_addr,
@@ -74,7 +74,7 @@ module csp (
     reg signed [17:0] dmem_gain_r    [0:2*synth_pkg::DMEM_WORDS-1];
     integer bi;
     // BOTH generations -- the arrays are 2*DMEM_WORDS deep and an
-    // uninitialised shadow half reads X the first time dmem_gen flips.
+    // uninitialised shadow half reads X the first time dmem_page flips.
     initial for (bi = 0; bi < 2*synth_pkg::DMEM_WORDS; bi = bi + 1) begin
         dmem_pitch[bi] = 18'sd0;
         dmem_duty[bi]  = 18'sd0;
@@ -122,12 +122,12 @@ module csp (
     logic signed [17:0] dmem_wdata;
 
     // Ping-pong generation bit. The sequencer writes generation
-    // ~dmem_gen while the pipeline reads dmem_gen, and they swap at the
+    // ~dmem_page while the pipeline reads dmem_page, and they swap at the
     // sample boundary -- so every element sees one coherent generation
     // and a read can never collide with a write. Costs no extra BSRAM:
     // the second generation lives in the half of each block that the
     // 512-entry pool leaves unused.
-    logic dmem_gen;   // flipped once per sample by the process below
+    logic dmem_page;   // flipped once per sample by the process below
 
     logic dmem_wr_toggle_meta, dmem_wr_toggle_sync, dmem_wr_toggle_prev;
     logic dmem_mbox_pending;
@@ -179,7 +179,7 @@ module csp (
     wire  dmem_wr_window   = 1'b1;
     wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
     wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
-    wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_gen;
+    wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_page;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -204,7 +204,7 @@ module csp (
             dmem_commit_half  <= 1'b0;
         end else if (dmem_mbox_take) begin
             if (!dmem_commit_phase) begin
-                dmem_commit_half  <= ~dmem_gen;   // the half written now
+                dmem_commit_half  <= ~dmem_page;   // the half written now
                 dmem_commit_phase <= 1'b1;
             end else
                 dmem_commit_phase <= 1'b0;
@@ -227,22 +227,22 @@ module csp (
     // owns its cycle (dmem_we), the mailbox defers around it.
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_pitch[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_pitch[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_duty[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_duty[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_fc[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_fc[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_q[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_gain_l[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gain_l[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_gain_l[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_gain_r[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gain_r[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_gain_r[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_sum[dmem_mbox_addr] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_sum[dmem_waddr]  <= dmem_wdata;
@@ -302,7 +302,7 @@ module csp (
     end
 
     // Route the word to its RAM by the low address bits. Same wire format.
-    wire [8:0] imem_wr_entry = {bank_shadow, imem_write_addr[9:2]};
+    wire [8:0] imem_wr_entry = {page_shadow, imem_write_addr[9:2]};
     always_ff @(posedge sclk)
         if (imem_write_enable) begin
             case (imem_write_addr[1:0])
@@ -347,8 +347,8 @@ module csp (
     // sample long. Flipping more often than a pass completes publishes a
     // half-written generation -- halved depth and a stale link in any chain.
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)           dmem_gen <= 1'b0;
-        else if (sample_tick) dmem_gen <= ~dmem_gen;
+        if (!rst_n)           dmem_page <= 1'b0;
+        else if (sample_tick) dmem_page <= ~dmem_page;
 
     wire pc_active = (pc < 9'(synth_pkg::NUM_INSTR));
     // Drain: the last instruction fetched still has to reach W, which is the
@@ -591,10 +591,10 @@ module csp (
     // dmem_base_gate and dmem_base are the same image read at two different
     // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
-        cfg_q    <= imem_cfg[{bank_active, pc_addr}];
-        rate_q   <= imem_rate[{bank_active, pc_addr}];
-        coef_q  <= imem_coef[{bank_active, pc_addr}];
-        rate2_q  <= imem_rate2[{bank_active, pc_addr}];
+        cfg_q    <= imem_cfg[{page_active, pc_addr}];
+        rate_q   <= imem_rate[{page_active, pc_addr}];
+        coef_q  <= imem_coef[{page_active, pc_addr}];
+        rate2_q  <= imem_rate2[{page_active, pc_addr}];
         state_q <= state_mem[pc_addr];
         gate_q   <= dmem_base_gate[cfg_q[25:16]];   // watched gate bus
         src_q    <= dmem_sum[cfg_q[25:16]];  // SEND source: bus output sum
@@ -613,12 +613,12 @@ module csp (
     // S2 -- identical timing to when these RAMs were inline.
     //----------------------------------------------------------------
     always_ff @(posedge clk) begin
-        rd_pitch_d <= dmem_pitch[{dmem_gen, rd_pitch_a}];
-        rd_duty_d  <= dmem_duty[{dmem_gen, rd_duty_a}];
-        rd_fc_d    <= dmem_fc[{dmem_gen, rd_fc_a}];
-        rd_q_d     <= dmem_q[{dmem_gen, rd_q_a}];
-        rd_gl_d    <= dmem_gain_l[{dmem_gen, rd_gl_a}];
-        rd_gr_d    <= dmem_gain_r[{dmem_gen, rd_gr_a}];
+        rd_pitch_d <= dmem_pitch[{dmem_page, rd_pitch_a}];
+        rd_duty_d  <= dmem_duty[{dmem_page, rd_duty_a}];
+        rd_fc_d    <= dmem_fc[{dmem_page, rd_fc_a}];
+        rd_q_d     <= dmem_q[{dmem_page, rd_q_a}];
+        rd_gl_d    <= dmem_gain_l[{dmem_page, rd_gl_a}];
+        rd_gr_d    <= dmem_gain_r[{dmem_page, rd_gr_a}];
     end
 
 endmodule

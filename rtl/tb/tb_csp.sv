@@ -43,7 +43,7 @@ module tb_csp;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .bank_active(1'b0), .bank_shadow(1'b1),
+        .page_active(1'b0), .page_shadow(1'b1),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(1'b0), .imem_write_addr(10'd0),
@@ -76,11 +76,11 @@ module tb_csp;
         // 1. generation cadence: one flip per sequencer pass. A pass is
         //    256 instructions x 1 cycle = 256 cycles, so it completes inside
         //    ONE sample and the cadence is one flip per sample.
-        toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
+        toggles = 0; ticks = 0; gen_prev = dut.dmem_page;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
-            if (dut.dmem_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = dut.dmem_gen;
+            if (dut.dmem_page !== gen_prev) toggles = toggles + 1;
+            gen_prev = dut.dmem_page;
             if (sample_tick) ticks = ticks + 1;
         end
         if (toggles !== ticks) begin
@@ -104,7 +104,7 @@ module tb_csp;
         // 3. persistence across many swaps -- a lost value here is silence
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
-            if (dut.dmem_gain_l[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
+            if (dut.dmem_gain_l[{dut.dmem_page, TESTBUS[8:0]}] !== MARK_A) begin
                 $display("FAIL: value lost on swap %0d", i + 1);
                 errors = errors + 1;
                 i = 99;
@@ -115,9 +115,9 @@ module tb_csp;
         // 4. a bus nothing refreshes keeps its base
         bus_write(10'(QUIETBUS), MARK_B);
         repeat (6*CYC) @(posedge clk);
-        if (dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (dut.dmem_fc[{dut.dmem_page, QUIETBUS[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus lost its base (got %0d)",
-                     dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}]);
+                     dut.dmem_fc[{dut.dmem_page, QUIETBUS[8:0]}]);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists");

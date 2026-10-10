@@ -102,7 +102,7 @@ void patch_default(patch_t *p)
                                        // 0..200% scale
     p->filter.resonance = 0x200;       // q1 = 1.0
     p->filter.type      = 0;           // LP
-    p->filter.dual      = 1;           // 24 dB/oct default
+    p->filter.cascade      = 1;           // 24 dB/oct default
 
     // amp env (A,D,S,R)
     p->env[0].attack  = 0x98;
@@ -115,8 +115,8 @@ void patch_default(patch_t *p)
     // The filter contour tracks the loudness contour: opens with the
     // attack, settles bright at sustain, closes on release.
     p->env[1] = p->env[0];
-    p->env1_dest      = 0;             // cutoff (the only dest yet)
-    p->env1_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
+    p->mod_env_dest      = 0;             // cutoff (the only dest yet)
+    p->mod_env_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
 
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle

@@ -1,4 +1,4 @@
-// output_tilt.sv — one-pole 6 dB/oct lowpass on the mix (the master
+// output_lpf.sv — one-pole 6 dB/oct lowpass on the mix (the master
 // "tilt")
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
@@ -21,7 +21,7 @@
 // silence — and to the exact input value on DC — while the passband
 // is untouched (the reshaped quantization error is ~1 LSB24).
 `default_nettype none
-module output_tilt #(
+module output_lpf #(
     parameter int SHIFT = 3
 ) (
     input  wire                clk,

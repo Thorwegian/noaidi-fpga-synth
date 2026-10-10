@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_tilt.sv — the output tilt's error-feedback fix.
+// tb_output_lpf.sv — the output tilt's error-feedback fix.
 //
 // The bug this guards: a truncating one-pole (out += (in-out)>>>3)
 // PARKS at a small nonzero residual when the input falls silent —
@@ -18,7 +18,7 @@
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
-module tb_tilt;
+module tb_output_lpf;
 
     logic clk = 0;
     logic rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
@@ -32,7 +32,7 @@ module tb_tilt;
     logic signed [23:0] in = 0;
     wire  signed [23:0] out;
 
-    output_tilt #(.SHIFT(3)) dut (
+    output_lpf #(.SHIFT(3)) dut (
         .clk(clk), .rst_n(rst_n), .tick(tick), .in(in), .out(out));
 
     integer errors = 0;

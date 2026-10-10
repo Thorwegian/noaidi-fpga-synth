@@ -13,7 +13,7 @@ PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
 	dsp/drum.sv \
-	dsp/output_tilt.sv \
+	dsp/output_lpf.sv \
 	dsp/limiter.sv \
 	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
 	dsp/svf_tpt.sv \
@@ -279,12 +279,12 @@ sim-stab: obj_dir/tb_svf_stability/sim
 
 # Output tilt error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
-TB_TILT = tb/tb_tilt.sv
-obj_dir/tb_tilt/sim: dsp/output_tilt.sv $(TB_TILT) Makefile
-	$(VERILATE) dsp/output_tilt.sv $(TB_TILT)
+TB_OUTPUT_LPF = tb/tb_output_lpf.sv
+obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv $(TB_OUTPUT_LPF) Makefile
+	$(VERILATE) dsp/output_lpf.sv $(TB_OUTPUT_LPF)
 
-sim-tilt: obj_dir/tb_tilt/sim
-	$(call run_sim,$<,tb/sim-tilt.out)
+sim-output-lpf: obj_dir/tb_output_lpf/sim
+	$(call run_sim,$<,tb/sim-output-lpf.out)
 
 # The pulse oscillator must average to ZERO at every duty. A bare
 # comparator is only centred at 50%: with phase sweeping the full signed range
@@ -310,14 +310,14 @@ sim-limiter: obj_dir/tb_limiter/sim
 
 sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
-     sim-stab sim-tilt sim-limiter
+     sim-stab sim-output-lpf sim-limiter
 	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
 	     tb/sim-elem.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
-	     tb/sim-stab.out tb/sim-tilt.out tb/sim-limiter.out
+	     tb/sim-stab.out tb/sim-output-lpf.out tb/sim-limiter.out
 	@# A bench that FAILS must fail the build. Before this, `make sim`
 	@# printed "3 FAILURE(S)" and still exited 0, because this target only
 	@# cats the output -- the same shape as a failed yosys still producing a

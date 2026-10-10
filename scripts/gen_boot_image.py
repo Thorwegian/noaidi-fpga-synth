@@ -49,7 +49,7 @@ RESO = 0x200         # log2 resonance UQ4.10: 0.5 octave of Q above
 VOL = 0x9F           # volume UQ4.4 (0x00 = silence): -36 dB of
                      # mixdown headroom, as 0xFF - 0x60
 FTYPE_LP = 0x0
-DUAL = 0             # 12 dB/oct single-filter mode
+CASCADE = 0             # 12 dB/oct single-filter mode
 MUTE = 0x00          # volume 0 = exact mute — hard-pan off channel
 
 # Unison detune offsets per unison index, in raw UQ4.10 fraction steps
@@ -100,9 +100,9 @@ for v in range(NUM_ELEMENTS):
     p1.append(0)                       # duty: saw ignores it
     p2.append((RESO << 14) | fc)   # resonance + cutoff
     if left:
-        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (MUTE << 8) | VOL)
+        p3.append((FTYPE_LP << 17) | (CASCADE << 16) | (MUTE << 8) | VOL)
     else:
-        p3.append((FTYPE_LP << 17) | (DUAL << 16) | (VOL << 8) | MUTE)
+        p3.append((FTYPE_LP << 17) | (CASCADE << 16) | (VOL << 8) | MUTE)
 
 for name, words in [("boot_p0", p0),
                     ("boot_p1", p1),

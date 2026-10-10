@@ -217,19 +217,19 @@ module element_pipeline #(
     // swap is pending; the sclk write side steers by a synced
     // complement of the active bank (memory map wording, literally).
     //----------------------------------------------------------------
-    logic bank_active;
+    logic page_active;
     logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_toggle sync (sysclk)
     logic swap_pending;
 
     initial begin
-        bank_active  = 1'b0;
+        page_active  = 1'b0;
         {swap_toggle_meta, swap_toggle_sync, swap_toggle_prev} = '0;
         swap_pending = 1'b0;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            bank_active  <= 1'b0;
+            page_active  <= 1'b0;
             swap_toggle_meta <= 1'b0; swap_toggle_sync <= 1'b0; swap_toggle_prev <= 1'b0;
             swap_pending <= 1'b0;
         end else begin
@@ -239,20 +239,20 @@ module element_pipeline #(
             if (swap_toggle_sync != swap_toggle_prev)
                 swap_pending <= 1'b1;
             else if (swap_pending && slot == synth_pkg::SWAP_SLOT[9:0]) begin
-                bank_active  <= ~bank_active;
+                page_active  <= ~page_active;
                 swap_pending <= 1'b0;
             end
         end
     end
 
     // write side: shadow = complement of active, synced into sclk
-    logic bank_active_meta, bank_active_sync;
-    initial {bank_active_meta, bank_active_sync} = '0;
+    logic page_active_meta, page_active_sync;
+    initial {page_active_meta, page_active_sync} = '0;
     always_ff @(posedge sclk) begin
-        bank_active_meta <= bank_active;
-        bank_active_sync <= bank_active_meta;
+        page_active_meta <= page_active;
+        page_active_sync <= page_active_meta;
     end
-    wire bank_shadow = ~bank_active_sync;
+    wire page_shadow = ~page_active_sync;
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
@@ -284,7 +284,7 @@ module element_pipeline #(
     logic [13:0] s1_fc;
     logic [13:0] s1_reso;   // log2 resonance code (UQ4.10)
     logic [7:0]  s1_vol_l, s1_vol_r;
-    logic        s1_dual;
+    logic        s1_cascade;
     logic [1:0]  s1_filter_mode;
     logic signed [23:0] s1_phase;
     logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
@@ -298,13 +298,13 @@ module element_pipeline #(
     logic [1:0]  s1_gate_word;
     logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
     always_ff @(posedge clk) begin
-        s1_osc_word     <= osc_param_ram[{bank_active, elem_read_index}];
-        s1_duty_word     <= duty_param_ram[{bank_active, elem_read_index}];
-        s1_filter_word     <= filter_param_ram[{bank_active, elem_read_index}];
-        s1_gain_word     <= gain_param_ram[{bank_active, elem_read_index}];
-        s1_gate_word     <= gate_param_ram[{bank_active, elem_read_index}];
-        s1_ptrs0_word     <= ptrs0_param_ram[{bank_active, elem_read_index}];
-        s1_ptrs1_word     <= ptrs1_param_ram[{bank_active, elem_read_index}];
+        s1_osc_word     <= osc_param_ram[{page_active, elem_read_index}];
+        s1_duty_word     <= duty_param_ram[{page_active, elem_read_index}];
+        s1_filter_word     <= filter_param_ram[{page_active, elem_read_index}];
+        s1_gain_word     <= gain_param_ram[{page_active, elem_read_index}];
+        s1_gate_word     <= gate_param_ram[{page_active, elem_read_index}];
+        s1_ptrs0_word     <= ptrs0_param_ram[{page_active, elem_read_index}];
+        s1_ptrs1_word     <= ptrs1_param_ram[{page_active, elem_read_index}];
         s1_phase  <= phase_ram[elem_read_index];
         s1_ic1eq1 <= ic1eq1_ram[elem_read_index];
         s1_ic2eq1 <= ic2eq1_ram[elem_read_index];
@@ -314,19 +314,19 @@ module element_pipeline #(
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd0) osc_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd0) osc_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd1) duty_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd1) duty_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd2) filter_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd2) filter_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd3) gain_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (elem_write_enable && elem_write_word == 3'd3) gain_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd4) gate_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[1:0];
+        if (elem_write_enable && elem_write_word == 3'd4) gate_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[1:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[29:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_osc_word[13:0];
@@ -342,7 +342,7 @@ module element_pipeline #(
     // one decode-stage mux, no new carry registers down the pipeline.
     assign s1_vol_l    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
     assign s1_vol_r    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
-    assign s1_dual  = s1_gain_word[16];
+    assign s1_cascade  = s1_gain_word[16];
     assign s1_filter_mode = s1_gain_word[18:17];
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -366,7 +366,7 @@ module element_pipeline #(
     logic [13:0] s2_fc;
     logic [13:0] s2_reso;
     logic [7:0]  s2_vol_l, s2_vol_r;
-    logic        s2_dual;
+    logic        s2_cascade;
     logic [1:0]  s2_filter_mode;
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
@@ -380,7 +380,7 @@ module element_pipeline #(
 
     csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .bank_active(bank_active), .bank_shadow(bank_shadow),
+        .page_active(page_active), .page_shadow(page_shadow),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_write_enable),
@@ -409,7 +409,7 @@ module element_pipeline #(
             s2_reso  <= '0;
             s2_vol_l    <= '0;
             s2_vol_r    <= '0;
-            s2_dual  <= 1'b0;
+            s2_cascade  <= 1'b0;
             s2_filter_mode <= '0;
             s2_phase <= '0;
             s2_ic1eq1 <= '0;
@@ -426,7 +426,7 @@ module element_pipeline #(
             s2_reso  <= s1_reso;
             s2_vol_l    <= s1_vol_l;
             s2_vol_r    <= s1_vol_r;
-            s2_dual  <= s1_dual;
+            s2_cascade  <= s1_cascade;
             s2_filter_mode <= s1_filter_mode;
             s2_phase <= s1_phase;
             s2_ic1eq1 <= s1_ic1eq1;
@@ -528,7 +528,7 @@ module element_pipeline #(
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
     logic [7:0]  s3_atten_l, s3_atten_r;
-    logic        s3_dual;
+    logic        s3_cascade;
     logic [1:0]  s3_filter_mode;
     logic [15:0] s3_reso_att;   // input-atten gain (UQ0.16)
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
@@ -548,7 +548,7 @@ module element_pipeline #(
             s3_duty  <= '0;
             s3_atten_l    <= '0;
             s3_atten_r    <= '0;
-            s3_dual  <= 1'b0;
+            s3_cascade  <= 1'b0;
             s3_filter_mode <= '0;
             s3_reso_att <= 16'hffff;
             s3_ic1eq1 <= '0;
@@ -569,9 +569,9 @@ module element_pipeline #(
             s3_duty  <= eff_duty;
             s3_atten_l    <= eff_atten_l;
             s3_atten_r    <= eff_atten_r;
-            s3_dual  <= s2_dual;
+            s3_cascade  <= s2_cascade;
             s3_filter_mode <= s2_filter_mode;
-            s3_reso_att <= s2_dual ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
+            s3_reso_att <= s2_cascade ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
             s3_ic1eq1 <= s2_ic1eq1;
             s3_ic2eq1 <= s2_ic2eq1;
             s3_ic1eq2 <= s2_ic1eq2;
@@ -620,14 +620,14 @@ module element_pipeline #(
     logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
-    logic               s3b_dual;  logic [1:0] s3b_filter_mode;
+    logic               s3b_cascade;  logic [1:0] s3b_filter_mode;
     logic signed [23:0] s3b_phase; logic [7:0] s3b_atten_l, s3b_atten_r;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3b_valid<=1'b0; s3b_idx<='0; s3b_att<='0;
             s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
-            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_filter_mode<='0;
+            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_cascade<=1'b0; s3b_filter_mode<='0;
             s3b_phase<='0; s3b_atten_l<='0; s3b_atten_r<='0;
             s3b_duty<='0; s3b_wave<='0;
         end else begin
@@ -635,7 +635,7 @@ module element_pipeline #(
             s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
             s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
             s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
-            s3b_dual<=s3_dual; s3b_filter_mode<=s3_filter_mode;
+            s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
             s3b_phase<=phase_next; s3b_atten_l<=s3_atten_l; s3b_atten_r<=s3_atten_r;
             s3b_duty<=s3_duty; s3b_wave<=s3_wave;
         end
@@ -657,21 +657,21 @@ module element_pipeline #(
     logic signed [17:0] s3c_osc;   logic [15:0] s3c_att;
     logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
-    logic               s3c_dual;  logic [1:0] s3c_filter_mode;
+    logic               s3c_cascade;  logic [1:0] s3c_filter_mode;
     logic signed [23:0] s3c_phase; logic [7:0] s3c_atten_l, s3c_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3c_valid<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
             s3c_k<='0; s3c_q1<='0;
             s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
-            s3c_dual<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
+            s3c_cascade<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
         end else begin
             s3c_valid<=s3b_valid; s3c_idx<=s3b_idx;
             s3c_osc <= osc_sample; s3c_att <= s3b_att;
             s3c_k<=s3b_k; s3c_q1<=s3b_q1;
             s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
             s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
-            s3c_dual<=s3b_dual; s3c_filter_mode<=s3b_filter_mode;
+            s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
             s3c_phase<=s3b_phase; s3c_atten_l<=s3b_atten_l; s3c_atten_r<=s3b_atten_r;
         end
     end
@@ -688,20 +688,20 @@ module element_pipeline #(
     logic signed [17:0] s3d_osc;
     logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
     logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
-    logic               s3d_dual;  logic [1:0] s3d_filter_mode;
+    logic               s3d_cascade;  logic [1:0] s3d_filter_mode;
     logic signed [23:0] s3d_phase; logic [7:0] s3d_atten_l, s3d_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3d_valid<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
             s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
-            s3d_dual<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
+            s3d_cascade<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
         end else begin
             s3d_valid<=s3c_valid; s3d_idx<=s3c_idx;
             s3d_osc <= 18'($signed(osc_mul >>> 16));
             s3d_k<=s3c_k; s3d_q1<=s3c_q1;
             s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
             s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
-            s3d_dual<=s3c_dual; s3d_filter_mode<=s3c_filter_mode;
+            s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
             s3d_phase<=s3c_phase; s3d_atten_l<=s3c_atten_l; s3d_atten_r<=s3c_atten_r;
         end
     end
@@ -726,7 +726,7 @@ module element_pipeline #(
         .in_osc(s3d_osc), .in_k(s3d_k), .in_q1(s3d_q1),
         .in_ic1eq1(s3d_ic1eq1), .in_ic2eq1(s3d_ic2eq1),
         .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
-        .in_dual(s3d_dual), .in_filter_mode(s3d_filter_mode),
+        .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
         .in_phase(s3d_phase), .in_atten_l(s3d_atten_l), .in_atten_r(s3d_atten_r),
         .out_valid(s9_valid), .out_idx(s9_idx), .out_elem(s9_elem),
         .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),

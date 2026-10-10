@@ -100,7 +100,7 @@ never sees.
 4. **Swap governs wiring; buses carry signal.** Pointer/config words
    ride the existing ping-pong banks (atomic regrouping). Bus values
    are not swap-banked; data memory is double-buffered per sample
-   (`dmem_gen`), so the lanes always read one complete pass.
+   (`dmem_page`), so the lanes always read one complete pass.
 5. **One data-memory word format: signed Q8.10**. 8 integer bits (sign
    included) + 10 fraction = 18 bits; integer = octaves, fraction =
    position within the octave. The same number means the same musical thing on every

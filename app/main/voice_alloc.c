@@ -188,7 +188,7 @@ static uint32_t amp_env_coef(uint8_t vel)
 // scaling must preserve the sign and the 18-bit mask is applied after.
 static uint32_t mod_env_coef(uint8_t vel)
 {
-    int32_t d = (int32_t)g_patch.env1_depth;
+    int32_t d = (int32_t)g_patch.mod_env_depth;
     int64_t scaled = ((int64_t)d * velocity_scale_q16(vel, g_patch.vel_mod_amt)) >> 16;
     return (uint32_t)(int32_t)scaled & 0x3FFFF;
 }
@@ -360,7 +360,7 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
 
     // GAIN word carries the mode byte (filter type/dual) from the patch
     // so CC 29/30 render on re-program.
-    uint32_t mode = ((uint32_t)(g_patch.filter.dual & 1) << 16)
+    uint32_t mode = ((uint32_t)(g_patch.filter.cascade & 1) << 16)
                   | ((uint32_t)(g_patch.filter.type & 3) << 17);
 
     elem_voicing_t voicing[ELEMS_PER_VOICE];
@@ -710,7 +710,7 @@ static void note_off(uint8_t note)
 // s_cutoff_offset carries the CC74/106 cutoff brightness; env inversions
 // follow the schema ((127-cc)<<1, panel convention).
 //
-// STORED-but-not-yet-rendered: env1_dest (CC 108; cutoff is the only
+// STORED-but-not-yet-rendered: mod_env_dest (CC 108; cutoff is the only
 // live MOD-env destination). The arp has no CC yet.
 static uint8_t  s_cutoff_msb, s_cutoff_lsb;   // CC74 / CC106
 static void apply_cutoff(void)
@@ -836,7 +836,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     // three so the top of travel is HP, not a second LP.
     case 29: g_patch.filter.type = (uint8_t)((val * 3) >> 7);  // 0..2
              s_pending |= DIRTY_VOICES; break;
-    case 30: g_patch.filter.dual = val >= 64;
+    case 30: g_patch.filter.cascade = val >= 64;
              s_pending |= DIRTY_VOICES; break;
 
     // ---- test tone: ≥64 replaces BOTH outputs with the
@@ -880,10 +880,10 @@ static void handle_cc(uint8_t num, uint8_t val)
     // authority at the ends.
     case 107: {
         int d = (int)val - 64;
-        g_patch.env1_depth = (int16_t)((d * (d < 0 ? -d : d)) << 2);
+        g_patch.mod_env_depth = (int16_t)((d * (d < 0 ? -d : d)) << 2);
         s_pending |= DIRTY_MOD_ENV;
     } break;
-    case 108: g_patch.env1_dest = (uint8_t)(val >> 5);  // stored; cutoff live
+    case 108: g_patch.mod_env_dest = (uint8_t)(val >> 5);  // stored; cutoff live
               break;
 
     default: break;   // unmapped / deferred CCs ignored

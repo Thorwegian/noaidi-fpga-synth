@@ -68,7 +68,7 @@ module tb_mbox_burst;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
-        .sclk(sclk), .bank_active(1'b0), .bank_shadow(1'b0),
+        .sclk(sclk), .page_active(1'b0), .page_shadow(1'b0),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_we), .imem_write_addr(imem_addr),

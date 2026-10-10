@@ -11,7 +11,7 @@
 // the mix, not the bus, so a wrong-generation read surfaces only as an
 // occasional subtly-stale modulation value.
 //
-//   1. dmem_gen toggles exactly once per sample
+//   1. dmem_page toggles exactly once per sample
 //   2. an SPI bus write reaches BOTH halves at once (write-through),
 //      so it is visible immediately
 //   3. the new value stays live across the next swap
@@ -31,26 +31,26 @@ module tb_prog_pingpong;
     integer toggles, ticks, cyc;
     integer persist_ok;
     integer straddles, windows;
-    logic   gen_seen, gen_valid;
-    logic   gen_prev;
+    logic   page_seen, page_valid;
+    logic   page_prev;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
     // hierarchical peeks -- the whole point of doing this in simulation
-    `define LIVE   u_pipe.u_csp.dmem_gain_l[{ u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
-    `define SHADOW u_pipe.u_csp.dmem_gain_l[{~u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
+    `define LIVE   u_pipe.u_csp.dmem_gain_l[{ u_pipe.u_csp.dmem_page, TESTBUS[8:0]}]
+    `define SHADOW u_pipe.u_csp.dmem_gain_l[{~u_pipe.u_csp.dmem_page, TESTBUS[8:0]}]
 
     initial begin
         reset_and_mute;
         observe(4);
 
         //---------------------------------------------------------------
-        // 1. dmem_gen toggles exactly once per sample
+        // 1. dmem_page toggles exactly once per sample
         //---------------------------------------------------------------
-        toggles = 0; ticks = 0; gen_prev = u_pipe.u_csp.dmem_gen;
+        toggles = 0; ticks = 0; page_prev = u_pipe.u_csp.dmem_page;
         for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
             @(posedge clk);
-            if (u_pipe.u_csp.dmem_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = u_pipe.u_csp.dmem_gen;
+            if (u_pipe.u_csp.dmem_page !== page_prev) toggles = toggles + 1;
+            page_prev = u_pipe.u_csp.dmem_page;
             if (sample_tick) ticks = ticks + 1;
         end
         // One generation == one COMPLETE sequencer pass. The
@@ -60,7 +60,7 @@ module tb_prog_pingpong;
         // often than a pass completes would publish a half-written
         // generation -- halved modulation depth and broken chains.
         if (toggles !== ticks) begin
-            $display("FAIL: dmem_gen toggled %0d times over %0d samples, want %0d",
+            $display("FAIL: dmem_page toggled %0d times over %0d samples, want %0d",
                      toggles, ticks, ticks);
             errors = errors + 1;
         end else
@@ -133,7 +133,7 @@ module tb_prog_pingpong;
         // 6. a neighbouring bus must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
-        if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_gen, 9'(TESTBUS+1)}] === MARK_B) begin
+        if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_page, 9'(TESTBUS+1)}] === MARK_B) begin
             $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TESTBUS+1);
             errors = errors + 1;
         end else
@@ -175,10 +175,10 @@ module tb_prog_pingpong;
         spi_word_write(16'(BUS_BASE + QUIETBUS), {14'b0, MARK_B});
         repeat (6) @(posedge sample_tick);
         repeat (4) @(posedge clk);
-        if (u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIETBUS[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus %0d lost its base (got %0d, want %0d)",
                      QUIETBUS,
-                     u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_gen, QUIETBUS[8:0]}], MARK_B);
+                     u_pipe.u_csp.dmem_fc[{u_pipe.u_csp.dmem_page, QUIETBUS[8:0]}], MARK_B);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists with nothing refreshing it");
@@ -186,25 +186,25 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         // 9. NO STRADDLE: a swap must not land inside a lane
         //    pass. Elements enter at slots 0..255 and read the bus at S2,
-        //    slots 1..256, so dmem_gen constant across that window means
+        //    slots 1..256, so dmem_page constant across that window means
         //    every element of the pass saw one generation. Several passes,
         //    so a one-off alignment cannot hide a real straddle.
         //---------------------------------------------------------------
         straddles = 0;
         windows   = 0;
-        gen_valid = 1'b0;
+        page_valid = 1'b0;
         for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
             @(posedge clk);
             if (slot == 10'd0) begin
-                if (gen_valid) windows = windows + 1;
-                gen_valid = 1'b0;                // swap happens here
+                if (page_valid) windows = windows + 1;
+                page_valid = 1'b0;                // swap happens here
             end else if (slot <= 10'd256) begin
-                if (!gen_valid) begin
-                    gen_seen  = u_pipe.u_csp.dmem_gen;  // first read of this pass
-                    gen_valid = 1'b1;
-                end else if (u_pipe.u_csp.dmem_gen !== gen_seen) begin
+                if (!page_valid) begin
+                    page_seen  = u_pipe.u_csp.dmem_page;  // first read of this pass
+                    page_valid = 1'b1;
+                end else if (u_pipe.u_csp.dmem_page !== page_seen) begin
                     if (straddles == 0)
-                        $display("FAIL: dmem_gen changed at slot %0d, mid lane pass", slot);
+                        $display("FAIL: dmem_page changed at slot %0d, mid lane pass", slot);
                     straddles = straddles + 1;
                 end
             end
@@ -213,7 +213,7 @@ module tb_prog_pingpong;
             $display("FAIL: %0d straddle(s) over %0d lane passes", straddles, windows);
             errors = errors + 1;
         end else
-            $display("no straddle: dmem_gen constant across all %0d lane read windows", windows);
+            $display("no straddle: dmem_page constant across all %0d lane read windows", windows);
 
         report;
     end

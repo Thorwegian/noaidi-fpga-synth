@@ -53,7 +53,7 @@ typedef struct {
     uint16_t cutoff;        // UQ4.10 log2 base (CC74 coarse + CC106 fine)
     uint16_t resonance;     // UQ4.10 log2 (r octaves above Butterworth)
     uint8_t  type;          // 0 LP .. (FILTER/GAIN mode field)
-    uint8_t  dual;          // 12/24 dB
+    uint8_t  cascade;          // 12/24 dB
     int16_t  key_track;     // cutoff-follows-pitch amount (per channel)
 } filter_t;
 
@@ -128,8 +128,8 @@ typedef struct {
 
     filter_t        filter;
     adsr_t          env[PATCH_NUM_ENV];   // [0]=amp, [1]=MOD
-    uint8_t         env1_dest;            // MOD env destination (def: cutoff)
-    int16_t         env1_depth;           // MOD env depth, signed raw bus value
+    uint8_t         mod_env_dest;            // MOD env destination (def: cutoff)
+    int16_t         mod_env_depth;           // MOD env depth, signed raw bus value
                                           // (walker DEPTH is signed 18-bit;
                                           // ±4096 = ±4 octaves of cutoff)
     lfo_t           lfo[PATCH_NUM_LFO];

@@ -133,21 +133,21 @@ module top (
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
     //----------------------------------------------------------------
-    // Output tilt (output_tilt.sv): one-pole 6 dB/oct lowpass on the
+    // Output tilt (output_lpf.sv): one-pole 6 dB/oct lowpass on the
     // mix, corner ≈ 2 kHz — the ear-tuned warm stop. Error
     // feedback inside the module makes it settle to EXACT zero on
     // silence. Sits BEFORE the test-tone mux so the purity
     // reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;
-    output_tilt #(.SHIFT(3)) u_tilt_l (
+    output_lpf #(.SHIFT(3)) u_lpf_l (
         .clk   (sysclk),
         .rst_n (rst_n),
         .tick  (sample_tick),
         .in    (sample_left),
         .out   (lpf_l)
     );
-    output_tilt #(.SHIFT(3)) u_tilt_r (
+    output_lpf #(.SHIFT(3)) u_lpf_r (
         .clk   (sysclk),
         .rst_n (rst_n),
         .tick  (sample_tick),
