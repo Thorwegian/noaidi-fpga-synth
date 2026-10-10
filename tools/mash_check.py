@@ -19,8 +19,8 @@ Sequence:
      by polling 1 s captures from the digital S/PDIF input
   5. PASS = the capture reaches AC-SILENCE: zero samples deviate from
      each channel's parked constant, and that constant (DC) is within
-     4 LSB of zero. The DC tolerance exists because the output tilt's
-     truncating integrator parks a ~1-LSB DC after signal decays
+     a raw value of 4 of zero. The DC tolerance exists because the output
+     tilt's truncating integrator parks a DC of ~raw 1 after signal decays
  - pure DC, inaudible, and NOT a stuck voice. Anything
      with actual AC energy at the deadline = FAIL, spectrum printed.
 
@@ -141,7 +141,7 @@ def capture_probe(secs=1):
 
     ac_nonzero counts samples that deviate from their channel's median
     - the parked-DC-tolerant silence metric: the output tilt parks a
-    ~1-LSB DC, and that is not a stuck voice."""
+    DC of ~raw 1, and that is not a stuck voice."""
     subprocess.run(["amixer", "-c", "1", "cset", "numid=16", "2"],
                    capture_output=True)
     subprocess.run(["amixer", "-c", "1", "cset", "numid=13", "on"],

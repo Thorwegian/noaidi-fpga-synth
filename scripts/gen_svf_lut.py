@@ -33,13 +33,13 @@ with open(file_path, "w") as file:
 # 1024 entries encoding ONE octave (1200/1024=1.172 cents per entry)
 # Encodes F1() for MIDI notes 0-11
 #
-# Entry format: QU0.25 value masked to 16 LSB (4 hex digits)
+# Entry format: QU0.25 value masked to the low 16 bits (4 hex digits)
 
 # LUT usage:
 # 
 # Input: 14-bit frequency (QU4.10)
 #
 # 1. Extract 4 MSB as octave number
-# 2. Extract 10 LSB as LUT index
+# 2. Extract the low 10 bits as LUT index
 # 3. Barrel-shift LUT value right by (12 - octaveNumber) to get F1 value (QU0.24)
 

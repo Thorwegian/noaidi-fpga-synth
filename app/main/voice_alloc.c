@@ -40,15 +40,15 @@
 // GAIN word carries a FIXED per-note ceiling (VOL_REF);
 // g_patch.volume moves the gain-bus base around it.
 // VOL_REF is the unity anchor, so a bus offset of 0 is unity gain:
-// the RTL adds (gain_bus >>> 6) to the UQ4.4 word gain, so 64 bus
-// LSB = one UQ4.4 step, and off = (vol−VOL_REF)·64.
+// the RTL adds (gain_bus >>> 6) to the UQ4.4 word gain, so a raw bus
+// value of 64 = one UQ4.4 step, and off = (vol−VOL_REF)·64.
 #define VOL_REF    0xCF               // unity anchor = patch_default volume
 
-// One semitone in the UQ4.10 log2 pitch (1024 LSB per octave).
-#define SEMI_LSB(s)  ((int32_t)(s) * 1024 / 12)
+// One semitone in the UQ4.10 log2 pitch (raw value 1024 per octave).
+#define SEMI_RAW(s)  ((int32_t)(s) * 1024 / 12)
 
 // Unison detune spread positions (symmetric, in "steps"); the actual
-// LSB offset is step * g_patch.unison_detune. The 7-wide set is the
+// raw pitch offset is step * g_patch.unison_detune. The 7-wide set is the
 // supersaw; the 4-wide set feeds each half of the 4+4 mode.
 static const int8_t SPREAD7[7] = {-3, -2, -1, 0, 1, 2, 3};
 static const int8_t SPREAD4[4] = {-3, -1, 1, 3};
@@ -146,7 +146,7 @@ static int64_t  s_last_apply;
                                        // BUS_CH_CUT → BUS_CUT(v), unity
 #define PROD_LFO2     1            // global LFO 2
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
-// sustain LSB = span/256 = 0.234 dB. The linear level ramp into the
+// one sustain step = span/256 = 0.234 dB. The linear level ramp into the
 // log-encoded gain is an exponential-amplitude curve, slow-then-fast.
 // Whether the attack should additionally be LINEARIZED in amplitude
 // (RC-style, fast-then-slow) is an OPEN QUESTION. With volume
@@ -219,15 +219,15 @@ static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
 // How long a release tail stays audible, from the RATES release byte
-// using the gateware decode's own formula: the level spans 2^22 LSB
-// and drops (16+low4) << high4 sixteenths-of-an-LSB per WALK, with an
+// using the gateware decode's own formula: the level spans raw 2^22
+// and drops (16+low4) << high4 sixteenths of a raw step per WALK, with an
 // entry walked at 48 kHz. patch_adsr_rate_byte already bakes the ×2
 // rate compensation into the byte, so the samples count is in 48 kHz
 // walks: 1 walk = 1/48000 s ≈ 20.83 µs.
 static int64_t release_tail_us(void)
 {
     uint32_t r    = patch_adsr_rate_byte(g_patch.env[0].release);
-    uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // 1/16-LSB units
+    uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // sixteenths of a raw step
     uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
     return (int64_t)(samples * 125u / 6u);            // µs at 48 kHz
 }
@@ -265,7 +265,7 @@ static uint16_t voice_fc(uint8_t note)
 
 // How each of the 8 elements maps onto the two oscillators for the
 // active voice structure. osc = which oscillator (0/1),
-// detune = unison spread in pitch LSBs, l/r = channel enables (both =
+// detune = unison spread in raw pitch steps, l/r = channel enables (both =
 // centre), active = sounding (else GATE-muted).
 typedef struct {
     uint8_t osc;
@@ -279,7 +279,7 @@ typedef struct {
 static int build_voicing(evoice_t p[ELEMS_PER_VOICE])
 {
     for (int u = 0; u < ELEMS_PER_VOICE; u++) p[u] = (evoice_t){0};
-    int  ud = g_patch.unison_detune;         // LSB per spread step
+    int  ud = g_patch.unison_detune;         // raw pitch per spread step
     int  n  = 0;
 
     // l/r mark which side a unison element LEANS (alternating). How
@@ -381,7 +381,7 @@ static void voice_program(int v, uint8_t note, uint8_t vel)
         }
         const osc_t *o = &g_patch.osc[plan[u].osc];
 
-        int32_t pitch = base + SEMI_LSB(o->coarse) + o->fine + plan[u].detune;
+        int32_t pitch = base + SEMI_RAW(o->coarse) + o->fine + plan[u].detune;
         if (pitch < 0)      pitch = 0;
         if (pitch > 0x3FFF) pitch = 0x3FFF;
 
@@ -658,7 +658,7 @@ static void reso_update(uint8_t val)
     engine_link_bus_write(BUS_RESO_GLOBAL, (uint32_t)offset);
 }
 
-// Mod wheel → cutoff term (0 to ~+5 octaves, wheel*40 Q8.10 LSB).
+// Mod wheel → cutoff term (0 to ~+5 octaves, raw Q8.10 value wheel*40).
 static void wheel_update(uint8_t val)
 {
     if (val == s_wheel)
@@ -668,7 +668,7 @@ static void wheel_update(uint8_t val)
 }
 
 // Pitch wheel: ±bend_range semitones (RPN 0; default ±2). Q8.10
-// has 1024/12 ≈ 85.3 LSB per semitone: off = delta × range × 85.33 /
+// has a raw value of 1024/12 ≈ 85.3 per semitone: off = delta × range × 85.33 /
 // 8192 = delta × range / 96. ONE write to the global pitch bus moves
 // every element; the cutoff buses get the same term so filter key
 // tracking follows the bend.
@@ -767,8 +767,8 @@ static void handle_cc(uint8_t num, uint8_t val)
 
     // ---- live: LFO 2 (source 1) ----
     case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_dirty |= D_LFO2; break;
-    // Depth scale is per-destination: duty bus decodes <<<13 (1024 LSB
-    // = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q),
+    // Depth scale is per-destination: duty bus decodes <<<13 (raw value
+    // 1024 = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q),
     // cutoff like resonance (val<<5 ≈ up to ±4 octaves of wobble).
     case 110: g_patch.lfo[1].depth =
                   (int16_t)(g_patch.lfo[1].dest == 1 ? val << 5
@@ -804,7 +804,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 22: g_patch.osc[1].coarse = (int16_t)((val * 25) / 128 - 12);
              s_dirty |= D_RENDER; break;
     // Fine: full travel = ±0.5 semitone.
-    // 0.5 semi = 1024/24 ≈ 42.7 LSB → (val−64)*2/3 spans ±42.
+    // 0.5 semi = 1024/24 ≈ raw 42.7 → (val−64)*2/3 spans ±42.
     case 15: g_patch.osc[0].fine = (int16_t)((((int)val - 64) * 2) / 3);
              s_dirty |= D_RENDER; break;
     case 23: g_patch.osc[1].fine = (int16_t)((((int)val - 64) * 2) / 3);
@@ -831,7 +831,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
                g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
                s_dirty |= D_RENDER; } break;
-    case 27: g_patch.unison_detune = (int16_t)(val >> 2);   // 0..31 LSB/step
+    case 27: g_patch.unison_detune = (int16_t)(val >> 2);   // 0..31 raw per step
              s_dirty |= D_RENDER; break;
     case 28: g_patch.unison_stereo = (int16_t)val;          // stereo spread
              s_dirty |= D_RENDER; break;
@@ -1024,17 +1024,14 @@ void voice_alloc_init(void)
     }
     patch_default(&g_patch);   // the active sound, in one struct
     wire_pointers();
-    // Null buses. The duty pointer (PTRS0[19:10]) and every other
-    // pointer left at its default target bus 0 — the intended "zero"
-    // bus. NO RUNTIME PATH ever writes bus 0/1 (that is what makes
-    // them safe "zero" targets), and unwritten bus BSRAM is NOT
-    // guaranteed zero on the GW2AR (the very reason pitch/reso below
-    // are written explicitly) — hence these two one-time nulling
-    // writes at init, the only writes those buses ever get. Without
-    // them, eff_duty = word + (garbage << 13) saturates and CC 25
-    // pulse-width does nothing.
-    engine_link_bus_write(0, 0);
-    engine_link_bus_write(1, 0);
+    // Global buses start at zero. Bus 0 needs nothing: the gateware
+    // holds it at zero, the target of any unused pointer. Every duty
+    // pointer (PTRS0[19:10]) points at bus 1, the global PWM bus that
+    // LFO 2 writes when its destination is duty. Unwritten bus BSRAM is
+    // NOT guaranteed zero on the GW2AR, so buses 1-3 get explicit zero
+    // bases here; without that, eff_duty = word + (garbage << 13)
+    // saturates and CC 25 pulse-width does nothing.
+    engine_link_bus_write(BUS_DUTY_GLOBAL, 0);
     engine_link_bus_write(BUS_PITCH_GLOBAL, 0);
     engine_link_bus_write(BUS_RESO_GLOBAL, 0);   // baseline = RESO
 

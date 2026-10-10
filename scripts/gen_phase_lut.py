@@ -40,5 +40,5 @@ with open(file_path, "w") as file:
 # Input: 14-bit frequency (QU4.10)
 #
 # 1. Extract 4 MSB as octave number
-# 2. Extract 10 LSB as LUT index
+# 2. Extract the low 10 bits as LUT index
 # 3. Barrel shift LUT value right by (BASE_OCTAVE - octaveNumber) to get phase delta

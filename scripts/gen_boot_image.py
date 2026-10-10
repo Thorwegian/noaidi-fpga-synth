@@ -15,7 +15,7 @@
 #   Notes: for k in 1..8 → [C, E, G, C+12] at MIDI 12*k, i.e. C0..C8.
 #   Stereo: hard-panned by unison index — the first 4 unisons of each
 #   note go left, the last 4 go right (off channel = 0x00, exact mute).
-#   Unison detune: [0, 2, 4, 6, -2, -4, -6, -8] LSB of the UQ4.10
+#   Unison detune: [0, 2, 4, 6, -2, -4, -6, -8] raw steps of the UQ4.10
 #   fraction (~±9.4 cents) — the left and right halves use different
 #   offsets, so the two channels are detuned relative to each other.
 #
@@ -52,8 +52,8 @@ FTYPE_LP = 0x0
 DUAL = 0             # 12 dB/oct single-filter mode
 MUTE = 0x00          # volume 0 = exact mute — hard-pan off channel
 
-# Unison detune offsets per unison index, in UQ4.10 fraction LSBs
-# (1 LSB ≈ 1.17 cents).  The left half (index 0-3) and right half
+# Unison detune offsets per unison index, in raw UQ4.10 fraction steps
+# (a raw value of 1 ≈ 1.17 cents).  The left half (index 0-3) and right half
 # (index 4-7) are different sets, giving inter-channel detune.
 UNISON_DETUNE = [0, 2, 4, 6, -2, -4, -6, -8]   # ≈ ±9.4 cents
 

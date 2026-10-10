@@ -88,7 +88,7 @@ void patch_default(patch_t *p)
     p->osc[1].coarse = -12;         // one octave below the supersaw (sub)
     p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
-    p->unison_detune = 6;      // LSB per spread step (supersaw spread)
+    p->unison_detune = 6;      // raw pitch per spread step (supersaw spread)
     p->unison_stereo = 127;    // full stereo spread = hard pan
                                // (CC 28 is continuous)
 

@@ -129,7 +129,7 @@ typedef struct {
     filter_t        filter;
     adsr_t          env[PATCH_NUM_ENV];   // [0]=amp, [1]=MOD
     uint8_t         env1_dest;            // MOD env destination (def: cutoff)
-    int16_t         env1_depth;           // MOD env depth, SIGNED bus LSB
+    int16_t         env1_depth;           // MOD env depth, signed raw bus value
                                           // (walker DEPTH is signed 18-bit;
                                           // ±4096 = ±4 octaves of cutoff)
     lfo_t           lfo[PATCH_NUM_LFO];

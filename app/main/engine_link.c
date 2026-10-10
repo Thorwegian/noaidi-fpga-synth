@@ -24,17 +24,17 @@
 #define ENGINE_TASK_STACK  3072
 #define ENGINE_TASK_PRIO   6          // highest app task: above midi_in/
                                       // voice_alloc (5), midi_log/ble_rx (4)
-// 1 kHz control rate. Paced by an esp_timer notifying the
-// task, NOT vTaskDelayUntil: the FreeRTOS tick is 100 Hz, so a 1 ms
-// delay would round to 0 ticks and assert.
+// 1 kHz control rate. Paced by an esp_timer notifying the task, so the
+// rate does not depend on the FreeRTOS tick (CONFIG_FREERTOS_HZ, pinned
+// to 1000 in sdkconfig.defaults).
 #define ENGINE_TICK_US     1000
 
 #define ELEM_BASE            0x2000
 #define ELEM_STRIDE          64
 
-// GAIN word with both channels at 0xFF = exact mute (0x00000000 is
-// 0 dB full volume — the classic footgun).
-#define P3_MUTE            0x0000FFFFu
+// GAIN word with both channels at 0x00 = exact mute (volume
+// semantics: 0xFF is loudest).
+#define P3_MUTE            0x00000000u
 
 static QueueHandle_t s_queue;
 static QueueHandle_t s_bus_queue;
@@ -238,7 +238,7 @@ void engine_link_init(void)
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
         s_image[e][0] = 0;
         s_image[e][1] = 0;
-        s_image[e][2] = 0x40000000;   // q1 = 1.0, fc = 0
+        s_image[e][2] = 0;            // Butterworth, fc = 0
         s_image[e][3] = P3_MUTE;
         s_image[e][4] = 0;            // GATE off
         s_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
