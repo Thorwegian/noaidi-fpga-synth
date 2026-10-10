@@ -34,7 +34,7 @@ wire        dmem_wr_toggle;
 wire        imem_write_enable;
 wire [9:0]  imem_write_addr;
 wire [31:0] imem_write_data;
-wire        swap_req;
+wire        swap_toggle;
 
 spi_bus #(.AW_BACKED(11)) u_bus (
     .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
@@ -43,7 +43,7 @@ spi_bus #(.AW_BACKED(11)) u_bus (
     .elem_write_index(elem_write_index), .elem_write_data(elem_write_data),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
-    .swap_req(swap_req)
+    .swap_toggle(swap_toggle)
 );
 
 logic signed [23:0] ml, mr;
@@ -54,7 +54,7 @@ element_pipeline #(
     .clk(clk), .rst_n(rst_n), .slot(slot),
     .lane_enter(lane_enter), .sample_tick(sample_tick),
     .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
-    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_req(swap_req),
+    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_toggle(swap_toggle),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .mix_left(ml), .mix_right(mr)

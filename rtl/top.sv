@@ -70,7 +70,7 @@ module top (
     logic [2:0]  elem_write_word;
     logic [7:0]  elem_write_index;
     logic [31:0] elem_write_data;
-    logic        swap_req;
+    logic        swap_toggle;
     logic [9:0]  dmem_wr_addr;
     logic [17:0] dmem_wr_data;
     logic        dmem_wr_toggle;
@@ -97,7 +97,7 @@ module top (
         .imem_write_enable       (imem_write_enable),
         .imem_write_addr     (imem_write_addr),
         .imem_write_data     (imem_write_data),
-        .swap_req    (swap_req),
+        .swap_toggle    (swap_toggle),
         .mix_left    (sample_left),
         .mix_right   (sample_right),
         .test_tone_en (test_tone_en)
@@ -248,7 +248,7 @@ module top (
         .imem_write_enable    (imem_write_enable),
         .imem_write_addr  (imem_write_addr),
         .imem_write_data  (imem_write_data),
-        .swap_req (swap_req)
+        .swap_toggle (swap_toggle)
     );
 
     //----------------------------------------------------------------
@@ -257,18 +257,18 @@ module top (
     // MS5351 setting is visibly off. led[1]: lit while reset is held.
     // Others off.
     //----------------------------------------------------------------
-    logic [15:0] beat;
+    logic [15:0] blink_div;
     logic        blink;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n) begin
-            beat  <= '0;
+            blink_div  <= '0;
             blink <= 1'b0;
         end else if (sample_tick) begin
-            if (beat == 16'd47999) begin
-                beat  <= '0;
+            if (blink_div == 16'd47999) begin
+                blink_div  <= '0;
                 blink <= ~blink;
             end else
-                beat  <= beat + 1'b1;
+                blink_div  <= blink_div + 1'b1;
         end
 
     assign led = {4'b1111, ~rst, ~blink};

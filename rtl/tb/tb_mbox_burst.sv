@@ -108,14 +108,14 @@ module tb_mbox_burst;
     logic signed [17:0] va, vb, lo, hi, iv;
     int seq = 0;
 
-    // classify one word: both halves must hold it, and dmem_init (single copy)
+    // classify one word: both halves must hold it, and dmem_base (single copy)
     // must too -- init holding stale data means the word never committed
     task automatic check_word(input [9:0] a, input signed [17:0] want,
                               input string who, input int oo, input int gg);
         begin
             lo = dut.dmem_fc[{1'b0, a[8:0]}];
             hi = dut.dmem_fc[{1'b1, a[8:0]}];
-            iv = dut.dmem_init[a];
+            iv = dut.dmem_base[a];
             checks = checks + 1;
             if (iv !== want) begin
                 drops = drops + 1;
@@ -125,7 +125,7 @@ module tb_mbox_burst;
                     drops_spaced = drops_spaced + 1; errors = errors + 1;
                 end
                 if (drops <= 8)
-                    $display("%s dropped:      %s bus %0d want %0d, dmem_init has %0d  (offset %0d, gap %0d)",
+                    $display("%s dropped:      %s bus %0d want %0d, dmem_base has %0d  (offset %0d, gap %0d)",
                              (gg >= maxrun) ? "FAIL" : "note",
                              who, a, want, iv, oo, gg);
             end else if (lo !== want || hi !== want) begin

@@ -53,29 +53,29 @@ module limiter #(
 
     // ---- S1a: octave = index of the leading 1 ----
     logic [OW-1:0]      oct_c;
-    logic               nz_c;
+    logic               nonzero_c;
     always_comb begin
-        oct_c = '0; nz_c = 1'b0;
+        oct_c = '0; nonzero_c = 1'b0;
         for (int i = 0; i < LEVEL_W; i++)
-            if (level[i]) begin oct_c = OW'(i); nz_c = 1'b1; end
+            if (level[i]) begin oct_c = OW'(i); nonzero_c = 1'b1; end
     end
     logic [OW-1:0]      s1_oct;
-    logic               s1_nz;
+    logic               s1_nonzero;
     logic [LEVEL_W-1:0] s1_level;
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) begin s1_oct <= '0; s1_nz <= 1'b0; s1_level <= '0; end
-        else        begin s1_oct <= oct_c; s1_nz <= nz_c; s1_level <= level; end
+        if (!rst_n) begin s1_oct <= '0; s1_nonzero <= 1'b0; s1_level <= '0; end
+        else        begin s1_oct <= oct_c; s1_nonzero <= nonzero_c; s1_level <= level; end
 
     // ---- S1b: 4 bits under the leading 1 -> log fraction -> level_code ----
-    logic [LEVEL_W-1:0] lsh_c;
+    logic [LEVEL_W-1:0] mantissa_c;
     always_comb begin
-        if (s1_oct >= OW'(4)) lsh_c = s1_level >> (s1_oct - OW'(4));
-        else                  lsh_c = s1_level << (OW'(4) - s1_oct);
+        if (s1_oct >= OW'(4)) mantissa_c = s1_level >> (s1_oct - OW'(4));
+        else                  mantissa_c = s1_level << (OW'(4) - s1_oct);
     end
     logic [OW+4:0] s2_code;
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n) s2_code <= '0;
-        else        s2_code <= s1_nz ? ({s1_oct, 4'd0} + (OW+5)'(log_lut[lsh_c[3:0]])) : '0;
+        else        s2_code <= s1_nonzero ? ({s1_oct, 4'd0} + (OW+5)'(log_lut[mantissa_c[3:0]])) : '0;
 
     // ---- S2a: target = dB over threshold, clamped to the 8-bit code ----
     logic [7:0] target_c;
@@ -91,15 +91,15 @@ module limiter #(
         else        s3_target <= target_c;
 
     // ---- S2b: slew toward target<<SUB, bounded per step ----
-    wire [7+SUB:0] tq = {s3_target, {SUB{1'b0}}};
-    logic [7+SUB:0] gq_c;
+    wire [7+SUB:0] target_q = {s3_target, {SUB{1'b0}}};
+    logic [7+SUB:0] gain_q_c;
     always_comb begin
-        if (tq > gain_q_in) gq_c = (tq - gain_q_in > attack_q)  ? gain_q_in + attack_q  : tq;
-        else                gq_c = (gain_q_in - tq > release_q) ? gain_q_in - release_q : tq;
+        if (target_q > gain_q_in) gain_q_c = (target_q - gain_q_in > attack_q)  ? gain_q_in + attack_q  : target_q;
+        else                gain_q_c = (gain_q_in - target_q > release_q) ? gain_q_in - release_q : target_q;
     end
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n) gain_q_out <= '0;
-        else        gain_q_out <= gq_c;
+        else        gain_q_out <= gain_q_c;
 
     // ---- S3: decode: 6 dB per int (shift), 0.375 dB per frac (LUT) ----
     wire [7:0] code = gain_q_out[7+SUB:SUB];

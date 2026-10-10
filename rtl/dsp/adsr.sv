@@ -208,21 +208,21 @@ module adsr #(
 
     // Everything the later stages need, carried alongside the DSP pipeline.
     logic [17:0] k_q;
-    logic [1:0]  stage_q;
-    logic [25:0] level_q;
-    logic        gate_q, v1;
-    logic [1:0]  stg_in_q;        // the stage we came FROM
+    logic [1:0]  stage_q1;
+    logic [25:0] level_q1;
+    logic        gate_q1, valid_q1;
+    logic [1:0]  prev_stage_q1;        // the stage we came FROM
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            k_q <= '0; stage_q <= AST_IDLE; level_q <= '0;
-            gate_q <= 1'b0; v1 <= 1'b0; stg_in_q <= AST_IDLE;
+            k_q <= '0; stage_q1 <= AST_IDLE; level_q1 <= '0;
+            gate_q1 <= 1'b0; valid_q1 <= 1'b0; prev_stage_q1 <= AST_IDLE;
         end else begin
-            v1       <= step_en;
+            valid_q1       <= step_en;
             k_q      <= k_seg;
-            stage_q  <= stage_sel;
-            stg_in_q <= stage_prev;
-            level_q  <= level_now;
-            gate_q   <= gate;
+            stage_q1  <= stage_sel;
+            prev_stage_q1 <= stage_prev;
+            level_q1  <= level_now;
+            gate_q1   <= gate;
         end
     end
 
@@ -254,7 +254,7 @@ module adsr #(
     ) u_mac (
         .A       (k_q),
         .B       (delta36),
-        .C       ({{(54-26-K_SHIFT){1'b0}}, level_q, {K_SHIFT{1'b0}}}),
+        .C       ({{(54-26-K_SHIFT){1'b0}}, level_q1, {K_SHIFT{1'b0}}}),
         .ASIGN   (1'b0),             // k is unsigned
         .BSIGN   (1'b1),             // delta is signed
         .ACCLOAD (1'b0),
@@ -270,21 +270,21 @@ module adsr #(
     wire [25:0] y_dsp = mac_out[K_SHIFT+25 : K_SHIFT];
 
     // The rest of the stage-2 context, aligned to the MAC's registered output.
-    logic [1:0] stg_q;
-    logic [25:0] lvl_q;
-    logic        gt_q, v2;
-    logic [1:0]  stg_in_d;
+    logic [1:0] stage_q2;
+    logic [25:0] level_q2;
+    logic        gate_q2, valid_q2;
+    logic [1:0]  prev_stage_q2;
     logic        prod_nz_q, prod_neg_q;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            stg_q <= AST_IDLE; lvl_q <= '0; gt_q <= 1'b0; v2 <= 1'b0;
-            stg_in_d <= AST_IDLE; prod_nz_q <= 1'b0; prod_neg_q <= 1'b0;
+            stage_q2 <= AST_IDLE; level_q2 <= '0; gate_q2 <= 1'b0; valid_q2 <= 1'b0;
+            prev_stage_q2 <= AST_IDLE; prod_nz_q <= 1'b0; prod_neg_q <= 1'b0;
         end else begin
-            v2       <= v1;
-            stg_q    <= stage_q;
-            lvl_q    <= level_q;
-            gt_q     <= gate_q;
-            stg_in_d <= stg_in_q;
+            valid_q2       <= valid_q1;
+            stage_q2    <= stage_q1;
+            level_q2    <= level_q1;
+            gate_q2     <= gate_q1;
+            prev_stage_q2 <= prev_stage_q1;
             // Whether the drive term is non-zero, and its sign, decided from
             // delta before the multiply -- k is always positive, so the
             // product's sign IS delta's sign. Keeping this out of the DSP
@@ -306,20 +306,20 @@ module adsr #(
     // shows up as y_dsp being unchanged from the level that went in. That
     // makes the creep a MUX on an incremented level rather than an extra add
     // in the arithmetic path.
-    wire stalled = (y_dsp == lvl_q) && prod_nz_q;
-    wire [25:0] crept = prod_neg_q ? (lvl_q - 26'd1) : (lvl_q + 26'd1);
+    wire stalled = (y_dsp == level_q2) && prod_nz_q;
+    wire [25:0] crept = prod_neg_q ? (level_q2 - 26'd1) : (level_q2 + 26'd1);
     // A release that has already reached zero must not creep below it, and an
     // attack at the top must not creep past the comparator's reach.
     wire [25:0] y = !stalled                        ? y_dsp
-                  : (prod_neg_q && lvl_q == 26'd0)  ? 26'd0
+                  : (prod_neg_q && level_q2 == 26'd0)  ? 26'd0
                   :                                   crept;
 
     logic [27:0] next;
     always_comb begin
-        if (!gt_q)
+        if (!gate_q2)
             // release: target is zero, and IDLE latches on arrival
             next = (y == 26'd0) ? {AST_IDLE, 26'd0} : {AST_REL, y};
-        else if (stg_q == AST_ATT)
+        else if (stage_q2 == AST_ATT)
             // attack: the comparator, not the target, ends the segment
             next = (y >= ENV_FULL) ? {AST_DEC, ENV_FULL} : {AST_ATT, y};
         else
@@ -329,7 +329,7 @@ module adsr #(
     end
 
     assign state_out = next;
-    assign state_we  = v2;
+    assign state_we  = valid_q2;
 
 endmodule
 `default_nettype wire

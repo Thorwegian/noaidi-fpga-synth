@@ -69,34 +69,34 @@ module drum #(
     end
 
     // ── 48 kHz derivation: two half toggles ──
-    // half48: which CYCLES-long period of the 48 kHz frame this is
-    // (0 = first). cell_half48: which CELLDIV-long cell of the
+    // odd_sample48: which CYCLES-long period of the 48 kHz frame this is
+    // (0 = first). odd_cell48: which CELLDIV-long cell of the
     // doubled cell this is (0 = first). Both flip at their boundary;
     // the wrap realign is a no-op while the ratios divide evenly,
     // same defensive style as cell_cnt above.
-    logic half48, cell_half48;
+    logic odd_sample48, odd_cell48;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
-            half48 <= 1'b0;
+            odd_sample48 <= 1'b0;
         else if (slot_r == CYCLES - 1)
-            half48 <= ~half48;
+            odd_sample48 <= ~odd_sample48;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
-            cell_half48 <= 1'b0;
+            odd_cell48 <= 1'b0;
         else if (slot_r == CYCLES - 1)
-            cell_half48 <= half48 ? 1'b0 : ~cell_half48;
+            odd_cell48 <= odd_sample48 ? 1'b0 : ~odd_cell48;
         else if (cell_cnt == CELLDIV - 1)
-            cell_half48 <= ~cell_half48;
+            odd_cell48 <= ~odd_cell48;
     end
 
     assign slot          = slot_r;
     assign sample_tick   = (slot_r == '0);
     assign lane_enter    = (slot_r < NUM_LANES);
     assign cell_tick     = (cell_cnt == '0);
-    assign sample_tick48 = sample_tick && !half48;
-    assign cell_tick48   = cell_tick   && !cell_half48;
+    assign sample_tick48 = sample_tick && !odd_sample48;
+    assign cell_tick48   = cell_tick   && !odd_cell48;
 
 endmodule

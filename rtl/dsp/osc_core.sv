@@ -62,15 +62,15 @@ module osc_core (
     // oscillator's ±0.5, so it fits without a clamp — and no clamp is added on
     // purpose, since one here would mask a width error instead of showing it.
     //----------------------------------------------------------------
-    logic signed [24:0] pul;
-    assign pul = ((phase_next < duty) ? 25'sd8388607 : -25'sd8388608)
+    logic signed [24:0] pulse;
+    assign pulse = ((phase_next < duty) ? 25'sd8388607 : -25'sd8388608)
                  - 25'(duty);
 
     //----------------------------------------------------------------
     // Triangle: fold sawtooth at midpoint (phase = 2^23)
     //----------------------------------------------------------------
-    logic signed [23:0] triw;
-    assign triw = (phase_next < 24'h800000)
+    logic signed [23:0] triangle;
+    assign triangle = (phase_next < 24'h800000)
         ? (phase_next << 1) - 24'h800000
         : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
 
@@ -85,14 +85,14 @@ module osc_core (
     initial $readmemh("dsp/sine_lut.hex", sine_lut);
 
     logic [1:0]  quadrant;
-    logic [7:0]  q_idx;
-    logic [23:0] q_mag;
+    logic [7:0]  quarter_idx;
+    logic [23:0] quarter_mag;
     assign quadrant = phase_next[23:22];
-    assign q_idx    = quadrant[0] ? ~phase_next[21:14] : phase_next[21:14];
-    assign q_mag    = sine_lut[q_idx];
+    assign quarter_idx    = quadrant[0] ? ~phase_next[21:14] : phase_next[21:14];
+    assign quarter_mag    = sine_lut[quarter_idx];
 
     logic signed [23:0] sine;
-    assign sine = quadrant[1] ? -$signed(q_mag) : $signed(q_mag);
+    assign sine = quadrant[1] ? -$signed(quarter_mag) : $signed(quarter_mag);
 
     //----------------------------------------------------------------
     // Waveform select
@@ -103,8 +103,8 @@ module osc_core (
     always_comb begin
         case (wave)
             2'd0:    muxed = 25'(saw);
-            2'd1:    muxed = pul;
-            2'd2:    muxed = 25'(triw);
+            2'd1:    muxed = pulse;
+            2'd2:    muxed = 25'(triangle);
             default: muxed = 25'(sine);
         endcase
     end
