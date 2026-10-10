@@ -71,11 +71,10 @@ module tb_prog_limiter;
         reset_and_mute;
 
         // ---- QUIET FIRST: below threshold, envelope still at unity ----
-        // Order matters: release is ~105 dB/s by design, so after the hot
-        // section it takes ~240 ms to recover ~25 dB. Measuring quiet
-        // straight after loud reads the residual gain reduction, not the
-        // limiter's transparency (it did, on the first run: -35.7 dBFS =
-        // the -12 dBFS signal under ~24 dB of still-releasing attenuation).
+        // Order matters: release is ~17.6 dB/s, so after the hot section
+        // it takes ~1.4 s to recover ~25 dB. Measuring quiet straight
+        // after loud would read the residual gain reduction, not the
+        // limiter's transparency.
         program8(GAIN_36DB_BOTH); flip; program8(GAIN_36DB_BOTH);
         observe(400);
         observe(1000); pk = peak;

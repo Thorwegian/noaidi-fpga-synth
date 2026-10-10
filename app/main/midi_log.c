@@ -7,7 +7,7 @@
 // event loop that decodes MIDI messages and prints them. This is the
 // only place MIDI traffic is printed: the RX task never blocks on the
 // console, and if the console cannot keep up, events are dropped here
-// (and counted) instead of stalling the MIDI input.
+// instead of stalling the MIDI input.
 
 #include "midi_log.h"
 
@@ -65,7 +65,6 @@ static void log_midi_event(const midi_message_t *m)
 static void midi_log_task(void *arg)
 {
     evt_t evt;
-    bool drop_logged = false;
     int64_t busy_since = esp_timer_get_time();
 
     while (1) {
@@ -77,26 +76,13 @@ static void midi_log_task(void *arg)
         // empties, so the receive above never blocks and this printf
         // loop (priority 4) starves IDLE → task watchdog. If we have
         // run this long without blocking, yield a tick; the event bus
-        // drops the excess for us (counted below).
+        // drops the excess for us.
         int64_t now = esp_timer_get_time();
         if (now - busy_since > 2000) {
             vTaskDelay(1);
             busy_since = esp_timer_get_time();
         } else if (uxQueueMessagesWaiting(s_queue) == 0) {
             busy_since = now;   // queue drained — next receive blocks
-        }
-
-        // Report drops once per burst, not once per event.
-        uint32_t dropped = event_bus_dropped(s_sub_id);
-        if (dropped > 0) {
-            if (!drop_logged) {
-                ESP_LOGW("midi_log", "console too slow, dropped %" PRIu32
-                         " events since last report", dropped);
-                drop_logged = true;
-            }
-            event_bus_reset_dropped(s_sub_id);
-        } else {
-            drop_logged = false;
         }
 
         switch (evt.kind) {

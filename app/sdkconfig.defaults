@@ -15,6 +15,9 @@ CONFIG_BT_NIMBLE_NVS_PERSIST=y
 # load-access-faults in a boot loop (seen on silicon). Static it is.
 CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 
+# 1 kHz FreeRTOS tick.
+CONFIG_FREERTOS_HZ=1000
+
 # Debug instrumentation for the engine_link watchdog crash.
 # RISC-V backtraces are only usable with frame pointers, and
 # TASK_WDT_PANIC turns the task watchdog from a warn-and-limp into a

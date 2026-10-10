@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
 # run.sh -- launch the Noaidi Open Stage Control panel headless.
 #
 # Serves http://<devhost>:8080 with noaidi-panel.json, driving the

@@ -32,13 +32,9 @@ package synth_pkg;
 
     // Drum slot where element 0 enters the pipeline
     parameter int LANE_BASE    = 0;
-    // Pipeline stages per element (S0..S11 + S3B/S5B/S8B/S9B splits)
-    parameter int LANE_STAGES  = 16;
-    // Contiguous drum span occupied by the lane pipeline
-    parameter int LANE_SPAN    = NUM_ELEMENTS + LANE_STAGES - 1;
-
     // Drum slot where a pending ping-pong bank swap executes: the
-    // pipeline is drained there (LANE_SPAN < SWAP_SLOT), so every
+    // lane pipeline (a 281-slot span, see element_pipeline.sv) is
+    // drained there, so every
     // sample reads one consistent bank generation.
     parameter int SWAP_SLOT    = 512;
 

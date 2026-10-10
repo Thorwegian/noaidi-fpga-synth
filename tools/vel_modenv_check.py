@@ -5,8 +5,8 @@
 #
 """Does CC 87 actually scale the MOD envelope's amount?
 
-A velocity sweep on the DEFAULT patch cannot answer this: it has CC 107 at
-centre, so the mod envelope's depth is zero and CC 87 has nothing to scale.
+A velocity sweep with CC 107 at centre cannot answer this: the mod
+envelope's depth is then zero and CC 87 has nothing to scale.
 The sweep then shows no brightness trend, which is correct and uninformative
 -- a detector measured against a signal it cannot see. So this check opens
 the depth first.
@@ -121,7 +121,7 @@ def main():
                   "velocity response")
             rc = 1
 
-        cc(86, 64); cc(87, 64); cc(107, 64); cc(123, 0); cc(120, 0)
+        cc(86, 64); cc(87, 64); cc(107, 87); cc(123, 0); cc(120, 0)   # boot values
     finally:
         try:
             if client is not None:

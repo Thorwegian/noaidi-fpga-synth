@@ -1,3 +1,6 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+
 idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        "midi_parser.c" "spi_regs.c" "engine_link.c"
                        "voice_alloc.c" "slider.c" "ble_midi.c" "patch.c"

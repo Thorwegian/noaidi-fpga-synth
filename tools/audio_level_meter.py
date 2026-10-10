@@ -124,7 +124,7 @@ def main():
     d = db(peak_session)
     dc_str = f"{db(dc_worst):.1f} dBFS" if dc_worst >= 1 else "none"
     print(f"\n\nsession peak: {d:.1f} dBFS, clipped samples: {clipped}, "
-          f"worst DC offset: {dc_worst:.0f} LSB ({dc_str})")
+          f"worst DC offset: {dc_worst:.0f} raw ({dc_str})")
     if d > -1.0:
         print("-> TOO HOT: back off the Focusrite output (or ALSA 'Line' capture)")
     elif d < -30.0:

@@ -216,10 +216,11 @@ module csp (
     always_ff @(posedge clk)
         if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
-    // Bus 1023 doubles as the test-tone control latch.
+    // Bus 511, the top of the pool, doubles as the test-tone control
+    // latch; no element or instruction reads it.
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
-        else if (dmem_commit && dmem_mbox_addr == 10'd1023)
+        else if (dmem_commit && dmem_mbox_addr == 10'd511)
             test_tone_en <= dmem_mbox_data[0];
 
     // Replica writes: one physical port, two writers — the sequencer

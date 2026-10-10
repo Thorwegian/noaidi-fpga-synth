@@ -16,6 +16,8 @@
 
 #include "midi_in.h"
 
+#include <stdbool.h>
+
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
@@ -44,6 +46,7 @@ typedef struct {
     const char   *name;      // task name + log tag
     midi_parser_t parser;
     uint8_t       dbg_seen;  // first-bytes hex log budget (bring-up aid)
+    bool          ready;     // UART configured, RX task not yet started
 } midi_port_t;
 
 static midi_port_t s_din   = { .uart = UART_NUM_1, .name = "midi_in"  };
@@ -131,16 +134,27 @@ static void port_init(midi_port_t *p, int rx_pin)
     ESP_ERROR_CHECK(uart_param_config(p->uart, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(p->uart, UART_PIN_NO_CHANGE, rx_pin,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-
-    BaseType_t ok = xTaskCreate(midi_in_task, p->name, MIDI_TASK_STACK, p,
-                                MIDI_TASK_PRIO, NULL);
-    if (ok != pdPASS) {
-        ESP_LOGE(p->name, "Failed to create RX task");
-        return;
-    }
+    p->ready = true;
 
     ESP_LOGI(p->name, "UART%d RX on GPIO%d, %d baud", (int)p->uart,
              rx_pin, MIDI_BAUD);
+}
+
+// Bytes that arrive before the task starts wait in the UART RX buffer.
+static void port_start(midi_port_t *p)
+{
+    if (!p->ready)
+        return;
+    p->ready = false;
+    if (xTaskCreate(midi_in_task, p->name, MIDI_TASK_STACK, p,
+                    MIDI_TASK_PRIO, NULL) != pdPASS)
+        ESP_LOGE(p->name, "Failed to create RX task");
+}
+
+void midi_in_start(void)
+{
+    port_start(&s_din);
+    port_start(&s_panel);
 }
 
 void midi_in_init(int rx_pin)

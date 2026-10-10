@@ -7,30 +7,26 @@
 // One element enters a lane every sysclk cycle for 256 cycles of
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different element: stage Sk at drum slot t holds the
-// element that entered at slot t-k.  The pipeline occupies
-// 256 + 16 - 1 = 271 contiguous slots (~35% of the 768-slot drum
-// rotation).
+// element that entered at slot t-k.  The pipeline is 26 stages deep
+// (s10_act follows s1_act by 24 cycles in tb_element_pipeline), so it
+// occupies 256 + 26 - 1 = 281 contiguous slots (~37% of the 768-slot
+// drum rotation).
 //
 // Stage map:
-//   S1  state/param RAM read data available (address issued at S0)
+//   S0  state/param RAM read address issued
+//   S1  state/param RAM read data available
 //   S2  issue phase-delta + SVF-K LUT reads
 //   S3  LUT data → delta, K, q1; phase_next = phase + delta (ONE adder)
 //   S3B register phase_next / barrel-shifted K / q1 / duty / wave
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
 //   S3D resonance attenuation multiply on registered operands (DSP)
-//   S4  SVF1 A:  m1 = K*ic1eq1,  m2 = q1*ic1eq1     (DSP)
-//   S5  SVF1 B1: lp1/hp1 adder tree
-//   S5B SVF1 B2: m3 = K*hp1 on registered hp1        (DSP)
-//   S6  SVF1 C:  bp1, new states, filter-1 output
-//   S7  SVF2 A:  m4 = K*ic1eq2,  m5 = q1*ic1eq2     (DSP)
-//   S8  SVF2 B1: lp2/hp2 adder tree
-//   S8B SVF2 B2: m6 = K*hp2 on registered hp2        (DSP)
-//   S9  SVF2 C:  bp2, new states, filter-2 output, element output
+//   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
+//       7 per pole); its output is the element output
 //   S9B attenuation decode: lin gains via LUT + barrel shift
-//   S10 attenuation multiply on registered operands      (DSP)
-//   S11 mix accumulate + state writeback
+//   S10 attenuation multiply on registered operands      (DSP); its
+//       output is accumulated into the mix and the state written back
 //
-// S3B/S5B/S8B/S9B exist because chaining adder trees or LUT+barrel-
+// S3B/S3C/S3D/S9B exist because chaining adder trees or LUT+barrel-
 // shift decodes into a DSP multiply in one cycle violated setup on
 // real silicon at 98.304 MHz (audible corruption, clean at half
 // clock) — paths nextpnr's approximate timing model passes. Rule: a
@@ -49,7 +45,7 @@
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
 // State RAM is semi dual-port: read address is issued with the element
-// entering at S0, writeback happens 15 cycles later — the read
+// entering at S0, writeback happens 25 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
@@ -80,7 +76,7 @@ module element_pipeline #(
     // so a read and a write can never collide on one address (the
     // click-on-sweep bug). swap_req (an sclk-domain toggle from
     // CTRL@0x0002) flips the active half at drum slot 512: the
-    // pipeline is drained there (span ends ~271), so every sample's
+    // pipeline is drained there (the span ends at slot 280), so every sample's
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
     input  logic           elem_write_enable,
@@ -145,7 +141,7 @@ module element_pipeline #(
 
     //----------------------------------------------------------------
     // Per-element internal state RAM — semi dual-port
-    // read address: entering element (S0), write: 15 cycles later
+    // read address: entering element (S0), write: 25 cycles later
     //----------------------------------------------------------------
     reg signed [23:0] phase_ram  [0:NUM_ELEMENTS-1];
     reg signed [35:0] ic1eq1_ram [0:NUM_ELEMENTS-1];
@@ -683,10 +679,9 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // S3D -- the attenuation multiply, on REGISTERED operands. It sits
     // one stage after the waveform stage so that no cycle chains the
-    // waveform mux into a DSP. Element latency is 18; the state
-    // writeback
-    // lands 14 cycles after the read, against a 256-slot half, so read
-    // and write still cannot collide.
+    // waveform mux into a DSP. The state writeback lands 25 cycles
+    // after the read, against a 256-slot half, so read and write still
+    // cannot collide.
     //----------------------------------------------------------------
     wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
     logic               s3d_act;   logic [VW-1:0] s3d_idx;
@@ -712,7 +707,7 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // SVF core (TPT), spanning S3B..S9.
+    // SVF core (TPT), stages S4..S9.
     //   g = k>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
     //   Streaming, latency 17; states/phase/gains carried through.
@@ -745,12 +740,11 @@ module element_pipeline #(
     //   gain UQ4.4: att_lut[i] = 2^(-i/16) in UQ0.16 → 6 dB per int
     //   step, 0.375 dB per frac step.
     //
-    // Split from the multiply for the same silicon-timing reason as
-    // S5B/S8B: LUT read + 16-position barrel shift chained into a DSP
-    // multiply in one cycle violated setup at 98.304 MHz — audibly, on
-    // whichever channel drew the longer route (the right, on this
-    // build), and clean at half clock. Decode and multiply are now
-    // separate stages.
+    // Split from the multiply for the silicon timing rule (see the
+    // header): LUT read + 16-position barrel shift chained into a DSP
+    // multiply in one cycle violates setup on real silicon, audibly,
+    // on whichever channel draws the longer route. Decode and multiply
+    // are separate stages.
     //----------------------------------------------------------------
     logic        s9b_act;
     logic [VW-1:0] s9b_idx;
@@ -760,7 +754,7 @@ module element_pipeline #(
     logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
 
     // Gain 0xFF is EXACT mute, not -96 dB: the log decode bottoms out at
-    // lin = 1 LSB, and 256 correlated muted elements sum 48 dB of that
+    // lin = raw value 1, and 256 correlated muted elements sum 48 dB of that
     // right back (measured: -48 dBFS of ghost organ). A muted voice
     // must contribute zero.
     logic signed [17:0] lin_l, lin_r;
@@ -871,8 +865,9 @@ module element_pipeline #(
     // settles (5 stages) | p8 latch gain_q + gain | p9 multiply | p10
     // sat24 publish. Every consumer latches mix_* at the NEXT tick, so
     // audio semantics are unchanged. lim_gain_q persists across samples
-    // = the envelope. Constants: threshold
-    // -1 dBFS, attack 12 dB/sample, release ~105 dB/s. sat24 stays
+    // = the envelope. Constants: threshold code 192 = −6 dBFS (one
+    // octave under the full-scale code 208), attack 1/8 code ≈ 0.05 dB
+    // per sample, release 1/2048 code per sample ≈ 17.6 dB/s. sat24 stays
     // underneath as the guaranteed catch.
     //----------------------------------------------------------------
     localparam int          LIM_SUB       = 11;
@@ -963,8 +958,8 @@ module element_pipeline #(
     end
 
     // State writeback — sync-only process (BSRAM write port).
-    // Writeback lands 13 cycles after the read (S5B/S8B added), so
-    // read and write addresses can never collide (13 < 256).
+    // Writeback lands 25 cycles after the read, so read and write
+    // addresses can never collide (25 < 256).
     always_ff @(posedge clk) begin
         if (s10_act) begin
             phase_ram[s10_idx]  <= s10_phase;

@@ -3,11 +3,8 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: DRAFT.**
-
-The firmware rung this schema governs: mapping the synth's live
-parameters onto MIDI CCs and SysEx, entirely in the synth model
-(firmware). The FPGA continues to know nothing of MIDI
+This schema maps the synth's live parameters onto MIDI CCs and
+SysEx, entirely in the synth model (firmware). The FPGA continues to know nothing of MIDI
 ([design.md](design.md) topology).
 
 **Framing: the MIDI/user side is CONVENTIONAL.**
@@ -17,7 +14,7 @@ analog synthesizer — "a virtual analog synth with a massive sound."
 Player-facing behavior follows synth-panel convention everywhere;
 the unconventional machinery stays under the hood.
 
-## Principles (settled)
+## Principles
 
 - **Perceptual linearity via log encode / exp decode.** Controllers
   map through the log₂ encodings the gateware already speaks. The
@@ -28,18 +25,17 @@ the unconventional machinery stays under the hood.
   only parameter/bus/producer writes through the engine link
   ([firmware_architecture.md](firmware_architecture.md)).
 - **Everything is live** — SysEx is a bulk transport for
-  configuration, not a separate "patch mode". (The stored-timbre
-  concept — deliberately unnamed — stays unnamed and
-  unimplemented until its own rung.)
+  configuration, not a separate "patch mode". (There is no stored
+  timbre; the concept is deliberately unnamed.)
 
-## Channel policy (proposal)
+## Channel policy
 
-Omni today, unchanged. `voice_t.channel` is already stored; when
-multi-timbrality arrives, channel = timbre slot and the voice pool
-partitions. Nothing in this schema should assume omni forever — CC
-state (`s_wheel`, `s_bend`, envelope rates) becomes per-channel then.
+The synth is omni; `voice_t.channel` is stored per voice. Nothing in
+this schema assumes omni: under multi-timbrality a channel is a timbre
+slot, the voice pool partitions, and CC state (`s_wheel`, `s_bend`,
+envelope rates) is per-channel.
 
-## CC map (proposal)
+## CC map
 
 Goal: **enough CCs to program a basic patch
 without SysEx** — the whole of patch.h reachable from a controller.
@@ -53,18 +49,18 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
-| 10 | pan | IMPLEMENTED: per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
-| 1 | mod wheel | PATCH-ASSIGNED destination+amount; the first mod-matrix slot to surface. The wheel→cutoff route is a temporary hardwiring, to become a routable per-channel destination like the LFO destinations |
-| RPN 0/0 | pitch-bend range | IMPLEMENTED: CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
+| 10 | pan | per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
+| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff bus) |
+| RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's DEPTH word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
 | 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed DEPTH word at note-on by the same `g(vel)`, so velocity sets how far the filter envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff bus base is zero |
-| 120/123 | all sound off / all notes off | panic. IMPLEMENTED: 123 releases every held voice, 120 hard-mutes immediately |
+| 120/123 | all sound off / all notes off | panic: 123 releases every held voice, 120 hard-mutes immediately |
 | 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**
 | CC | Target | Notes |
 |---|---|---|
-| 20 | osc 1 waveform | discrete, 4 of them: 0 saw / 1 pulse / 2 tri / 3 sine, read from a quarter-wave LUT in `osc_core` and mirrored into the full cycle. None are bandlimited; noise is planned |
+| 20 | osc 1 waveform | discrete, 4 of them: 0 saw / 1 pulse / 2 tri / 3 sine, read from a quarter-wave LUT in `osc_core` and mirrored into the full cycle. None are bandlimited |
 | 21 | osc 2 waveform | discrete |
 | 14 | osc 1 coarse (interval) | ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22 |
 | 15 | osc 1 fine | full travel ±0.5 semitone, center 64 |
@@ -81,11 +77,11 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
-| 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
-| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step. **Temporarily live** on global bus 3 |
+| 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing); optional |
+| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel resonance bus (bus 3) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
-| 31 | key tracking amount | IMPLEMENTED: 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
+| 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
 
 **Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
 MOD (undefined block; standard CCs only ever covered one envelope).
@@ -99,17 +95,17 @@ equal-ratio ladder.
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
 | 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's DEPTH word is signed |
-| 108 | MOD env destination | stored; cutoff is the implemented destination |
+| 108 | MOD env destination | STORED ONLY: the MOD env always drives cutoff |
 
 **LFOs** (2)
 | CC | Target | Notes |
 |---|---|---|
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
-| 77 | LFO 1 depth | standard "vibrato depth" |
+| 77 | LFO 1 depth | standard "vibrato depth"; `val<<2` (raw value 508 at the top, ~½ octave) |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
-| 114 | LFO 1 destination | DEFERRED to the mod matrix — LFO 1 is the pitch vibrato (one producer per bus in the CSP) |
+| 114 | LFO 1 destination | NOT IMPLEMENTED (ignored): LFO 1 always drives pitch |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
-| 110 | LFO 2 depth | per-destination scale: duty `val<<4` (full ≈ ±1.0 PWM), resonance and cutoff `val<<5` (up to ~±4 oct), pitch `val<<2` |
+| 110 | LFO 2 depth | `val<<2`, the same scale as CC 77 for every destination (raw value 508 at the top: ~½ octave of pitch, cutoff or Q, or ±0.5 duty) |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
 | 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1 — dual vibrato) / **CUTOFF** (channel cut bus → per-voice sends) |
 
@@ -118,33 +114,32 @@ equal-ratio ladder.
 |---|---|---|
 | 117 | arp/seq on/off | NOT IMPLEMENTED (ignored) |
 | 118 | arp mode | NOT IMPLEMENTED (ignored); discrete: up/down/updown/random/pattern/chord |
-| TBD | arp octave range | CC 119 is the TEST TONE; the arp gets a new number when the arp rung lands |
 | — | rate | follows the clock (Auto/Internal); step rate is a division, not a free CC |
 
-Deferred to the mod-matrix stage (not basic-patch CCs): the full
-source→dest routing beyond the wheel and the two env/LFO dests
-above. Glide/portamento (standard CC 5 / 65) when that feature
-lands.
+Not mapped: source→destination routing beyond the wheel and the
+env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 
 Amp-envelope CCs re-push RATES and the velocity-scaled DEPTH to all
 32 amp-ADSR producers (banked, riding one swap); `release_tail_us()`
 reads the live release rate.
 
-**Open question 2 — RESOLVED: both.** Cutoff base
-is UQ4.10; use CC 74 (coarse, 7-bit MSB) + CC 106 (fine, 7-bit LSB)
-for the full 14 bits, per the MIDI MSB/LSB convention. Fine is
+**Cutoff resolution.** Cutoff base is UQ4.10; CC 74 (coarse, high 7
+bits) + CC 106 (fine, low 7 bits) give the full 14 bits, per the MIDI
+coarse/fine convention. Fine is
 optional — coarse alone (≈1/8 octave steps) is already musical, and
 a controller that only sends 74 still works. Rates and sustain stay
 7-bit by construction.
 
-## SysEx (proposal)
+## SysEx
+
+Decided, not implemented: `midi_parser` discards SysEx.
 
 Frame: `F0 7D 4E 4F <op> <payload…> F7` — `7D` is the
 educational/non-commercial manufacturer ID, `4E 4F` = "NO" as a
 device signature. All payload bytes 7-bit; 32-bit words packed as 5
 septets, MSB-first.
 
-Minimal op set to start (the raw escape hatch — everything the
+The op set (the raw escape hatch — everything the
 engine link can do, addressable from a sequencer):
 
 | op | Payload | Meaning |
@@ -154,29 +149,22 @@ engine link can do, addressable from a sequencer):
 | 0x03 | entry, word, w32 | producer table write (rides swap) |
 | 0x7F | — | identity request → reply with git describe of firmware |
 
-Structured configuration blocks (whole-timbre dumps, mod-routing
-setups) are deliberately NOT in this rung: they deserve the
-structure discussion first. The raw ops make everything reachable
-today; the structured layer comes when a later rung defines what a
-stored configuration *is*.
+The raw ops reach everything the engine link can write. Structured
+configuration (whole-timbre dumps, mod-routing setups, step-sequencer
+pattern data, per-step events, chord-mode config) does not fit the raw
+elem/bus/producer writes and is a separate structured SysEx layer,
+designed together with the sequencer and the stored-configuration
+structure.
 
-**Open question 3 — RESOLVED: basic raw ops now,
-grow later.** Ship the raw escape hatch (the op table above) for the
-first rung. But the step sequencer WILL need more — pattern data,
-per-step events, chord-mode config don't fit the raw
-elem/bus/producer writes — so a structured SysEx layer is a known
-follow-up, not a maybe. Design it alongside the sequencer rung.
+SysEx parsing lives in `midi_parser` (shared by UART `midi_in` and
+`ble_midi`): a bounded buffer, with streaming ops preferred over big
+dumps given the 31250 baud wire.
 
-**Open question 4 — SysEx parser location.** `midi_parser`
-(shared by UART `midi_in` and `ble_midi`) currently discards SysEx
-payloads; SysEx would extend it (bounded buffer,
-streaming ops preferred over big dumps given the 31250 baud wire).
-Any objection to capping SysEx payloads at something small (e.g. 64
-bytes) for now?
+Undecided: the SysEx payload cap (e.g. 64 bytes).
 
-## Explicitly out of scope this rung
+## Out of scope
 
 Gateware changes of any kind; program change / bank select (needs the
 stored-configuration structure); NRPN; MIDI 2.0 / MPE; velocity
-curves. (Per-channel timbres / layering ARE now planned — control_map
-decision 5 — but land with channel awareness, not this CC rung.)
+curves. Per-channel timbres / layering belong to channel awareness
+([control_map.md](control_map.md) decision 5).

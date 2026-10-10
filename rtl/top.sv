@@ -252,16 +252,26 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // led[0]: ~0.73 Hz (1.37 s period) liveness blink derived from
-    // sample ticks — proves clock + drum with one flop chain.
-    // led[1]: lit while reset is held. Others off.
+    // led[0]: 1 Hz clock-sanity blink, toggled every 48000 sample ticks
+    // (0.5 s at 96 kHz). A correct sysclk blinks once a second; a wrong
+    // MS5351 setting is visibly off. led[1]: lit while reset is held.
+    // Others off.
     //----------------------------------------------------------------
-    logic [16:0] beat;
+    logic [15:0] beat;
+    logic        blink;
     always_ff @(posedge sysclk or negedge rst_n)
-        if (!rst_n)           beat <= '0;
-        else if (sample_tick) beat <= beat + 1'b1;
+        if (!rst_n) begin
+            beat  <= '0;
+            blink <= 1'b0;
+        end else if (sample_tick) begin
+            if (beat == 16'd47999) begin
+                beat  <= '0;
+                blink <= ~blink;
+            end else
+                beat  <= beat + 1'b1;
+        end
 
-    assign led = {4'b1111, ~rst, ~beat[16]};
+    assign led = {4'b1111, ~rst, ~blink};
 
 endmodule
 `default_nettype wire

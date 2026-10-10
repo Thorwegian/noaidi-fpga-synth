@@ -14,7 +14,7 @@ hard-left / center / hard-right.
 
 Reuses ble_midi_fuzz.py's helpers (persistent bluetoothctl session,
 ALSA port wait, serial capture, disconnect+untrust discipline).
-Audio: ICUSBAUDIO7D LINE IN (hw:1,0) per AGENTS.md, DC removed before
+Audio: ICUSBAUDIO7D LINE IN (hw:1,0), DC removed before
 RMS. Pass criteria: >=15 dB toward the panned side at the
 rails (far side is VOL_MUTEd - the chain floor decides the margin),
 <=3 dB imbalance at center.

@@ -123,6 +123,7 @@ void app_main(void)
     printf("=== voice concept: 32 voices x 8 elements, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();
+    midi_in_start();   // subscribers are registered: start publishing
     slider_init();   // panel slider -> CC71 (parked); console keys 1/2/r/p
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
 #if CONFIG_NOAIDI_STRESS_TEST
