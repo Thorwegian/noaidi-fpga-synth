@@ -78,12 +78,12 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	# hence 2>&1.
 	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
 
-# Placement seed is PINNED: nextpnr's router is seed-sensitive, and
-# the q1-LUT shrink made the default seed fail routing
-# on an unrelated u_spi net while seed 2 routes with full timing
-# margin. Bump SEED if a future netlist hits "Failed to find a
-# route" — it is placement luck, not (necessarily) real congestion.
-SEED ?= 2
+# Placement seed is PINNED: nextpnr's router is seed-sensitive. Some
+# placements cannot route the ADSR's DSP output fabric ("Found two arcs
+# with same sink wire"), others fail with "Failed to find a route".
+# Bump SEED when a netlist change hits either — it is placement luck,
+# not (necessarily) real congestion. `make timing-sweep` compares seeds.
+SEED ?= 5
 
 # ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
