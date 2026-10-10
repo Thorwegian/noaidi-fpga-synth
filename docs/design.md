@@ -36,7 +36,7 @@ code is the source of truth: `rtl/synth_pkg.sv` and the generators in
   exactly one channel exists.
 - **Source / sink is the couple**: things that write buses are
   SOURCES; the parameters that read buses are SINKS. Code identifiers
-  (`ENGINE_NUM_PRODUCERS`, `engine_link_prod_write`, ...) spell
+  (`ENGINE_NUM_INSTR`, `engine_link_imem_write`, ...) spell
   this `prod`; docs use source/sink and quote code names only as
   code.
 - **The full terminal triad — source / sink (drain) / gate**:

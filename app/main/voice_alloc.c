@@ -111,7 +111,7 @@ static int64_t  s_last_flush;
 //             (the quiet floor), the ADSR source adds level ×
 //             (+ENV_SPAN) — the level simply ADDS volume: floor at
 //             level 0, the note's full volume at level 1. Velocity
-//             scales the ADSR source's DEPTH (amp_depth_for).
+//             scales the ADSR source's DEPTH (amp_env_coef).
 // bus 4:      CHANNEL cutoff bus — the scope ladder made real:
 //             wheel + bend + CC74/106 — ONE firmware write, fanned
 //             out to the 32 per-voice cutoff buses by type-3 bus
@@ -138,13 +138,13 @@ static int64_t  s_last_flush;
 // (MOD env, channel-cut fan-out) — the pair MUST be adjacent: both
 // write BUS_CUT(v), and chain-summing requires same-bus writers in
 // consecutive walker slots.
-#define PROD_ADSR(v)   (32 + (v))
-#define PROD_MODENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
+#define INSTR_AMP_ENV(v)   (32 + (v))
+#define INSTR_MOD_ENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
                                        // voice, watches the gate bus,
                                        // drives the voice's CUTOFF bus
-#define PROD_FANOUT(v) (65 + 2 * (v))  // type-3 bus source:
+#define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))  // type-3 bus source:
                                        // BUS_CH_CUT → BUS_CUT(v), unity
-#define PROD_LFO2     1            // global LFO 2
+#define INSTR_LFO2     1            // global LFO 2
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
 // one sustain step = span/256 = 0.234 dB. The linear level ramp into the
 // log-encoded gain is an exponential-amplitude curve, slow-then-fast.
@@ -179,14 +179,14 @@ static uint32_t velocity_scale_q16(uint8_t vel, uint8_t amt)
 // g(vel). Base is -ENV_SPAN, so a soft note rises from the same silence to a
 // LOWER peak rather than starting higher -- smaller excursion, same ramp rate,
 // hence the shorter perceived attack.
-static uint32_t amp_depth_for(uint8_t vel)
+static uint32_t amp_env_coef(uint8_t vel)
 {
     return (uint32_t)(((int64_t)ENV_SPAN * velocity_scale_q16(vel, g_patch.vel_amp_amt)) >> 16);
 }
 
 // The MOD envelope's DEPTH for this note. Signed: CC 107 is bipolar, so the
 // scaling must preserve the sign and the 18-bit mask is applied after.
-static uint32_t mod_depth_for(uint8_t vel)
+static uint32_t mod_env_coef(uint8_t vel)
 {
     int32_t d = (int32_t)g_patch.env1_depth;
     int64_t scaled = ((int64_t)d * velocity_scale_q16(vel, g_patch.vel_mod_amt)) >> 16;
@@ -451,14 +451,14 @@ static void update_amp_env(void)
     uint32_t r1 = patch_adsr_word1(&g_patch.env[0]);
     uint32_t r2 = patch_adsr_word3(&g_patch.env[0]);
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_prod_write(PROD_ADSR(v), 1, r1);
-        engine_link_prod_write(PROD_ADSR(v), 3, r2);
+        engine_link_imem_write(INSTR_AMP_ENV(v), 1, r1);
+        engine_link_imem_write(INSTR_AMP_ENV(v), 3, r2);
         // Re-apply this voice's OWN velocity scaling. Without it,
         // editing any amp-envelope CC while notes are held pushes the
         // unscaled patch depth to every voice and snaps held notes back
         // to full amount, audible as a jump in level mid-note.
-        engine_link_prod_write(PROD_ADSR(v), 2,
-                               amp_depth_for(s_voices[v].vel));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 2,
+                               amp_env_coef(s_voices[v].vel));
     }
 }
 
@@ -491,11 +491,11 @@ static uint16_t lfo_rate_from_cc(uint8_t val)
 // LFO 1 = source 0 (the vibrato). CC 76/77 rate/depth, CC 113 shape.
 static void update_lfo1(void)
 {
-    engine_link_prod_write(0, 0,
+    engine_link_imem_write(0, 0,
         CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[0].shape & 3) << 4)
            | ((uint32_t)BUS_PITCH_GLOBAL << 6)
            | ((uint32_t)g_patch.lfo[0].rate << 16));
-    engine_link_prod_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
+    engine_link_imem_write(0, 2, (uint32_t)(uint16_t)g_patch.lfo[0].depth);
 }
 
 // LFO 2 = source 1, global. CC 109/110/111/112. Destinations:
@@ -525,11 +525,11 @@ static void update_lfo2(void)
         // pitch bus every sample, so it never goes stale.
         prev_bus = bus;
     }
-    engine_link_prod_write(PROD_LFO2, 0,
+    engine_link_imem_write(INSTR_LFO2, 0,
         CSP_OPC_LFO | ((uint32_t)(g_patch.lfo[1].shape & 3) << 4)
            | ((uint32_t)bus << 6)
            | ((uint32_t)g_patch.lfo[1].rate << 16));
-    engine_link_prod_write(PROD_LFO2, 2,
+    engine_link_imem_write(INSTR_LFO2, 2,
         (uint32_t)(uint16_t)g_patch.lfo[1].depth);
 }
 
@@ -547,14 +547,14 @@ static void update_mod_env(void)
     uint32_t rates  = patch_adsr_word1(&g_patch.env[1]);
     uint32_t rates2 = patch_adsr_word3(&g_patch.env[1]);
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_prod_write(PROD_MODENV(v), 0,
+        engine_link_imem_write(INSTR_MOD_ENV(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_CUT(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
-        engine_link_prod_write(PROD_MODENV(v), 1, rates);
+        engine_link_imem_write(INSTR_MOD_ENV(v), 1, rates);
         // per-voice velocity scaling, same reason as update_amp_env
-        engine_link_prod_write(PROD_MODENV(v), 2,
-                               mod_depth_for(s_voices[v].vel));
-        engine_link_prod_write(PROD_MODENV(v), 3, rates2);
+        engine_link_imem_write(INSTR_MOD_ENV(v), 2,
+                               mod_env_coef(s_voices[v].vel));
+        engine_link_imem_write(INSTR_MOD_ENV(v), 3, rates2);
     }
 }
 
@@ -597,8 +597,8 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
     // are written BEFORE the gate, so the envelope the gate triggers is
     // already the right size for this note; writing them after would let
     // the first pass run at the previous note's amount.
-    engine_link_prod_write(PROD_ADSR(pick),   2, amp_depth_for(vel));
-    engine_link_prod_write(PROD_MODENV(pick), 2, mod_depth_for(vel));
+    engine_link_imem_write(INSTR_AMP_ENV(pick),   2, amp_env_coef(vel));
+    engine_link_imem_write(INSTR_MOD_ENV(pick), 2, mod_env_coef(vel));
     engine_link_bus_write(BUS_CUT(pick), cut_bus_value(pick));
     engine_link_bus_write(BUS_VGATE(pick), 1);
 
@@ -615,16 +615,16 @@ static void refresh_cut_buses(void)
 }
 
 // Boot wiring for the fan-out: 32 stateless SEND sources,
-// entry PROD_FANOUT(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
+// entry INSTR_CUTOFF_MAC(v) = BUS_CH_CUT × unity → BUS_CUT(v), each in the
 // slot adjacent to its voice's MOD env (same target bus, and chain
 // summing requires consecutive slots). Word 1 (RATES) is meaningless
 // for a SEND.
 static void init_fanout_sources(void)
 {
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_prod_write(PROD_FANOUT(v), 0,
-            CSP_OPC_SEND | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
-        engine_link_prod_write(PROD_FANOUT(v), 2, 0x10000u);   // unity
+        engine_link_imem_write(INSTR_CUTOFF_MAC(v), 0,
+            CSP_OPC_MAC | ((uint32_t)BUS_CUT(v) << 6) | ((uint32_t)BUS_CH_CUT << 16));
+        engine_link_imem_write(INSTR_CUTOFF_MAC(v), 2, 0x10000u);   // unity
     }
 }
 
@@ -1021,12 +1021,12 @@ void voice_alloc_init(void)
     // level ADDS up to the note's GAIN word ceiling (volume
     // semantics). Bases are live bus writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
-        engine_link_prod_write(PROD_ADSR(v), 0,
+        engine_link_imem_write(INSTR_AMP_ENV(v), 0,
             CSP_OPC_ADSR | ((uint32_t)BUS_GAIN(v) << 6)
                | ((uint32_t)BUS_VGATE(v) << 16));
-        engine_link_prod_write(PROD_ADSR(v), 1, patch_adsr_word1(&g_patch.env[0]));
-        engine_link_prod_write(PROD_ADSR(v), 2, ENV_SPAN);
-        engine_link_prod_write(PROD_ADSR(v), 3, patch_adsr_word3(&g_patch.env[0]));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 1, patch_adsr_word1(&g_patch.env[0]));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 2, ENV_SPAN);
+        engine_link_imem_write(INSTR_AMP_ENV(v), 3, patch_adsr_word3(&g_patch.env[0]));
     }
     refresh_gain_buses();   // gain-bus bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);

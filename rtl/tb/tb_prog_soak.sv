@@ -34,7 +34,7 @@ module tb_prog_soak;
 
     localparam [31:0] OPC_LFO  = 32'hE;
     localparam [31:0] OPC_ADSR = 32'hF;
-    localparam [31:0] OPC_SEND = 32'hD;
+    localparam [31:0] OPC_MAC = 32'hD;
 
     logic clk = 0, sclk = 0, rst_n = 1, sample_tick = 0;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
@@ -133,7 +133,7 @@ module tb_prog_soak;
             iwrite(10'((64+2*v)*4 + 3), 32'hE0120000);
             iwrite(10'((64+2*v)*4 + 2), 32'h00001000);
             // fan-out SEND: bus 4 -> cut bus 48+v, CHAINED after the MOD env
-            iwrite(10'((65+2*v)*4 + 0), OPC_SEND | (32'(48+v) << 6) | (32'd4 << 16));
+            iwrite(10'((65+2*v)*4 + 0), OPC_MAC | (32'(48+v) << 6) | (32'd4 << 16));
             iwrite(10'((65+2*v)*4 + 2), 32'h00010000);
         end
 

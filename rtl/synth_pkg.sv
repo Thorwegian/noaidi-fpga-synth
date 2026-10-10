@@ -90,7 +90,7 @@ package synth_pkg;
     parameter logic [3:0] OPC_OFF  = 4'h0;
     parameter logic [3:0] OPC_LFO  = 4'hE;  // state + mul + accum
     parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum
-    parameter logic [3:0] OPC_SEND = 4'hD;  // source + mul + accum
+    parameter logic [3:0] OPC_MAC = 4'hD;  // source + mul + accum
 
     //--- Filter stability clamp --------------------------------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not

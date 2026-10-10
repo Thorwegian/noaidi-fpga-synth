@@ -43,8 +43,8 @@ static uint32_t s_param_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 #define BUS_BASE_ADDR      0x0800
 #define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
                                   // 4 global buses in one burst
-#define PROD_BASE_ADDR     0x0100
-#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
+#define IMEM_BASE_ADDR     0x0100
+#define IMEM_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
                                   // + 32 MOD envs + 32 amp ADSRs (4
                                   // words each) + 32 fan-out sources
                                   // (2 words) = 324 pushes before the
@@ -64,14 +64,14 @@ typedef struct {
     uint8_t  entry;
     uint8_t  word;      // 0 CFG, 1 RATES, 2 DEPTH, 3 RATES2
     uint32_t value;
-} prod_cmd_t;
+} imem_cmd_t;
 
-static QueueHandle_t s_prod_queue;
-static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // word 3 is the second
+static QueueHandle_t s_imem_queue;
+static uint32_t s_imem_image[ENGINE_NUM_INSTR][4];   // word 3 is the second
                                                    // ADSR rate word
-#define PDIRTY_WORDS (ENGINE_NUM_PRODUCERS * 4 / 32)
-static uint32_t s_pdirty_now[PDIRTY_WORDS];
-static uint32_t s_pdirty_prev[PDIRTY_WORDS];
+#define IMEM_DIRTY_WORDS (ENGINE_NUM_INSTR * 4 / 32)
+static uint32_t s_imem_dirty_now[IMEM_DIRTY_WORDS];
+static uint32_t s_imem_dirty_prev[IMEM_DIRTY_WORDS];
 
 // Dirty bitmaps, one bit per (elem, word): 1792 bits.
 #define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
@@ -138,17 +138,17 @@ static void engine_task(void *arg)
             mark_dirty(cmd.elem, cmd.word);
             changed = true;
         }
-        prod_cmd_t pc;
-        while (xQueueReceive(s_prod_queue, &pc, 0) == pdTRUE) {
+        imem_cmd_t pc;
+        while (xQueueReceive(s_imem_queue, &pc, 0) == pdTRUE) {
             // entry is uint8_t = 0..255 — exactly the pool size, so
             // the type IS the bound
             if (pc.word >= 4)
                 continue;
-            if (s_prod[pc.entry][pc.word] == pc.value)   // no-op elision
+            if (s_imem_image[pc.entry][pc.word] == pc.value)   // no-op elision
                 continue;
-            s_prod[pc.entry][pc.word] = pc.value;
+            s_imem_image[pc.entry][pc.word] = pc.value;
             int bit = pc.entry * 4 + pc.word;
-            s_pdirty_now[bit >> 5] |= 1u << (bit & 31);
+            s_imem_dirty_now[bit >> 5] |= 1u << (bit & 31);
             changed = true;
         }
 
@@ -157,8 +157,8 @@ static void engine_task(void *arg)
         bool prev_any = false;
         for (int i = 0; i < DIRTY_WORDS; i++)
             if (s_dirty_prev[i]) { prev_any = true; break; }
-        for (int i = 0; i < PDIRTY_WORDS; i++)
-            if (s_pdirty_prev[i]) { prev_any = true; break; }
+        for (int i = 0; i < IMEM_DIRTY_WORDS; i++)
+            if (s_imem_dirty_prev[i]) { prev_any = true; break; }
         if (!changed && !prev_any)
             continue;
 
@@ -184,24 +184,24 @@ static void engine_task(void *arg)
                 fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE,
                                       s_param_image[e], ENGINE_WORDS_PER_ELEMENT);
         }
-        for (int i = 0; i < PDIRTY_WORDS; i++) {
-            uint32_t bits = s_pdirty_now[i] | s_pdirty_prev[i];
+        for (int i = 0; i < IMEM_DIRTY_WORDS; i++) {
+            uint32_t bits = s_imem_dirty_now[i] | s_imem_dirty_prev[i];
             while (bits) {
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
                 int idx = i * 32 + b;              // entry*4 + word
                 // four words per entry and a stride of four, so the
                 // producer address IS the bit index
-                fpga_word_write(PROD_BASE_ADDR + idx,
-                                s_prod[idx / 4][idx % 4]);
+                fpga_word_write(IMEM_BASE_ADDR + idx,
+                                s_imem_image[idx / 4][idx % 4]);
             }
         }
         fpga_swap();
 
         memcpy(s_dirty_prev, s_dirty_now, sizeof(s_dirty_prev));
         memset(s_dirty_now, 0, sizeof(s_dirty_now));
-        memcpy(s_pdirty_prev, s_pdirty_now, sizeof(s_pdirty_prev));
-        memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
+        memcpy(s_imem_dirty_prev, s_imem_dirty_now, sizeof(s_imem_dirty_prev));
+        memset(s_imem_dirty_now, 0, sizeof(s_imem_dirty_now));
 
         // Single-core guard. If this wake ran long (a flood of
         // dirty rows to burst over SPI), the 1 kHz notify is already
@@ -239,8 +239,8 @@ void engine_link_init(void)
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
     s_bus_queue = xQueueCreate(BUS_QUEUE_LEN, sizeof(bus_cmd_t));
-    s_prod_queue = xQueueCreate(PROD_QUEUE_LEN, sizeof(prod_cmd_t));
-    if (s_queue == NULL || s_bus_queue == NULL || s_prod_queue == NULL) {
+    s_imem_queue = xQueueCreate(IMEM_QUEUE_LEN, sizeof(imem_cmd_t));
+    if (s_queue == NULL || s_bus_queue == NULL || s_imem_queue == NULL) {
         ESP_LOGE(TAG, "failed to create command queues");
         return;
     }
@@ -275,10 +275,10 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
     return xQueueSend(s_bus_queue, &bc, 0) == pdTRUE;
 }
 
-bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
+bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value)
 {
-    if (s_prod_queue == NULL || word >= 4)   // uint8_t entry spans the pool
+    if (s_imem_queue == NULL || word >= 4)   // uint8_t entry spans the pool
         return false;
-    prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    return xQueueSend(s_prod_queue, &pc, 0) == pdTRUE;
+    imem_cmd_t pc = {.entry = entry, .word = word, .value = value};
+    return xQueueSend(s_imem_queue, &pc, 0) == pdTRUE;
 }

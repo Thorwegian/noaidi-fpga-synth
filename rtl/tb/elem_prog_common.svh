@@ -139,8 +139,8 @@ localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
 // fast attack, slow decay, high sustain, fast release.
 localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
 localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
-localparam [31:0] DEPTH_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
-localparam [31:0] DEPTH_HALF  = 32'h00008000;       // 0.5
+localparam [31:0] COEF_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
+localparam [31:0] COEF_HALF  = 32'h00008000;       // 0.5
 
 // ---- Mode 0 master, ~20 MHz ---------------------------------------
 localparam integer HALF = 25;

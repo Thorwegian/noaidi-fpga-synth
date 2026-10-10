@@ -48,7 +48,7 @@ module tb_mbox_burst;
     localparam int NV = 32;
     localparam [31:0] OPC_LFO  = 32'hE;
     localparam [31:0] OPC_ADSR = 32'hF;
-    localparam [31:0] OPC_SEND = 32'hD;
+    localparam [31:0] OPC_MAC = 32'hD;
 
     // two buses no instruction targets, so only the mailbox ever writes them
     // and anything other than the written value is the bug, not a refresh
@@ -160,7 +160,7 @@ module tb_mbox_burst;
             iwrite(10'((64+2*v)*4 + 1), 32'h00100400);
             iwrite(10'((64+2*v)*4 + 3), 32'hE0120000);
             iwrite(10'((64+2*v)*4 + 2), 32'h00001000);
-            iwrite(10'((65+2*v)*4 + 0), OPC_SEND | (32'(48+v) << 6) | (32'd4 << 16));
+            iwrite(10'((65+2*v)*4 + 0), OPC_MAC | (32'(48+v) << 6) | (32'd4 << 16));
             iwrite(10'((65+2*v)*4 + 2), 32'h00010000);
         end
         // gates on, so every envelope is live and the write-back span is full

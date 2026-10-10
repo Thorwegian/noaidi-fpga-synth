@@ -74,7 +74,7 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
 // Amp-envelope idiom (volume semantics): base = −span (the quiet
 // floor), depth POSITIVE — the envelope adds volume.
-#define ENGINE_NUM_PRODUCERS 256   // instruction pool; all 256 entries
+#define ENGINE_NUM_INSTR 256   // instruction pool; all 256 entries
                                     // execute every sample
 // CSP opcode = CFG[3:0], a BITMASK of enables rather than an enum:
 //   bit 0 reads a source operand      bit 2 multiplies by DEPTH
@@ -86,9 +86,9 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 #define CSP_OPC_OFF   0x0u
 #define CSP_OPC_LFO   0xEu   // state + multiply + accumulate
 #define CSP_OPC_ADSR  0xFu   // source (gate) + state + multiply + accumulate
-#define CSP_OPC_SEND  0xDu   // source + multiply + accumulate
+#define CSP_OPC_MAC  0xDu   // source + multiply + accumulate
 
-bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
+bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value);
 
 
 #ifdef __cplusplus

@@ -281,7 +281,7 @@ module csp (
     // bits now select which RAM the word lands in.
     reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {bank, entry[7:0]}
     reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
-    reg [31:0] imem_depth [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_coef [0:2*synth_pkg::NUM_INSTR-1];
     // Word 3, the second ADSR rate word. The address encoding carries
     // this slot: imem_write_addr is {entry, word[1:0]}, and firmware's
     // flush strides by four.
@@ -294,7 +294,7 @@ module csp (
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
             imem_cfg[wi]   = 32'd0;            // opcode 0 = off
             imem_rate[wi]  = 32'd0;
-            imem_depth[wi] = 32'd0;
+            imem_coef[wi] = 32'd0;
             imem_rate2[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
@@ -308,7 +308,7 @@ module csp (
             case (imem_write_addr[1:0])
                 2'd0: imem_cfg[imem_wr_entry]   <= imem_write_data;
                 2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
-                2'd2: imem_depth[imem_wr_entry] <= imem_write_data;
+                2'd2: imem_coef[imem_wr_entry] <= imem_write_data;
                 2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
                 default: ;                      // unreachable: all four words are used
             endcase
@@ -371,7 +371,7 @@ module csp (
     end
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
-    logic [31:0] cfg_q, rate_q, depth_q, rate2_q;
+    logic [31:0] cfg_q, rate_q, coef_q, rate2_q;
     logic [27:0] state_q;
     logic signed [17:0] gate_q, src_q, base_q;
     logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
@@ -391,7 +391,7 @@ module csp (
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_phase_inc;
-    logic [31:0] r_rate, r_depth, r_rate2;
+    logic [31:0] r_rate, r_coef, r_rate2;
     logic [27:0] r_state;
 
     // ---- R stage registers ---------------------------------------------
@@ -404,7 +404,7 @@ module csp (
     wire x_is_lfo = x_st_en && !x_opcode[synth_pkg::OPC_SOURCE];
     logic [9:0]  x_dest;
     logic [27:0] x_state;
-    logic signed [17:0] x_operand, x_depth, x_base;
+    logic signed [17:0] x_operand, x_coef, x_base;
     logic [15:0] x_phase_inc;
 
     // ---- X stage registers ---------------------------------------------
@@ -462,7 +462,7 @@ module csp (
     // still in flight -- the read would silently be stale. Same history,
     // same most-recent-wins rule. The instruction one ahead is in A right
     // now, so its contribution is the combinational accum_sat.
-    wire signed [17:0] send_src =
+    wire signed [17:0] mac_src =
           (a_valid  && a_dest  == r_src) ? accum_sat
         : (wb_valid && wb_addr == r_src) ? wb_value
         : (fwd1_valid && fwd1_addr == r_src) ? fwd1_value
@@ -520,10 +520,10 @@ module csp (
             fwd1_valid <= 1'b0; fwd2_valid <= 1'b0;
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
-            r_src <= '0; r_phase_inc <= '0; r_rate <= '0; r_depth <= '0;
+            r_src <= '0; r_phase_inc <= '0; r_rate <= '0; r_coef <= '0;
             r_state <= '0; r_rate2 <= '0;
             x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_state <= '0;
-            x_operand <= '0; x_depth <= '0; x_base <= '0;
+            x_operand <= '0; x_coef <= '0; x_base <= '0;
             x_phase_inc <= '0;
             a_dest <= '0; a_base <= '0; a_product <= '0; a_acc_en <= 1'b0;
             a_st_en <= 1'b0; a_is_lfo <= 1'b0; a_st_pc <= '0; a_lfo_next <= '0;
@@ -545,7 +545,7 @@ module csp (
             // An ADSR uses CFG[25:16] as its gate bus, so bit 26 is free.
             r_rate2    <= rate2_q;
             r_rate     <= rate_q;
-            r_depth    <= depth_q;
+            r_coef    <= coef_q;
             r_state   <= state_q;
 
             // R -> X: gate / source / base are out; decode and choose
@@ -555,11 +555,11 @@ module csp (
             x_dest    <= r_dest;
             x_state  <= r_state;
             x_base    <= base_q;
-            x_depth   <= $signed(r_depth[17:0]);
+            x_coef   <= $signed(r_coef[17:0]);
             x_phase_inc <= r_phase_inc;
             x_operand <= r_is_lfo ? lfo_wave
                        : r_is_env ? adsr_level
-                       :            send_src;
+                       :            mac_src;
 
             // X -> A: the multiply, registered operands, alone in its stage
             a_valid    <= x_valid;
@@ -570,7 +570,7 @@ module csp (
             a_st_pc    <= x_pc;
             a_lfo_next <= lfo_next;
             a_base    <= x_base;
-            a_product <= x_mul_en ? (x_operand * x_depth)
+            a_product <= x_mul_en ? (x_operand * x_coef)
                                   : $signed({{2{x_operand[17]}}, x_operand, 16'd0});
 
             // A -> W: the saturated sum, and push the forwarding history
@@ -593,7 +593,7 @@ module csp (
     always_ff @(posedge clk) begin
         cfg_q    <= imem_cfg[{bank_active, pc_addr}];
         rate_q   <= imem_rate[{bank_active, pc_addr}];
-        depth_q  <= imem_depth[{bank_active, pc_addr}];
+        coef_q  <= imem_coef[{bank_active, pc_addr}];
         rate2_q  <= imem_rate2[{bank_active, pc_addr}];
         state_q <= state_mem[pc_addr];
         gate_q   <= dmem_base_gate[cfg_q[25:16]];   // watched gate bus
