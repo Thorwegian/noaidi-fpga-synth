@@ -22,7 +22,8 @@
 #define ENGINE_QUEUE_LEN   1024   // voice_alloc's boot-time pointer
                                   // push alone is 512 commands
 #define ENGINE_TASK_STACK  3072
-#define ENGINE_TASK_PRIO   6          // above midi_log, below midi_in
+#define ENGINE_TASK_PRIO   6          // highest app task: above midi_in/
+                                      // voice_alloc (5), midi_log/ble_rx (4)
 // 1 kHz control rate. Paced by an esp_timer notifying the
 // task, NOT vTaskDelayUntil: the FreeRTOS tick is 100 Hz, so a 1 ms
 // delay would round to 0 ticks and assert.
@@ -41,17 +42,18 @@ static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
 #define BUS_BASE_ADDR      0x0800
 #define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
-                                  // gates in one burst
+                                  // 4 global buses in one burst
 #define PROD_BASE_ADDR     0x0100
-#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs + 32 amp ADSRs
-                                  // + 32 MOD envs (3 words each) + 32
-                                  // fan-out sources (2 words) = 262
-                                  // pushes before the 1 kHz tick can
-                                  // drain. 256 silently dropped the
-                                  // tail = voices 30/31's amp-env
-                                  // configs = gain floor forever =
-                                  // heard as the level dropping every
-                                  // 32 note-ons. Headroom 2x.
+#define PROD_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
+                                  // + 32 MOD envs + 32 amp ADSRs (4
+                                  // words each) + 32 fan-out sources
+                                  // (2 words) = 324 pushes before the
+                                  // 1 kHz tick can drain. A 256-deep
+                                  // queue drops the tail = the last
+                                  // voices' amp-env configs = gain
+                                  // floor forever = heard as the level
+                                  // dropping every 32 note-ons.
+                                  // Headroom ~1.6x.
 
 typedef struct {
     uint16_t bus;
@@ -60,7 +62,7 @@ typedef struct {
 
 typedef struct {
     uint8_t  entry;
-    uint8_t  word;      // 0 CFG, 1 DEPTH
+    uint8_t  word;      // 0 CFG, 1 RATES, 2 DEPTH, 3 RATES2
     uint32_t value;
 } prod_cmd_t;
 
@@ -71,7 +73,7 @@ static uint32_t s_prod[ENGINE_NUM_PRODUCERS][4];   // word 3 is the second
 static uint32_t s_pdirty_now[PDIRTY_WORDS];
 static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 
-// Dirty bitmaps, one bit per (elem, word): 1024 bits.
+// Dirty bitmaps, one bit per (elem, word): 1792 bits.
 #define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
 static uint32_t s_dirty_now[DIRTY_WORDS];   // changed since last swap
 static uint32_t s_dirty_prev[DIRTY_WORDS];  // written before last swap
@@ -188,7 +190,7 @@ static void engine_task(void *arg)
             while (bits) {
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
-                int idx = i * 32 + b;              // entry*3 + word
+                int idx = i * 32 + b;              // entry*4 + word
                 // four words per entry and a stride of four, so the
                 // producer address IS the bit index
                 fpga_word_write(PROD_BASE_ADDR + idx,

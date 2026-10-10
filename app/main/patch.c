@@ -13,9 +13,6 @@
 
 patch_t g_patch;
 
-// Pack an ADSR into the source-table RATES word (A | D<<8 | S<<16 |
-// R<<24) — the gateware's universal A,D,S,R byte order.
-//
 // RATE COMPENSATION: the envelope walk these bytes are calibrated
 // against runs at 48 kHz, half the sample rate, which alone would
 // double every attack/decay/release time. The rate decode is
@@ -119,7 +116,7 @@ void patch_default(patch_t *p)
     // attack, settles bright at sustain, closes on release.
     p->env[1] = p->env[0];
     p->env1_dest      = 0;             // cutoff (the only dest yet)
-    p->env1_depth     = 2048;          // +2 octaves send (CC 107 ≈ 96)
+    p->env1_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
 
     // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
@@ -132,10 +129,10 @@ void patch_default(patch_t *p)
     p->lfo[1].shape = 2;
     p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
     p->lfo[1].depth = 0;
-    p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance.
-                                       // (pitch is LFO 1's bus — one
-                                       // producer per bus in the walker)
+    p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance,
+                                       // 2 pitch (sums with LFO 1),
+                                       // 3 cutoff
 
-    p->volume     = 0xCF;              // was VOL_BASE (~-18 dB as volume)
+    p->volume     = 0xCF;              // = VOL_REF, the unity anchor (~-18 dB)
     p->bend_range = 2;                 // current ±2 semitones
 }

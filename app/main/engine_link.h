@@ -34,7 +34,7 @@ extern "C" {
 
 typedef struct {
     uint8_t  elem;    // element index 0..255
-    uint8_t  word;    // 0..3 (p0..p3)
+    uint8_t  word;    // 0..6 (OSC DUTY FILTER GAIN GATE PTRS0 PTRS1)
     uint32_t value;
 } engine_cmd_t;
 
@@ -57,31 +57,23 @@ bool engine_link_send(const engine_cmd_t *cmd);
 bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 
 // ── Producer table (B4/B5) ──────────────────────────────────────────
-// 128 producers x 3 words (stride 4) at 0x0100, banked like
+// 256 instructions x 4 words (stride 4) at 0x0100, banked like
 // parameters (config is wiring): writes land in the shadow and take
 // effect at the swap, with the same catch-up mirroring as the
 // element image.
-//   word 0 CFG:   [3:0] type (0 off, 1 LFO, 2 ADSR), [5:4] LFO shape
+//   word 0 CFG:   [3:0] opcode bitmask (CSP_OPC_* below), [5:4] LFO shape
 //                 (saw/pulse/tri/sine), [15:6] target bus,
 //                 LFO:  [31:16] rate (UQ0.24 increment low bits:
 //                       5.7 mHz steps, 375 Hz max)
 //                 ADSR: [25:16] gate bus (level-sensitive: > 0 held)
-//   word 1 RATES (ADSR), in the universal A, D, S, R order:
-//                 [7:0] attack, [15:8] decay, [31:24] release as
-//                 8-bit log2 RATES — increment = (16+low4) << high4
-//                 in 1/16-LSB units (the level carries 4 fractional
-//                 bits; that IS the four-octave down-bias, so gentle
-//                 decays exist). One uniform expression, no
-//                 truncation: all 256 codes are distinct equal-ratio
-//                 steps — perceptually linear, so a MIDI CC maps as
-//                 (cc << 1). Full-range ~44 s .. ~0.7 ms; rates, not
-//                 durations — no 1/x in gateware. [23:16] SUSTAIN
-//                 LEVEL, one LSB = envelope span / 256 below peak
-//   word 2 DEPTH: [17:0] signed Q8.10 contribution amplitude
+//                 SEND: [25:16] source bus
+//   words 1 and 3 (ADSR): linear rate coefficients kA/kD/kR and the
+//                 sustain level — see the ADSR wire format in patch.h
+//   word 2 DEPTH: [17:0] signed Q2.16 coefficient, 0x10000 = unity
 // The producer ADDS to the bus base: firmware's base write and the
 // producer's contribution coexist on one bus (e.g. bend + vibrato).
-// Amp-envelope idiom: base = full attenuation, depth NEGATIVE — the
-// envelope subtracts silence.
+// Amp-envelope idiom (volume semantics): base = −span (the quiet
+// floor), depth POSITIVE — the envelope adds volume.
 #define ENGINE_NUM_PRODUCERS 256   // instruction pool; all 256 entries
                                     // execute every sample
 // CSP opcode = CFG[3:0], a BITMASK of enables rather than an enum:

@@ -97,7 +97,7 @@ static void midi_in_task(void *arg)
             // Source silent: full transport reset and dump whatever the
             // line glitch may have left in the FIFO.
             //
-            // Note panic belongs here too once voices exist — but only
+            // Note panic belongs here too (not yet wired) — but only
             // if Active Sensing had been observed: a source that never
             // sends 0xFE must never be silenced by silence alone. Further,
             // after such a silence, Active Sensing must be observed again

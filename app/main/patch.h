@@ -70,7 +70,7 @@ typedef struct {
 // fabric carry chain. Firmware does the decode, which is control-rate
 // work and belongs on this side.
 //
-// MIRRORED IN rtl/synth_pkg.sv -- change both or neither:
+// MIRRORED IN rtl/dsp/adsr.sv -- change both or neither:
 //
 //   word 1   [17:0] kA          [31:18] kD[13:0]
 //   word 3   [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
@@ -137,7 +137,8 @@ typedef struct {
     mod_route_t     mod[PATCH_MOD_ROUTES];
 
     // Velocity sensitivity: 64 = the historical hardwired feel,
-    // 0 = OFF (isolation testing), 127 = double. CC 86/87.
+    // 0 = OFF (full amount on every note, isolation testing),
+    // 127 = full velocity scaling. CC 86/87.
     uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT
     uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT
 

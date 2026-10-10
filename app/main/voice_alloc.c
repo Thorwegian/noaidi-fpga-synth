@@ -37,8 +37,8 @@
 // Master volume rides the per-voice gain-bus BASE, summed with the
 // amp-envelope producer — exactly what the mod buses are for: one
 // cheap bus write per voice, no swap and no element re-render. The
-// GAIN word carries a FIXED per-note ceiling (VOL_REF minus
-// velocity); g_patch.volume moves the gain-bus base around it.
+// GAIN word carries a FIXED per-note ceiling (VOL_REF);
+// g_patch.volume moves the gain-bus base around it.
 // VOL_REF is the unity anchor, so a bus offset of 0 is unity gain:
 // the RTL adds (gain_bus >>> 6) to the UQ4.4 word gain, so 64 bus
 // LSB = one UQ4.4 step, and off = (vol−VOL_REF)·64.
@@ -104,15 +104,14 @@ static int64_t  s_last_apply;
 // bus 3:      global resonance offset — TEMPORARY CC 71 assignment
 //             until the MIDI schema is nailed down. Every element's
 //             Q pointer references it; the
-//             knob writes (cc << 7) − RESO so the effective code is
-//             exactly cc << 7 (0 = Butterworth .. 127 ≈ self-osc).
+//             knob writes code − RESO so the effective code is
+//             cc·5632/127 (0 = Butterworth .. 127 = 5.5 oct, Q≈32).
 // bus 16+v:   voice v's gain bus — OWNED BY THE AMP ENVELOPE (B5;
 //             volume semantics): base = −ENV_SPAN
 //             (the quiet floor), the ADSR source adds level ×
 //             (+ENV_SPAN) — the level simply ADDS volume: floor at
 //             level 0, the note's full volume at level 1. Velocity
-//             is note-static and
-//             bakes into the GAIN (volume) word instead.
+//             scales the ADSR source's DEPTH (amp_depth_for).
 // bus 4:      CHANNEL cutoff bus — the scope ladder made real:
 //             wheel + bend + CC74/106 — ONE firmware write, fanned
 //             out to the 32 per-voice cutoff buses by type-3 bus
@@ -192,15 +191,7 @@ static uint32_t mod_depth_for(uint8_t vel)
     int64_t scaled = ((int64_t)d * vel_gain_q16(vel, g_patch.vel_mod_amt)) >> 16;
     return (uint32_t)(int32_t)scaled & 0x3FFFF;
 }
-// RATES word in the universal A, D, S, R order: bytes 0/1/3 are
-// 8-bit log2 RATES — increment = (16+low4) << high4 in 1/16-LSB
-// units (the envelope level carries 4 fractional bits: that IS the
-// four-octave down-bias, needed because decay only traverses
-// peak→sustain; full-range times span ~44 s .. ~0.7 ms). All 256
-// codes are distinct equal-ratio steps of a log2 ladder, so a MIDI
-// CC maps perceptually linearly as (cc << 1). Byte 2 is the SUSTAIN
-// LEVEL, one LSB = span/256 below peak (0.1875 dB at the 48 dB
-// span).
+// ADSR wire format (words 1 and 3): see patch.h.
 // The amp envelope's A,D,S,R lives in g_patch.env[0] (patch.h);
 // patch_adsr_rate1/rate2() convert it into the linear coefficients
 // the CSP multiplies by.
@@ -255,9 +246,9 @@ static void send(uint8_t elem, uint8_t word, uint32_t value)
 }
 
 // Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
-// wheel rides cutoff bus 1, which every element's cutoff pointer
-// references (see engine_link_init); it does not touch the FILTER
-// words.
+// wheel rides BUS_CH_CUT, fanned out to each voice's BUS_CUT(v),
+// which its elements' cutoff pointers reference (wire_pointers); it
+// does not touch the FILTER words.
 static uint16_t voice_fc(uint8_t note)
 {
     // Key tracking (CC 31): 0..200% with CENTER 64 = 100%; convention
@@ -349,15 +340,14 @@ static void promote_idle(int64_t now)
 
 // Render a voice from the two-oscillator plan. Each active
 // element takes its oscillator's wave / duty / pitch (note + coarse +
-// fine + unison detune); pan and velocity bake into the GAIN word, the
+// fine + unison detune); pan bakes into the GAIN word, the
 // amp envelope articulates on the gain bus above it. Inactive elements
 // (2-plain uses only 2 of 8) are GATE-muted. note_on re-gates here; a
 // released voice was GATE-muted by promote_idle.
 static void voice_program(int v, uint8_t note, uint8_t vel)
 {
     uint16_t fc = voice_fc(note);
-    // Per-note ceiling only: fixed VOL_REF minus velocity (softer hits
-    // are LOWER values). MASTER volume is NOT here — it rides the
+    // Per-note ceiling only: fixed VOL_REF. MASTER volume is NOT here — it rides the
     // gain-bus base (refresh_gain_buses), so a CC 7 sweep is bus
     // writes, not a re-render of every element.
     // Velocity is not here: the ceiling is the same for every note, and
@@ -652,8 +642,8 @@ static void refresh_gain_buses(void)
 
 // CC 71 → global resonance bus (TEMPORARY assignment, see bus plan).
 // One live bus write moves every element: effective resonance code
-// = RESO + (cc<<7 − RESO) = cc << 7 — 0 = Butterworth, 127 ≈ 15.9
-// octaves of Q = self-oscillation. Conventional knob: up = more.
+// = RESO + (code − RESO) = cc·5632/127 — 0 = Butterworth, 127 = 5.5
+// octaves of Q (Q≈32). Conventional knob: up = more.
 static void reso_update(uint8_t val)
 {
     // Tempered scale: a plain cc<<7 would run Q to ~15.9 octaves
@@ -719,9 +709,8 @@ static void note_off(uint8_t note)
 // s_cut_off carries the CC74/106 cutoff brightness; env inversions
 // follow the schema ((127-cc)<<1, panel convention).
 //
-// STORED-but-not-yet-rendered: MOD env, osc 2 / unison, 2nd LFO +
-// LFO shape/dest, key tracking, arp, pan. A controller may set
-// them, and they take effect once each is rendered.
+// STORED-but-not-yet-rendered: env1_dest (CC 108; cutoff is the only
+// live MOD-env destination). The arp has no CC yet.
 static uint8_t  s_cut_coarse, s_cut_fine;   // CC74 / CC106
 static void apply_cutoff(void)
 {
@@ -854,7 +843,7 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
 
     // ---- test tone: ≥64 replaces BOTH outputs with the
-    // gateware's full-scale 187.5 Hz sine (bus-1023 control latch) —
+    // gateware's full-scale 1500 Hz sine (bus-1023 control latch) —
     // the audio-chain purity reference, remotely switchable so the
     // test suite needs no console. ----
     case 119:
@@ -961,7 +950,7 @@ static void apply_dirty(int64_t now)
 
 // Poll period for the idle sweep: a released voice must reach
 // true silence within this of its tail ending, even if no further
-// notes arrive. 50 ms is well below noticeable and negligible load.
+// notes arrive. 20 ms is well below noticeable and negligible load.
 // It also bounds how long a pending coalesced CC edit waits.
 #define VA_SWEEP_MS   20
 
