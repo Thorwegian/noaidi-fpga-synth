@@ -50,11 +50,12 @@ units live in patch.h).
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
 | 10 | pan | per-side log-gain attenuation baked into the partial L/R GAIN words; full deflection mutes the far side |
+| 64 | sustain (damper) pedal | ≥64 = down. A note-off while the pedal is down keeps the voice sounding (gate on); pedal up releases every voice the pedal was holding. A key struck again while sustained gets a new voice. Omni for now |
 | 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff DMEM word) |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
 | 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff DMEM base is zero |
-| 120/123 | all sound off / all notes off | panic: 123 releases every held voice, 120 hard-mutes immediately |
+| 120/123 | all sound off / all notes off | panic: 123 releases every held voice (sustained ones included) and lifts the sustain pedal, 120 hard-mutes immediately |
 | 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
 **Oscillators**

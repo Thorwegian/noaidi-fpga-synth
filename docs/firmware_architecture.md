@@ -55,7 +55,7 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down, gate DMEM word 1, envelope gated on |
+| `V_HELD` | key down (or held by the sustain pedal), gate DMEM word 1, envelope gated on |
 | `V_RELEASING` | key up, gate DMEM word 0, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
 
@@ -70,6 +70,11 @@ different facts:
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
+- **Sustain pedal** (CC 64): while it is down, a note-off marks the
+  voice `sustained` instead of releasing it, so it stays HELD with its
+  gate on. Note-off pairing skips sustained voices, so a key struck
+  again pairs with its new voice. Pedal up releases every sustained
+  voice. For stealing, sustained voices count as HELD.
 - **Known limitation**: the ADSR gate is level-sensitive, so a voice
   stolen while HELD keeps its envelope stage (no fresh attack); one
   stolen while RELEASING restarts from silence (`adsr.sv` treats a
