@@ -58,9 +58,12 @@ static const int8_t UNISON_OFFSETS_4[4] = {-3, -1, 1, 3};
 // fresh voice; the previous strike of the same key keeps ringing its
 // release tail underneath. Three states, because "key held" and
 // "voice in use" are different facts:
-//   V_HELD      key is down, envelope gated on
+//   V_HELD      key is down (or held by the sustain pedal), envelope
+//               gated on
 //   V_RELEASING key is up, release tail still audible
 //   V_IDLE      tail done (or never started) — free for allocation
+// A V_HELD voice whose key came up while the sustain pedal is down is
+// marked `sustained`: it keeps its gate on until the pedal comes up.
 // RELEASING promotes to IDLE lazily during allocation scans, once
 // esp_timer says the tail has run out — no timer task.
 typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
@@ -72,10 +75,12 @@ typedef struct {
     uint8_t  channel;       // stored for later multi-timbrality; omni
     uint32_t alloc_seq;         // allocation order, for oldest-steal
     int64_t  release_until; // esp_timer µs when the release tail is done
+    bool     sustained;     // key up, held by the sustain pedal
 } voice_t;
 
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_alloc_seq;
+static bool     s_sustain_pedal;   // CC 64 down, omni for now
 static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
 static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 // Velocity scales the ENVELOPE AMOUNT, so there is no per-voice
@@ -684,24 +689,48 @@ static void pitch_bend_update(uint16_t bend14)
     s_pending |= DIRTY_CUTOFF;   // cut DMEM refresh coalesced
 }
 
+// Release one voice: one gate DMEM write, the ADSR sees the level drop
+// and releases. Partial GATE words stay on; parameters stay live.
+static void release_voice(int v)
+{
+    s_voices[v].state = V_RELEASING;
+    s_voices[v].sustained = false;
+    s_voices[v].release_until = esp_timer_get_time() + release_tail_us();
+    engine_link_dmem_write(DMEM_VGATE(v), 0);
+}
+
 // Note-off releases the OLDEST HELD voice carrying that note — FIFO
-// pairing with note-ons, since MIDI guarantees one off per on. One
-// gate DMEM write: the ADSR sees the level drop and releases. Partial
-// GATE words stay on; parameters stay live. A voice whose key was
-// stolen carries a different note by now and is correctly skipped.
+// pairing with note-ons, since MIDI guarantees one off per on. Voices
+// already held only by the sustain pedal are skipped, so a key struck
+// again while sustained pairs with its new voice. With the pedal down
+// the voice is marked sustained instead of released. A voice whose key
+// was stolen carries a different note by now and is correctly skipped.
 static void note_off(uint8_t note)
 {
     int pick = -1;
     uint32_t oldest = UINT32_MAX;
     for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_HELD && s_voices[v].note == note &&
-            s_voices[v].alloc_seq < oldest)
+        if (s_voices[v].state == V_HELD && !s_voices[v].sustained &&
+            s_voices[v].note == note && s_voices[v].alloc_seq < oldest)
             { oldest = s_voices[v].alloc_seq; pick = v; }
     if (pick < 0)
         return;   // off without a matching held on (steal ate it)
-    s_voices[pick].state = V_RELEASING;
-    s_voices[pick].release_until = esp_timer_get_time() + release_tail_us();
-    engine_link_dmem_write(DMEM_VGATE(pick), 0);
+    if (s_sustain_pedal)
+        s_voices[pick].sustained = true;
+    else
+        release_voice(pick);
+}
+
+// Sustain (damper) pedal, CC 64: values >= 64 are down. Pedal up
+// releases every voice the pedal was holding.
+static void sustain_pedal_update(bool down)
+{
+    s_sustain_pedal = down;
+    if (down)
+        return;
+    for (int v = 0; v < NUM_VOICES; v++)
+        if (s_voices[v].state == V_HELD && s_voices[v].sustained)
+            release_voice(v);
 }
 
 // Program the active patch over MIDI CCs (docs/midi_schema.md).
@@ -737,6 +766,7 @@ static void handle_cc(uint8_t num, uint8_t val)
     switch (num) {
     // ---- live: DMEM ----
     case 1:  mod_wheel_update(val); break;               // mod wheel → cutoff
+    case 64: sustain_pedal_update(val >= 64); break;     // sustain (damper) pedal
     case 71: resonance_update(val); break;                // resonance (temp DMEM 3)
     case 74: s_cutoff_msb = val; apply_cutoff(); break;
     case 106:s_cutoff_lsb   = val; apply_cutoff(); break;
@@ -852,19 +882,18 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- panic (found via the BLE fuzzer's stuck notes: its final
     // CC 123 was a no-op, so note-offs dropped under flood backpressure
     // left voices ringing forever) ----
-    case 123:                          // all notes off: release held voices
+    case 123:                          // all notes off: release held voices,
+        s_sustain_pedal = false;       // sustained ones included
         for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].state == V_HELD) {
-                s_voices[v].state = V_RELEASING;
-                s_voices[v].release_until =
-                    esp_timer_get_time() + release_tail_us();
-                engine_link_dmem_write(DMEM_VGATE(v), 0);
-            }
+            if (s_voices[v].state == V_HELD)
+                release_voice(v);
         break;
     case 120:                          // all sound off: immediate silence
+        s_sustain_pedal = false;
         for (int v = 0; v < NUM_VOICES; v++)
             if (s_voices[v].state != V_IDLE) {
                 s_voices[v].state = V_IDLE;
+                s_voices[v].sustained = false;
                 engine_link_dmem_write(DMEM_VGATE(v), 0);
                 hard_mute_voice(v);
             }
