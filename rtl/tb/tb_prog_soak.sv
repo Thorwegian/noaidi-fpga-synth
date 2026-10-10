@@ -36,7 +36,8 @@ module tb_prog_soak;
     localparam [31:0] OPC_ADSR = 32'hF;
     localparam [31:0] OPC_SEND = 32'hD;
 
-    logic clk = 0, sclk = 0, rst_n = 0, sample_tick = 0;
+    logic clk = 0, sclk = 0, rst_n = 1, sample_tick = 0;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #5 clk = ~clk;
     always #7 sclk = ~sclk;
 

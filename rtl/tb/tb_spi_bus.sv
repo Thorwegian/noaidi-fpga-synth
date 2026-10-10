@@ -21,7 +21,7 @@ module tb_spi_bus;
     logic sclk = 0, cs = 1, mosi = 0;
     wire  miso;
     logic sysclk = 0;
-    logic rst_n  = 0;
+    logic rst_n  = 1;  // driven to 0 at time 0: a real falling edge for the async resets
 
     always #6.781 sysclk = ~sysclk;    // ~73.728 MHz, async to sclk
 

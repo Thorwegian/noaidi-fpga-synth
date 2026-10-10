@@ -5,7 +5,7 @@ app/build
 *.log
 *.json
 *.fs
-*.vvp
+obj_dir/
 *.vcd
 !rtl/tb/ref_boot_*.hex
 rtl/tb/sim-*.out

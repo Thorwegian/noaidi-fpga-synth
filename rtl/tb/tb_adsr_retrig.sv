@@ -30,7 +30,8 @@ module tb_adsr_retrig;
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
     localparam [25:0] ENV_FULL = 26'h400000;
 
-    reg clk = 0, rst_n = 0;
+    reg clk = 0, rst_n = 1;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #5 clk = ~clk;
 
     GSR GSR (.GSRI(1'b1));

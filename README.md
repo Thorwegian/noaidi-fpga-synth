@@ -94,7 +94,12 @@ pll_clk O0=73728K -s
 
 - **[OSS CAD Suite](https://github.com/yosyshq/oss-cad-suite-build)**
   — yosys / nextpnr-himbaechel / gowin_pack / openFPGALoader /
-  iverilog (expected at `/opt/oss-cad-suite`)
+  Verilator (expected at `/opt/oss-cad-suite`). The simulations need
+  Verilator 5 with `--timing` and a C++20 compiler (clang, or gcc 10+);
+  tested with Verilator 5.053
+- **Gowin's simulation models** for `make sim`: only
+  `IDE/simlib/gw2a/prim_sim.v` from Gowin EDA, pointed to by `GOWIN_SIM`
+  (default `/opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v`)
 - **ESP-IDF v6** for the ESP32-C3 firmware
 - **Python 3** for the LUT/boot-image generators (`scripts/`)
 
@@ -109,7 +114,7 @@ the build environment is a noted TODO (docs/design.md roadmap).
 Everything runs from the repo root:
 
 ```bash
-make sim         # full gateware sim suite (make -j4 sim to parallelize)
+make sim         # full gateware sim suite in Verilator (make -j4 sim to parallelize)
 make pack        # synthesize + place/route -> rtl/pack.fs
 make sram        # load bitstream into FPGA SRAM (volatile, fast)
 make flash       # write bitstream to FPGA flash (persistent)
@@ -117,6 +122,10 @@ make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor
 ```
+
+`make sim` starts every variable that has no initial value at a random
+value, with a new seed on each run; the seed is the first line of each
+`rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
 
 After any gateware load (`sram`/`flash`), restart the ESP32
 (`make fw-flash` or its reset button) so the engine link rewrites the

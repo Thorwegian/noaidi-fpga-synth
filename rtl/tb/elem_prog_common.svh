@@ -10,7 +10,7 @@
 // flip/mute_all/program helpers, and the report task. Each bench
 // owns its own initial block, preamble and timeout.
 
-logic clk = 0, rst_n = 0;
+logic clk = 0, rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
 always #6.781 clk = ~clk;               // ~73.728 MHz
 
 logic sclk = 0, cs = 1, mosi = 0;

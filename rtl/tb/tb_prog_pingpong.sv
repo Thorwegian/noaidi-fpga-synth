@@ -32,7 +32,7 @@ module tb_prog_pingpong;
     integer toggles, ticks, cyc;
     integer persist_ok;
     integer straddles, windows;
-    logic   gen_seen;
+    logic   gen_seen, gen_valid;
     logic   gen_prev;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
@@ -193,16 +193,17 @@ module tb_prog_pingpong;
         //---------------------------------------------------------------
         straddles = 0;
         windows   = 0;
-        gen_seen  = 1'bx;
+        gen_valid = 1'b0;
         for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
             @(posedge clk);
             if (slot == 10'd0) begin
-                if (gen_seen !== 1'bx) windows = windows + 1;
-                gen_seen = 1'bx;                 // swap happens here
+                if (gen_valid) windows = windows + 1;
+                gen_valid = 1'b0;                // swap happens here
             end else if (slot <= 10'd256) begin
-                if (gen_seen === 1'bx)
-                    gen_seen = u_pipe.u_csp.dmem_gen;   // first read of this pass
-                else if (u_pipe.u_csp.dmem_gen !== gen_seen) begin
+                if (!gen_valid) begin
+                    gen_seen  = u_pipe.u_csp.dmem_gen;  // first read of this pass
+                    gen_valid = 1'b1;
+                end else if (u_pipe.u_csp.dmem_gen !== gen_seen) begin
                     if (straddles == 0)
                         $display("FAIL: dmem_gen changed at slot %0d, mid lane pass", slot);
                     straddles = straddles + 1;

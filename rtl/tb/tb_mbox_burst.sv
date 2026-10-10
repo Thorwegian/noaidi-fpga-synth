@@ -54,7 +54,8 @@ module tb_mbox_burst;
     // and anything other than the written value is the bug, not a refresh
     localparam [9:0] QA = 10'd300, QB = 10'd301;
 
-    logic clk = 0, sclk = 0, rst_n = 0, sample_tick = 0;
+    logic clk = 0, sclk = 0, rst_n = 1, sample_tick = 0;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #5 clk  = ~clk;
     always #7 sclk = ~sclk;
 
