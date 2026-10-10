@@ -22,7 +22,7 @@
 // Latency: present `level` (and hold it) at cycle 0 -> gain_q_out valid
 // from cycle 4, gain_lin from cycle 5. The state (gain_q, the envelope)
 // is OWNED BY THE INSTANTIATOR -- a register for the master, a per-
-// element RAM for the filter -- so one module serves both; for a
+// partial RAM for the filter -- so one module serves both; for a
 // streaming instance the stages simply pipeline. `level` and the gained
 // signal are separate ports: feedforward / feedback / external sidechain
 // is wiring, not a mode.

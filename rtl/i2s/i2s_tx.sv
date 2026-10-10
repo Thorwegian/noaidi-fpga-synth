@@ -6,7 +6,7 @@
 //
 // Generates its own BCLK (sysclk / BCLK_DIV) and LRCLK (BCLK /
 // BCLK_PER_WS), so no I2S-specific timing lives anywhere else in the
-// design.  New sample data is latched on sample_tick (the drum's
+// design.  New sample data is latched on sample_tick (the timebase's
 // "sample ready" pulse) into holding registers; the shift register is
 // loaded from those holds on each LRCLK edge, exactly as before.
 //
@@ -26,7 +26,7 @@ module i2s_tx #(
 ) (
     input  logic                    sysclk,
     input  logic                    rst_n,
-    input  logic                    sample_tick,   // drum sample boundary
+    input  logic                    sample_tick,   // timebase sample boundary
 
     input  logic signed [BITS-1:0]  data_left,     // stable for a full sample
     input  logic signed [BITS-1:0]  data_right,
@@ -84,9 +84,9 @@ module i2s_tx #(
     assign i2s_lrclk = (ws_cnt >= (BCLK_PER_WS / 2));
 
     //----------------------------------------------------------------
-    // Sample holds — latched by the drum's sample_tick, then stable
+    // Sample holds — latched by the timebase's sample_tick, then stable
     // for the whole sample period (the WS-edge load below can never
-    // race the drum).
+    // race the timebase).
     //----------------------------------------------------------------
     logic signed [BITS-1:0] hold_l, hold_r;
 

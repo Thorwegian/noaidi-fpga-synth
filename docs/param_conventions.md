@@ -30,7 +30,7 @@ are small mapping choices, not architecture.
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
 | **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | linear in **dB** like every other segment | ✗ **F1 — the likely main "feels wrong"** |
 | Decay/release curve | exponential amplitude = linear dB (SF2 centibel ramps; analog RC discharge) | linear in dB | ✓ exactly conventional |
-| Sustain | a level, linear-ish dB | a linear envelope level over the 60 dB envelope span (`ENV_SPAN`, raw value 0x2800 on the log gain bus): a fraction of the span, ≈0.47 dB per CC step at full depth | ✓ |
+| Sustain | a level, linear-ish dB | a linear envelope level over the 60 dB envelope span (`ENV_SPAN`, raw value 0x2800 on the log gain DMEM word): a fraction of the span, ≈0.47 dB per CC step at full depth | ✓ |
 
 **F1 explained**: a linear-dB attack spends most of its wall-clock
 time below audibility and then arrives all at once — short attacks
@@ -39,12 +39,12 @@ splits the domains: attack in amplitude, decay/release in dB. Our
 decay/release are right; only the attack segment deviates.
 
 The amp envelope's level is linear, yet it moves volume in dB because
-the gain bus it drives is logarithmic; that holds until gain is
+the gain DMEM word it drives is logarithmic; that holds until gain is
 linear.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our
-MOD envelope does on the log-domain cutoff bus. **The MOD envelope
+MOD envelope does on the log-domain cutoff DMEM word. **The MOD envelope
 conforms natively; F1's deviation is the AMP envelope's attack
 only.**
 

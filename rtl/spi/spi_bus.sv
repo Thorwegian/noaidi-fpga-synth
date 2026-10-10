@@ -51,37 +51,37 @@ module spi_bus #(
     input  logic        sysclk,
     input  logic        rst_n,
 
-    // ---- per-element parameter writes (sclk domain) ----------------
+    // ---- per-partial parameter writes (sclk domain) ----------------
     // The memory map's 0x2000 + v*64 range, offsets 0..6 (OSC, DUTY,
     // FILTER, GAIN, GATE, PTRS0, PTRS1). Combinational decode, valid
     // exactly on the sclk edge that completes a data word — the
     // consumer writes its RAM on that same edge (there may be no
     // further edges: a master stops clocking after the last bit).
-    // Offsets 7..63 are dropped for now; per-element read-back is TBD
+    // Offsets 7..63 are dropped for now; per-partial read-back is TBD
     // (reads in this range return zero).
-    output logic        elem_write_enable,
-    output logic [2:0]  elem_write_word,   // 0..6 = OSC..PTRS1 param RAM
+    output logic        partial_write_enable,
+    output logic [2:0]  partial_write_word,   // 0..6 = OSC..PTRS1 param RAM
 
-    // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
+    // ---- DMEM base writes (sclk domain, mailbox toward sysclk) -----
     // The write crosses clock domains through this 1-deep toggle
     // mailbox; csp.sv syncs dmem_wr_toggle and commits each write into
-    // both bus generations (see its mailbox notes for the rate margin).
+    // both DMEM pages (see its mailbox notes for the rate margin).
     output logic [9:0]  dmem_wr_addr,
     output logic [17:0] dmem_wr_data,
-    output logic        dmem_wr_toggle,  // toggles once per bus write
+    output logic        dmem_wr_toggle,  // toggles once per DMEM write
 
-    // ---- instruction table writes (sclk domain, banked like params) ---
-    // Instruction config is wiring: it rides the ping-pong banks and
-    // takes effect at the swap, same as the per-element words.
+    // ---- instruction table writes (sclk domain, paged like params) ---
+    // Instruction config is wiring: it rides the ping-pong pages and
+    // takes effect at the swap, same as the per-partial words.
     output logic        imem_write_enable,
     output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
     output logic [31:0] imem_write_data,
-    output logic [7:0]  elem_write_index,
-    output logic [31:0] elem_write_data,
+    output logic [7:0]  partial_write_index,
+    output logic [31:0] partial_write_data,
 
-    // CTRL@0x0002 bit 0: bank swap request. Toggle semantics
+    // CTRL@0x0002 bit 0: page swap request. Toggle semantics
     // (sclk domain); the consumer syncs the toggle and flips its
-    // active bank at the next drum slot 512. The write also lands in
+    // active page at the next time slot 512. The write also lands in
     // the plain window RAM, so reading CTRL back shows the last value.
     output logic        swap_toggle
 );
@@ -219,22 +219,22 @@ module spi_bus #(
                               && (data_byte_index == 2'd3)
                               && !is_read && addr_in_backed;
 
-    // ---- per-element write decode (MAP_ELEM_BASE + 256×64 words,
+    // ---- per-partial write decode (MAP_PARTIAL_BASE + 256×64 words,
     //      offsets 0..6) -------------------------------------------
-    localparam [15:0] ELEM_BASE = synth_pkg::MAP_ELEM_BASE;
-    localparam [15:0] ELEM_END  = synth_pkg::MAP_ELEM_BASE
-                                + 16'(synth_pkg::NUM_ELEMENTS
-                                      * synth_pkg::MAP_ELEM_STRIDE);
-    wire        in_elem_range = (word_addr >= ELEM_BASE)
-                             && (word_addr <  ELEM_END);
-    wire [15:0] elem_rel_addr = word_addr - ELEM_BASE; // 0..0x3FFF in range
-    wire [13:0] elem_offset   = elem_rel_addr[13:0];
-    assign elem_write_enable = byte_end && (frame_phase == 3'd4)
+    localparam [15:0] PARTIAL_BASE = synth_pkg::MAP_PARTIAL_BASE;
+    localparam [15:0] PARTIAL_END  = synth_pkg::MAP_PARTIAL_BASE
+                                + 16'(synth_pkg::NUM_PARTIALS
+                                      * synth_pkg::MAP_PARTIAL_STRIDE);
+    wire        in_partial_range = (word_addr >= PARTIAL_BASE)
+                             && (word_addr <  PARTIAL_END);
+    wire [15:0] partial_rel_addr = word_addr - PARTIAL_BASE; // 0..0x3FFF in range
+    wire [13:0] partial_offset   = partial_rel_addr[13:0];
+    assign partial_write_enable = byte_end && (frame_phase == 3'd4)
                                && (data_byte_index == 2'd3)
-                               && !is_read && in_elem_range
-                               && (elem_offset[5:3] == 3'd0)
-                               && (elem_offset[2:0] < 3'd7);
-    assign elem_write_word   = elem_offset[2:0];
+                               && !is_read && in_partial_range
+                               && (partial_offset[5:3] == 3'd0)
+                               && (partial_offset[2:0] < 3'd7);
+    assign partial_write_word   = partial_offset[2:0];
 
     // ---- instruction table write decode (0x0100..0x04FF) -------------
     localparam [15:0] IMEM_BASE = synth_pkg::MAP_IMEM_BASE;
@@ -255,21 +255,21 @@ module spi_bus #(
     assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
     assign imem_write_data = {partial_word, rx_byte};
 
-    // ---- bus base write capture (see mailbox note at the ports) ----
-    wire in_bus_range = (word_addr >= synth_pkg::MAP_BUS_BASE)
-                     && (word_addr <  synth_pkg::MAP_BUS_BASE
+    // ---- DMEM base write capture (see mailbox note at the ports) ---
+    wire in_dmem_range = (word_addr >= synth_pkg::MAP_DMEM_BASE)
+                     && (word_addr <  synth_pkg::MAP_DMEM_BASE
                                       + 16'(synth_pkg::DMEM_WORDS));
     initial dmem_wr_toggle = 1'b0;
     always_ff @(posedge sclk) begin
         if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
-            && !is_read && in_bus_range) begin
+            && !is_read && in_dmem_range) begin
             dmem_wr_addr   <= word_addr[9:0];
             dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
             dmem_wr_toggle <= ~dmem_wr_toggle;
         end
     end
-    assign elem_write_index = elem_offset[13:6];
-    assign elem_write_data  = {partial_word, rx_byte};
+    assign partial_write_index = partial_offset[13:6];
+    assign partial_write_data  = {partial_word, rx_byte};
 
     always_ff @(posedge sclk) begin
         if (store_write_enable)

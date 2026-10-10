@@ -50,7 +50,7 @@ static uint32_t adsr_rate_coeff(uint8_t rate_byte)
 
 // Sustain as a plain level. Firmware knows the destination, so it
 // decodes here rather than costing the gateware a second barrel
-// shift. Only the linear form is used -- CFG[26] is never set.
+// shift. Only the linear form is used -- OP[26] is never set.
 static uint32_t adsr_sustain(const adsr_t *e)
 {
     uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
@@ -58,14 +58,14 @@ static uint32_t adsr_sustain(const adsr_t *e)
     return lvl >> ADSR_SUSTAIN_SHIFT;
 }
 
-uint32_t patch_adsr_word1(const adsr_t *e)
+uint32_t patch_adsr_rate_ad(const adsr_t *e)
 {
     uint32_t ka = adsr_rate_coeff(patch_adsr_rate_byte(e->attack));
     uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
     return (ka & 0x3FFFFu) | ((kd & 0x3FFFu) << 18);
 }
 
-uint32_t patch_adsr_word3(const adsr_t *e)
+uint32_t patch_adsr_rate_dsr(const adsr_t *e)
 {
     uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
     uint32_t kr = adsr_rate_coeff(patch_adsr_rate_byte(e->release));
@@ -102,7 +102,7 @@ void patch_default(patch_t *p)
                                        // 0..200% scale
     p->filter.resonance = 0x200;       // q1 = 1.0
     p->filter.type      = 0;           // LP
-    p->filter.dual      = 1;           // 24 dB/oct default
+    p->filter.cascade      = 1;           // 24 dB/oct default
 
     // amp env (A,D,S,R)
     p->env[0].attack  = 0x98;
@@ -111,21 +111,21 @@ void patch_default(patch_t *p)
     p->env[0].release = 0x28;
 
     // MOD env: ON by default in the boot patch —
-    // same initial params as the AMP envelope, sent to the cutoff bus.
+    // same initial params as the AMP envelope, sent to the cutoff DMEM word.
     // The filter contour tracks the loudness contour: opens with the
     // attack, settles bright at sustain, closes on release.
     p->env[1] = p->env[0];
-    p->env1_dest      = 0;             // cutoff (the only dest yet)
-    p->env1_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
+    p->mod_env_dest      = 0;             // cutoff (the only dest yet)
+    p->mod_env_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
 
-    // LFO 1 = the boot vibrato (source 0): 1 Hz triangle, ±19 cents
+    // LFO 1 = the boot vibrato (instruction 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (increment per 48 kHz
                                        // walk)
     p->lfo[0].depth = 16;
 
-    // LFO 2 (source 1): triangle, ~1 Hz, depth 0 = OFF; default
-    // destination is PWM (duty bus) — the thing LFO 1 can't do.
+    // LFO 2 (instruction 1): triangle, ~1 Hz, depth 0 = OFF; default
+    // destination is PWM (duty DMEM word) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
     p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
     p->lfo[1].depth = 0;

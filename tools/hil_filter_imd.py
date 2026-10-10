@@ -6,10 +6,10 @@
  
 WHY NOT flat-top: tools/filter_pain_check.py measures the share of samples
 at the output rails. That detects clipping of the MASTER bus -- but the
-element's internal sat_q414 clip is attenuated downstream by the per-element
+partial's internal sat_q414 clip is attenuated downstream by the per-partial
 gain and the master limiter, so it never reaches the rails. With the master
-limiter in the chain, a rail metric reports "clean" no matter how badly an
-element distorts -- it is blind to the thing being hunted.
+limiter in the chain, a rail metric reports "clean" no matter how badly a
+partial distorts -- it is blind to the thing being hunted.
 
 THE METRIC: intermodulation. A LINEAR filter driven by two notes can only
 emit harmonics of those two notes -- n*f1 and m*f2. Any energy elsewhere is
@@ -56,7 +56,7 @@ FREQS = tuple(440.0 * 2 ** ((n - 69) / 12) for n in NOTES)
 PATCH = [
     (20, 0),    # osc1 = saw
     (24, 0),    # mix hard to osc1 (osc2 hard-muted at the rail)
-    (26, 0),    # voice mode: PLAIN, one element per note.
+    (26, 0),    # voice mode: PLAIN, one partial per note.
                 #
                 # Do NOT use unison to raise the level here, though it is
                 # tempting: much of this grid sits below the -55 dBFS trust
@@ -64,7 +64,7 @@ PATCH = [
                 # same cells, back-to-back runs:
                 #     plain   cutoff 64/r127:  -12.2 -12.2 -12.3 -12.4
                 #     unison  cutoff 64/r127:   -7.1 -12.4 -13.4 -18.7
-                # Eight coherent elements sum PHASE-DEPENDENTLY on whatever
+                # Eight coherent partials sum PHASE-DEPENDENTLY on whatever
                 # the allocator hands out, so levels swing ~15 dB and the
                 # metric wobbles by 11 dB. Plain is 100x more repeatable.
                 # The quiet cells stay quiet; that is a real limit of this

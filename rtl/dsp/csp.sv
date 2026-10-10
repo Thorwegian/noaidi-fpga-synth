@@ -4,18 +4,18 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The element DSP lane pipeline (element_pipeline.sv) and this are two
+// The partial pipeline (partial_pipeline.sv) and this are two
 // unrelated jobs, so they are two modules.
-// Double-buffering the bus generation removes any coupling to the drum
-// schedule, so the sequencer and the lanes are genuinely independent:
-// this module references the drum's slot counter nowhere.
+// Double-buffering the DMEM page removes any coupling to the timebase
+// schedule, so the sequencer and the partial pipeline are genuinely
+// independent: this module references the timebase's slot counter nowhere.
 //
-// What lives here: the six bus replicas plus dmem_base and dmem_sum,
-// the SPI mailbox, the ping-pong generation bit, the instruction and
+// What lives here: the six DMEM replicas plus dmem_base and dmem_sum,
+// the SPI mailbox, the ping-pong page bit, the instruction and
 // state RAMs, the sequencer state machine, the LFO and ADSR step logic,
 // and the chain-summing arithmetic.
 //
-// The interface to the lane pipeline is six read ports: an address in
+// The interface to the partial pipeline is six read ports: an address in
 // (from the S1 pointers) and registered data out (landing at S2),
 // which is exactly the timing the pipeline had when the RAMs were
 // inline.
@@ -26,10 +26,10 @@ module csp (
     input  wire         rst_n,
     input  wire         sample_tick,
     input  wire         sclk,
-    input  wire         bank_active,
-    input  wire         bank_shadow,
+    input  wire         page_active,
+    input  wire         page_shadow,
 
-    // SPI bus-base mailbox (sclk domain, crossed by a toggle)
+    // SPI DMEM-base mailbox (sclk domain, crossed by a toggle)
     input  wire [9:0]   dmem_wr_addr,
     input  wire [17:0]  dmem_wr_data,
     input  wire         dmem_wr_toggle,
@@ -56,15 +56,15 @@ module csp (
     output logic        test_tone_en
 );
     //----------------------------------------------------------------
-    // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
+    // DMEM — the uniform Q8.10 pool (dmem_architecture.md).
     // Written ONLY on sysclk: SPI writes arrive through the toggle
-    // mailbox below and commit into both ping-pong generations; the
-    // lanes read the other generation from the one being written, so a
-    // read and a write never meet on one address.
-    // Bus 0 is hardwired zero (writes to it are ignored).
+    // mailbox below and commit into both ping-pong pages; the
+    // partial pipeline reads the other page from the one being written,
+    // so a read and a write never meet on one address.
+    // DMEM word 0 is hardwired zero (writes to it are ignored).
     //----------------------------------------------------------------
     // Six replicas of the one uniform pool — one read port per sink
-    // (see bus_architecture.md "Why six replicas"). Broadcast writes
+    // (see dmem_architecture.md "Why six replicas"). Broadcast writes
     // keep them identical.
     reg signed [17:0] dmem_pitch [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_duty  [0:2*synth_pkg::DMEM_WORDS-1];
@@ -73,8 +73,8 @@ module csp (
     reg signed [17:0] dmem_gain_l    [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_gain_r    [0:2*synth_pkg::DMEM_WORDS-1];
     integer bi;
-    // BOTH generations -- the arrays are 2*DMEM_WORDS deep and an
-    // uninitialised shadow half reads X the first time dmem_gen flips.
+    // BOTH pages -- the arrays are 2*DMEM_WORDS deep and an
+    // uninitialised shadow half reads X the first time dmem_page flips.
     initial for (bi = 0; bi < 2*synth_pkg::DMEM_WORDS; bi = bi + 1) begin
         dmem_pitch[bi] = 18'sd0;
         dmem_duty[bi]  = 18'sd0;
@@ -84,16 +84,16 @@ module csp (
         dmem_gain_r[bi]    = 18'sd0;
     end
 
-    // SPI bus-base writes now land in a dedicated BASE RAM as well as
+    // SPI DMEM-base writes land in a dedicated BASE RAM as well as
     // the value replicas: sinks read the replicas, the program counter
     // reads the base and writes base + contribution into the replicas
-    // (the spec's "bus = base register + instruction contributions",
-    // realized). A bus no instruction targets keeps value = base via the
+    // (the spec's "DMEM word = base register + instruction contributions",
+    // realized). A DMEM word no instruction targets keeps value = base via the
     // mailbox's own replica write.
     reg signed [17:0] dmem_base [0:2*synth_pkg::DMEM_WORDS-1];
     // SECOND COPY, for the same reason imem was split: the sequencer needs
     // TWO different addresses out of the init image in one cycle -- the
-    // watched gate bus (from CFG) and the target's base (from the
+    // watched gate DMEM word (from OP) and the target's base (from the
     // destination field). One port served both by phase muxing, which cost
     // a cycle. Written by the identical mailbox strobe, so the two are
     // always the same memory; only the read address differs.
@@ -104,13 +104,13 @@ module csp (
         dmem_base_gate[bbi] = 18'sd0;
     end
 
-    // BUS-SUM RAM: the sequencer-facing mirror of a bus's
+    // DMEM-SUM RAM: the sequencer-facing mirror of a DMEM word's
     // OUTPUT SUM — written by the same strobes as the replicas, read
-    // at D/R by SEND entries. This is what makes the node graph's
-    // edges real: a send references the bus's summed output (firmware
+    // at D/R by MAC instructions. This is what makes the node graph's
+    // edges real: a MAC references the DMEM word's summed output (firmware
     // base plus every source contribution written so far) rather than
     // the firmware base alone. With sources ordered before
-    // their sends in the table, propagation is same-sample.
+    // their MAC instructions in the table, propagation is same-sample.
     reg signed [17:0] dmem_sum [0:2*synth_pkg::DMEM_WORDS-1];
     integer bsi;
     initial for (bsi = 0; bsi < 2*synth_pkg::DMEM_WORDS; bsi = bsi + 1)
@@ -121,20 +121,20 @@ module csp (
     logic [9:0]         dmem_waddr;
     logic signed [17:0] dmem_wdata;
 
-    // Ping-pong generation bit. The sequencer writes generation
-    // ~dmem_gen while the pipeline reads dmem_gen, and they swap at the
-    // sample boundary -- so every element sees one coherent generation
+    // Ping-pong page bit. The sequencer writes page
+    // ~dmem_page while the pipeline reads dmem_page, and they swap at the
+    // sample boundary -- so every partial sees one coherent page
     // and a read can never collide with a write. Costs no extra BSRAM:
-    // the second generation lives in the half of each block that the
+    // the second page lives in the half of each block that the
     // 512-entry pool leaves unused.
-    logic dmem_gen;   // flipped once per sample by the process below
+    logic dmem_page;   // flipped once per sample by the process below
 
     logic dmem_wr_toggle_meta, dmem_wr_toggle_sync, dmem_wr_toggle_prev;
     logic dmem_mbox_pending;
     logic [9:0]  dmem_mbox_addr;
     logic [17:0] dmem_mbox_data;
-    // A mailbox entry commits over TWO takes, one per generation.
-    // The sequencer rewrites its target buses every sample, so ITS writes
+    // A mailbox entry commits over TWO takes, one per page.
+    // The sequencer rewrites its target DMEM words every sample, so ITS writes
     // can live in one half. A mailbox write sets a PERSISTENT base that
     // nothing refreshes, so a single-half write alternates with stale
     // data on every swap -- silence, in practice (caught by
@@ -144,8 +144,7 @@ module csp (
     //
     // This does not weaken atomicity where it matters: the property we
     // need is that the SEQUENCER's pass is seen as one complete
-    // generation. Firmware writes were always asynchronous and
-    // mid-sample, before ping-pong and after it.
+    // page. Firmware writes are asynchronous and mid-sample either way.
     logic dmem_commit_phase;
     logic dmem_commit_half;
     // Mailbox commits happen in any idle slot where the sequencer is not
@@ -155,7 +154,7 @@ module csp (
     // How long that defer can last is the whole safety argument. The
     // sequencer retires one instruction per cycle, so its write-backs are
     // CONTIGUOUS: the real program's pc 32..127 (32 amp envelopes, 32 mod
-    // envelopes, 32 fan-out sends) holds dmem_we for 96 cycles straight =
+    // envelopes, 32 fan-out MACs) holds dmem_we for 96 cycles straight =
     // 1.30 us. tb_mbox_burst measures that run rather than trusting this
     // comment.
     //
@@ -172,14 +171,14 @@ module csp (
     // first idle cycle coincides with a sequencer write (~1 in 3 during
     // the sequencer span): a lost gate-off is a stuck note, a lost
     // gate-on a dead key.
-    // Ping-pong puts reads and writes in different generations, so no
+    // Ping-pong puts reads and writes in different pages, so no
     // scheduling window is needed to keep them apart. A commit still
     // defers a cycle when the sequencer is writing, since they share
     // the write port.
     wire  dmem_wr_window   = 1'b1;
     wire  dmem_mbox_take   = dmem_mbox_pending && dmem_wr_window && !dmem_we;
     wire  dmem_commit = dmem_mbox_take && (dmem_mbox_addr != 10'd0);
-    wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_gen;
+    wire  dmem_commit_half_sel = dmem_commit_phase ? ~dmem_commit_half : ~dmem_page;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -204,7 +203,7 @@ module csp (
             dmem_commit_half  <= 1'b0;
         end else if (dmem_mbox_take) begin
             if (!dmem_commit_phase) begin
-                dmem_commit_half  <= ~dmem_gen;   // the half written now
+                dmem_commit_half  <= ~dmem_page;   // the half written now
                 dmem_commit_phase <= 1'b1;
             end else
                 dmem_commit_phase <= 1'b0;
@@ -216,8 +215,8 @@ module csp (
     always_ff @(posedge clk)
         if (dmem_commit) dmem_base_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
-    // Bus 511, the top of the pool, doubles as the test-tone control
-    // latch; no element or instruction reads it.
+    // DMEM word 511, the top of the pool, doubles as the test-tone control
+    // latch; no partial or instruction reads it.
     always_ff @(posedge clk or negedge rst_n)
         if (!rst_n)                                       test_tone_en <= 1'b0;
         else if (dmem_commit && dmem_mbox_addr == 10'd511)
@@ -227,28 +226,28 @@ module csp (
     // owns its cycle (dmem_we), the mailbox defers around it.
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_pitch[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_pitch[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_pitch[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_duty[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_duty[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_duty[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_fc[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_fc[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_fc[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_q[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_gain_l[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gain_l[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_gain_l[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_gain_r[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gain_r[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        else if (dmem_we)   dmem_gain_r[{~dmem_page, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
         if (dmem_commit)   dmem_sum[dmem_mbox_addr] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_sum[dmem_waddr]  <= dmem_wdata;
 
     //----------------------------------------------------------------
-    // Program counter (B4/B5, bus_architecture.md) -- the table executor.
+    // Program counter (B4/B5, dmem_architecture.md) -- the table executor.
     // 256 entries x 4 config words (stride 4 in the RAM), ONE cycle per
     // entry; the six-stage pipeline is documented at the pc
     // below. Law 1: the one instruction multiply sits alone in its stage
@@ -261,55 +260,49 @@ module csp (
     // ADSR state word: [27:26] stage, [25:0] level in UQ4.22 -- the RC
     // envelope's format, defined in dsp/adsr.sv. The envelope is
     // the one instruction with a real state machine, so it is its own module
-    // of its own; the LFO is an adder and the SEND is a wire, and both stay
+    // of its own; the LFO is an adder and the MAC is a wire, and both stay
     // here. An LFO uses [24:0] as its phase accumulator and leaves [27:25]
     // alone, so the two never collide -- an instruction is one or the other.
     //----------------------------------------------------------------
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    // THE 3-CYCLE BOTTLENECK, REMOVED. This was one RAM holding
-    // {bank, entry, word} and read through a single port with the address
-    // muxed by phase: CFG at P0, RATES at P1, DEPTH at P2. Three words
-    // through one port costs three cycles however the logic is arranged, so
-    // the instruction rate was capped at one per three cycles regardless of
-    // how well the stages overlapped.
-    //
-    // Three RAMs, same total bits, read with the SAME address in the SAME
-    // cycle. The SPI write path is unchanged from the firmware's point of
-    // view: imem_write_addr is still {entry[7:0], word[1:0]} and the low two
-    // bits now select which RAM the word lands in.
-    reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {bank, entry[7:0]}
-    reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
-    reg [31:0] imem_depth [0:2*synth_pkg::NUM_INSTR-1];
+    // One RAM per instruction word (OP, RATE_AD, COEF, RATE_DSR), all read
+    // with the SAME address in the SAME cycle, so an instruction issues
+    // every cycle: words read through one shared port would cost one cycle
+    // each. imem_write_addr is {entry[7:0], word[1:0]}; the low two bits
+    // select which RAM the word lands in.
+    reg [31:0] imem_op   [0:2*synth_pkg::NUM_INSTR-1];   // {page, entry[7:0]}
+    reg [31:0] imem_rate_ad  [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_coef [0:2*synth_pkg::NUM_INSTR-1];
     // Word 3, the second ADSR rate word. The address encoding carries
     // this slot: imem_write_addr is {entry, word[1:0]}, and firmware's
     // flush strides by four.
-    reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_rate_dsr [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [24:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level (format in dsp/adsr.sv).
     reg [27:0] state_mem [0:synth_pkg::NUM_INSTR-1];
     integer wi;
     initial begin
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
-            imem_cfg[wi]   = 32'd0;            // opcode 0 = off
-            imem_rate[wi]  = 32'd0;
-            imem_depth[wi] = 32'd0;
-            imem_rate2[wi] = 32'd0;
+            imem_op[wi]   = 32'd0;            // opcode 0 = off
+            imem_rate_ad[wi]  = 32'd0;
+            imem_coef[wi] = 32'd0;
+            imem_rate_dsr[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
             state_mem[wi] = 28'd0;
     end
 
     // Route the word to its RAM by the low address bits. Same wire format.
-    wire [8:0] imem_wr_entry = {bank_shadow, imem_write_addr[9:2]};
+    wire [8:0] imem_wr_entry = {page_shadow, imem_write_addr[9:2]};
     always_ff @(posedge sclk)
         if (imem_write_enable) begin
             case (imem_write_addr[1:0])
-                2'd0: imem_cfg[imem_wr_entry]   <= imem_write_data;
-                2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
-                2'd2: imem_depth[imem_wr_entry] <= imem_write_data;
-                2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
+                2'd0: imem_op[imem_wr_entry]   <= imem_write_data;
+                2'd1: imem_rate_ad[imem_wr_entry]  <= imem_write_data;
+                2'd2: imem_coef[imem_wr_entry] <= imem_write_data;
+                2'd3: imem_rate_dsr[imem_wr_entry] <= imem_write_data;
                 default: ;                      // unreachable: all four words are used
             endcase
         end
@@ -317,10 +310,10 @@ module csp (
     // ONE INSTRUCTION PER CYCLE. Six stages, one instruction deep
     // each, retiring one per cycle once full:
     //
-    //   F  present pc to imem_cfg/rate/depth and state_mem
-    //   D  those four are out; present the gate/source address (from CFG)
+    //   F  present pc to imem_op/rate/coef and state_mem
+    //   D  those four are out; present the gate/source address (from OP)
     //      and the target address to dmem_base_gate / dmem_sum / dmem_base
-    //   R  gate, send-source and target base are out; resolve the
+    //   R  gate, MAC source and target base are out; resolve the
     //      gate, choose the operand
     //   X  the instruction multiply -- registered operands, alone in its
     //      stage (law 1) -- and the state writeback
@@ -331,24 +324,24 @@ module csp (
     // 256 cycles and every instruction runs every sample: 96 kHz control,
     // and no constraint on where in the table a chain may sit. Three cycles
     // per instruction would not fit -- 256 x 3 = 768 leaves no room beside
-    // the lane pipeline in a 768-cycle sample.
+    // the partial pipeline in a 768-cycle sample.
     //
     // Field map:
-    //   CFG   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
-    //         bus (also the ADSR's watched gate), [31:16] LFO phase
+    //   OP   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
+    //         DMEM word (also the ADSR's watched gate), [31:16] LFO phase
     //         increment -- overlapping the source field, which an LFO does
     //         not use
-    //   RATES  [17:0] kA, [31:18] kD[13:0] -- linear coefficients
-    //   DEPTH  [17:0] signed coefficient, 0x10000 = unity
-    //   RATES2 [3:0] kD[17:14], [21:4] kR, [31:22] sustain (dsp/adsr.sv)
+    //   RATE_AD  [17:0] kA, [31:18] kD[13:0] -- linear coefficients
+    //   COEF   [17:0] signed coefficient, 0x10000 = unity
+    //   RATE_DSR [3:0] kD[17:14], [21:4] kR, [31:22] sustain (dsp/adsr.sv)
     logic [8:0] pc;             // 0..NUM_INSTR, one per cycle
 
-    // The generation flips once per SAMPLE, because a complete pass is one
+    // The page flips once per SAMPLE, because a complete pass is one
     // sample long. Flipping more often than a pass completes publishes a
-    // half-written generation -- halved depth and a stale link in any chain.
+    // half-written page -- halved depth and a stale link in any chain.
     always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n)           dmem_gen <= 1'b0;
-        else if (sample_tick) dmem_gen <= ~dmem_gen;
+        if (!rst_n)           dmem_page <= 1'b0;
+        else if (sample_tick) dmem_page <= ~dmem_page;
 
     wire pc_active = (pc < 9'(synth_pkg::NUM_INSTR));
     // Drain: the last instruction fetched still has to reach W, which is the
@@ -371,10 +364,10 @@ module csp (
     end
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
-    logic [31:0] cfg_q, rate_q, depth_q, rate2_q;
+    logic [31:0] op_q, rate_ad_q, coef_q, rate_dsr_q;
     logic [27:0] state_q;
     logic signed [17:0] gate_q, src_q, base_q;
-    logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
+    logic [7:0]  pc_addr_d;     // the pc that goes with op_q
     logic        d_valid;
 
     // ---- D stage registers ---------------------------------------------
@@ -391,7 +384,7 @@ module csp (
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_phase_inc;
-    logic [31:0] r_rate, r_depth, r_rate2;
+    logic [31:0] r_rate_ad, r_coef, r_rate_dsr;
     logic [27:0] r_state;
 
     // ---- R stage registers ---------------------------------------------
@@ -404,7 +397,7 @@ module csp (
     wire x_is_lfo = x_st_en && !x_opcode[synth_pkg::OPC_SOURCE];
     logic [9:0]  x_dest;
     logic [27:0] x_state;
-    logic signed [17:0] x_operand, x_depth, x_base;
+    logic signed [17:0] x_operand, x_coef, x_base;
     logic [15:0] x_phase_inc;
 
     // ---- X stage registers ---------------------------------------------
@@ -457,12 +450,12 @@ module csp (
         (accum_sum > 21'sd131071)  ? 18'sd131071  :
         (accum_sum < -21'sd131072) ? -18'sd131072 : accum_sum[17:0];
 
-    // A SEND reads a bus's OUTPUT SUM from dmem_sum, and at one instruction
-    // per cycle the bus it wants may have been written by an instruction
+    // A MAC reads a DMEM word's OUTPUT SUM from dmem_sum, and at one instruction
+    // per cycle the DMEM word it wants may have been written by an instruction
     // still in flight -- the read would silently be stale. Same history,
     // same most-recent-wins rule. The instruction one ahead is in A right
     // now, so its contribution is the combinational accum_sat.
-    wire signed [17:0] send_src =
+    wire signed [17:0] mac_src =
           (a_valid  && a_dest  == r_src) ? accum_sat
         : (wb_valid && wb_addr == r_src) ? wb_value
         : (fwd1_valid && fwd1_addr == r_src) ? fwd1_value
@@ -478,8 +471,8 @@ module csp (
         .step_en   (r_valid && r_is_env),
         .state_in  (r_state),
         .gate      (gate_q > 18'sd0),
-        .rates     (r_rate),
-        .rates2    (r_rate2),
+        .rate_ad     (r_rate_ad),
+        .rate_dsr    (r_rate_dsr),
         .level_out (adsr_level),
         .state_out (adsr_state_out),
         .state_we  ()                  // the CSP tracks validity itself
@@ -520,10 +513,10 @@ module csp (
             fwd1_valid <= 1'b0; fwd2_valid <= 1'b0;
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
-            r_src <= '0; r_phase_inc <= '0; r_rate <= '0; r_depth <= '0;
-            r_state <= '0; r_rate2 <= '0;
+            r_src <= '0; r_phase_inc <= '0; r_rate_ad <= '0; r_coef <= '0;
+            r_state <= '0; r_rate_dsr <= '0;
             x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_state <= '0;
-            x_operand <= '0; x_depth <= '0; x_base <= '0;
+            x_operand <= '0; x_coef <= '0; x_base <= '0;
             x_phase_inc <= '0;
             a_dest <= '0; a_base <= '0; a_product <= '0; a_acc_en <= 1'b0;
             a_st_en <= 1'b0; a_is_lfo <= 1'b0; a_st_pc <= '0; a_lfo_next <= '0;
@@ -537,15 +530,15 @@ module csp (
             // D -> R: the four config words are out of the RAMs this cycle
             r_valid    <= d_valid;
             r_pc       <= pc_addr_d;
-            r_opcode   <= cfg_q[3:0];
-            r_shape    <= cfg_q[5:4];
-            r_dest     <= cfg_q[15:6];
-            r_src      <= cfg_q[25:16];
-            r_phase_inc <= cfg_q[31:16];
-            // An ADSR uses CFG[25:16] as its gate bus, so bit 26 is free.
-            r_rate2    <= rate2_q;
-            r_rate     <= rate_q;
-            r_depth    <= depth_q;
+            r_opcode   <= op_q[3:0];
+            r_shape    <= op_q[5:4];
+            r_dest     <= op_q[15:6];
+            r_src      <= op_q[25:16];
+            r_phase_inc <= op_q[31:16];
+            // An ADSR uses OP[25:16] as its gate DMEM word, so bit 26 is free.
+            r_rate_dsr    <= rate_dsr_q;
+            r_rate_ad     <= rate_ad_q;
+            r_coef    <= coef_q;
             r_state   <= state_q;
 
             // R -> X: gate / source / base are out; decode and choose
@@ -555,11 +548,11 @@ module csp (
             x_dest    <= r_dest;
             x_state  <= r_state;
             x_base    <= base_q;
-            x_depth   <= $signed(r_depth[17:0]);
+            x_coef   <= $signed(r_coef[17:0]);
             x_phase_inc <= r_phase_inc;
             x_operand <= r_is_lfo ? lfo_wave
                        : r_is_env ? adsr_level
-                       :            send_src;
+                       :            mac_src;
 
             // X -> A: the multiply, registered operands, alone in its stage
             a_valid    <= x_valid;
@@ -570,7 +563,7 @@ module csp (
             a_st_pc    <= x_pc;
             a_lfo_next <= lfo_next;
             a_base    <= x_base;
-            a_product <= x_mul_en ? (x_operand * x_depth)
+            a_product <= x_mul_en ? (x_operand * x_coef)
                                   : $signed({{2{x_operand[17]}}, x_operand, 16'd0});
 
             // A -> W: the saturated sum, and push the forwarding history
@@ -586,22 +579,22 @@ module csp (
     assign dmem_waddr = wb_addr;
     assign dmem_we    = wb_valid;
 
-    // Memory reads. The four imem RAMs share one address, so CFG, both RATE
-    // words and DEPTH all arrive together rather than over three cycles.
+    // Memory reads. The four imem RAMs share one address, so OP, both RATE
+    // words and COEF all arrive together rather than over three cycles.
     // dmem_base_gate and dmem_base are the same image read at two different
     // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
-        cfg_q    <= imem_cfg[{bank_active, pc_addr}];
-        rate_q   <= imem_rate[{bank_active, pc_addr}];
-        depth_q  <= imem_depth[{bank_active, pc_addr}];
-        rate2_q  <= imem_rate2[{bank_active, pc_addr}];
+        op_q    <= imem_op[{page_active, pc_addr}];
+        rate_ad_q   <= imem_rate_ad[{page_active, pc_addr}];
+        coef_q  <= imem_coef[{page_active, pc_addr}];
+        rate_dsr_q  <= imem_rate_dsr[{page_active, pc_addr}];
         state_q <= state_mem[pc_addr];
-        gate_q   <= dmem_base_gate[cfg_q[25:16]];   // watched gate bus
-        src_q    <= dmem_sum[cfg_q[25:16]];  // SEND source: bus output sum
-        base_q   <= dmem_base[cfg_q[15:6]];    // the target's initial value
+        gate_q   <= dmem_base_gate[op_q[25:16]];   // watched gate DMEM word
+        src_q    <= dmem_sum[op_q[25:16]];  // MAC source: DMEM output sum
+        base_q   <= dmem_base[op_q[15:6]];    // the target's initial value
     end
 
-    // one write port, two producers: the LFO's accumulate and the
+    // one write port, two writers: the LFO's accumulate and the
     // envelope's recurrence, both valid at A for the same instruction
     always_ff @(posedge clk)
         if (a_st_en)
@@ -609,16 +602,16 @@ module csp (
 
     //----------------------------------------------------------------
     // Sink read ports. One BSRAM read port per replica, addressed by
-    // the lane pipeline's S1 pointers, registered so the data lands at
+    // the partial pipeline's S1 pointers, registered so the data lands at
     // S2 -- identical timing to when these RAMs were inline.
     //----------------------------------------------------------------
     always_ff @(posedge clk) begin
-        rd_pitch_d <= dmem_pitch[{dmem_gen, rd_pitch_a}];
-        rd_duty_d  <= dmem_duty[{dmem_gen, rd_duty_a}];
-        rd_fc_d    <= dmem_fc[{dmem_gen, rd_fc_a}];
-        rd_q_d     <= dmem_q[{dmem_gen, rd_q_a}];
-        rd_gl_d    <= dmem_gain_l[{dmem_gen, rd_gl_a}];
-        rd_gr_d    <= dmem_gain_r[{dmem_gen, rd_gr_a}];
+        rd_pitch_d <= dmem_pitch[{dmem_page, rd_pitch_a}];
+        rd_duty_d  <= dmem_duty[{dmem_page, rd_duty_a}];
+        rd_fc_d    <= dmem_fc[{dmem_page, rd_fc_a}];
+        rd_q_d     <= dmem_q[{dmem_page, rd_q_a}];
+        rd_gl_d    <= dmem_gain_l[{dmem_page, rd_gl_a}];
+        rd_gr_d    <= dmem_gain_r[{dmem_page, rd_gr_a}];
     end
 
 endmodule

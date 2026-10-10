@@ -100,12 +100,10 @@ void app_main(void)
 
     printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
     // 0x1005 aliases 0x0005 under the 11-bit backed mask AND decodes
-    // to nothing else. The previous probe address, 0x0805, was inside
-    // the BUS POOL (0x0800-0x0BFF): the store dropped it as intended,
-    // but spi_bus fired the bus mailbox and parked bus 5 at a large
-    // negative base every boot - a self-test moving a live fader
-    //. Probe addresses must miss EVERY decode window:
-    // backed 0x0000-0x07FF, bus 0x0800-0x0BFF, elements 0x2000-0x5FFF.
+    // to nothing else. Probe addresses must miss EVERY decode window
+    // (an address inside DMEM would fire the DMEM mailbox and move a
+    // live value at every boot):
+    // backed 0x0000-0x07FF, DMEM 0x0800-0x0BFF, partials 0x2000-0x5FFF.
     fpga_word_write(0x1005, 0xBAD0BAD0);      // would alias 0x0005 if broken
     uint32_t z = fpga_word_read(0x1005);
     uint32_t keep = fpga_word_read(0x0005);
@@ -118,9 +116,9 @@ void app_main(void)
 
     // ── The synth proper ────────────────────────────────────────────
     // engine_link takes sole ownership of the SPI link from here on
-    // (mutes both banks at init — the boot organ goes silent), then
-    // voice_alloc turns MIDI into voices of 8 elements.
-    printf("=== voice concept: 32 voices x 8 elements, MIDI omni ===\n");
+    // (mutes both pages at init — the boot organ goes silent), then
+    // voice_alloc turns MIDI into voices of 8 partials.
+    printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();
     midi_in_start();   // subscribers are registered: start publishing

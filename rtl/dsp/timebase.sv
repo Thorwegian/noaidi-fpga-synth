@@ -1,45 +1,45 @@
 //--------------------------------------------------------------------
-// drum.sv — SCMO timing core ("the drum")
+// timebase.sv — timing core of the time-division-multiplexed (TDM) pipeline
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Single timebase for the whole synth: a free-running counter wrapping
-// every DRUM_CYCLES sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
+// every CYCLES_PER_SAMPLE sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
 // time-multiplexed operations are scheduled against this counter —
 // there is no other sample-rate timing source in the design.
 //
 //   sample_tick : high during slot 0 of each sample period.
 //                 "A new sample is ready": consumers latch the mix
 //                 output and the mix accumulators are cleared on it.
-//   lane_enter  : high during the NUM_LANES slots in which an element
+//   slot_issue  : high during the NUM_ISSUE_SLOTS slots in which a partial
 //                 enters the pipeline (slot 0..255).
 //   cell_tick   : high during the first slot of every CELL_DIV — the
 //                 SPDIF cell boundary (768 = 128 cells × 6). Counted
 //                 from the same reset and realigned at every wrap
 //                 (CYCLES % CELL_DIV == 0), so it coincides with
-//                 sample_tick by construction; the drum really is the
+//                 sample_tick by construction; this module really is the
 //                 sole timebase, output stages included.
-//   slot        : current drum slot (scheduling / debug).
+//   slot        : current time slot (scheduling / debug).
 //   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
 //                 48 kHz (primary) S/PDIF output: sample boundary
 //                 every second wrap (1536 sysclk), cell boundary every
 //                 second cell (12 sysclk). Derived from the same
 //                 counters, so 1536 = 128 cells × 12 and sample_tick48
-//                 coincides with a cell_tick48 by construction — the
-//                 drum stays the sole timebase.
+//                 coincides with a cell_tick48 by construction — this
+//                 module stays the sole timebase.
 //--------------------------------------------------------------------
 `default_nettype none
-module drum #(
-    parameter int CYCLES    = synth_pkg::DRUM_CYCLES,
-    parameter int NUM_LANES = synth_pkg::NUM_ELEMENTS,
+module timebase #(
+    parameter int CYCLES    = synth_pkg::CYCLES_PER_SAMPLE,
+    parameter int NUM_ISSUE_SLOTS = synth_pkg::NUM_PARTIALS,
     parameter int CELLDIV   = synth_pkg::CELL_DIV
 ) (
     input  logic                   clk,
     input  logic                   rst_n,
 
     output logic                   sample_tick,
-    output logic                   lane_enter,
+    output logic                   slot_issue,
     output logic                   cell_tick,
     output logic                   sample_tick48,
     output logic                   cell_tick48,
@@ -94,7 +94,7 @@ module drum #(
 
     assign slot          = slot_r;
     assign sample_tick   = (slot_r == '0);
-    assign lane_enter    = (slot_r < NUM_LANES);
+    assign slot_issue    = (slot_r < NUM_ISSUE_SLOTS);
     assign cell_tick     = (cell_cnt == '0);
     assign sample_tick48 = sample_tick && !odd_sample48;
     assign cell_tick48   = cell_tick   && !odd_cell48;

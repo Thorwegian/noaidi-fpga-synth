@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # q1 (SVF damping) decode LUT for the log2-encoded resonance
-# parameter (bus_architecture.md; shrank it 1024 -> 16).
+# parameter (dmem_architecture.md): 16 entries.
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
@@ -15,9 +15,9 @@
 # 16 entries per octave, following the attenuation LUT:
 # resonance is a loudness-class percept (peak height in dB), and the
 # ~0.375 dB grid is ear-proven silky on the gain path — unlike pitch,
-# which needs the 1024-entry treatment. Bus/wire format keeps the
+# which needs the 1024-entry treatment. DMEM/wire format keeps the
 # full UQ4.10 resolution; fraction bits below 1/16 octave sit under
-# the decode grid, exactly like gain's bus fraction.
+# the decode grid, exactly like gain's DMEM fraction.
 #
 #   q1_lut[i] = round(sqrt(2) * 2^(-i/16) * 2^16)   (Q2.16 scale)
 # 17-bit values in (46340, 92682].

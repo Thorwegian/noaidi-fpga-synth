@@ -3,9 +3,9 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// A voice is a grouping of elements (design.md terminology). This
-// allocator runs the first grouping: 32 voices × 8 elements in fixed
-// blocks (voice v owns elements 8v..8v+7), voiced from the active
+// A voice is a grouping of partials (design.md terminology). This
+// allocator runs the first grouping: 32 voices × 8 partials in fixed
+// blocks (voice v owns partials 8v..8v+7), voiced from the active
 // patch (g_patch, patch.h): voice structure, unison detune and stereo
 // spread. Subscribes to MIDI on the event bus, emits parameter
 // commands to the engine link. Omni for now (channel is stored per

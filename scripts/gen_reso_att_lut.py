@@ -3,13 +3,13 @@
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2
 #
-# reso_att_lut: resonance-indexed INPUT attenuation for the dual
+# reso_att_lut: resonance-indexed INPUT attenuation for the cascade
 # (24 dB/oct) SVF. The 4-pole cascade's resonant peak grows ~Q^2, so at
 # high resonance a full-scale input overdrives the internal +-8 (Q4.14)
 # sat_q414 guardrail and clips harshly. Pre-filter attenuation, indexed by
 # the log2 resonance code, scales the oscillator down so the cascade stays
 # under its guardrail (cascade peak <= PEAK_LIMIT). The curve is
-# ear-approved. Single (12 dB/oct) never overdrives ->
+# ear-approved. A single section (12 dB/oct) never overdrives ->
 # unity, gated in RTL. 64 entries indexed by eff_reso[13:8], UQ0.16.
 from pathlib import Path
 import math

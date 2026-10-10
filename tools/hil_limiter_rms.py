@@ -40,12 +40,12 @@ CHORD = (45, 52, 57, 61, 64)       # 5 notes, drive the bus hard
 PATCH = [
     (20, 0),    # osc1 saw
     (24, 0),    # mix to osc1
-    (26, 64),   # voice mode 7+1 UNISON -- 8 elements per note. Plain mode
+    (26, 64),   # voice mode 7+1 UNISON -- 8 partials per note. Plain mode
                 # peaked at -15.7 dBFS with a 5-note chord, i.e. ~15 dB
                 # BELOW the -1 dBFS threshold, so the limiter never engaged
                 # and the test measured chord beating instead. The limiter
                 # must be doing real work or this proves nothing.
-    (27, 24),   # some unison detune: perfectly coherent elements is not a
+    (27, 24),   # some unison detune: perfectly coherent partials is not a
                 # realistic worst case and invites exact cancellation
     (28, 0),    # spread centered: keep the energy on both channels
     (86, 0), (87, 0),

@@ -50,7 +50,7 @@ module spdif_tx #(
     output reg              spdif_out
 );
     // The cell timebase is provided by the caller:
-    //   sysclk = 73.728 MHz, cell_tick = /6 (12.288 MHz), from drum.sv.
+    //   sysclk = 73.728 MHz, cell_tick = /6 (12.288 MHz), from timebase.sv.
     // Requirements: sample_tick must coincide with a cell_tick, and
     // there must be exactly 128 cell periods per sample period.
 

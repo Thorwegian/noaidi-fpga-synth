@@ -22,7 +22,7 @@ the unconventional machinery stays under the hood.
   byte): every CC step is one equal-ratio step on the uniform ladder
   (the rule behind the fractional-level decode).
 - **All musical mapping lives in the synth model** — the FPGA sees
-  only parameter/bus/producer writes through the engine link
+  only parameter/DMEM/instruction writes through the engine link
   ([firmware_architecture.md](firmware_architecture.md)).
 - **Everything is live** — SysEx is a bulk transport for
   configuration, not a separate "patch mode". (There is no stored
@@ -49,11 +49,11 @@ units live in patch.h).
 | CC | Target | Notes |
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
-| 10 | pan | per-side log-gain attenuation baked into the element L/R GAIN words; full deflection mutes the far side |
-| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff bus) |
+| 10 | pan | per-side log-gain attenuation baked into the partial L/R GAIN words; full deflection mutes the far side |
+| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff DMEM word) |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
-| 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's DEPTH word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
-| 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed DEPTH word at note-on by the same `g(vel)`, so velocity sets how far the filter envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff bus base is zero |
+| 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
+| 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff DMEM base is zero |
 | 120/123 | all sound off / all notes off | panic: 123 releases every held voice, 120 hard-mutes immediately |
 | 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
@@ -78,13 +78,13 @@ units live in patch.h).
 |---|---|---|
 | 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
 | 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing); optional |
-| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel resonance bus (bus 3) |
+| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel resonance DMEM word (DMEM word 3) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
-| 30 | filter 12/24 dB | discrete |
+| 30 | filter 12/24 dB | discrete: single section (12 dB/oct) / cascade (two 2-pole sections, 24 dB/oct) |
 | 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
 
-**Envelopes** — env 1 = amp (standard sound-controller CCs), env 2 =
-MOD (undefined block; standard CCs only ever covered one envelope).
+**Envelopes** — the amp envelope (standard sound-controller CCs) and
+the MOD envelope (undefined block; standard CCs only ever covered one envelope).
 All four ADSR CCs per envelope invert — knob up = longer/louder
 (panel convention), which keeps every step on the
 equal-ratio ladder.
@@ -94,7 +94,7 @@ equal-ratio ladder.
 | 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 1` (level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's DEPTH word is signed |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's COEF word is signed |
 | 108 | MOD env destination | STORED ONLY: the MOD env always drives cutoff |
 
 **LFOs** (2)
@@ -107,7 +107,7 @@ equal-ratio ladder.
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
 | 110 | LFO 2 depth | `val<<2`, the same scale as CC 77 for every destination (raw value 508 at the top: ~½ octave of pitch, cutoff or Q, or ±0.5 duty) |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1 — dual vibrato) / **CUTOFF** (channel cut bus → per-voice sends) |
+| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1 — dual vibrato) / **CUTOFF** (channel cutoff DMEM word → per-voice MAC instructions) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |
@@ -119,8 +119,8 @@ equal-ratio ladder.
 Not mapped: source→destination routing beyond the wheel and the
 env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 
-Amp-envelope CCs re-push RATES and the velocity-scaled DEPTH to all
-32 amp-ADSR producers (banked, riding one swap); `release_tail_us()`
+Amp-envelope CCs re-push RATE_AD and the velocity-scaled COEF to all
+32 amp-ADSR instructions (paged, riding one page swap); `release_tail_us()`
 reads the live release rate.
 
 **Cutoff resolution.** Cutoff base is UQ4.10; CC 74 (coarse, high 7
@@ -144,15 +144,15 @@ engine link can do, addressable from a sequencer):
 
 | op | Payload | Meaning |
 |---|---|---|
-| 0x01 | elem, word, w32 | element parameter write (rides swap) |
-| 0x02 | bus14, w32 | live bus-base write |
-| 0x03 | entry, word, w32 | producer table write (rides swap) |
+| 0x01 | partial, word, w32 | partial parameter write (rides the page swap) |
+| 0x02 | dmem14, w32 | live DMEM-base write |
+| 0x03 | entry, word, w32 | instruction table write (rides the page swap) |
 | 0x7F | — | identity request → reply with git describe of firmware |
 
 The raw ops reach everything the engine link can write. Structured
 configuration (whole-timbre dumps, mod-routing setups, step-sequencer
 pattern data, per-step events, chord-mode config) does not fit the raw
-elem/bus/producer writes and is a separate structured SysEx layer,
+partial/DMEM/instruction writes and is a separate structured SysEx layer,
 designed together with the sequencer and the stored-configuration
 structure.
 

@@ -4,12 +4,12 @@
 // tb_mbox_burst.sv -- the mailbox's two-take commit under back-to-back
 // traffic.
 //
-// A mailbox word commits over TWO takes, one per ping-pong generation, and
+// A mailbox word commits over TWO takes, one per ping-pong page, and
 // both takes need a cycle where the sequencer is not writing the replicas
 // (dmem_we). Between the takes, dmem_mbox_addr/dmem_mbox_data are still the
 // live source for the second write -- so a toggle edge arriving mid-commit
 // overwrites them, and take 2 writes the NEW word into the OLD word's unused
-// half. Two words then each sit in one generation only, which alternates with
+// half. Two words then each sit in one page only, which alternates with
 // stale data on every swap: the documented "silence in practice" failure.
 //
 // Whether that is reachable is a pure rate question, and the bench prints the
@@ -29,7 +29,7 @@
 // The contract, and it is one contract with one condition:
 //
 //   AT OR BEYOND the sequencer's write-back stall, a mailbox word reaches BOTH
-//   ping-pong generations and is not dropped.
+//   ping-pong pages and is not dropped.
 //
 // Inside the stall, a 1-deep mailbox can half-commit or drop by construction,
 // and the design relies on the SPI word period being longer than the stall
@@ -41,16 +41,16 @@
 // race cannot fire at 10 MHz, and the extra logic is enough to make 2 of 4
 // nextpnr placements audibly glitch. The margin is the mechanism here, so
 // this bench measures the margin -- if a denser instruction table or a
-// faster SPI clock ever eats it, this fails loudly instead of a bus base
-// quietly landing in one generation.
+// faster SPI clock ever eats it, this fails loudly instead of a DMEM base
+// quietly landing in one page.
 `timescale 1ns/1ps
 module tb_mbox_burst;
     localparam int NV = 32;
     localparam [31:0] OPC_LFO  = 32'hE;
     localparam [31:0] OPC_ADSR = 32'hF;
-    localparam [31:0] OPC_SEND = 32'hD;
+    localparam [31:0] OPC_MAC = 32'hD;
 
-    // two buses no instruction targets, so only the mailbox ever writes them
+    // two DMEM words no instruction targets, so only the mailbox ever writes them
     // and anything other than the written value is the bug, not a refresh
     localparam [9:0] QA = 10'd300, QB = 10'd301;
 
@@ -68,7 +68,7 @@ module tb_mbox_burst;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
-        .sclk(sclk), .bank_active(1'b0), .bank_shadow(1'b0),
+        .sclk(sclk), .page_active(1'b0), .page_shadow(1'b0),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_we), .imem_write_addr(imem_addr),
@@ -83,7 +83,7 @@ module tb_mbox_burst;
     // chosen offset from the boundary without also owning the clock
     initial forever begin
         sample_tick = 1; @(posedge clk); sample_tick = 0;
-        repeat (synth_pkg::DRUM_CYCLES - 1) @(posedge clk);
+        repeat (synth_pkg::CYCLES_PER_SAMPLE - 1) @(posedge clk);
     end
 
     task automatic iwrite(input [9:0] a, input [31:0] d);
@@ -160,7 +160,7 @@ module tb_mbox_burst;
             iwrite(10'((64+2*v)*4 + 1), 32'h00100400);
             iwrite(10'((64+2*v)*4 + 3), 32'hE0120000);
             iwrite(10'((64+2*v)*4 + 2), 32'h00001000);
-            iwrite(10'((65+2*v)*4 + 0), OPC_SEND | (32'(48+v) << 6) | (32'd4 << 16));
+            iwrite(10'((65+2*v)*4 + 0), OPC_MAC | (32'(48+v) << 6) | (32'd4 << 16));
             iwrite(10'((65+2*v)*4 + 2), 32'h00010000);
         end
         // gates on, so every envelope is live and the write-back span is full

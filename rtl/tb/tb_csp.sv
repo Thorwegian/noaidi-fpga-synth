@@ -5,7 +5,7 @@
 // License: CERN-OHL-S v2
 //
 // The point of this bench is SPEED. tb_prog_pingpong exercises the same
-// invariants, but it elaborates the whole element pipeline -- the SVF,
+// invariants, but it elaborates the whole partial pipeline -- the SVF,
 // the oscillators, the limiter -- and takes minutes. This instantiates
 // csp alone and runs in seconds, which is what makes it usable
 // as a tight loop while working on the engine.
@@ -18,9 +18,9 @@
 `default_nettype none
 module tb_csp;
 
-    localparam int CYC     = synth_pkg::DRUM_CYCLES;
-    localparam int TESTBUS = 20;
-    localparam int QUIETBUS= 300;
+    localparam int CYC     = synth_pkg::CYCLES_PER_SAMPLE;
+    localparam int TEST_DMEM = 20;
+    localparam int QUIET_DMEM= 300;
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;
 
@@ -28,7 +28,7 @@ module tb_csp;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;
 
-    // the drum's sample boundary, without the drum
+    // the timebase's sample boundary, without the timebase
     logic [15:0] slotc = 0;
     logic        sample_tick;
     always_ff @(posedge clk) slotc <= (slotc == CYC-1) ? 16'd0 : slotc + 16'd1;
@@ -43,7 +43,7 @@ module tb_csp;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .bank_active(1'b0), .bank_shadow(1'b1),
+        .page_active(1'b0), .page_shadow(1'b1),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(1'b0), .imem_write_addr(10'd0),
@@ -59,7 +59,7 @@ module tb_csp;
     logic   gen_prev;
 
     // a mailbox write: payload then a toggle edge, as spi_bus does it
-    task automatic bus_write(input [9:0] a, input signed [17:0] d);
+    task automatic dmem_write(input [9:0] a, input signed [17:0] d);
         begin
             @(negedge clk);
             dmem_wr_addr = a; dmem_wr_data = d;
@@ -73,14 +73,14 @@ module tb_csp;
         repeat (4) @(posedge clk); rst_n = 1;
         repeat (CYC) @(posedge clk);
 
-        // 1. generation cadence: one flip per sequencer pass. A pass is
+        // 1. page cadence: one flip per sequencer pass. A pass is
         //    256 instructions x 1 cycle = 256 cycles, so it completes inside
         //    ONE sample and the cadence is one flip per sample.
-        toggles = 0; ticks = 0; gen_prev = dut.dmem_gen;
+        toggles = 0; ticks = 0; gen_prev = dut.dmem_page;
         for (cyc = 0; cyc < 8*CYC; cyc = cyc + 1) begin
             @(posedge clk);
-            if (dut.dmem_gen !== gen_prev) toggles = toggles + 1;
-            gen_prev = dut.dmem_gen;
+            if (dut.dmem_page !== gen_prev) toggles = toggles + 1;
+            gen_prev = dut.dmem_page;
             if (sample_tick) ticks = ticks + 1;
         end
         if (toggles !== ticks) begin
@@ -90,13 +90,13 @@ module tb_csp;
             $display("gen cadence: %0d toggles / %0d samples", toggles, ticks);
 
         // 2. write-through: the value must be in BOTH halves
-        bus_write(10'(TESTBUS), MARK_A);
+        dmem_write(10'(TEST_DMEM), MARK_A);
         repeat (2*CYC) @(posedge clk);
-        if (dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}] !== MARK_A ||
-            dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}] !== MARK_A) begin
+        if (dut.dmem_gain_l[{1'b0, TEST_DMEM[8:0]}] !== MARK_A ||
+            dut.dmem_gain_l[{1'b1, TEST_DMEM[8:0]}] !== MARK_A) begin
             $display("FAIL: write-through -- halves read %0d / %0d, want %0d",
-                     dut.dmem_gain_l[{1'b0, TESTBUS[8:0]}],
-                     dut.dmem_gain_l[{1'b1, TESTBUS[8:0]}], MARK_A);
+                     dut.dmem_gain_l[{1'b0, TEST_DMEM[8:0]}],
+                     dut.dmem_gain_l[{1'b1, TEST_DMEM[8:0]}], MARK_A);
             errors = errors + 1;
         end else
             $display("write-through: present in both generations");
@@ -104,7 +104,7 @@ module tb_csp;
         // 3. persistence across many swaps -- a lost value here is silence
         for (i = 0; i < 12; i = i + 1) begin
             repeat (CYC) @(posedge clk);
-            if (dut.dmem_gain_l[{dut.dmem_gen, TESTBUS[8:0]}] !== MARK_A) begin
+            if (dut.dmem_gain_l[{dut.dmem_page, TEST_DMEM[8:0]}] !== MARK_A) begin
                 $display("FAIL: value lost on swap %0d", i + 1);
                 errors = errors + 1;
                 i = 99;
@@ -112,18 +112,18 @@ module tb_csp;
         end
         if (errors == 0) $display("persistence: stable across 12 swaps");
 
-        // 4. a bus nothing refreshes keeps its base
-        bus_write(10'(QUIETBUS), MARK_B);
+        // 4. a DMEM word nothing refreshes keeps its base
+        dmem_write(10'(QUIET_DMEM), MARK_B);
         repeat (6*CYC) @(posedge clk);
-        if (dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}] !== MARK_B) begin
+        if (dut.dmem_fc[{dut.dmem_page, QUIET_DMEM[8:0]}] !== MARK_B) begin
             $display("FAIL: unproduced bus lost its base (got %0d)",
-                     dut.dmem_fc[{dut.dmem_gen, QUIETBUS[8:0]}]);
+                     dut.dmem_fc[{dut.dmem_page, QUIET_DMEM[8:0]}]);
             errors = errors + 1;
         end else
             $display("unproduced bus: base persists");
 
-        // 5. the read port returns what the live generation holds
-        @(negedge clk); rd_a = TESTBUS[8:0];
+        // 5. the read port returns what the live page holds
+        @(negedge clk); rd_a = TEST_DMEM[8:0];
         repeat (3) @(posedge clk);
         if (rd_gl_d !== MARK_A) begin
             $display("FAIL: read port returned %0d, want %0d", rd_gl_d, MARK_A);

@@ -1,15 +1,15 @@
 //--------------------------------------------------------------------
-// tb_element_pipeline.sv — 256-element SCMO pipeline testbench
+// tb_partial_pipeline.sv — 256-partial TDM pipeline testbench
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Checks:
-//   1. drum cadence: sample_tick every 768 cycles, high 1 cycle
-//   2. voice span: exactly 256 voices enter per sample period
-//   3. oscillator: per-voice phase advance == LUT delta each period
+//   1. timebase cadence: sample_tick every 768 cycles, high 1 cycle
+//   2. partial span: exactly 256 partials enter per sample period
+//   3. oscillator: per-partial phase advance == LUT delta each period
 //   4. SVF dynamics: both filter state pairs leave zero
-//   5. attenuation: s10_out == (s9_elem * lin) >>> 16, exact
+//   5. attenuation: s10_out == (s9_sample * lin) >>> 16, exact
 //   6. mixer: mix_left/right == sat24(sum of s10 outputs << 10)
 //      (through the master limiter at unity gain: levels stay under
 //      its -6 dBFS threshold; published 10 cycles after the tick),
@@ -21,7 +21,7 @@
 //--------------------------------------------------------------------
 `timescale 1ns / 1ps
 
-module tb_element_pipeline;
+module tb_partial_pipeline;
 
     //----------------------------------------------------------------
     // Clocks and reset
@@ -31,27 +31,27 @@ module tb_element_pipeline;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;          // ~73.728 MHz
 
-    logic        sample_tick, lane_enter;
+    logic        sample_tick, slot_issue;
     logic [9:0]  slot;
     logic signed [23:0] mix_left, mix_right;
 
-    drum #(.CYCLES(768), .NUM_LANES(256)) u_drum (
+    timebase #(.CYCLES(768), .NUM_ISSUE_SLOTS(256)) u_timebase (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick),
-        .lane_enter(lane_enter),
+        .slot_issue(slot_issue),
         .slot(slot)
     );
 
-    element_pipeline #(.NUM_ELEMENTS(256),
+    partial_pipeline #(.NUM_PARTIALS(256),
         // committed reference fixtures — immune to bench-local edits
         // of scripts/gen_boot_image.py regenerating the tree hexes
         .P0_HEX("tb/ref_boot_p0.hex"), .P1_HEX("tb/ref_boot_p1.hex"),
         .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
     ) u_pipe (
         .clk(clk), .rst_n(rst_n),
-        .slot(slot), .lane_enter(lane_enter), .sample_tick(sample_tick),
-        .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
-        .elem_write_index(8'b0), .elem_write_data(32'b0),   // no SPI
+        .slot(slot), .slot_issue(slot_issue), .sample_tick(sample_tick),
+        .sclk(1'b0), .partial_write_enable(1'b0), .partial_write_word(3'b0),
+        .partial_write_index(8'b0), .partial_write_data(32'b0),   // no SPI
         .swap_toggle(1'b0),                                    // writes in
         .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
         .dmem_wr_toggle(1'b0),
@@ -98,8 +98,8 @@ module tb_element_pipeline;
     // attenuation cross-check pipeline — two-deep history: S9B sits
     // between S9 and S10 (timing split), so s10 registers are driven by
     // s9 values from TWO cycles back
-    integer prev_s9_elem = 0,  prev_s9_atten_l = 0;
-    integer prev2_s9_elem = 0, prev2_s9_atten_l = 0;
+    integer prev_s9_sample = 0,  prev_s9_atten_l = 0;
+    integer prev2_s9_sample = 0, prev2_s9_atten_l = 0;
 
     function automatic longint sat24_impl(input longint x);
         // x: Q0.24-ish (unbounded); clamp to signed 24-bit
@@ -135,20 +135,20 @@ module tb_element_pipeline;
         // values from two cycles back (S9B decode stage in between)
         if (u_pipe.s10_valid) begin
             integer expect_out;
-            expect_out = (prev2_s9_elem * lin_of(prev2_s9_atten_l)) >>> 16;
+            expect_out = (prev2_s9_sample * lin_of(prev2_s9_atten_l)) >>> 16;
             if (u_pipe.s10_outl !== expect_out[17:0]) begin
                 $display("FAIL atten: voice %0d s10_outl=%h expect=%h",
                          u_pipe.s10_idx, u_pipe.s10_outl, expect_out[17:0]);
                 errors = errors + 1;
             end
         end
-        prev2_s9_elem = prev_s9_elem;
+        prev2_s9_sample = prev_s9_sample;
         prev2_s9_atten_l    = prev_s9_atten_l;
-        prev_s9_elem  = $signed(u_pipe.s9_elem);
+        prev_s9_sample  = $signed(u_pipe.s9_sample);
         prev_s9_atten_l     = u_pipe.s9_atten_l;
 
-        // drum cadence + span accounting at the sample boundary
-        // (guard with rst_n: the drum sits at slot 0 while held in reset)
+        // timebase cadence + span accounting at the sample boundary
+        // (guard with rst_n: the timebase sits at slot 0 while held in reset)
         if (sample_tick && rst_n) begin
             if (slot != 0) begin
                 $display("FAIL tick: sample_tick with slot=%0d", slot);
@@ -262,8 +262,8 @@ module tb_element_pipeline;
 
     initial begin
         #40 rst_n = 1'b1;
-        $dumpfile("tb_element_pipeline.vcd");
-        $dumpvars(0, tb_element_pipeline);
+        $dumpfile("tb_partial_pipeline.vcd");
+        $dumpvars(0, tb_partial_pipeline);
     end
 
 endmodule

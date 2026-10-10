@@ -5,12 +5,12 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Audio:  256-element SCMO pipeline ("the drum") → SPDIF + I2S.
+// Audio:  256-partial time-division-multiplexed pipeline → SPDIF + I2S.
 //         The 48 kHz SPDIF (pin 27) is the PRIMARY audio path:
 //         coax for listening AND an LED-TOSLINK tap into the dev
 //         box for bit-perfect capture. The 96 kHz SPDIF is parked
 //         on pin 86.
-// Timing: drum.sv owns every timebase — the sample boundary
+// Timing: timebase.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the SPDIF cell boundary
 //         (6 sysclk = 1 cell), and their half-rate 48 kHz
 //         counterparts — all counted from one reset.
@@ -44,17 +44,17 @@ module top (
     wire rst_n = ~rst;
 
     //----------------------------------------------------------------
-    // Drum — the sole timebase
+    // Timebase — the single source of sample and slot timing
     //----------------------------------------------------------------
-    logic       sample_tick, lane_enter, cell_tick;
+    logic       sample_tick, slot_issue, cell_tick;
     logic       sample_tick48, cell_tick48;
     logic [9:0] slot;
 
-    drum u_drum (
+    timebase u_timebase (
         .clk           (sysclk),
         .rst_n         (rst_n),
         .sample_tick   (sample_tick),
-        .lane_enter    (lane_enter),
+        .slot_issue    (slot_issue),
         .cell_tick     (cell_tick),
         .sample_tick48 (sample_tick48),
         .cell_tick48   (cell_tick48),
@@ -62,14 +62,14 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 256-element pipeline
+    // 256-partial pipeline
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    logic        elem_write_enable;
-    logic [2:0]  elem_write_word;
-    logic [7:0]  elem_write_index;
-    logic [31:0] elem_write_data;
+    logic        partial_write_enable;
+    logic [2:0]  partial_write_word;
+    logic [7:0]  partial_write_index;
+    logic [31:0] partial_write_data;
     logic        swap_toggle;
     logic [9:0]  dmem_wr_addr;
     logic [17:0] dmem_wr_data;
@@ -80,17 +80,17 @@ module top (
                             // truncates entries, so size it from the pool
     logic [31:0] imem_write_data;
 
-    element_pipeline u_elem_pipeline (
+    partial_pipeline u_partial_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .slot        (slot),
-        .lane_enter  (lane_enter),
+        .slot_issue  (slot_issue),
         .sample_tick (sample_tick),
         .sclk        (sclk),
-        .elem_write_enable       (elem_write_enable),
-        .elem_write_word     (elem_write_word),
-        .elem_write_index     (elem_write_index),
-        .elem_write_data    (elem_write_data),
+        .partial_write_enable       (partial_write_enable),
+        .partial_write_word     (partial_write_word),
+        .partial_write_index     (partial_write_index),
+        .partial_write_data    (partial_write_data),
         .dmem_wr_addr     (dmem_wr_addr),
         .dmem_wr_data     (dmem_wr_data),
         .dmem_wr_toggle      (dmem_wr_toggle),
@@ -109,7 +109,7 @@ module top (
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
     // Midband deliberately: coupling caps in an analog chain
     // attenuate low tones, and 1500 Hz measures flat. Enabled by
-    // bus-address-1023 writes (firmware maps CC 119); replaces the mix
+    // DMEM-address-511 writes (firmware maps CC 119); replaces the mix
     // at BOTH outputs. At 48 kHz capture the tone lands exactly on
     // bin 32 of a 1024-point FFT — coherent, no window, harmonics on
     // exact bins (64, 96, ...). The purity criterion: any harmonic
@@ -133,21 +133,21 @@ module top (
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
     //----------------------------------------------------------------
-    // Output tilt (output_tilt.sv): one-pole 6 dB/oct lowpass on the
+    // Output low-pass (output_lpf.sv): one-pole 6 dB/oct lowpass on the
     // mix, corner ≈ 2 kHz — the ear-tuned warm stop. Error
     // feedback inside the module makes it settle to EXACT zero on
     // silence. Sits BEFORE the test-tone mux so the purity
     // reference stays unfiltered.
     //----------------------------------------------------------------
     logic signed [23:0] lpf_l, lpf_r;
-    output_tilt #(.SHIFT(3)) u_tilt_l (
+    output_lpf #(.SHIFT(3)) u_lpf_l (
         .clk   (sysclk),
         .rst_n (rst_n),
         .tick  (sample_tick),
         .in    (sample_left),
         .out   (lpf_l)
     );
-    output_tilt #(.SHIFT(3)) u_tilt_r (
+    output_lpf #(.SHIFT(3)) u_lpf_r (
         .clk   (sysclk),
         .rst_n (rst_n),
         .tick  (sample_tick),
@@ -179,7 +179,7 @@ module top (
     // hence the second transmitter instead of a tap on the 96 kHz one.
     // Decimation by 2 with pair averaging: a 2-tap boxcar whose null
     // sits at 48 kHz — content near that Nyquist (24 kHz) is already
-    // crushed by the 2 kHz master tilt, so a longer filter is not
+    // crushed by the 2 kHz output low-pass, so a longer filter is not
     // warranted. sample_tick48 coincides with a sample_tick, so
     // out_left/out_right below are the very values the 96 kHz
     // transmitter latches on the same edge: the held register is the
@@ -238,10 +238,10 @@ module top (
         .miso     (miso),
         .sysclk   (sysclk),
         .rst_n    (rst_n),
-        .elem_write_enable    (elem_write_enable),
-        .elem_write_word  (elem_write_word),
-        .elem_write_index  (elem_write_index),
-        .elem_write_data (elem_write_data),
+        .partial_write_enable    (partial_write_enable),
+        .partial_write_word  (partial_write_word),
+        .partial_write_index  (partial_write_index),
+        .partial_write_data (partial_write_data),
         .dmem_wr_addr  (dmem_wr_addr),
         .dmem_wr_data  (dmem_wr_data),
         .dmem_wr_toggle   (dmem_wr_toggle),

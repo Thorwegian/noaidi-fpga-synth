@@ -7,15 +7,15 @@ export PATH := /opt/oss-cad-suite/bin:$(PATH)
 # failed synthesis instead of silently routing a stale netlist.
 SHELL := /bin/bash
 
-# Mainline: 256-element pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
+# Mainline: 256-partial pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
-	dsp/drum.sv \
-	dsp/output_tilt.sv \
+	dsp/timebase.sv \
+	dsp/output_lpf.sv \
 	dsp/limiter.sv \
-	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
+	dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv \
 	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
@@ -27,7 +27,7 @@ SRC = $(PKG) $(MOD) constraints.cst
 # Generated LUTs / boot image
 LUTS = \
 	dsp/phase_lut.hex \
-	dsp/svf_k_lut.hex \
+	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
 	dsp/att_lut.hex \
@@ -44,7 +44,7 @@ all: pack.fs
 dsp/phase_lut.hex: ../scripts/gen_phase_lut.py
 	python3 $<
 
-dsp/svf_k_lut.hex: ../scripts/gen_svf_lut.py
+dsp/svf_fc_lut.hex: ../scripts/gen_svf_lut.py
 	python3 $<
 
 dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
@@ -83,7 +83,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # with same sink wire"), others fail with "Failed to find a route".
 # Bump SEED when a netlist change hits either — it is placement luck,
 # not (necessarily) real congestion. `make timing-sweep` compares seeds.
-SEED ?= 8
+SEED ?= 7
 
 # ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
@@ -134,8 +134,9 @@ timing-sweep: yosys.json
 	done; wait
 	@for s in $(SEEDS); do \
 		printf "seed %-4s " $$s; \
-		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {print $$NF, $$0}' \
-			/tmp/tsweep/$$s.log | grep drum || echo "(no result)"; \
+		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {match($$0, /: [0-9.]+ MHz/); \
+			print substr($$0, RSTART+2, RLENGTH-6), $$0}' /tmp/tsweep/$$s.log | sort -n | head -1 | \
+			cut -d' ' -f2- | grep . || echo "(no result)"; \
 	done
 
 sram: pack.fs
@@ -180,36 +181,36 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
-TB_ELEM = tb/tb_element_pipeline.sv
+SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
+TB_PARTIAL = tb/tb_partial_pipeline.sv
 
-obj_dir/tb_element_pipeline/sim: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_ELEM) $(VL_DSP)
+obj_dir/tb_partial_pipeline/sim: $(SIM_MOD) $(TB_PARTIAL) $(LUTS) Makefile
+	$(VERILATE) $(SIM_MOD) $(TB_PARTIAL) $(VL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a
 # fixed order afterwards. Suite wall-clock collapses to the longest
 # bench. Read a single bench with: make sim-prog-boot && cat tb/sim-prog-boot.out
-sim-elem: obj_dir/tb_element_pipeline/sim
-	$(call run_sim,$<,tb/sim-elem.out)
+sim-partial: obj_dir/tb_partial_pipeline/sim
+	$(call run_sim,$<,tb/sim-partial.out)
 
 TB_SPDIF = tb/tb_spdif_block.sv
-obj_dir/tb_spdif_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
+obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
 sim-spdif: obj_dir/tb_spdif_block/sim
 	$(call run_sim,$<,tb/sim-spdif.out)
 
-# 48 kHz (primary) transmitter: drum's half-rate ticks + CS_FREQ
+# 48 kHz (primary) transmitter: timebase's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
-obj_dir/tb_spdif48_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
-	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48)
 
 sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)
 
-PROG_COMMON = tb/elem_prog_common.svh
+PROG_COMMON = tb/partial_prog_common.svh
 
 obj_dir/tb_prog_%/sim: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
 	$(VERILATE) $(SIM_MOD) spi/spi_bus.sv $< $(VL_DSP)
@@ -226,9 +227,9 @@ sim-prog-bus: obj_dir/tb_prog_bus/sim
 sim-prog-sources: obj_dir/tb_prog_sources/sim
 	$(call run_sim,$<,tb/sim-prog-sources.out)
 
-# The ping-pong bus generation. Timing and resource numbers
-# cannot tell a right-generation read from a wrong one, and hardware
-# cannot see the bus at all -- these invariants only exist in sim.
+# The ping-pong DMEM page. Timing and resource numbers
+# cannot tell a right-page read from a wrong one, and hardware
+# cannot see DMEM at all -- these invariants only exist in sim.
 sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
 	$(call run_sim,$<,tb/sim-prog-pingpong.out)
 
@@ -277,14 +278,14 @@ obj_dir/tb_svf_stability/sim: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
 sim-stab: obj_dir/tb_svf_stability/sim
 	$(call run_sim,$<,tb/sim-stab.out)
 
-# Output tilt error feedback: exact-zero convergence on
+# Output low-pass error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
-TB_TILT = tb/tb_tilt.sv
-obj_dir/tb_tilt/sim: dsp/output_tilt.sv $(TB_TILT) Makefile
-	$(VERILATE) dsp/output_tilt.sv $(TB_TILT)
+TB_OUTPUT_LPF = tb/tb_output_lpf.sv
+obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv $(TB_OUTPUT_LPF) Makefile
+	$(VERILATE) dsp/output_lpf.sv $(TB_OUTPUT_LPF)
 
-sim-tilt: obj_dir/tb_tilt/sim
-	$(call run_sim,$<,tb/sim-tilt.out)
+sim-output-lpf: obj_dir/tb_output_lpf/sim
+	$(call run_sim,$<,tb/sim-output-lpf.out)
 
 # The pulse oscillator must average to ZERO at every duty. A bare
 # comparator is only centred at 50%: with phase sweeping the full signed range
@@ -308,16 +309,16 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
+sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
-     sim-stab sim-tilt sim-limiter
+     sim-stab sim-output-lpf sim-limiter
 	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
-	     tb/sim-elem.out tb/sim-spdif.out \
+	     tb/sim-partial.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
 	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
-	     tb/sim-stab.out tb/sim-tilt.out tb/sim-limiter.out
+	     tb/sim-stab.out tb/sim-output-lpf.out tb/sim-limiter.out
 	@# A bench that FAILS must fail the build. Before this, `make sim`
 	@# printed "3 FAILURE(S)" and still exited 0, because this target only
 	@# cats the output -- the same shape as a failed yosys still producing a
@@ -328,4 +329,4 @@ sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif si
 	fi
 
 clean:
-	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex obj_dir
+	rm -rf *.log *.json *.fs dsp/svf_fc_lut.hex obj_dir

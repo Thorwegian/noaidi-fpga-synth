@@ -23,7 +23,7 @@
 `default_nettype none
 module tb_prog_limiter;
 
-`include "tb/elem_prog_common.svh"
+`include "tb/partial_prog_common.svh"
 
     localparam longint RAIL = 64'd8388608;                // Q0.24 full scale
     localparam [31:0] GAIN_0DB_BOTH  = 32'h0000FFFF;      // 0 dB L+R
@@ -58,11 +58,11 @@ module tb_prog_limiter;
         integer i;
         begin
             for (i = 0; i < 8; i = i + 1) begin
-                spi_word_write(elem_addr(i, W_OSC),    OSC_SINE_C4);
-                spi_word_write(elem_addr(i, W_DUTY),   32'h0);
-                spi_word_write(elem_addr(i, W_FILTER), FILTER_OPEN);
-                spi_word_write(elem_addr(i, W_GAIN),   gainword);
-                spi_word_write(elem_addr(i, W_GATE),   32'h1);
+                spi_word_write(partial_addr(i, W_OSC),    OSC_SINE_C4);
+                spi_word_write(partial_addr(i, W_DUTY),   32'h0);
+                spi_word_write(partial_addr(i, W_FILTER), FILTER_OPEN);
+                spi_word_write(partial_addr(i, W_GAIN),   gainword);
+                spi_word_write(partial_addr(i, W_GATE),   32'h1);
             end
         end
     endtask

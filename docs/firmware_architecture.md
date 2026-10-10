@@ -4,7 +4,7 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 Three modules on the existing event bus;
-one owner for SPI and the bank-swap discipline.
+one owner for SPI and the page-swap discipline.
 
 ```
 UART1 ──► midi_in ──event bus──► synth model ──cmd queue──► engine link ──SPI──► FPGA
@@ -20,24 +20,24 @@ event bus. Knows nothing about voices or the FPGA.
 ## synth model
 
 Subscribes to MIDI events. Owns **all musical state** and every
-musical decision: voice allocation (which of the 256 elements plays which
+musical decision: voice allocation (which of the 256 partials plays which
 note), unison grouping, detune/pan baking, CC → parameter mapping,
 channel programs. Emits abstract engine commands ("voice 17: these
 params, gate on") into a FreeRTOS queue.
 
 ## engine link
 
-The **single owner** of the SPI bus and of the shadow-bank discipline.
+The **single owner** of the SPI bus and of the shadow-page discipline.
 Nothing else in the firmware may call `fpga_word_write`/`fpga_swap`
 once `engine_link_init()` has run (`main.c`'s boot SPI self-test
 writes directly before that).
 
 - Keeps a full RAM image of the parameter space. Commands mutate the
-  image; the link writes dirty words to the shadow bank and swaps.
-- The mirror-both-banks rule ("after a swap the new shadow holds the
-  previous generation") is implemented here, in exactly one place:
+  image; the link writes dirty words to the shadow page and swaps.
+- The mirror-both-pages rule ("after a swap the new shadow page is
+  one write batch behind") is implemented here, in exactly one place:
   after a swap, the link re-writes the words dirtied by the previous
-  generation. Callers never think about banks.
+  write batch. Callers never think about pages.
 - Runs on a **fixed 1 kHz tick** (matches MIDI's practical event
   ceiling): each tick drains the queue, coalesces writes, performs one
   write-batch + swap if anything changed. Bounded swap rate, natural
@@ -55,8 +55,8 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down, gate bus 1, envelope gated on |
-| `V_RELEASING` | key up, gate bus 0, release tail still audible |
+| `V_HELD` | key down, gate DMEM word 1, envelope gated on |
+| `V_RELEASING` | key up, gate DMEM word 0, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
@@ -64,7 +64,7 @@ different facts:
 - **Tail end**: at note-off the firmware estimates when the release
   tail ends, from the amp envelope's release rate, and once
   `esp_timer` passes that deadline it promotes the voice to IDLE and
-  mutes its elements (GATE off). The check runs in the note-on
+  mutes its partials (GATE off). The check runs in the note-on
   allocation scan and in the voice task's periodic sweep — no timer
   task. This estimate-and-mute is to be replaced by linear gain.
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
@@ -85,8 +85,8 @@ stays a dumb, fast executor. No special path.
 
 ## Command format
 
-- Commands are `engine_param_cmd_t {elem, word, value}` structs
-  (`engine_link.h`); the engine link translates element and word to
+- Commands are `engine_param_cmd_t {partial, word, value}` structs
+  (`engine_link.h`); the engine link translates partial and word to
   addresses.
 - The command queue holds 1024 entries; on overflow
   `engine_link_param_write()` drops the command.

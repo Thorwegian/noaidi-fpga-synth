@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Hardware test: LFO2 -> CUTOFF through the send graph.
+"""Hardware test: LFO2 -> CUTOFF through the MAC graph.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-The first route that NEEDS the bus-sum read: LFO2 (a walker source)
-writes the channel cut bus, and the 32 per-voice sends relay its
-contribution into the voice cutoff buses. Reading the firmware-held
-base instead of the bus sum makes this invisible by construction, so
-a measured filter wobble IS the bus-sum RAM working on silicon.
+The first route that NEEDS the DMEM-sum read: LFO2 (a CSP instruction)
+writes the channel cut DMEM word, and the 32 per-voice MAC instructions
+relay its contribution into the voice cutoff DMEM words. Reading the
+firmware-held base instead of the DMEM sum makes this invisible by
+construction, so a measured filter wobble IS the DMEM-sum RAM working on
+silicon.
 
 Method: saw pad, corner mid-dark, velocity off; hold one note 3 s
 and slice the capture into 100 ms windows. With LFO2 -> cutoff at
@@ -110,7 +111,7 @@ def main():
 
         if results["wobble"] < 6:
             failures.append(f"wobble swing {results['wobble']:.1f} dB < 6 - "
-                            "LFO not reaching cutoff through the sends")
+                            "LFO not reaching cutoff through the MAC instructions")
         if results["still"] > 3:
             failures.append(f"still swing {results['still']:.1f} dB > 3 - "
                             "wobble without depth (state leak?)")
@@ -135,7 +136,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("PASS: LFO2 contribution relayed through the send graph")
+    print("PASS: LFO2 contribution relayed through the MAC graph")
     return 0
 
 

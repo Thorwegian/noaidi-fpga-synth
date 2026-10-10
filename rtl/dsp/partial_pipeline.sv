@@ -1,27 +1,29 @@
 //--------------------------------------------------------------------
-// element_pipeline.sv — 256-element SCMO pipeline (the drum's lanes)
+// partial_pipeline.sv — 256-partial time-division-multiplexed pipeline
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// One element enters a lane every sysclk cycle for 256 cycles of
-// each sample period (drum slot 0..255).  Every cycle, every stage
-// processes a different element: stage Sk at drum slot t holds the
-// element that entered at slot t-k.  The pipeline is 26 stages deep
-// (s10_valid follows s1_valid by 24 cycles in tb_element_pipeline), so it
+// The partial pipeline is a time-division-multiplexed pipeline: one
+// datapath, 256 partials, one per clock. One partial enters the
+// pipeline every sysclk cycle for 256 cycles of each sample period
+// (time slot 0..255).  Every cycle, every stage processes a different
+// partial: stage Sk at time slot t holds the partial that entered at
+// slot t-k.  The pipeline is 26 stages deep
+// (s10_valid follows s1_valid by 24 cycles in tb_partial_pipeline), so it
 // occupies 256 + 26 - 1 = 281 contiguous slots (~37% of the 768-slot
-// drum rotation).
+// sample period).
 //
 // Stage map:
 //   S0  state/param RAM read address issued
 //   S1  state/param RAM read data available
-//   S2  issue phase-increment + SVF-K LUT reads
+//   S2  issue phase-increment + svf_fc_lut reads
 //   S3  LUT data → phase_inc, K, q1; phase_next = phase + phase_inc (ONE adder)
 //   S3B register phase_next / barrel-shifted K / q1 / duty / wave
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
 //   S3D resonance attenuation multiply on registered operands (DSP)
 //   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
-//       7 per 2-pole section); its output is the element output
+//       7 per 2-pole section); its output is the partial output
 //   S9B attenuation decode: lin gains via LUT + barrel shift
 //   S10 attenuation multiply on registered operands      (DSP); its
 //       output is accumulated into the mix and the state written back
@@ -31,10 +33,10 @@
 // real silicon at 98.304 MHz (audible corruption, clean at half
 // clock) — paths nextpnr's approximate timing model passes. Rule: a
 // stage is adds/decode-only or multiply-only, never both chained.
-// S3B is the last of the class: when per-element fc gives consecutive
-// lanes different K shift amounts, a chord screams in the left
-// channel, because the glitched lane after a group boundary is a
-// left-panned element. No known residual of this class remains.
+// S3B is the last of the class: when per-partial fc gives consecutive
+// partials different K shift amounts, a chord screams in the left
+// channel, because the glitched issue slot after a group boundary
+// carries a left-panned partial. No known residual of this class remains.
 //
 // Number formats (design doc):
 //   phase      UQ0.24  (24-bit)
@@ -44,13 +46,13 @@
 //   pitch/fc   UQ4.10  (14-bit)
 //   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
 //
-// State RAM is semi dual-port: read address is issued with the element
+// State RAM is semi dual-port: read address is issued with the partial
 // entering at S0, writeback happens 25 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
-module element_pipeline #(
-    parameter int NUM_ELEMENTS = synth_pkg::NUM_ELEMENTS,
+module partial_pipeline #(
+    parameter int NUM_PARTIALS = synth_pkg::NUM_PARTIALS,
     // Boot parameter images. Synthesis uses the tree's generated
     // images; testbenches override with rtl/tb/ref_boot_* (committed
     // fixtures) so bench expectations never depend on bench-local
@@ -64,37 +66,37 @@ module element_pipeline #(
     input  logic           rst_n,
 
     input  logic [9:0]     slot,
-    input  logic           lane_enter,
+    input  logic           slot_issue,
     input  logic           sample_tick,
 
-    // Per-element parameter writes from the SPI control plane.
+    // Per-partial parameter writes from the SPI control plane.
     // sclk-domain write port on the param RAMs; the pipeline reads on
     // clk (sysclk) — the dual-clock BSRAM is the CDC (design doc).
     //
-    // PING-PONG (memory map decision 7): the banks are doubled —
+    // PING-PONG (memory map decision 7): the pages are doubled —
     // reads always hit the ACTIVE half, writes always the SHADOW half,
     // so a read and a write can never collide on one address (the
     // click-on-sweep bug). swap_toggle (an sclk-domain toggle from
-    // CTRL@0x0002) flips the active half at drum slot 512: the
+    // CTRL@0x0002) flips the active half at time slot 512: the
     // pipeline is drained there (the span ends at slot 280), so every sample's
-    // 256 elements read one consistent bank generation.
+    // 256 partials read one consistent page.
     input  logic           sclk,
-    input  logic           elem_write_enable,
-    input  logic [2:0]     elem_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
+    input  logic           partial_write_enable,
+    input  logic [2:0]     partial_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
 
-    // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
-    // Synced here and committed to bus RAM only in an idle drum slot,
-    // so a commit never collides with a lane's bus read.
+    // DMEM-write mailbox from spi_bus (sclk-domain toggle + payload).
+    // Synced here and committed to DMEM only in an idle time slot,
+    // so a commit never collides with a partial's DMEM read.
     input  logic [9:0]     dmem_wr_addr,
     input  logic [17:0]    dmem_wr_data,
     input  logic           dmem_wr_toggle,
 
-    // Instruction table writes (sclk domain, banked — wiring per law 4)
+    // Instruction table writes (sclk domain, paged — wiring per law 4)
     input  logic           imem_write_enable,
     input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]}
     input  logic [31:0]    imem_write_data,
-    input  logic [7:0]     elem_write_index,
-    input  logic [31:0]    elem_write_data,
+    input  logic [7:0]     partial_write_index,
+    input  logic [31:0]    partial_write_data,
     input  logic           swap_toggle,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
@@ -104,21 +106,21 @@ module element_pipeline #(
                                              // every consumer latches it
     output logic signed [23:0] mix_right,
 
-    // Test-tone control (audio-chain purity check): bus
-    // address 1023 is reserved as a control latch — bit 0 enables the
+    // Test-tone control (audio-chain purity check): DMEM
+    // address 511 is reserved as a control latch — bit 0 enables the
     // top-level 1500 Hz full-scale sine that replaces the mix at the
-    // outputs. Latched here because the bus mailbox already has the
-    // sclk→sysclk CDC; no pointer ever references bus 1023.
+    // outputs. Latched here because the DMEM mailbox already has the
+    // sclk→sysclk CDC; no pointer ever references DMEM word 511.
     output logic           test_tone_en
 );
 
-    localparam int VW = $clog2(NUM_ELEMENTS);   // element index width
+    localparam int VW = $clog2(NUM_PARTIALS);   // partial index width
 
     //----------------------------------------------------------------
     // LUT ROMs (combinational reads)
     //----------------------------------------------------------------
     reg [23:0] phase_lut [0:1023];     // osc phase increment, one octave
-    reg [15:0] k_lut     [0:1023];     // SVF K mantissa, one octave
+    reg [15:0] svf_fc_lut     [0:1023];     // SVF K mantissa, one octave
     reg [16:0] q1_lut    [0:15];       // SVF damping mantissa, one
                                        // octave of the log2 resonance
                                        // code (q1 = sqrt2 * 2^-r) in
@@ -129,28 +131,28 @@ module element_pipeline #(
                                        // LUTs, no BSRAM block
     reg [16:0] att_lut   [0:15];       // log-gain fractional part
     reg [15:0] reso_att_lut [0:63];    // resonance-indexed input
-                                       // attenuation, UQ0.16 (dual)
+                                       // attenuation, UQ0.16 (cascade)
 
     initial begin
         $readmemh("dsp/phase_lut.hex", phase_lut);
-        $readmemh("dsp/svf_k_lut.hex", k_lut);
+        $readmemh("dsp/svf_fc_lut.hex", svf_fc_lut);
         $readmemh("dsp/q1_lut.hex", q1_lut);
         $readmemh("dsp/att_lut.hex", att_lut);
         $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
     end
 
     //----------------------------------------------------------------
-    // Per-element internal state RAM — semi dual-port
-    // read address: entering element (S0), write: 25 cycles later
+    // Per-partial internal state RAM — semi dual-port
+    // read address: entering partial (S0), write: 25 cycles later
     //----------------------------------------------------------------
-    reg signed [23:0] phase_ram  [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic1eq1_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic2eq1_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic1eq2_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic2eq2_ram [0:NUM_ELEMENTS-1];
+    reg signed [23:0] phase_ram  [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic1eq1_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic2eq1_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic1eq2_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic2eq2_ram [0:NUM_PARTIALS-1];
 
     //----------------------------------------------------------------
-    // Per-element parameter RAM — SPI-writable (sclk write port below),
+    // Per-partial parameter RAM — SPI-writable (sclk write port below),
     // hex init is the boot image
     //
     //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
@@ -162,74 +164,74 @@ module element_pipeline #(
     //             (0x00 = silence/exact mute .. 0xFF = loudest;
     //              inverted to the attenuation code at the effective-
     //              parameter seam)
-    //   p3[16]    24 dB mode       p3[18:17] filter type
+    //   p3[16]    cascade (24 dB)  p3[18:17] filter type
     //----------------------------------------------------------------
-    // Doubled for ping-pong: {bank, voice} addressing, both halves
+    // Doubled for ping-pong: {page, partial} addressing, both halves
     // initialized to the boot image so an unwritten shadow is sane
     // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
-    reg [35:0] osc_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] duty_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] filter_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] gain_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] osc_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] duty_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] filter_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] gain_param_ram [0:2*NUM_PARTIALS-1];
 
-    // Pointer words: per-element bus pointers, three 10-bit fields
+    // Pointer words: per-partial DMEM pointers, three 10-bit fields
     // each. +5 (PTRS0): [9:0] pitch, [19:10] duty, [29:20] cutoff.
     // +6 (PTRS1): [9:0] Q, [19:10] gain L, [29:20] gain R. Pointers
-    // are wiring, so they ride the ping-pong banks like every
-    // parameter. Init 0: every parameter points at bus 0 (hardwired
-    // zero), so boot behavior is exactly the pre-bus behavior.
-    reg [29:0] ptrs0_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [29:0] ptrs1_param_ram [0:2*NUM_ELEMENTS-1];
+    // are wiring, so they ride the ping-pong pages like every
+    // parameter. Init 0: every parameter points at DMEM word 0 (hardwired
+    // zero), so boot behavior is exactly the unmodulated behavior.
+    reg [29:0] ptrs0_param_ram [0:2*NUM_PARTIALS-1];
+    reg [29:0] ptrs1_param_ram [0:2*NUM_PARTIALS-1];
     integer pi;
-    initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1) begin
+    initial for (pi = 0; pi < 2*NUM_PARTIALS; pi = pi + 1) begin
         ptrs0_param_ram[pi] = 30'd0;
         ptrs1_param_ram[pi] = 30'd0;
     end
 
     // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
-    // Gate 0 silences the element (gain decode forced to exact mute);
+    // Gate 0 silences the partial (gain decode forced to exact mute);
     // the oscillator and filters free-run regardless. This is NOT an
     // ADSR trigger: envelopes are sequencer SOURCES, gated by a control
-    // input (a gate bus shared across a voice's elements), rather than
-    // element traits. GATE's only job is the exact-mute path, and
-    // dropping GATE and RETRIG as element parameters entirely is under
+    // input (a gate DMEM word shared across a voice's partials), rather than
+    // partial traits. GATE's only job is the exact-mute path, and
+    // dropping GATE and RETRIG as partial parameters entirely is under
     // discussion.
-    // Both banks boot gated ON so the boot image keeps sounding (the
+    // Both pages boot gated ON so the boot image keeps sounding (the
     // power-up liveness check).
-    reg [1:0] gate_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [1:0] gate_param_ram [0:2*NUM_PARTIALS-1];
     integer gi;
-    initial for (gi = 0; gi < 2*NUM_ELEMENTS; gi = gi + 1)
+    initial for (gi = 0; gi < 2*NUM_PARTIALS; gi = gi + 1)
         gate_param_ram[gi] = 2'b01;
 
     initial begin
-        $readmemh(P0_HEX, osc_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, duty_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, filter_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, gain_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P0_HEX, osc_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, duty_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, filter_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, gain_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P0_HEX, osc_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P1_HEX, duty_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P2_HEX, filter_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P3_HEX, gain_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P0_HEX, osc_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P1_HEX, duty_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P2_HEX, filter_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P3_HEX, gain_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
     end
 
     //----------------------------------------------------------------
-    // Bank control: active half (sysclk) flips at drum slot 512 when a
+    // Page control: active half (sysclk) flips at time slot 512 when a
     // swap is pending; the sclk write side steers by a synced
-    // complement of the active bank (memory map wording, literally).
+    // complement of the active page (memory map wording, literally).
     //----------------------------------------------------------------
-    logic bank_active;
+    logic page_active;
     logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_toggle sync (sysclk)
     logic swap_pending;
 
     initial begin
-        bank_active  = 1'b0;
+        page_active  = 1'b0;
         {swap_toggle_meta, swap_toggle_sync, swap_toggle_prev} = '0;
         swap_pending = 1'b0;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            bank_active  <= 1'b0;
+            page_active  <= 1'b0;
             swap_toggle_meta <= 1'b0; swap_toggle_sync <= 1'b0; swap_toggle_prev <= 1'b0;
             swap_pending <= 1'b0;
         end else begin
@@ -239,25 +241,25 @@ module element_pipeline #(
             if (swap_toggle_sync != swap_toggle_prev)
                 swap_pending <= 1'b1;
             else if (swap_pending && slot == synth_pkg::SWAP_SLOT[9:0]) begin
-                bank_active  <= ~bank_active;
+                page_active  <= ~page_active;
                 swap_pending <= 1'b0;
             end
         end
     end
 
     // write side: shadow = complement of active, synced into sclk
-    logic bank_active_meta, bank_active_sync;
-    initial {bank_active_meta, bank_active_sync} = '0;
+    logic page_active_meta, page_active_sync;
+    initial {page_active_meta, page_active_sync} = '0;
     always_ff @(posedge sclk) begin
-        bank_active_meta <= bank_active;
-        bank_active_sync <= bank_active_meta;
+        page_active_meta <= page_active;
+        page_active_sync <= page_active_meta;
     end
-    wire bank_shadow = ~bank_active_sync;
+    wire page_shadow = ~page_active_sync;
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
     initial begin
-        for (i0 = 0; i0 < NUM_ELEMENTS; i0 = i0 + 1) begin
+        for (i0 = 0; i0 < NUM_PARTIALS; i0 = i0 + 1) begin
             phase_ram[i0]  = '0;
             ic1eq1_ram[i0] = '0;
             ic2eq1_ram[i0] = '0;
@@ -268,13 +270,13 @@ module element_pipeline #(
 
 
     //----------------------------------------------------------------
-    // S0/S1 — RAM reads (address = element entering this cycle)
+    // S0/S1 — RAM reads (address = partial entering this cycle)
     //
     // Sync-only process: yosys memory inference (BSRAM read port).
     // Read data validity is gated by s1_valid, so no reset is needed.
     //----------------------------------------------------------------
-    logic [VW-1:0] elem_read_index;
-    assign elem_read_index = lane_enter ? slot[VW-1:0] : '0;
+    logic [VW-1:0] partial_read_index;
+    assign partial_read_index = slot_issue ? slot[VW-1:0] : '0;
 
     logic        s1_valid;
     logic [VW-1:0] s1_idx;
@@ -284,49 +286,48 @@ module element_pipeline #(
     logic [13:0] s1_fc;
     logic [13:0] s1_reso;   // log2 resonance code (UQ4.10)
     logic [7:0]  s1_vol_l, s1_vol_r;
-    logic        s1_dual;
+    logic        s1_cascade;
     logic [1:0]  s1_filter_mode;
     logic signed [23:0] s1_phase;
     logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
 
-    // Param RAM reads are SYNCHRONOUS on clk (was a comb read into the
-    // same registers — identical timing, but sync-read + separate-clock
-    // write is the shape yosys infers as dual-clock BSRAM). Sync-only
+    // Param RAM reads are SYNCHRONOUS on clk: sync-read + separate-clock
+    // write is the shape yosys infers as dual-clock BSRAM. Sync-only
     // process: yosys does not infer BSRAM from a process with an async
-    // reset. Validity is act-gated.
+    // reset. Validity is gated by the valid flag.
     logic [35:0] s1_osc_word, s1_duty_word, s1_filter_word, s1_gain_word;
     logic [1:0]  s1_gate_word;
     logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
     always_ff @(posedge clk) begin
-        s1_osc_word     <= osc_param_ram[{bank_active, elem_read_index}];
-        s1_duty_word     <= duty_param_ram[{bank_active, elem_read_index}];
-        s1_filter_word     <= filter_param_ram[{bank_active, elem_read_index}];
-        s1_gain_word     <= gain_param_ram[{bank_active, elem_read_index}];
-        s1_gate_word     <= gate_param_ram[{bank_active, elem_read_index}];
-        s1_ptrs0_word     <= ptrs0_param_ram[{bank_active, elem_read_index}];
-        s1_ptrs1_word     <= ptrs1_param_ram[{bank_active, elem_read_index}];
-        s1_phase  <= phase_ram[elem_read_index];
-        s1_ic1eq1 <= ic1eq1_ram[elem_read_index];
-        s1_ic2eq1 <= ic2eq1_ram[elem_read_index];
-        s1_ic1eq2 <= ic1eq2_ram[elem_read_index];
-        s1_ic2eq2 <= ic2eq2_ram[elem_read_index];
+        s1_osc_word     <= osc_param_ram[{page_active, partial_read_index}];
+        s1_duty_word     <= duty_param_ram[{page_active, partial_read_index}];
+        s1_filter_word     <= filter_param_ram[{page_active, partial_read_index}];
+        s1_gain_word     <= gain_param_ram[{page_active, partial_read_index}];
+        s1_gate_word     <= gate_param_ram[{page_active, partial_read_index}];
+        s1_ptrs0_word     <= ptrs0_param_ram[{page_active, partial_read_index}];
+        s1_ptrs1_word     <= ptrs1_param_ram[{page_active, partial_read_index}];
+        s1_phase  <= phase_ram[partial_read_index];
+        s1_ic1eq1 <= ic1eq1_ram[partial_read_index];
+        s1_ic2eq1 <= ic2eq1_ram[partial_read_index];
+        s1_ic1eq2 <= ic1eq2_ram[partial_read_index];
+        s1_ic2eq2 <= ic2eq2_ram[partial_read_index];
     end
 
-    // SPI-side write ports (sclk domain) — sync-only, one per bank
+    // SPI-side write ports (sclk domain) — sync-only, one per page
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd0) osc_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd0) osc_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd1) duty_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd1) duty_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd2) filter_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd2) filter_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd3) gain_param_ram[{bank_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd3) gain_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd4) gate_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[1:0];
+        if (partial_write_enable && partial_write_word == 3'd4) gate_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[1:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (partial_write_enable && partial_write_word == 3'd5) ptrs0_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{bank_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (partial_write_enable && partial_write_word == 3'd6) ptrs1_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_osc_word[13:0];
@@ -335,14 +336,13 @@ module element_pipeline #(
     assign s1_fc    = s1_filter_word[13:0];
     assign s1_reso  = s1_filter_word[27:14];
     // GAIN word carries VOLUME (0x00 = silence.. 0xFF =
-    // loudest): a zeroed parameter word is now silent-by-default
-    // instead of full-blast. GATE off = volume zero, which the
+    // loudest): a zeroed parameter word is silent by default. GATE off = volume zero, which the
     // effective-parameter stage maps onto the existing exact-mute
     // machinery:
     // one decode-stage mux, no new carry registers down the pipeline.
     assign s1_vol_l    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
     assign s1_vol_r    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
-    assign s1_dual  = s1_gain_word[16];
+    assign s1_cascade  = s1_gain_word[16];
     assign s1_filter_mode = s1_gain_word[18:17];
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -350,13 +350,13 @@ module element_pipeline #(
             s1_valid   <= 1'b0;
             s1_idx   <= '0;
         end else begin
-            s1_valid   <= lane_enter;
+            s1_valid   <= slot_issue;
             s1_idx   <= slot[VW-1:0];
         end
     end
 
     //----------------------------------------------------------------
-    // S2 — issue phase_inc + K LUT reads; carry everything
+    // S2 — issue phase_inc + svf_fc_lut reads; carry everything
     //----------------------------------------------------------------
     logic        s2_valid;
     logic [VW-1:0] s2_idx;
@@ -366,7 +366,7 @@ module element_pipeline #(
     logic [13:0] s2_fc;
     logic [13:0] s2_reso;
     logic [7:0]  s2_vol_l, s2_vol_r;
-    logic        s2_dual;
+    logic        s2_cascade;
     logic [1:0]  s2_filter_mode;
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
@@ -380,7 +380,7 @@ module element_pipeline #(
 
     csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .bank_active(bank_active), .bank_shadow(bank_shadow),
+        .page_active(page_active), .page_shadow(page_shadow),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_write_enable),
@@ -409,7 +409,7 @@ module element_pipeline #(
             s2_reso  <= '0;
             s2_vol_l    <= '0;
             s2_vol_r    <= '0;
-            s2_dual  <= 1'b0;
+            s2_cascade  <= 1'b0;
             s2_filter_mode <= '0;
             s2_phase <= '0;
             s2_ic1eq1 <= '0;
@@ -426,7 +426,7 @@ module element_pipeline #(
             s2_reso  <= s1_reso;
             s2_vol_l    <= s1_vol_l;
             s2_vol_r    <= s1_vol_r;
-            s2_dual  <= s1_dual;
+            s2_cascade  <= s1_cascade;
             s2_filter_mode <= s1_filter_mode;
             s2_phase <= s1_phase;
             s2_ic1eq1 <= s1_ic1eq1;
@@ -437,20 +437,20 @@ module element_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // Effective parameters: base + bus[pointer], all SATURATING into
-    // each parameter's legal range so extreme bus values clamp
+    // Effective parameters: base + DMEM[pointer], all SATURATING into
+    // each parameter's legal range so extreme DMEM values clamp
     // instead of wrapping. Six parallel adders + clamps between S2
     // registers and S3 registers: adds/decode only, no multiply —
     // within the silicon timing rule. Per-sink slices of the Q8.10
-    // bus word (bus_architecture.md law 5):
-    //   pitch/cutoff/resonance: as-is (one bus integer = one octave;
+    // DMEM word (dmem_architecture.md law 5):
+    //   pitch/cutoff/resonance: as-is (one DMEM integer = one octave;
     //          for resonance that is one octave of Q ≈ +6 dB of peak)
-    //   duty:  <<< 13 (bus ±1.0 → duty ±1.0 in Q0.24)
-    //   gains: >>> 6  (bus 1 octave = 6 dB = 16 UQ4.4 steps; positive
-    //          bus = LOUDER — volume semantics). A base of
+    //   duty:  <<< 13 (DMEM ±1.0 → duty ±1.0 in Q0.24)
+    //   gains: >>> 6  (DMEM 1 octave = 6 dB = 16 UQ4.4 steps; positive
+    //          DMEM = LOUDER — volume semantics). A base of
     //          0x00 (exact mute — hard-panned channels, gated
-    //          elements) is preserved regardless of the bus, and the
-    //          bus alone can never reach exact mute (sums clamp to
+    //          partials) is preserved regardless of DMEM, and the
+    //          DMEM word alone can never reach exact mute (sums clamp to
     //          the quietest audible step). The sum is converted to
     //          the attenuation code here, at ONE seam, so everything
     //          downstream (S9B decode, mute == 0xFF) is untouched.
@@ -516,7 +516,7 @@ module element_pipeline #(
     // S3 — LUT data, phase_inc/K, phase_next, oscillator waveform
     //----------------------------------------------------------------
     logic [23:0] s3_phase_inc_lut;
-    logic [15:0] s3_k_lut;
+    logic [15:0] s3_svf_fc_lut;
     logic [16:0] s3_q1_lut;
     logic [3:0]  s3_reso_oct;
 
@@ -528,7 +528,7 @@ module element_pipeline #(
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
     logic [7:0]  s3_atten_l, s3_atten_r;
-    logic        s3_dual;
+    logic        s3_cascade;
     logic [1:0]  s3_filter_mode;
     logic [15:0] s3_reso_att;   // input-atten gain (UQ0.16)
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
@@ -536,7 +536,7 @@ module element_pipeline #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3_phase_inc_lut <= '0;
-            s3_k_lut     <= '0;
+            s3_svf_fc_lut     <= '0;
             s3_q1_lut    <= '0;
             s3_reso_oct  <= '0;
             s3_valid   <= 1'b0;
@@ -548,7 +548,7 @@ module element_pipeline #(
             s3_duty  <= '0;
             s3_atten_l    <= '0;
             s3_atten_r    <= '0;
-            s3_dual  <= 1'b0;
+            s3_cascade  <= 1'b0;
             s3_filter_mode <= '0;
             s3_reso_att <= 16'hffff;
             s3_ic1eq1 <= '0;
@@ -557,7 +557,7 @@ module element_pipeline #(
             s3_ic2eq2 <= '0;
         end else begin
             s3_phase_inc_lut <= phase_lut[eff_pitch[9:0]];
-            s3_k_lut     <= k_lut[eff_fc[9:0]];
+            s3_svf_fc_lut     <= svf_fc_lut[eff_fc[9:0]];
             s3_q1_lut    <= q1_lut[eff_reso[9:6]];
             s3_reso_oct  <= eff_reso[13:10];
             s3_valid   <= s2_valid;
@@ -569,9 +569,9 @@ module element_pipeline #(
             s3_duty  <= eff_duty;
             s3_atten_l    <= eff_atten_l;
             s3_atten_r    <= eff_atten_r;
-            s3_dual  <= s2_dual;
+            s3_cascade  <= s2_cascade;
             s3_filter_mode <= s2_filter_mode;
-            s3_reso_att <= s2_dual ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
+            s3_reso_att <= s2_cascade ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
             s3_ic1eq1 <= s2_ic1eq1;
             s3_ic2eq1 <= s2_ic2eq1;
             s3_ic1eq2 <= s2_ic1eq2;
@@ -588,7 +588,7 @@ module element_pipeline #(
     // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
     // LUT+shift expands to ~22+ bits of real precision, needed later
     // for the noise oscillator and whistling-filter melodies.
-    assign k     = $signed({20'd0, s3_k_lut}) <<< (3 + s3_fc_oct);
+    assign k     = $signed({20'd0, s3_svf_fc_lut}) <<< (3 + s3_fc_oct);
     // Resonance decode: q1 = sqrt(2) * 2^-r in Q2.16. Same
     // LUT+barrel-shift shape as K; registered into S3B before the
     // S4 multiply (the silicon timing rule). At high octaves the
@@ -607,11 +607,11 @@ module element_pipeline #(
 
     //----------------------------------------------------------------
     // S3B/S3C -- resonance-dependent INPUT attenuation. Scale the
-    // oscillator sample down as resonance rises so the 24 dB/oct dual
+    // oscillator sample down as resonance rises so the 24 dB/oct
     // cascade never overdrives its internal +-8 guardrail (sat_q414).
-    // Register-then-multiply: S3B registers osc + the (dual-gated) atten
+    // Register-then-multiply: S3B registers osc + the (cascade-gated) atten
     // and every SVF operand; S3C multiplies. Keeps the osc_core->reg
-    // critical path intact (no combinational mult in it). Single (12
+    // critical path intact (no combinational mult in it). A single section (12
     // dB/oct) never overdrives, so its atten is unity (0xffff).
     //----------------------------------------------------------------
     // S3B registers the ADVANCED PHASE (and duty/wave alongside it); the
@@ -620,14 +620,14 @@ module element_pipeline #(
     logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
-    logic               s3b_dual;  logic [1:0] s3b_filter_mode;
+    logic               s3b_cascade;  logic [1:0] s3b_filter_mode;
     logic signed [23:0] s3b_phase; logic [7:0] s3b_atten_l, s3b_atten_r;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3b_valid<=1'b0; s3b_idx<='0; s3b_att<='0;
             s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
-            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_filter_mode<='0;
+            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_cascade<=1'b0; s3b_filter_mode<='0;
             s3b_phase<='0; s3b_atten_l<='0; s3b_atten_r<='0;
             s3b_duty<='0; s3b_wave<='0;
         end else begin
@@ -635,7 +635,7 @@ module element_pipeline #(
             s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
             s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
             s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
-            s3b_dual<=s3_dual; s3b_filter_mode<=s3_filter_mode;
+            s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
             s3b_phase<=phase_next; s3b_atten_l<=s3_atten_l; s3b_atten_r<=s3_atten_r;
             s3b_duty<=s3_duty; s3b_wave<=s3_wave;
         end
@@ -657,21 +657,21 @@ module element_pipeline #(
     logic signed [17:0] s3c_osc;   logic [15:0] s3c_att;
     logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
-    logic               s3c_dual;  logic [1:0] s3c_filter_mode;
+    logic               s3c_cascade;  logic [1:0] s3c_filter_mode;
     logic signed [23:0] s3c_phase; logic [7:0] s3c_atten_l, s3c_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3c_valid<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
             s3c_k<='0; s3c_q1<='0;
             s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
-            s3c_dual<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
+            s3c_cascade<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
         end else begin
             s3c_valid<=s3b_valid; s3c_idx<=s3b_idx;
             s3c_osc <= osc_sample; s3c_att <= s3b_att;
             s3c_k<=s3b_k; s3c_q1<=s3b_q1;
             s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
             s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
-            s3c_dual<=s3b_dual; s3c_filter_mode<=s3b_filter_mode;
+            s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
             s3c_phase<=s3b_phase; s3c_atten_l<=s3b_atten_l; s3c_atten_r<=s3b_atten_r;
         end
     end
@@ -688,20 +688,20 @@ module element_pipeline #(
     logic signed [17:0] s3d_osc;
     logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
     logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
-    logic               s3d_dual;  logic [1:0] s3d_filter_mode;
+    logic               s3d_cascade;  logic [1:0] s3d_filter_mode;
     logic signed [23:0] s3d_phase; logic [7:0] s3d_atten_l, s3d_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3d_valid<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
             s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
-            s3d_dual<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
+            s3d_cascade<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
         end else begin
             s3d_valid<=s3c_valid; s3d_idx<=s3c_idx;
             s3d_osc <= 18'($signed(osc_mul >>> 16));
             s3d_k<=s3c_k; s3d_q1<=s3c_q1;
             s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
             s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
-            s3d_dual<=s3c_dual; s3d_filter_mode<=s3c_filter_mode;
+            s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
             s3d_phase<=s3c_phase; s3d_atten_l<=s3c_atten_l; s3d_atten_r<=s3c_atten_r;
         end
     end
@@ -715,7 +715,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     wire               s9_valid;
     wire [VW-1:0]      s9_idx;
-    wire signed [17:0] s9_elem;
+    wire signed [17:0] s9_sample;
     wire signed [23:0] s9_phase;
     wire signed [35:0] s9_ic1eq1n, s9_ic2eq1n, s9_ic1eq2n, s9_ic2eq2n;
     wire [7:0]         s9_atten_l, s9_atten_r;
@@ -726,9 +726,9 @@ module element_pipeline #(
         .in_osc(s3d_osc), .in_k(s3d_k), .in_q1(s3d_q1),
         .in_ic1eq1(s3d_ic1eq1), .in_ic2eq1(s3d_ic2eq1),
         .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
-        .in_dual(s3d_dual), .in_filter_mode(s3d_filter_mode),
+        .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
         .in_phase(s3d_phase), .in_atten_l(s3d_atten_l), .in_atten_r(s3d_atten_r),
-        .out_valid(s9_valid), .out_idx(s9_idx), .out_elem(s9_elem),
+        .out_valid(s9_valid), .out_idx(s9_idx), .out_sample(s9_sample),
         .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),
         .out_ic1eq2n(s9_ic1eq2n), .out_ic2eq2n(s9_ic2eq2n),
         .out_phase(s9_phase), .out_atten_l(s9_atten_l), .out_atten_r(s9_atten_r)
@@ -748,13 +748,13 @@ module element_pipeline #(
     //----------------------------------------------------------------
     logic        s9b_valid;
     logic [VW-1:0] s9b_idx;
-    logic signed [17:0] s9b_elem;
+    logic signed [17:0] s9b_sample;
     logic signed [17:0] s9b_lin_l, s9b_lin_r;
     logic signed [23:0] s9b_phase;
     logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
 
     // Gain 0xFF is EXACT mute, not -96 dB: the log decode bottoms out at
-    // lin = raw value 1, and 256 correlated muted elements sum 48 dB of that
+    // lin = raw value 1, and 256 correlated muted partials sum 48 dB of that
     // right back (measured: -48 dBFS of ghost organ). A muted voice
     // must contribute zero.
     logic signed [17:0] lin_l, lin_r;
@@ -769,7 +769,7 @@ module element_pipeline #(
         if (!rst_n) begin
             s9b_valid  <= 1'b0;
             s9b_idx  <= '0;
-            s9b_elem <= '0;
+            s9b_sample <= '0;
             s9b_lin_l <= '0;
             s9b_lin_r <= '0;
             s9b_phase <= '0;
@@ -780,7 +780,7 @@ module element_pipeline #(
         end else begin
             s9b_valid  <= s9_valid;
             s9b_idx  <= s9_idx;
-            s9b_elem <= s9_elem;
+            s9b_sample <= s9_sample;
             s9b_lin_l <= lin_l;
             s9b_lin_r <= lin_r;
             s9b_phase <= s9_phase;
@@ -802,8 +802,8 @@ module element_pipeline #(
 
     logic signed [34:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9b_elem * s9b_lin_l;
-        prod_r = s9b_elem * s9b_lin_r;
+        prod_l = s9b_sample * s9b_lin_l;
+        prod_r = s9b_sample * s9b_lin_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -833,12 +833,12 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // S11 — mix accumulate + state writeback
     //
-    // Mixdown headroom: 256 elements × Q4.14 (±8.0) sums to ±2048 in a
+    // Mixdown headroom: 256 partials × Q4.14 (±8.0) sums to ±2048 in a
     // 26-bit Q4.14 accumulator (12 integer bits, ±2048) — marginal by
     // design exactly as the Q2.16 era was (256 × ±2.0 vs ±512). The
     // output limiter (sat24) converts Q4.14 → Q0.24 (<< 10) and clips
     // only in the pathological all-aligned-at-the-rail case; overall
-    // loudness is set by the per-element UQ4.4 gains: −2 bits of audio
+    // loudness is set by the per-partial UQ4.4 gains: −2 bits of audio
     // scale cancel the +2 bits of conversion shift.
     //----------------------------------------------------------------
     function automatic logic signed [23:0] sat24(input logic signed [35:0] x);

@@ -15,7 +15,7 @@
 // (r = 0x200 = q1 1.0), and a self-oscillation isolation check.
 //
 // Stability metric: normalized autocorrelation at
-// the saw fundamental's lag. Element 0 plays a saw at pitch 0x1614 —
+// the saw fundamental's lag. Partial 0 plays a saw at pitch 0x1614 —
 // 375.03 Hz, period 255.98 samples, so the lag is exactly 256. A
 // stable filtered saw scores near 1000 milli-r; atonal roaring scores
 // near 0. A moderate-cutoff baseline combo guards the metric itself.
@@ -32,20 +32,20 @@ module tb_svf_stability;
     logic clk = 0, rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #6.781 clk = ~clk;               // ~73.728 MHz
 
-    logic       sample_tick, lane_enter;
+    logic       sample_tick, slot_issue;
     logic [9:0] slot;
-    drum u_drum (
+    timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .lane_enter(lane_enter),
+        .sample_tick(sample_tick), .slot_issue(slot_issue),
         .cell_tick(), .slot(slot)
     );
 
     logic signed [23:0] ml, mr;
-    element_pipeline u_pipe (
+    partial_pipeline u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
-        .lane_enter(lane_enter), .sample_tick(sample_tick),
-        .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
-        .elem_write_index(8'b0), .elem_write_data(32'b0),
+        .slot_issue(slot_issue), .sample_tick(sample_tick),
+        .sclk(1'b0), .partial_write_enable(1'b0), .partial_write_word(3'b0),
+        .partial_write_index(8'b0), .partial_write_data(32'b0),
         .swap_toggle(1'b0),
         .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
         .dmem_wr_toggle(1'b0),
@@ -54,7 +54,7 @@ module tb_svf_stability;
         .mix_left(ml), .mix_right(mr)
     );
 
-    // ---- fixture: element 0 = saw @ 375 Hz, all others muted --------
+    // ---- fixture: partial 0 = saw @ 375 Hz, all others muted --------
     integer e;
     initial begin
         #1;
@@ -89,8 +89,8 @@ module tb_svf_stability;
     integer  di;
     longint  sum_xx, sum_xy;
     longint  pk;
-    longint  pkr;    // peak of |mix_right| — all its elements are
-                     // muted, so any energy here is cross-element leak
+    longint  pkr;    // peak of |mix_right| — all its partials are
+                     // muted, so any energy here is cross-partial leak
 
     task automatic measure(output longint r_milli, output longint peak);
         integer n;
@@ -170,12 +170,12 @@ module tb_svf_stability;
         end
 
         // Corner 3 — self-oscillation: r at the top of the scale
-        // decodes to q1 ~= 0 (zero damping). Element 0 rings freely;
+        // decodes to q1 ~= 0 (zero damping). Partial 0 rings freely;
         // no tonality assert (wrap chaos under sustained drive is
         // possible and audible-by-design), but the mix limiter must
         // bound the output and — the real assert — the OTHER mix
-        // channel (all its elements muted) must stay silent: one
-        // element's self-oscillation must not corrupt its neighbors.
+        // channel (all its partials muted) must stay silent: one
+        // partial's self-oscillation must not corrupt its neighbors.
         set_filter(14'h2000, 14'h3FFF);
         measure(r, peak);
         $display("corner3 fc=2000 r=max:   r=%0d peak=%0d peakR=%0d (self-osc)",

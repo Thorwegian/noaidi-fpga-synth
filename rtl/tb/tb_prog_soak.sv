@@ -5,26 +5,26 @@
 //
 // An interaction glitch needs the actual slot map from voice_alloc.c:
 //
-//   slot 0        LFO 1            -> bus 2   (global pitch)
-//   slot 1        LFO 2            -> bus 1   (global duty)
+//   slot 0        LFO 1            -> DMEM 2  (global pitch)
+//   slot 1        LFO 2            -> DMEM 1  (global duty)
 //   slot 32+v     amp envelope     gate 80+v, target 16+v
 //   slot 64+2v    MOD envelope     gate 80+v, target 48+v
-//   slot 65+2v    cutoff fan-out   source bus 4, target 48+v   <-- CHAINED,
+//   slot 65+2v    cutoff MAC       source DMEM 4, target 48+v  <-- CHAINED,
 //                                  adjacent to the MOD env on the same target
 //
-// That adjacency is a chain: the MOD envelope writes BUS_CUT(v) and the
-// fan-out accumulates the channel cutoff onto it. Two envelopes share each
-// gate bus, and a send reads a bus while envelopes write others -- none of
+// That adjacency is a chain: the MOD envelope writes DMEM_CUT(v) and the
+// MAC accumulates the channel cutoff onto it. Two envelopes share each
+// gate DMEM word, and a MAC reads a DMEM word while envelopes write others -- none of
 // which the envelope-only soak exercised.
 //
-// A "firmware" process also rewrites bus bases continuously through the SPI
+// A "firmware" process also rewrites DMEM bases continuously through the SPI
 // mailbox while the program runs, because the suspected failure is a mailbox
-// commit landing in only one ping-pong generation, which then alternates with
+// commit landing in only one ping-pong page, which then alternates with
 // stale data on every swap.
 //
 // Two assertions, both the reported symptom:
 //   retrigger     a gated envelope in DECAY must not return to ATTACK or IDLE
-//   discontinuity a bus the lane pipeline reads must not jump by more than a
+//   discontinuity a DMEM word the partial pipeline reads must not jump by more than a
 //                 plausible per-sample step
 `timescale 1ns/1ps
 module tb_prog_soak;
@@ -34,7 +34,7 @@ module tb_prog_soak;
 
     localparam [31:0] OPC_LFO  = 32'hE;
     localparam [31:0] OPC_ADSR = 32'hF;
-    localparam [31:0] OPC_SEND = 32'hD;
+    localparam [31:0] OPC_MAC = 32'hD;
 
     logic clk = 0, sclk = 0, rst_n = 1, sample_tick = 0;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
@@ -51,7 +51,7 @@ module tb_prog_soak;
 
     csp dut (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick),
-        .sclk(sclk), .bank_active(1'b0), .bank_shadow(1'b0),
+        .sclk(sclk), .page_active(1'b0), .page_shadow(1'b0),
         .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
         .dmem_wr_toggle(dmem_wr_toggle),
         .imem_write_enable(imem_we), .imem_write_addr(imem_addr),
@@ -78,7 +78,7 @@ module tb_prog_soak;
     task automatic one_sample;
         begin
             sample_tick = 1; @(posedge clk); sample_tick = 0;
-            repeat (synth_pkg::DRUM_CYCLES - 1) @(posedge clk);
+            repeat (synth_pkg::CYCLES_PER_SAMPLE - 1) @(posedge clk);
         end
     endtask
 
@@ -122,18 +122,18 @@ module tb_prog_soak;
         iwrite(10'd6, 32'h00001000);
 
         for (v = 0; v < NV; v++) begin
-            // amp envelope: gate 80+v -> gain bus 16+v
+            // amp envelope: gate 80+v -> gain DMEM word 16+v
             iwrite(10'((32+v)*4 + 0), OPC_ADSR | (32'(16+v) << 6) | (32'(80+v) << 16));
             iwrite(10'((32+v)*4 + 1), 32'h00120000);
             iwrite(10'((32+v)*4 + 3), 32'hF0280000);
             iwrite(10'((32+v)*4 + 2), 32'h00002800);          // ENV_SPAN
-            // MOD envelope: gate 80+v -> cut bus 48+v
+            // MOD envelope: gate 80+v -> cut DMEM word 48+v
             iwrite(10'((64+2*v)*4 + 0), OPC_ADSR | (32'(48+v) << 6) | (32'(80+v) << 16));
             iwrite(10'((64+2*v)*4 + 1), 32'h00100400);
             iwrite(10'((64+2*v)*4 + 3), 32'hE0120000);
             iwrite(10'((64+2*v)*4 + 2), 32'h00001000);
-            // fan-out SEND: bus 4 -> cut bus 48+v, CHAINED after the MOD env
-            iwrite(10'((65+2*v)*4 + 0), OPC_SEND | (32'(48+v) << 6) | (32'd4 << 16));
+            // fan-out MAC: DMEM word 4 -> cut DMEM word 48+v, CHAINED after the MOD env
+            iwrite(10'((65+2*v)*4 + 0), OPC_MAC | (32'(48+v) << 6) | (32'd4 << 16));
             iwrite(10'((65+2*v)*4 + 2), 32'h00010000);
         end
 
@@ -154,7 +154,7 @@ module tb_prog_soak;
                     gated[32+v] = 1; gated[64+2*v] = 1;
                 end
             // firmware keeps rewriting bases while the program runs -- this is
-            // what can catch a mailbox commit landing in one generation only
+            // what can catch a mailbox commit landing in one page only
             if (s % 3 == 0) bwrite(10'd4, 18'(2000 + (s % 64)));
 
             one_sample();
@@ -164,7 +164,7 @@ module tb_prog_soak;
                 check_env(64 + 2*v, s);
             end
 
-            // bus continuity as the lane pipeline sees it
+            // DMEM continuity as the partial pipeline sees it
             if (!first) begin
                 if ((rd_gl_d > p_gl + 18'sd3000) || (rd_gl_d < p_gl - 18'sd3000)) begin
                     disc = disc + 1; errors = errors + 1;

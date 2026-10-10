@@ -5,7 +5,7 @@
 // tb_spdif48_block.sv — the 48 kHz (primary) transmitter, decoded the
 // same way tb_spdif_block.sv decodes the 96 kHz stream.
 //
-// This bench deliberately takes BOTH half-rate ticks from the drum
+// This bench deliberately takes BOTH half-rate ticks from the timebase
 // (unlike the 96 kHz bench, which builds its own cell counter), so it
 // proves the tick derivation as well as the stream:
 //
@@ -27,12 +27,12 @@ module tb_spdif48_block;
     logic rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #5 clk = ~clk;    // ratios are all internal; absolute rate is moot
 
-    logic       sample_tick, lane_enter;
+    logic       sample_tick, slot_issue;
     logic       sample_tick48, cell_tick48;
     logic [9:0] slot;
-    drum u_drum (
+    timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .lane_enter(lane_enter),
+        .sample_tick(sample_tick), .slot_issue(slot_issue),
         .sample_tick48(sample_tick48), .cell_tick48(cell_tick48),
         .slot(slot)
     );
@@ -54,7 +54,7 @@ module tb_spdif48_block;
     localparam integer NFRAMES = 400;   // > 2 full blocks
 
     // ---- cell capture: realigned at every sample_tick48 ----------------
-    // Integer /12 counter from the same reset: the drum's 48 kHz cell
+    // Integer /12 counter from the same reset: the timebase's 48 kHz cell
     // grid starts at slot 0, so cd48 == 11 is the last sysclk of each
     // 12-sysclk cell.
     reg [3:0] cd48;
