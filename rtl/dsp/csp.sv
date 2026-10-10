@@ -4,8 +4,8 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Split out of element_pipeline.sv, which was carrying two unrelated
-// jobs in 1,473 lines: the element DSP lane pipeline, and this. They
+// The element DSP lane pipeline (element_pipeline.sv) and this are two
+// unrelated jobs, so they are two modules.
 // Double-buffering the bus generation removes any coupling to the drum
 // schedule, so the sequencer and the lanes are genuinely independent:
 // this module references the drum's slot counter nowhere.
@@ -57,12 +57,10 @@ module csp (
 );
     //----------------------------------------------------------------
     // Bus RAM — the uniform Q8.10 pool (bus_architecture.md).
-    // One replica in the B1 pilot (only cutoff reads it); replicas
-    // are added per sink at B2. Written ONLY on sysclk: SPI writes
-    // arrive through the toggle mailbox below and commit in an idle
-    // slot (lane bus reads issue during slots 1..~257, so a commit at
-    // slot >258 can never collide with a read — the BSRAM
-    // read-during-write corruption class is impossible by schedule).
+    // Written ONLY on sysclk: SPI writes arrive through the toggle
+    // mailbox below and commit into both ping-pong generations; the
+    // lanes read the other generation from the one being written, so a
+    // read and a write never meet on one address.
     // Bus 0 is hardwired zero (writes to it are ignored).
     //----------------------------------------------------------------
     // Six replicas of the one uniform pool — one read port per sink
@@ -108,7 +106,7 @@ module csp (
 
     // BUS-SUM RAM: the sequencer-facing mirror of a bus's
     // OUTPUT SUM — written by the same strobes as the replicas, read
-    // at P1 by SEND entries. This is what makes the node graph's
+    // at D/R by SEND entries. This is what makes the node graph's
     // edges real: a send references the bus's summed output (firmware
     // base plus every source contribution written so far) rather than
     // the firmware base alone. With sources ordered before
@@ -250,7 +248,7 @@ module csp (
 
     //----------------------------------------------------------------
     // Program counter (B4/B5, bus_architecture.md) -- the table executor.
-    // 256 entries x 3 config words (stride 4 in the RAM), ONE cycle per
+    // 256 entries x 4 config words (stride 4 in the RAM), ONE cycle per
     // entry; the six-stage pipeline is documented at the pc
     // below. Law 1: the one instruction multiply sits alone in its stage
     // with registered operands. Law 3: entries execute in table order, once
@@ -259,8 +257,8 @@ module csp (
     // sine's internal multiply and the instruction multiply fed by registers
     // only.
     //
-    // ADSR state word: [27:26] stage, [25:0] level in UQ12.14 -- the RC
-    // envelope's format, now living in dsp/adsr.sv. The envelope is
+    // ADSR state word: [27:26] stage, [25:0] level in UQ4.22 -- the RC
+    // envelope's format, defined in dsp/adsr.sv. The envelope is
     // the one instruction with a real state machine, so it is its own module
     // of its own; the LFO is an adder and the SEND is a wire, and both stay
     // here. An LFO uses [24:0] as its phase accumulator and leaves [27:25]
@@ -287,14 +285,8 @@ module csp (
     // this slot: imem_write_addr is {entry, word[1:0]}, and firmware's
     // flush strides by four.
     reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
-    // State word: LFO uses [23:0] as its phase; ADSR uses [27:26] as
-    // the stage and [25:0] as the level in UQ22.4 — FOUR FRACTIONAL
-    // BITS, so rate increments are in 1/16-LSB units and the 8-bit
-    // log2 rate byte decodes as ONE uniform expression with no
-    // truncation anywhere: all 256 codes are distinct equal-ratio
-    // steps, for perceptual linearity (a MIDI CC maps as
-    // cc << 1). The fractional bits ARE the "binary point moved four
-    // left" — in the accumulator, where it belongs.
+    // State word: LFO uses [24:0] as its phase; ADSR uses [27:26] as
+    // the stage and [25:0] as the level (format in dsp/adsr.sv).
     reg [27:0] istate [0:synth_pkg::NUM_INSTR-1];
     integer wi;
     initial begin
@@ -317,7 +309,7 @@ module csp (
                 2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
                 2'd2: imem_depth[imem_wr_entry] <= imem_write_data;
                 2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
-                default: ;                      // word 3 unused (stride 4)
+                default: ;                      // unreachable: all four words are used
             endcase
         end
 
@@ -327,8 +319,8 @@ module csp (
     //   F  present pc to imem_cfg/rate/depth and istate
     //   D  those four are out; present the gate/source address (from CFG)
     //      and the target address to dmem_gate / dmem_local / dmem_init
-    //   R  gate, send-source and target base are out; decode the rate
-    //      bytes, resolve the gate, choose the operand
+    //   R  gate, send-source and target base are out; resolve the
+    //      gate, choose the operand
     //   X  the instruction multiply -- registered operands, alone in its
     //      stage (law 1) -- and the state writeback
     //   A  value = addend + contribution, saturated
@@ -345,9 +337,9 @@ module csp (
     //         bus (also the ADSR's watched gate), [31:16] LFO phase
     //         increment -- overlapping the source field, which an LFO does
     //         not use
-    //   RATES [7:0] attack, [15:8] decay, [23:16] sustain LEVEL, [31:24]
-    //         release -- the universal A, D, S, R order
-    //   DEPTH [17:0] signed coefficient, 0x10000 = unity
+    //   RATES  [17:0] kA, [31:18] kD[13:0] -- linear coefficients
+    //   DEPTH  [17:0] signed coefficient, 0x10000 = unity
+    //   RATES2 [3:0] kD[17:14], [21:4] kR, [31:22] sustain (dsp/adsr.sv)
     logic [8:0] pc;             // 0..NUM_INSTR, one per cycle
 
     // The generation flips once per SAMPLE, because a complete pass is one
@@ -541,7 +533,7 @@ module csp (
             d_valid   <= pc_active;
             pc_addr_d <= pc_addr;
 
-            // D -> R: the three config words are out of the RAMs this cycle
+            // D -> R: the four config words are out of the RAMs this cycle
             r_valid    <= d_valid;
             r_pc       <= pc_addr_d;
             r_opcode   <= cfg_q[3:0];

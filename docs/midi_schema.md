@@ -75,14 +75,14 @@ units live in patch.h).
 | 85 | osc 2 pulse width / duty | same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
 | 27 | unison detune | spread within a unison group |
-| 28 | unison stereo spread | CONTINUOUS: 0 = centered, far side attenuated 0.375 dB/step, 127 = hard pan / exact far-side mute (the default) |
+| 28 | unison stereo spread | CONTINUOUS: 0 = centered, far side attenuated `spread>>1` × 0.375 dB (≈0.19 dB per CC step; 126 = −23.6 dB), 127 = hard pan / exact far-side mute (the default) |
 
 **Filter**
 | CC | Target | Notes |
 |---|---|---|
 | 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
 | 106 | cutoff — FINE | 7-bit LSB (74+32, MIDI convention); optional |
-| 71 | resonance | `cc << 7` onto the log₂ resonance code; top ≈ self-osc. **Temporarily live** on global bus 3 |
+| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step. **Temporarily live** on global bus 3 |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete |
 | 31 | key tracking amount | IMPLEMENTED: 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
@@ -116,8 +116,8 @@ equal-ratio ladder.
 **Arp / step sequencer**
 | CC | Target | Notes |
 |---|---|---|
-| 117 | arp/seq on/off | |
-| 118 | arp mode | discrete: up/down/updown/random/pattern/chord |
+| 117 | arp/seq on/off | NOT IMPLEMENTED (ignored) |
+| 118 | arp mode | NOT IMPLEMENTED (ignored); discrete: up/down/updown/random/pattern/chord |
 | TBD | arp octave range | CC 119 is the TEST TONE; the arp gets a new number when the arp rung lands |
 | — | rate | follows the clock (Auto/Internal); step rate is a division, not a free CC |
 
@@ -126,9 +126,9 @@ source→dest routing beyond the wheel and the two env/LFO dests
 above. Glide/portamento (standard CC 5 / 65) when that feature
 lands.
 
-Changed rates are pushed to all 32 amp-ADSR producers (32 banked
-`engine_link_prod_write`s riding one swap) and `release_tail_us()`
-switches from the compile-time `ADSR_RATES` macro to the live value.
+Amp-envelope CCs re-push RATES and the velocity-scaled DEPTH to all
+32 amp-ADSR producers (banked, riding one swap); `release_tail_us()`
+reads the live release rate.
 
 **Open question 2 — RESOLVED: both.** Cutoff base
 is UQ4.10; use CC 74 (coarse, 7-bit MSB) + CC 106 (fine, 7-bit LSB)
@@ -167,8 +167,9 @@ per-step events, chord-mode config don't fit the raw
 elem/bus/producer writes — so a structured SysEx layer is a known
 follow-up, not a maybe. Design it alongside the sequencer rung.
 
-**Open question 4 — SysEx parser location.** `midi_in` currently
-parses channel messages; SysEx would extend it (bounded buffer,
+**Open question 4 — SysEx parser location.** `midi_parser`
+(shared by UART `midi_in` and `ble_midi`) currently discards SysEx
+payloads; SysEx would extend it (bounded buffer,
 streaming ops preferred over big dumps given the 31250 baud wire).
 Any objection to capping SysEx payloads at something small (e.g. 64
 bytes) for now?

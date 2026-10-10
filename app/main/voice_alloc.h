@@ -5,13 +5,11 @@
 //
 // A voice is a grouping of elements (design.md terminology). This
 // allocator runs the first grouping: 32 voices × 8 elements in fixed
-// blocks (voice v owns elements 8v..8v+7), church-organ unison detune,
-// hard-panned by element index. Subscribes to MIDI on the event bus,
-// emits parameter commands to the engine link. Omni for now (channel
-// is stored per voice for later multi-timbrality).
-//
-// No stop/program structure yet — the timbre is hardcoded here until
-// the user-facing scope is nailed down.
+// blocks (voice v owns elements 8v..8v+7), voiced from the active
+// patch (g_patch, patch.h): voice structure, unison detune and stereo
+// spread. Subscribes to MIDI on the event bus, emits parameter
+// commands to the engine link. Omni for now (channel is stored per
+// voice for later multi-timbrality).
 
 #pragma once
 

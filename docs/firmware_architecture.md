@@ -20,7 +20,7 @@ event bus. Knows nothing about voices or the FPGA.
 ## synth model
 
 Subscribes to MIDI events. Owns **all musical state** and every
-musical decision: voice allocation (which of the 256 slots plays which
+musical decision: voice allocation (which of the 256 elements plays which
 note), unison grouping, detune/pan baking, CC → parameter mapping,
 channel programs. Emits abstract engine commands ("voice 17: these
 params, gate on") into a FreeRTOS queue.
@@ -32,7 +32,8 @@ on the host with scripted MIDI in and expected commands out.
 
 The **single owner** of the SPI bus and of the shadow-bank discipline.
 Nothing else in the firmware may call `fpga_word_write`/`fpga_swap`
-once this exists (`main.c`'s direct writes migrate here).
+once `engine_link_init()` has run (`main.c`'s boot SPI self-test
+writes directly before that).
 
 - Keeps a full RAM image of the parameter space. Commands mutate the
   image; the link writes dirty words to the shadow bank and swaps.
@@ -75,9 +76,10 @@ different facts:
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
 - **Known limitation**: the ADSR gate is level-sensitive, so a voice
-  stolen while HELD keeps its envelope stage (no fresh attack), and
-  one stolen while RELEASING attacks from the tail's level. Both only
-  occur with all 32 voices in use; a true retrigger needs a gateware
+  stolen while HELD keeps its envelope stage (no fresh attack); one
+  stolen while RELEASING restarts from silence (`adsr.sv` treats a
+  re-gated release as a new note). It only occurs with all 32 voices
+  in use; a true retrigger of a HELD voice needs a gateware
   edge/pulse mechanism ("retrig reserved" under the GATE rung).
 
 ## Sequencers / arpeggiators (later)
@@ -86,12 +88,11 @@ Just another producer into the same command queue. Producers own their
 timing (esp_timer); the engine link stays a dumb, fast executor. No
 special path.
 
-## Open details (settle when building)
+## Command format
 
-- Command format: struct per command vs. (addr, value) pairs — leaning
-  structs, so the model doesn't know the memory map either; only the
-  engine link translates to addresses.
-- Queue depth and overflow policy (drop-oldest vs. block) under MIDI
-  floods.
-- Where GATE snap semantics surface in the command set (gate-on
-  implies snap; see design.md smoothing).
+- Commands are `engine_cmd_t {elem, word, value}` structs
+  (`engine_link.h`); the engine link translates element and word to
+  addresses.
+- The command queue holds 1024 entries; on overflow
+  `engine_link_send()` drops the command and counts the drop, and the
+  tick logs it.

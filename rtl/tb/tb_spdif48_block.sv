@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_spdif48_block.sv — the 48 kHz test transmitter, decoded the
+// tb_spdif48_block.sv — the 48 kHz (primary) transmitter, decoded the
 // same way tb_spdif_block.sv decodes the 96 kHz stream.
 //
 // This bench deliberately takes BOTH half-rate ticks from the drum
@@ -14,7 +14,7 @@
 //   2. exactly 128 cells of 12 sysclk per 1536-sysclk sample period
 //      (the frame decode collapses if this drifts)
 //   3. biphase-mark cells, even parity, M/W/B preambles — identical
-//      requirements to the main output
+//      requirements to the 96 kHz output
 //   4. channel status assembling to {04 00 00 02 0B ...}:
 //      consumer PCM, 48 kHz (CS_FREQ = 0x02), 24-bit
 //   5. audio payload intact

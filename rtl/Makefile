@@ -200,7 +200,7 @@ obj_dir/tb_spdif_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Mak
 sim-spdif: obj_dir/tb_spdif_block/sim
 	$(call run_sim,$<,tb/sim-spdif.out)
 
-# 48 kHz test transmitter: drum's half-rate ticks + CS_FREQ
+# 48 kHz (primary) transmitter: drum's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
 obj_dir/tb_spdif48_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
@@ -233,7 +233,7 @@ sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
 	$(call run_sim,$<,tb/sim-prog-pingpong.out)
 
 # Active master limiter in situ: hot chord must not rail, must not
-# go near-silent, and 50 ms RMS must not jump > 3 dB.
+# go near-silent, and 10 ms windowed RMS must not jump > 3 dB.
 sim-prog-limiter: obj_dir/tb_prog_limiter/sim
 	$(call run_sim,$<,tb/sim-prog-limiter.out)
 

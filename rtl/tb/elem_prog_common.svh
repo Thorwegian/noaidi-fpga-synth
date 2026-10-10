@@ -84,7 +84,7 @@ endfunction
 function automatic [15:0] bus_addr(input integer b);
     bus_addr = 16'(BUS_BASE + 16'(b));
 endfunction
-// source table: 3 words per entry, stride 4
+// source table: 4 words per entry (CFG, RATES, DEPTH, RATES2), stride 4
 function automatic [15:0] src_addr(input integer entry, input integer w);
     src_addr = 16'(SRC_BASE + 16'(entry) * 4 + 16'(w));
 endfunction

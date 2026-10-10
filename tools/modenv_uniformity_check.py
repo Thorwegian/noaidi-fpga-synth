@@ -7,7 +7,7 @@
 The symptom: with a plucky MOD-env patch, random notes have a longer
 MOD envelope, roughly every 32nd. Suspected cause: a knob DRAG that
 includes a re-render (e.g. PW) wedges the engine task in a long SPI
-flush; meanwhile coalesced applies keep pushing 96-write update_mod_env
+flush; meanwhile coalesced applies keep pushing 128-write update_mod_env
 bursts, the prod queue overflows, and the DROPPED TAIL (= the highest
 voices) keeps stale RATES from earlier in the drag.
 

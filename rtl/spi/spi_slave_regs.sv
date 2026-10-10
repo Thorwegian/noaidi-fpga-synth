@@ -171,7 +171,7 @@ module spi_slave_regs #(
     //
     // The write process is sync-only and reset-free on purpose: an async
     // reset in the same always_ff as a memory write blocks BSRAM
-    // inference in yosys (see AGENTS.md).  It does not infer BSRAM as
+    // inference in yosys.  It does not infer BSRAM as
     // written even so — the combinational read on the SPI side and the
     // second read port on sysclk force distributed logic — which is fine
     // at 16 words (16 x 36 = 576 FFs) and is what makes the one-dummy-

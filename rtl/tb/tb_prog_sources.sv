@@ -44,7 +44,7 @@ module tb_prog_sources;
 
         // B4: source sequencer + LFO. 93.75 Hz square LFO (musically
         // absurd on purpose — the bench needs several periods inside
-        // ~20 ms) on gain bus 3, depth +-2 octaves (+-12 dB). Window
+        // ~20 ms) on gain bus 3, swinging +-1 octave (+-6 dB). Window
         // peaks must alternate with ZERO SPI during measurement.
         spi_word_write(src_addr(0, 0), SRC_LFO_TREMOLO);
         spi_word_write(src_addr(0, 2), OFFS_PLUS_2OCT);
@@ -65,7 +65,7 @@ module tb_prog_sources;
         end
 
         // B5: ADSR + gate bus. LFO off, gain bus base to the envelope
-        // floor, source 1 = ADSR watching gate bus 5, depth -0x2000.
+        // floor, source 1 = ADSR watching gate bus 5, depth +0x2000 (+8 oct).
         // volume semantics: base = quiet floor (negative),
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
@@ -154,7 +154,7 @@ module tb_prog_sources;
 
         // BUS AS SOURCE (a bus is already a combiner
         // of sources — the only new thing is "other bus" as a source).
-        // ADSRs off; type-3 entry reads bus 6, multiplies by DEPTH,
+        // ADSRs off; a SEND entry reads bus 6, multiplies by DEPTH,
         // adds to gain bus 3. Bus 3 base = −8 oct floor. Bus 6 = 0 →
         // floor stays; bus 6 = +8 oct at unity depth → full loudness
         // (≥8× the floor); half depth → +4 oct = clearly in between.
@@ -197,7 +197,7 @@ module tb_prog_sources;
 
         // FIRMWARE-SHAPED TRIPLE (real wiring): the exact
         // per-voice chain the ESP32 programs — even slot = MOD env
-        // (ADSR, depth 0 here), odd slot = fan-out (type 3, unity,
+        // (ADSR, depth 0 here), odd slot = fan-out (SEND, unity,
         // from the channel bus) — and a hierarchical peek asserts the
         // replica holds EXACTLY base + 0 + channel. Guards the whole
         // sum against regressions no audio-level assert would pin.
@@ -261,10 +261,8 @@ module tb_prog_sources;
         end
 
         // UPPER HALF EXECUTES: move the send
-        // to entry 130 — half B, walked on alternate samples. The
-        // LFO (entry 0, half A) writes bus 6 on even passes; the
-        // half-B send relays the sum on odd passes (one sample
-        // stale — invisible at these rates). Same wobble assert
+        // to entry 130. The LFO (entry 0) writes bus 6 and the send
+        // relays the sum later in the same pass. Same wobble assert
         // proves entries above 127 are configured, walked, and
         // summing.
         spi_word_write(src_addr(2, 0), SRC_OFF);

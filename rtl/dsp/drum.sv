@@ -22,7 +22,7 @@
 //                 sole timebase, output stages included.
 //   slot        : current drum slot (scheduling / debug).
 //   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
-//                 48 kHz test S/PDIF output: sample boundary
+//                 48 kHz (primary) S/PDIF output: sample boundary
 //                 every second wrap (1536 sysclk), cell boundary every
 //                 second cell (12 sysclk). Derived from the same
 //                 counters, so 1536 = 128 cells × 12 and sample_tick48

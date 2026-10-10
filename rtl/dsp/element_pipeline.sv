@@ -110,7 +110,7 @@ module element_pipeline #(
 
     // Test-tone control (audio-chain purity check): bus
     // address 1023 is reserved as a control latch — bit 0 enables the
-    // top-level 187.5 Hz full-scale sine that replaces the mix at the
+    // top-level 1500 Hz full-scale sine that replaces the mix at the
     // outputs. Latched here because the bus mailbox already has the
     // sclk→sysclk CDC; no pointer ever references bus 1023.
     output logic           test_tone_en
@@ -165,7 +165,7 @@ module element_pipeline #(
     //   p3[7:0]   volume L UQ4.4   p3[15:8] volume R UQ4.4
     //             (0x00 = silence/exact mute .. 0xFF = loudest;
     //              inverted to the attenuation code at the effective-
-    //              parameter seam —)
+    //              parameter seam)
     //   p3[16]    24 dB mode       p3[18:17] filter type
     //----------------------------------------------------------------
     // Doubled for ping-pong: {bank, voice} addressing, both halves
@@ -296,7 +296,8 @@ module element_pipeline #(
     // Param RAM reads are SYNCHRONOUS on clk (was a comb read into the
     // same registers — identical timing, but sync-read + separate-clock
     // write is the shape yosys infers as dual-clock BSRAM). Sync-only
-    // process, per the AGENTS.md inference gotcha; validity is act-gated.
+    // process: yosys does not infer BSRAM from a process with an async
+    // reset. Validity is act-gated.
     logic [35:0] s1_osc_word, s1_duty_word, s1_filter_word, s1_gain_word;
     logic [1:0]  s1_gate_word;
     logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
@@ -375,8 +376,8 @@ module element_pipeline #(
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
     //----------------------------------------------------------------
-    // The Control Signal Processor now lives in its own module
-    //. Six read ports: S1 pointers in, S2 data out.
+    // The Control Signal Processor lives in its own module (csp.sv).
+    // Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
     logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
@@ -501,7 +502,7 @@ module element_pipeline #(
         $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
     wire signed [18:0] gr_sum =
         $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
-    // volume in, attenuation code out (the one subtract of)
+    // volume in, attenuation code out (the one subtract)
     wire [7:0] eff_gl =
         (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins
         (gl_sum[18] || gl_sum == 19'sd0)
@@ -870,7 +871,7 @@ module element_pipeline #(
     // settles (5 stages) | p8 latch gain_q + gain | p9 multiply | p10
     // sat24 publish. Every consumer latches mix_* at the NEXT tick, so
     // audio semantics are unchanged. lim_gain_q persists across samples
-    // = the envelope. Constants from scripts/limiter_model.py: threshold
+    // = the envelope. Constants: threshold
     // -1 dBFS, attack 12 dB/sample, release ~105 dB/s. sat24 stays
     // underneath as the guaranteed catch.
     //----------------------------------------------------------------

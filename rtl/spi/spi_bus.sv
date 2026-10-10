@@ -63,14 +63,9 @@ module spi_bus #(
     output logic [2:0]  elem_write_word,   // 0..6 = OSC..PTRS1 param RAM
 
     // ---- bus base writes (sclk domain, mailbox toward sysclk) ------
-    // Bus values are live (no ping-pong). The write crosses clock
-    // domains through this 1-deep toggle mailbox; the pipeline syncs
-    // dmem_wr_toggle and commits to bus RAM only in an idle drum
-    // slot, so a commit can never collide with a lane's bus read (the
-    // BSRAM read-during-write corruption class stays impossible by
-    // construction, not by probability). Overrun math: one SPI word
-    // takes >= ~5.6 us at 10 MHz; a commit waits at most one lane
-    // span (~3.7 us) — back-to-back writes cannot outrun the mailbox.
+    // The write crosses clock domains through this 1-deep toggle
+    // mailbox; csp.sv syncs dmem_wr_toggle and commits each write into
+    // both bus generations (see its mailbox notes for the rate margin).
     output logic [9:0]  dmem_wr_addr,
     output logic [17:0] dmem_wr_data,
     output logic        dmem_wr_toggle,  // toggles once per bus write
@@ -188,7 +183,7 @@ module spi_bus #(
                     partial_word    <= {partial_word[15:0], rx_byte};
                     data_byte_index <= data_byte_index + 2'd1;
                     // prefetch the NEXT word two byte-slots before it
-                    // streams (>=500 ns at 40 MHz against ~60 ns needed)
+                    // streams (~400 ns at 40 MHz against ~60 ns needed)
                     if (data_byte_index == 2'd1) begin
                         fetch_addr   <= auto_increment ? word_addr + 16'd1
                                                        : word_addr;
@@ -212,7 +207,8 @@ module spi_bus #(
 
     //--------------------------------------------------------------------
     // Store — dual-clock semi dual-port BSRAM (write sclk, read sysclk).
-    // Sync-only, reset-free processes so yosys infers DPX9B (AGENTS.md).
+    // Sync-only, reset-free processes so yosys infers DPX9B (an async
+    // reset in a memory-write process blocks BSRAM inference).
     //--------------------------------------------------------------------
     logic [35:0] store_ram [0:NWORDS-1];
 

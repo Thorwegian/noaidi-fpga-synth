@@ -75,9 +75,7 @@ module osc_core (
         : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
 
     //----------------------------------------------------------------
-    // Sine: true sine from a quarter-wave LUT (— the old
-    // y=4x(1-x) parabola read as a noisy tone on hardware). One
-    // quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
+    // Sine: true sine from a quarter-wave LUT. One quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
     // cycle is rebuilt from the top two phase bits — quadrant[0]
     // mirrors the falling quarters, quadrant[1] negates the lower
     // half. Full-scale like saw/tri. (A true parabolic waveform,

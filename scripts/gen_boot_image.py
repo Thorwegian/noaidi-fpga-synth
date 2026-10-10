@@ -14,15 +14,15 @@
 #   32 notes × 8 unison voices = 256 voices.
 #   Notes: for k in 1..8 → [C, E, G, C+12] at MIDI 12*k, i.e. C0..C8.
 #   Stereo: hard-panned by unison index — the first 4 unisons of each
-#   note go left, the last 4 go right (off channel = 0xFF ≈ -96 dB).
+#   note go left, the last 4 go right (off channel = 0x00, exact mute).
 #   Unison detune: [0, 2, 4, 6, -2, -4, -6, -8] LSB of the UQ4.10
 #   fraction (~±9.4 cents) — the left and right halves use different
 #   offsets, so the two channels are detuned relative to each other.
 #
 # Mixdown loudness (256 voices!):
-#   Saw oscillators run ±1.0 FS.  Per-voice gain is UQ4.4 log:
-#   lin = att_lut[frac] >>> int  (6 dB per int step, 0.375 dB per frac).
-#   gain = 0x60 → int 6 → -36 dB = 1/64 amplitude.
+#   Saw oscillators run ±1.0 FS.  Per-voice volume is UQ4.4 log
+#   (0x00 = silence, 0xFF = loudest; 6 dB per int step, 0.375 dB per
+#   frac): VOL = 0x9F = 0xFF - 0x60 → -36 dB = 1/64 amplitude.
 #     - 8 unison voices perfectly aligned: 8/64 = 1/8 FS per note.
 #     - 32 notes, RMS ≈ -17 dBFS, peaks ≈ -5 dBFS (sum of many detuned
 #       saws) — healthy headroom; the mixer's sat24 only clips in

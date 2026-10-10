@@ -39,10 +39,10 @@ Input transports:
   agnostic; a control-surface CC over BLE and the same CC over the
   wire are indistinguishable downstream.
 
-Constraint: **shouldn't require any FPGA changes.** (The two
-new oscillator waveforms wanted alongside — white noise, sine — are
-tracked as gateware issues separately and are not part of this
-firmware-side map.)
+Constraint: **shouldn't require any FPGA changes.** (The new
+oscillator waveform wanted alongside — white noise — is tracked as a
+gateware issue separately and is not part of this firmware-side map;
+sine exists.)
 
 ## Decisions
 
@@ -80,10 +80,10 @@ a Prophet-capable engine, staged:
    synth model channel-aware is cheap and unlocks multi-timbral
    layering and key splits — each channel becomes a "part" that can
    hold its own patch. Near-term easy win.
-6. **Active-patch data structure — start now**:
+6. **Active-patch data structure**:
    program change stays deferred until the stored-configuration
-   format is settled, but begin an in-RAM `patch_t` (drafted in
-   `app/main/patch.h`) that holds the whole currently-active sound.
+   format is settled; the in-RAM `patch_t` `g_patch`
+   (`app/main/patch.h`/`patch.c`) holds the whole currently-active sound.
    It becomes the single source of truth the CC/SysEx handlers
    MUTATE and voice_alloc/engine_link RENDER to buses and element
    words. Program change later just loads/stores instances of it;
@@ -101,9 +101,9 @@ The list fits the engine as built:
   voice** — exactly the current budget; 32-voice polyphony stands
   (mode 1's 2-element voices could go higher with a mode-aware
   allocator).
-- Sources: 2 LFOs × 16 channels = 32 (pool entries 0–31 as today)
-  and 2 ADSRs × 32 voices = 64 (entries 32–95) — 96 of the 128-entry
-  pool, 32 spare.
+- Sources: today entries 0–1 are the LFOs, 32–63 the amp ADSRs and
+  64–127 the MOD-env / fan-out SEND pairs — 130 of the 256-entry
+  pool. 2 LFOs × 16 channels would need 30 more.
 - Arp/sequencer, bend range, key tracking, pedals, aftertouch: pure
   firmware (event bus → synth model → bus writes), as the
   architecture intends.

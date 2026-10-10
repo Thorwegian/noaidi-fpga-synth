@@ -9,7 +9,6 @@
 # (0.375 dB per unit), so level_code = octave*16 + log_lut[m] and
 # target = level_code - threshold_code is directly the attenuation
 # code that att_lut decodes back to a linear gain. No division.
-# Bit-faithful to scripts/limiter_model.py.
 
 from pathlib import Path
 import math

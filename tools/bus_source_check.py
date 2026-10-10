@@ -9,7 +9,7 @@ bus (BUS_CH_CUT) BASE -> 32 type-3 walker entries -> per-voice cutoff
 buses -> element cutoff. If the fan-out works, sweeping CC 74
 dark/bright changes the saw's spectrum through the filter; if it is
 broken, cutoff stops responding entirely, because the per-voice base
-carries only velocity, which this patch zeroes.
+is always zero (cut_bus_value).
 
 Metric: brightness index = RMS(first difference)/RMS - a first
 difference emphasizes HF, so an open filter scores several times a
