@@ -10,3 +10,5 @@ License: CERN-OHL-S v2
 ```
 
 - Raw values are raw values. There is no such unit as "LSB".
+
+- Comments and docs files must always be updated to reflect changes to the code.
