@@ -119,7 +119,7 @@ equal-ratio ladder.
 Not mapped: source→destination routing beyond the wheel and the
 env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 
-Amp-envelope CCs re-push RATES and the velocity-scaled COEF to all
+Amp-envelope CCs re-push RATE_AD and the velocity-scaled COEF to all
 32 amp-ADSR instructions (paged, riding one page swap); `release_tail_us()`
 reads the live release rate.
 

@@ -62,7 +62,7 @@ typedef struct {
 
 typedef struct {
     uint8_t  entry;
-    uint8_t  word;      // 0 OP, 1 RATES, 2 COEF, 3 RATES2
+    uint8_t  word;      // 0 OP, 1 RATE_AD, 2 COEF, 3 RATE_DSR
     uint32_t value;
 } imem_cmd_t;
 

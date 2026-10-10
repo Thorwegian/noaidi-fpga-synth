@@ -267,18 +267,18 @@ module csp (
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    // One RAM per instruction word (OP, RATES, COEF, RATES2), all read
+    // One RAM per instruction word (OP, RATE_AD, COEF, RATE_DSR), all read
     // with the SAME address in the SAME cycle, so an instruction issues
     // every cycle: words read through one shared port would cost one cycle
     // each. imem_write_addr is {entry[7:0], word[1:0]}; the low two bits
     // select which RAM the word lands in.
     reg [31:0] imem_op   [0:2*synth_pkg::NUM_INSTR-1];   // {page, entry[7:0]}
-    reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_rate_ad  [0:2*synth_pkg::NUM_INSTR-1];
     reg [31:0] imem_coef [0:2*synth_pkg::NUM_INSTR-1];
     // Word 3, the second ADSR rate word. The address encoding carries
     // this slot: imem_write_addr is {entry, word[1:0]}, and firmware's
     // flush strides by four.
-    reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
+    reg [31:0] imem_rate_dsr [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [24:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level (format in dsp/adsr.sv).
     reg [27:0] state_mem [0:synth_pkg::NUM_INSTR-1];
@@ -286,9 +286,9 @@ module csp (
     initial begin
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
             imem_op[wi]   = 32'd0;            // opcode 0 = off
-            imem_rate[wi]  = 32'd0;
+            imem_rate_ad[wi]  = 32'd0;
             imem_coef[wi] = 32'd0;
-            imem_rate2[wi] = 32'd0;
+            imem_rate_dsr[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
             state_mem[wi] = 28'd0;
@@ -300,9 +300,9 @@ module csp (
         if (imem_write_enable) begin
             case (imem_write_addr[1:0])
                 2'd0: imem_op[imem_wr_entry]   <= imem_write_data;
-                2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
+                2'd1: imem_rate_ad[imem_wr_entry]  <= imem_write_data;
                 2'd2: imem_coef[imem_wr_entry] <= imem_write_data;
-                2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
+                2'd3: imem_rate_dsr[imem_wr_entry] <= imem_write_data;
                 default: ;                      // unreachable: all four words are used
             endcase
         end
@@ -331,9 +331,9 @@ module csp (
     //         DMEM word (also the ADSR's watched gate), [31:16] LFO phase
     //         increment -- overlapping the source field, which an LFO does
     //         not use
-    //   RATES  [17:0] kA, [31:18] kD[13:0] -- linear coefficients
+    //   RATE_AD  [17:0] kA, [31:18] kD[13:0] -- linear coefficients
     //   COEF   [17:0] signed coefficient, 0x10000 = unity
-    //   RATES2 [3:0] kD[17:14], [21:4] kR, [31:22] sustain (dsp/adsr.sv)
+    //   RATE_DSR [3:0] kD[17:14], [21:4] kR, [31:22] sustain (dsp/adsr.sv)
     logic [8:0] pc;             // 0..NUM_INSTR, one per cycle
 
     // The page flips once per SAMPLE, because a complete pass is one
@@ -364,7 +364,7 @@ module csp (
     end
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
-    logic [31:0] op_q, rate_q, coef_q, rate2_q;
+    logic [31:0] op_q, rate_ad_q, coef_q, rate_dsr_q;
     logic [27:0] state_q;
     logic signed [17:0] gate_q, src_q, base_q;
     logic [7:0]  pc_addr_d;     // the pc that goes with op_q
@@ -384,7 +384,7 @@ module csp (
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
     logic [15:0] r_phase_inc;
-    logic [31:0] r_rate, r_coef, r_rate2;
+    logic [31:0] r_rate_ad, r_coef, r_rate_dsr;
     logic [27:0] r_state;
 
     // ---- R stage registers ---------------------------------------------
@@ -471,8 +471,8 @@ module csp (
         .step_en   (r_valid && r_is_env),
         .state_in  (r_state),
         .gate      (gate_q > 18'sd0),
-        .rates     (r_rate),
-        .rates2    (r_rate2),
+        .rate_ad     (r_rate_ad),
+        .rate_dsr    (r_rate_dsr),
         .level_out (adsr_level),
         .state_out (adsr_state_out),
         .state_we  ()                  // the CSP tracks validity itself
@@ -513,8 +513,8 @@ module csp (
             fwd1_valid <= 1'b0; fwd2_valid <= 1'b0;
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
-            r_src <= '0; r_phase_inc <= '0; r_rate <= '0; r_coef <= '0;
-            r_state <= '0; r_rate2 <= '0;
+            r_src <= '0; r_phase_inc <= '0; r_rate_ad <= '0; r_coef <= '0;
+            r_state <= '0; r_rate_dsr <= '0;
             x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_state <= '0;
             x_operand <= '0; x_coef <= '0; x_base <= '0;
             x_phase_inc <= '0;
@@ -536,8 +536,8 @@ module csp (
             r_src      <= op_q[25:16];
             r_phase_inc <= op_q[31:16];
             // An ADSR uses OP[25:16] as its gate DMEM word, so bit 26 is free.
-            r_rate2    <= rate2_q;
-            r_rate     <= rate_q;
+            r_rate_dsr    <= rate_dsr_q;
+            r_rate_ad     <= rate_ad_q;
             r_coef    <= coef_q;
             r_state   <= state_q;
 
@@ -585,9 +585,9 @@ module csp (
     // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
         op_q    <= imem_op[{page_active, pc_addr}];
-        rate_q   <= imem_rate[{page_active, pc_addr}];
+        rate_ad_q   <= imem_rate_ad[{page_active, pc_addr}];
         coef_q  <= imem_coef[{page_active, pc_addr}];
-        rate2_q  <= imem_rate2[{page_active, pc_addr}];
+        rate_dsr_q  <= imem_rate_dsr[{page_active, pc_addr}];
         state_q <= state_mem[pc_addr];
         gate_q   <= dmem_base_gate[op_q[25:16]];   // watched gate DMEM word
         src_q    <= dmem_sum[op_q[25:16]];  // MAC source: DMEM output sum

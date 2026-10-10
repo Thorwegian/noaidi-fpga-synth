@@ -60,10 +60,10 @@ package synth_pkg;
     //             ADSR: [25:16] gate DMEM word (watched, level-sensitive:
     //                   value > 0 = held)
     //             MAC: [25:16] source DMEM word
-    //   +1 RATES (ADSR): [17:0] kA, [31:18] kD[13:0] — linear
+    //   +1 RATE_AD (ADSR): [17:0] kA, [31:18] kD[13:0] — linear
     //             coefficients (dsp/adsr.sv)
     //   +2 COEF:  [17:0] signed Q2.16 coefficient, 0x10000 = unity
-    //   +3 RATES2 (ADSR): [3:0] kD[17:14], [21:4] kR, [31:22] sustain
+    //   +3 RATE_DSR (ADSR): [3:0] kD[17:14], [21:4] kR, [31:22] sustain
     // An instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
     // Pool 256, FULL RATE: the CSP retires one instruction per

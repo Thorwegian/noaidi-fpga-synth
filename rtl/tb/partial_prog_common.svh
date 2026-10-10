@@ -83,7 +83,7 @@ endfunction
 function automatic [15:0] dmem_addr(input integer b);
     dmem_addr = 16'(DMEM_BASE + 16'(b));
 endfunction
-// instruction table: 4 words per entry (OP, RATES, COEF, RATES2), stride 4
+// instruction table: 4 words per entry (OP, RATE_AD, COEF, RATE_DSR), stride 4
 function automatic [15:0] src_addr(input integer entry, input integer w);
     src_addr = 16'(SRC_BASE + 16'(entry) * 4 + 16'(w));
 endfunction
@@ -117,7 +117,7 @@ localparam [31:0] OFFS_PLUS_4OCT  = 32'h00001000;
 localparam [31:0] OFFS_PLUS_8OCT  = 32'h00002000;
 localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 
-// instruction-table words, composed from the OP/RATES/COEF fields
+// instruction-table words, composed from the OP/RATE_AD/COEF fields
 // (memory_map.md) instead of opaque hex
 localparam [31:0] SRC_OFF         = 32'h0;
 // opcodes are bitmasks: OPC_LFO/ADSR/MAC in synth_pkg
@@ -132,10 +132,10 @@ localparam [31:0] SRC_DMEM3_FROM6 =                  // MAC:
 localparam [31:0] SRC_LFO_TREM_DMEM6 =               // pulse LFO -> DMEM 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
 // Rates are linear coefficients, in two words, computed with the same
-// arithmetic the firmware uses (patch_adsr_word1/word3): fast attack,
+// arithmetic the firmware uses (patch_adsr_rate_ad/word3): fast attack,
 // slow decay, high sustain, fast release.
-localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
-localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
+localparam [31:0] BENCH_ADSR_RATE_AD  = 32'h00120000;   // kA, kD[13:0]
+localparam [31:0] BENCH_ADSR_RATE_DSR = 32'hF0280000;   // kD[17:14], kR, sustain
 localparam [31:0] COEF_UNITY = 32'h00010000;       // (x*d)>>16: 1.0
 localparam [31:0] COEF_HALF  = 32'h00008000;       // 0.5
 

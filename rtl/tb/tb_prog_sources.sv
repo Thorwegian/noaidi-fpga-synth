@@ -70,8 +70,8 @@ module tb_prog_sources;
         // envelope depth POSITIVE — level adds volume
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // COEF must
                                                           // match the
                                                           // floor's
@@ -79,8 +79,8 @@ module tb_prog_sources;
         flip;
         spi_word_write(src_addr(0, 0), SRC_OFF);
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_8OCT);   // COEF must
                                                           // match the
                                                           // floor's
@@ -117,21 +117,21 @@ module tb_prog_sources;
         // (full loudness). Last-write-wins would leave −8+4 = −4 oct
         // = 24 dB quieter. Compare against slot-2-off single-source.
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
         spi_word_write(src_addr(2, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(2, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(2, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
         flip;
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), OFFS_PLUS_4OCT);
         spi_word_write(src_addr(2, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(2, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(2, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(2, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(2, 2), OFFS_PLUS_4OCT);
         spi_word_write(dmem_addr(3), OFFS_MINUS_8OCT);   // base: floor
         spi_word_write(dmem_addr(5), 32'h00000001);      // gate on
@@ -203,15 +203,15 @@ module tb_prog_sources;
         // replica holds EXACTLY base + 0 + channel. Guards the whole
         // sum against regressions no audio-level assert would pin.
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), 32'h0);          // MOD env depth 0
         spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6); // fan-out, adjacent
         spi_word_write(src_addr(2, 2), COEF_UNITY);
         flip;
         spi_word_write(src_addr(1, 0), SRC_ADSR_DMEM3_GATE5);
-        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATES);
-        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATES2);
+        spi_word_write(src_addr(1, 1), BENCH_ADSR_RATE_AD);
+        spi_word_write(src_addr(1, 3), BENCH_ADSR_RATE_DSR);
         spi_word_write(src_addr(1, 2), 32'h0);
         spi_word_write(src_addr(2, 0), SRC_DMEM3_FROM6);
         spi_word_write(src_addr(2, 2), COEF_UNITY);

@@ -195,7 +195,7 @@ static uint32_t mod_env_coef(uint8_t vel)
 }
 // ADSR wire format (words 1 and 3): see patch.h.
 // The amp envelope's A,D,S,R lives in g_patch.env[0] (patch.h);
-// patch_adsr_word1() and patch_adsr_word3() convert it into the linear coefficients
+// patch_adsr_rate_ad() and patch_adsr_rate_dsr() convert it into the linear coefficients
 // the CSP multiplies by.
 // patch_default() carries the ear-tuned values (0x98/0x20/0xF0/0x28).
 
@@ -449,8 +449,8 @@ static void render_active_voices(void)
 // reads the patch, so tail bookkeeping follows automatically.
 static void update_amp_env(void)
 {
-    uint32_t r1 = patch_adsr_word1(&g_patch.env[0]);
-    uint32_t r2 = patch_adsr_word3(&g_patch.env[0]);
+    uint32_t r1 = patch_adsr_rate_ad(&g_patch.env[0]);
+    uint32_t r2 = patch_adsr_rate_dsr(&g_patch.env[0]);
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_AMP_ENV(v), 1, r1);
         engine_link_imem_write(INSTR_AMP_ENV(v), 3, r2);
@@ -545,17 +545,17 @@ static void update_lfo2(void)
 // cutoff is the implemented destination).
 static void update_mod_env(void)
 {
-    uint32_t rates  = patch_adsr_word1(&g_patch.env[1]);
-    uint32_t rates2 = patch_adsr_word3(&g_patch.env[1]);
+    uint32_t rate_ad  = patch_adsr_rate_ad(&g_patch.env[1]);
+    uint32_t rate_dsr = patch_adsr_rate_dsr(&g_patch.env[1]);
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_MOD_ENV(v), 0,
             CSP_OPC_ADSR | ((uint32_t)DMEM_CUT(v) << 6)
                | ((uint32_t)DMEM_VGATE(v) << 16));
-        engine_link_imem_write(INSTR_MOD_ENV(v), 1, rates);
+        engine_link_imem_write(INSTR_MOD_ENV(v), 1, rate_ad);
         // per-voice velocity scaling, same reason as update_amp_env
         engine_link_imem_write(INSTR_MOD_ENV(v), 2,
                                mod_env_coef(s_voices[v].vel));
-        engine_link_imem_write(INSTR_MOD_ENV(v), 3, rates2);
+        engine_link_imem_write(INSTR_MOD_ENV(v), 3, rate_dsr);
     }
 }
 
@@ -618,7 +618,7 @@ static void refresh_cut_dmem(void)
 // Boot wiring for the fan-out: 32 stateless MAC instructions,
 // entry INSTR_CUTOFF_MAC(v) = DMEM_CH_CUT × unity → DMEM_CUT(v), each in the
 // slot adjacent to its voice's MOD env (same target DMEM word, and chain
-// summing requires consecutive slots). Word 1 (RATES) is meaningless
+// summing requires consecutive slots). Word 1 (RATE_AD) is meaningless
 // for a MAC.
 static void init_fanout_sources(void)
 {
@@ -1027,9 +1027,9 @@ void voice_alloc_init(void)
         engine_link_imem_write(INSTR_AMP_ENV(v), 0,
             CSP_OPC_ADSR | ((uint32_t)DMEM_GAIN(v) << 6)
                | ((uint32_t)DMEM_VGATE(v) << 16));
-        engine_link_imem_write(INSTR_AMP_ENV(v), 1, patch_adsr_word1(&g_patch.env[0]));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 1, patch_adsr_rate_ad(&g_patch.env[0]));
         engine_link_imem_write(INSTR_AMP_ENV(v), 2, ENV_SPAN);
-        engine_link_imem_write(INSTR_AMP_ENV(v), 3, patch_adsr_word3(&g_patch.env[0]));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 3, patch_adsr_rate_dsr(&g_patch.env[0]));
     }
     refresh_gain_dmem();   // gain DMEM bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);

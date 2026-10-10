@@ -55,8 +55,8 @@
 //
 // Wire format, MIRRORED IN app/main/patch.h -- change both or neither:
 //
-//   rates   [17:0] kA          [31:18] kD[13:0]
-//   rates2  [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
+//   rate_ad   [17:0] kA          [31:18] kD[13:0]
+//   rate_dsr  [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
 //
 // Sustain arrives as a plain 10-bit level too. Only the linear decode is
 // used; the log decode OP[26] would select is never selected.
@@ -80,8 +80,8 @@ module adsr #(
     input  wire        step_en,      // advance this envelope now
     input  wire [27:0] state_in,     // {stage[1:0], level[25:0]}
     input  wire        gate,         // watched DMEM word level > 0 = held
-    input  wire [31:0] rates,        // kA and the low 14 bits of kD
-    input  wire [31:0] rates2,       // the rest of kD, then kR and sustain
+    input  wire [31:0] rate_ad,        // kA and the low 14 bits of kD
+    input  wire [31:0] rate_dsr,       // the rest of kD, then kR and sustain
 
     // the envelope's contribution, combinational from state_in
     output wire signed [17:0] level_out,
@@ -150,9 +150,9 @@ module adsr #(
     // kD straddles the two words: 14 bits in one, 4 in the other. Firmware
     // packs it that way because three 18-bit coefficients plus a sustain
     // level do not fit into 64 bits any other way.
-    wire [17:0] k_dec = {rates2[3:0], rates[31:18]};
-    wire [17:0] k_seg = !gate                   ? rates2[21:4]   // release
-                      : (stage_sel == AST_ATT)  ? rates[17:0]    // attack
+    wire [17:0] k_dec = {rate_dsr[3:0], rate_ad[31:18]};
+    wire [17:0] k_seg = !gate                   ? rate_dsr[21:4]   // release
+                      : (stage_sel == AST_ATT)  ? rate_ad[17:0]    // attack
                       :                           k_dec;         // decay
 
     // Sustain is a plain level: the top 10 bits of the 22-bit envelope
@@ -160,7 +160,7 @@ module adsr #(
     // mismatch of one scales every sustain by two, and a high sustain then
     // sits above full scale and makes the decay segment climb instead of
     // settle.
-    wire [25:0] sus = 26'(rates2[31:22]) << SUS_SHIFT;
+    wire [25:0] sus = 26'(rate_dsr[31:22]) << SUS_SHIFT;
 
     wire [25:0] target = !gate                  ? 26'd0
                        : (stage_sel == AST_ATT) ? ENV_OVER

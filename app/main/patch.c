@@ -58,14 +58,14 @@ static uint32_t adsr_sustain(const adsr_t *e)
     return lvl >> ADSR_SUSTAIN_SHIFT;
 }
 
-uint32_t patch_adsr_word1(const adsr_t *e)
+uint32_t patch_adsr_rate_ad(const adsr_t *e)
 {
     uint32_t ka = adsr_rate_coeff(patch_adsr_rate_byte(e->attack));
     uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
     return (ka & 0x3FFFFu) | ((kd & 0x3FFFu) << 18);
 }
 
-uint32_t patch_adsr_word3(const adsr_t *e)
+uint32_t patch_adsr_rate_dsr(const adsr_t *e)
 {
     uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
     uint32_t kr = adsr_rate_coeff(patch_adsr_rate_byte(e->release));
