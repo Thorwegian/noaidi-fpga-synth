@@ -390,7 +390,7 @@ bench-verified) milestone. One rung in flight at a time.
    IDF_PATH-driven direct invocation, or a containerized firmware
    build. The gateware side is already portable (OSS CAD Suite on
    PATH).
-8. **Clock-sanity heartbeat (parked)**: toggle one LED every 48 000
+8. **Clock-sanity heartbeat ✅**: led[0] toggles every 48 000
    sample ticks — a correct
    SYSCLK reads as a metronomic 1 Hz blink, a wrong MS5351 setting is
    visibly off. Nearly free in the drum; turns "is the clock right?"
