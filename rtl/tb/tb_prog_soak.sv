@@ -95,8 +95,8 @@ module tb_prog_soak;
     // check one envelope slot
     task automatic check_env(input int slot, input int samp);
         begin
-            stg = dut.istate[slot][27:26];
-            lvl = dut.istate[slot][25:0];
+            stg = dut.state_mem[slot][27:26];
+            lvl = dut.state_mem[slot][25:0];
             if (gated[slot] && prev_stg[slot] == ST_DEC
                             && (stg == ST_ATT || stg == ST_IDLE)) begin
                 retrig = retrig + 1; errors = errors + 1;
@@ -182,8 +182,8 @@ module tb_prog_soak;
             p_gl = rd_gl_d; p_fc = rd_fc_d; first = 0;
         end
 
-        $display("  amp env slot 32: stage=%0d level=%0d", dut.istate[32][27:26], dut.istate[32][25:0]);
-        $display("  mod env slot 64: stage=%0d level=%0d", dut.istate[64][27:26], dut.istate[64][25:0]);
+        $display("  amp env slot 32: stage=%0d level=%0d", dut.state_mem[32][27:26], dut.state_mem[32][25:0]);
+        $display("  mod env slot 64: stage=%0d level=%0d", dut.state_mem[64][27:26], dut.state_mem[64][25:0]);
         $display("  gain bus 16 = %0d   cut bus 48 = %0d", rd_gl_d, rd_fc_d);
         $display("  retriggers=%0d  discontinuities=%0d", retrig, disc);
         if (errors == 0) $display("ALL PASS");

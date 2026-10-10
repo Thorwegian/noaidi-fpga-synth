@@ -13,7 +13,7 @@
 
 static const char *TAG = "fpga_spi";
 
-static spi_device_handle_t g_spi;
+static spi_device_handle_t s_spi;
 
 // ── Initialisation ──────────────────────────────────────────────────
 void fpga_spi_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
@@ -37,7 +37,7 @@ void fpga_spi_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
     };
 
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_DISABLED));
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev_cfg, &g_spi));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &dev_cfg, &s_spi));
     ESP_LOGI(TAG, "SPI init: MOSI=%d MISO=%d SCLK=%d CS=%d freq=%lu",
              mosi_pin, miso_pin, sclk_pin, cs_pin, freq_hz);
 }
@@ -60,7 +60,7 @@ static void fpga_xfer_bytes(const uint8_t *tx, size_t nbytes)
     // esp_intr_enable, a semaphore wait) dominated and pinned
     // engine_link under a CC flood. Polling busy-waits the ~5 µs
     // of wire time instead — far less overhead per word burst.
-    ESP_ERROR_CHECK(spi_device_polling_transmit(g_spi, &t));
+    ESP_ERROR_CHECK(spi_device_polling_transmit(s_spi, &t));
 }
 
 // ── Low-level: full-duplex N bytes in ONE CS-framed transaction ─────
@@ -73,7 +73,7 @@ static void fpga_xfer_bytes_duplex(const uint8_t *tx, uint8_t *rx, size_t nbytes
         .tx_buffer = tx,
         .rx_buffer = rx,
     };
-    ESP_ERROR_CHECK(spi_device_transmit(g_spi, &t));
+    ESP_ERROR_CHECK(spi_device_transmit(s_spi, &t));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -87,12 +87,12 @@ static void fpga_xfer_bytes_duplex(const uint8_t *tx, uint8_t *rx, size_t nbytes
 // MISO byte 0 is always 0xA5 (the slave's ID: a free link check).
 // ═══════════════════════════════════════════════════════════════════
 
-#define WORDS_MAX 8   // per transaction, sized for the local frame buffer
+#define BURST_MAX_WORDS 8   // per transaction, sized for the local frame buffer
 
 void fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n)
 {
-    uint8_t frame[3 + 4 * WORDS_MAX];
-    if (n > WORDS_MAX) n = WORDS_MAX;
+    uint8_t frame[3 + 4 * BURST_MAX_WORDS];
+    if (n > BURST_MAX_WORDS) n = BURST_MAX_WORDS;
     frame[0] = 0x40;                    // write, auto-increment
     frame[1] = (uint8_t)(addr >> 8);
     frame[2] = (uint8_t)(addr & 0xFF);
@@ -113,9 +113,9 @@ void fpga_word_write(uint16_t addr, uint32_t value)
 // Returns false if the ID byte is missing (link fault).
 bool fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n)
 {
-    uint8_t tx[5 + 4 * WORDS_MAX] = {0};
-    uint8_t rx[5 + 4 * WORDS_MAX] = {0};
-    if (n > WORDS_MAX) n = WORDS_MAX;
+    uint8_t tx[5 + 4 * BURST_MAX_WORDS] = {0};
+    uint8_t rx[5 + 4 * BURST_MAX_WORDS] = {0};
+    if (n > BURST_MAX_WORDS) n = BURST_MAX_WORDS;
     tx[0] = 0xC0;                       // read, auto-increment
     tx[1] = (uint8_t)(addr >> 8);
     tx[2] = (uint8_t)(addr & 0xFF);

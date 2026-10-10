@@ -34,7 +34,7 @@ wire        dmem_wr_toggle;
 wire        imem_write_enable;
 wire [9:0]  imem_write_addr;
 wire [31:0] imem_write_data;
-wire        swap_req;
+wire        swap_toggle;
 
 spi_bus #(.AW_BACKED(11)) u_bus (
     .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
@@ -43,7 +43,7 @@ spi_bus #(.AW_BACKED(11)) u_bus (
     .elem_write_index(elem_write_index), .elem_write_data(elem_write_data),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
-    .swap_req(swap_req)
+    .swap_toggle(swap_toggle)
 );
 
 logic signed [23:0] ml, mr;
@@ -54,7 +54,7 @@ element_pipeline #(
     .clk(clk), .rst_n(rst_n), .slot(slot),
     .lane_enter(lane_enter), .sample_tick(sample_tick),
     .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
-    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_req(swap_req),
+    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_toggle(swap_toggle),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .mix_left(ml), .mix_right(mr)
@@ -135,7 +135,7 @@ localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
 // Rates are linear coefficients, in two words. These are the
 // old 0xF4F000F0 nibble word converted by the same arithmetic firmware
-// uses (patch_adsr_rate1/rate2), so the bench hears what it used to:
+// uses (patch_adsr_word1/word3), so the bench hears what it used to:
 // fast attack, slow decay, high sustain, fast release.
 localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
 localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
@@ -218,7 +218,7 @@ task automatic program_v0;
     end
 endtask
 
-// firmware voice_program() mirror: C4/E4/G4/C5 on voices 0-3,
+// firmware render_voice() mirror: C4/E4/G4/C5 on voices 0-3,
 // church-organ detune, hard-panned, fc one octave above the note
 function automatic [13:0] chord_pitch(input integer v);
     case (v)

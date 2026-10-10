@@ -36,8 +36,8 @@ module tb_prog_pingpong;
     logic signed [17:0] live_before, live_mid, live_after, shadow_mid;
 
     // hierarchical peeks -- the whole point of doing this in simulation
-    `define LIVE   u_pipe.u_csp.dmem_gl[{ u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
-    `define SHADOW u_pipe.u_csp.dmem_gl[{~u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
+    `define LIVE   u_pipe.u_csp.dmem_gain_l[{ u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
+    `define SHADOW u_pipe.u_csp.dmem_gain_l[{~u_pipe.u_csp.dmem_gen, TESTBUS[8:0]}]
 
     initial begin
         reset_and_mute;
@@ -133,7 +133,7 @@ module tb_prog_pingpong;
         // 6. a neighbouring bus must be untouched -- catches an address
         //    that wraps into the wrong half
         //---------------------------------------------------------------
-        if (u_pipe.u_csp.dmem_gl[{u_pipe.u_csp.dmem_gen, 9'(TESTBUS+1)}] === MARK_B) begin
+        if (u_pipe.u_csp.dmem_gain_l[{u_pipe.u_csp.dmem_gen, 9'(TESTBUS+1)}] === MARK_B) begin
             $display("FAIL: neighbouring bus %0d also changed -- address aliasing", TESTBUS+1);
             errors = errors + 1;
         end else

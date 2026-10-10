@@ -36,7 +36,7 @@ typedef struct {
     uint8_t  elem;    // element index 0..255
     uint8_t  word;    // 0..6 (OSC DUTY FILTER GAIN GATE PTRS0 PTRS1)
     uint32_t value;
-} engine_cmd_t;
+} engine_param_cmd_t;
 
 // Mutes every element into the local image, writes both banks (two
 // full-image writes with a swap between), and starts the 1 kHz tick
@@ -48,7 +48,7 @@ void engine_link_init(void);
 
 // Queue one parameter write. Non-blocking: returns false if the queue
 // is full (the write is dropped).
-bool engine_link_send(const engine_cmd_t *cmd);
+bool engine_link_param_write(const engine_param_cmd_t *cmd);
 
 // Queue one live bus-base write (bus_architecture.md). Buses are not
 // banked and need no swap: the write goes straight to the bus base

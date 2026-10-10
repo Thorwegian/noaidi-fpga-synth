@@ -8,20 +8,20 @@
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different element: stage Sk at drum slot t holds the
 // element that entered at slot t-k.  The pipeline is 26 stages deep
-// (s10_act follows s1_act by 24 cycles in tb_element_pipeline), so it
+// (s10_valid follows s1_valid by 24 cycles in tb_element_pipeline), so it
 // occupies 256 + 26 - 1 = 281 contiguous slots (~37% of the 768-slot
 // drum rotation).
 //
 // Stage map:
 //   S0  state/param RAM read address issued
 //   S1  state/param RAM read data available
-//   S2  issue phase-delta + SVF-K LUT reads
-//   S3  LUT data → delta, K, q1; phase_next = phase + delta (ONE adder)
+//   S2  issue phase-increment + SVF-K LUT reads
+//   S3  LUT data → phase_inc, K, q1; phase_next = phase + phase_inc (ONE adder)
 //   S3B register phase_next / barrel-shifted K / q1 / duty / wave
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
 //   S3D resonance attenuation multiply on registered operands (DSP)
 //   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
-//       7 per pole); its output is the element output
+//       7 per 2-pole section); its output is the element output
 //   S9B attenuation decode: lin gains via LUT + barrel shift
 //   S10 attenuation multiply on registered operands      (DSP); its
 //       output is accumulated into the mix and the state written back
@@ -74,7 +74,7 @@ module element_pipeline #(
     // PING-PONG (memory map decision 7): the banks are doubled —
     // reads always hit the ACTIVE half, writes always the SHADOW half,
     // so a read and a write can never collide on one address (the
-    // click-on-sweep bug). swap_req (an sclk-domain toggle from
+    // click-on-sweep bug). swap_toggle (an sclk-domain toggle from
     // CTRL@0x0002) flips the active half at drum slot 512: the
     // pipeline is drained there (the span ends at slot 280), so every sample's
     // 256 elements read one consistent bank generation.
@@ -95,7 +95,7 @@ module element_pipeline #(
     input  logic [31:0]    imem_write_data,
     input  logic [7:0]     elem_write_index,
     input  logic [31:0]    elem_write_data,
-    input  logic           swap_req,    // sclk-domain toggle
+    input  logic           swap_toggle,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
                                              // after sample_tick (S11
@@ -117,7 +117,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // LUT ROMs (combinational reads)
     //----------------------------------------------------------------
-    reg [23:0] phase_lut [0:1023];     // osc phase delta, one octave
+    reg [23:0] phase_lut [0:1023];     // osc phase increment, one octave
     reg [15:0] k_lut     [0:1023];     // SVF K mantissa, one octave
     reg [16:0] q1_lut    [0:15];       // SVF damping mantissa, one
                                        // octave of the log2 resonance
@@ -218,7 +218,7 @@ module element_pipeline #(
     // complement of the active bank (memory map wording, literally).
     //----------------------------------------------------------------
     logic bank_active;
-    logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_req toggle sync (sysclk)
+    logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_toggle sync (sysclk)
     logic swap_pending;
 
     initial begin
@@ -233,7 +233,7 @@ module element_pipeline #(
             swap_toggle_meta <= 1'b0; swap_toggle_sync <= 1'b0; swap_toggle_prev <= 1'b0;
             swap_pending <= 1'b0;
         end else begin
-            swap_toggle_meta <= swap_req;
+            swap_toggle_meta <= swap_toggle;
             swap_toggle_sync <= swap_toggle_meta;
             swap_toggle_prev <= swap_toggle_sync;
             if (swap_toggle_sync != swap_toggle_prev)
@@ -271,21 +271,21 @@ module element_pipeline #(
     // S0/S1 — RAM reads (address = element entering this cycle)
     //
     // Sync-only process: yosys memory inference (BSRAM read port).
-    // Read data validity is gated by s1_act, so no reset is needed.
+    // Read data validity is gated by s1_valid, so no reset is needed.
     //----------------------------------------------------------------
     logic [VW-1:0] elem_read_index;
     assign elem_read_index = lane_enter ? slot[VW-1:0] : '0;
 
-    logic        s1_act;
+    logic        s1_valid;
     logic [VW-1:0] s1_idx;
     logic [13:0] s1_pitch;
     logic [1:0]  s1_wave;
     logic signed [23:0] s1_duty;
     logic [13:0] s1_fc;
     logic [13:0] s1_reso;   // log2 resonance code (UQ4.10)
-    logic [7:0]  s1_gl, s1_gr;
+    logic [7:0]  s1_vol_l, s1_vol_r;
     logic        s1_dual;
-    logic [1:0]  s1_ftype;
+    logic [1:0]  s1_filter_mode;
     logic signed [23:0] s1_phase;
     logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
 
@@ -340,34 +340,34 @@ module element_pipeline #(
     // effective-parameter stage maps onto the existing exact-mute
     // machinery:
     // one decode-stage mux, no new carry registers down the pipeline.
-    assign s1_gl    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
-    assign s1_gr    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
+    assign s1_vol_l    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
+    assign s1_vol_r    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
     assign s1_dual  = s1_gain_word[16];
-    assign s1_ftype = s1_gain_word[18:17];
+    assign s1_filter_mode = s1_gain_word[18:17];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s1_act   <= 1'b0;
+            s1_valid   <= 1'b0;
             s1_idx   <= '0;
         end else begin
-            s1_act   <= lane_enter;
+            s1_valid   <= lane_enter;
             s1_idx   <= slot[VW-1:0];
         end
     end
 
     //----------------------------------------------------------------
-    // S2 — issue delta + K LUT reads; carry everything
+    // S2 — issue phase_inc + K LUT reads; carry everything
     //----------------------------------------------------------------
-    logic        s2_act;
+    logic        s2_valid;
     logic [VW-1:0] s2_idx;
     logic [13:0] s2_pitch;
     logic [1:0]  s2_wave;
     logic signed [23:0] s2_duty;
     logic [13:0] s2_fc;
     logic [13:0] s2_reso;
-    logic [7:0]  s2_gl, s2_gr;
+    logic [7:0]  s2_vol_l, s2_vol_r;
     logic        s2_dual;
-    logic [1:0]  s2_ftype;
+    logic [1:0]  s2_filter_mode;
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
@@ -376,7 +376,7 @@ module element_pipeline #(
     // Six read ports: S1 pointers in, S2 data out.
     //----------------------------------------------------------------
     logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
-    logic signed [17:0] s2_dmem_q, s2_dmem_gl, s2_dmem_gr;
+    logic signed [17:0] s2_dmem_q, s2_dmem_gain_l, s2_dmem_gain_r;
 
     csp u_csp (
         .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
@@ -393,41 +393,41 @@ module element_pipeline #(
         .rd_gl_a   (s1_ptrs1_word[18:10]),
         .rd_gr_a   (s1_ptrs1_word[28:20]),
         .rd_pitch_d(s2_dmem_pitch), .rd_duty_d(s2_dmem_duty), .rd_fc_d(s2_dmem_fc),
-        .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gl), .rd_gr_d(s2_dmem_gr),
+        .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gain_l), .rd_gr_d(s2_dmem_gain_r),
         .test_tone_en(test_tone_en)
     );
 
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s2_act   <= 1'b0;
+            s2_valid   <= 1'b0;
             s2_idx   <= '0;
             s2_pitch <= '0;
             s2_wave  <= '0;
             s2_duty  <= '0;
             s2_fc    <= '0;
             s2_reso  <= '0;
-            s2_gl    <= '0;
-            s2_gr    <= '0;
+            s2_vol_l    <= '0;
+            s2_vol_r    <= '0;
             s2_dual  <= 1'b0;
-            s2_ftype <= '0;
+            s2_filter_mode <= '0;
             s2_phase <= '0;
             s2_ic1eq1 <= '0;
             s2_ic2eq1 <= '0;
             s2_ic1eq2 <= '0;
             s2_ic2eq2 <= '0;
         end else begin
-            s2_act   <= s1_act;
+            s2_valid   <= s1_valid;
             s2_idx   <= s1_idx;
             s2_pitch <= s1_pitch;
             s2_wave  <= s1_wave;
             s2_duty  <= s1_duty;
             s2_fc    <= s1_fc;
             s2_reso  <= s1_reso;
-            s2_gl    <= s1_gl;
-            s2_gr    <= s1_gr;
+            s2_vol_l    <= s1_vol_l;
+            s2_vol_r    <= s1_vol_r;
             s2_dual  <= s1_dual;
-            s2_ftype <= s1_ftype;
+            s2_filter_mode <= s1_filter_mode;
             s2_phase <= s1_phase;
             s2_ic1eq1 <= s1_ic1eq1;
             s2_ic2eq1 <= s1_ic2eq1;
@@ -492,85 +492,85 @@ module element_pipeline #(
         (duty_sum >  32'sd8388607) ? 24'sd8388607  :
         (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
 
-    wire signed [17:0] gmod_l = s2_dmem_gl >>> 6;
-    wire signed [17:0] gmod_r = s2_dmem_gr >>> 6;
+    wire signed [17:0] gain_mod_l = s2_dmem_gain_l >>> 6;
+    wire signed [17:0] gain_mod_r = s2_dmem_gain_r >>> 6;
     wire signed [18:0] gl_sum =
-        $signed({11'b0, s2_gl}) + {gmod_l[17], gmod_l};
+        $signed({11'b0, s2_vol_l}) + {gain_mod_l[17], gain_mod_l};
     wire signed [18:0] gr_sum =
-        $signed({11'b0, s2_gr}) + {gmod_r[17], gmod_r};
+        $signed({11'b0, s2_vol_r}) + {gain_mod_r[17], gain_mod_r};
     // volume in, attenuation code out (the one subtract)
-    wire [7:0] eff_gl =
-        (s2_gl == 8'h00)      ? 8'hFF :             // base mute wins
+    wire [7:0] eff_atten_l =
+        (s2_vol_l == 8'h00)      ? 8'hFF :             // base mute wins
         (gl_sum[18] || gl_sum == 19'sd0)
                               ? 8'hFE :             // quietest audible
         (gl_sum > 19'sd255)   ? 8'h00 :             // full volume
         8'hFF - gl_sum[7:0];
-    wire [7:0] eff_gr =
-        (s2_gr == 8'h00)      ? 8'hFF :
+    wire [7:0] eff_atten_r =
+        (s2_vol_r == 8'h00)      ? 8'hFF :
         (gr_sum[18] || gr_sum == 19'sd0)
                               ? 8'hFE :
         (gr_sum > 19'sd255)   ? 8'h00 :
         8'hFF - gr_sum[7:0];
 
     //----------------------------------------------------------------
-    // S3 — LUT data, delta/K, phase_next, oscillator waveform
+    // S3 — LUT data, phase_inc/K, phase_next, oscillator waveform
     //----------------------------------------------------------------
-    logic [23:0] s3_delta_lut;
+    logic [23:0] s3_phase_inc_lut;
     logic [15:0] s3_k_lut;
     logic [16:0] s3_q1_lut;
     logic [3:0]  s3_reso_oct;
 
-    logic        s3_act;
+    logic        s3_valid;
     logic [VW-1:0] s3_idx;
     logic signed [23:0] s3_phase;
     logic [3:0]  s3_pitch_oct;
     logic [3:0]  s3_fc_oct;
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
-    logic [7:0]  s3_gl, s3_gr;
+    logic [7:0]  s3_atten_l, s3_atten_r;
     logic        s3_dual;
-    logic [1:0]  s3_ftype;
+    logic [1:0]  s3_filter_mode;
     logic [15:0] s3_reso_att;   // input-atten gain (UQ0.16)
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3_delta_lut <= '0;
+            s3_phase_inc_lut <= '0;
             s3_k_lut     <= '0;
             s3_q1_lut    <= '0;
             s3_reso_oct  <= '0;
-            s3_act   <= 1'b0;
+            s3_valid   <= 1'b0;
             s3_idx   <= '0;
             s3_phase <= '0;
             s3_pitch_oct <= '0;
             s3_fc_oct    <= '0;
             s3_wave  <= '0;
             s3_duty  <= '0;
-            s3_gl    <= '0;
-            s3_gr    <= '0;
+            s3_atten_l    <= '0;
+            s3_atten_r    <= '0;
             s3_dual  <= 1'b0;
-            s3_ftype <= '0;
+            s3_filter_mode <= '0;
             s3_reso_att <= 16'hffff;
             s3_ic1eq1 <= '0;
             s3_ic2eq1 <= '0;
             s3_ic1eq2 <= '0;
             s3_ic2eq2 <= '0;
         end else begin
-            s3_delta_lut <= phase_lut[eff_pitch[9:0]];
+            s3_phase_inc_lut <= phase_lut[eff_pitch[9:0]];
             s3_k_lut     <= k_lut[eff_fc[9:0]];
             s3_q1_lut    <= q1_lut[eff_reso[9:6]];
             s3_reso_oct  <= eff_reso[13:10];
-            s3_act   <= s2_act;
+            s3_valid   <= s2_valid;
             s3_idx   <= s2_idx;
             s3_phase <= s2_phase;
             s3_pitch_oct <= eff_pitch[13:10];
             s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
             s3_duty  <= eff_duty;
-            s3_gl    <= eff_gl;
-            s3_gr    <= eff_gr;
+            s3_atten_l    <= eff_atten_l;
+            s3_atten_r    <= eff_atten_r;
             s3_dual  <= s2_dual;
-            s3_ftype <= s2_ftype;
+            s3_filter_mode <= s2_filter_mode;
             s3_reso_att <= s2_dual ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
             s3_ic1eq1 <= s2_ic1eq1;
             s3_ic2eq1 <= s2_ic2eq1;
@@ -580,11 +580,11 @@ module element_pipeline #(
     end
 
     // S3 combinational datapath
-    logic signed [23:0] delta;
+    logic signed [23:0] phase_inc;
     logic signed [35:0] k;
     logic signed [17:0] osc_sample;
 
-    assign delta = $signed(s3_delta_lut) >>> (11 - s3_pitch_oct);
+    assign phase_inc = $signed(s3_phase_inc_lut) >>> (11 - s3_pitch_oct);
     // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
     // LUT+shift expands to ~22+ bits of real precision, needed later
     // for the noise oscillator and whistling-filter melodies.
@@ -603,7 +603,7 @@ module element_pipeline #(
     // path off the combinational sum, giving one cycle of
     // BSRAM read -> octave shift -> 24-bit add -> sine LUT -> mux.
     // That was the critical path of the whole design.
-    wire signed [23:0] phase_next = s3_phase + delta;
+    wire signed [23:0] phase_next = s3_phase + phase_inc;
 
     //----------------------------------------------------------------
     // S3B/S3C -- resonance-dependent INPUT attenuation. Scale the
@@ -616,27 +616,27 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // S3B registers the ADVANCED PHASE (and duty/wave alongside it); the
     // waveform is generated from the registered value in S3B->S3C.
-    logic               s3b_act;   logic [VW-1:0] s3b_idx;
+    logic               s3b_valid;   logic [VW-1:0] s3b_idx;
     logic [15:0] s3b_att;
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
-    logic               s3b_dual;  logic [1:0] s3b_ftype;
-    logic signed [23:0] s3b_phase; logic [7:0] s3b_gl, s3b_gr;
+    logic               s3b_dual;  logic [1:0] s3b_filter_mode;
+    logic signed [23:0] s3b_phase; logic [7:0] s3b_atten_l, s3b_atten_r;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3b_act<=1'b0; s3b_idx<='0; s3b_att<='0;
+            s3b_valid<=1'b0; s3b_idx<='0; s3b_att<='0;
             s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
-            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_ftype<='0;
-            s3b_phase<='0; s3b_gl<='0; s3b_gr<='0;
+            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_dual<=1'b0; s3b_filter_mode<='0;
+            s3b_phase<='0; s3b_atten_l<='0; s3b_atten_r<='0;
             s3b_duty<='0; s3b_wave<='0;
         end else begin
-            s3b_act<=s3_act; s3b_idx<=s3_idx;
+            s3b_valid<=s3_valid; s3b_idx<=s3_idx;
             s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
             s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
             s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
-            s3b_dual<=s3_dual; s3b_ftype<=s3_ftype;
-            s3b_phase<=phase_next; s3b_gl<=s3_gl; s3b_gr<=s3_gr;
+            s3b_dual<=s3_dual; s3b_filter_mode<=s3_filter_mode;
+            s3b_phase<=phase_next; s3b_atten_l<=s3_atten_l; s3b_atten_r<=s3_atten_r;
             s3b_duty<=s3_duty; s3b_wave<=s3_wave;
         end
     end
@@ -653,26 +653,26 @@ module element_pipeline #(
 
     // S3C registers the WAVEFORM (was: the attenuation product). The
     // multiply moves to S3D so nothing chains a mux into a DSP.
-    logic               s3c_act;   logic [VW-1:0] s3c_idx;
+    logic               s3c_valid;   logic [VW-1:0] s3c_idx;
     logic signed [17:0] s3c_osc;   logic [15:0] s3c_att;
     logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
-    logic               s3c_dual;  logic [1:0] s3c_ftype;
-    logic signed [23:0] s3c_phase; logic [7:0] s3c_gl, s3c_gr;
+    logic               s3c_dual;  logic [1:0] s3c_filter_mode;
+    logic signed [23:0] s3c_phase; logic [7:0] s3c_atten_l, s3c_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3c_act<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
+            s3c_valid<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
             s3c_k<='0; s3c_q1<='0;
             s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
-            s3c_dual<=1'b0; s3c_ftype<='0; s3c_phase<='0; s3c_gl<='0; s3c_gr<='0;
+            s3c_dual<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
         end else begin
-            s3c_act<=s3b_act; s3c_idx<=s3b_idx;
+            s3c_valid<=s3b_valid; s3c_idx<=s3b_idx;
             s3c_osc <= osc_sample; s3c_att <= s3b_att;
             s3c_k<=s3b_k; s3c_q1<=s3b_q1;
             s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
             s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
-            s3c_dual<=s3b_dual; s3c_ftype<=s3b_ftype;
-            s3c_phase<=s3b_phase; s3c_gl<=s3b_gl; s3c_gr<=s3b_gr;
+            s3c_dual<=s3b_dual; s3c_filter_mode<=s3b_filter_mode;
+            s3c_phase<=s3b_phase; s3c_atten_l<=s3b_atten_l; s3c_atten_r<=s3b_atten_r;
         end
     end
 
@@ -684,25 +684,25 @@ module element_pipeline #(
     // cannot collide.
     //----------------------------------------------------------------
     wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
-    logic               s3d_act;   logic [VW-1:0] s3d_idx;
+    logic               s3d_valid;   logic [VW-1:0] s3d_idx;
     logic signed [17:0] s3d_osc;
     logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
     logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
-    logic               s3d_dual;  logic [1:0] s3d_ftype;
-    logic signed [23:0] s3d_phase; logic [7:0] s3d_gl, s3d_gr;
+    logic               s3d_dual;  logic [1:0] s3d_filter_mode;
+    logic signed [23:0] s3d_phase; logic [7:0] s3d_atten_l, s3d_atten_r;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s3d_act<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
+            s3d_valid<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
             s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
-            s3d_dual<=1'b0; s3d_ftype<='0; s3d_phase<='0; s3d_gl<='0; s3d_gr<='0;
+            s3d_dual<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
         end else begin
-            s3d_act<=s3c_act; s3d_idx<=s3c_idx;
+            s3d_valid<=s3c_valid; s3d_idx<=s3c_idx;
             s3d_osc <= 18'($signed(osc_mul >>> 16));
             s3d_k<=s3c_k; s3d_q1<=s3c_q1;
             s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
             s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
-            s3d_dual<=s3c_dual; s3d_ftype<=s3c_ftype;
-            s3d_phase<=s3c_phase; s3d_gl<=s3c_gl; s3d_gr<=s3c_gr;
+            s3d_dual<=s3c_dual; s3d_filter_mode<=s3c_filter_mode;
+            s3d_phase<=s3c_phase; s3d_atten_l<=s3c_atten_l; s3d_atten_r<=s3c_atten_r;
         end
     end
 
@@ -713,25 +713,25 @@ module element_pipeline #(
     //   Streaming, latency 17; states/phase/gains carried through.
     //   See rtl/dsp/svf_tpt.sv.
     //----------------------------------------------------------------
-    wire               s9_act;
+    wire               s9_valid;
     wire [VW-1:0]      s9_idx;
     wire signed [17:0] s9_elem;
     wire signed [23:0] s9_phase;
     wire signed [35:0] s9_ic1eq1n, s9_ic2eq1n, s9_ic1eq2n, s9_ic2eq2n;
-    wire [7:0]         s9_gl, s9_gr;
+    wire [7:0]         s9_atten_l, s9_atten_r;
 
     svf_tpt #(.IDXW(VW)) u_svf (
         .clk(clk), .rst_n(rst_n),
-        .in_act(s3d_act), .in_idx(s3d_idx),
+        .in_valid(s3d_valid), .in_idx(s3d_idx),
         .in_osc(s3d_osc), .in_k(s3d_k), .in_q1(s3d_q1),
-        .in_ic1a(s3d_ic1eq1), .in_ic2a(s3d_ic2eq1),
-        .in_ic1b(s3d_ic1eq2), .in_ic2b(s3d_ic2eq2),
-        .in_dual(s3d_dual), .in_ftype(s3d_ftype),
-        .in_phase(s3d_phase), .in_gl(s3d_gl), .in_gr(s3d_gr),
-        .out_act(s9_act), .out_idx(s9_idx), .out_elem(s9_elem),
-        .out_ic1an(s9_ic1eq1n), .out_ic2an(s9_ic2eq1n),
-        .out_ic1bn(s9_ic1eq2n), .out_ic2bn(s9_ic2eq2n),
-        .out_phase(s9_phase), .out_gl(s9_gl), .out_gr(s9_gr)
+        .in_ic1eq1(s3d_ic1eq1), .in_ic2eq1(s3d_ic2eq1),
+        .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
+        .in_dual(s3d_dual), .in_filter_mode(s3d_filter_mode),
+        .in_phase(s3d_phase), .in_atten_l(s3d_atten_l), .in_atten_r(s3d_atten_r),
+        .out_valid(s9_valid), .out_idx(s9_idx), .out_elem(s9_elem),
+        .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),
+        .out_ic1eq2n(s9_ic1eq2n), .out_ic2eq2n(s9_ic2eq2n),
+        .out_phase(s9_phase), .out_atten_l(s9_atten_l), .out_atten_r(s9_atten_r)
     );
 
     //----------------------------------------------------------------
@@ -746,7 +746,7 @@ module element_pipeline #(
     // on whichever channel draws the longer route. Decode and multiply
     // are separate stages.
     //----------------------------------------------------------------
-    logic        s9b_act;
+    logic        s9b_valid;
     logic [VW-1:0] s9b_idx;
     logic signed [17:0] s9b_elem;
     logic signed [17:0] s9b_lin_l, s9b_lin_r;
@@ -759,15 +759,15 @@ module element_pipeline #(
     // must contribute zero.
     logic signed [17:0] lin_l, lin_r;
     always_comb begin
-        lin_l = (s9_gl == 8'hFF) ? 18'sd0
-              : 18'($signed({1'b0, att_lut[s9_gl[3:0]]})) >>> s9_gl[7:4];
-        lin_r = (s9_gr == 8'hFF) ? 18'sd0
-              : 18'($signed({1'b0, att_lut[s9_gr[3:0]]})) >>> s9_gr[7:4];
+        lin_l = (s9_atten_l == 8'hFF) ? 18'sd0
+              : 18'($signed({1'b0, att_lut[s9_atten_l[3:0]]})) >>> s9_atten_l[7:4];
+        lin_r = (s9_atten_r == 8'hFF) ? 18'sd0
+              : 18'($signed({1'b0, att_lut[s9_atten_r[3:0]]})) >>> s9_atten_r[7:4];
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s9b_act  <= 1'b0;
+            s9b_valid  <= 1'b0;
             s9b_idx  <= '0;
             s9b_elem <= '0;
             s9b_lin_l <= '0;
@@ -778,7 +778,7 @@ module element_pipeline #(
             s9b_ic1eq2n <= '0;
             s9b_ic2eq2n <= '0;
         end else begin
-            s9b_act  <= s9_act;
+            s9b_valid  <= s9_valid;
             s9b_idx  <= s9_idx;
             s9b_elem <= s9_elem;
             s9b_lin_l <= lin_l;
@@ -794,7 +794,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     // S10 — attenuation multiply on REGISTERED operands  (DSP)
     //----------------------------------------------------------------
-    logic        s10_act;
+    logic        s10_valid;
     logic [VW-1:0] s10_idx;
     logic signed [17:0] s10_outl, s10_outr;
     logic signed [23:0] s10_phase;
@@ -808,7 +808,7 @@ module element_pipeline #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            s10_act  <= 1'b0;
+            s10_valid  <= 1'b0;
             s10_idx  <= '0;
             s10_outl <= '0;
             s10_outr <= '0;
@@ -818,7 +818,7 @@ module element_pipeline #(
             s10_ic1eq2n <= '0;
             s10_ic2eq2n <= '0;
         end else begin
-            s10_act  <= s9b_act;
+            s10_valid  <= s9b_valid;
             s10_idx  <= s9b_idx;
             s10_outl <= prod_l >>> 16;
             s10_outr <= prod_r >>> 16;
@@ -850,7 +850,7 @@ module element_pipeline #(
             sat24 = x[23:0];
     endfunction
 
-    logic signed [25:0] mix_l_acc, mix_r_acc;   // Q4.14 audio + 8 guard bits
+    logic signed [25:0] mix_acc_l, mix_acc_r;   // Q4.14 audio + 8 guard bits
 
     //----------------------------------------------------------------
     // S11 master limiter: log-domain peak limiter on the PRE-clip
@@ -878,7 +878,7 @@ module element_pipeline #(
     logic        [25:0] lim_abs_l, lim_abs_r, lim_level;   // unsigned magnitudes
     logic        [17:0] lim_gain_q;                        // envelope state
     logic        [16:0] lim_gain;                          // UQ0.16 applied gain
-    logic        [3:0]  lim_phase;
+    logic        [3:0]  lim_step;
     wire         [17:0] lim_gain_q_next;
     wire         [16:0] lim_gain_lin;
     limiter #(.LEVEL_W(26), .SUB(LIM_SUB)) u_lim (
@@ -898,8 +898,8 @@ module element_pipeline #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            mix_l_acc  <= '0;
-            mix_r_acc  <= '0;
+            mix_acc_l  <= '0;
+            mix_acc_r  <= '0;
             mix_left   <= '0;
             mix_right  <= '0;
             lim_acc_l  <= '0;
@@ -911,46 +911,46 @@ module element_pipeline #(
             lim_prod_r <= '0;
             lim_gain_q <= '0;
             lim_gain   <= 17'h10000;
-            lim_phase  <= 4'd0;
+            lim_step  <= 4'd0;
         end else begin
             if (sample_tick) begin
                 // sample boundary: hold the finished sum for the
                 // limiter, start accumulating the next sample
-                lim_acc_l  <= mix_l_acc;
-                lim_acc_r  <= mix_r_acc;
-                mix_l_acc  <= '0;
-                mix_r_acc  <= '0;
-                lim_phase  <= 4'd1;
-            end else if (s10_act) begin
-                mix_l_acc <= mix_l_acc + {{8{s10_outl[17]}}, s10_outl};
-                mix_r_acc <= mix_r_acc + {{8{s10_outr[17]}}, s10_outr};
+                lim_acc_l  <= mix_acc_l;
+                lim_acc_r  <= mix_acc_r;
+                mix_acc_l  <= '0;
+                mix_acc_r  <= '0;
+                lim_step  <= 4'd1;
+            end else if (s10_valid) begin
+                mix_acc_l <= mix_acc_l + {{8{s10_outl[17]}}, s10_outl};
+                mix_acc_r <= mix_acc_r + {{8{s10_outr[17]}}, s10_outr};
             end
-            case (lim_phase)
+            case (lim_step)
                 4'd1: begin   // |acc|: explicit two's-complement negate on the bits
                     lim_abs_l <= lim_acc_l[25] ? (~lim_acc_l + 26'd1) : lim_acc_l;
                     lim_abs_r <= lim_acc_r[25] ? (~lim_acc_r + 26'd1) : lim_acc_r;
-                    lim_phase <= 4'd2;
+                    lim_step <= 4'd2;
                 end
                 4'd2: begin   // stereo link: the louder channel gates both
                     lim_level <= (lim_abs_l > lim_abs_r) ? lim_abs_l : lim_abs_r;
-                    lim_phase <= 4'd3;
+                    lim_step <= 4'd3;
                 end
                 4'd3, 4'd4, 4'd5, 4'd6, 4'd7:   // limiter pipeline settles
-                    lim_phase <= lim_phase + 4'd1;
+                    lim_step <= lim_step + 4'd1;
                 4'd8: begin   // both outputs valid (gain_q from p7, gain from p8)
                     lim_gain_q <= lim_gain_q_next;
                     lim_gain   <= lim_gain_lin;
-                    lim_phase  <= 4'd9;
+                    lim_step  <= 4'd9;
                 end
                 4'd9: begin   // apply the gain
                     lim_prod_l <= 26'(lim_mul_l >>> 16);
                     lim_prod_r <= 26'(lim_mul_r >>> 16);
-                    lim_phase  <= 4'd10;
+                    lim_step  <= 4'd10;
                 end
                 4'd10: begin  // Q4.14 -> Q0.24, rail
                     mix_left   <= sat24(36'(lim_prod_l) <<< 10);
                     mix_right  <= sat24(36'(lim_prod_r) <<< 10);
-                    lim_phase  <= 4'd0;
+                    lim_step  <= 4'd0;
                 end
                 default: ;
             endcase
@@ -961,7 +961,7 @@ module element_pipeline #(
     // Writeback lands 25 cycles after the read, so read and write
     // addresses can never collide (25 < 256).
     always_ff @(posedge clk) begin
-        if (s10_act) begin
+        if (s10_valid) begin
             phase_ram[s10_idx]  <= s10_phase;
             ic1eq1_ram[s10_idx] <= s10_ic1eq1n;
             ic2eq1_ram[s10_idx] <= s10_ic2eq1n;

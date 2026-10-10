@@ -77,7 +77,7 @@ static uint16_t gatt_svr_chr_midi_io_handle;
 static bool s_advertising;
 static int s_conn_count;
 
-static midi_parser_t g_ble_parser;
+static midi_parser_t s_ble_parser;
 
 // Ingress ring buffer: NOSPLIT keeps packet boundaries, which
 // the BLE-MIDI framing needs. 4 KB ≈ 8 max-MTU packets or hundreds of
@@ -111,10 +111,10 @@ static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n)
         if (idx >= n) {
             return;   // status promised, absent — drop the runt
         }
-        midi_parser_feed(&g_ble_parser, pkt[idx++]);
+        midi_parser_feed(&s_ble_parser, pkt[idx++]);
     }
     while (idx < n) {
-        midi_parser_feed(&g_ble_parser, pkt[idx++]);
+        midi_parser_feed(&s_ble_parser, pkt[idx++]);
     }
 }
 
@@ -133,7 +133,7 @@ static void ble_rx_task(void *arg)
         if (n >= 2)
             process_ble_midi_pkt(pkt, (uint16_t)n);
         else
-            midi_parser_reset(&g_ble_parser);   // 1-byte reset sentinel
+            midi_parser_reset(&s_ble_parser);   // 1-byte reset sentinel
                                                 // (connect/disconnect)
         vRingbufferReturnItem(s_rx_rb, pkt);
 
@@ -387,7 +387,7 @@ void ble_midi_console_status(void)
 
 void ble_midi_init(void)
 {
-    midi_parser_init(&g_ble_parser, ble_msg_to_bus, NULL);
+    midi_parser_init(&s_ble_parser, ble_msg_to_bus, NULL);
 
     // Ingress decoupling: ring buffer + drain task, so the
     // NimBLE host task never parses or publishes.

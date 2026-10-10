@@ -83,7 +83,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # with same sink wire"), others fail with "Failed to find a route".
 # Bump SEED when a netlist change hits either — it is placement luck,
 # not (necessarily) real congestion. `make timing-sweep` compares seeds.
-SEED ?= 5
+SEED ?= 8
 
 # ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means

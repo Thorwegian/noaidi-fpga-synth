@@ -172,7 +172,7 @@ idle) and the BSRAM geometry (18-bit-wide blocks).
   (in the field the ADSR uses for its gate bus, so the sequencer's read
   path is unchanged), the value read is multiplied by DEPTH
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the
-  target like any source. The read is of the bus's **OUTPUT SUM** (`dmem_local`, a sequencer-facing mirror
+  target like any source. The read is of the bus's **OUTPUT SUM** (`dmem_sum`, a sequencer-facing mirror
   written by the same strobes as the replicas): firmware base plus
   every source contribution written so far — a send ordered after
   its sources relays them same-sample, which is what makes the node

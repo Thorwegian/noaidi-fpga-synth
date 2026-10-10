@@ -22,7 +22,7 @@ afternoon.
 THREE RULES THIS ENCODES, each learned the hard way:
 
 1. RELOADING THE FPGA INVALIDATES THE ESP'S SHADOW IMAGE.
-   engine_link keeps `s_image` as a copy of the FPGA's state and elides any
+   engine_link keeps `s_param_image` as a copy of the FPGA's state and elides any
    write whose value already matches it. A fresh bitstream resets the FPGA
    without the ESP knowing, so every matching write is then silently skipped.
    Nothing in firmware enforces the reboot, so this harness does — and it

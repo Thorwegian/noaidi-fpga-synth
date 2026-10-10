@@ -83,7 +83,7 @@ module spi_bus #(
     // (sclk domain); the consumer syncs the toggle and flips its
     // active bank at the next drum slot 512. The write also lands in
     // the plain window RAM, so reading CTRL back shows the last value.
-    output logic        swap_req
+    output logic        swap_toggle
 );
 
     localparam int NWORDS = 1 << AW_BACKED;
@@ -237,15 +237,15 @@ module spi_bus #(
     assign elem_write_word   = elem_offset[2:0];
 
     // ---- instruction table write decode (0x0100..0x04FF) -------------
-    localparam [15:0] PROD_BASE = synth_pkg::MAP_IMEM_BASE;
-    localparam [15:0] PROD_END  = synth_pkg::MAP_IMEM_BASE
+    localparam [15:0] IMEM_BASE = synth_pkg::MAP_IMEM_BASE;
+    localparam [15:0] IMEM_END  = synth_pkg::MAP_IMEM_BASE
                                 + 16'(4 * synth_pkg::NUM_INSTR);
     // All FOUR words per entry are writable. Word 3 carries the second ADSR
     // rate word (kD's high bits, kR and sustain); excluding it here while the
     // address map reserves the slot drops writes to it silently, which shows
     // up as an envelope that will not release, because kR stays zero.
-    wire in_instruction_range = (word_addr >= PROD_BASE)
-                          && (word_addr <  PROD_END);
+    wire in_instruction_range = (word_addr >= IMEM_BASE)
+                          && (word_addr <  IMEM_END);
     assign imem_write_enable = byte_end && (frame_phase == 3'd4)
                                    && (data_byte_index == 2'd3)
                                    && !is_read && in_instruction_range;
@@ -276,14 +276,14 @@ module spi_bus #(
             store_ram[word_addr[AW_BACKED-1:0]] <= {4'b0, partial_word, rx_byte};
     end
 
-    // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_req.
+    // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_toggle.
     // Registered on the committing edge itself — no later edge is
     // guaranteed (framing rule).
-    initial swap_req = 1'b0;
+    initial swap_toggle = 1'b0;
     always_ff @(posedge sclk) begin
         if (store_write_enable && (word_addr == synth_pkg::MAP_CTRL_ADDR)
             && rx_byte[0])
-            swap_req <= ~swap_req;
+            swap_toggle <= ~swap_toggle;
     end
 
     //--------------------------------------------------------------------

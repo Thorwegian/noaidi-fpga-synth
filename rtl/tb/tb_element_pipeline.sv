@@ -52,7 +52,7 @@ module tb_element_pipeline;
         .slot(slot), .lane_enter(lane_enter), .sample_tick(sample_tick),
         .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
         .elem_write_index(8'b0), .elem_write_data(32'b0),   // no SPI
-        .swap_req(1'b0),                                    // writes in
+        .swap_toggle(1'b0),                                    // writes in
         .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
         .dmem_wr_toggle(1'b0),
         .imem_write_enable(1'b0), .imem_write_addr(10'b0),
@@ -98,8 +98,8 @@ module tb_element_pipeline;
     // attenuation cross-check pipeline — two-deep history: S9B sits
     // between S9 and S10 (timing split), so s10 registers are driven by
     // s9 values from TWO cycles back
-    integer prev_s9_elem = 0,  prev_s9_gl = 0;
-    integer prev2_s9_elem = 0, prev2_s9_gl = 0;
+    integer prev_s9_elem = 0,  prev_s9_atten_l = 0;
+    integer prev2_s9_elem = 0, prev2_s9_atten_l = 0;
 
     function automatic longint sat24_impl(input longint x);
         // x: Q0.24-ish (unbounded); clamp to signed 24-bit
@@ -133,9 +133,9 @@ module tb_element_pipeline;
     always @(posedge clk) begin
         // attenuation cross-check: s10 registers are driven by s9
         // values from two cycles back (S9B decode stage in between)
-        if (u_pipe.s10_act) begin
+        if (u_pipe.s10_valid) begin
             integer expect_out;
-            expect_out = (prev2_s9_elem * lin_of(prev2_s9_gl)) >>> 16;
+            expect_out = (prev2_s9_elem * lin_of(prev2_s9_atten_l)) >>> 16;
             if (u_pipe.s10_outl !== expect_out[17:0]) begin
                 $display("FAIL atten: voice %0d s10_outl=%h expect=%h",
                          u_pipe.s10_idx, u_pipe.s10_outl, expect_out[17:0]);
@@ -143,9 +143,9 @@ module tb_element_pipeline;
             end
         end
         prev2_s9_elem = prev_s9_elem;
-        prev2_s9_gl    = prev_s9_gl;
+        prev2_s9_atten_l    = prev_s9_atten_l;
         prev_s9_elem  = $signed(u_pipe.s9_elem);
-        prev_s9_gl     = u_pipe.s9_gl;
+        prev_s9_atten_l     = u_pipe.s9_atten_l;
 
         // drum cadence + span accounting at the sample boundary
         // (guard with rst_n: the drum sits at slot 0 while held in reset)
@@ -171,7 +171,7 @@ module tb_element_pipeline;
         end
 
         // mixer accumulate (same cycle as RTL)
-        if (u_pipe.s10_act) begin
+        if (u_pipe.s10_valid) begin
             exp_acc_l = exp_acc_l + ($signed(u_pipe.s10_outl));
             exp_acc_r = exp_acc_r + ($signed(u_pipe.s10_outr));
             adds_this_period = adds_this_period + 1;

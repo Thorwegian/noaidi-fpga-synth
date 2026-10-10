@@ -10,7 +10,7 @@
 // schedule, so the sequencer and the lanes are genuinely independent:
 // this module references the drum's slot counter nowhere.
 //
-// What lives here: the six bus replicas plus dmem_init and dmem_local,
+// What lives here: the six bus replicas plus dmem_base and dmem_sum,
 // the SPI mailbox, the ping-pong generation bit, the instruction and
 // state RAMs, the sequencer state machine, the LFO and ADSR step logic,
 // and the chain-summing arithmetic.
@@ -70,8 +70,8 @@ module csp (
     reg signed [17:0] dmem_duty  [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_fc    [0:2*synth_pkg::DMEM_WORDS-1];
     reg signed [17:0] dmem_q     [0:2*synth_pkg::DMEM_WORDS-1];
-    reg signed [17:0] dmem_gl    [0:2*synth_pkg::DMEM_WORDS-1];
-    reg signed [17:0] dmem_gr    [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_gain_l    [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_gain_r    [0:2*synth_pkg::DMEM_WORDS-1];
     integer bi;
     // BOTH generations -- the arrays are 2*DMEM_WORDS deep and an
     // uninitialised shadow half reads X the first time dmem_gen flips.
@@ -80,8 +80,8 @@ module csp (
         dmem_duty[bi]  = 18'sd0;
         dmem_fc[bi]    = 18'sd0;
         dmem_q[bi]     = 18'sd0;
-        dmem_gl[bi]    = 18'sd0;
-        dmem_gr[bi]    = 18'sd0;
+        dmem_gain_l[bi]    = 18'sd0;
+        dmem_gain_r[bi]    = 18'sd0;
     end
 
     // SPI bus-base writes now land in a dedicated BASE RAM as well as
@@ -90,18 +90,18 @@ module csp (
     // (the spec's "bus = base register + instruction contributions",
     // realized). A bus no instruction targets keeps value = base via the
     // mailbox's own replica write.
-    reg signed [17:0] dmem_init [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_base [0:2*synth_pkg::DMEM_WORDS-1];
     // SECOND COPY, for the same reason imem was split: the sequencer needs
     // TWO different addresses out of the init image in one cycle -- the
     // watched gate bus (from CFG) and the target's base (from the
     // destination field). One port served both by phase muxing, which cost
     // a cycle. Written by the identical mailbox strobe, so the two are
     // always the same memory; only the read address differs.
-    reg signed [17:0] dmem_gate [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_base_gate [0:2*synth_pkg::DMEM_WORDS-1];
     integer bbi;
     initial for (bbi = 0; bbi < 2*synth_pkg::DMEM_WORDS; bbi = bbi + 1) begin
-        dmem_init[bbi] = 18'sd0;
-        dmem_gate[bbi] = 18'sd0;
+        dmem_base[bbi] = 18'sd0;
+        dmem_base_gate[bbi] = 18'sd0;
     end
 
     // BUS-SUM RAM: the sequencer-facing mirror of a bus's
@@ -111,10 +111,10 @@ module csp (
     // base plus every source contribution written so far) rather than
     // the firmware base alone. With sources ordered before
     // their sends in the table, propagation is same-sample.
-    reg signed [17:0] dmem_local [0:2*synth_pkg::DMEM_WORDS-1];
+    reg signed [17:0] dmem_sum [0:2*synth_pkg::DMEM_WORDS-1];
     integer bsi;
     initial for (bsi = 0; bsi < 2*synth_pkg::DMEM_WORDS; bsi = bsi + 1)
-        dmem_local[bsi] = 18'sd0;
+        dmem_sum[bsi] = 18'sd0;
 
     // Program counter replica-write strobes (driven below)
     logic               dmem_we;
@@ -212,9 +212,9 @@ module csp (
     end
 
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_init[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit) dmem_base[dmem_mbox_addr] <= $signed(dmem_mbox_data);
     always_ff @(posedge clk)
-        if (dmem_commit) dmem_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        if (dmem_commit) dmem_base_gate[dmem_mbox_addr] <= $signed(dmem_mbox_data);
 
     // Bus 511, the top of the pool, doubles as the test-tone control
     // latch; no element or instruction reads it.
@@ -238,14 +238,14 @@ module csp (
         if (dmem_commit)   dmem_q[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
         else if (dmem_we)   dmem_q[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gl[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gl[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        if (dmem_commit)   dmem_gain_l[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        else if (dmem_we)   dmem_gain_l[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_gr[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_gr[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
+        if (dmem_commit)   dmem_gain_r[{dmem_commit_half_sel, dmem_mbox_addr[8:0]}] <= $signed(dmem_mbox_data);
+        else if (dmem_we)   dmem_gain_r[{~dmem_gen, dmem_waddr[8:0]}]   <= dmem_wdata;
     always_ff @(posedge clk)
-        if (dmem_commit)   dmem_local[dmem_mbox_addr] <= $signed(dmem_mbox_data);
-        else if (dmem_we)   dmem_local[dmem_waddr]  <= dmem_wdata;
+        if (dmem_commit)   dmem_sum[dmem_mbox_addr] <= $signed(dmem_mbox_data);
+        else if (dmem_we)   dmem_sum[dmem_waddr]  <= dmem_wdata;
 
     //----------------------------------------------------------------
     // Program counter (B4/B5, bus_architecture.md) -- the table executor.
@@ -288,7 +288,7 @@ module csp (
     reg [31:0] imem_rate2 [0:2*synth_pkg::NUM_INSTR-1];
     // State word: LFO uses [24:0] as its phase; ADSR uses [27:26] as
     // the stage and [25:0] as the level (format in dsp/adsr.sv).
-    reg [27:0] istate [0:synth_pkg::NUM_INSTR-1];
+    reg [27:0] state_mem [0:synth_pkg::NUM_INSTR-1];
     integer wi;
     initial begin
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
@@ -298,7 +298,7 @@ module csp (
             imem_rate2[wi] = 32'd0;
         end
         for (wi = 0; wi < synth_pkg::NUM_INSTR; wi = wi + 1)
-            istate[wi] = 28'd0;
+            state_mem[wi] = 28'd0;
     end
 
     // Route the word to its RAM by the low address bits. Same wire format.
@@ -317,9 +317,9 @@ module csp (
     // ONE INSTRUCTION PER CYCLE. Six stages, one instruction deep
     // each, retiring one per cycle once full:
     //
-    //   F  present pc to imem_cfg/rate/depth and istate
+    //   F  present pc to imem_cfg/rate/depth and state_mem
     //   D  those four are out; present the gate/source address (from CFG)
-    //      and the target address to dmem_gate / dmem_local / dmem_init
+    //      and the target address to dmem_base_gate / dmem_sum / dmem_base
     //   R  gate, send-source and target base are out; resolve the
     //      gate, choose the operand
     //   X  the instruction multiply -- registered operands, alone in its
@@ -372,7 +372,7 @@ module csp (
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
     logic [31:0] cfg_q, rate_q, depth_q, rate2_q;
-    logic [27:0] istate_q;
+    logic [27:0] state_q;
     logic signed [17:0] gate_q, src_q, base_q;
     logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
     logic        d_valid;
@@ -390,9 +390,9 @@ module csp (
     wire r_is_lfo = r_st_en && !r_src_en;     // free-running phase
     logic [1:0]  r_shape;
     logic [9:0]  r_dest, r_src;
-    logic [15:0] r_lfo_rate;
+    logic [15:0] r_phase_inc;
     logic [31:0] r_rate, r_depth, r_rate2;
-    logic [27:0] r_istate;
+    logic [27:0] r_state;
 
     // ---- R stage registers ---------------------------------------------
     logic        x_valid;
@@ -403,9 +403,9 @@ module csp (
     wire x_acc_en = x_opcode[synth_pkg::OPC_ACCUM];
     wire x_is_lfo = x_st_en && !x_opcode[synth_pkg::OPC_SOURCE];
     logic [9:0]  x_dest;
-    logic [27:0] x_istate;
+    logic [27:0] x_state;
     logic signed [17:0] x_operand, x_depth, x_base;
-    logic [15:0] x_lfo_rate;
+    logic [15:0] x_phase_inc;
 
     // ---- X stage registers ---------------------------------------------
     logic        a_valid;
@@ -433,12 +433,12 @@ module csp (
     // RECENT match wins. That relaxes the allocator rule rather than
     // tightening it: a chain now tolerates gaps of up to three slots.
     //
-    // The base read needs no hazard logic -- dmem_init is the pass's initial
+    // The base read needs no hazard logic -- dmem_base is the pass's initial
     // image and only the SPI mailbox ever writes it.
     //----------------------------------------------------------------
-    logic        h1_valid, h2_valid;
-    logic [9:0]  h1_addr,  h2_addr;
-    logic signed [17:0] h1_value, h2_value;
+    logic        fwd1_valid, fwd2_valid;
+    logic [9:0]  fwd1_addr,  fwd2_addr;
+    logic signed [17:0] fwd1_value, fwd2_value;
 
     wire signed [19:0] result = a_product[35:16];
     // bit 3 makes chaining EXPLICIT rather than inferred from program
@@ -448,8 +448,8 @@ module csp (
     // starts from the target's initial value, whatever its neighbours do.
     wire signed [17:0] accum_in =
           (a_acc_en && wb_valid && wb_addr == a_dest) ? wb_value
-        : (a_acc_en && h1_valid && h1_addr == a_dest) ? h1_value
-        : (a_acc_en && h2_valid && h2_addr == a_dest) ? h2_value
+        : (a_acc_en && fwd1_valid && fwd1_addr == a_dest) ? fwd1_value
+        : (a_acc_en && fwd2_valid && fwd2_addr == a_dest) ? fwd2_value
         :                                               a_base;
     wire signed [20:0] accum_sum =
         {{3{accum_in[17]}}, accum_in} + {result[19], result};
@@ -457,7 +457,7 @@ module csp (
         (accum_sum > 21'sd131071)  ? 18'sd131071  :
         (accum_sum < -21'sd131072) ? -18'sd131072 : accum_sum[17:0];
 
-    // A SEND reads a bus's OUTPUT SUM from dmem_local, and at one instruction
+    // A SEND reads a bus's OUTPUT SUM from dmem_sum, and at one instruction
     // per cycle the bus it wants may have been written by an instruction
     // still in flight -- the read would silently be stale. Same history,
     // same most-recent-wins rule. The instruction one ahead is in A right
@@ -465,8 +465,8 @@ module csp (
     wire signed [17:0] send_src =
           (a_valid  && a_dest  == r_src) ? accum_sat
         : (wb_valid && wb_addr == r_src) ? wb_value
-        : (h1_valid && h1_addr == r_src) ? h1_value
-        : (h2_valid && h2_addr == r_src) ? h2_value
+        : (fwd1_valid && fwd1_addr == r_src) ? fwd1_value
+        : (fwd2_valid && fwd2_addr == r_src) ? fwd2_value
         :                                  src_q;
 
     // ---- the envelope, in its own module ---------------------------------
@@ -476,7 +476,7 @@ module csp (
     adsr u_adsr (
         .clk(clk), .rst_n(rst_n),
         .step_en   (r_valid && r_is_env),
-        .state_in  (r_istate),
+        .state_in  (r_state),
         .gate      (gate_q > 18'sd0),
         .rates     (r_rate),
         .rates2    (r_rate2),
@@ -490,9 +490,9 @@ module csp (
     // genrtlil signedness assert.
     // bits [24:1]: the extra low bit is the fractional half-step that keeps
     // the LFO frequency unchanged now that passes are twice as frequent
-    wire signed [23:0] lfo_phase = $signed(r_istate[24:1]);
+    wire signed [23:0] lfo_phase = $signed(r_state[24:1]);
     logic signed [17:0] lfo_wave;
-    osc_core u_wk_osc (
+    osc_core u_lfo_osc (
         .phase_next (lfo_phase),
         .duty       (24'sd0),
         .wave       (r_shape),
@@ -508,7 +508,7 @@ module csp (
         // free-running phase accumulator in [24:0]; the extra low bit is the
         // fractional half-step that keeps the frequency unchanged now that a
         // pass runs every sample
-        lfo_next = {x_istate[27:25], x_istate[24:0] + {9'b0, x_lfo_rate}};
+        lfo_next = {x_state[27:25], x_state[24:0] + {9'b0, x_phase_inc}};
 
     //----------------------------------------------------------------
     // The pipeline.
@@ -517,18 +517,18 @@ module csp (
         if (!rst_n) begin
             d_valid <= 1'b0; r_valid <= 1'b0; x_valid <= 1'b0;
             a_valid <= 1'b0; wb_valid <= 1'b0;
-            h1_valid <= 1'b0; h2_valid <= 1'b0;
+            fwd1_valid <= 1'b0; fwd2_valid <= 1'b0;
             pc_addr_d <= '0;
             r_pc <= '0; r_opcode <= '0; r_shape <= '0; r_dest <= '0;
-            r_src <= '0; r_lfo_rate <= '0; r_rate <= '0; r_depth <= '0;
-            r_istate <= '0; r_rate2 <= '0;
-            x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_istate <= '0;
+            r_src <= '0; r_phase_inc <= '0; r_rate <= '0; r_depth <= '0;
+            r_state <= '0; r_rate2 <= '0;
+            x_pc <= '0; x_opcode <= '0; x_dest <= '0; x_state <= '0;
             x_operand <= '0; x_depth <= '0; x_base <= '0;
-            x_lfo_rate <= '0;
+            x_phase_inc <= '0;
             a_dest <= '0; a_base <= '0; a_product <= '0; a_acc_en <= 1'b0;
             a_st_en <= 1'b0; a_is_lfo <= 1'b0; a_st_pc <= '0; a_lfo_next <= '0;
             wb_addr <= '0; wb_value <= '0;
-            h1_addr <= '0; h1_value <= '0; h2_addr <= '0; h2_value <= '0;
+            fwd1_addr <= '0; fwd1_value <= '0; fwd2_addr <= '0; fwd2_value <= '0;
         end else begin
             // F -> D
             d_valid   <= pc_active;
@@ -541,22 +541,22 @@ module csp (
             r_shape    <= cfg_q[5:4];
             r_dest     <= cfg_q[15:6];
             r_src      <= cfg_q[25:16];
-            r_lfo_rate <= cfg_q[31:16];
+            r_phase_inc <= cfg_q[31:16];
             // An ADSR uses CFG[25:16] as its gate bus, so bit 26 is free.
             r_rate2    <= rate2_q;
             r_rate     <= rate_q;
             r_depth    <= depth_q;
-            r_istate   <= istate_q;
+            r_state   <= state_q;
 
             // R -> X: gate / source / base are out; decode and choose
             x_valid   <= r_valid && (r_opcode != synth_pkg::OPC_OFF);
             x_pc      <= r_pc;
             x_opcode  <= r_opcode;
             x_dest    <= r_dest;
-            x_istate  <= r_istate;
+            x_state  <= r_state;
             x_base    <= base_q;
             x_depth   <= $signed(r_depth[17:0]);
-            x_lfo_rate <= r_lfo_rate;
+            x_phase_inc <= r_phase_inc;
             x_operand <= r_is_lfo ? lfo_wave
                        : r_is_env ? adsr_level
                        :            send_src;
@@ -577,8 +577,8 @@ module csp (
             wb_valid <= a_valid && (a_dest != 10'd0);
             wb_addr  <= a_dest;
             wb_value <= accum_sat;
-            h1_valid <= wb_valid; h1_addr <= wb_addr; h1_value <= wb_value;
-            h2_valid <= h1_valid; h2_addr <= h1_addr; h2_value <= h1_value;
+            fwd1_valid <= wb_valid; fwd1_addr <= wb_addr; fwd1_value <= wb_value;
+            fwd2_valid <= fwd1_valid; fwd2_addr <= fwd1_addr; fwd2_value <= fwd1_value;
         end
     end
 
@@ -588,24 +588,24 @@ module csp (
 
     // Memory reads. The four imem RAMs share one address, so CFG, both RATE
     // words and DEPTH all arrive together rather than over three cycles.
-    // dmem_gate and dmem_init are the same image read at two different
+    // dmem_base_gate and dmem_base are the same image read at two different
     // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
         cfg_q    <= imem_cfg[{bank_active, pc_addr}];
         rate_q   <= imem_rate[{bank_active, pc_addr}];
         depth_q  <= imem_depth[{bank_active, pc_addr}];
         rate2_q  <= imem_rate2[{bank_active, pc_addr}];
-        istate_q <= istate[pc_addr];
-        gate_q   <= dmem_gate[cfg_q[25:16]];   // watched gate bus
-        src_q    <= dmem_local[cfg_q[25:16]];  // SEND source: bus output sum
-        base_q   <= dmem_init[cfg_q[15:6]];    // the target's initial value
+        state_q <= state_mem[pc_addr];
+        gate_q   <= dmem_base_gate[cfg_q[25:16]];   // watched gate bus
+        src_q    <= dmem_sum[cfg_q[25:16]];  // SEND source: bus output sum
+        base_q   <= dmem_base[cfg_q[15:6]];    // the target's initial value
     end
 
     // one write port, two producers: the LFO's accumulate and the
     // envelope's recurrence, both valid at A for the same instruction
     always_ff @(posedge clk)
         if (a_st_en)
-            istate[a_st_pc] <= a_is_lfo ? a_lfo_next : adsr_state_out;
+            state_mem[a_st_pc] <= a_is_lfo ? a_lfo_next : adsr_state_out;
 
     //----------------------------------------------------------------
     // Sink read ports. One BSRAM read port per replica, addressed by
@@ -617,8 +617,8 @@ module csp (
         rd_duty_d  <= dmem_duty[{dmem_gen, rd_duty_a}];
         rd_fc_d    <= dmem_fc[{dmem_gen, rd_fc_a}];
         rd_q_d     <= dmem_q[{dmem_gen, rd_q_a}];
-        rd_gl_d    <= dmem_gl[{dmem_gen, rd_gl_a}];
-        rd_gr_d    <= dmem_gr[{dmem_gen, rd_gr_a}];
+        rd_gl_d    <= dmem_gain_l[{dmem_gen, rd_gl_a}];
+        rd_gr_d    <= dmem_gain_r[{dmem_gen, rd_gr_a}];
     end
 
 endmodule

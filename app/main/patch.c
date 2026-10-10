@@ -22,7 +22,7 @@ patch_t g_patch;
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
 // The rate byte: mantissa in the low nibble, exponent in the high one.
 // The +0x10 cancels against the gateware's SHIFT_BIAS of 11; both
-// cancellations are folded into adsr_k() below.
+// cancellations are folded into adsr_rate_coeff() below.
 uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 {
     return patch_rate > 0xEF ? 0xFF : (uint8_t)(patch_rate + 0x10);
@@ -37,7 +37,7 @@ uint8_t patch_adsr_rate_byte(uint8_t patch_rate)
 // For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
 // those codes come through bit-for-bit. Slower ones round, which costs
 // resolution above ~11 s and nothing below it.
-static uint32_t adsr_k(uint8_t rate_byte)
+static uint32_t adsr_rate_coeff(uint8_t rate_byte)
 {
     uint32_t mant  = 16u + (rate_byte & 0x0Fu);
     uint32_t shift = 26u - ((uint32_t)rate_byte >> 4);
@@ -55,20 +55,20 @@ static uint32_t adsr_sustain(const adsr_t *e)
 {
     uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
     if (lvl > 0x3FFFFFu) lvl = 0x3FFFFFu;
-    return lvl >> ADSR_SUS_SHIFT;
+    return lvl >> ADSR_SUSTAIN_SHIFT;
 }
 
-uint32_t patch_adsr_rate1(const adsr_t *e)
+uint32_t patch_adsr_word1(const adsr_t *e)
 {
-    uint32_t ka = adsr_k(patch_adsr_rate_byte(e->attack));
-    uint32_t kd = adsr_k(patch_adsr_rate_byte(e->decay));
+    uint32_t ka = adsr_rate_coeff(patch_adsr_rate_byte(e->attack));
+    uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
     return (ka & 0x3FFFFu) | ((kd & 0x3FFFu) << 18);
 }
 
-uint32_t patch_adsr_rate2(const adsr_t *e)
+uint32_t patch_adsr_word3(const adsr_t *e)
 {
-    uint32_t kd = adsr_k(patch_adsr_rate_byte(e->decay));
-    uint32_t kr = adsr_k(patch_adsr_rate_byte(e->release));
+    uint32_t kd = adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
+    uint32_t kr = adsr_rate_coeff(patch_adsr_rate_byte(e->release));
     return ((kd >> 14) & 0xFu)
          | ((kr & 0x3FFFFu) << 4)
          | ((adsr_sustain(e) & 0x3FFu) << 22);
