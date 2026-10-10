@@ -1,8 +1,8 @@
 //------------------------------------------------------------------------
 // adsr.sv -- the RC envelope, as its own module
 //
-// Copyright (C) 2026  Thor Johannes Hoeyer
-// SPDX-License-Identifier: CERN-OHL-S-2.0
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
 //
 // The envelope is the one instruction with a real state machine, so it
 // earns a module; the LFO is an adder and the SEND is a wire.
@@ -298,8 +298,9 @@ module adsr #(
     // ---- stage 3: the creep, and the segment decision --------------------
     // Fixed-point RC STALLS: once the step truncates to zero the level freezes
     // short of its target, and on release that is a DC tail and a voice that
-    // never frees -- heard as a stuck note, not as an envelope bug. One LSB of
-    // creep bounds the arrival, and 1 LSB of 26 is far below anything audible.
+    // never frees -- heard as a stuck note, not as an envelope bug. A creep of
+    // raw value 1 bounds the arrival, and 1 in a 26-bit level is far below
+    // anything audible.
     //
     // The DSP has already produced level + (delta*k >>> K_SHIFT), so a stall
     // shows up as y_dsp being unchanged from the level that went in. That

@@ -131,7 +131,7 @@ flowchart LR
 | `0x0000–0x00FF`  | System / housekeeping         | 256 words | TBD |
 | `0x0100–0x04FF`  | Instruction memory (256 × 4 words) | 1024 words | live (B4/B5) |
 | `0x0500–0x07FF`  | Reserved (global)             | 768 words | — |
-| `0x0800–0x09FF`  | Bus base registers (write-only, live — [bus_architecture.md](bus_architecture.md)) | 512 words | B1: live |
+| `0x0800–0x09FF`  | Bus base registers (write-only, live — [bus_architecture.md](bus_architecture.md)); bus 511 (`0x09FF`) is the test-tone latch, bit 0 = on | 512 words | B1: live |
 | `0x0A00–0x0BFF`  | Reserved (global)             | 512 words | — |
 | `0x0C00–0x1FFF`  | Reserved (global)             | ~5K words | — |
 | `0x2000–0x5FFF`  | Per-element parameters (256 × 64) | 16K words | partial |

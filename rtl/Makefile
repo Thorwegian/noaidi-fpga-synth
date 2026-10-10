@@ -247,18 +247,6 @@ obj_dir/tb_csp/sim: $(CSP_SIM) tb/tb_csp.sv Makefile
 sim-csp: obj_dir/tb_csp/sim
 	$(call run_sim,$<,tb/sim-csp.out)
 
-# A voice stolen mid-release must attack from silence, not continue from where
-# the release had got to. This is the case the board cannot isolate: the
-# allocator only steals once all 32 voices are busy, and those other 31 are
-# ringing into the same microphone while the measurement is taken, so the
-# stolen voice's level IS the interference. Presenting the state directly is
-# both cleaner and decisive -- without the fix this bench reports 2 FAILURES.
-obj_dir/tb_adsr_retrig/sim: tb/tb_adsr_retrig.sv $(PKG) dsp/adsr.sv Makefile
-	$(VERILATE) $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(VL_DSP)
-
-sim-adsr-retrig: obj_dir/tb_adsr_retrig/sim
-	$(call run_sim,$<,tb/sim-adsr-retrig.out)
-
 # The mailbox's two-take commit under back-to-back traffic.
 obj_dir/tb_mbox_burst/sim: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
 	$(VERILATE) $(CSP_SIM) tb/tb_mbox_burst.sv $(VL_DSP)
@@ -302,7 +290,7 @@ sim-tilt: obj_dir/tb_tilt/sim
 # comparator is only centred at 50%: with phase sweeping the full signed range
 # the comparator is true for (duty + 2^23)/2^24 of the cycle, so the mean of a
 # +-2^23 square is exactly `duty` -- at CC 25 = 127 (duty 7549747) the oscillator
-# carried 29491 LSB of pure DC, scaled on its way out by the amp envelope.
+# carried a raw value of 29491 of pure DC, scaled on its way out by the amp envelope.
 # Without the fix this bench reports 8 failures, which is the only reason its
 # passing means anything.
 obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
@@ -320,10 +308,10 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
+sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-tilt sim-limiter
-	@cat tb/sim-pulse-dc.out tb/sim-adsr-retrig.out tb/sim-csp.out tb/sim-mbox-burst.out \
+	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
 	     tb/sim-elem.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \

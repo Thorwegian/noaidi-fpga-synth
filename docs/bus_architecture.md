@@ -140,11 +140,11 @@ never sees.
 
 ## Sizing (initial allocations; address space reserves ≥2×)
 
-Derivations use the drum budget (768 slots, 271 used by lanes, ~497
+Derivations use the drum budget (768 slots, 281 used by lanes, ~487
 idle) and the BSRAM geometry (18-bit-wide blocks).
 
 - **Bus word**: signed Q8.10 — 18 bits, native BSRAM width; ±128
-  octaves of range, 1 LSB ≈ 1.17 cents. Gain consumes the top
+  octaves of range, a raw value of 1 ≈ 1.17 cents. Gain consumes the top
   fraction bits (0.375 dB decode grid; buses already carry the
   precision if the grid ever refines).
 - **Bus pool**: one uniform pool of 512 buses. The six sinks are

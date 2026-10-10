@@ -8,8 +8,8 @@
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
 // stable under cutoff modulation at resonance. Streaming,
 // one element per cycle, fully pipelined; one multiply OR the adds per
-// stage (the silicon timing rule that gave the Chamberlin its S5B/S8B
-// splits). Fixed-point locked.
+// stage (the silicon timing rule, see element_pipeline.sv). Fixed-point
+// locked.
 //
 // Coefficients (per element):
 //   g  = pi*fc/fs = K/2 = in_k >>> 1     (Q8.28, full width -> pitch)
@@ -84,7 +84,7 @@ module svf_tpt #(
     // quarter-range below the +-128 register rail so the pole's own 36-bit
     // intermediate sums (t, s1n, ...) can't wrap either (clamping at the
     // exact rail reintroduces the static). Bit-identical below the clamp.
-    localparam signed [35:0] ST_MAX =  36'sd25769803775;  // +96.0 - 1 LSB (Q8.28)
+    localparam signed [35:0] ST_MAX =  36'sd25769803775;  // largest Q8.28 value below +96.0
     localparam signed [35:0] ST_MIN = -36'sd25769803776;  // -96.0
     function automatic logic signed [35:0] sat_state(input logic signed [35:0] x);
         if (x > ST_MAX)      sat_state = ST_MAX;

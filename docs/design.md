@@ -214,7 +214,7 @@ pipeline on each of slots 0–255.
 keystroke = 256. The pipeline knows nothing of that grouping — 256
 interchangeable elements; unison is a firmware convention.
 
-**Per-element chain** (16 stages today): state/param RAM read → LUT reads
+**Per-element chain** (26 stages): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12/24 dB via single/dual
 mode — a separate filter per element costs nothing in cycles) →

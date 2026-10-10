@@ -131,6 +131,7 @@ static int64_t  s_last_apply;
 #define BUS_GAIN(v)   (16 + (v))
 #define BUS_CUT(v)    (48 + (v))
 #define BUS_VGATE(v)  (80 + (v))
+#define BUS_TEST_TONE 511   // gateware test-tone latch (csp.sv)
 
 // Producer plan: entries 0..31 = LFOs (0 is the boot vibrato),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
@@ -843,11 +844,11 @@ static void handle_cc(uint8_t num, uint8_t val)
              s_dirty |= D_RENDER; break;
 
     // ---- test tone: ≥64 replaces BOTH outputs with the
-    // gateware's full-scale 1500 Hz sine (bus-1023 control latch) —
+    // gateware's full-scale 1500 Hz sine (bus-511 control latch) —
     // the audio-chain purity reference, remotely switchable so the
     // test suite needs no console. ----
     case 119:
-        engine_link_bus_write(1023, val >= 64 ? 1u : 0u);
+        engine_link_bus_write(BUS_TEST_TONE, val >= 64 ? 1u : 0u);
         break;
 
     // ---- panic (found via the BLE fuzzer's stuck notes: its final
