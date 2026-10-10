@@ -52,7 +52,7 @@ package synth_pkg;
     //--- Instruction table (B4/B5) -------------------------------------
     // 256 entries x 4 words, stride 4, at 0x0100-0x04FF. Config is
     // wiring, so it rides the ping-pong pages (law 4).
-    //   +0 CFG:   [3:0] opcode bitmask (0x0 off, 0xE LFO, 0xF ADSR,
+    //   +0 OP:   [3:0] opcode bitmask (0x0 off, 0xE LFO, 0xF ADSR,
     //             0xD MAC — OPC_* below), [5:4] LFO shape
     //             (osc_core: saw/pulse/tri/sine), [15:6] target DMEM word,
     //             LFO: [31:16] rate, added to the 25-bit phase
@@ -85,7 +85,7 @@ package synth_pkg;
     parameter int OPC_ACCUM  = 3;   // accumulates onto the target, vs load init
     // An envelope is the instruction that watches a gate, so STATE+SOURCE
     // means envelope and STATE alone means phase accumulator -- no fifth bit
-    // is needed and the opcode still fits CFG[3:0].
+    // is needed and the opcode still fits OP[3:0].
     parameter logic [3:0] OPC_OFF  = 4'h0;
     parameter logic [3:0] OPC_LFO  = 4'hE;  // state + mul + accum
     parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum

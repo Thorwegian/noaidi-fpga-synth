@@ -154,7 +154,7 @@ and every mapping stays in firmware.
 
 ## Instruction memory — `0x0100–0x04FF`
 
-The CSP's program: entries are **instructions**, `CFG[3:0]` is the
+The CSP's program: entries are **instructions**, `OP[3:0]` is the
 **opcode**, and the sequencer executes them in order once per pass.
 256 instructions × 4 words, stride 4, paged like parameters (config
 is wiring — takes effect at the swap). Sizing, execution rate and
@@ -162,7 +162,7 @@ chaining: [dmem_architecture.md](dmem_architecture.md).
 
 | Offset | Word | Contents |
 |---|---|---|
-| `+0` | `CFG` | `[3:0]` **opcode bitmask** — bit 0 reads a source operand, bit 1 has persistent state, bit 2 multiplies by COEF, bit 3 accumulates onto the target rather than starting from its initial value. An envelope is the instruction that watches a gate, so state+source means envelope and state alone means phase accumulator: `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` MAC (multiply-accumulate). Bit 3 makes chaining explicit, so the allocator can check it. `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target DMEM address; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (2.86 mHz steps, 187.5 Hz max); ADSR: `[25:16]` gate DMEM address (level-sensitive, > 0 = held); MAC: `[25:16]` source DMEM address — stateless, reads that word's DMEM sum (`dmem_sum`: firmware base plus every instruction result written so far; instructions ordered before the MAC propagate same-sample), × COEF (`0x10000` = unity, sign inverts), chain-adds to target |
+| `+0` | `OP` | `[3:0]` **opcode bitmask** — bit 0 reads a source operand, bit 1 has persistent state, bit 2 multiplies by COEF, bit 3 accumulates onto the target rather than starting from its initial value. An envelope is the instruction that watches a gate, so state+source means envelope and state alone means phase accumulator: `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` MAC (multiply-accumulate). Bit 3 makes chaining explicit, so the allocator can check it. `[5:4]` LFO shape (saw/pulse/tri/sine via osc_core), `[15:6]` target DMEM address; LFO: `[31:16]` rate — low 16 bits of the UQ0.24 phase increment (2.86 mHz steps, 187.5 Hz max); ADSR: `[25:16]` gate DMEM address (level-sensitive, > 0 = held); MAC: `[25:16]` source DMEM address — stateless, reads that word's DMEM sum (`dmem_sum`: firmware base plus every instruction result written so far; instructions ordered before the MAC propagate same-sample), × COEF (`0x10000` = unity, sign inverts), chain-adds to target |
 | `+1` | `RATES` (ADSR) | `[17:0]` kA, `[31:18]` kD[13:0] — linear RC coefficients (step = (target − level) · k >> 24), decoded by firmware from the patch's 8-bit log₂ rates (`patch.c`) |
 | `+2` | `COEF` | `[17:0]` signed **Q2.16** — the instruction's coefficient (immediate). **Unity is `0x10000`**: the product is taken as `>>> 16`, so the field spans about −2.0…+2.0. Amp-envelope idiom: initial image = −span (the quiet floor), coefficient positive — the level adds volume |
 | `+3` | `RATES2` (ADSR) | `[3:0]` kD[17:14], `[21:4]` kR, `[31:22]` sustain level (10 bits of the 22-bit envelope scale) |

@@ -62,7 +62,7 @@ bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 // parameters (config is wiring): writes land in the shadow and take
 // effect at the swap, with the same catch-up mirroring as the
 // partial image.
-//   word 0 CFG:   [3:0] opcode bitmask (CSP_OPC_* below), [5:4] LFO shape
+//   word 0 OP:   [3:0] opcode bitmask (CSP_OPC_* below), [5:4] LFO shape
 //                 (saw/pulse/tri/sine), [15:6] target DMEM address,
 //                 LFO:  [31:16] rate (UQ0.24 increment low bits:
 //                       5.7 mHz steps, 375 Hz max)
@@ -78,7 +78,7 @@ bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 // floor), COEF POSITIVE — the envelope adds volume.
 #define ENGINE_NUM_INSTR 256   // instruction pool; all 256 entries
                                     // execute every sample
-// CSP opcode = CFG[3:0], a BITMASK of enables rather than an enum:
+// CSP opcode = OP[3:0], a BITMASK of enables rather than an enum:
 //   bit 0 reads a source operand      bit 2 multiplies by COEF
 //   bit 1 has persistent state        bit 3 accumulates onto the target
 // An envelope is the instruction that watches a gate, so state+source means

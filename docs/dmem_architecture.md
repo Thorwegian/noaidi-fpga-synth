@@ -17,9 +17,9 @@ it far better than reading it as a fabric:
 | program counter | the sequencer, stepping entries in order |
 | data memory | the control-signal pool, 512 words of signed 18-bit |
 | instruction | one table entry |
-| opcode | `CFG[3:0]` — a bitmask of enables: bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` MAC |
-| source operand | `CFG[25:16]` — the data-memory word an instruction reads |
-| destination | `CFG[15:6]` — the word it writes |
+| opcode | `OP[3:0]` — a bitmask of enables: bit 0 source operand, bit 1 state, bit 2 multiply, bit 3 accumulate. `0x0` off, `0xE` LFO, `0xF` ADSR, `0xD` MAC |
+| source operand | `OP[25:16]` — the data-memory word an instruction reads |
+| destination | `OP[15:6]` — the word it writes |
 | immediate | `COEF` — a coefficient |
 | accumulator | the running total carried between adjacent instructions |
 | initial memory image | what firmware writes; each pass starts from it |
@@ -170,7 +170,7 @@ BSRAM geometry (18-bit-wide blocks).
   sources*, so the only thing needed is **another DMEM word as a source
   operand**: the MAC (multiply-accumulate) instruction — the CSP's first
   processing instruction, vs the generators LFO/ADSR. A MAC instruction
-  is stateless: CFG names a source DMEM address
+  is stateless: OP names a source DMEM address
   (in the field the ADSR uses for its gate DMEM word, so the sequencer's read
   path is unchanged), the value read is multiplied by COEF
   (`0x10000` = unity, sign inverts, ±2.0 max) and chain-adds to the

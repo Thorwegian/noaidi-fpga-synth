@@ -93,7 +93,7 @@ module csp (
     reg signed [17:0] dmem_base [0:2*synth_pkg::DMEM_WORDS-1];
     // SECOND COPY, for the same reason imem was split: the sequencer needs
     // TWO different addresses out of the init image in one cycle -- the
-    // watched gate DMEM word (from CFG) and the target's base (from the
+    // watched gate DMEM word (from OP) and the target's base (from the
     // destination field). One port served both by phase muxing, which cost
     // a cycle. Written by the identical mailbox strobe, so the two are
     // always the same memory; only the read address differs.
@@ -267,12 +267,12 @@ module csp (
     localparam [1:0] AST_IDLE = 2'd0, AST_ATT = 2'd1,
                      AST_DEC  = 2'd2, AST_REL = 2'd3;
 
-    // One RAM per instruction word (CFG, RATES, COEF, RATES2), all read
+    // One RAM per instruction word (OP, RATES, COEF, RATES2), all read
     // with the SAME address in the SAME cycle, so an instruction issues
     // every cycle: words read through one shared port would cost one cycle
     // each. imem_write_addr is {entry[7:0], word[1:0]}; the low two bits
     // select which RAM the word lands in.
-    reg [31:0] imem_cfg   [0:2*synth_pkg::NUM_INSTR-1];   // {page, entry[7:0]}
+    reg [31:0] imem_op   [0:2*synth_pkg::NUM_INSTR-1];   // {page, entry[7:0]}
     reg [31:0] imem_rate  [0:2*synth_pkg::NUM_INSTR-1];
     reg [31:0] imem_coef [0:2*synth_pkg::NUM_INSTR-1];
     // Word 3, the second ADSR rate word. The address encoding carries
@@ -285,7 +285,7 @@ module csp (
     integer wi;
     initial begin
         for (wi = 0; wi < 2*synth_pkg::NUM_INSTR; wi = wi + 1) begin
-            imem_cfg[wi]   = 32'd0;            // opcode 0 = off
+            imem_op[wi]   = 32'd0;            // opcode 0 = off
             imem_rate[wi]  = 32'd0;
             imem_coef[wi] = 32'd0;
             imem_rate2[wi] = 32'd0;
@@ -299,7 +299,7 @@ module csp (
     always_ff @(posedge sclk)
         if (imem_write_enable) begin
             case (imem_write_addr[1:0])
-                2'd0: imem_cfg[imem_wr_entry]   <= imem_write_data;
+                2'd0: imem_op[imem_wr_entry]   <= imem_write_data;
                 2'd1: imem_rate[imem_wr_entry]  <= imem_write_data;
                 2'd2: imem_coef[imem_wr_entry] <= imem_write_data;
                 2'd3: imem_rate2[imem_wr_entry] <= imem_write_data;
@@ -310,8 +310,8 @@ module csp (
     // ONE INSTRUCTION PER CYCLE. Six stages, one instruction deep
     // each, retiring one per cycle once full:
     //
-    //   F  present pc to imem_cfg/rate/coef and state_mem
-    //   D  those four are out; present the gate/source address (from CFG)
+    //   F  present pc to imem_op/rate/coef and state_mem
+    //   D  those four are out; present the gate/source address (from OP)
     //      and the target address to dmem_base_gate / dmem_sum / dmem_base
     //   R  gate, MAC source and target base are out; resolve the
     //      gate, choose the operand
@@ -327,7 +327,7 @@ module csp (
     // the partial pipeline in a 768-cycle sample.
     //
     // Field map:
-    //   CFG   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
+    //   OP   [3:0] opcode, [5:4] LFO shape, [15:6] target, [25:16] source
     //         DMEM word (also the ADSR's watched gate), [31:16] LFO phase
     //         increment -- overlapping the source field, which an LFO does
     //         not use
@@ -364,10 +364,10 @@ module csp (
     end
 
     // ---- RAM outputs, all arriving in the same cycle --------------------
-    logic [31:0] cfg_q, rate_q, coef_q, rate2_q;
+    logic [31:0] op_q, rate_q, coef_q, rate2_q;
     logic [27:0] state_q;
     logic signed [17:0] gate_q, src_q, base_q;
-    logic [7:0]  pc_addr_d;     // the pc that goes with cfg_q
+    logic [7:0]  pc_addr_d;     // the pc that goes with op_q
     logic        d_valid;
 
     // ---- D stage registers ---------------------------------------------
@@ -530,12 +530,12 @@ module csp (
             // D -> R: the four config words are out of the RAMs this cycle
             r_valid    <= d_valid;
             r_pc       <= pc_addr_d;
-            r_opcode   <= cfg_q[3:0];
-            r_shape    <= cfg_q[5:4];
-            r_dest     <= cfg_q[15:6];
-            r_src      <= cfg_q[25:16];
-            r_phase_inc <= cfg_q[31:16];
-            // An ADSR uses CFG[25:16] as its gate DMEM word, so bit 26 is free.
+            r_opcode   <= op_q[3:0];
+            r_shape    <= op_q[5:4];
+            r_dest     <= op_q[15:6];
+            r_src      <= op_q[25:16];
+            r_phase_inc <= op_q[31:16];
+            // An ADSR uses OP[25:16] as its gate DMEM word, so bit 26 is free.
             r_rate2    <= rate2_q;
             r_rate     <= rate_q;
             r_coef    <= coef_q;
@@ -579,19 +579,19 @@ module csp (
     assign dmem_waddr = wb_addr;
     assign dmem_we    = wb_valid;
 
-    // Memory reads. The four imem RAMs share one address, so CFG, both RATE
+    // Memory reads. The four imem RAMs share one address, so OP, both RATE
     // words and COEF all arrive together rather than over three cycles.
     // dmem_base_gate and dmem_base are the same image read at two different
     // addresses in the same cycle, which costs no extra phase either.
     always_ff @(posedge clk) begin
-        cfg_q    <= imem_cfg[{page_active, pc_addr}];
+        op_q    <= imem_op[{page_active, pc_addr}];
         rate_q   <= imem_rate[{page_active, pc_addr}];
         coef_q  <= imem_coef[{page_active, pc_addr}];
         rate2_q  <= imem_rate2[{page_active, pc_addr}];
         state_q <= state_mem[pc_addr];
-        gate_q   <= dmem_base_gate[cfg_q[25:16]];   // watched gate DMEM word
-        src_q    <= dmem_sum[cfg_q[25:16]];  // MAC source: DMEM output sum
-        base_q   <= dmem_base[cfg_q[15:6]];    // the target's initial value
+        gate_q   <= dmem_base_gate[op_q[25:16]];   // watched gate DMEM word
+        src_q    <= dmem_sum[op_q[25:16]];  // MAC source: DMEM output sum
+        base_q   <= dmem_base[op_q[15:6]];    // the target's initial value
     end
 
     // one write port, two writers: the LFO's accumulate and the

@@ -83,7 +83,7 @@ endfunction
 function automatic [15:0] dmem_addr(input integer b);
     dmem_addr = 16'(DMEM_BASE + 16'(b));
 endfunction
-// instruction table: 4 words per entry (CFG, RATES, COEF, RATES2), stride 4
+// instruction table: 4 words per entry (OP, RATES, COEF, RATES2), stride 4
 function automatic [15:0] src_addr(input integer entry, input integer w);
     src_addr = 16'(SRC_BASE + 16'(entry) * 4 + 16'(w));
 endfunction
@@ -117,7 +117,7 @@ localparam [31:0] OFFS_PLUS_4OCT  = 32'h00001000;
 localparam [31:0] OFFS_PLUS_8OCT  = 32'h00002000;
 localparam [31:0] OFFS_MINUS_8OCT = 32'h0003E000;   // 18-bit signed
 
-// instruction-table words, composed from the CFG/RATES/COEF fields
+// instruction-table words, composed from the OP/RATES/COEF fields
 // (memory_map.md) instead of opaque hex
 localparam [31:0] SRC_OFF         = 32'h0;
 // opcodes are bitmasks: OPC_LFO/ADSR/MAC in synth_pkg

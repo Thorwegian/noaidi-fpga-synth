@@ -50,7 +50,7 @@ static uint32_t adsr_rate_coeff(uint8_t rate_byte)
 
 // Sustain as a plain level. Firmware knows the destination, so it
 // decodes here rather than costing the gateware a second barrel
-// shift. Only the linear form is used -- CFG[26] is never set.
+// shift. Only the linear form is used -- OP[26] is never set.
 static uint32_t adsr_sustain(const adsr_t *e)
 {
     uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level

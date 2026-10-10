@@ -59,7 +59,7 @@
 //   rates2  [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
 //
 // Sustain arrives as a plain 10-bit level too. Only the linear decode is
-// used; the log decode CFG[26] would select is never selected.
+// used; the log decode OP[26] would select is never selected.
 //
 // PIPELINING. Subtract, then multiply-accumulate; each DSP registers its own
 // output, so state_out lands TWO cycles after the inputs are presented and the
