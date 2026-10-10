@@ -59,7 +59,7 @@
 //     path is broken and nothing downstream is worth debugging.
 //
 // Clock domains: the register store is written from the SPI (sclk)
-// domain and read as whole words by the drum (sysclk) domain.  See the
+// domain and read as whole words by the timebase (sysclk) domain.  See the
 // note at the read port about what that is and is not safe for.
 //------------------------------------------------------------------------
 `default_nettype none

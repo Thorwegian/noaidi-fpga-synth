@@ -46,15 +46,15 @@ module top (
     //----------------------------------------------------------------
     // Drum — the sole timebase
     //----------------------------------------------------------------
-    logic       sample_tick, lane_enter, cell_tick;
+    logic       sample_tick, slot_issue, cell_tick;
     logic       sample_tick48, cell_tick48;
     logic [9:0] slot;
 
-    drum u_drum (
+    timebase u_timebase (
         .clk           (sysclk),
         .rst_n         (rst_n),
         .sample_tick   (sample_tick),
-        .lane_enter    (lane_enter),
+        .slot_issue    (slot_issue),
         .cell_tick     (cell_tick),
         .sample_tick48 (sample_tick48),
         .cell_tick48   (cell_tick48),
@@ -84,7 +84,7 @@ module top (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .slot        (slot),
-        .lane_enter  (lane_enter),
+        .slot_issue  (slot_issue),
         .sample_tick (sample_tick),
         .sclk        (sclk),
         .elem_write_enable       (elem_write_enable),

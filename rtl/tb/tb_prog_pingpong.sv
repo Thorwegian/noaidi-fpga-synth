@@ -47,7 +47,7 @@ module tb_prog_pingpong;
         // 1. dmem_page toggles exactly once per sample
         //---------------------------------------------------------------
         toggles = 0; ticks = 0; page_prev = u_pipe.u_csp.dmem_page;
-        for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
+        for (cyc = 0; cyc < 8*synth_pkg::CYCLES_PER_SAMPLE; cyc = cyc + 1) begin
             @(posedge clk);
             if (u_pipe.u_csp.dmem_page !== page_prev) toggles = toggles + 1;
             page_prev = u_pipe.u_csp.dmem_page;
@@ -193,7 +193,7 @@ module tb_prog_pingpong;
         straddles = 0;
         windows   = 0;
         page_valid = 1'b0;
-        for (cyc = 0; cyc < 8*synth_pkg::DRUM_CYCLES; cyc = cyc + 1) begin
+        for (cyc = 0; cyc < 8*synth_pkg::CYCLES_PER_SAMPLE; cyc = cyc + 1) begin
             @(posedge clk);
             if (slot == 10'd0) begin
                 if (page_valid) windows = windows + 1;

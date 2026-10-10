@@ -31,14 +31,14 @@ module tb_element_pipeline;
     initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;          // ~73.728 MHz
 
-    logic        sample_tick, lane_enter;
+    logic        sample_tick, slot_issue;
     logic [9:0]  slot;
     logic signed [23:0] mix_left, mix_right;
 
-    drum #(.CYCLES(768), .NUM_LANES(256)) u_drum (
+    timebase #(.CYCLES(768), .NUM_ISSUE_SLOTS(256)) u_timebase (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick),
-        .lane_enter(lane_enter),
+        .slot_issue(slot_issue),
         .slot(slot)
     );
 
@@ -49,7 +49,7 @@ module tb_element_pipeline;
         .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
     ) u_pipe (
         .clk(clk), .rst_n(rst_n),
-        .slot(slot), .lane_enter(lane_enter), .sample_tick(sample_tick),
+        .slot(slot), .slot_issue(slot_issue), .sample_tick(sample_tick),
         .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
         .elem_write_index(8'b0), .elem_write_data(32'b0),   // no SPI
         .swap_toggle(1'b0),                                    // writes in

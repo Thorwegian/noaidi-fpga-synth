@@ -12,7 +12,7 @@ TOP = top
 PKG = synth_pkg.sv
 MOD = \
 	$(TOP).sv \
-	dsp/drum.sv \
+	dsp/timebase.sv \
 	dsp/output_lpf.sv \
 	dsp/limiter.sv \
 	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
@@ -135,7 +135,7 @@ timing-sweep: yosys.json
 	@for s in $(SEEDS); do \
 		printf "seed %-4s " $$s; \
 		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {print $$NF, $$0}' \
-			/tmp/tsweep/$$s.log | grep drum || echo "(no result)"; \
+			/tmp/tsweep/$$s.log | grep timebase || echo "(no result)"; \
 	done
 
 sram: pack.fs
@@ -180,7 +180,7 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
+SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
 obj_dir/tb_element_pipeline/sim: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
@@ -194,8 +194,8 @@ sim-elem: obj_dir/tb_element_pipeline/sim
 	$(call run_sim,$<,tb/sim-elem.out)
 
 TB_SPDIF = tb/tb_spdif_block.sv
-obj_dir/tb_spdif_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
+obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
 sim-spdif: obj_dir/tb_spdif_block/sim
 	$(call run_sim,$<,tb/sim-spdif.out)
@@ -203,8 +203,8 @@ sim-spdif: obj_dir/tb_spdif_block/sim
 # 48 kHz (primary) transmitter: drum's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
-obj_dir/tb_spdif48_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
-	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48)
 
 sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)

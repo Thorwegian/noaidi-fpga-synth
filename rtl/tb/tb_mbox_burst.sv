@@ -83,7 +83,7 @@ module tb_mbox_burst;
     // chosen offset from the boundary without also owning the clock
     initial forever begin
         sample_tick = 1; @(posedge clk); sample_tick = 0;
-        repeat (synth_pkg::DRUM_CYCLES - 1) @(posedge clk);
+        repeat (synth_pkg::CYCLES_PER_SAMPLE - 1) @(posedge clk);
     end
 
     task automatic iwrite(input [9:0] a, input [31:0] d);

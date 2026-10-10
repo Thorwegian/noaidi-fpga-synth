@@ -5,14 +5,14 @@
 // License: CERN-OHL-S v2
 //
 // Single timebase for the whole synth: a free-running counter wrapping
-// every DRUM_CYCLES sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
+// every CYCLES_PER_SAMPLE sysclk cycles (768 = 73.728 MHz / 96 kHz).  All
 // time-multiplexed operations are scheduled against this counter —
 // there is no other sample-rate timing source in the design.
 //
 //   sample_tick : high during slot 0 of each sample period.
 //                 "A new sample is ready": consumers latch the mix
 //                 output and the mix accumulators are cleared on it.
-//   lane_enter  : high during the NUM_LANES slots in which an element
+//   slot_issue  : high during the NUM_ISSUE_SLOTS slots in which an element
 //                 enters the pipeline (slot 0..255).
 //   cell_tick   : high during the first slot of every CELL_DIV — the
 //                 SPDIF cell boundary (768 = 128 cells × 6). Counted
@@ -30,16 +30,16 @@
 //                 drum stays the sole timebase.
 //--------------------------------------------------------------------
 `default_nettype none
-module drum #(
-    parameter int CYCLES    = synth_pkg::DRUM_CYCLES,
-    parameter int NUM_LANES = synth_pkg::NUM_ELEMENTS,
+module timebase #(
+    parameter int CYCLES    = synth_pkg::CYCLES_PER_SAMPLE,
+    parameter int NUM_ISSUE_SLOTS = synth_pkg::NUM_ELEMENTS,
     parameter int CELLDIV   = synth_pkg::CELL_DIV
 ) (
     input  logic                   clk,
     input  logic                   rst_n,
 
     output logic                   sample_tick,
-    output logic                   lane_enter,
+    output logic                   slot_issue,
     output logic                   cell_tick,
     output logic                   sample_tick48,
     output logic                   cell_tick48,
@@ -94,7 +94,7 @@ module drum #(
 
     assign slot          = slot_r;
     assign sample_tick   = (slot_r == '0);
-    assign lane_enter    = (slot_r < NUM_LANES);
+    assign slot_issue    = (slot_r < NUM_ISSUE_SLOTS);
     assign cell_tick     = (cell_cnt == '0);
     assign sample_tick48 = sample_tick && !odd_sample48;
     assign cell_tick48   = cell_tick   && !odd_cell48;

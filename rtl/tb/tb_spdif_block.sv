@@ -23,11 +23,11 @@ module tb_spdif_block;
     logic rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #5 clk = ~clk;    // ratios are all internal; absolute rate is moot
 
-    logic       sample_tick, lane_enter;
+    logic       sample_tick, slot_issue;
     logic [9:0] slot;
-    drum u_drum (
+    timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .lane_enter(lane_enter), .slot(slot)
+        .sample_tick(sample_tick), .slot_issue(slot_issue), .slot(slot)
     );
 
     logic signed [23:0] al = 24'sh123456;

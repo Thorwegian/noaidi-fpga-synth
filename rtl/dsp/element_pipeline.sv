@@ -64,7 +64,7 @@ module element_pipeline #(
     input  logic           rst_n,
 
     input  logic [9:0]     slot,
-    input  logic           lane_enter,
+    input  logic           slot_issue,
     input  logic           sample_tick,
 
     // Per-element parameter writes from the SPI control plane.
@@ -274,7 +274,7 @@ module element_pipeline #(
     // Read data validity is gated by s1_valid, so no reset is needed.
     //----------------------------------------------------------------
     logic [VW-1:0] elem_read_index;
-    assign elem_read_index = lane_enter ? slot[VW-1:0] : '0;
+    assign elem_read_index = slot_issue ? slot[VW-1:0] : '0;
 
     logic        s1_valid;
     logic [VW-1:0] s1_idx;
@@ -350,7 +350,7 @@ module element_pipeline #(
             s1_valid   <= 1'b0;
             s1_idx   <= '0;
         end else begin
-            s1_valid   <= lane_enter;
+            s1_valid   <= slot_issue;
             s1_idx   <= slot[VW-1:0];
         end
     end

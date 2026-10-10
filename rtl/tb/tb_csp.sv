@@ -18,7 +18,7 @@
 `default_nettype none
 module tb_csp;
 
-    localparam int CYC     = synth_pkg::DRUM_CYCLES;
+    localparam int CYC     = synth_pkg::CYCLES_PER_SAMPLE;
     localparam int TESTBUS = 20;
     localparam int QUIETBUS= 300;
     localparam signed [17:0] MARK_A = 18'sd12345;

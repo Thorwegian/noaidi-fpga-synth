@@ -17,8 +17,8 @@ package synth_pkg;
     parameter int SYS_CLK_HZ  = 73_728_000;
 
     //--- Drum (SCMO) scheduling -------------------------------------
-    parameter int DRUM_CYCLES  = 768;    // SYS_CLK_HZ / SAMPLE_RATE
-    parameter int DRUM_W       = 10;     // $clog2(DRUM_CYCLES)
+    parameter int CYCLES_PER_SAMPLE  = 768;    // SYS_CLK_HZ / SAMPLE_RATE
+    parameter int TIMEBASE_W       = 10;     // $clog2(CYCLES_PER_SAMPLE)
     parameter int CELL_DIV     = 6;      // SPDIF cell = 6 sysclk (768 = 128 x 6)
 
     //--- Elements and lanes (design doc terminology) ----------------
@@ -31,7 +31,7 @@ package synth_pkg;
     parameter int POLYPHONY    = 32;     // firmware convention only
 
     // Drum slot where element 0 enters the pipeline
-    parameter int LANE_BASE    = 0;
+    parameter int FIRST_ISSUE_SLOT    = 0;
     // Drum slot where a pending ping-pong bank swap executes: the
     // lane pipeline (a 281-slot span, see element_pipeline.sv) is
     // drained there, so every

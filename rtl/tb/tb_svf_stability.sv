@@ -32,18 +32,18 @@ module tb_svf_stability;
     logic clk = 0, rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #6.781 clk = ~clk;               // ~73.728 MHz
 
-    logic       sample_tick, lane_enter;
+    logic       sample_tick, slot_issue;
     logic [9:0] slot;
-    drum u_drum (
+    timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .lane_enter(lane_enter),
+        .sample_tick(sample_tick), .slot_issue(slot_issue),
         .cell_tick(), .slot(slot)
     );
 
     logic signed [23:0] ml, mr;
     element_pipeline u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
-        .lane_enter(lane_enter), .sample_tick(sample_tick),
+        .slot_issue(slot_issue), .sample_tick(sample_tick),
         .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
         .elem_write_index(8'b0), .elem_write_data(32'b0),
         .swap_toggle(1'b0),

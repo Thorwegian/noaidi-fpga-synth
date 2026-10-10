@@ -78,7 +78,7 @@ module tb_prog_soak;
     task automatic one_sample;
         begin
             sample_tick = 1; @(posedge clk); sample_tick = 0;
-            repeat (synth_pkg::DRUM_CYCLES - 1) @(posedge clk);
+            repeat (synth_pkg::CYCLES_PER_SAMPLE - 1) @(posedge clk);
         end
     endtask
 

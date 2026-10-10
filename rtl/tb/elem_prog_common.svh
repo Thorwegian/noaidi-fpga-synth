@@ -16,11 +16,11 @@ always #6.781 clk = ~clk;               // ~73.728 MHz
 logic sclk = 0, cs = 1, mosi = 0;
 wire  miso;
 
-logic       sample_tick, lane_enter;
+logic       sample_tick, slot_issue;
 logic [9:0] slot;
-drum u_drum (
+timebase u_timebase (
     .clk(clk), .rst_n(rst_n),
-    .sample_tick(sample_tick), .lane_enter(lane_enter),
+    .sample_tick(sample_tick), .slot_issue(slot_issue),
     .cell_tick(), .slot(slot)
 );
 
@@ -52,7 +52,7 @@ element_pipeline #(
     .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
 ) u_pipe (
     .clk(clk), .rst_n(rst_n), .slot(slot),
-    .lane_enter(lane_enter), .sample_tick(sample_tick),
+    .slot_issue(slot_issue), .sample_tick(sample_tick),
     .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
     .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_toggle(swap_toggle),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
