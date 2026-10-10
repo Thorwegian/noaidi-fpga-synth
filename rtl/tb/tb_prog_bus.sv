@@ -11,7 +11,7 @@
 `default_nettype none
 module tb_prog_bus;
 
-`include "tb/elem_prog_common.svh"
+`include "tb/partial_prog_common.svh"
 
     initial begin
         reset_and_mute;
@@ -25,10 +25,10 @@ module tb_prog_bus;
         // GATE (map offset +4, bit 0): gate off silences the chord
         // even though the GAIN words still hold live values.
         for (v = 0; v < 32; v = v + 1)
-            spi_word_write(elem_addr(v, W_GATE), 32'h00000000);
+            spi_word_write(partial_addr(v, W_GATE), 32'h00000000);
         flip;
         for (v = 0; v < 32; v = v + 1)
-            spi_word_write(elem_addr(v, W_GATE), 32'h00000000);
+            spi_word_write(partial_addr(v, W_GATE), 32'h00000000);
         observe(4);
         observe(50);
         if (peak > 4000) begin
@@ -38,10 +38,10 @@ module tb_prog_bus;
             $display("gate off: silent, gains untouched (peak=%0d)", peak);
 
         for (v = 0; v < 8; v = v + 1)      // regate voice 0's elements
-            spi_word_write(elem_addr(v, W_GATE), 32'h00000001);
+            spi_word_write(partial_addr(v, W_GATE), 32'h00000001);
         flip;
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(elem_addr(v, W_GATE), 32'h00000001);
+            spi_word_write(partial_addr(v, W_GATE), 32'h00000001);
         observe(60);
         observe(400);
         if (peak < 200000) begin
@@ -53,10 +53,10 @@ module tb_prog_bus;
         // Bus pilot (B1): elements 0-7 sound voice 0's C4. Point
         // their cutoff at bus 1, drive the base live (no swaps).
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT_DMEM1);
+            spi_word_write(partial_addr(v, W_PTRS0), PTRS0_CUT_DMEM1);
         flip;
         for (v = 0; v < 8; v = v + 1)
-            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT_DMEM1);
+            spi_word_write(partial_addr(v, W_PTRS0), PTRS0_CUT_DMEM1);
         observe(60);
         observe(400);
         worst = peak;                             // baseline loudness
@@ -97,15 +97,15 @@ module tb_prog_bus;
         // pitch pointer to bus 2, gains to bus 3.
         spi_word_write(dmem_addr(1), 32'h00000000);
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(elem_addr(v, W_OSC),   OSC_SINE_C4);
-            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_DMEM2);
-            spi_word_write(elem_addr(v, W_PTRS1), PTRS1_GAINS_DMEM3);
+            spi_word_write(partial_addr(v, W_OSC),   OSC_SINE_C4);
+            spi_word_write(partial_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_DMEM2);
+            spi_word_write(partial_addr(v, W_PTRS1), PTRS1_GAINS_DMEM3);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(elem_addr(v, W_OSC),   OSC_SINE_C4);
-            spi_word_write(elem_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_DMEM2);
-            spi_word_write(elem_addr(v, W_PTRS1), PTRS1_GAINS_DMEM3);
+            spi_word_write(partial_addr(v, W_OSC),   OSC_SINE_C4);
+            spi_word_write(partial_addr(v, W_PTRS0), PTRS0_CUT1_PITCH_DMEM2);
+            spi_word_write(partial_addr(v, W_PTRS1), PTRS1_GAINS_DMEM3);
         end
         observe(60);
         observe(2182);

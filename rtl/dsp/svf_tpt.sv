@@ -8,7 +8,7 @@
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
 // stable under cutoff modulation at resonance. Streaming,
 // one element per cycle, fully pipelined; one multiply OR the adds per
-// stage (the silicon timing rule, see element_pipeline.sv). Fixed-point
+// stage (the silicon timing rule, see partial_pipeline.sv). Fixed-point
 // locked.
 //
 // Coefficients (per element):
@@ -52,7 +52,7 @@ module svf_tpt #(
     input  wire [7:0]           in_atten_r,
     output reg                  out_valid,
     output reg  [IDXW-1:0]      out_idx,
-    output reg  signed [17:0]   out_elem,   // Q4.14
+    output reg  signed [17:0]   out_sample,   // Q4.14
     output reg  signed [35:0]   out_ic1eq1n,
     output reg  signed [35:0]   out_ic2eq1n,
     output reg  signed [35:0]   out_ic1eq2n,
@@ -500,13 +500,13 @@ module svf_tpt #(
     end
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            out_valid<=0; out_idx<=0; out_elem<=0;
+            out_valid<=0; out_idx<=0; out_sample<=0;
             out_ic1eq1n<=0; out_ic2eq1n<=0; out_ic1eq2n<=0; out_ic2eq2n<=0;
             out_phase<=0; out_atten_l<=0; out_atten_r<=0;
         end else begin
             out_valid  <= sec2f_valid;
             out_idx  <= sec2f_idx;
-            out_elem <= sec2f_cascade ? sat_q414(f2sel) : sec2f_y1;
+            out_sample <= sec2f_cascade ? sat_q414(f2sel) : sec2f_y1;
             out_ic1eq1n<= sat_state(sec2f_s1an);
             out_ic2eq1n<= sat_state(sec2f_s2an);
             out_ic1eq2n<= sat_state(sec2f_s1bn);

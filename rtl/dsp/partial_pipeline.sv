@@ -1,5 +1,5 @@
 //--------------------------------------------------------------------
-// element_pipeline.sv — 256-element SCMO pipeline (the drum's lanes)
+// partial_pipeline.sv — 256-element SCMO pipeline (the drum's lanes)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -8,7 +8,7 @@
 // each sample period (drum slot 0..255).  Every cycle, every stage
 // processes a different element: stage Sk at drum slot t holds the
 // element that entered at slot t-k.  The pipeline is 26 stages deep
-// (s10_valid follows s1_valid by 24 cycles in tb_element_pipeline), so it
+// (s10_valid follows s1_valid by 24 cycles in tb_partial_pipeline), so it
 // occupies 256 + 26 - 1 = 281 contiguous slots (~37% of the 768-slot
 // drum rotation).
 //
@@ -49,8 +49,8 @@
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
-module element_pipeline #(
-    parameter int NUM_ELEMENTS = synth_pkg::NUM_ELEMENTS,
+module partial_pipeline #(
+    parameter int NUM_PARTIALS = synth_pkg::NUM_PARTIALS,
     // Boot parameter images. Synthesis uses the tree's generated
     // images; testbenches override with rtl/tb/ref_boot_* (committed
     // fixtures) so bench expectations never depend on bench-local
@@ -79,8 +79,8 @@ module element_pipeline #(
     // pipeline is drained there (the span ends at slot 280), so every sample's
     // 256 elements read one consistent bank generation.
     input  logic           sclk,
-    input  logic           elem_write_enable,
-    input  logic [2:0]     elem_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
+    input  logic           partial_write_enable,
+    input  logic [2:0]     partial_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
 
     // Bus-write mailbox from spi_bus (sclk-domain toggle + payload).
     // Synced here and committed to bus RAM only in an idle drum slot,
@@ -93,8 +93,8 @@ module element_pipeline #(
     input  logic           imem_write_enable,
     input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]}
     input  logic [31:0]    imem_write_data,
-    input  logic [7:0]     elem_write_index,
-    input  logic [31:0]    elem_write_data,
+    input  logic [7:0]     partial_write_index,
+    input  logic [31:0]    partial_write_data,
     input  logic           swap_toggle,    // sclk-domain toggle
 
     output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
@@ -112,7 +112,7 @@ module element_pipeline #(
     output logic           test_tone_en
 );
 
-    localparam int VW = $clog2(NUM_ELEMENTS);   // element index width
+    localparam int VW = $clog2(NUM_PARTIALS);   // element index width
 
     //----------------------------------------------------------------
     // LUT ROMs (combinational reads)
@@ -143,11 +143,11 @@ module element_pipeline #(
     // Per-element internal state RAM — semi dual-port
     // read address: entering element (S0), write: 25 cycles later
     //----------------------------------------------------------------
-    reg signed [23:0] phase_ram  [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic1eq1_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic2eq1_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic1eq2_ram [0:NUM_ELEMENTS-1];
-    reg signed [35:0] ic2eq2_ram [0:NUM_ELEMENTS-1];
+    reg signed [23:0] phase_ram  [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic1eq1_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic2eq1_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic1eq2_ram [0:NUM_PARTIALS-1];
+    reg signed [35:0] ic2eq2_ram [0:NUM_PARTIALS-1];
 
     //----------------------------------------------------------------
     // Per-element parameter RAM — SPI-writable (sclk write port below),
@@ -167,10 +167,10 @@ module element_pipeline #(
     // Doubled for ping-pong: {bank, voice} addressing, both halves
     // initialized to the boot image so an unwritten shadow is sane
     // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
-    reg [35:0] osc_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] duty_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] filter_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [35:0] gain_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [35:0] osc_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] duty_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] filter_param_ram [0:2*NUM_PARTIALS-1];
+    reg [35:0] gain_param_ram [0:2*NUM_PARTIALS-1];
 
     // Pointer words: per-element bus pointers, three 10-bit fields
     // each. +5 (PTRS0): [9:0] pitch, [19:10] duty, [29:20] cutoff.
@@ -178,10 +178,10 @@ module element_pipeline #(
     // are wiring, so they ride the ping-pong banks like every
     // parameter. Init 0: every parameter points at bus 0 (hardwired
     // zero), so boot behavior is exactly the pre-bus behavior.
-    reg [29:0] ptrs0_param_ram [0:2*NUM_ELEMENTS-1];
-    reg [29:0] ptrs1_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [29:0] ptrs0_param_ram [0:2*NUM_PARTIALS-1];
+    reg [29:0] ptrs1_param_ram [0:2*NUM_PARTIALS-1];
     integer pi;
-    initial for (pi = 0; pi < 2*NUM_ELEMENTS; pi = pi + 1) begin
+    initial for (pi = 0; pi < 2*NUM_PARTIALS; pi = pi + 1) begin
         ptrs0_param_ram[pi] = 30'd0;
         ptrs1_param_ram[pi] = 30'd0;
     end
@@ -196,20 +196,20 @@ module element_pipeline #(
     // discussion.
     // Both banks boot gated ON so the boot image keeps sounding (the
     // power-up liveness check).
-    reg [1:0] gate_param_ram [0:2*NUM_ELEMENTS-1];
+    reg [1:0] gate_param_ram [0:2*NUM_PARTIALS-1];
     integer gi;
-    initial for (gi = 0; gi < 2*NUM_ELEMENTS; gi = gi + 1)
+    initial for (gi = 0; gi < 2*NUM_PARTIALS; gi = gi + 1)
         gate_param_ram[gi] = 2'b01;
 
     initial begin
-        $readmemh(P0_HEX, osc_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, duty_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, filter_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, gain_param_ram, 0, NUM_ELEMENTS-1);
-        $readmemh(P0_HEX, osc_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P1_HEX, duty_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P2_HEX, filter_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
-        $readmemh(P3_HEX, gain_param_ram, NUM_ELEMENTS, 2*NUM_ELEMENTS-1);
+        $readmemh(P0_HEX, osc_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P1_HEX, duty_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P2_HEX, filter_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P3_HEX, gain_param_ram, 0, NUM_PARTIALS-1);
+        $readmemh(P0_HEX, osc_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P1_HEX, duty_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P2_HEX, filter_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
+        $readmemh(P3_HEX, gain_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
     end
 
     //----------------------------------------------------------------
@@ -257,7 +257,7 @@ module element_pipeline #(
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
     initial begin
-        for (i0 = 0; i0 < NUM_ELEMENTS; i0 = i0 + 1) begin
+        for (i0 = 0; i0 < NUM_PARTIALS; i0 = i0 + 1) begin
             phase_ram[i0]  = '0;
             ic1eq1_ram[i0] = '0;
             ic2eq1_ram[i0] = '0;
@@ -273,8 +273,8 @@ module element_pipeline #(
     // Sync-only process: yosys memory inference (BSRAM read port).
     // Read data validity is gated by s1_valid, so no reset is needed.
     //----------------------------------------------------------------
-    logic [VW-1:0] elem_read_index;
-    assign elem_read_index = slot_issue ? slot[VW-1:0] : '0;
+    logic [VW-1:0] partial_read_index;
+    assign partial_read_index = slot_issue ? slot[VW-1:0] : '0;
 
     logic        s1_valid;
     logic [VW-1:0] s1_idx;
@@ -298,35 +298,35 @@ module element_pipeline #(
     logic [1:0]  s1_gate_word;
     logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
     always_ff @(posedge clk) begin
-        s1_osc_word     <= osc_param_ram[{page_active, elem_read_index}];
-        s1_duty_word     <= duty_param_ram[{page_active, elem_read_index}];
-        s1_filter_word     <= filter_param_ram[{page_active, elem_read_index}];
-        s1_gain_word     <= gain_param_ram[{page_active, elem_read_index}];
-        s1_gate_word     <= gate_param_ram[{page_active, elem_read_index}];
-        s1_ptrs0_word     <= ptrs0_param_ram[{page_active, elem_read_index}];
-        s1_ptrs1_word     <= ptrs1_param_ram[{page_active, elem_read_index}];
-        s1_phase  <= phase_ram[elem_read_index];
-        s1_ic1eq1 <= ic1eq1_ram[elem_read_index];
-        s1_ic2eq1 <= ic2eq1_ram[elem_read_index];
-        s1_ic1eq2 <= ic1eq2_ram[elem_read_index];
-        s1_ic2eq2 <= ic2eq2_ram[elem_read_index];
+        s1_osc_word     <= osc_param_ram[{page_active, partial_read_index}];
+        s1_duty_word     <= duty_param_ram[{page_active, partial_read_index}];
+        s1_filter_word     <= filter_param_ram[{page_active, partial_read_index}];
+        s1_gain_word     <= gain_param_ram[{page_active, partial_read_index}];
+        s1_gate_word     <= gate_param_ram[{page_active, partial_read_index}];
+        s1_ptrs0_word     <= ptrs0_param_ram[{page_active, partial_read_index}];
+        s1_ptrs1_word     <= ptrs1_param_ram[{page_active, partial_read_index}];
+        s1_phase  <= phase_ram[partial_read_index];
+        s1_ic1eq1 <= ic1eq1_ram[partial_read_index];
+        s1_ic2eq1 <= ic2eq1_ram[partial_read_index];
+        s1_ic1eq2 <= ic1eq2_ram[partial_read_index];
+        s1_ic2eq2 <= ic2eq2_ram[partial_read_index];
     end
 
     // SPI-side write ports (sclk domain) — sync-only, one per bank
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd0) osc_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd0) osc_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd1) duty_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd1) duty_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd2) filter_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd2) filter_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd3) gain_param_ram[{page_shadow, elem_write_index}] <= {4'b0, elem_write_data};
+        if (partial_write_enable && partial_write_word == 3'd3) gain_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd4) gate_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[1:0];
+        if (partial_write_enable && partial_write_word == 3'd4) gate_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[1:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd5) ptrs0_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (partial_write_enable && partial_write_word == 3'd5) ptrs0_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
     always_ff @(posedge sclk)
-        if (elem_write_enable && elem_write_word == 3'd6) ptrs1_param_ram[{page_shadow, elem_write_index}] <= elem_write_data[29:0];
+        if (partial_write_enable && partial_write_word == 3'd6) ptrs1_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
 
     // field views of the registered param words
     assign s1_pitch = s1_osc_word[13:0];
@@ -715,7 +715,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     wire               s9_valid;
     wire [VW-1:0]      s9_idx;
-    wire signed [17:0] s9_elem;
+    wire signed [17:0] s9_sample;
     wire signed [23:0] s9_phase;
     wire signed [35:0] s9_ic1eq1n, s9_ic2eq1n, s9_ic1eq2n, s9_ic2eq2n;
     wire [7:0]         s9_atten_l, s9_atten_r;
@@ -728,7 +728,7 @@ module element_pipeline #(
         .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
         .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
         .in_phase(s3d_phase), .in_atten_l(s3d_atten_l), .in_atten_r(s3d_atten_r),
-        .out_valid(s9_valid), .out_idx(s9_idx), .out_elem(s9_elem),
+        .out_valid(s9_valid), .out_idx(s9_idx), .out_sample(s9_sample),
         .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),
         .out_ic1eq2n(s9_ic1eq2n), .out_ic2eq2n(s9_ic2eq2n),
         .out_phase(s9_phase), .out_atten_l(s9_atten_l), .out_atten_r(s9_atten_r)
@@ -748,7 +748,7 @@ module element_pipeline #(
     //----------------------------------------------------------------
     logic        s9b_valid;
     logic [VW-1:0] s9b_idx;
-    logic signed [17:0] s9b_elem;
+    logic signed [17:0] s9b_sample;
     logic signed [17:0] s9b_lin_l, s9b_lin_r;
     logic signed [23:0] s9b_phase;
     logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
@@ -769,7 +769,7 @@ module element_pipeline #(
         if (!rst_n) begin
             s9b_valid  <= 1'b0;
             s9b_idx  <= '0;
-            s9b_elem <= '0;
+            s9b_sample <= '0;
             s9b_lin_l <= '0;
             s9b_lin_r <= '0;
             s9b_phase <= '0;
@@ -780,7 +780,7 @@ module element_pipeline #(
         end else begin
             s9b_valid  <= s9_valid;
             s9b_idx  <= s9_idx;
-            s9b_elem <= s9_elem;
+            s9b_sample <= s9_sample;
             s9b_lin_l <= lin_l;
             s9b_lin_r <= lin_r;
             s9b_phase <= s9_phase;
@@ -802,8 +802,8 @@ module element_pipeline #(
 
     logic signed [34:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9b_elem * s9b_lin_l;
-        prod_r = s9b_elem * s9b_lin_r;
+        prod_l = s9b_sample * s9b_lin_l;
+        prod_r = s9b_sample * s9b_lin_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin

@@ -25,15 +25,15 @@ package synth_pkg;
     // The FPGA generates ELEMENTS (256 of them), technically via
     // LANES — time-multiplexed passes through the pipeline. The
     // ESP32 groups elements into voices; the FPGA never sees that.
-    parameter int NUM_ELEMENTS = 256;
-    parameter int ELEM_W       = 8;      // $clog2(NUM_ELEMENTS)
+    parameter int NUM_PARTIALS = 256;
+    parameter int PARTIAL_W       = 8;      // $clog2(NUM_PARTIALS)
     parameter int UNISON       = 8;      // firmware convention only
     parameter int POLYPHONY    = 32;     // firmware convention only
 
     // Drum slot where element 0 enters the pipeline
     parameter int FIRST_ISSUE_SLOT    = 0;
     // Drum slot where a pending ping-pong bank swap executes: the
-    // lane pipeline (a 281-slot span, see element_pipeline.sv) is
+    // lane pipeline (a 281-slot span, see partial_pipeline.sv) is
     // drained there, so every
     // sample reads one consistent bank generation.
     parameter int SWAP_SLOT    = 512;
@@ -42,8 +42,8 @@ package synth_pkg;
     parameter int          MAP_AW_BACKED   = 11;       // 2048-word window
     parameter logic [7:0]  SPI_ID_BYTE     = 8'hA5;
     parameter logic [15:0] MAP_CTRL_ADDR   = 16'h0002; // bit 0: swap request
-    parameter logic [15:0] MAP_ELEM_BASE   = 16'h2000; // per-element params
-    parameter int          MAP_ELEM_STRIDE = 64;       // words per element
+    parameter logic [15:0] MAP_PARTIAL_BASE   = 16'h2000; // per-element params
+    parameter int          MAP_PARTIAL_STRIDE = 64;       // words per element
 
     //--- Bus fabric (docs/bus_architecture.md) ----------------------
     parameter logic [15:0] MAP_DMEM_BASE = 16'h0800;    // bus base registers

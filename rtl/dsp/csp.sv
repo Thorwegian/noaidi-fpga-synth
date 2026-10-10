@@ -4,7 +4,7 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The element DSP lane pipeline (element_pipeline.sv) and this are two
+// The element DSP lane pipeline (partial_pipeline.sv) and this are two
 // unrelated jobs, so they are two modules.
 // Double-buffering the bus generation removes any coupling to the drum
 // schedule, so the sequencer and the lanes are genuinely independent:

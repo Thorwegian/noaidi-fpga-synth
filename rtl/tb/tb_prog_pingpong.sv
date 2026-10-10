@@ -21,7 +21,7 @@
 `default_nettype none
 module tb_prog_pingpong;
 
-`include "tb/elem_prog_common.svh"
+`include "tb/partial_prog_common.svh"
 
     localparam int          TEST_DMEM = 20;          // inside the live range
     localparam signed [17:0] MARK_A = 18'sd12345;

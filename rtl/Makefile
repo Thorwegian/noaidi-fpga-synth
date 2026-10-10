@@ -15,7 +15,7 @@ MOD = \
 	dsp/timebase.sv \
 	dsp/output_lpf.sv \
 	dsp/limiter.sv \
-	dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv \
+	dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv \
 	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
@@ -180,18 +180,18 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
-TB_ELEM = tb/tb_element_pipeline.sv
+SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
+TB_PARTIAL = tb/tb_partial_pipeline.sv
 
-obj_dir/tb_element_pipeline/sim: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_ELEM) $(VL_DSP)
+obj_dir/tb_partial_pipeline/sim: $(SIM_MOD) $(TB_PARTIAL) $(LUTS) Makefile
+	$(VERILATE) $(SIM_MOD) $(TB_PARTIAL) $(VL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a
 # fixed order afterwards. Suite wall-clock collapses to the longest
 # bench. Read a single bench with: make sim-prog-boot && cat tb/sim-prog-boot.out
-sim-elem: obj_dir/tb_element_pipeline/sim
-	$(call run_sim,$<,tb/sim-elem.out)
+sim-partial: obj_dir/tb_partial_pipeline/sim
+	$(call run_sim,$<,tb/sim-partial.out)
 
 TB_SPDIF = tb/tb_spdif_block.sv
 obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
@@ -209,7 +209,7 @@ obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDI
 sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)
 
-PROG_COMMON = tb/elem_prog_common.svh
+PROG_COMMON = tb/partial_prog_common.svh
 
 obj_dir/tb_prog_%/sim: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
 	$(VERILATE) $(SIM_MOD) spi/spi_bus.sv $< $(VL_DSP)
@@ -308,11 +308,11 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
+sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-output-lpf sim-limiter
 	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
-	     tb/sim-elem.out tb/sim-spdif.out \
+	     tb/sim-partial.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \
 	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \

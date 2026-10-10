@@ -66,10 +66,10 @@ module top (
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    logic        elem_write_enable;
-    logic [2:0]  elem_write_word;
-    logic [7:0]  elem_write_index;
-    logic [31:0] elem_write_data;
+    logic        partial_write_enable;
+    logic [2:0]  partial_write_word;
+    logic [7:0]  partial_write_index;
+    logic [31:0] partial_write_data;
     logic        swap_toggle;
     logic [9:0]  dmem_wr_addr;
     logic [17:0] dmem_wr_data;
@@ -80,17 +80,17 @@ module top (
                             // truncates entries, so size it from the pool
     logic [31:0] imem_write_data;
 
-    element_pipeline u_elem_pipeline (
+    partial_pipeline u_partial_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
         .slot        (slot),
         .slot_issue  (slot_issue),
         .sample_tick (sample_tick),
         .sclk        (sclk),
-        .elem_write_enable       (elem_write_enable),
-        .elem_write_word     (elem_write_word),
-        .elem_write_index     (elem_write_index),
-        .elem_write_data    (elem_write_data),
+        .partial_write_enable       (partial_write_enable),
+        .partial_write_word     (partial_write_word),
+        .partial_write_index     (partial_write_index),
+        .partial_write_data    (partial_write_data),
         .dmem_wr_addr     (dmem_wr_addr),
         .dmem_wr_data     (dmem_wr_data),
         .dmem_wr_toggle      (dmem_wr_toggle),
@@ -238,10 +238,10 @@ module top (
         .miso     (miso),
         .sysclk   (sysclk),
         .rst_n    (rst_n),
-        .elem_write_enable    (elem_write_enable),
-        .elem_write_word  (elem_write_word),
-        .elem_write_index  (elem_write_index),
-        .elem_write_data (elem_write_data),
+        .partial_write_enable    (partial_write_enable),
+        .partial_write_word  (partial_write_word),
+        .partial_write_index  (partial_write_index),
+        .partial_write_data (partial_write_data),
         .dmem_wr_addr  (dmem_wr_addr),
         .dmem_wr_data  (dmem_wr_data),
         .dmem_wr_toggle   (dmem_wr_toggle),

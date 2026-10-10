@@ -26,7 +26,7 @@
 #define VA_TASK_PRIO   5
 
 #define NUM_VOICES     32
-#define ELEMS_PER_VOICE 8
+#define PARTIALS_PER_VOICE 8
 
 // The active sound lives in g_patch (patch.h); WAVE_SAW / resonance /
 // base volume / ADSR come from there. Only the exact-mute code stays
@@ -239,11 +239,11 @@ static uint16_t midi_to_pitch(uint8_t note)
     return (uint16_t)((note / 12) << 10) | (uint16_t)((note % 12) * 1024 / 12);
 }
 
-static void param_write(uint8_t elem, uint8_t word, uint32_t value)
+static void param_write(uint8_t partial, uint8_t word, uint32_t value)
 {
-    engine_param_cmd_t c = {.elem = elem, .word = word, .value = value};
+    engine_param_cmd_t c = {.partial = partial, .word = word, .value = value};
     if (!engine_link_param_write(&c))
-        ESP_LOGW(TAG, "engine queue full, elem %d word %d lost", elem, word);
+        ESP_LOGW(TAG, "engine queue full, partial %d word %d lost", partial, word);
 }
 
 // Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
@@ -272,13 +272,13 @@ typedef struct {
     int16_t detune;
     bool    l, r;
     bool    active;
-} elem_voicing_t;
+} partial_voicing_t;
 
 // Fill the voicing plan for the current voice_struct. Returns the
 // number of active (sounding) elements, for loudness make-up.
-static int build_voicing(elem_voicing_t p[ELEMS_PER_VOICE])
+static int build_voicing(partial_voicing_t p[PARTIALS_PER_VOICE])
 {
-    for (int u = 0; u < ELEMS_PER_VOICE; u++) p[u] = (elem_voicing_t){0};
+    for (int u = 0; u < PARTIALS_PER_VOICE; u++) p[u] = (partial_voicing_t){0};
     int  ud = g_patch.unison_detune;         // raw pitch per spread step
     int  n  = 0;
 
@@ -287,22 +287,22 @@ static int build_voicing(elem_voicing_t p[ELEMS_PER_VOICE])
     // by g_patch.unison_stereo, CC 28 being a spread AMOUNT.
     switch (g_patch.voice_struct) {
     case VOICE_2_PLAIN:                       // osc1 + osc2, centred
-        p[0] = (elem_voicing_t){0, 0, true, true, true};
-        p[1] = (elem_voicing_t){1, 0, true, true, true};
+        p[0] = (partial_voicing_t){0, 0, true, true, true};
+        p[1] = (partial_voicing_t){1, 0, true, true, true};
         n = 2;
         break;
     case VOICE_7_PLUS_1:                       // supersaw x7 + osc2
         for (int i = 0; i < 7; i++)
-            p[i] = (elem_voicing_t){0, (int16_t)(UNISON_OFFSETS_7[i] * ud),
+            p[i] = (partial_voicing_t){0, (int16_t)(UNISON_OFFSETS_7[i] * ud),
                               !(i & 1), (i & 1) != 0, true};
-        p[7] = (elem_voicing_t){1, 0, true, true, true};
+        p[7] = (partial_voicing_t){1, 0, true, true, true};
         n = 8;
         break;
     case VOICE_4_PLUS_4:                       // both oscillators x4
         for (int i = 0; i < 4; i++) {
-            p[i]     = (elem_voicing_t){0, (int16_t)(UNISON_OFFSETS_4[i] * ud),
+            p[i]     = (partial_voicing_t){0, (int16_t)(UNISON_OFFSETS_4[i] * ud),
                                   !(i & 1), (i & 1) != 0, true};
-            p[i + 4] = (elem_voicing_t){1, (int16_t)(UNISON_OFFSETS_4[i] * ud),
+            p[i + 4] = (partial_voicing_t){1, (int16_t)(UNISON_OFFSETS_4[i] * ud),
                                   !(i & 1), (i & 1) != 0, true};
         }
         n = 8;
@@ -321,8 +321,8 @@ static int build_voicing(elem_voicing_t p[ELEMS_PER_VOICE])
 // would wreck the ear-tuned envelope feel — hence firmware muting.)
 static void hard_mute_voice(int v)
 {
-    for (int u = 0; u < ELEMS_PER_VOICE; u++)
-        param_write((uint8_t)(v * ELEMS_PER_VOICE + u), 4, 0);   // GATE off
+    for (int u = 0; u < PARTIALS_PER_VOICE; u++)
+        param_write((uint8_t)(v * PARTIALS_PER_VOICE + u), 4, 0);   // GATE off
 }
 
 // Retire release tails that have run out: RELEASING → IDLE, and mute
@@ -363,7 +363,7 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
     uint32_t mode = ((uint32_t)(g_patch.filter.cascade & 1) << 16)
                   | ((uint32_t)(g_patch.filter.type & 3) << 17);
 
-    elem_voicing_t voicing[ELEMS_PER_VOICE];
+    partial_voicing_t voicing[PARTIALS_PER_VOICE];
     int active = build_voicing(voicing);
     // Loudness make-up: fewer summed elements are quieter. Gentle
     // UQ4.4 step boost (≈0.375 dB/step), conservative, so 2-plain is
@@ -373,10 +373,10 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
     int32_t base   = (int32_t)midi_to_pitch(note);
     int      mix   = g_patch.osc_mix;      // ±: + favours osc2, − osc1
 
-    for (int u = 0; u < ELEMS_PER_VOICE; u++) {
-        uint8_t elem = (uint8_t)(v * ELEMS_PER_VOICE + u);
+    for (int u = 0; u < PARTIALS_PER_VOICE; u++) {
+        uint8_t partial = (uint8_t)(v * PARTIALS_PER_VOICE + u);
         if (!voicing[u].active) {
-            param_write(elem, 4, 0);              // GATE off = exact element mute
+            param_write(partial, 4, 0);              // GATE off = exact element mute
             continue;
         }
         const osc_t *o = &g_patch.osc[voicing[u].osc];
@@ -421,11 +421,11 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
         uint32_t r = (r_en && !bal_mute && pan > -63)
                        ? (uint32_t)rvol : VOL_MUTE;
 
-        param_write(elem, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC
-        param_write(elem, 1, (uint32_t)o->duty & 0xFFFFFF);                  // DUTY
-        param_write(elem, 2, ((uint32_t)g_patch.filter.resonance << 14) | fc);
-        param_write(elem, 3, (r << 8) | l | mode);                          // GAIN
-        param_write(elem, 4, 1);                  // GATE on
+        param_write(partial, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC
+        param_write(partial, 1, (uint32_t)o->duty & 0xFFFFFF);                  // DUTY
+        param_write(partial, 2, ((uint32_t)g_patch.filter.resonance << 14) | fc);
+        param_write(partial, 3, (r << 8) | l | mode);                          // GAIN
+        param_write(partial, 4, 1);                  // GATE on
     }
 }
 
@@ -975,8 +975,8 @@ static void voice_alloc_task(void *arg)
 // voice's gain bus. Static wiring, written once, rides the swap.
 static void init_param_pointers(void)
 {
-    for (int e = 0; e < NUM_VOICES * ELEMS_PER_VOICE; e++) {
-        int v = e / ELEMS_PER_VOICE;
+    for (int e = 0; e < NUM_VOICES * PARTIALS_PER_VOICE; e++) {
+        int v = e / PARTIALS_PER_VOICE;
         param_write((uint8_t)e, 5,
              (uint32_t)DMEM_PITCH_GLOBAL
              | ((uint32_t)DMEM_DUTY_GLOBAL << 10)   // PWM bus
@@ -1040,5 +1040,5 @@ void voice_alloc_init(void)
         return;
     }
     ESP_LOGI(TAG, "%d voices x %d elements ready (sub id %d)",
-             NUM_VOICES, ELEMS_PER_VOICE, s_sub_id);
+             NUM_VOICES, PARTIALS_PER_VOICE, s_sub_id);
 }

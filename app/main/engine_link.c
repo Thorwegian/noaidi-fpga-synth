@@ -29,8 +29,8 @@
 // to 1000 in sdkconfig.defaults).
 #define ENGINE_TICK_US     1000
 
-#define ELEM_BASE            0x2000
-#define ELEM_STRIDE          64
+#define PARTIAL_BASE            0x2000
+#define PARTIAL_STRIDE          64
 
 // GAIN word with both channels at 0x00 = exact mute (volume
 // semantics: 0xFF is loudest).
@@ -38,7 +38,7 @@
 
 static QueueHandle_t s_queue;
 static QueueHandle_t s_dmem_queue;
-static uint32_t s_param_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
+static uint32_t s_param_image[ENGINE_NUM_PARTIALS][ENGINE_WORDS_PER_PARTIAL];
 
 #define DMEM_BASE_ADDR      0x0800
 #define DMEM_QUEUE_LEN      128    // init writes 32 envelope floors +
@@ -73,24 +73,24 @@ static uint32_t s_imem_image[ENGINE_NUM_INSTR][4];   // word 3 is the second
 static uint32_t s_imem_dirty_now[IMEM_DIRTY_WORDS];
 static uint32_t s_imem_dirty_prev[IMEM_DIRTY_WORDS];
 
-// Dirty bitmaps, one bit per (elem, word): 1792 bits.
-#define DIRTY_WORDS (ENGINE_NUM_ELEMENTS * ENGINE_WORDS_PER_ELEMENT / 32)
+// Dirty bitmaps, one bit per (partial, word): 1792 bits.
+#define DIRTY_WORDS (ENGINE_NUM_PARTIALS * ENGINE_WORDS_PER_PARTIAL / 32)
 static uint32_t s_dirty_now[DIRTY_WORDS];   // changed since last swap
 static uint32_t s_dirty_prev[DIRTY_WORDS];  // written before last swap
 
 
-static inline void mark_dirty(int elem, int word)
+static inline void mark_dirty(int partial, int word)
 {
-    int bit = elem * ENGINE_WORDS_PER_ELEMENT + word;
+    int bit = partial * ENGINE_WORDS_PER_PARTIAL + word;
     s_dirty_now[bit >> 5] |= 1u << (bit & 31);
 }
 
 // Write every image word to the current shadow bank. Boot-time only.
 static void write_full_image(void)
 {
-    for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++)
-        fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE, s_param_image[e],
-                              ENGINE_WORDS_PER_ELEMENT);
+    for (int e = 0; e < ENGINE_NUM_PARTIALS; e++)
+        fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE, s_param_image[e],
+                              ENGINE_WORDS_PER_PARTIAL);
 }
 
 static TaskHandle_t s_task;
@@ -122,8 +122,8 @@ static void engine_task(void *arg)
         // both banked, both covered by the same swap).
         bool changed = false;
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
-            if (cmd.word >= ENGINE_WORDS_PER_ELEMENT)
-                continue;   // elem is uint8_t: 0..255 by construction
+            if (cmd.word >= ENGINE_WORDS_PER_PARTIAL)
+                continue;   // partial is uint8_t: 0..255 by construction
             // No-op elision, so the cost tracks what actually changed:
             // the image IS the FPGA's state (the FPGA-reload → ESP-
             // reboot rule guarantees it), so a write of the value
@@ -132,10 +132,10 @@ static void engine_task(void *arg)
             // one-knob re-render's flush from all 256 rows (~15 ms of
             // SPI, enough to wedge the link) into just the touched
             // rows.
-            if (s_param_image[cmd.elem][cmd.word] == cmd.value)
+            if (s_param_image[cmd.partial][cmd.word] == cmd.value)
                 continue;
-            s_param_image[cmd.elem][cmd.word] = cmd.value;
-            mark_dirty(cmd.elem, cmd.word);
+            s_param_image[cmd.partial][cmd.word] = cmd.value;
+            mark_dirty(cmd.partial, cmd.word);
             changed = true;
         }
         imem_cmd_t pc;
@@ -170,10 +170,10 @@ static void engine_task(void *arg)
         // into hundreds of transactions and pin this task until the
         // watchdog fires. Untouched words in the row are already
         // current in s_param_image, so re-sending them is free.
-        for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
+        for (int e = 0; e < ENGINE_NUM_PARTIALS; e++) {
             bool row_dirty = false;
-            for (int w = 0; w < ENGINE_WORDS_PER_ELEMENT; w++) {
-                int bit = e * ENGINE_WORDS_PER_ELEMENT + w;
+            for (int w = 0; w < ENGINE_WORDS_PER_PARTIAL; w++) {
+                int bit = e * ENGINE_WORDS_PER_PARTIAL + w;
                 if ((s_dirty_now[bit >> 5] | s_dirty_prev[bit >> 5])
                         & (1u << (bit & 31))) {
                     row_dirty = true;
@@ -181,8 +181,8 @@ static void engine_task(void *arg)
                 }
             }
             if (row_dirty)
-                fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE,
-                                      s_param_image[e], ENGINE_WORDS_PER_ELEMENT);
+                fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE,
+                                      s_param_image[e], ENGINE_WORDS_PER_PARTIAL);
         }
         for (int i = 0; i < IMEM_DIRTY_WORDS; i++) {
             uint32_t bits = s_imem_dirty_now[i] | s_imem_dirty_prev[i];
@@ -220,7 +220,7 @@ void engine_link_init(void)
     // braces at boot), benign params otherwise. ALL pointers start on
     // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
     // at note-on. The wheel rides DMEM_CH_CUT.
-    for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
+    for (int e = 0; e < ENGINE_NUM_PARTIALS; e++) {
         s_param_image[e][0] = 0;
         s_param_image[e][1] = 0;
         s_param_image[e][2] = 0;            // Butterworth, fc = 0
@@ -235,7 +235,7 @@ void engine_link_init(void)
     fpga_swap();
     write_full_image();
     fpga_swap();
-    ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_ELEMENTS);
+    ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_PARTIALS);
 
     s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
     s_dmem_queue = xQueueCreate(DMEM_QUEUE_LEN, sizeof(dmem_cmd_t));

@@ -41,11 +41,11 @@ module tb_svf_stability;
     );
 
     logic signed [23:0] ml, mr;
-    element_pipeline u_pipe (
+    partial_pipeline u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .slot_issue(slot_issue), .sample_tick(sample_tick),
-        .sclk(1'b0), .elem_write_enable(1'b0), .elem_write_word(3'b0),
-        .elem_write_index(8'b0), .elem_write_data(32'b0),
+        .sclk(1'b0), .partial_write_enable(1'b0), .partial_write_word(3'b0),
+        .partial_write_index(8'b0), .partial_write_data(32'b0),
         .swap_toggle(1'b0),
         .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
         .dmem_wr_toggle(1'b0),

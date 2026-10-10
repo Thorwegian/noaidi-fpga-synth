@@ -23,8 +23,8 @@
 extern "C" {
 #endif
 
-#define ENGINE_NUM_ELEMENTS 256
-#define ENGINE_WORDS_PER_ELEMENT 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
+#define ENGINE_NUM_PARTIALS 256
+#define ENGINE_WORDS_PER_PARTIAL 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
 // GAIN word: volume UQ4.4 per channel — 0x00 = silence/
 // exact mute, 0xFF = loudest; positive gain-bus values mean LOUDER.
 // FILTER word: [13:0] cutoff UQ4.10 log2; [27:14] resonance UQ4.10
@@ -33,7 +33,7 @@ extern "C" {
 // [31:28] reserved.
 
 typedef struct {
-    uint8_t  elem;    // element index 0..255
+    uint8_t  partial;    // element index 0..255
     uint8_t  word;    // 0..6 (OSC DUTY FILTER GAIN GATE PTRS0 PTRS1)
     uint32_t value;
 } engine_param_cmd_t;

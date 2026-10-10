@@ -10,7 +10,7 @@
 `default_nettype none
 module tb_prog_sweep;
 
-`include "tb/elem_prog_common.svh"
+`include "tb/partial_prog_common.svh"
 
     initial begin
         reset_and_mute;
@@ -29,7 +29,7 @@ module tb_prog_sweep;
         // apart on the encoding.
         worst = 0;
         for (step = 0; step < 40; step = step + 1) begin
-            spi_word_write(elem_addr(0, W_FILTER),
+            spi_word_write(partial_addr(0, W_FILTER),
                            {4'b0, RESO_R200, 14'(14'h2800 + step * 4)});
             spi_word_write(CTRL_ADDR, 32'h00000001);
             observe(3);
@@ -44,8 +44,8 @@ module tb_prog_sweep;
         // chord stress — the firmware's exact write pattern: 4 voices
         // x 8 saw elements, church-organ detune, hard-panned,
         // retriggered repeatedly. Screaming = sustained near-clip.
-        spi_word_write(elem_addr(0, W_GAIN), GAIN_MUTE_BOTH);
-        flip; spi_word_write(elem_addr(0, W_GAIN), GAIN_MUTE_BOTH); flip;
+        spi_word_write(partial_addr(0, W_GAIN), GAIN_MUTE_BOTH);
+        flip; spi_word_write(partial_addr(0, W_GAIN), GAIN_MUTE_BOTH); flip;
         for (step = 0; step < 4; step = step + 1) begin
             program_chord;                        // into shadow
             flip;

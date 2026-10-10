@@ -1,11 +1,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// elem_prog_common.svh — shared body for the tb_prog_* element-program
+// partial_prog_common.svh — shared body for the tb_prog_* element-program
 // benches, which are independent so make -j can run them in parallel.
 // Include INSIDE a module.
 //
-// Provides: clocks/reset, drum + spi_bus + element_pipeline (ref
+// Provides: clocks/reset, drum + spi_bus + partial_pipeline (ref
 // boot fixtures), the ~20 MHz Mode-0 SPI master, the mix observer,
 // flip/mute_all/program helpers, and the report task. Each bench
 // owns its own initial block, preamble and timeout.
@@ -24,10 +24,10 @@ timebase u_timebase (
     .cell_tick(), .slot(slot)
 );
 
-wire        elem_write_enable;
-wire [2:0]  elem_write_word;
-wire [7:0]  elem_write_index;
-wire [31:0] elem_write_data;
+wire        partial_write_enable;
+wire [2:0]  partial_write_word;
+wire [7:0]  partial_write_index;
+wire [31:0] partial_write_data;
 wire [9:0]  dmem_wr_addr;
 wire [17:0] dmem_wr_data;
 wire        dmem_wr_toggle;
@@ -39,22 +39,22 @@ wire        swap_toggle;
 spi_bus #(.AW_BACKED(11)) u_bus (
     .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
     .sysclk(clk), .rst_n(rst_n),
-    .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
-    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data),
+    .partial_write_enable(partial_write_enable), .partial_write_word(partial_write_word),
+    .partial_write_index(partial_write_index), .partial_write_data(partial_write_data),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .swap_toggle(swap_toggle)
 );
 
 logic signed [23:0] ml, mr;
-element_pipeline #(
+partial_pipeline #(
     .P0_HEX("tb/ref_boot_p0.hex"), .P1_HEX("tb/ref_boot_p1.hex"),
     .P2_HEX("tb/ref_boot_p2.hex"), .P3_HEX("tb/ref_boot_p3.hex")
 ) u_pipe (
     .clk(clk), .rst_n(rst_n), .slot(slot),
     .slot_issue(slot_issue), .sample_tick(sample_tick),
-    .sclk(sclk), .elem_write_enable(elem_write_enable), .elem_write_word(elem_write_word),
-    .elem_write_index(elem_write_index), .elem_write_data(elem_write_data), .swap_toggle(swap_toggle),
+    .sclk(sclk), .partial_write_enable(partial_write_enable), .partial_write_word(partial_write_word),
+    .partial_write_index(partial_write_index), .partial_write_data(partial_write_data), .swap_toggle(swap_toggle),
     .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data), .dmem_wr_toggle(dmem_wr_toggle),
     .imem_write_enable(imem_write_enable), .imem_write_addr(imem_write_addr), .imem_write_data(imem_write_data),
     .mix_left(ml), .mix_right(mr)
@@ -67,8 +67,8 @@ integer errors = 0;
 // source-table words are composed from named fields here, ONCE, and
 // every bench in the family uses these. No magic hex in benches.
 localparam [15:0] CTRL_ADDR   = synth_pkg::MAP_CTRL_ADDR;
-localparam [15:0] ELEM_BASE   = synth_pkg::MAP_ELEM_BASE;
-localparam int    ELEM_STRIDE = synth_pkg::MAP_ELEM_STRIDE;
+localparam [15:0] PARTIAL_BASE   = synth_pkg::MAP_PARTIAL_BASE;
+localparam int    PARTIAL_STRIDE = synth_pkg::MAP_PARTIAL_STRIDE;
 localparam [15:0] DMEM_BASE    = synth_pkg::MAP_DMEM_BASE;
 localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
                                                             // pending the
@@ -78,8 +78,8 @@ localparam [15:0] SRC_BASE    = synth_pkg::MAP_IMEM_BASE;   // code name
 localparam int W_OSC = 0, W_DUTY = 1, W_FILTER = 2, W_GAIN = 3,
                W_GATE = 4, W_PTRS0 = 5, W_PTRS1 = 6;
 
-function automatic [15:0] elem_addr(input integer e, input integer w);
-    elem_addr = 16'(ELEM_BASE + 16'(e) * ELEM_STRIDE + 16'(w));
+function automatic [15:0] partial_addr(input integer e, input integer w);
+    partial_addr = 16'(PARTIAL_BASE + 16'(e) * PARTIAL_STRIDE + 16'(w));
 endfunction
 function automatic [15:0] dmem_addr(input integer b);
     dmem_addr = 16'(DMEM_BASE + 16'(b));
@@ -200,10 +200,10 @@ task automatic reset_and_mute;
         @(negedge clk);
         rst_n = 1;
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
+            spi_word_write(partial_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         flip;
         for (v = 0; v < 256; v = v + 1)
-            spi_word_write(elem_addr(v, W_GAIN), GAIN_MUTE_BOTH);
+            spi_word_write(partial_addr(v, W_GAIN), GAIN_MUTE_BOTH);
         observe(4);
     end
 endtask
@@ -211,10 +211,10 @@ endtask
 // program voice 0 into the CURRENT shadow: A4 SINE, open LP, -12 dB
 task automatic program_v0;
     begin
-        spi_word_write(elem_addr(0, W_OSC),    OSC_SINE_A4);
-        spi_word_write(elem_addr(0, W_DUTY),   32'h00000000);
-        spi_word_write(elem_addr(0, W_FILTER), FILTER_OPEN);
-        spi_word_write(elem_addr(0, W_GAIN),   GAIN_12DB_BOTH);
+        spi_word_write(partial_addr(0, W_OSC),    OSC_SINE_A4);
+        spi_word_write(partial_addr(0, W_DUTY),   32'h00000000);
+        spi_word_write(partial_addr(0, W_FILTER), FILTER_OPEN);
+        spi_word_write(partial_addr(0, W_GAIN),   GAIN_12DB_BOTH);
     end
 endtask
 
@@ -245,12 +245,12 @@ task automatic program_chord;
             fc = chord_pitch(v) + 14'h0400;
             for (u = 0; u < 8; u = u + 1) begin
                 pit = $signed({2'b0, chord_pitch(v)}) + detune(u);
-                spi_word_write(elem_addr(v*8+u, W_OSC),
+                spi_word_write(partial_addr(v*8+u, W_OSC),
                                {18'b0, pit[13:0]});          // saw
-                spi_word_write(elem_addr(v*8+u, W_DUTY), 32'h0);
-                spi_word_write(elem_addr(v*8+u, W_FILTER),
+                spi_word_write(partial_addr(v*8+u, W_DUTY), 32'h0);
+                spi_word_write(partial_addr(v*8+u, W_FILTER),
                                {4'b0, RESO_R200, fc});
-                spi_word_write(elem_addr(v*8+u, W_GAIN),
+                spi_word_write(partial_addr(v*8+u, W_GAIN),
                                (u < 4) ? GAIN_CHORD_LEFT
                                        : GAIN_CHORD_RIGHT);
             end

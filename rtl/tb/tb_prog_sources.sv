@@ -10,7 +10,7 @@
 `default_nettype none
 module tb_prog_sources;
 
-`include "tb/elem_prog_common.svh"
+`include "tb/partial_prog_common.svh"
 
     initial begin
         reset_and_mute;
@@ -22,23 +22,23 @@ module tb_prog_sources;
         // flattens the tremolo ratio the assert depends on (found on
         // the split's first run).
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(elem_addr(v, W_OSC),    OSC_SINE_C4);
-            spi_word_write(elem_addr(v, W_DUTY),   32'h00000000);
-            spi_word_write(elem_addr(v, W_FILTER), FILTER_OPEN);
-            spi_word_write(elem_addr(v, W_GAIN),
+            spi_word_write(partial_addr(v, W_OSC),    OSC_SINE_C4);
+            spi_word_write(partial_addr(v, W_DUTY),   32'h00000000);
+            spi_word_write(partial_addr(v, W_FILTER), FILTER_OPEN);
+            spi_word_write(partial_addr(v, W_GAIN),
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
-            spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
-            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
+            spi_word_write(partial_addr(v, W_GATE),   32'h00000001);
+            spi_word_write(partial_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
         end
         flip;
         for (v = 0; v < 8; v = v + 1) begin
-            spi_word_write(elem_addr(v, W_OSC),    OSC_SINE_C4);
-            spi_word_write(elem_addr(v, W_DUTY),   32'h00000000);
-            spi_word_write(elem_addr(v, W_FILTER), FILTER_OPEN);
-            spi_word_write(elem_addr(v, W_GAIN),
+            spi_word_write(partial_addr(v, W_OSC),    OSC_SINE_C4);
+            spi_word_write(partial_addr(v, W_DUTY),   32'h00000000);
+            spi_word_write(partial_addr(v, W_FILTER), FILTER_OPEN);
+            spi_word_write(partial_addr(v, W_GAIN),
                            (v < 4) ? GAIN_CHORD_LEFT : GAIN_CHORD_RIGHT);
-            spi_word_write(elem_addr(v, W_GATE),   32'h00000001);
-            spi_word_write(elem_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
+            spi_word_write(partial_addr(v, W_GATE),   32'h00000001);
+            spi_word_write(partial_addr(v, W_PTRS1),  PTRS1_GAINS_DMEM3);
         end
         observe(60);
 

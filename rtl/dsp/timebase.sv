@@ -32,7 +32,7 @@
 `default_nettype none
 module timebase #(
     parameter int CYCLES    = synth_pkg::CYCLES_PER_SAMPLE,
-    parameter int NUM_ISSUE_SLOTS = synth_pkg::NUM_ELEMENTS,
+    parameter int NUM_ISSUE_SLOTS = synth_pkg::NUM_PARTIALS,
     parameter int CELLDIV   = synth_pkg::CELL_DIV
 ) (
     input  logic                   clk,

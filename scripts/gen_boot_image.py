@@ -31,7 +31,7 @@
 import math
 from pathlib import Path
 
-NUM_ELEMENTS = 256
+NUM_PARTIALS = 256
 UNISON = 8
 POLYPHONY = 32
 
@@ -88,7 +88,7 @@ p0 = []
 p1 = []
 p2 = []
 p3 = []
-for v in range(NUM_ELEMENTS):
+for v in range(NUM_PARTIALS):
     note = notes[v // UNISON]
     unison = v % UNISON
     left  = unison < (UNISON // 2)          # first 4 unisons → left
