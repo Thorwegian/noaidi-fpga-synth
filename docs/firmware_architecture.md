@@ -85,8 +85,8 @@ stays a dumb, fast executor. No special path.
 
 ## Command format
 
-- Commands are `engine_cmd_t {elem, word, value}` structs
+- Commands are `engine_param_cmd_t {elem, word, value}` structs
   (`engine_link.h`); the engine link translates element and word to
   addresses.
 - The command queue holds 1024 entries; on overflow
-  `engine_link_send()` drops the command.
+  `engine_link_param_write()` drops the command.

@@ -34,11 +34,11 @@
 
 // GAIN word with both channels at 0x00 = exact mute (volume
 // semantics: 0xFF is loudest).
-#define P3_MUTE            0x00000000u
+#define GAIN_WORD_MUTE            0x00000000u
 
 static QueueHandle_t s_queue;
 static QueueHandle_t s_bus_queue;
-static uint32_t s_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
+static uint32_t s_param_image[ENGINE_NUM_ELEMENTS][ENGINE_WORDS_PER_ELEMENT];
 
 #define BUS_BASE_ADDR      0x0800
 #define BUS_QUEUE_LEN      128    // init writes 32 envelope floors +
@@ -89,20 +89,20 @@ static inline void mark_dirty(int elem, int word)
 static void write_full_image(void)
 {
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++)
-        fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE, s_image[e],
+        fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE, s_param_image[e],
                               ENGINE_WORDS_PER_ELEMENT);
 }
 
 static TaskHandle_t s_task;
 
-static void tick_cb(void *arg)
+static void tick_timer_cb(void *arg)
 {
     xTaskNotifyGive(s_task);   // runs in the esp_timer task
 }
 
 static void engine_task(void *arg)
 {
-    engine_cmd_t cmd;
+    engine_param_cmd_t cmd;
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -127,14 +127,14 @@ static void engine_task(void *arg)
             // No-op elision, so the cost tracks what actually changed:
             // the image IS the FPGA's state (the FPGA-reload → ESP-
             // reboot rule guarantees it), so a write of the value
-            // already there is pure waste. voice_program re-renders
+            // already there is pure waste. render_voice re-renders
             // resend every word; skipping the unchanged ones turns a
             // one-knob re-render's flush from all 256 rows (~15 ms of
             // SPI, enough to wedge the link) into just the touched
             // rows.
-            if (s_image[cmd.elem][cmd.word] == cmd.value)
+            if (s_param_image[cmd.elem][cmd.word] == cmd.value)
                 continue;
-            s_image[cmd.elem][cmd.word] = cmd.value;
+            s_param_image[cmd.elem][cmd.word] = cmd.value;
             mark_dirty(cmd.elem, cmd.word);
             changed = true;
         }
@@ -169,7 +169,7 @@ static void engine_task(void *arg)
         // semaphore), so sending word by word would turn a re-render
         // into hundreds of transactions and pin this task until the
         // watchdog fires. Untouched words in the row are already
-        // current in s_image, so re-sending them is free.
+        // current in s_param_image, so re-sending them is free.
         for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
             bool row_dirty = false;
             for (int w = 0; w < ENGINE_WORDS_PER_ELEMENT; w++) {
@@ -182,7 +182,7 @@ static void engine_task(void *arg)
             }
             if (row_dirty)
                 fpga_word_write_burst(ELEM_BASE + e * ELEM_STRIDE,
-                                      s_image[e], ENGINE_WORDS_PER_ELEMENT);
+                                      s_param_image[e], ENGINE_WORDS_PER_ELEMENT);
         }
         for (int i = 0; i < PDIRTY_WORDS; i++) {
             uint32_t bits = s_pdirty_now[i] | s_pdirty_prev[i];
@@ -221,13 +221,13 @@ void engine_link_init(void)
     // bus 0 (the zero bus) — voice_alloc owns the plan and repoints
     // at note-on. The wheel rides BUS_CH_CUT.
     for (int e = 0; e < ENGINE_NUM_ELEMENTS; e++) {
-        s_image[e][0] = 0;
-        s_image[e][1] = 0;
-        s_image[e][2] = 0;            // Butterworth, fc = 0
-        s_image[e][3] = P3_MUTE;
-        s_image[e][4] = 0;            // GATE off
-        s_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
-        s_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
+        s_param_image[e][0] = 0;
+        s_param_image[e][1] = 0;
+        s_param_image[e][2] = 0;            // Butterworth, fc = 0
+        s_param_image[e][3] = GAIN_WORD_MUTE;
+        s_param_image[e][4] = 0;            // GATE off
+        s_param_image[e][5] = 0;            // PTRS0: all → bus 0 (none);
+        s_param_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
     }
 
     // Both banks get the muted image before anything can play.
@@ -237,7 +237,7 @@ void engine_link_init(void)
     fpga_swap();
     ESP_LOGI(TAG, "both banks muted (%d elements)", ENGINE_NUM_ELEMENTS);
 
-    s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_cmd_t));
+    s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
     s_bus_queue = xQueueCreate(BUS_QUEUE_LEN, sizeof(bus_cmd_t));
     s_prod_queue = xQueueCreate(PROD_QUEUE_LEN, sizeof(prod_cmd_t));
     if (s_queue == NULL || s_bus_queue == NULL || s_prod_queue == NULL) {
@@ -252,7 +252,7 @@ void engine_link_init(void)
     }
 
     const esp_timer_create_args_t targs = {
-        .callback = tick_cb, .name = "engine_tick",
+        .callback = tick_timer_cb, .name = "engine_tick",
     };
     esp_timer_handle_t timer;
     ESP_ERROR_CHECK(esp_timer_create(&targs, &timer));
@@ -260,7 +260,7 @@ void engine_link_init(void)
     ESP_LOGI(TAG, "1 kHz tick running");
 }
 
-bool engine_link_send(const engine_cmd_t *cmd)
+bool engine_link_param_write(const engine_param_cmd_t *cmd)
 {
     if (s_queue == NULL)
         return false;

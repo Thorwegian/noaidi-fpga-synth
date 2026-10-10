@@ -73,7 +73,7 @@
 `default_nettype none
 module adsr #(
     parameter int K_SHIFT   = 24,     // firmware scales k by 2**K_SHIFT
-    parameter int SUS_SHIFT = 12      // = ADSR_SUS_SHIFT in patch.h
+    parameter int SUS_SHIFT = 12      // = ADSR_SUSTAIN_SHIFT in patch.h
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -158,7 +158,7 @@ module adsr #(
                       :                           k_dec;         // decay
 
     // Sustain is a plain level: the top 10 bits of the 22-bit envelope
-    // scale. SUS_SHIFT must equal ADSR_SUS_SHIFT in app/main/patch.h. A
+    // scale. SUS_SHIFT must equal ADSR_SUSTAIN_SHIFT in app/main/patch.h. A
     // mismatch of one scales every sustain by two, and a high sustain then
     // sits above full scale and makes the decay segment climb instead of
     // settle.

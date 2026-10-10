@@ -81,10 +81,10 @@ typedef struct {
 // slower than ~11 s.
 #define ADSR_K_SHIFT    24u        // gateware's fixed output shift
 #define ADSR_K_MAX      253952u    // 18 bits: mantissa 31 << 13
-#define ADSR_SUS_SHIFT  12u        // 10-bit sustain of a 22-bit level
+#define ADSR_SUSTAIN_SHIFT  12u        // 10-bit sustain of a 22-bit level
 
-uint32_t patch_adsr_rate1(const adsr_t *e);
-uint32_t patch_adsr_rate2(const adsr_t *e);
+uint32_t patch_adsr_word1(const adsr_t *e);
+uint32_t patch_adsr_word3(const adsr_t *e);
 uint8_t  patch_adsr_rate_byte(uint8_t patch_rate);
 
 // ── LFO ─────────────────────────────────────────────────────────────

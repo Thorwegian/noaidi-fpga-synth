@@ -9,7 +9,7 @@ from pathlib import Path
 Fs = 96000
 ENTRIES = 1024
 
-def midiToHz(note):
+def midi_to_hz(note):
     return 440 * math.pow(2, (note - 69) / 12)
 
 def fcToK(Fc):
@@ -22,7 +22,7 @@ file_path = script_dir / "../rtl/dsp/svf_k_lut.hex"
 with open(file_path, "w") as file:
     # plain range instead of numpy.arange — zero third-party deps
     for note in (i * (12 / 1024) for i in range(ENTRIES)):
-        Fc = midiToHz(note)
+        Fc = midi_to_hz(note)
         K = fcToK(Fc)
         value = round(K * (1 << 25))
         file.write(f"{value:04x}\n") # Keep 16 non-zero bits (i.e. strip 9 bits)

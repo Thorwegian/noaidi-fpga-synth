@@ -45,12 +45,12 @@ typedef struct {
     uart_port_t   uart;
     const char   *name;      // task name + log tag
     midi_parser_t parser;
-    uint8_t       dbg_seen;  // first-bytes hex log budget (bring-up aid)
+    uint8_t       hexdump_budget;  // first-bytes hex log budget (bring-up aid)
     bool          ready;     // UART configured, RX task not yet started
 } midi_port_t;
 
-static midi_port_t s_din   = { .uart = UART_NUM_1, .name = "midi_in"  };
-static midi_port_t s_panel = { .uart = UART_NUM_0, .name = "midi_pnl" };
+static midi_port_t s_din_port   = { .uart = UART_NUM_1, .name = "midi_in"  };
+static midi_port_t s_panel_port = { .uart = UART_NUM_0, .name = "midi_pnl" };
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
@@ -80,8 +80,8 @@ static void midi_in_task(void *arg)
             // Bring-up aid: hex-log the first few bytes ever seen on
             // this port, so "wired but garbled" (framing/polarity) is
             // distinguishable from "nothing arrives" without a scope.
-            if (p->dbg_seen < 8) {
-                p->dbg_seen++;
+            if (p->hexdump_budget < 8) {
+                p->hexdump_budget++;
                 ESP_LOGI(p->name, "rx byte %02X", byte);
             }
             midi_parser_feed(&p->parser, byte);
@@ -153,13 +153,13 @@ static void port_start(midi_port_t *p)
 
 void midi_in_start(void)
 {
-    port_start(&s_din);
-    port_start(&s_panel);
+    port_start(&s_din_port);
+    port_start(&s_panel_port);
 }
 
 void midi_in_init(int rx_pin)
 {
-    port_init(&s_din, rx_pin);
+    port_init(&s_din_port, rx_pin);
 }
 
 void midi_panel_init(int rx_pin)
@@ -188,16 +188,16 @@ void midi_panel_init(int rx_pin)
     }
     bool idle_high = highs >= 24;       // ≥75% high = healthy idle
 
-    port_init(&s_panel, rx_pin);
+    port_init(&s_panel_port, rx_pin);
 
     if (!idle_high) {
-        ESP_ERROR_CHECK(uart_set_line_inverse(s_panel.uart,
+        ESP_ERROR_CHECK(uart_set_line_inverse(s_panel_port.uart,
                                               UART_SIGNAL_RXD_INV));
-        ESP_LOGW(s_panel.name,
+        ESP_LOGW(s_panel_port.name,
                  "line idles LOW (%d/32 high) - RX inverted; if no bytes"
                  " follow, check wiring/plug orientation", highs);
     } else {
-        ESP_LOGI(s_panel.name, "line idles high (%d/32) - polarity OK",
+        ESP_LOGI(s_panel_port.name, "line idles high (%d/32) - polarity OK",
                  highs);
     }
 }

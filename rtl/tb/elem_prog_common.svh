@@ -135,7 +135,7 @@ localparam [31:0] SRC_LFO_TREM_BUS6 =               // pulse LFO -> bus 6
     32'hE | (32'd1 << 4) | (32'd6 << 6) | (32'd32768 << 16);
 // Rates are linear coefficients, in two words. These are the
 // old 0xF4F000F0 nibble word converted by the same arithmetic firmware
-// uses (patch_adsr_rate1/rate2), so the bench hears what it used to:
+// uses (patch_adsr_word1/word3), so the bench hears what it used to:
 // fast attack, slow decay, high sustain, fast release.
 localparam [31:0] BENCH_ADSR_RATES  = 32'h00120000;   // kA, kD[13:0]
 localparam [31:0] BENCH_ADSR_RATES2 = 32'hF0280000;   // kD[17:14], kR, sustain
@@ -218,7 +218,7 @@ task automatic program_v0;
     end
 endtask
 
-// firmware voice_program() mirror: C4/E4/G4/C5 on voices 0-3,
+// firmware render_voice() mirror: C4/E4/G4/C5 on voices 0-3,
 // church-organ detune, hard-panned, fc one octave above the note
 function automatic [13:0] chord_pitch(input integer v);
     case (v)
