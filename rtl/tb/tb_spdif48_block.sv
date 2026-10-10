@@ -24,7 +24,7 @@
 module tb_spdif48_block;
 
     logic clk = 0;
-    logic rst_n = 0;
+    logic rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #5 clk = ~clk;    // ratios are all internal; absolute rate is moot
 
     logic       sample_tick, lane_enter;

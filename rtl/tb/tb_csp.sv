@@ -24,7 +24,8 @@ module tb_csp;
     localparam signed [17:0] MARK_A = 18'sd12345;
     localparam signed [17:0] MARK_B = -18'sd6789;
 
-    logic clk = 0, rst_n = 0, sclk = 0;
+    logic clk = 0, rst_n = 1, sclk = 0;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;
 
     // the drum's sample boundary, without the drum

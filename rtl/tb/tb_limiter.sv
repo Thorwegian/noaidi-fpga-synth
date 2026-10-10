@@ -20,7 +20,8 @@ module tb_limiter;
     localparam int          MAXCODE = (LW-1)*16 + 15 - 205;   // 210 here
     localparam int          LAT     = 6;           // > 5-stage latency, margin
 
-    logic clk = 0, rst_n = 0;
+    logic clk = 0, rst_n = 1;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #5 clk = ~clk;
     logic [LW-1:0] level;
     logic [7:0]    thresh;

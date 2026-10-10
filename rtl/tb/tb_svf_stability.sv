@@ -29,7 +29,7 @@
 `default_nettype none
 module tb_svf_stability;
 
-    logic clk = 0, rst_n = 0;
+    logic clk = 0, rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #6.781 clk = ~clk;               // ~73.728 MHz
 
     logic       sample_tick, lane_enter;
@@ -77,6 +77,7 @@ module tb_svf_stability;
     // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth
     task automatic set_filter(input [13:0] fc, input [13:0] r);
         begin
+            @(negedge clk);     // not on the edge where the pipeline reads it
             u_pipe.filter_param_ram[0]   = {8'b0, r[13:0], fc};
             u_pipe.filter_param_ram[256] = {8'b0, r[13:0], fc};
         end

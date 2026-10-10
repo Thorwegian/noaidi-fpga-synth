@@ -76,7 +76,7 @@ module tb_pulse_dc;
         $display("    duty          mean(LSB Q2.16)");
         for (k = 0; k <= 8; k = k + 1) begin
             mean_at(2'd1, duties[k], m);
-            $display("    %11d  %+12.2f%s", $signed(duties[k]), m,
+            $display("    %11d  %12.2f%s", $signed(duties[k]), m,
                      (absr(m) <= TOL) ? "" : "   ** DC **");
             if (absr(m) > TOL) errors = errors + 1;
         end
@@ -86,7 +86,7 @@ module tb_pulse_dc;
         for (k = 0; k < 4; k = k + 1) begin
             if (k != 1) begin
                 mean_at(2'(k), 24'sd0, m);
-                $display("    wave %0d (duty 0) mean %+10.2f%s", k, m,
+                $display("    wave %0d (duty 0) mean %10.2f%s", k, m,
                          (absr(m) <= TOL) ? "" : "   ** DC **");
                 if (absr(m) > TOL) errors = errors + 1;
             end

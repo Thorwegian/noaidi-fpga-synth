@@ -145,144 +145,158 @@ flash: pack.fs
 	openFPGALoader -b tangnano20k -f $<
 
 #----------------------------------------------------------------------
-# Simulation (iverilog)
+# Simulation (Verilator)
 #----------------------------------------------------------------------
 # Gowin's behavioural models for the DSP primitives adsr.sv instantiates
 # explicitly (yosys cannot infer a fused DSP cell, so they are written out
 # by hand). Vendor code, so it is referenced where the toolchain installs it
 # rather than vendored into this CERN-OHL-S tree. Override on the command line
-# if your Gowin EDA lives somewhere else.
+# if your copy lives somewhere else. -DSIM_GOWIN_PRIM turns on the GSR
+# instance inside adsr.sv, which the models need somewhere up the hierarchy.
 GOWIN_SIM ?= /opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v
+VL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
 
-# -s is MANDATORY with prim_sim.v: without an explicit elaboration root
-# iverilog elaborates every primitive in that 16770-line file, including the
-# ones we never touch, and fails on their GSR references. -DSIM_GOWIN_PRIM
-# turns on the GSR instance inside adsr.sv, which the models need to exist
-# somewhere up the hierarchy. The define goes before the source files:
-# iverilog on macOS stops parsing options at the first file name.
-IVL_DSP_DEF = -DSIM_GOWIN_PRIM
-IVL_DSP = $(GOWIN_SIM)
+# Each bench is compiled into its own executable, obj_dir/<bench>/sim, and
+# --timing runs the benches' delays and event controls as written.
+#
+# Verilator is two-state: there is no X. --x-assign/--x-initial unique plus
+# a random reset seed at run time make uninitialised state come up as random
+# values rather than silently 0, so a missing reset shows as a result that
+# changes between runs. Each `make` picks a fresh seed and writes it as the
+# first line of every .out; reproduce a run with `make sim SIM_SEED=<n>`.
+#
+# Warnings are fatal except: lint and style, IEEEMAYDEPRECATE (Gowin's
+# prim_sim.v), TIMESCALEMOD (the benches set a `timescale, the RTL does not),
+# MULTIDRIVEN (initial values in spi_bus.sv) and ZERODLY (tb_spi_bus's
+# variable delays).
+VL_FLAGS = --binary --timing -O3 --x-assign unique --x-initial unique -I. \
+           -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD \
+           -Wno-MULTIDRIVEN -Wno-ZERODLY
+VERILATE = mkdir -p $(@D) && verilator $(VL_FLAGS) --top-module $(notdir $(@D)) --Mdir $(@D) -o sim
+
+ifeq ($(origin SIM_SEED),undefined)
+SIM_SEED := $(shell echo $$((RANDOM + 1)))
+endif
+# $(call run_sim,<executable>,<log>)
+run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
 SIM_MOD = $(PKG) dsp/drum.sv dsp/limiter.sv dsp/element_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_ELEM = tb/tb_element_pipeline.sv
 
-tb/tb_element_pipeline.vvp: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_ELEM) $(IVL_DSP)
+obj_dir/tb_element_pipeline/sim: $(SIM_MOD) $(TB_ELEM) $(LUTS) Makefile
+	$(VERILATE) $(SIM_MOD) $(TB_ELEM) $(VL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a
 # fixed order afterwards. Suite wall-clock collapses to the longest
-# bench. Read a single bench with: make sim-prog && cat tb/sim-prog.out
-sim-elem: tb/tb_element_pipeline.vvp
-	vvp tb/tb_element_pipeline.vvp > tb/sim-elem.out 2>&1
+# bench. Read a single bench with: make sim-prog-boot && cat tb/sim-prog-boot.out
+sim-elem: obj_dir/tb_element_pipeline/sim
+	$(call run_sim,$<,tb/sim-elem.out)
 
 TB_SPDIF = tb/tb_spdif_block.sv
-tb/tb_spdif_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	iverilog -g2012 -o $@ $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
+obj_dir/tb_spdif_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
+	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF)
 
-sim-spdif: tb/tb_spdif_block.vvp
-	vvp tb/tb_spdif_block.vvp > tb/sim-spdif.out 2>&1
+sim-spdif: obj_dir/tb_spdif_block/sim
+	$(call run_sim,$<,tb/sim-spdif.out)
 
 # 48 kHz test transmitter: drum's half-rate ticks + CS_FREQ
 # override, decoded with the same block checker.
 TB_SPDIF48 = tb/tb_spdif48_block.sv
-tb/tb_spdif48_block.vvp: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
-	iverilog -g2012 -o $@ $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+obj_dir/tb_spdif48_block/sim: $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
+	$(VERILATE) $(PKG) dsp/drum.sv spdif/spdif_tx.sv $(TB_SPDIF48)
 
-sim-spdif48: tb/tb_spdif48_block.vvp
-	vvp tb/tb_spdif48_block.vvp > tb/sim-spdif48.out 2>&1
+sim-spdif48: obj_dir/tb_spdif48_block/sim
+	$(call run_sim,$<,tb/sim-spdif48.out)
 
 PROG_COMMON = tb/elem_prog_common.svh
 
-tb/tb_prog_%.vvp: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) spi/spi_bus.sv $< $(IVL_DSP)
+obj_dir/tb_prog_%/sim: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
+	$(VERILATE) $(SIM_MOD) spi/spi_bus.sv $< $(VL_DSP)
 
-sim-prog-boot: tb/tb_prog_boot.vvp
-	vvp tb/tb_prog_boot.vvp > tb/sim-prog-boot.out 2>&1
+sim-prog-boot: obj_dir/tb_prog_boot/sim
+	$(call run_sim,$<,tb/sim-prog-boot.out)
 
-sim-prog-sweep: tb/tb_prog_sweep.vvp
-	vvp tb/tb_prog_sweep.vvp > tb/sim-prog-sweep.out 2>&1
+sim-prog-sweep: obj_dir/tb_prog_sweep/sim
+	$(call run_sim,$<,tb/sim-prog-sweep.out)
 
-sim-prog-bus: tb/tb_prog_bus.vvp
-	vvp tb/tb_prog_bus.vvp > tb/sim-prog-bus.out 2>&1
+sim-prog-bus: obj_dir/tb_prog_bus/sim
+	$(call run_sim,$<,tb/sim-prog-bus.out)
 
-sim-prog-sources: tb/tb_prog_sources.vvp
-	vvp tb/tb_prog_sources.vvp > tb/sim-prog-sources.out 2>&1
+sim-prog-sources: obj_dir/tb_prog_sources/sim
+	$(call run_sim,$<,tb/sim-prog-sources.out)
 
 # The ping-pong bus generation. Timing and resource numbers
 # cannot tell a right-generation read from a wrong one, and hardware
 # cannot see the bus at all -- these invariants only exist in sim.
-sim-prog-pingpong: tb/tb_prog_pingpong.vvp
-	vvp tb/tb_prog_pingpong.vvp > tb/sim-prog-pingpong.out 2>&1
+sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
+	$(call run_sim,$<,tb/sim-prog-pingpong.out)
 
 # Active master limiter in situ: hot chord must not rail, must not
 # go near-silent, and 50 ms RMS must not jump > 3 dB.
-sim-prog-limiter: tb/tb_prog_limiter.vvp
-	vvp tb/tb_prog_limiter.vvp > tb/sim-prog-limiter.out 2>&1
+sim-prog-limiter: obj_dir/tb_prog_limiter/sim
+	$(call run_sim,$<,tb/sim-prog-limiter.out)
 
-# The CSP alone -- seconds rather than minutes, because it does not
-# elaborate the SVF, the oscillators or the limiter.
-tb/tb_csp.vvp: $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv tb/tb_csp.sv $(IVL_DSP)
-
-sim-csp: tb/tb_csp.vvp
-	vvp tb/tb_csp.vvp > tb/sim-csp.out 2>&1
-
-# All of these elaborate the CSP alone, like tb_csp.
+# All of these elaborate the CSP alone -- without the SVF, the
+# oscillators' audio path or the limiter.
 CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
 
-# The mailbox's two-take commit under back-to-back traffic. IN the gate.
+obj_dir/tb_csp/sim: $(CSP_SIM) tb/tb_csp.sv Makefile
+	$(VERILATE) $(CSP_SIM) tb/tb_csp.sv $(VL_DSP)
+
+sim-csp: obj_dir/tb_csp/sim
+	$(call run_sim,$<,tb/sim-csp.out)
+
 # A voice stolen mid-release must attack from silence, not continue from where
 # the release had got to. This is the case the board cannot isolate: the
 # allocator only steals once all 32 voices are busy, and those other 31 are
 # ringing into the same microphone while the measurement is taken, so the
 # stolen voice's level IS the interference. Presenting the state directly is
 # both cleaner and decisive -- without the fix this bench reports 2 FAILURES.
-tb/tb_adsr_retrig.vvp: tb/tb_adsr_retrig.sv $(PKG) dsp/adsr.sv Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -s tb_adsr_retrig -o $@ $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(IVL_DSP)
+obj_dir/tb_adsr_retrig/sim: tb/tb_adsr_retrig.sv $(PKG) dsp/adsr.sv Makefile
+	$(VERILATE) $(PKG) dsp/adsr.sv tb/tb_adsr_retrig.sv $(VL_DSP)
 
-sim-adsr-retrig: tb/tb_adsr_retrig.vvp
-	@vvp $< > tb/sim-adsr-retrig.out 2>&1 || true
-	@cat tb/sim-adsr-retrig.out
+sim-adsr-retrig: obj_dir/tb_adsr_retrig/sim
+	$(call run_sim,$<,tb/sim-adsr-retrig.out)
 
-tb/tb_mbox_burst.vvp: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_mbox_burst.sv $(IVL_DSP)
+# The mailbox's two-take commit under back-to-back traffic.
+obj_dir/tb_mbox_burst/sim: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
+	$(VERILATE) $(CSP_SIM) tb/tb_mbox_burst.sv $(VL_DSP)
 
-sim-mbox-burst: tb/tb_mbox_burst.vvp
-	vvp tb/tb_mbox_burst.vvp > tb/sim-mbox-burst.out 2>&1
+sim-mbox-burst: obj_dir/tb_mbox_burst/sim
+	$(call run_sim,$<,tb/sim-mbox-burst.out)
 
-# The real program mix under constant mailbox rewrites. STANDALONE, not in
-# the default gate: its 4000 samples would add minutes to every run.
-tb/tb_prog_soak.vvp: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -I. -s $(notdir $(basename $@)) -o $@ $(CSP_SIM) tb/tb_prog_soak.sv $(IVL_DSP)
+# The real program mix under constant mailbox rewrites. Not in the
+# default gate.
+obj_dir/tb_prog_soak/sim: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
+	$(VERILATE) $(CSP_SIM) tb/tb_prog_soak.sv $(VL_DSP)
 
-sim-prog-soak: tb/tb_prog_soak.vvp
-	vvp tb/tb_prog_soak.vvp
+sim-prog-soak: obj_dir/tb_prog_soak/sim
+	$(call run_sim,$<,/dev/stdout)
 
 TB_BUS = tb/tb_spi_bus.sv
-tb/tb_spi_bus.vvp: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
-	iverilog -g2012 -o $@ $(PKG) spi/spi_bus.sv $(TB_BUS)
+obj_dir/tb_spi_bus/sim: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
+	$(VERILATE) $(PKG) spi/spi_bus.sv $(TB_BUS)
 
-sim-bus: tb/tb_spi_bus.vvp
-	vvp tb/tb_spi_bus.vvp > tb/sim-bus.out 2>&1
+sim-bus: obj_dir/tb_spi_bus/sim
+	$(call run_sim,$<,tb/sim-bus.out)
 
-# SVF stability spot-check at the FC_MAX clamp corner (fast assert
-# bench — part of the regular suite).
+# SVF stability spot-check at the FC_MAX clamp corner.
 TB_STAB = tb/tb_svf_stability.sv
-tb/tb_svf_stability.vvp: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
-	iverilog -g2012 $(IVL_DSP_DEF) -s $(notdir $(basename $@)) -o $@ $(SIM_MOD) $(TB_STAB) $(IVL_DSP)
+obj_dir/tb_svf_stability/sim: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
+	$(VERILATE) $(SIM_MOD) $(TB_STAB) $(VL_DSP)
 
-sim-stab: tb/tb_svf_stability.vvp
-	vvp tb/tb_svf_stability.vvp > tb/sim-stab.out 2>&1
+sim-stab: obj_dir/tb_svf_stability/sim
+	$(call run_sim,$<,tb/sim-stab.out)
 
 # Output tilt error feedback: exact-zero convergence on
 # silence, exact-value convergence on DC, both polarities.
 TB_TILT = tb/tb_tilt.sv
-tb/tb_tilt.vvp: dsp/output_tilt.sv $(TB_TILT) Makefile
-	iverilog -g2012 -o $@ dsp/output_tilt.sv $(TB_TILT)
+obj_dir/tb_tilt/sim: dsp/output_tilt.sv $(TB_TILT) Makefile
+	$(VERILATE) dsp/output_tilt.sv $(TB_TILT)
 
-sim-tilt: tb/tb_tilt.vvp
-	vvp tb/tb_tilt.vvp > tb/sim-tilt.out 2>&1
+sim-tilt: obj_dir/tb_tilt/sim
+	$(call run_sim,$<,tb/sim-tilt.out)
 
 # The pulse oscillator must average to ZERO at every duty. A bare
 # comparator is only centred at 50%: with phase sweeping the full signed range
@@ -291,21 +305,20 @@ sim-tilt: tb/tb_tilt.vvp
 # carried 29491 LSB of pure DC, scaled on its way out by the amp envelope.
 # Without the fix this bench reports 8 failures, which is the only reason its
 # passing means anything.
-tb/tb_pulse_dc.vvp: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
-	iverilog -g2012 -s tb_pulse_dc -o $@ $(PKG) dsp/osc_core.sv tb/tb_pulse_dc.sv
+obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
+	$(VERILATE) $(PKG) dsp/osc_core.sv tb/tb_pulse_dc.sv
 
-sim-pulse-dc: tb/tb_pulse_dc.vvp
-	@vvp $< > tb/sim-pulse-dc.out 2>&1 || true
-	@cat tb/sim-pulse-dc.out
+sim-pulse-dc: obj_dir/tb_pulse_dc/sim
+	$(call run_sim,$<,tb/sim-pulse-dc.out)
 
 # Log-domain limiter unit bench: the per-step function in
 # isolation -- transparency, proportional attack, release, saturation.
 TB_LIM = tb/tb_limiter.sv
-tb/tb_limiter.vvp: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Makefile
-	iverilog -g2012 -o $@ dsp/limiter.sv $(TB_LIM)
+obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Makefile
+	$(VERILATE) dsp/limiter.sv $(TB_LIM)
 
-sim-limiter: tb/tb_limiter.vvp
-	vvp tb/tb_limiter.vvp > tb/sim-limiter.out 2>&1
+sim-limiter: obj_dir/tb_limiter/sim
+	$(call run_sim,$<,tb/sim-limiter.out)
 
 sim: sim-pulse-dc sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-elem sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
@@ -327,4 +340,4 @@ sim: sim-pulse-dc sim-adsr-retrig sim-csp sim-mbox-burst sim-prog-pingpong sim-e
 	fi
 
 clean:
-	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex
+	rm -rf *.log *.json *.fs dsp/svf_k_lut.hex obj_dir

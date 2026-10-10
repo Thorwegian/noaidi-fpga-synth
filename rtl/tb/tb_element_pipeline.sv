@@ -1,5 +1,5 @@
 //--------------------------------------------------------------------
-// tb_element_pipeline.sv — 256-element SCMO pipeline testbench (iverilog)
+// tb_element_pipeline.sv — 256-element SCMO pipeline testbench
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -26,7 +26,8 @@ module tb_element_pipeline;
     // Clocks and reset
     //----------------------------------------------------------------
     logic clk   = 1'b0;
-    logic rst_n = 1'b0;
+    logic rst_n = 1'b1;
+    initial rst_n = 0;  // a real falling edge, so the async resets act before the first clock
     always #6.781 clk = ~clk;          // ~73.728 MHz
 
     logic        sample_tick, lane_enter;

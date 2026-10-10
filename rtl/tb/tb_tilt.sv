@@ -21,7 +21,7 @@
 module tb_tilt;
 
     logic clk = 0;
-    logic rst_n = 0;
+    logic rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
     always #5 clk = ~clk;
 
     // sample strobe every 8 clk (the ratio is irrelevant to the DUT)
