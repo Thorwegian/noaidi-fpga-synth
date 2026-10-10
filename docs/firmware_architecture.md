@@ -94,5 +94,4 @@ special path.
   (`engine_link.h`); the engine link translates element and word to
   addresses.
 - The command queue holds 1024 entries; on overflow
-  `engine_link_send()` drops the command and counts the drop, and the
-  tick logs it.
+  `engine_link_send()` drops the command.

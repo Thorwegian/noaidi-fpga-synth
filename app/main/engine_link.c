@@ -78,7 +78,6 @@ static uint32_t s_pdirty_prev[PDIRTY_WORDS];
 static uint32_t s_dirty_now[DIRTY_WORDS];   // changed since last swap
 static uint32_t s_dirty_prev[DIRTY_WORDS];  // written before last swap
 
-static uint32_t s_drops;
 
 static inline void mark_dirty(int elem, int word)
 {
@@ -204,20 +203,6 @@ static void engine_task(void *arg)
         memcpy(s_pdirty_prev, s_pdirty_now, sizeof(s_pdirty_prev));
         memset(s_pdirty_now, 0, sizeof(s_pdirty_now));
 
-        // Drop visibility, always on (not just at init): a silent drop
-        // is a voice configured wrong forever.
-        static uint32_t s_drops_reported;
-        if (s_drops != s_drops_reported) {
-            ESP_LOGW(TAG, "engine writes dropped: %u total",
-                     (unsigned)s_drops);
-            s_drops_reported = s_drops;
-        }
-
-        if (s_drops) {
-            ESP_LOGW(TAG, "queue full, dropped %" PRIu32 " commands", s_drops);
-            s_drops = 0;
-        }
-
         // Single-core guard. If this wake ran long (a flood of
         // dirty rows to burst over SPI), the 1 kHz notify is already
         // pending, so the ulTaskNotifyTake above would return at once
@@ -279,11 +264,7 @@ bool engine_link_send(const engine_cmd_t *cmd)
 {
     if (s_queue == NULL)
         return false;
-    if (xQueueSend(s_queue, cmd, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
+    return xQueueSend(s_queue, cmd, 0) == pdTRUE;
 }
 
 bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
@@ -291,16 +272,7 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810)
     if (s_bus_queue == NULL || bus == 0 || bus >= 1024)
         return false;
     bus_cmd_t bc = {.bus = bus, .value = value_q810};
-    if (xQueueSend(s_bus_queue, &bc, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
-}
-
-uint32_t engine_link_drops(void)
-{
-    return s_drops;
+    return xQueueSend(s_bus_queue, &bc, 0) == pdTRUE;
 }
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
@@ -308,16 +280,5 @@ bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value)
     if (s_prod_queue == NULL || word >= 4)   // uint8_t entry spans the pool
         return false;
     prod_cmd_t pc = {.entry = entry, .word = word, .value = value};
-    // Drops stay possible under a wedged flush; blocking here is not
-    // the answer, since it trades a dropped write for a stall. The
-    // LOSSLESSNESS
-    // guarantee lives one level up instead: voice_alloc's apply_dirty
-    // checks engine_link_drops() around each config burst and RE-ARMS
-    // the dirty bit when anything dropped, so the coalescer retries at
-    // its own bounded pace until the config lands complete.
-    if (xQueueSend(s_prod_queue, &pc, 0) != pdTRUE) {
-        s_drops++;
-        return false;
-    }
-    return true;
+    return xQueueSend(s_prod_queue, &pc, 0) == pdTRUE;
 }

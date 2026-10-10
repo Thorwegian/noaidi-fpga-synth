@@ -46,8 +46,8 @@ typedef struct {
 // pushed as ordinary PTRS0/PTRS1 commands at its init.
 void engine_link_init(void);
 
-// Queue one parameter write. Non-blocking: returns false (and counts
-// the drop) if the queue is full — the tick will log it.
+// Queue one parameter write. Non-blocking: returns false if the queue
+// is full (the write is dropped).
 bool engine_link_send(const engine_cmd_t *cmd);
 
 // Queue one live bus-base write (bus_architecture.md). Buses are not
@@ -90,11 +90,6 @@ bool engine_link_bus_write(uint16_t bus, uint32_t value_q810);
 
 bool engine_link_prod_write(uint8_t entry, uint8_t word, uint32_t value);
 
-// Total dropped commands (queue-full across all engine queues). A
-// nonzero value after an init burst means silently missing config —
-// exactly the class of bug that costs the last voices their amp
-// envelopes. Callers of init bursts must check and LOG.
-uint32_t engine_link_drops(void);
 
 #ifdef __cplusplus
 }

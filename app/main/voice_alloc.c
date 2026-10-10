@@ -767,15 +767,11 @@ static void handle_cc(uint8_t num, uint8_t val)
 
     // ---- live: LFO 2 (source 1) ----
     case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_dirty |= D_LFO2; break;
-    // Depth scale is per-destination: duty bus decodes <<<13 (raw value
-    // 1024 = full ±1.0 duty), resonance as-is (1024 = 1 octave of Q),
-    // cutoff like resonance (val<<5 ≈ up to ±4 octaves of wobble).
-    case 110: g_patch.lfo[1].depth =
-                  (int16_t)(g_patch.lfo[1].dest == 1 ? val << 5
-                          : g_patch.lfo[1].dest == 2 ? val << 2   // pitch: like CC 77
-                          : g_patch.lfo[1].dest == 3 ? val << 5   // cutoff
-                                                     : val << 4);
-              s_dirty |= D_LFO2; break;
+    // Same depth scale as LFO 1 (CC 77), whatever the destination: the
+    // knob sets the same raw bus value everywhere. What that value means
+    // depends on the sink (1024 = one octave of pitch, cutoff or Q, or
+    // full ±1.0 duty).
+    case 110: g_patch.lfo[1].depth = (int16_t)(val << 2); s_dirty |= D_LFO2; break;
     case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_dirty |= D_LFO2; break;
     // Four destinations (the send fan-out makes cutoff reachable):
     // 0..31 duty/PWM, 32..63 resonance,
@@ -925,15 +921,6 @@ static void apply_dirty(int64_t now)
 {
     if (!s_dirty || now - s_last_apply < APPLY_MIN_US)
         return;
-    // Lossless-config guarantee: a wedged engine flush can overflow
-    // the queues and DROP part of a config burst, which leaves tail
-    // voices with stale
-    // MOD-env rates, heard as random notes having a longer MOD
-    // envelope. Snapshot the drop counter; if anything dropped during
-    // this apply, RE-ARM the same dirty bits so the whole batch
-    // retries at the next bounded-rate apply until it lands whole.
-    uint32_t applied = s_dirty;
-    uint32_t drops0  = engine_link_drops();
     if (s_dirty & D_ENV)    update_amp_env();
     if (s_dirty & D_ENV2)   update_mod_env();
     if (s_dirty & D_CUT)    refresh_cut_buses();
@@ -942,10 +929,6 @@ static void apply_dirty(int64_t now)
     if (s_dirty & D_GAIN)   refresh_gain_buses();
     if (s_dirty & D_RENDER) render_active_voices();
     s_dirty = 0;
-    if (engine_link_drops() != drops0) {
-        s_dirty |= applied;   // retry the batch — coalesced, bounded
-        ESP_LOGW(TAG, "config burst dropped writes — retrying batch");
-    }
     s_last_apply = now;
 }
 
@@ -963,17 +946,6 @@ static void voice_alloc_task(void *arg)
         // Timed receive so the idle sweep runs during quiet passages,
         // not only when the next note_on happens to scan.
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(VA_SWEEP_MS)) == pdTRUE) {
-            // Observability for the "mysteriously unresponsive" hunt:
-            // if events were evicted from this subscriber's queue
-            // (e.g. a CC flood crowding out note events), say so —
-            // otherwise a drop here is indistinguishable from a
-            // MIDI-side fault.
-            uint32_t dropped = event_bus_dropped(s_sub_id);
-            if (dropped > 0) {
-                ESP_LOGW(TAG, "event bus dropped %u events for voice_alloc",
-                         (unsigned)dropped);
-                event_bus_reset_dropped(s_sub_id);
-            }
             if (evt.kind == EVT_MIDI)
                 handle_midi(&evt.midi);
         } else {
@@ -1067,12 +1039,6 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
-    // Tripwire: a full engine queue during the init burst silently
-    // drops config, which costs the last voices their amp envelopes.
-    // Scream if ANY init write was dropped.
-    if (engine_link_drops() > 0)
-        ESP_LOGE(TAG, "INIT DROPPED %u engine writes — config incomplete!",
-                 (unsigned)engine_link_drops());
     ESP_LOGI(TAG, "%d voices x %d elements ready (sub id %d)",
              NUM_VOICES, ELEMS_PER_VOICE, s_sub_id);
 }
