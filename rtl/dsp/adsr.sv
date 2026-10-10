@@ -8,7 +8,7 @@
 // earns a module; the LFO is an adder and the SEND is a wire.
 //
 // THE RECURRENCE. RC for everything, and no LUTs for the ADSR.
-// The level is a LINEAR AMPLITUDE in UQ12.14 across [25:0]; full scale
+// The level is a LINEAR AMPLITUDE in UQ4.22 across [25:0]; full scale
 // 0x400000 is the gain bus's Q4.14 unity (0x4000) carrying eight extra
 // fractional bits so a slow step does not truncate away. Every segment is
 // the same recurrence,

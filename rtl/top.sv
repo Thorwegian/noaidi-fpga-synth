@@ -252,8 +252,9 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // led[0]: ~1.4 Hz liveness blink derived from sample ticks —
-    // proves clock + drum with one flop chain. Others off.
+    // led[0]: ~0.73 Hz (1.37 s period) liveness blink derived from
+    // sample ticks — proves clock + drum with one flop chain.
+    // led[1]: lit while reset is held. Others off.
     //----------------------------------------------------------------
     logic [16:0] beat;
     always_ff @(posedge sysclk or negedge rst_n)

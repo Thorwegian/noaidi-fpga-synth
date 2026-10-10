@@ -69,7 +69,7 @@ module tb_prog_bus;
             $display("FAIL: bus offset did not muffle (peak=%0d)", peak);
             errors = errors + 1;
         end else
-            $display("bus -2oct: muffled (peak=%0d)", peak);
+            $display("bus -8oct: muffled (peak=%0d)", peak);
 
         spi_word_write(bus_addr(1), 32'h00000000);
         observe(60);

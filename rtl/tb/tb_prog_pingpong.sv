@@ -12,10 +12,9 @@
 // occasional subtly-stale modulation value.
 //
 //   1. dmem_gen toggles exactly once per sample
-//   2. an SPI bus write lands in the SHADOW half, so sinks keep reading
-//      the old value for the remainder of the current sample
-//   3. the new value becomes live exactly at the sample boundary, so no
-//      element ever sees a mixed snapshot
+//   2. an SPI bus write reaches BOTH halves at once (write-through),
+//      so it is visible immediately
+//   3. the new value stays live across the next swap
 //   4. the shadow half actually received the write (it is not dropped)
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
@@ -82,7 +81,7 @@ module tb_prog_pingpong;
         shadow_mid = `SHADOW;
 
         // A MAILBOX write is immediate by design: it must reach both
-        // halves (see dmem_commit_phase in element_pipeline.sv), or its
+        // halves (see dmem_commit_phase in csp.sv), or its
         // value dies on the second swap. That is the un-ping-ponged behaviour
         // restored, not a concession -- firmware writes have always
         // landed mid-sample. The atomicity that matters is the SEQUENCER's,

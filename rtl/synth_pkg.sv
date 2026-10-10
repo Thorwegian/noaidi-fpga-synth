@@ -55,21 +55,20 @@ package synth_pkg;
     parameter int          BUS_W        = 18;          // signed Q8.10
 
     //--- Instruction table (B4/B5) -------------------------------------
-    // 128 entries x 3 words, stride 4, at 0x0100-0x02FF. Config is
+    // 256 entries x 4 words, stride 4, at 0x0100-0x04FF. Config is
     // wiring, so it rides the ping-pong banks (law 4).
-    //   +0 CFG:   [3:0] type (0 off, 1 LFO, 2 ADSR), [5:4] LFO shape
+    //   +0 CFG:   [3:0] opcode bitmask (0x0 off, 0xE LFO, 0xF ADSR,
+    //             0xD SEND — OPC_* below), [5:4] LFO shape
     //             (osc_core: saw/pulse/tri/sine), [15:6] target bus,
-    //             LFO: [31:16] rate (low 16 bits of the UQ0.24 phase
-    //                  increment — 5.7 mHz steps, 375 Hz max)
+    //             LFO: [31:16] rate, added to the 25-bit phase
+    //                  accumulator (2.86 mHz steps, 187.5 Hz max)
     //             ADSR: [25:16] gate bus (watched, level-sensitive:
     //                   value > 0 = held)
-    //   +1 RATES (ADSR): [7:0] attack, [15:8] decay, [23:16] SUSTAIN
-    //             (level fraction, 8 bits), [31:24] RELEASE — byte
-    //             order matches patch_adsr_word(), the pipeline
-    //             decode and memory_map.md (a swapped S/R in this
-    //             comment was). Rates are 8-bit log2:
-    //             increment = (16+frac) << oct on the 22-bit level
-    //   +2 DEPTH: [17:0] signed Q8.10 contribution amplitude
+    //             SEND: [25:16] source bus
+    //   +1 RATES (ADSR): [17:0] kA, [31:18] kD[13:0] — linear
+    //             coefficients (dsp/adsr.sv)
+    //   +2 DEPTH: [17:0] signed Q2.16 coefficient, 0x10000 = unity
+    //   +3 RATES2 (ADSR): [3:0] kD[17:14], [21:4] kR, [31:22] sustain
     // A instruction's OUTPUT uses the previous sample's state (the
     // one-sample lag keeps every multiply's operands registered).
     // Pool 256, FULL RATE: the CSP retires one instruction per

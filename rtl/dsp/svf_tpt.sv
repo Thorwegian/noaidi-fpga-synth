@@ -9,8 +9,7 @@
 // stable under cutoff modulation at resonance. Streaming,
 // one element per cycle, fully pipelined; one multiply OR the adds per
 // stage (the silicon timing rule that gave the Chamberlin its S5B/S8B
-// splits). Fixed-point locked and bit-verified against a Python model
-// (docs/svf.txt; scripts/tpt_fixed*.py).
+// splits). Fixed-point locked.
 //
 // Coefficients (per element):
 //   g  = pi*fc/fs = K/2 = in_k >>> 1     (Q8.28, full width -> pitch)
