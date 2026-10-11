@@ -63,8 +63,8 @@ units live in patch.h).
 |---|---|---|
 | 20 | osc 1 waveform | discrete, 4 of them: 0 saw / 1 pulse / 2 tri / 3 sine, read from a quarter-wave LUT in `osc_core` and mirrored into the full cycle. None are bandlimited |
 | 21 | osc 2 waveform | discrete |
-| 14 | osc 1 coarse (interval) | ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22 |
-| 15 | osc 1 fine | full travel ±0.5 semitone, center 64 |
+| 14 | osc 1 coarse (interval) | ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22. Coarse and fine both edit the oscillator's one pitch offset (`tune`): coarse sets the whole semitones and keeps the fine part |
+| 15 | osc 1 fine | full travel ±0.5 semitone, center 64; sets the part of `tune` beyond the whole semitones |
 | 22 | osc 2 coarse (interval) | ±12 semitones in whole-semitone steps, center 64, ~5 CC steps/semitone |
 | 23 | osc 2 fine | full travel ±0.5 semitone, center 64 |
 | 24 | osc mix / balance | osc1↔osc2; at the rails (0/127) the disfavored oscillator is hard-MUTED (the log-gain mix term alone tops out at ~23.6 dB) |
@@ -92,9 +92,9 @@ equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
 | 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer |
-| 79 | amp env S | `cc << 1` — sustain is a LEVEL (higher byte = louder), NOT inverted; knob up = louder |
+| 79 | amp env S | `cc << 3` into the 10-bit sustain — sustain is a LEVEL (higher = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
-| 104 | MOD env S | `cc << 1` (level, not inverted) |
+| 104 | MOD env S | `cc << 3` (10-bit level, not inverted) |
 | 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's COEF word is signed |
 | 108 | MOD env destination | STORED ONLY: the MOD env always drives cutoff |
 
@@ -104,11 +104,11 @@ equal-ratio ladder.
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
 | 77 | LFO 1 depth | standard "vibrato depth"; `val<<2` (COEF 508 at the top: ±254 on the pitch DMEM word, about ±3 semitones) |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
-| 114 | LFO 1 destination | NOT IMPLEMENTED (ignored): LFO 1 always drives pitch |
+| 114 | LFO 1 destination | 4-way `(val*4)>>7`, as CC 112: duty/PWM / resonance / PITCH / **CUTOFF** |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
 | 110 | LFO 2 depth | `val<<2`, the same scale as CC 77 for every destination (raw value 508 at the top: ~½ octave of pitch, cutoff or Q, or ±0.5 duty) |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH (sums with LFO 1 — dual vibrato) / **CUTOFF** (channel cutoff DMEM word → per-voice MAC instructions) |
+| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH / **CUTOFF** (channel cutoff DMEM word → per-voice MAC instructions). Both LFOs on one destination sum (dual vibrato on pitch) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |

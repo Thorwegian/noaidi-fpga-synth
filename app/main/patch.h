@@ -40,8 +40,8 @@ typedef enum {
 
 typedef struct {
     waveform_t wave;
-    int16_t    coarse;      // semitone offset
-    int16_t    fine;        // UQ4.10 fraction (detune)
+    int16_t    tune;        // pitch offset, raw (1024 per octave); the
+                            // coarse and fine CCs both edit it
     int32_t    duty;        // pulse width / parabola skew, full Q0.24
                             // signed (needs 24 bits — int16 truncated
                             // CC 25's <<17 to zero)
@@ -49,8 +49,10 @@ typedef struct {
 
 // ── Filter ──────────────────────────────────────────────────────────
 typedef struct {
-    uint16_t cutoff;        // UQ4.10 log2 base (CC74 coarse + CC106 fine)
-    uint16_t resonance;     // UQ4.10 log2 (r octaves above Butterworth)
+    int16_t  cutoff;        // offset from the key-tracked base, raw
+                            // (1024 per octave; CC 74 coarse + CC 106 fine)
+    uint16_t resonance;     // effective code, UQ4.10 log2 (r octaves of Q
+                            // above Butterworth); 0x3FFF self-oscillates
     uint8_t  type;          // 0 LP .. (FILTER/GAIN mode field)
     uint8_t  cascade;          // 12/24 dB
     int16_t  key_track;     // cutoff-follows-pitch amount (per channel)
@@ -59,7 +61,9 @@ typedef struct {
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
 // Rates are 8-bit log2 in the PATCH; the wire format is linear.
 typedef struct {
-    uint8_t attack, decay, sustain, release;
+    uint8_t  attack, decay;     // 8-bit log2 rate codes
+    uint16_t sustain;           // 10-bit level: sustain / 1024 of full scale
+    uint8_t  release;
 } adsr_t;
 
 // ── ADSR wire format ─────────────────────────────────────────
@@ -91,9 +95,13 @@ typedef struct {
     uint8_t  shape;         // osc_core shape (saw/pulse/tri/sine)
     uint16_t rate;          // phase increment per sample, in 2^-25 of a
                             // cycle (subsonic..control rate)
-    int16_t  depth;         // signed Q8.10 contribution amplitude
-    uint8_t  dest;          // DMEM/sink selector (mod routing)
+    int16_t  depth;         // signed COEF: the LFO swings its DMEM word
+                            // by ±depth/2 (the wave is ±0.5 in Q2.16)
+    uint8_t  dest;          // LFO_DEST_*: the DMEM word it drives
 } lfo_t;
+
+// LFO destinations. Both LFOs take any of them.
+enum { LFO_DEST_DUTY = 0, LFO_DEST_RESONANCE, LFO_DEST_PITCH, LFO_DEST_CUTOFF };
 
 // ── Modulation routing (the staged mod matrix) ──────────────────────
 // Fixed-function stage exposes only a few; the full matrix is the

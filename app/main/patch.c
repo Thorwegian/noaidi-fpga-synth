@@ -51,11 +51,11 @@ static uint32_t adsr_rate_coeff(uint8_t rate_byte)
 // Sustain as a plain level. Firmware knows the destination, so it
 // decodes here rather than costing the gateware a second barrel
 // shift. Only the linear form is used -- OP[26] is never set.
+// The patch already holds the gateware's 10 bits; adsr.sv shifts them
+// up by ADSR_SUSTAIN_SHIFT into the 22-bit level.
 static uint32_t adsr_sustain(const adsr_t *e)
 {
-    uint32_t lvl = (uint32_t)e->sustain << 14;    // 26-bit envelope level
-    if (lvl > 0x3FFFFFu) lvl = 0x3FFFFFu;
-    return lvl >> ADSR_SUSTAIN_SHIFT;
+    return e->sustain > 0x3FFu ? 0x3FFu : e->sustain;
 }
 
 uint32_t patch_adsr_rate_ad(const adsr_t *e)
@@ -85,7 +85,7 @@ void patch_default(patch_t *p)
     // the midrange; the ×7 detune gives the classic supersaw width.
     p->osc[0].wave   = WAVE_SAW;    // the ×7 supersaw
     p->osc[1].wave   = WAVE_SINE;   // the single "+1" — a pure sine
-    p->osc[1].coarse = -12;         // one octave below the supersaw (sub)
+    p->osc[1].tune   = -1024;       // one octave below the supersaw (sub)
     p->voice_struct  = VOICE_7_PLUS_1;
     p->osc_mix       = 0;      // centre balance
     p->unison_detune = 6;      // raw pitch per spread step (supersaw spread)
@@ -100,14 +100,15 @@ void patch_default(patch_t *p)
 
     p->filter.key_track = 64;          // center = 100% tracking, on a
                                        // 0..200% scale
-    p->filter.resonance = 0x200;       // q1 = 1.0
+    p->filter.cutoff    = 0;           // CC 74/106 centre: the key-tracked base
+    p->filter.resonance = 0x200;       // q1 = 1.0 (Q 1)
     p->filter.type      = 0;           // LP
     p->filter.cascade      = 1;           // 24 dB/oct default
 
     // amp env (A,D,S,R)
     p->env[0].attack  = 0x98;
     p->env[0].decay   = 0x20;
-    p->env[0].sustain = 0xF0;
+    p->env[0].sustain = 0x3C0;         // 15/16 of full scale
     p->env[0].release = 0x28;
 
     // MOD env: ON by default in the boot patch —
@@ -122,15 +123,14 @@ void patch_default(patch_t *p)
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (350 × 96000 / 2^25)
     p->lfo[0].depth = 16;
+    p->lfo[0].dest  = LFO_DEST_PITCH;
 
     // LFO 2 (instruction 1): triangle, ~1 Hz, depth 0 = OFF; default
-    // destination is PWM (duty DMEM word) — the thing LFO 1 can't do.
+    // destination is PWM (duty DMEM word).
     p->lfo[1].shape = 2;
     p->lfo[1].rate  = 350;             // ~1 Hz
     p->lfo[1].depth = 0;
-    p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance,
-                                       // 2 pitch (sums with LFO 1),
-                                       // 3 cutoff
+    p->lfo[1].dest  = LFO_DEST_DUTY;
 
     p->volume     = 0xCF;              // = VOL_REF, the unity anchor (~-18 dB)
     p->bend_range = 2;                 // current ±2 semitones
