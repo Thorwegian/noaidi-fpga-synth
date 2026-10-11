@@ -50,6 +50,8 @@ units live in patch.h).
 |---|---|---|
 | 7 | part volume | standard Channel Volume → per-part `volume` |
 | 10 | pan | per-side log-gain attenuation baked into the partial L/R GAIN words; full deflection mutes the far side |
+| 0 / 32 | Bank Select MSB / LSB | sets the channel's bank, MSB × 128 + LSB, for its next Program Change; no sound changes until then ([storage_format.md](storage_format.md) "Banks") |
+| Program Change | load a program | loads the channel's current bank's program from `banks.toml`; sounding notes switch at once. A missing bank, program or file is logged and changes nothing |
 | 64 | sustain (damper) pedal | ≥64 = down. A note-off while the pedal is down keeps the voice sounding (gate on); pedal up releases every voice the pedal was holding. A key struck again while sustained gets a new voice. Omni for now |
 | 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff DMEM word) |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
@@ -165,7 +167,6 @@ Undecided: the SysEx payload cap (e.g. 64 bytes).
 
 ## Out of scope
 
-Gateware changes of any kind; program change / bank select (needs the
-stored-configuration structure); NRPN; MIDI 2.0 / MPE; velocity
+Gateware changes of any kind; NRPN; MIDI 2.0 / MPE; velocity
 curves. Per-channel timbres / layering belong to channel awareness
 ([control_map.md](control_map.md) decision 5).
