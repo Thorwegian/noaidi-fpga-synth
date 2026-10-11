@@ -104,11 +104,11 @@ equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
-| 77 | LFO 1 depth | standard "vibrato depth"; `val<<2` (COEF 508 at the top: ±254 on the pitch DMEM word, about ±3 semitones) |
+| 77 | LFO 1 depth | standard "vibrato depth". Scale by destination (`lfo_depth_from_cc`): on PITCH a SQUARE-LAW taper, raw value 8192·(val/127)², ±48 semitones at the top, ±0.3 at 10, a full octave span (±6) at about 45; elsewhere `val<<2` (raw value 508 at the top: ±¼ octave of cutoff or Q, or ±0.25 duty). A destination change (CC 114) works the depth out again from the knob's last position |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
 | 114 | LFO 1 destination | 4-way `(val*4)>>7`, as CC 112: duty/PWM / resonance / PITCH / **CUTOFF** |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
-| 110 | LFO 2 depth | `val<<2`, the same scale as CC 77 for every destination (raw value 508 at the top: ~½ octave of pitch, cutoff or Q, or ±0.5 duty) |
+| 110 | LFO 2 depth | the same scale as CC 77: square law to ±48 semitones on pitch, `val<<2` elsewhere; worked out again on a CC 112 change |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
 | 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH / **CUTOFF** (channel cutoff DMEM word → per-voice MAC instructions). Both LFOs on one destination sum (dual vibrato on pitch) |
 
