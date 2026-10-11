@@ -42,10 +42,14 @@ not matter. Safety mode keeps a copy of the flash sector while it is
 rewritten, so a power loss mid-write loses no neighbouring data.
 
 ### Reaching the files from a computer
-- **ESP32-C3:** no USB OTG. The partition is read over serial
-  (`esptool.py read_flash`), unpacked into a folder with ESP-IDF's
-  `fatfsparse.py --wl-layer enabled`, edited, packed with
-  `wl_fatfsgen.py` and written back (`esptool.py write_flash`).
+- **ESP32-C3:** no USB OTG. `make fw-storage-read DIR=folder` reads
+  the partition over serial and unpacks it into a folder;
+  `make fw-storage-write DIR=folder` packs a folder and writes it back.
+  Both use `tools/storage/storage_image.py`. That tool runs ESP-IDF's
+  own FatFs on the computer, because ESP-IDF's image generator
+  (`wl_fatfsgen.py`) upper-cases folder names and lower-cases long
+  names. It also handles the wear-levelling layer, including a
+  partition the synth has been writing to.
 - **ESP32-S3:** USB OTG presents the partition to the computer as a USB
   drive. The firmware unmounts it while the computer has it.
 
@@ -438,9 +442,10 @@ If power is lost partway, the next mount finishes or undoes the save:
 The factory patches and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The factory set is the
 default patch, as `Patches/Factory/Pads/Supersaw.toml`, and
-`system.toml` starts it at power-on. The build packs that
-folder into a `storage` partition image with `wl_fatfsgen.py`.
+`system.toml` starts it at power-on.
 
 A firmware update never writes the `storage` partition, so it cannot
-overwrite user patches. The image is written only by an explicit flash
-step, which first-time setup uses.
+overwrite user patches. `make fw-storage-flash` packs `app/storage/`
+and writes it; first-time setup uses it, and it erases all user
+patches. If the partition does not mount, the synth reports it, runs
+on the default patch, and never formats the partition on its own.
