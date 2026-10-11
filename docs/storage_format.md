@@ -366,15 +366,15 @@ key_track = 100
 
 [amp_env]
 attack = 0.042
+sustain = -3.76
 decay = 3
-sustain = -3.8
 release = 11
 velocity = 50
 
 [mod_env]
 attack = 0.042
+sustain = 93.75
 decay = 3
-sustain = 93.8
 release = 11
 velocity = 50
 destination = "cutoff"

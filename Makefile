@@ -12,6 +12,8 @@
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
+#   make fw-test    host test: every patch-file value loads back exactly,
+#                   and the factory patch equals the default patch
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   copy the synth's storage into folder x
@@ -33,6 +35,10 @@
 # already-activated shell.
 IDF ?= $(HOME)/bin/idf
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
+HOST_CC ?= cc
+FW_TEST = app/build/host/patch_units_test
+FW_TEST_SRC = app/test/patch_units_test.c app/main/patch_units.c \
+              app/main/patch_file.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
 
 all: pack fw
 
@@ -57,6 +63,11 @@ fw-flash:
 fw-monitor:
 	cd app && $(IDF) monitor
 
+fw-test: $(FW_TEST_SRC)
+	mkdir -p $(dir $(FW_TEST))
+	$(HOST_CC) -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src -o $(FW_TEST) $(FW_TEST_SRC) -lm
+	$(FW_TEST) app/storage/Patches/Factory/Pads/Supersaw.toml
+
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
 
@@ -71,4 +82,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-test fw-storage-flash fw-storage-write fw-storage-read clean

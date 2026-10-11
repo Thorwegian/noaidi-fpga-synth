@@ -14,6 +14,8 @@
 
 #include <stdbool.h>
 
+#include "patch.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,6 +29,11 @@ bool storage_init(void);
 
 // Whether storage_init() mounted the file system.
 bool storage_mounted(void);
+
+// Read system.toml's startup_patch into *p. Prints where the loaded patch
+// differs from the default patch. False, with *p untouched, if there is
+// no file system, no startup_patch, or the patch does not read.
+bool storage_load_startup(patch_t *p);
 
 #ifdef __cplusplus
 }

@@ -12,8 +12,12 @@
 #include <sys/stat.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_vfs_fat.h"
 #include "wear_levelling.h"
+
+#include "patch_file.h"
+#include "tomlc17.h"
 
 #define TAG "storage"
 
@@ -78,4 +82,42 @@ bool storage_init(void)
 bool storage_mounted(void)
 {
     return s_mounted;
+}
+
+// system.toml's startup_patch, a path from the root. False if absent.
+static bool startup_patch_path(char *path, size_t len)
+{
+    toml_result_t r = toml_parse_file_ex(STORAGE_ROOT "/system.toml");
+    if (!r.ok) {
+        ESP_LOGW(TAG, "system.toml: %s", r.errmsg);
+        toml_free(r);
+        return false;
+    }
+    toml_datum_t sp = toml_get(r.toptab, "startup_patch");
+    bool ok = sp.type == TOML_STRING;
+    if (ok)
+        snprintf(path, len, STORAGE_ROOT "/%s", sp.u.s);
+    toml_free(r);
+    return ok;
+}
+
+bool storage_load_startup(patch_t *p)
+{
+    char path[320], err[200];
+    if (!s_mounted || !startup_patch_path(path, sizeof path))
+        return false;
+    patch_t loaded, def;
+    int64_t t0 = esp_timer_get_time();
+    if (!patch_file_read(path, &loaded, err, sizeof err)) {
+        ESP_LOGE(TAG, "%s: %s; keeping the default patch", path, err);
+        return false;
+    }
+    int64_t t1 = esp_timer_get_time();
+    patch_default(&def);
+    printf("storage: %s loaded in %lld ms; differences from the default patch:\n",
+           path, (long long)((t1 - t0) / 1000));
+    int diffs = patch_file_diff(stdout, &def, &loaded);
+    printf("storage: %d difference%s\n", diffs, diffs == 1 ? "" : "s");
+    *p = loaded;
+    return true;
 }

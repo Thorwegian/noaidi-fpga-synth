@@ -127,6 +127,7 @@ make flash       # write bitstream to FPGA flash (persistent)
 make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor
+make fw-test     # host test of the patch file format (about a minute)
 make fw-storage-flash        # write the patch storage from app/storage (erases user patches)
 make fw-storage-read DIR=x   # copy the synth's patches and settings into folder x
 make fw-storage-write DIR=x  # write folder x back to the synth

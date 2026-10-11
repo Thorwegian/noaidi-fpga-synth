@@ -18,6 +18,7 @@
 #include "event_bus.h"
 #include "engine_link.h"
 #include "patch.h"
+#include "storage.h"
 
 #define TAG "voice_alloc"
 
@@ -778,6 +779,17 @@ static void sustain_pedal_update(bool down)
 // STORED-but-not-yet-rendered: mod_env_dest (CC 108; cutoff is the only
 // live MOD-env destination). The arp has no CC yet.
 static uint8_t  s_cutoff_msb, s_cutoff_lsb;   // CC74 / CC106
+
+// Set the CC 74/106 pair from the patch's cutoff, so a lone CC 106 after
+// a patch load moves the fine part of that cutoff.
+static void sync_cutoff_cc(void)
+{
+    int32_t v14 = (int32_t)g_patch.filter.cutoff + 8192;
+    if (v14 < 0)     v14 = 0;
+    if (v14 > 16383) v14 = 16383;
+    s_cutoff_msb = (uint8_t)(v14 >> 7);
+    s_cutoff_lsb = (uint8_t)(v14 & 0x7F);
+}
 static void apply_cutoff(void)
 {
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so
@@ -1066,6 +1078,8 @@ void voice_alloc_init(void)
         return;
     }
     patch_default(&g_patch);   // the active sound, in one struct
+    storage_load_startup(&g_patch);   // system.toml's startup patch, if any
+    sync_cutoff_cc();
     init_param_pointers();
     // Global DMEM words start at zero. DMEM word 0 needs nothing: the
     // gateware holds it at zero, the target of any unused pointer. Every
