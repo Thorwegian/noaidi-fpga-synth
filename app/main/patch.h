@@ -89,6 +89,8 @@ typedef struct {
 uint32_t patch_adsr_rate_ad(const adsr_t *e);
 uint32_t patch_adsr_rate_dsr(const adsr_t *e);
 uint8_t  patch_adsr_rate_byte(uint8_t patch_rate);
+// One rate byte -> the 18-bit coefficient k the gateware multiplies by.
+uint32_t patch_adsr_rate_coeff(uint8_t rate_byte);
 
 // ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
