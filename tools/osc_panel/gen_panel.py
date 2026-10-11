@@ -105,7 +105,7 @@ def button(cc, label, value):
         "expand": True,
     }
 
-def number_input(widget_id, maximum):
+def number_input(widget_id, caption):
     # a typed number, sent by the Select button rather than on its own
     w = {
         "type": "input",
@@ -120,7 +120,7 @@ def number_input(widget_id, maximum):
         "expand": True,
         "css": "font-size: 18px;",
     }
-    return captioned(w, f"{widget_id.replace('_', ' ').title()} (0-{maximum})")
+    return captioned(w, caption)
 
 def program_select():
     # Bank Select (CC 0 = bank // 128, CC 32 = bank % 128) then Program
@@ -135,8 +135,8 @@ def program_select():
         f"send('{TARGET}', '/program', {CH}, program)\n"
     )
     return [
-        number_input("bank_number", 16383),
-        number_input("program_number", 127),
+        number_input("bank_number", "Bank"),
+        number_input("program_number", "Program"),
         {
             "type": "button",
             "id": "program_select",
@@ -150,14 +150,13 @@ def program_select():
         },
     ]
 
-def section(title, widgets, expand=True):
-    # expand: True, or a weight for sharing a row with other sections
+def section(title, widgets):
     slug = title.lower().replace(" ", "_").replace("&", "and")
     return {
         "type": "panel",
         "id": f"sec_{slug}",
         "layout": "vertical",
-        "expand": expand,
+        "expand": True,
         "widgets": [
             {
                 "type": "text",
@@ -250,30 +249,20 @@ root_widgets = [
         switch(112, "LFO2 Dest",
                {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 0),
     ]),
-    {
-        # Global and Program share one row: plenty of width to the right.
-        "type": "panel",
-        "id": "global_row",
-        "layout": "horizontal",
-        "expand": True,
-        "widgets": [
-            section("Global", [
-                # knobs, because vertical sliders are nearly unusable here.
-                # No mod-wheel control: the physical keyboard has it, and
-                # wheel→cutoff is a temporary hardwiring anyway, due to become
-                # a routable per-channel destination.
-                knob(7, "Volume", 103),              # boot volume 0xCF ≈ cc 103 (206)
-                knob(10, "Pan", 64, bipolar=True),
-                knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
-                knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
-                                                # 0 = velocity OFF, full patch amount
-                switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
-                button(123, "NOTES OFF", 0),
-                button(120, "SOUND OFF", 0),
-            ], expand=3),
-            section("Program", program_select()),
-        ],
-    },
+    section("Global", [
+        # knobs, because vertical sliders are nearly unusable here.
+        # No mod-wheel control: the physical keyboard has it, and
+        # wheel→cutoff is a temporary hardwiring anyway, due to become
+        # a routable per-channel destination.
+        knob(7, "Volume", 103),              # boot volume 0xCF ≈ cc 103 (206)
+        knob(10, "Pan", 64, bipolar=True),
+        knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
+        knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
+                                        # 0 = velocity OFF, full patch amount
+        switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
+        button(123, "NOTES OFF", 0),
+        button(120, "SOUND OFF", 0),
+    ] + program_select()),
     # No virtual keyboard: the physical keyboard covers notes,
     # velocity and both wheels. This panel exists precisely for the
     # MIDI a keyboard CANNOT send.
