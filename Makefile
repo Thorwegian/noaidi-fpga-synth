@@ -15,7 +15,8 @@
 #   make fw-console attach the console with screen (Ctrl-A K exits;
 #                   Ctrl-L redraws after attaching or resizing)
 #   make fw-test    host test: every patch-file value loads back exactly,
-#                   and the factory patches read back exactly
+#                   banks.toml reads and writes back, and the factory
+#                   patches and banks read back exactly
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
@@ -45,6 +46,8 @@ HOST_DIR  = app/build/host
 FW_TEST   = $(HOST_DIR)/patch_units_test
 FW_TEST_C   = app/main/patch_units.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
 FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+BANKS_TEST  = $(HOST_DIR)/banks_test
+BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 
 all: pack fw
@@ -80,6 +83,9 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
 	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(FW_TEST) $(shell find app/storage/Patches -name '*.toml')
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
+	    $(HOST_DIR)/tomlc17.o
+	$(BANKS_TEST) app/storage/banks.toml
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
