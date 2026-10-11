@@ -6,7 +6,11 @@
     "orientation": "landscape",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#14171c",
-    "platforms": ["android", "ios", "web"],
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
     "android": {
       "package": "no.noaidi.companion",
       "edgeToEdgeEnabled": true
@@ -15,6 +19,12 @@
       "bundleIdentifier": "no.noaidi.companion",
       "supportsTablet": true,
       "requireFullScreen": true
+    },
+    "owner": "noaidi",
+    "extra": {
+      "eas": {
+        "projectId": "7806c853-da43-40e0-b400-7891d3ed902d"
+      }
     }
   }
 }
