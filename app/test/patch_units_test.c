@@ -17,7 +17,8 @@
 // Then it writes the init patch (patch_init) as a patch file and reads it
 // back, which must give the init patch. Each factory file given as an
 // argument must read, and must already hold the writer's own text for
-// its values (comment lines aside), so it reads back exactly.
+// its values (comment lines aside), so it reads back exactly. Last,
+// saving, recovery from an interrupted save, and patch-name rules.
 //
 //   make fw-test
 
@@ -25,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "patch.h"
 #include "patch_file.h"
@@ -113,6 +115,93 @@ static void check_field(const patch_field_t *f, int i, patch_t *p)
         check_raw(f, i, p, r);
 }
 
+static void fail(const char *what)
+{
+    printf("FAIL %s\n", what);
+    s_failures++;
+}
+
+static bool exists(const char *path)
+{
+    return access(path, F_OK) == 0;
+}
+
+static void write_text(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "w");
+    fputs(text, f);
+    fclose(f);
+}
+
+// Save, the four interrupted-save cases, and names.
+static void check_saving(void)
+{
+    char dir[] = "/tmp/noaidi_save_XXXXXX";
+    if (!mkdtemp(dir)) { fail("mkdtemp"); return; }
+    char a[320], a_new[340], b[320], b_new[340], err[200];
+    snprintf(a, sizeof a, "%s/A.toml", dir);
+    snprintf(a_new, sizeof a_new, "%s.new", a);
+    snprintf(b, sizeof b, "%s/B.toml", dir);
+    snprintf(b_new, sizeof b_new, "%s.new", b);
+
+    patch_t init, other, back;
+    patch_init(&init);
+    patch_init(&other);
+    other.filter.resonance = 1024;
+
+    // a plain save: the file reads back, no .new remains
+    if (!patch_file_save(a, &init, err, sizeof err)) fail(err);
+    if (!patch_file_read(a, &back, err, sizeof err) || patch_file_diff(stdout, &init, &back))
+        fail("saved patch does not read back");
+    if (exists(a_new)) fail("save left a .new file");
+
+    // a complete .new beside the old patch: the save finishes
+    char *text; size_t len;
+    FILE *m = open_memstream(&text, &len);
+    patch_file_write(m, &other);
+    fputs("# end\n", m);
+    fclose(m);
+    write_text(a_new, text);
+    patch_file_recover(dir);
+    if (exists(a_new) || !patch_file_read(a, &back, err, sizeof err) ||
+        patch_file_diff(stdout, &other, &back))
+        fail("complete .new beside the old patch was not finished");
+
+    // an incomplete .new beside the old patch: the old patch stays
+    write_text(a_new, "format = 1\n[filter]\nresonance = 4\n");
+    patch_file_recover(dir);
+    if (exists(a_new) || !patch_file_read(a, &back, err, sizeof err) ||
+        patch_file_diff(stdout, &other, &back))
+        fail("incomplete .new beside the old patch was not undone");
+
+    // a complete .new with no old patch: it becomes the patch
+    write_text(b_new, text);
+    patch_file_recover(dir);
+    if (exists(b_new) || !exists(b)) fail("complete new .new was not renamed");
+
+    // an incomplete .new with no old patch: deleted, no patch appears
+    remove(b);
+    write_text(b_new, "format = 1\n");
+    patch_file_recover(dir);
+    if (exists(b_new) || exists(b)) fail("incomplete new .new was not deleted");
+    free(text);
+
+    remove(a);
+    rmdir(dir);
+
+    // names
+    const char *good[] = { "Arctic Ice", "Ærlig Gjøk", "RnB Whistle", "a",
+        "1234567890123456789012345678901234567890123456789012345678901234" };
+    const char *bad[] = { "", " lead", "lead ", "lead.", "a/b", "a\\b", "what?",
+        "x:y", "q\"", "<a>", "pipe|", "tab\t",
+        "12345678901234567890123456789012345678901234567890123456789012345" };
+    for (size_t i = 0; i < sizeof good / sizeof good[0]; i++)
+        if (!patch_name_valid(good[i])) { printf("FAIL name \"%s\" rejected\n", good[i]); s_failures++; }
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++)
+        if (patch_name_valid(bad[i])) { printf("FAIL name \"%s\" accepted\n", bad[i]); s_failures++; }
+    printf("saving, recovery, names: %s\n", s_failures ? "see above" : "ok");
+}
+
 int main(int argc, char **argv)
 {
     size_t n;
@@ -190,6 +279,8 @@ int main(int argc, char **argv)
         free(body);
         free(text);
     }
+
+    check_saving();
 
     printf("\n%s (%d failures)\n", s_failures ? "FAIL" : "ALL PASS", s_failures);
     return s_failures ? 1 : 0;

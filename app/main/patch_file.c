@@ -5,8 +5,11 @@
 
 #include "patch_file.h"
 
+#include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "patch_units.h"
 #include "tomlc17.h"
@@ -107,6 +110,103 @@ void patch_file_write(FILE *out, const patch_t *p)
         }
         k = end;
     }
+}
+
+// ── Saving ──────────────────────────────────────────────────────────
+#define END_LINE "# end\n"     // the last line of a complete .new file
+
+bool patch_file_save(const char *path, const patch_t *p, char *err, size_t err_len)
+{
+    char tmp[320];
+    if (snprintf(tmp, sizeof tmp, "%s.new", path) >= (int)sizeof tmp) {
+        snprintf(err, err_len, "path too long");
+        return false;
+    }
+    FILE *out = fopen(tmp, "w");
+    if (!out) {
+        snprintf(err, err_len, "cannot create %s", tmp);
+        return false;
+    }
+    patch_file_write(out, p);
+    fputs(END_LINE, out);
+    bool ok = fflush(out) == 0 && fsync(fileno(out)) == 0;
+    ok = (fclose(out) == 0) && ok;
+    if (!ok) {
+        remove(tmp);
+        snprintf(err, err_len, "cannot write %s (storage full?)", tmp);
+        return false;
+    }
+    remove(path);                          // absent for a new patch
+    if (rename(tmp, path) != 0) {
+        snprintf(err, err_len, "cannot rename %s", tmp);
+        return false;
+    }
+    return true;
+}
+
+// Whether a .new file is complete: it ends with END_LINE.
+static bool new_file_complete(const char *path)
+{
+    FILE *in = fopen(path, "rb");
+    if (!in)
+        return false;
+    char tail[sizeof END_LINE] = {0};
+    long n = (long)strlen(END_LINE);
+    bool ok = fseek(in, -n, SEEK_END) == 0 && fread(tail, 1, (size_t)n, in) == (size_t)n
+              && memcmp(tail, END_LINE, (size_t)n) == 0;
+    fclose(in);
+    return ok;
+}
+
+int patch_file_recover(const char *dir)
+{
+    DIR *d = opendir(dir);
+    if (!d)
+        return 0;
+    int repaired = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.')
+            continue;
+        char path[320];
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            repaired += patch_file_recover(path);
+            continue;
+        }
+        size_t len = strlen(path);
+        if (len < 5 || strcmp(path + len - 4, ".new") != 0)
+            continue;
+        if (new_file_complete(path)) {     // finish the save
+            char target[320];
+            snprintf(target, sizeof target, "%.*s", (int)(len - 4), path);
+            remove(target);
+            rename(path, target);
+        } else {                            // undo it: the old patch stays
+            remove(path);
+        }
+        repaired++;
+    }
+    closedir(d);
+    return repaired;
+}
+
+bool patch_name_valid(const char *name)
+{
+    size_t len = strlen(name);
+    if (len == 0 || name[0] == ' ' || name[len - 1] == ' ' || name[len - 1] == '.')
+        return false;
+    size_t chars = 0;
+    for (const unsigned char *c = (const unsigned char *)name; *c; c++) {
+        if (*c < 0x20 || *c == 0x7F || strchr("\\/:*?\"<>|", *c))
+            return false;
+        if ((*c & 0xC0) != 0x80)           // count UTF-8 characters, not bytes
+            chars++;
+    }
+    return chars <= 64;
 }
 
 int patch_file_diff(FILE *out, const patch_t *a, const patch_t *b)

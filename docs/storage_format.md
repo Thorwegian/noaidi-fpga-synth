@@ -433,17 +433,24 @@ New instrument-wide settings are added here as keys.
 
 ## Saving
 
-The synth writes only under `Patches/User`. To replace `Name.toml`, it:
+The synth writes only under `Patches/User`. To save `Name.toml`, it:
 
-1. writes the new patch to `Name.toml.new` and flushes it;
-2. deletes `Name.toml`;
+1. writes the new patch to `Name.toml.new`, ending with the line
+   `# end`, and flushes it to the flash;
+2. deletes `Name.toml`, if there is one;
 3. renames `Name.toml.new` to `Name.toml`.
 
-If power is lost partway, the next mount finishes or undoes the save:
-- `Name.toml.new` with no `Name.toml` beside it is complete (step 2
-  ran only after step 1 finished), so it is renamed;
-- `Name.toml.new` beside `Name.toml` may be incomplete, so it is
-  deleted and the old patch stays.
+If power is lost partway, the next mount finishes or undoes the save.
+The `# end` line tells a complete `.new` file from one cut off while
+being written; a cut-off file can still be valid TOML, missing keys,
+so parsing alone cannot tell.
+- A complete `Name.toml.new` finishes the save: any `Name.toml` is
+  deleted and the `.new` file renamed.
+- An incomplete `Name.toml.new` is deleted, so the old patch, if any,
+  stays.
+
+A saved file therefore ends with `# end`. The loader ignores it, like
+any comment.
 
 ## Factory content
 

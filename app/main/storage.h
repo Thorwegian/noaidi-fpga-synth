@@ -13,6 +13,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "patch.h"
 
@@ -33,6 +34,13 @@ bool storage_mounted(void);
 // Read system.toml's startup_patch into *p. False, with *p untouched, if
 // there is no file system, no startup_patch, or the patch does not read.
 bool storage_load_startup(patch_t *p);
+
+// Save *p as Patches/User/<category>/<name>.toml, replacing a patch of
+// that name (FAT compares names case-insensitively). The category folder
+// must exist and the name must be valid (patch_name_valid). False, with
+// the reason in err, otherwise.
+bool storage_save_patch(const char *category, const char *name, const patch_t *p,
+                        char *err, size_t err_len);
 
 #ifdef __cplusplus
 }

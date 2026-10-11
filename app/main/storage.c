@@ -71,6 +71,12 @@ bool storage_init(void)
         ok = make_dir(path);
     }
 
+    // Finish or undo saves a power loss interrupted. The synth writes
+    // only under Patches/User.
+    int repaired = patch_file_recover(STORAGE_ROOT "/Patches/User");
+    if (repaired)
+        ESP_LOGW(TAG, "repaired %d interrupted save%s", repaired, repaired == 1 ? "" : "s");
+
     uint64_t total = 0, free_bytes = 0;
     if (esp_vfs_fat_info(STORAGE_ROOT, &total, &free_bytes) == ESP_OK)
         ESP_LOGI(TAG, "mounted at %s: %llu of %llu bytes free",
@@ -99,6 +105,28 @@ static bool startup_patch_path(char *path, size_t len)
         snprintf(path, len, STORAGE_ROOT "/%s", sp.u.s);
     toml_free(r);
     return ok;
+}
+
+bool storage_save_patch(const char *category, const char *name, const patch_t *p,
+                        char *err, size_t err_len)
+{
+    if (!s_mounted) {
+        snprintf(err, err_len, "no storage");
+        return false;
+    }
+    if (!patch_name_valid(name) || !patch_name_valid(category)) {
+        snprintf(err, err_len, "invalid name");
+        return false;
+    }
+    char path[320];
+    struct stat st;
+    snprintf(path, sizeof path, STORAGE_ROOT "/Patches/User/%s", category);
+    if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        snprintf(err, err_len, "no category folder User/%s", category);
+        return false;
+    }
+    snprintf(path, sizeof path, STORAGE_ROOT "/Patches/User/%s/%s.toml", category, name);
+    return patch_file_save(path, p, err, err_len);
 }
 
 bool storage_load_startup(patch_t *p)
