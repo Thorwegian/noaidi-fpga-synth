@@ -824,20 +824,14 @@ CONFIG_ESPTOOLPY_MONITOR_BAUD=115200
 #
 # Partition Table
 #
-# default:
-CONFIG_PARTITION_TABLE_SINGLE_APP=y
-# default:
+# CONFIG_PARTITION_TABLE_SINGLE_APP is not set
 # CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE is not set
-# default:
 # CONFIG_PARTITION_TABLE_TWO_OTA is not set
-# default:
 # CONFIG_PARTITION_TABLE_TWO_OTA_LARGE is not set
-# default:
-# CONFIG_PARTITION_TABLE_CUSTOM is not set
-# default:
+CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # default:
-CONFIG_PARTITION_TABLE_FILENAME="partitions_singleapp.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 # default:
 CONFIG_PARTITION_TABLE_OFFSET=0x8000
 # default:
@@ -2245,6 +2239,100 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=y
 # end of Wi-Fi
 
 #
+# FAT Filesystem support
+#
+# default:
+CONFIG_FATFS_VOLUME_COUNT=2
+# CONFIG_FATFS_LFN_NONE is not set
+CONFIG_FATFS_LFN_HEAP=y
+# CONFIG_FATFS_LFN_STACK is not set
+CONFIG_FATFS_SECTOR_512=y
+# CONFIG_FATFS_SECTOR_4096 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_DYNAMIC is not set
+# default:
+CONFIG_FATFS_CODEPAGE_437=y
+# default:
+# CONFIG_FATFS_CODEPAGE_720 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_737 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_771 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_775 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_850 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_852 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_855 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_857 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_860 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_861 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_862 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_863 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_864 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_865 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_866 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_869 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_932 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_936 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_949 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_950 is not set
+# default:
+CONFIG_FATFS_CODEPAGE=437
+CONFIG_FATFS_MAX_LFN=255
+# CONFIG_FATFS_API_ENCODING_ANSI_OEM is not set
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+# default:
+CONFIG_FATFS_FS_LOCK=0
+# default:
+CONFIG_FATFS_TIMEOUT_MS=10000
+# default:
+CONFIG_FATFS_PER_FILE_CACHE=y
+# default:
+# CONFIG_FATFS_USE_FASTSEEK is not set
+# default:
+CONFIG_FATFS_USE_STRFUNC_NONE=y
+# default:
+# CONFIG_FATFS_USE_STRFUNC_WITHOUT_CRLF_CONV is not set
+# default:
+# CONFIG_FATFS_USE_STRFUNC_WITH_CRLF_CONV is not set
+# default:
+CONFIG_FATFS_VFS_FSTAT_BLKSIZE=0
+# default:
+# CONFIG_FATFS_IMMEDIATE_FSYNC is not set
+# default:
+# CONFIG_FATFS_USE_LABEL is not set
+# default:
+CONFIG_FATFS_LINK_LOCK=y
+# default:
+CONFIG_FATFS_USE_DYN_BUFFERS=y
+
+#
+# File system free space calculation behavior
+#
+# default:
+CONFIG_FATFS_DONT_TRUST_FREE_CLUSTER_CNT=0
+# default:
+CONFIG_FATFS_DONT_TRUST_LAST_ALLOC=0
+# end of File system free space calculation behavior
+# end of FAT Filesystem support
+
+#
 # FreeRTOS
 #
 
@@ -3200,6 +3288,13 @@ CONFIG_PTHREAD_TASK_NAME_DEFAULT="pthread"
 # end of PThreads
 
 #
+# SD Protocol Layer Configuration
+#
+# default:
+CONFIG_SD_ENABLE_SDIO_SUPPORT=y
+# end of SD Protocol Layer Configuration
+
+#
 # MMU Config
 #
 # default:
@@ -3340,6 +3435,19 @@ CONFIG_VFS_SEMIHOSTFS_MAX_MOUNT_POINTS=1
 # default:
 CONFIG_VFS_INITIALIZE_DEV_NULL=y
 # end of Virtual file system
+
+#
+# Wear Levelling
+#
+CONFIG_WL_SECTOR_SIZE_512=y
+# CONFIG_WL_SECTOR_SIZE_4096 is not set
+# default:
+CONFIG_WL_SECTOR_SIZE=512
+# CONFIG_WL_SECTOR_MODE_PERF is not set
+CONFIG_WL_SECTOR_MODE_SAFE=y
+# default:
+CONFIG_WL_SECTOR_MODE=1
+# end of Wear Levelling
 # end of Component config
 
 # default:

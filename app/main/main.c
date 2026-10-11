@@ -20,6 +20,7 @@
 #include "slider.h"
 #include "ble_midi.h"
 #include "stress_test.h"
+#include "storage.h"
 
 void app_main(void)
 {
@@ -56,6 +57,9 @@ void app_main(void)
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
+
+    // Patch storage: mount before anything loads a patch.
+    storage_init();
 
     // Event bus first, then the consumers that subscribe to it.
     event_bus_init();
