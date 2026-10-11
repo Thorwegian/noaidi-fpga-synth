@@ -9,7 +9,8 @@
 // out-of-range value clamps. A file that is not valid TOML, or whose format is newer than
 // PATCH_FILE_FORMAT, is not read. The conversions are patch_units.h's.
 //
-// Plain C with stdio: the host test (app/test) uses it too.
+// C++ (patch_file.cpp) with a C interface; plain stdio and POSIX, so
+// the host test (app/test) uses it too. Saving goes through safe_file.hpp.
 
 #pragma once
 
@@ -58,4 +59,15 @@ int patch_file_diff(FILE *out, const patch_t *a, const patch_t *b);
 
 #ifdef __cplusplus
 }
+
+#include <string>
+#include <string_view>
+
+// The same, for C++ callers.
+namespace patch_file {
+bool parse(std::string_view text, patch_t &p, std::string &error);
+bool read(const std::string &path, patch_t &p, std::string &error);
+std::string to_text(const patch_t &p);
+bool save(const std::string &path, const patch_t &p, std::string &error);
+} // namespace patch_file
 #endif

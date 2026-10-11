@@ -39,10 +39,13 @@ IDF ?= $(HOME)/bin/idf
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
 # The ESP32's USB serial port: Linux names it ttyACM, macOS cu.usbmodem.
 ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))
-HOST_CC ?= cc
-FW_TEST = app/build/host/patch_units_test
-FW_TEST_SRC = app/test/patch_units_test.c app/main/patch_units.c \
-              app/main/patch_file.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
+HOST_CC  ?= cc
+HOST_CXX ?= c++
+HOST_DIR  = app/build/host
+FW_TEST   = $(HOST_DIR)/patch_units_test
+FW_TEST_C   = app/main/patch_units.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
+FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 
 all: pack fw
 
@@ -71,9 +74,11 @@ fw-console:
 	@test -n "$(ESPPORT)" || { echo "no ESP32 serial port found; set ESPPORT=/dev/..."; exit 2; }
 	screen $(ESPPORT) 115200
 
-fw-test: $(FW_TEST_SRC)
-	mkdir -p $(dir $(FW_TEST))
-	$(HOST_CC) -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src -o $(FW_TEST) $(FW_TEST_SRC) -lm
+fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
+	mkdir -p $(HOST_DIR)
+	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(addprefix $(CURDIR)/,$(FW_TEST_C))
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
+	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(FW_TEST) $(shell find app/storage/Patches -name '*.toml')
 
 fw-storage-flash:
