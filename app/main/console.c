@@ -23,14 +23,13 @@
 #define MAX_COMMANDS    24
 #define MAX_ARGS        8
 #define MAX_CANDIDATES  32
-#define SIZE_QUERY_US   300000     // a terminal that has not answered by then is not one
+#define SIZE_QUERY_US   300000     // no answer by then: keep the size we have
 #define SCROLLBACK_LINES 1000
 #define SCROLLBACK_BYTES (80 * 1024)   // text cap: ~80 bytes a line on average
 
 // ── Terminal state ──────────────────────────────────────────────────
 static SemaphoreHandle_t s_lock;   // everything written to the terminal
-static bool    s_full;             // the VT100 layout is up
-static int     s_rows, s_cols;
+static int     s_rows = 24, s_cols = 80;   // until the terminal answers
 static int64_t s_query_sent;       // when the size query went out, 0 = none pending
 static char    s_status[128];
 static char    s_prompt[96] = "$ ";
@@ -82,18 +81,11 @@ static size_t s_len, s_pos;        // bytes; s_pos is the cursor
 
 static void draw_input(void)
 {
-    if (s_full)
-        term_printf("\x1b[%d;1H", s_rows);
-    else
-        term_puts("\r");
-    term_puts("\x1b[2K");
+    term_printf("\x1b[%d;1H\x1b[2K", s_rows);
     term_puts(s_prompt);
     term_write(s_line, s_len);
     int col = 1 + columns(s_prompt, strlen(s_prompt)) + columns(s_line, s_pos);
-    if (s_full)
-        term_printf("\x1b[%d;%dH", s_rows, col);
-    else if (col > 1)                      // ESC[0C would still move one
-        term_printf("\r\x1b[%dC", col - 1);
+    term_printf("\x1b[%d;%dH", s_rows, col);
 }
 
 // ── Scrollback ──────────────────────────────────────────────────────
@@ -163,8 +155,6 @@ static int page_rows(void)
 
 static void draw_status(void)
 {
-    if (!s_full)
-        return;
     char row[200];
     int n = s_back ? snprintf(row, sizeof row, " %d lines back, PgDn for live | %s",
                               s_back, s_status)
@@ -211,17 +201,12 @@ static void draw_screen(void)
 static void emit_line(const char *text, size_t len)
 {
     sb_add(text, len);
-    if (s_full && s_back == 0) {
+    if (s_back == 0) {
         term_printf("\x1b" "7\x1b[%d;1H\n", page_rows());
         term_write(text, len);
         term_puts("\x1b" "8");
-    } else if (s_full) {
-        draw_status();
     } else {
-        term_puts("\r\x1b[2K");
-        term_write(text, len);
-        term_puts("\r\n");
-        draw_input();
+        draw_status();
     }
 }
 
@@ -506,7 +491,7 @@ static void csi(const char *params, char final)
     case '~':
         if (a == 1 || a == 7) s_pos = 0;
         else if (a == 4 || a == 8) s_pos = s_len;
-        else if ((a == 5 || a == 6) && s_full) {   // PgUp / PgDn: a page
+        else if (a == 5 || a == 6) {               // PgUp / PgDn: a page
             int max_back = s_sb_count > page_rows() ? s_sb_count - page_rows() : 0;
             s_back += (a == 5) ? page_rows() : -page_rows();
             if (s_back > max_back) s_back = max_back;
@@ -522,7 +507,7 @@ static void csi(const char *params, char final)
         break;
     case 'R':                                  // the size answer: wake up
         if (s_query_sent && a >= 4 && b >= 20) {
-            s_rows = a; s_cols = b; s_full = true;
+            s_rows = a; s_cols = b;
             s_query_sent = 0;
             s_back = 0;
             draw_screen();
@@ -548,9 +533,8 @@ static void console_task(void *arg)
         int got = usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(100));
         xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
         if (s_query_sent && esp_timer_get_time() - s_query_sent > SIZE_QUERY_US) {
-            s_query_sent = 0;                  // no answer: plain lines
-            s_full = false;
-            draw_input();
+            s_query_sent = 0;                  // no answer (nothing attached yet):
+            draw_screen();                     // lay out at the size we have
         }
         if (got <= 0) {
             xSemaphoreGiveRecursive(s_lock);

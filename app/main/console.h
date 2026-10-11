@@ -19,9 +19,10 @@
 // output.
 //
 // Return on an empty line wakes the console: it asks the terminal for
-// its size and redraws the whole screen from the scrollback. That is the
-// only full redraw; the size is also asked for at boot. A terminal that
-// does not answer gets plain lines with the prompt reprinted below them.
+// its size (a cursor-position report) and redraws the whole screen from
+// the scrollback. That is the only full redraw; the size is also asked
+// for at boot. The console assumes a VT100 terminal; until one answers,
+// it lays out 24 × 80.
 //
 // stdout and stderr are this console's stream, so printf and ESP_LOG
 // both land in the output. The line editor has cursor keys, Home/End,
