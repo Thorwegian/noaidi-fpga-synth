@@ -136,6 +136,9 @@ in a file is always one raw value written in a musical unit.
     (the lowest), so the first save may change the raw value without
     changing the sound. After that the file never changes.
   - A host test checks this for every raw value of every key.
+- **Arithmetic:** the firmware converts in `double`. `pulse_width`
+  needs 8 significant digits to reach every raw value, more than a
+  `float` holds.
 - **Number types:** any numeric key accepts a TOML integer or a float;
   `24` and `24.0` mean the same.
 - **Integer keys:** `slope` and `bend_range` take whole numbers only.
@@ -211,11 +214,11 @@ plus the CC 71 setting.
 
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
-| `attack` | seconds | 0.001 … 32 | rate code, see below |
-| `decay` | seconds | 0.0047 … 151 | rate code |
+| `attack` | seconds | 0.001 … 35.9 | rate code, see below |
+| `decay` | seconds, to reach this envelope's sustain | 0.0047 … 35.1 | rate code |
 | `sustain` (`amp_env`) | dB, relative to the peak | −60.2 … −0.24 | `sustain` = round(256 × (1 + value / 60.206)) |
 | `sustain` (`mod_env`) | percent of the depth | 0 … 99.6 | `sustain` = round(value × 256 / 100) |
-| `release` | seconds | 0.0047 … 151 | rate code |
+| `release` | seconds, for a fall from full scale | 0.0047 … 35.1 | rate code |
 | `velocity` | percent: how far a soft note scales the envelope's amount | 0 … 100 | `vel_amp_amt` / `vel_mod_amt` = round(value × 127 / 100) |
 
 `[mod_env]` also has:
@@ -225,19 +228,55 @@ plus the CC 71 setting.
 | `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
 | `depth` | semitones of cutoff | −192 … +186 | `mod_env_depth` = round(value × 1024 / 12) |
 
-**Envelope times.** A segment follows `y += (target − y) × k / 2²⁴` once
-per sample at 96 kHz, and the rate code sets `k`. That gives the
-segment a time constant
+**Envelope times.** Once per sample at 96 kHz, a segment follows
 
-    τ = −1 / (96000 × ln(1 − k / 2²⁴))  seconds.
+    y += floor((target − y) × k / 2²⁴)
 
-- **Attack** charges toward 1.3 × full scale and ends at full scale, so
-  `attack` is the time from zero to full scale: τ × ln(1.3 / 0.3).
-- **Decay and release** approach their target without reaching it, so
-  `decay` and `release` are the time until the remaining distance to
-  the target is 60 dB below where it started (0.1 %): τ × ln(1000).
-  An exponential covers that fraction in the same time from any
-  starting level, so the time does not depend on the sustain level.
+with a step of at least 1 toward the target. The rate code sets `k`.
+This is a one-pole low-pass, rounded: the rounding adds about half a
+raw step to every step and makes the last part of a slow segment a
+straight line of one raw step per sample. The times below include
+both effects. All quantities are raw levels and samples, and
+`seconds = samples / 96000`:
+
+    α = k / 2²⁴        g = −ln(1 − α)        F = 2²² (full scale)
+
+**Decay and release** end when the remaining distance to the target
+is 60 dB below where it started (0.1 %). For a segment that covers
+the distance `D`:
+
+    y₁ = 1 / (2α)                  (closer than this: one raw step per sample)
+    E  = D / 1000
+    D ≤ y₁:  samples = D − E
+    D > y₁:  samples = ln((α·D + ½) / (α·max(y₁, E) + ½)) / g + max(0, y₁ − E)
+
+- `decay` covers `D = F − sustain level`, the distance to this
+  envelope's own sustain (sustain level = `sustain` × 2¹⁴). The loader
+  therefore reads `sustain` before `decay`. Decay samples are rounded
+  to a whole number before conversion. Neighbouring codes whose decays
+  differ by less than that are, at high sustain levels, codes that
+  decay identically in the gateware.
+- `release` covers `D = F`, a fall from full scale. A release usually
+  starts lower, from the sustain level or mid-attack, and then ends
+  sooner.
+
+**Attack** charges toward `T = 1.3 × F` and ends at full scale. The
+step is about half a raw step short of the exponential until the
+drive falls to 1, then one raw step per sample:
+
+    y_s = min(F, T − 3 / (2α))
+    y_s ≤ 0:  samples = F
+    y_s > 0:  samples = ln((α·T − ½) / (α·(T − y_s) − ½)) / g + (F − y_s)
+
+Against a bit-exact run of `adsr.sv`, for times up to 10 s, these
+formulas are within:
+- 1.2 % for attack;
+- 2.3 % for a full-scale fall;
+- 3.8 % for decays to sustain levels of 25–75 %;
+- 9.5 % for the shortest distances.
+
+A time converts to the rate code whose time is nearest by ratio, and
+the lowest code wins a tie.
 
 Rate codes 0xF0–0xFF share one coefficient, and so do some slow codes.
 Of the 256 codes, 232 sound different.
@@ -309,16 +348,16 @@ key_track = 100
 
 [amp_env]
 attack = 0.042
-decay = 38
+decay = 3
 sustain = -3.8
-release = 25
+release = 11
 velocity = 50
 
 [mod_env]
 attack = 0.042
-decay = 38
+decay = 3
 sustain = 93.8
-release = 25
+release = 11
 velocity = 50
 destination = "cutoff"
 depth = 24
