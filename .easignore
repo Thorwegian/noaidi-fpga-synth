@@ -1,0 +1,13 @@
+# What EAS Build uploads for the companion app (companion/); EAS reads this
+# instead of .gitignore. The app needs nothing outside companion/: its
+# generated files (manifest, factory patches, display page) are checked in.
+/.git/
+/app/
+/display/
+/docs/
+/rtl/
+/scripts/
+/tools/
+node_modules/
+companion/build/
+companion/.expo/
