@@ -10,8 +10,9 @@
 // bank rm <n> <program>              delete program; later ones move down
 // bank new <n> <name>                create bank n
 // bank del <n>                       delete bank n
-// bank build <n> <folder>            a new bank from a folder's .toml files,
-//                                    in name order
+// bank build <n> <folder>            a new bank from the .toml files in a
+//                                    folder and its subfolders, in path
+//                                    order
 //
 // Every change reads banks.toml, edits it and saves it the safe way.
 // Patch paths are typed like any other path and stored from the storage
@@ -98,26 +99,33 @@ void list_programs(const banks::Bank &bank)
         std::printf("  %3zu  %s\n", p, bank.programs[p].c_str());
 }
 
-// The .toml files of a folder, in name order (case-insensitive), as
-// stored in banks.toml.
+// The .toml files in a folder and its subfolders, as stored in
+// banks.toml (from the storage root), in path order (case-insensitive).
+void collect_patches(const std::string &abs, std::vector<std::string> &out)
+{
+    DIR *d = opendir(fs_path(abs).c_str());
+    if (!d)
+        return;
+    const std::string prefix = abs == "/" ? std::string() : abs.substr(1) + "/";
+    while (dirent *e = readdir(d)) {
+        if (e->d_name[0] == '.')
+            continue;
+        size_t len = std::strlen(e->d_name);
+        if (e->d_type == DT_DIR)
+            collect_patches((abs == "/" ? "" : abs) + "/" + e->d_name, out);
+        else if (len > 5 && strcasecmp(e->d_name + len - 5, ".toml") == 0)
+            out.push_back(prefix + e->d_name);
+    }
+    closedir(d);
+}
+
 std::vector<std::string> folder_patches(const char *arg)
 {
-    std::string abs = resolve(arg);
-    std::vector<std::string> names;
-    if (DIR *d = opendir(fs_path(abs).c_str())) {
-        while (dirent *e = readdir(d)) {
-            size_t len = std::strlen(e->d_name);
-            if (e->d_type != DT_DIR && len > 5 && strcasecmp(e->d_name + len - 5, ".toml") == 0)
-                names.emplace_back(e->d_name);
-        }
-        closedir(d);
-    }
-    std::sort(names.begin(), names.end(),
+    std::vector<std::string> paths;
+    collect_patches(resolve(arg), paths);
+    std::sort(paths.begin(), paths.end(),
               [](const std::string &a, const std::string &b) { return strcasecmp(a.c_str(), b.c_str()) < 0; });
-    std::string prefix = abs == "/" ? std::string() : abs.substr(1) + "/";
-    for (std::string &name : names)
-        name = prefix + name;
-    return names;
+    return paths;
 }
 
 int usage()
@@ -161,7 +169,7 @@ int cmd_bank(int argc, char **argv)
             return 1;
         }
         std::vector<std::string> patches = folder_patches(argv[3]);
-        if (patches.empty()) { std::printf("bank: no .toml files in %s\n", argv[3]); return 1; }
+        if (patches.empty()) { std::printf("bank: no .toml files in %s or below\n", argv[3]); return 1; }
         if (patches.size() > banks::max_programs)
             patches.resize(banks::max_programs);
         banks::Bank &bank = banks[*n];
