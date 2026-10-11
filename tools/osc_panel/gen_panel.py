@@ -13,8 +13,9 @@ here and rerunning. Emits noaidi-panel.json next to itself.
 
 Conventions: /control preArgs are [channel(1-based), cc]; every widget
 targets the 'noaidi' MIDI device declared by run.sh (--midi noaidi:...).
-Defaults mirror patch_default() so the panel opens showing the boot
-patch (widgets send nothing until touched).
+Defaults mirror the boot patch (app/storage/Patches/Factory/Pads/
+Supersaw.toml) so the panel opens showing it (widgets send nothing
+until touched).
 
 Layout notes (o-s-c v1.31): panel widgets do NOT render their label,
 so every section carries an explicit text-widget header; children of
@@ -103,6 +104,48 @@ def button(cc, label, value):
         "off": None,         # nothing on release
         "expand": True,
     }
+
+def number_input(widget_id, maximum):
+    # a typed number, sent by the Select button rather than on its own
+    w = {
+        "type": "input",
+        "id": widget_id,
+        "label": False,
+        "numeric": True,
+        "default": 0,
+        "bypass": True,
+        "expand": True,
+        "css": "font-size: 18px;",
+    }
+    return captioned(w, f"{widget_id.replace('_', ' ').title()} (0-{maximum})")
+
+def program_select():
+    # Bank Select (CC 0 = bank // 128, CC 32 = bank % 128) then Program
+    # Change, in that order: a bank applies at the next Program Change
+    # (docs/storage_format.md "Banks").
+    script = (
+        "if (value !== 1) return\n"
+        "var bank = Math.max(0, Math.min(16383, Math.round(get('bank_number') || 0)))\n"
+        "var program = Math.max(0, Math.min(127, Math.round(get('program_number') || 0)))\n"
+        f"send('{TARGET}', '/control', {CH}, 0, Math.floor(bank / 128))\n"
+        f"send('{TARGET}', '/control', {CH}, 32, bank % 128)\n"
+        f"send('{TARGET}', '/program', {CH}, program)\n"
+    )
+    return [
+        number_input("bank_number", 16383),
+        number_input("program_number", 127),
+        {
+            "type": "button",
+            "id": "program_select",
+            "label": "SELECT",
+            "mode": "push",
+            "on": 1,
+            "off": 0,
+            "bypass": True,      # the script sends; the button itself does not
+            "onValue": script,
+            "expand": True,
+        },
+    ]
 
 def section(title, widgets):
     slug = title.lower().replace(" ", "_").replace("&", "and")
@@ -217,6 +260,7 @@ root_widgets = [
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
     ]),
+    section("Program", program_select()),
     # No virtual keyboard: the physical keyboard covers notes,
     # velocity and both wheels. This panel exists precisely for the
     # MIDI a keyboard CANNOT send.
