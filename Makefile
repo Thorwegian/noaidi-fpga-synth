@@ -12,8 +12,9 @@
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
-#   make fw-console attach the console with screen (Ctrl-A K exits;
-#                   Ctrl-L redraws after attaching or resizing)
+#   make fw-console attach the console with screen (Ctrl-A K exits);
+#                   everything is logged to app/build/console.log,
+#                   overwritten on every run
 #   make fw-test    host test: every patch-file value loads back exactly,
 #                   banks.toml reads and writes back, and the factory
 #                   patches and banks read back exactly
@@ -73,9 +74,13 @@ fw-flash:
 fw-monitor:
 	cd app && $(IDF) monitor
 
+CONSOLE_LOG = app/build/console.log
 fw-console:
 	@test -n "$(ESPPORT)" || { echo "no ESP32 serial port found; set ESPPORT=/dev/..."; exit 2; }
-	screen $(ESPPORT) 115200
+	mkdir -p app/build
+	rm -f $(CONSOLE_LOG)
+	printf 'logfile $(CURDIR)/$(CONSOLE_LOG)\nlogfile flush 1\ndeflog on\n' > app/build/screenrc
+	screen -c app/build/screenrc $(ESPPORT) 115200
 
 fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	mkdir -p $(HOST_DIR)

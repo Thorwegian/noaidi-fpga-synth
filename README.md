@@ -172,6 +172,10 @@ saved /Patches/User/Pads/Arctic Ice.toml
   **PgUp/PgDn** page through them; the status bar shows how far back
   you are, and PgDn past the newest line returns to live output.
 - **Exiting:** `Ctrl-A K` leaves `screen`.
+- **Log:** everything the console receives is written to
+  `app/build/console.log`, overwritten on every run (`less -R` shows it
+  with its escape sequences). For a crash, `make fw-monitor` is better:
+  it decodes the panic backtrace into source lines.
 
 ## Patch storage
 
