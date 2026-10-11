@@ -6,7 +6,7 @@
 
 - Agents should propose changes to AGENTS.md when they make mistakes, but never modify the file directly.
 
-- All source files shall carry the following copyright notice:
+- All source files (except libraries that we use) shall carry the following copyright notice:
 
 ```
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
