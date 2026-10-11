@@ -3,18 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "license": "CERN-OHL-S-2.0",
-  "type": "module",
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.16",
+    "expo": "57.0.25",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1",
     "smol-toml": "1.9.0"
   },
   "devDependencies": {
     "@types/node": "22.20.2",
+    "@types/react": "19.2.2",
     "typescript": "5.9.3",
     "vite": "7.3.6",
     "vitest": "4.1.11"
-  }
+  },
+  "main": "index.ts"
 }

@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  shell.html — the page that hosts the Noaidi display; make_html.py inlines
+  the WebAssembly module and shell.js, so the page needs no server and no
+  network.
+
+  Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+  License: CERN-OHL-S v2
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Noaidi display</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { image-rendering: pixelated; touch-action: none; display: block; }
+</style>
+</head>
+<body>
+<canvas id="display"></canvas>
+<script>/*MODULE*/</script>
+<script>/*SHELL*/</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Noaidi",
+    "slug": "noaidi-companion",
+    "version": "0.1.0",
+    "orientation": "landscape",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#14171c",
+    "platforms": ["android", "ios", "web"],
+    "android": {
+      "package": "no.noaidi.companion",
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "no.noaidi.companion",
+      "supportsTablet": true,
+      "requireFullScreen": true
+    }
+  }
+}

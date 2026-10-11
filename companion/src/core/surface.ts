@@ -15,6 +15,7 @@
 // can copy them:
 // - touching or moving a permanent control focuses its parameter;
 // - turning an encoder focuses the parameter it has on the current layer;
+// - tapping a parameter on the screen focuses it;
 // - switching layer shows the layer overview (the new assignments);
 // - after screen.focusTimeoutMs without activity, the screen returns to
 //   the layer overview.
@@ -155,8 +156,11 @@ export function turnEncoder(layout: Layout, patch: Patch, a: Assignment, steps: 
 
 // ── Focus and screen ────────────────────────────────────────────────
 
+// The control of a focus that came from tapping the screen.
+export const SCREEN = 'screen';
+
 export interface Focus {
-  readonly control: string;
+  readonly control: string;   // a control's id, or SCREEN
   readonly param: ParameterId;
 }
 
@@ -169,6 +173,7 @@ export interface SurfaceState {
 export type SurfaceEvent =
   | { readonly type: 'control'; readonly control: string; readonly time: number }   // touched, moved or turned
   | { readonly type: 'button'; readonly control: string; readonly time: number }
+  | { readonly type: 'screen'; readonly param: ParameterId; readonly time: number }   // tapped on the screen
   | { readonly type: 'tick'; readonly time: number };
 
 export type ScreenView =
@@ -196,6 +201,9 @@ export function reduceSurface(layout: Layout, state: SurfaceState, event: Surfac
       if (!a) return state;
       return { ...state, focus: { control: event.control, param: a.param }, lastActivity: event.time };
     }
+    case 'screen':
+      if (!hasParameter(event.param)) return state;
+      return { ...state, focus: { control: SCREEN, param: event.param }, lastActivity: event.time };
     case 'button': {
       const layer = layout.layers.find((l) => l.button === event.control);
       if (!layer) return state;
@@ -211,4 +219,38 @@ export function reduceSurface(layout: Layout, state: SurfaceState, event: Surfac
 export function screenView(layout: Layout, state: SurfaceState): ScreenView {
   const layer = layerOf(layout, state);
   return state.focus ? { mode: 'parameter', focus: state.focus, layer } : { mode: 'layer', layer };
+}
+
+// ── Controller ──────────────────────────────────────────────────────
+
+export type SurfaceListener = (state: SurfaceState) => void;
+
+export interface SurfaceController {
+  readonly layout: Layout;
+  getState(): SurfaceState;
+  dispatch(event: SurfaceEvent): void;
+  subscribe(listener: SurfaceListener): () => void;
+}
+
+// Holds the surface state and tells listeners when it changes. The caller
+// sends 'tick' events (every 100 ms or so) for the focus timeout.
+export function createSurfaceController(layout: Layout, time = 0): SurfaceController {
+  let state = initialSurfaceState(layout, time);
+  const listeners = new Set<SurfaceListener>();
+  return {
+    layout,
+    getState: () => state,
+    dispatch(event) {
+      const next = reduceSurface(layout, state, event);
+      if (next === state) return;
+      const visible = next.layerId !== state.layerId || next.focus?.param !== state.focus?.param
+        || next.focus?.control !== state.focus?.control;
+      state = next;
+      if (visible) for (const l of listeners) l(state);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }

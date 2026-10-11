@@ -6,3 +6,5 @@ node_modules/
 !package.json
 !package-lock.json
 !tsconfig.json
+!app.json
+!eas.json

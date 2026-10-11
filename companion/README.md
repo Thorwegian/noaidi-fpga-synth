@@ -18,10 +18,34 @@ synth: the parameter list comes from the firmware's own patch-file table.
 |---|---|
 | `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `patch`, `patchFile` (TOML format 1), `patchStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
 | `src/display/` | companion-owned display metadata: label, section, unit, formatting, interaction, Editor control |
-| `src/generated/` | generated from the firmware sources, checked in |
+| `src/simulator/` | pure TypeScript: `panel` (simulated controls acting on the store and the surface), `displayBridge` (JSON messages to and from the LVGL display) |
+| `src/layouts/` | panel layouts; `filterSpike` is the LVGL/WASM spike's |
+| `src/app/` | React Native: the simulated chassis (`Knob`, `Encoder`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
+| `src/generated/` | checked in: `parameters.json` (gen_manifest), `factoryPatches.ts` (app/storage), `displayHtml.ts` (the LVGL display page, `make -C display web`) |
 | `test/` | vitest tests; `compat.test.ts` runs the firmware's own patch reader |
 | `tools/gen_manifest/` | writes the parameter manifest |
 | `tools/patch_tool/` | the firmware's patch reader and writer on the computer, for the compatibility tests |
+
+## The screen
+
+The instrument's screen is not drawn in React: it is the real display,
+portable LVGL C in [../display](../display/README.md), compiled to
+WebAssembly and packed into one self-contained page. React draws the
+physical controls around it. The app talks to the display with JSON
+messages (`src/simulator/displayBridge.ts` ↔ `display/ports/web/shell.js`),
+sending each parameter as its index in the manifest, which is its
+`noaidi_param_t` in `display/include/noaidi_param_ids.h`. Touches inside
+the screen go to LVGL itself, and a tapped parameter comes back as a
+`touched` message that focuses it through the surface core.
+
+## Running
+
+| Command | What it does |
+|---|---|
+| `npx expo start --web` | the app in a browser |
+| `eas build -p android --profile preview` | an Android APK (Expo's build service) |
+
+Expo Go is not used: the app is a development or release build.
 
 ## Building and testing
 
@@ -30,7 +54,7 @@ crashes on vitest's optional peers).
 
 | Command | What it does |
 |---|---|
-| `make -C companion manifest` | regenerate the manifest (needs a host C compiler) |
+| `make -C companion manifest` | regenerate the manifest, the display's `noaidi_param_ids.h` and `factoryPatches.ts` (needs a host C compiler) |
 | `make -C companion check` | everything: manifest fresh and consistent, `tsc`, all tests including the compatibility tests (needs a host C compiler and `git submodule update --init app/lib/tomlc17`) |
 | `npm test` | the TypeScript tests; the compatibility tests are skipped |
 

@@ -1,3 +1,6 @@
 [submodule "app/lib/tomlc17"]
 	path = app/lib/tomlc17
 	url = https://github.com/cktan/tomlc17
+[submodule "display/lib/lvgl"]
+	path = display/lib/lvgl
+	url = https://github.com/lvgl/lvgl.git
