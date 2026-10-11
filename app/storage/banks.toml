@@ -1,12 +1,16 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
-#
-# MIDI banks: Bank Select and Program Change → patch files
-# (docs/storage_format.md "Banks").
+
 format = 1
 
 [bank.0]
 name = "Factory"
 programs = [
     "Patches/Factory/Pads/Supersaw.toml",   # 0
+    "Patches/Factory/Pads/Galaxy.toml",     # 1
+]
+
+[bank.1]
+name = "User"
+programs = [
 ]
