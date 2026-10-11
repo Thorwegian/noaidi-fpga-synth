@@ -18,16 +18,22 @@
 import type { Patch } from '../core/patch';
 import type { PatchStore } from '../core/patchStore';
 import { parameter, parameters, type ParameterId } from '../core/parameters';
-import { assignmentFor, type SurfaceController } from '../core/surface';
+import { assignmentFor, layerOf, type Graphic, type SurfaceController } from '../core/surface';
 
 export const NONE = -1;
 export const ENCODERS = 4;
+export const TILES = 4;
+
+// noaidi_display_graphic_t
+const GRAPHICS: Record<Graphic, number> = { none: 0, filter: 1, ampEnv: 2, modEnv: 3 };
 
 export type ToDisplay =
   | { readonly type: 'value'; readonly param: number; readonly value: number | 'inf' | '-inf' }
   | { readonly type: 'name'; readonly param: number; readonly name: string }
   | { readonly type: 'focus'; readonly param: number }
-  | { readonly type: 'layer'; readonly label: string; readonly assign: readonly number[] };
+  | { readonly type: 'layer'; readonly label: string; readonly assign: readonly number[] }
+  | { readonly type: 'overview'; readonly tiles: readonly number[]; readonly graphic: number }
+  | { readonly type: 'refresh'; readonly ms: number };
 
 export type FromDisplay =
   | { readonly type: 'ready'; readonly width: number; readonly height: number }
@@ -62,13 +68,20 @@ function encoderIds(surface: SurfaceController): string[] {
 
 export function layerMessage(surface: SurfaceController): ToDisplay {
   const state = surface.getState();
-  const layer = surface.layout.layers.find((l) => l.id === state.layerId)!;
+  const layer = layerOf(surface.layout, state);
   const assign = encoderIds(surface).map((id) => {
     const a = assignmentFor(surface.layout, state, id);
     return a ? paramIndex(a.param) : NONE;
   });
   while (assign.length < ENCODERS) assign.push(NONE);
   return { type: 'layer', label: layer.label, assign };
+}
+
+export function overviewMessage(surface: SurfaceController): ToDisplay {
+  const overview = layerOf(surface.layout, surface.getState()).overview;
+  const tiles = (overview?.tiles ?? []).slice(0, TILES).map(paramIndex);
+  while (tiles.length < TILES) tiles.push(NONE);
+  return { type: 'overview', tiles, graphic: GRAPHICS[overview?.graphic ?? 'none'] };
 }
 
 export function focusMessage(surface: SurfaceController): ToDisplay {
@@ -82,6 +95,7 @@ export function fullState(store: PatchStore, surface: SurfaceController): ToDisp
   return [
     ...parameters.map((p) => valueMessage(patch, p.id)),
     layerMessage(surface),
+    overviewMessage(surface),
     focusMessage(surface),
   ];
 }
@@ -105,6 +119,7 @@ export function connectDisplay(store: PatchStore, surface: SurfaceController,
     if (state.layerId !== lastLayer) {
       lastLayer = state.layerId;
       send(layerMessage(surface));
+      send(overviewMessage(surface));
     }
     send(focusMessage(surface));
   });

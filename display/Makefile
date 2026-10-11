@@ -30,9 +30,10 @@ DISPLAY_TS := ../companion/src/generated/displayHtml.ts
 HOST_OBJ   := $(patsubst %.c,$(BUILD)/host/%.o,$(LVGL_SRC) $(DISPLAY_SRC))
 WEB_OBJ    := $(patsubst %.c,$(BUILD)/web/%.o,$(LVGL_SRC) $(DISPLAY_SRC) ports/web/web_port.c)
 
-WEB_EXPORTS := _web_init,_web_frame,_web_rgba,_web_pointer,_web_set_layer
+WEB_EXPORTS := _web_init,_web_frame,_web_rgba,_web_pointer,_web_set_layer,_web_set_overview
+WEB_EXPORTS := $(WEB_EXPORTS),_web_set_refresh_period
 WEB_EXPORTS := $(WEB_EXPORTS),_noaidi_display_set_value,_noaidi_display_set_name,_noaidi_display_focus
-WEB_EXPORTS := $(WEB_EXPORTS),_noaidi_display_shown_value,_noaidi_display_shown_focus
+WEB_EXPORTS := $(WEB_EXPORTS),_noaidi_display_shown_value,_noaidi_display_shown_focus,_noaidi_display_shown_graphic
 WEB_EXPORTS := $(WEB_EXPORTS),_noaidi_display_shown_encoder_label,_malloc,_free
 WEB_LDFLAGS := -O2 -sMODULARIZE=1 -sEXPORT_NAME=createNoaidiDisplay -sSINGLE_FILE=1 -sSINGLE_FILE_BINARY_ENCODE=0 \
                -sENVIRONMENT=web,node -sINITIAL_MEMORY=16777216 -sALLOW_MEMORY_GROWTH=0 \

@@ -115,3 +115,19 @@ EMSCRIPTEN_KEEPALIVE void web_set_layer(const char *label, int a0, int a1, int a
     };
     noaidi_display_set_layer(label, assign);
 }
+
+EMSCRIPTEN_KEEPALIVE void web_set_overview(int t0, int t1, int t2, int t3, int graphic)
+{
+    const noaidi_param_t tiles[NOAIDI_DISPLAY_TILES] = {
+        (noaidi_param_t)t0, (noaidi_param_t)t1, (noaidi_param_t)t2, (noaidi_param_t)t3,
+    };
+    noaidi_display_set_overview(tiles, (noaidi_display_graphic_t)graphic);
+}
+
+// How often LVGL may redraw, in ms (LV_DEF_REFR_PERIOD by default): a
+// diagnostic for the simulator's frame-rate headroom.
+EMSCRIPTEN_KEEPALIVE void web_set_refresh_period(int ms)
+{
+    if (ms >= 1)
+        lv_timer_set_period(lv_display_get_refr_timer(s_disp), (uint32_t)ms);
+}

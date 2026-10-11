@@ -18,9 +18,9 @@ synth: the parameter list comes from the firmware's own patch-file table.
 |---|---|
 | `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `patch`, `patchFile` (TOML format 1), `patchStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
 | `src/display/` | companion-owned display metadata: label, section, unit, formatting, interaction, Editor control |
-| `src/simulator/` | pure TypeScript: `panel` (simulated controls acting on the store and the surface), `displayBridge` (JSON messages to and from the LVGL display) |
-| `src/layouts/` | panel layouts; `filterSpike` is the LVGL/WASM spike's |
-| `src/app/` | React Native: the simulated chassis (`Knob`, `Encoder`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
+| `src/simulator/` | pure TypeScript: `panel` (simulated controls acting on the store and the surface), `knobGesture` (rotary or vertical knob drags), `displayBridge` (JSON messages to and from the LVGL display) |
+| `src/layouts/` | panel layouts as data: grid placement, assignments, panel ranges and tapers, layers and their overviews; `layoutA` is the first whole-panel hypothesis |
+| `src/app/` | React Native: `Panel` draws a layout (`Knob`, `Fader`, `Encoder`, `LayerButton`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
 | `src/generated/` | checked in: `parameters.json` (gen_manifest), `factoryPatches.ts` (app/storage), `displayHtml.ts` (the LVGL display page, `make -C display web`) |
 | `test/` | vitest tests; `compat.test.ts` runs the firmware's own patch reader |
 | `tools/gen_manifest/` | writes the parameter manifest |

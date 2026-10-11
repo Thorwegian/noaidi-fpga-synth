@@ -11,7 +11,7 @@
 
 #include "display_state.h"
 #include "param_text.h"
-#include "screens/filter_screen.h"
+#include "screens/main_screen.h"
 
 static display_state_t s_state;
 static noaidi_display_event_cb_t s_event_cb;
@@ -45,7 +45,10 @@ void noaidi_display_init(lv_display_t *disp)
     s_state.focus = NOAIDI_PARAM_NONE;
     for (int i = 0; i < NOAIDI_DISPLAY_ENCODERS; i++)
         s_state.assign[i] = NOAIDI_PARAM_NONE;
-    filter_screen_create(lv_display_get_screen_active(disp), &s_state);
+    for (int i = 0; i < NOAIDI_DISPLAY_TILES; i++)
+        s_state.tiles[i] = NOAIDI_PARAM_NONE;
+    s_state.graphic = NOAIDI_DISPLAY_GRAPHIC_NONE;
+    main_screen_create(lv_display_get_screen_active(disp), &s_state);
 }
 
 void noaidi_display_set_event_cb(noaidi_display_event_cb_t cb, void *user)
@@ -59,7 +62,7 @@ void noaidi_display_set_value(noaidi_param_t param, double value)
     if (!valid(param)) return;
     s_state.value[param] = value;
     s_state.has_name[param] = false;
-    filter_screen_update(&s_state);
+    main_screen_update(&s_state);
 }
 
 void noaidi_display_set_name(noaidi_param_t param, const char *name)
@@ -67,13 +70,13 @@ void noaidi_display_set_name(noaidi_param_t param, const char *name)
     if (!valid(param) || !name) return;
     snprintf(s_state.name[param], sizeof s_state.name[param], "%s", name);
     s_state.has_name[param] = true;
-    filter_screen_update(&s_state);
+    main_screen_update(&s_state);
 }
 
 void noaidi_display_focus(noaidi_param_t param)
 {
     s_state.focus = valid(param) ? param : NOAIDI_PARAM_NONE;
-    filter_screen_update(&s_state);
+    main_screen_update(&s_state);
 }
 
 void noaidi_display_set_layer(const char *label,
@@ -82,20 +85,34 @@ void noaidi_display_set_layer(const char *label,
     snprintf(s_state.layer, sizeof s_state.layer, "%s", label ? label : "");
     for (int i = 0; i < NOAIDI_DISPLAY_ENCODERS; i++)
         s_state.assign[i] = valid(assignments[i]) ? assignments[i] : NOAIDI_PARAM_NONE;
-    filter_screen_update(&s_state);
+    main_screen_update(&s_state);
+}
+
+void noaidi_display_set_overview(const noaidi_param_t tiles[NOAIDI_DISPLAY_TILES],
+                                 noaidi_display_graphic_t graphic)
+{
+    for (int i = 0; i < NOAIDI_DISPLAY_TILES; i++)
+        s_state.tiles[i] = valid(tiles[i]) ? tiles[i] : NOAIDI_PARAM_NONE;
+    s_state.graphic = graphic <= NOAIDI_DISPLAY_GRAPHIC_MOD_ENV ? graphic : NOAIDI_DISPLAY_GRAPHIC_NONE;
+    main_screen_update(&s_state);
 }
 
 const char *noaidi_display_shown_value(noaidi_param_t param)
 {
-    return filter_screen_shown_value(param);
+    return main_screen_shown_value(param);
 }
 
 noaidi_param_t noaidi_display_shown_focus(void)
 {
-    return filter_screen_shown_focus();
+    return main_screen_shown_focus();
 }
 
 const char *noaidi_display_shown_encoder_label(int i)
 {
-    return filter_screen_shown_encoder_label(i);
+    return main_screen_shown_encoder_label(i);
+}
+
+noaidi_display_graphic_t noaidi_display_shown_graphic(void)
+{
+    return main_screen_shown_graphic();
 }

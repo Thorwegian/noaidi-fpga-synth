@@ -11,6 +11,9 @@
 //        { type: "name",  param, name }
 //        { type: "focus", param }          param -1: the layer overview
 //        { type: "layer", label, assign: [p0, p1, p2, p3] }
+//        { type: "overview", tiles: [p0, p1, p2, p3], graphic }
+//                  graphic: 0 none, 1 filter, 2 amp envelope, 3 mod envelope
+//        { type: "refresh", ms }           LVGL's redraw period (diagnostic)
 //   out: { type: "ready", width, height }
 //        { type: "touched", param }         the player tapped a parameter
 //        { type: "fps", fps }               frames drawn per second, every 2 s
@@ -62,6 +65,14 @@
           break;
         case 'focus':
           M._noaidi_display_focus(msg.param);
+          break;
+        case 'overview': {
+          const t = msg.tiles;
+          M._web_set_overview(t[0] ?? -1, t[1] ?? -1, t[2] ?? -1, t[3] ?? -1, msg.graphic ?? 0);
+          break;
+        }
+        case 'refresh':
+          M._web_set_refresh_period(msg.ms);
           break;
         case 'layer': {
           const a = msg.assign;

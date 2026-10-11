@@ -16,6 +16,8 @@ typedef struct {
     noaidi_param_t focus;
     char           layer[NOAIDI_DISPLAY_LABEL_MAX];
     noaidi_param_t assign[NOAIDI_DISPLAY_ENCODERS];
+    noaidi_param_t tiles[NOAIDI_DISPLAY_TILES];   // the overview's
+    noaidi_display_graphic_t graphic;              // the overview's
 } display_state_t;
 
 // The value text of param as the state has it.

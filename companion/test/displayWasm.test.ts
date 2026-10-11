@@ -15,7 +15,7 @@ import { readPatchFile } from '../src/core/patchFile';
 import { createPatchStore } from '../src/core/patchStore';
 import { DISPLAY_HEIGHT, DISPLAY_HTML, DISPLAY_WIDTH } from '../src/generated/displayHtml';
 import { FACTORY_FILES } from '../src/generated/factoryPatches';
-import { filterSpike } from '../src/layouts/filterSpike';
+import { layoutA } from '../src/layouts/layoutA';
 import { connectDisplay, paramIndex, type FromDisplay } from '../src/simulator/displayBridge';
 import { createPanel } from '../src/simulator/panel';
 
@@ -73,6 +73,7 @@ async function openPage() {
     shownValue: (id: string): string | null =>
       M.ccall('noaidi_display_shown_value', 'string', ['number'], [paramIndex(id)]),
     shownFocus: (): number => M._noaidi_display_shown_focus(),
+    shownGraphic: (): number => M._noaidi_display_shown_graphic(),
     encoderLabel: (i: number): string => M.ccall('noaidi_display_shown_encoder_label', 'string', ['number'], [i]),
   };
 }
@@ -84,7 +85,7 @@ describe('the real display through the simulator bridge', () => {
 
     const store = createPatchStore(readPatchFile(FACTORY_FILES['Patches/Factory/Pads/Supersaw.toml']!).patch);
     let now = 0;
-    const panel = createPanel(filterSpike, store, () => now);
+    const panel = createPanel(layoutA, store, () => now);
     const bridge = connectDisplay(store, panel.surface, page.post, () => now);
     bridge.receive(page.fromPage[0]!);   // ready: the full state goes over
 
@@ -104,7 +105,7 @@ describe('the real display through the simulator bridge', () => {
     expect(page.shownFocus()).toBe(paramIndex('filter.resonance'));
 
     // inactivity returns the display to the overview
-    now += filterSpike.screen.focusTimeoutMs;
+    now += layoutA.screen.focusTimeoutMs;
     panel.tick();
     expect(page.shownFocus()).toBe(-1);
 
@@ -118,6 +119,20 @@ describe('the real display through the simulator bridge', () => {
     bridge.receive(touched!);
     expect(panel.surface.getState().focus).toEqual({ control: 'screen', param: 'filter.cutoff' });
     expect(page.shownFocus()).toBe(paramIndex('filter.cutoff'));
+
+    // a layer button: new encoder labels and overview at once
+    panel.press('bOsc');
+    expect(page.encoderLabel(0)).toBe('Osc 1 wave');
+    expect(page.encoderLabel(3)).toBe('Structure');
+    expect(page.shownValue('voice.structure')).toBe('7+1');
+    expect(page.shownGraphic()).toBe(0);
+    expect(page.shownValue('voice.osc_mix')).toBe('0 %');
+
+    // a fader off screen: the focus card, over the amp envelope's shape
+    panel.move('attack', 0.5);
+    expect(page.shownFocus()).toBe(paramIndex('amp_env.attack'));
+    expect(page.shownValue('amp_env.attack')).not.toBeNull();
+    expect(page.shownGraphic()).toBe(2);
     bridge.dispose();
   });
 });

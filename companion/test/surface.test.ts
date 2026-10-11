@@ -11,6 +11,8 @@ import {
 
 const LAYOUT: Layout = {
   name: 'test',
+  grid: { columns: 4, rows: 3 },
+  display: { at: [2, 0], span: [2, 2] },
   controls: [
     { id: 'cutoff', kind: 'knob', at: [0, 0] },
     { id: 'attack', kind: 'fader', at: [1, 0] },
@@ -46,6 +48,7 @@ describe('validateLayout', () => {
       'fixed: no parameter no.such',
       'layer x: cutoff is not a button',
       'layer x: attack is a fader',
+      'attack: a fader with no assignment',
     ]);
   });
 });

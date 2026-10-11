@@ -43,13 +43,13 @@ export function createPanel(layout: Layout, store: PatchStore, now: () => number
     move(id, position) {
       const a = assignmentFor(layout, surface.getState(), id);
       if (!a) return;
-      store.set(a.param, positionToValue(a, position), { coalesce: true });
+      store.set(a.param, positionToValue(a, position, store.getPatch()), { coalesce: true });
       control(id);
     },
 
     position(id) {
       const a = assignmentFor(layout, surface.getState(), id);
-      return a ? valueToPosition(a, store.get(a.param) as number) : 0;
+      return a ? valueToPosition(a, store.get(a.param) as number, store.getPatch()) : 0;
     },
 
     turn(id, steps) {

@@ -31,7 +31,16 @@ extern "C" {
 #endif
 
 #define NOAIDI_DISPLAY_ENCODERS 4          // contextual encoders under the screen
+#define NOAIDI_DISPLAY_TILES    4          // overview tiles per layer
 #define NOAIDI_DISPLAY_LABEL_MAX 24        // bytes, layer label and name values
+
+// A picture the display can draw from the values it has.
+typedef enum {
+    NOAIDI_DISPLAY_GRAPHIC_NONE,
+    NOAIDI_DISPLAY_GRAPHIC_FILTER,         // the filter's response
+    NOAIDI_DISPLAY_GRAPHIC_AMP_ENV,        // the amp envelope's shape
+    NOAIDI_DISPLAY_GRAPHIC_MOD_ENV,        // the mod envelope's shape
+} noaidi_display_graphic_t;
 
 // Something the player did on the screen itself.
 typedef enum {
@@ -54,13 +63,21 @@ void noaidi_display_set_value(noaidi_param_t param, double value);
 void noaidi_display_set_name(noaidi_param_t param, const char *name);
 
 // The parameter to show prominently, or NOAIDI_PARAM_NONE for the
-// current layer's overview.
+// current layer's overview. A parameter already on screen (an overview
+// tile, an encoder) is highlighted there; any other gets the main area,
+// with the picture that belongs to it.
 void noaidi_display_focus(noaidi_param_t param);
 
 // The current layer: its label and what each contextual encoder owns
 // (NOAIDI_PARAM_NONE for an unassigned encoder).
 void noaidi_display_set_layer(const char *label,
                               const noaidi_param_t assignments[NOAIDI_DISPLAY_ENCODERS]);
+
+// What the layer's overview shows when nothing is focused: up to four
+// tiles (NOAIDI_PARAM_NONE for none) and a picture. With a picture, the
+// first two tiles show above it; without, all four.
+void noaidi_display_set_overview(const noaidi_param_t tiles[NOAIDI_DISPLAY_TILES],
+                                 noaidi_display_graphic_t graphic);
 
 // ── For tests: what the screen shows ────────────────────────────────
 
@@ -73,6 +90,9 @@ noaidi_param_t noaidi_display_shown_focus(void);
 
 // The label shown over encoder i.
 const char *noaidi_display_shown_encoder_label(int i);
+
+// The picture shown in the main area.
+noaidi_display_graphic_t noaidi_display_shown_graphic(void);
 
 #ifdef __cplusplus
 }
