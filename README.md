@@ -143,19 +143,25 @@ the layout: output scrolls above a status bar and an input line.
 ```
 I (2041) storage: /storage/Patches/Factory/Pads/Supersaw.toml loaded in 11 ms
 /Patches $ cd User/Pads
-/Patches/User/Pads $ save Arctic Ice 2
-saved /Patches/User/Pads/Arctic Ice 2
- noaidi … | /Patches/User/Pads/Arctic Ice 2
-/Patches/User/Pads $ load ../../Factory/Pads/Supersaw█
+/Patches/User/Pads $ save "Arctic Ice.toml"
+saved /Patches/User/Pads/Arctic Ice.toml
+ noaidi … | /Patches/User/Pads/Arctic Ice.toml
+/Patches/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
 ```
 
-- **Commands:** `help`, `cd [folder]`, `pwd`, `ls [folder]`,
-  `load <patch>`, `save <patch>` (only under `/Patches/User/<category>/`),
-  `rm <patch>`, `patch` (print the active patch as a file), and `ble`.
+- **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
+  `rm <file>`.
+- **Patches:** `load <file>`, `save <file>` (anywhere: this is a
+  developer's shell), `init` (the init patch), `patch` (print the active
+  patch as a file).
+- **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
+  `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
+  `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
+  `ble`, `help`.
 - **Paths:** absolute from the storage root (`/Patches/User`) or
-  relative to the working folder in the prompt, with `.` and `..`;
-  patch names leave out `.toml`. Quote names with spaces, or let Tab
-  complete them.
+  relative to the working folder in the prompt, with `.` and `..`,
+  taken literally (extensions included). Quote names with spaces, or let
+  Tab complete them.
 - **Keys:** ↑/↓ recall earlier commands; ←/→, Home/End, Ctrl-A/E/U/W
   edit; Ctrl-C clears the line. **Return on an empty line** redraws the
   screen: after attaching, or after resizing the window.

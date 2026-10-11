@@ -10,6 +10,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "esp_app_desc.h"
 
@@ -20,7 +21,6 @@
 #include "storage.h"
 #include "voice_alloc.h"
 
-#define USER_DIR  "/Patches/User/"
 #define PATH_LEN  256
 
 static char s_cwd[PATH_LEN] = "/Patches";       // from the storage root
@@ -68,14 +68,11 @@ static void fs_path(const char *abs, char *out, size_t len)
     snprintf(out, len, STORAGE_ROOT "%s", abs);
 }
 
-// A patch argument: resolved, with ".toml" added if it has none.
-static void patch_file_path(const char *arg, char *abs, size_t abs_len, char *fs, size_t fs_len)
+// A file argument: resolved, and its file system path.
+static void file_path(const char *arg, char *abs, size_t abs_len, char *fs, size_t fs_len)
 {
     resolve(arg, abs, abs_len);
-    size_t n = strlen(abs);
-    if (n > 5 && strcasecmp(abs + n - 5, ".toml") == 0)
-        abs[n - 5] = '\0';                     // abs: without the extension
-    snprintf(fs, fs_len, STORAGE_ROOT "%s.toml", abs);
+    fs_path(abs, fs, fs_len);
 }
 
 static bool is_dir(const char *fs)
@@ -104,14 +101,13 @@ static void complete_entries(const char *prefix, void (*add)(const char *), bool
         const char *name = e->d_name;
         if (name[0] == '.' || strncasecmp(name, base, bl) != 0)
             continue;
-        size_t nl = strlen(name);
         char cand[2 * PATH_LEN];
         if (e->d_type == DT_DIR)
             snprintf(cand, sizeof cand, "%.*s%s/", (int)dl, prefix, name);
-        else if (!dirs_only && nl > 5 && strcasecmp(name + nl - 5, ".toml") == 0)
-            snprintf(cand, sizeof cand, "%.*s%.*s", (int)dl, prefix, (int)(nl - 5), name);
+        else if (!dirs_only)
+            snprintf(cand, sizeof cand, "%.*s%s", (int)dl, prefix, name);
         else
-            continue;                           // .new files, anything else
+            continue;
         add(cand);
     }
     closedir(d);
@@ -136,7 +132,7 @@ static int cmd_help(int argc, char **argv)
     const console_cmd_t *const *cmds;
     int n = console_commands(&cmds);
     for (int i = 0; i < n; i++)
-        printf("  %-6s %-10s %s\n", cmds[i]->name, cmds[i]->usage, cmds[i]->help);
+        printf("  %-6s %-14s %s\n", cmds[i]->name, cmds[i]->usage, cmds[i]->help);
     printf("  Paths are relative to the working directory; Tab completes,\n");
     printf("  up/down recall, PgUp/PgDn page the output, Return on an\n");
     printf("  empty line redraws the screen.\n");
@@ -176,13 +172,14 @@ static int cmd_ls(int argc, char **argv)
     while ((e = readdir(d))) {
         if (e->d_name[0] == '.')
             continue;
-        size_t nl = strlen(e->d_name);
-        if (e->d_type == DT_DIR)
+        if (e->d_type == DT_DIR) {
             printf("  %s/\n", e->d_name);
-        else if (nl > 5 && strcasecmp(e->d_name + nl - 5, ".toml") == 0)
-            printf("  %.*s\n", (int)(nl - 5), e->d_name);
-        else
-            printf("  %s\n", e->d_name);
+        } else {
+            char f[3 * PATH_LEN];
+            struct stat st;
+            snprintf(f, sizeof f, "%s/%s", fs, e->d_name);
+            printf("  %-40s %6ld\n", e->d_name, stat(f, &st) == 0 ? (long)st.st_size : -1L);
+        }
         n++;
     }
     closedir(d);
@@ -192,9 +189,9 @@ static int cmd_ls(int argc, char **argv)
 
 static int cmd_load(int argc, char **argv)
 {
-    if (argc != 2) { printf("usage: load <patch>\n"); return 1; }
+    if (argc != 2) { printf("usage: load <file>\n"); return 1; }
     char abs[PATH_LEN], fs[PATH_LEN + 16], err[200];
-    patch_file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
+    file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
     patch_t p;
     if (!patch_file_read(fs, &p, err, sizeof err)) {
         printf("load: %s\n", err);
@@ -210,27 +207,32 @@ static int cmd_load(int argc, char **argv)
     return 0;
 }
 
-static int cmd_save(int argc, char **argv)
+static int cmd_init(int argc, char **argv)
 {
-    if (argc != 2) { printf("usage: save <patch>\n"); return 1; }
-    char abs[PATH_LEN], fs[PATH_LEN + 16], err[200];
-    patch_file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
-    // abs must be /Patches/User/<category>/<name>
-    const char *r = abs + strlen(USER_DIR);
-    const char *slash = strchr(r, '/');
-    if (strncasecmp(abs, USER_DIR, strlen(USER_DIR)) != 0 || !slash || strchr(slash + 1, '/')) {
-        printf("save: patches go in " USER_DIR "<category>/<name>\n");
+    (void)argc; (void)argv;
+    patch_t p;
+    patch_init(&p);
+    if (!voice_alloc_set_patch(&p)) {
+        printf("init: the synth did not answer\n");
         return 1;
     }
-    char category[64], name[PATH_LEN];
-    snprintf(category, sizeof category, "%.*s", (int)(slash - r), r);
-    snprintf(name, sizeof name, "%s", slash + 1);
+    snprintf(s_current, sizeof s_current, "init patch");
+    show_status();
+    printf("loaded the init patch\n");
+    return 0;
+}
+
+static int cmd_save(int argc, char **argv)
+{
+    if (argc != 2) { printf("usage: save <file>\n"); return 1; }
+    char abs[PATH_LEN], fs[PATH_LEN + 16], err[200];
+    file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
     patch_t p;
     if (!voice_alloc_get_patch(&p)) {
         printf("save: the synth did not answer\n");
         return 1;
     }
-    if (!storage_save_patch(category, name, &p, err, sizeof err)) {
+    if (!patch_file_save(fs, &p, err, sizeof err)) {
         printf("save: %s\n", err);
         return 1;
     }
@@ -242,18 +244,38 @@ static int cmd_save(int argc, char **argv)
 
 static int cmd_rm(int argc, char **argv)
 {
-    if (argc != 2) { printf("usage: rm <patch>\n"); return 1; }
+    if (argc != 2) { printf("usage: rm <file>\n"); return 1; }
     char abs[PATH_LEN], fs[PATH_LEN + 16];
-    patch_file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
-    if (strncasecmp(abs, USER_DIR, strlen(USER_DIR)) != 0) {
-        printf("rm: only patches under " USER_DIR "\n");
-        return 1;
-    }
-    if (remove(fs) != 0) {
-        printf("rm: no patch %s\n", abs);
+    file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
+    if (is_dir(fs) || remove(fs) != 0) {
+        printf("rm: no file %s\n", abs);
         return 1;
     }
     printf("removed %s\n", abs);
+    return 0;
+}
+
+static int cmd_mkdir(int argc, char **argv)
+{
+    if (argc != 2) { printf("usage: mkdir <folder>\n"); return 1; }
+    char abs[PATH_LEN], fs[PATH_LEN + 16];
+    file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
+    if (mkdir(fs, 0775) != 0) {
+        printf("mkdir: cannot create %s\n", abs);
+        return 1;
+    }
+    return 0;
+}
+
+static int cmd_rmdir(int argc, char **argv)
+{
+    if (argc != 2) { printf("usage: rmdir <folder>\n"); return 1; }
+    char abs[PATH_LEN], fs[PATH_LEN + 16];
+    file_path(argv[1], abs, sizeof abs, fs, sizeof fs);
+    if (strcmp(abs, s_cwd) == 0 || rmdir(fs) != 0) {
+        printf("rmdir: cannot remove %s (not empty, or in use)\n", abs);
+        return 1;
+    }
     return 0;
 }
 
@@ -283,9 +305,12 @@ static const console_cmd_t s_commands[] = {
     { "cd",    "[folder]", "change folder (default /Patches)",         cmd_cd,    complete_dir },
     { "pwd",   "",         "print the working folder",                 cmd_pwd,   NULL },
     { "ls",    "[folder]", "list a folder",                            cmd_ls,    complete_dir },
-    { "load",  "<patch>",  "load a patch",                             cmd_load,  complete_path },
-    { "save",  "<patch>",  "save the active patch under " USER_DIR "<category>/", cmd_save, complete_path },
-    { "rm",    "<patch>",  "delete a patch under " USER_DIR,           cmd_rm,    complete_path },
+    { "mkdir", "<folder>", "create a folder",                          cmd_mkdir, complete_dir },
+    { "rmdir", "<folder>", "remove an empty folder",                   cmd_rmdir, complete_dir },
+    { "load",  "<file>",   "load a patch file",                        cmd_load,  complete_path },
+    { "init",  "",         "load the init patch",                      cmd_init,  NULL },
+    { "save",  "<file>",   "save the active patch to a file",          cmd_save,  complete_path },
+    { "rm",    "<file>",   "delete a file",                            cmd_rm,    complete_path },
     { "patch", "",         "print the active patch as a patch file",   cmd_patch, NULL },
     { "ble",   "",         "BLE MIDI status; re-advertise if needed",  cmd_ble,   NULL },
 };
@@ -294,12 +319,10 @@ void cli_init(void)
 {
     for (size_t i = 0; i < sizeof s_commands / sizeof s_commands[0]; i++)
         console_register(&s_commands[i]);
+    cli_system_init();
     const char *startup = storage_startup_patch();
-    if (startup[0]) {
-        size_t n = strlen(startup);
-        if (n > 5 && strcasecmp(startup + n - 5, ".toml") == 0) n -= 5;
-        snprintf(s_current, sizeof s_current, "/%.*s", (int)n, startup);
-    }
+    if (startup[0])
+        snprintf(s_current, sizeof s_current, "/%s", startup);
     show_prompt();
     show_status();
 }

@@ -433,7 +433,9 @@ New instrument-wide settings are added here as keys.
 
 ## Saving
 
-The synth writes only under `Patches/User`. To save `Name.toml`, it:
+Saves from MIDI, a GUI or the front panel go only under
+`Patches/User`; the developers' serial console writes wherever it is
+told. To save `Name.toml`, the synth:
 
 1. writes the new patch to `Name.toml.new`, ending with the line
    `# end`, and flushes it to the flash;
