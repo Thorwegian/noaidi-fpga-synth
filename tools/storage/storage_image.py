@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
-"""Pack a folder into the synth's storage partition image, or unpack one.
+"""Copy the synth's storage partition to and from a folder.
 
-    storage_image.py pack   <folder> <image>
-    storage_image.py unpack <image>  <folder>
+    storage_image.py read   <folder>          synth -> folder (over serial)
+    storage_image.py write  <folder>          folder -> synth (erases it)
+    storage_image.py pack   <folder> <image>  folder -> image file
+    storage_image.py unpack <image>  <folder> image file -> folder
+
+read and write talk to the ESP32 through ESP-IDF's parttool; set ESPPORT
+to pick the serial port, otherwise esptool finds it.
 
 The partition (docs/storage_format.md) is FAT with long names on
 ESP-IDF's wear-levelling layer, in safety mode with 512-byte sectors.
@@ -20,12 +25,13 @@ reserves for itself. The dummy page moves through them as the device
 writes, so unpacking reads the dummy position and move count from the
 state and maps every logical page back.
 
-ESP-IDF's FatFs sources are taken from $IDF_PATH (default
-~/esp/esp-idf). Any Python 3 runs this; no ESP-IDF Python packages are
-needed.
+ESP-IDF's location and its Python come from the firmware build
+(app/build), so run "make fw" once first; $IDF_PATH overrides the
+location. Any Python 3 runs this script.
 """
 
 import binascii
+import json
 import os
 import re
 import shutil
@@ -38,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 PARTITIONS = os.path.join(REPO, 'app', 'partitions.csv')
 SDKCONFIG = os.path.join(REPO, 'app', 'sdkconfig')
+BUILD = os.path.join(REPO, 'app', 'build')
 
 PAGE = 4096                 # flash sector = WL page
 FAT_SECTOR = 512            # CONFIG_WL_SECTOR_SIZE
@@ -100,11 +107,44 @@ def sdkconfig_values():
     return values
 
 
+def idf_path():
+    """$IDF_PATH, else the ESP-IDF the firmware was last built with."""
+    if os.environ.get('IDF_PATH'):
+        return os.environ['IDF_PATH']
+    try:
+        with open(os.path.join(BUILD, 'project_description.json')) as f:
+            return json.load(f)['idf_path']
+    except (OSError, KeyError, ValueError):
+        sys.exit('storage_image: ESP-IDF not found; build the firmware first '
+                 '(make fw) or set IDF_PATH')
+
+
+def idf_python():
+    """The ESP-IDF Python the firmware was last built with (it has esptool)."""
+    try:
+        with open(os.path.join(BUILD, 'CMakeCache.txt')) as f:
+            for line in f:
+                m = re.match(r'PYTHON(?::\w+)?=(.+)', line.strip())
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    sys.exit('storage_image: ESP-IDF Python not found; build the firmware '
+             'first (make fw)')
+
+
+def parttool(*args):
+    cmd = [idf_python(), os.path.join(idf_path(), 'components', 'partition_table',
+                                      'parttool.py')]
+    if os.environ.get('ESPPORT'):
+        cmd += ['--port', os.environ['ESPPORT']]
+    subprocess.run(cmd + list(args), check=True)
+
+
 def build_fatimage(workdir):
-    idf = os.environ.get('IDF_PATH', os.path.expanduser('~/esp/esp-idf'))
-    src = os.path.join(idf, 'components', 'fatfs', 'src')
+    src = os.path.join(idf_path(), 'components', 'fatfs', 'src')
     if not os.path.isfile(os.path.join(src, 'ff.c')):
-        sys.exit(f'storage_image: no FatFs sources in {src}; set IDF_PATH')
+        sys.exit(f'storage_image: no FatFs sources in {src}')
     # ESP-IDF's ffconf.h, with the app's sdkconfig in place of sdkconfig.h
     # and no FreeRTOS: the same configuration the firmware compiles.
     with open(os.path.join(src, 'ffconf.h')) as f:
@@ -206,11 +246,32 @@ def unpack(image, folder):
     print(f'{folder}: unpacked from {image}')
 
 
+# ── read / write: the synth over serial ──────────────────────────────
+
+def read(folder):
+    with tempfile.TemporaryDirectory() as work:
+        image = os.path.join(work, 'storage.img')
+        parttool('read_partition', '--partition-name', 'storage', '--output', image)
+        unpack(image, folder)
+
+
+def write(folder):
+    with tempfile.TemporaryDirectory() as work:
+        image = os.path.join(work, 'storage.img')
+        pack(folder, image)
+        parttool('write_partition', '--partition-name', 'storage', '--input', image)
+
+
 def main():
-    if len(sys.argv) == 4 and sys.argv[1] == 'pack':
-        pack(sys.argv[2], sys.argv[3])
-    elif len(sys.argv) == 4 and sys.argv[1] == 'unpack':
-        unpack(sys.argv[2], sys.argv[3])
+    args = sys.argv[1:]
+    if len(args) == 3 and args[0] == 'pack':
+        pack(args[1], args[2])
+    elif len(args) == 3 and args[0] == 'unpack':
+        unpack(args[1], args[2])
+    elif len(args) == 2 and args[0] == 'read':
+        read(args[1])
+    elif len(args) == 2 and args[0] == 'write':
+        write(args[1])
     else:
         sys.exit(__doc__)
 

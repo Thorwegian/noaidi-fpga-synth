@@ -17,9 +17,10 @@
 #   make fw-storage-read DIR=x   copy the synth's storage into folder x
 #   make fw-storage-write DIR=x  replace the synth's storage with folder x
 #
-# The storage targets pack and unpack with tools/storage (ESP-IDF's own
-# image generator loses the case of file names) and write through
-# ESP-IDF's parttool, so they run inside the ESP-IDF environment.
+# The storage targets use tools/storage/storage_image.py (ESP-IDF's own
+# image generator loses the case of file names), which finds ESP-IDF
+# through the firmware build: run "make fw" once first. ESPPORT picks the
+# serial port.
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -31,11 +32,7 @@
 # "Build requirements"); override with IDF=idf.py inside an
 # already-activated shell.
 IDF ?= $(HOME)/bin/idf
-IDF_PATH ?= $(HOME)/esp/esp-idf
-IDF_ENV ?= . $(IDF_PATH)/export.sh >/dev/null 2>&1 &&
-PARTTOOL = $(IDF_ENV) python $(IDF_PATH)/components/partition_table/parttool.py
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
-STORAGE_IMG = app/build/storage.img
 
 all: pack fw
 
@@ -65,15 +62,11 @@ fw-storage-flash:
 
 fw-storage-write:
 	@test -n "$(DIR)" || { echo "usage: make fw-storage-write DIR=folder"; exit 2; }
-	mkdir -p app/build
-	$(STORAGE_IMAGE) pack "$(DIR)" $(STORAGE_IMG)
-	$(PARTTOOL) write_partition --partition-name storage --input $(STORAGE_IMG)
+	$(STORAGE_IMAGE) write "$(DIR)"
 
 fw-storage-read:
 	@test -n "$(DIR)" || { echo "usage: make fw-storage-read DIR=folder"; exit 2; }
-	mkdir -p app/build
-	$(PARTTOOL) read_partition --partition-name storage --output $(STORAGE_IMG)
-	$(STORAGE_IMAGE) unpack $(STORAGE_IMG) "$(DIR)"
+	$(STORAGE_IMAGE) read "$(DIR)"
 
 clean:
 	$(MAKE) -C rtl clean
