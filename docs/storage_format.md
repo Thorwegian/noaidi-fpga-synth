@@ -58,6 +58,7 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 ```
 /storage
 ├── system.toml
+├── banks.toml
 ├── Patches
 │   ├── Factory
 │   │   ├── Arps
@@ -421,6 +422,50 @@ startup_patch = "Patches/Factory/Pads/Supersaw.toml"
 
 New instrument-wide settings are added here as keys.
 
+## Banks
+
+`banks.toml` maps MIDI Bank Select and Program Change onto patch files.
+A bank is a numbered list of patches: a program's position in the list
+is its program number, so a bank has no gaps.
+
+```toml
+format = 1
+
+[bank.0]
+name = "Factory"
+programs = [
+    "Patches/Factory/Pads/Supersaw.toml",       # program 0
+    "Patches/Factory/Leads/RnB Whistle.toml",   # program 1
+]
+
+[bank.1]
+name = "User"
+programs = []
+```
+
+| Key | Meaning |
+|---|---|
+| `[bank.<n>]` | bank *n*, 0 … 16383: the Bank Select value, MSB × 128 + LSB |
+| `name` | the bank's name, for display |
+| `programs` | the patches, as paths from the root; entry *p* is program *p*, 0 … 127 |
+
+- **Bank numbers are explicit.** A song keeps addressing the same bank
+  when other banks are added or removed.
+- **Program numbers are positions.** Inserting or deleting a program
+  renumbers the programs after it; appending renumbers nothing.
+- **Banks are per channel.** Each MIDI channel has a current bank, 0
+  at power-on. Bank Select alone changes no sound: CC 0 (MSB) and
+  CC 32 (LSB) each set their half of the channel's bank number, and the
+  bank applies at the next Program Change on that channel, as the MIDI
+  specification has it.
+- **Program Change** on a channel loads that channel's current bank's
+  program into the part playing the channel. Notes already sounding
+  switch to the new patch at once. A bank or program that does not
+  exist, or a file that does not read, is reported and changes
+  nothing.
+- **Reading:** `banks.toml` is read when a Program Change needs it.
+  A missing or unreadable file means there are no banks.
+
 ## Loading
 
 - **Unknown keys and tables:** ignored.
@@ -435,6 +480,8 @@ New instrument-wide settings are added here as keys.
   untouched.
 
 ## Saving
+
+`banks.toml` and patch files are saved the same way.
 
 Saves from MIDI, a GUI or the front panel go only under
 `Patches/User`; the developers' serial console writes wherever it is
@@ -462,9 +509,10 @@ any comment.
 The factory patches and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The factory set is
 `Patches/Factory/Pads/Supersaw.toml`, the sound the synth starts with:
-`system.toml` names it as the startup patch. `make fw-test` checks that
-every factory patch reads and is already in the writer's own form, so
-it reads back exactly.
+`system.toml` names it as the startup patch, and `banks.toml` makes it
+program 0 of bank 0, "Factory". `make fw-test` checks that
+every factory patch and `banks.toml` read and are already in the
+writer's own form, so they read back exactly.
 
 A firmware update never writes the `storage` partition, so it cannot
 overwrite user patches. `make fw-storage-flash` packs `app/storage/`

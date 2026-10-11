@@ -78,8 +78,8 @@ Prophet-capable engine:
    sound — the single source of truth the CC handlers MUTATE and
    voice_alloc/engine_link RENDER to DMEM words and partial words.
    Stored patches are TOML files in the format of
-   [storage_format.md](storage_format.md); program change
-   loads/stores instances of `patch_t`; multi-timbral layering
+   [storage_format.md](storage_format.md); Bank Select and
+   Program Change load them through `banks.toml` into `patch_t`; multi-timbral layering
    (decision 5) is an array of parts, each a `patch_t`.
 4. **Clock source modes:** **Auto** (slave to external MIDI clock
    when one is detected, else run the internal clock) and
