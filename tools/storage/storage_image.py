@@ -4,9 +4,14 @@
 """Copy the synth's storage partition to and from a folder.
 
     storage_image.py read   <folder>          synth -> folder (over serial)
-    storage_image.py write  <folder>          folder -> synth (erases it)
+    storage_image.py write  <folder>          folder -> synth
     storage_image.py pack   <folder> <image>  folder -> image file
     storage_image.py unpack <image>  <folder> image file -> folder
+
+Every command replaces its destination: write and pack replace the
+whole partition, read and unpack replace the folder. A folder is only
+replaced when it is empty or holds a storage copy (system.toml or
+Patches at its top), so a mistyped path cannot wipe unrelated files.
 
 read and write talk to the ESP32 through ESP-IDF's parttool; set ESPPORT
 to pick the serial port, otherwise esptool finds it.
@@ -230,7 +235,20 @@ def read_state(img, lay):
     sys.exit('storage_image: no valid wear-levelling state in the image')
 
 
+def replaceable(folder):
+    """Missing, empty, or a previous storage copy."""
+    if not os.path.exists(folder):
+        return True
+    if not os.path.isdir(folder):
+        return False
+    entries = os.listdir(folder)
+    return not entries or 'system.toml' in entries or 'Patches' in entries
+
+
 def unpack(image, folder):
+    if not replaceable(folder):
+        sys.exit(f'storage_image: {folder} is not empty and holds no storage copy '
+                 '(system.toml or Patches); not replacing it')
     with open(image, 'rb') as f:
         img = f.read()
     lay = Layout(len(img))
@@ -242,13 +260,22 @@ def unpack(image, folder):
         fat_img = os.path.join(work, 'fat.img')
         with open(fat_img, 'wb') as f:
             f.write(fat)
-        subprocess.run([exe, 'unpack', fat_img, folder], check=True)
-    print(f'{folder}: unpacked from {image}')
+        out = os.path.join(work, 'out')
+        subprocess.run([exe, 'unpack', fat_img, out], check=True)
+        # Replace, not merge: files deleted on the synth must not survive
+        # in the folder.
+        if os.path.exists(folder):
+            shutil.rmtree(folder)
+        shutil.move(out, folder)
+    print(f'{folder}: replaced with the contents of {image}')
 
 
 # ── read / write: the synth over serial ──────────────────────────────
 
 def read(folder):
+    if not replaceable(folder):
+        sys.exit(f'storage_image: {folder} is not empty and holds no storage copy '
+                 '(system.toml or Patches); not replacing it')
     with tempfile.TemporaryDirectory() as work:
         image = os.path.join(work, 'storage.img')
         parttool('read_partition', '--partition-name', 'storage', '--output', image)

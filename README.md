@@ -128,18 +128,42 @@ make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor
 make fw-test     # host test of the patch file format (about a minute)
-make fw-storage-flash        # write the patch storage from app/storage (erases user patches)
-make fw-storage-read DIR=x   # copy the synth's patches and settings into folder x
-make fw-storage-write DIR=x  # write folder x back to the synth
 ```
-
-Patches and settings are TOML files on a FAT partition; see
-[docs/storage_format.md](docs/storage_format.md). The storage targets
-need one `make fw` first.
 
 `make sim` starts every variable that has no initial value at a random
 value, with a new seed on each run; the seed is the first line of each
 `rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
+
+## Patch storage
+
+The synth keeps its patches and settings as TOML files on a FAT
+partition in the ESP32's flash
+([docs/storage_format.md](docs/storage_format.md)). A computer reaches
+them over the USB serial port:
+
+```bash
+make fw-storage-read DIR=~/noaidi     # synth → folder
+#   ... edit, add or delete files in ~/noaidi ...
+make fw-storage-write DIR=~/noaidi    # folder → synth
+make fw-storage-flash                 # app/storage → synth: the factory content
+```
+
+- **Every command replaces its destination.** `fw-storage-read`
+  replaces the folder with the synth's storage, so files that are no
+  longer on the synth disappear from the folder too.
+  `fw-storage-write` and `fw-storage-flash` replace the whole storage
+  partition, user patches included.
+- **The folder is protected:** `fw-storage-read` only replaces a folder
+  that is empty or already holds a storage copy (`system.toml` or
+  `Patches` at its top), so a mistyped path cannot wipe other files.
+- **First-time setup:** a new board needs `make fw-storage-flash` once,
+  after `make fw-flash`. Firmware updates never touch the storage
+  partition.
+- **Requirements:** the commands find ESP-IDF through the firmware
+  build, so run `make fw` once first. `ESPPORT=/dev/...` picks the
+  serial port if esptool doesn't find it.
+- **Reset:** the synth reads its storage at boot. esptool resets it
+  after every command, so it boots with what was just written.
 
 After any gateware load (`sram`/`flash`), restart the ESP32
 (`make fw-flash` or its reset button) so the engine link rewrites the

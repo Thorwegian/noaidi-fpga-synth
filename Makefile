@@ -16,7 +16,7 @@
 #                   and the factory patch equals the default patch
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
-#   make fw-storage-read DIR=x   copy the synth's storage into folder x
+#   make fw-storage-read DIR=x   replace folder x with the synth's storage
 #   make fw-storage-write DIR=x  replace the synth's storage with folder x
 #
 # The storage targets use tools/storage/storage_image.py (ESP-IDF's own
