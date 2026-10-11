@@ -1,0 +1,58 @@
+format = 1
+
+[voice]
+structure = "4+4"
+osc_mix = 40
+unison_detune = 0.04
+unison_stereo = 100
+
+[[osc]]
+wave = "pulse"
+tune = 0
+pulse_width = 95
+
+[[osc]]
+wave = "pulse"
+tune = 12
+pulse_width = 95
+
+[filter]
+type = "lowpass"
+slope = 24
+cutoff = 35.66
+resonance = 2.42
+key_track = 100
+
+[amp_env]
+attack = 0.042
+sustain = -0.47
+decay = 0.341
+release = 6
+velocity = 50
+
+[mod_env]
+attack = 0.042
+sustain = 0
+decay = 12.4
+release = 11
+velocity = 50
+destination = "cutoff"
+depth = 90.75
+
+[[lfo]]
+shape = "pulse"
+rate = 6.543
+destination = "pitch"
+depth = 2.58
+
+[[lfo]]
+shape = "pulse"
+rate = 3.405
+destination = "pulse_width"
+depth = 3.03
+
+[part]
+volume = 0
+pan = 0
+bend_range = 2
+# end

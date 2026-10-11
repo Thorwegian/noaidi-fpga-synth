@@ -1,0 +1,14 @@
+format = 1
+
+[bank.0]
+name = "Factory"
+programs = [
+    "Patches/Factory/Pads/Supersaw.toml",   # 0
+    "Patches/Factory/Pads/Galaxy.toml",     # 1
+]
+
+[bank.1]
+name = "User"
+programs = [
+]
+# end
