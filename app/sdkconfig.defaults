@@ -26,6 +26,10 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 CONFIG_ESP_TASK_WDT_PANIC=y
 
+# app_main loads the startup patch (TOML parsing) before the tasks take
+# over, more than the default 3584-byte main task stack holds.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # The console's tasks command: per-task state, stack high-water mark and
 # CPU share (cli_system.c).
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y

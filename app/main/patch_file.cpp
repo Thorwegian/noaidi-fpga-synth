@@ -90,12 +90,12 @@ bool read(const std::string &path, patch_t &p, std::string &error)
         error = "cannot open " + path;
         return false;
     }
-    std::string text;
-    char buf[512];
-    size_t got;
-    while ((got = std::fread(buf, 1, sizeof buf, in)) > 0)
-        text.append(buf, got);
-    bool read_ok = !std::ferror(in);
+    // Straight into a heap string: these run on tasks with small stacks.
+    std::fseek(in, 0, SEEK_END);
+    long size = std::ftell(in);
+    std::fseek(in, 0, SEEK_SET);
+    std::string text(size > 0 ? static_cast<size_t>(size) : 0, '\0');
+    bool read_ok = size >= 0 && std::fread(text.data(), 1, text.size(), in) == text.size();
     std::fclose(in);
     if (!read_ok) {
         error = "cannot read " + path;

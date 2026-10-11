@@ -27,7 +27,7 @@
 #define TAG "voice_alloc"
 
 #define VA_QUEUE_LEN   64
-#define VA_TASK_STACK  3072
+#define VA_TASK_STACK  6144   // Program Change reads banks.toml and a patch file here
 #define VA_TASK_PRIO   5
 
 #define NUM_VOICES     32
