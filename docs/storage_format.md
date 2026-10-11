@@ -127,12 +127,10 @@ in a file is always one raw value written in a musical unit.
   - Ratio units (seconds, Hz, Q) compare by ratio.
   - An exact tie goes to the raw value further from zero.
   - A value outside a key's range is clamped to the range. The ranges
-    are what the firmware and gateware can do, not what a MIDI
-    controller reaches; the CCs cover only part of several of them.
+    are what the engine can practically do, not what a MIDI controller
+    reaches; the CCs cover only part of several of them.
     `sustain = 0` therefore loads as the highest sustain the envelope
-    has. Where the engine saturates inside a range, for example a pitch
-    beyond the oscillator's 16 octaves, the value is kept but sounds
-    like the limit.
+    has.
 - **Save:** a raw value is written as the shortest decimal that loads
   back to that same raw value. A hand-typed `cutoff = 1000` therefore
   stays `1000` after a load and a save, instead of `1000.4174`.
@@ -169,7 +167,7 @@ default patch (`patch_default`).
 |---|---|---|---|
 | `structure` | name: `"1+1"`, `"7+1"`, `"4+4"` | | `voice_struct` 0, 1, 2 |
 | `osc_mix` | percent, −100 = osc 1 only, +100 = osc 2 only | −100 … +100 | `osc_mix` = round(value × 63 / 100) |
-| `unison_detune` | semitones per spread step | 0 … 64 | `unison_detune` = round(value × 1024 / 12) |
+| `unison_detune` | semitones per spread step | 0 … 1 | `unison_detune` = round(value × 1024 / 12) |
 | `unison_stereo` | percent | 0 … 100 | `unison_stereo` = round(value × 127 / 100) |
 
 `osc_mix` raw values −64 and −63 both mute osc 2, and the synth stores
@@ -180,7 +178,7 @@ default patch (`patch_default`).
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | | `wave` 0, 1, 2, 3 |
-| `tune` | semitones, decimals for the fine part | −192 … +192 | one pitch offset, round(value × 1024 / 12) |
+| `tune` | semitones, decimals for the fine part | −48 … +48 | one pitch offset, round(value × 1024 / 12) |
 | `pulse_width` | percent of the cycle the pulse is high | 0 … 100 | `duty` = round((value − 50) / 100 × 2²⁴) |
 
 The pulse is DC-free at every width, so a width below 50 % sounds the
@@ -197,9 +195,9 @@ reach every raw step: `-12.07` is an octave down and 7 cents flat.
 |---|---|---|---|
 | `type` | name: `"lowpass"`, `"bandpass"`, `"highpass"` | | `type` 0, 1, 2 |
 | `slope` | dB/octave | 12 or 24 | `cascade` 0 or 1 |
-| `cutoff` | Hz, for MIDI note 60 (C4) | 8.18 … 535 800 | the cutoff pitch for C4, see below |
-| `resonance` | Q | 0.707 … 46 341 | code = round(1024 × log₂(value × √2)) |
-| `key_track` | percent | −51 200 … +51 198 | `key_track` = round(value × 64 / 100) |
+| `cutoff` | Hz, for MIDI note 60 (C4) | 8.18 … 14 388 | the cutoff pitch for C4, see below |
+| `resonance` | Q, or `inf` | 0.707 … 32, or `inf` | code = round(1024 × log₂(value × √2)); `inf` = code 0x3FFF |
+| `key_track` | percent | 0 … 200 | `key_track` = round(value × 64 / 100) |
 
 **Cutoff.** For a note, the filter's pitch (raw) is
 
@@ -213,8 +211,14 @@ CC 74/106 setting. `cutoff` is that pitch for note 60, in Hz:
 C4 is the reference that key tracking pivots on, so at 0 % key
 tracking `cutoff` is the frequency for every note.
 
+The gateware clamps the cutoff at `FC_MAX` (14.4 kHz), its
+measured-clean limit, so `cutoff` stops there.
+
 **Resonance** is the effective resonance code: the patch's base value
-plus the CC 71 setting.
+plus the CC 71 setting. Q 32 is the sharpest stable setting, the top
+CC 71 reaches. `inf` selects the top code, where the damping decodes
+to zero and the filter self-oscillates. The codes in between, where
+the filter is barely damped, are left out.
 
 ### `[amp_env]` and `[mod_env]`
 
@@ -232,7 +236,7 @@ plus the CC 71 setting.
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
-| `depth` | semitones of cutoff | −384 … +384 | `mod_env_depth` = round(value × 1024 / 12) |
+| `depth` | semitones of cutoff | −129 … +129 | `mod_env_depth` = round(value × 1024 / 12) |
 
 **Envelope times.** Once per sample at 96 kHz, a segment follows
 
@@ -302,10 +306,10 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 
 | `destination` | `depth` unit | `depth` range | `depth` raw value |
 |---|---|---|---|
-| `"pulse_width"` | percent of pulse width | −1600 … +1600 | round(value × 1024 / 50) |
-| `"resonance"` | octaves of Q | −32 … +32 | round(value × 1024) |
-| `"pitch"` | semitones | −384 … +384 | round(value × 1024 / 12) |
-| `"cutoff"` | semitones | −384 … +384 | round(value × 1024 / 12) |
+| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(value × 1024 / 50) |
+| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(value × 1024) |
+| `"pitch"` | semitones | −48 … +48 | round(value × 1024 / 12) |
+| `"cutoff"` | semitones | −129 … +129 | round(value × 1024 / 12) |
 
 - **Destinations:** both LFOs take any of the four (`dest` 0
   `pulse_width`, 1 `resonance`, 2 `pitch`, 3 `cutoff`).
@@ -319,7 +323,7 @@ Patch-specific settings for the part that plays the patch.
 |---|---|---|---|
 | `volume` | dB, 0 = unity; `-inf` = off | −77.5 … +18 | `volume` = 207 + round(value / 0.37629); raw 0 = off |
 | `pan` | percent, −100 = left, +100 = right | −100 … +100 | `pan` = round(value × 63 / 100) |
-| `bend_range` | semitones, whole | 0 … 255 | `bend_range` |
+| `bend_range` | semitones, whole | 0 … 48 | `bend_range` |
 
 `pan` raw values −64 and −63 both mute the right side, and the synth
 stores −63.
