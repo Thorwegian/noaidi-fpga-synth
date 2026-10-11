@@ -4,6 +4,12 @@
 
 - Agents *always* liveblog their progress directly to the comments sections of the GitHub issues they are working on.
 
+- Agents write elegant and highly structured code at a senior developer level.
+
+- Elegant C++ with STL is *always* preferred over clunky C. Agents *will* port C modules to C++ at every chance (dependencies excepted).
+
+- Elegant SystemVerilog is *always* preferred over clunky Verilog. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
+
 - Agents *must* update comments and docs so they match the code before *every* commit.
 
 - Variable names *must* be descriptive and use industry standard textbook terminology.
