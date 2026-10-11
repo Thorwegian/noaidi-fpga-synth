@@ -42,6 +42,9 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   [docs/memory_map.md](docs/memory_map.md); MIDI/user mapping (in
   design): [docs/midi_schema.md](docs/midi_schema.md); consolidated
   design: [docs/design.md](docs/design.md).
+- **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-C3
+  Super Mini with 4 MB of flash. The firmware's partition table
+  (`app/partitions.csv`) assumes the 4 MB.
 
 ## Wiring
 
@@ -124,7 +127,14 @@ make flash       # write bitstream to FPGA flash (persistent)
 make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor
+make fw-storage-flash        # write the patch storage from app/storage (erases user patches)
+make fw-storage-read DIR=x   # copy the synth's patches and settings into folder x
+make fw-storage-write DIR=x  # write folder x back to the synth
 ```
+
+Patches and settings are TOML files on a FAT partition; see
+[docs/storage_format.md](docs/storage_format.md). The storage targets
+need one `make fw` first.
 
 `make sim` starts every variable that has no initial value at a random
 value, with a new seed on each run; the seed is the first line of each

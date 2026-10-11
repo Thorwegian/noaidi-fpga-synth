@@ -17,24 +17,24 @@ the device is plain text in a FAT file system.
 | Filename encoding | UTF-8 (`CONFIG_FATFS_API_ENCODING_UTF_8`) |
 | Mount point | `/storage` |
 
-On the ESP32-C3's 2 MB flash the partition table is:
+On the ESP32-C3 Super Mini's 4 MB flash the partition table is:
 
 | Name | Type | Subtype | Offset | Size |
 |---|---|---|---|---|
 | `nvs` | data | nvs | `0x9000` | `0x6000` |
 | `phy_init` | data | phy | `0xF000` | `0x1000` |
 | `factory` | app | factory | `0x10000` | `0x100000` (1 MB) |
-| `storage` | data | fat | `0x110000` | `0xF0000` (960 KB) |
+| `storage` | data | fat | `0x110000` | `0x2F0000` (2.9 MB) |
 
 The format does not depend on the partition size. A board with more
 flash gets a larger `storage` partition and nothing else changes.
 
 **Capacity.** A file takes whole clusters. A patch file is about 650
 bytes, two 512-byte clusters, plus up to about 200 bytes of directory
-entries for a long name. The 960 KB partition therefore holds about
-800 patches after the FAT tables, the folders and the wear-levelling
-overhead: six banks of 128. With 4096-byte clusters it would hold only about
-190.
+entries for a long name. The 2.9 MB partition therefore holds about
+2400 patches after the FAT tables, the folders and the wear-levelling
+overhead: eighteen banks of 128. With 4096-byte clusters it would hold
+only about 700.
 
 The 512-byte sectors cost write speed, because each write rewrites the
 4 KB flash sector beneath it. Saves are rare and small, so this does
