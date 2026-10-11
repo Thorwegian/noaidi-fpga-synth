@@ -1014,6 +1014,53 @@ static void flush_pending_edits(int64_t now)
     s_last_flush = now;
 }
 
+// A patch request (voice_alloc_set_patch / _get_patch). Setting marks
+// everything dirty and flushes at once, so the new patch is in place
+// before the next event.
+static void handle_patch_request(const patch_request_t *r, int64_t now)
+{
+    if (r->set) {
+        g_patch = *r->patch;
+        sync_cutoff_cc();
+        engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
+        s_pending |= DIRTY_AMP_ENV | DIRTY_MOD_ENV | DIRTY_CUTOFF | DIRTY_LFO1
+                   | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
+        s_last_flush = 0;
+        flush_pending_edits(now);
+    } else {
+        *r->patch = g_patch;
+    }
+    xSemaphoreGive(r->done);
+}
+
+static bool patch_request(bool set, patch_t *p)
+{
+    if (s_queue == NULL)
+        return false;
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    if (done == NULL)
+        return false;
+    evt_t evt = {.kind = EVT_PATCH, .patch = {.set = set, .patch = p, .done = done}};
+    // Once queued, the request holds pointers into this frame and to
+    // done, so wait for it however long it takes.
+    bool ok = xQueueSend(s_queue, &evt, pdMS_TO_TICKS(500)) == pdTRUE;
+    if (ok)
+        xSemaphoreTake(done, portMAX_DELAY);
+    vSemaphoreDelete(done);
+    return ok;
+}
+
+bool voice_alloc_set_patch(const patch_t *p)
+{
+    patch_t copy = *p;              // the caller's copy may go out of scope
+    return patch_request(true, &copy);
+}
+
+bool voice_alloc_get_patch(patch_t *p)
+{
+    return patch_request(false, p);
+}
+
 // Poll period for the idle sweep: a released voice must reach
 // true silence within this of its tail ending, even if no further
 // notes arrive. 20 ms is well below noticeable and negligible load.
@@ -1030,6 +1077,8 @@ static void voice_alloc_task(void *arg)
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(VA_POLL_MS)) == pdTRUE) {
             if (evt.kind == EVT_MIDI)
                 handle_midi(&evt.midi);
+            else if (evt.kind == EVT_PATCH)
+                handle_patch_request(&evt.patch, esp_timer_get_time());
         } else {
             busy_since = esp_timer_get_time();   // queue empty → we blocked
         }

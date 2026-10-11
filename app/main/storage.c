@@ -32,6 +32,7 @@ static const char *const s_categories[] = {
 
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
 static bool        s_mounted;
+static char        s_startup[320];   // the startup patch loaded, from the root
 
 // mkdir that treats an existing folder as success.
 static bool make_dir(const char *path)
@@ -142,6 +143,12 @@ bool storage_load_startup(patch_t *p)
     }
     int64_t t1 = esp_timer_get_time();
     ESP_LOGI(TAG, "%s loaded in %lld ms", path, (long long)((t1 - t0) / 1000));
+    snprintf(s_startup, sizeof s_startup, "%s", path + strlen(STORAGE_ROOT "/"));
     *p = loaded;
     return true;
+}
+
+const char *storage_startup_patch(void)
+{
+    return s_startup;
 }

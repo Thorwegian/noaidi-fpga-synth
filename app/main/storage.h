@@ -35,6 +35,10 @@ bool storage_mounted(void);
 // there is no file system, no startup_patch, or the patch does not read.
 bool storage_load_startup(patch_t *p);
 
+// The startup patch's path from the storage root, as storage_load_startup
+// loaded it, or "" if it loaded none.
+const char *storage_startup_patch(void);
+
 // Save *p as Patches/User/<category>/<name>.toml, replacing a patch of
 // that name (FAT compares names case-insensitively). The category folder
 // must exist and the name must be valid (patch_name_valid). False, with

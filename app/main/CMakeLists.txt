@@ -3,11 +3,11 @@
 
 idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        "midi_parser.c" "spi_regs.c" "engine_link.c"
-                       "voice_alloc.c" "slider.c" "ble_midi.c" "patch.c"
+                       "voice_alloc.c" "ble_midi.c" "patch.c" "console.c" "cli.c" "cli_system.c"
                        "stress_test.c" "storage.c" "patch_units.c" "patch_file.c"
                        "../lib/tomlc17/src/tomlc17.c"
                        PRIV_REQUIRES spi_flash esp_app_format esp_driver_spi esp_driver_gpio esp_driver_uart esp_timer
-                                     esp_adc nvs_flash esp_driver_usb_serial_jtag bt esp_ringbuf
+                                     nvs_flash esp_driver_usb_serial_jtag bt esp_ringbuf
                                      fatfs wear_levelling vfs
                        INCLUDE_DIRS ""
                        PRIV_INCLUDE_DIRS "../lib/tomlc17/src")

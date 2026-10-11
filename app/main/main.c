@@ -17,13 +17,19 @@
 #include "event_bus.h"
 #include "engine_link.h"
 #include "voice_alloc.h"
-#include "slider.h"
+#include "console.h"
+#include "cli.h"
+#include "nvs_flash.h"
 #include "ble_midi.h"
 #include "stress_test.h"
 #include "storage.h"
 
 void app_main(void)
 {
+    // The serial console first: from here on stdout and ESP_LOG print
+    // through it (console.h).
+    console_init();
+
     // Boot banner: WHICH build is running (esp_app_desc is regenerated
     // every build — version is git-describe, date/time is the compile).
     // Exists because a hash-verified flash can leave the old app
@@ -126,7 +132,14 @@ void app_main(void)
     engine_link_init();
     voice_alloc_init();
     midi_in_start();   // subscribers are registered: start publishing
-    slider_init();   // panel slider -> CC71 (parked); console keys 1/2/r/p
+    // NVS holds the BLE bonds. A full or version-mismatched partition is
+    // erased and reinitialized: it only ever holds settings.
+    esp_err_t nvs = nvs_flash_init();
+    if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs);
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
 #if CONFIG_NOAIDI_STRESS_TEST
     stress_test_start();  // synthetic MIDI flood; off by default
@@ -134,4 +147,5 @@ void app_main(void)
     // NOTE: boot-capture tooling waits for the "play the keyboard"
     // marker - keep the prefix if this line ever changes.
     printf("play the keyboard\n");
+    cli_init();      // console commands and status bar
 }

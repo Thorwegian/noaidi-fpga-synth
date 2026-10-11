@@ -26,6 +26,11 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 CONFIG_ESP_TASK_WDT_PANIC=y
 
+# The console's tasks command: per-task state, stack high-water mark and
+# CPU share (cli_system.c).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
 # The ESP32-C3 Super Mini has 4 MB of flash.
 #
 # Patch storage (docs/storage_format.md): a FAT partition on the

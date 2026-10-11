@@ -233,10 +233,10 @@ the filter is barely damped, are left out.
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `attack` | seconds | 0.001 … 35.9 | rate code, see below |
-| `decay` | seconds, to reach this envelope's sustain | 0.0047 … 35.1 | rate code |
+| `decay` | seconds, to reach this envelope's sustain | 0.0031 … 30.9, depending on sustain (see below) | rate code |
 | `sustain` (`amp_env`) | dB, relative to the peak | −60.2 … −0.06 | `sustain` = round(1024 × (1 + value / 60.206)) |
 | `sustain` (`mod_env`) | percent of the depth | 0 … 99.9 | `sustain` = round(value × 1024 / 100) |
-| `release` | seconds, for a fall from full scale | 0.0047 … 35.1 | rate code |
+| `release` | seconds, for a fall from full scale | 0.0047 … 30.9 | rate code |
 | `velocity` | percent: how far a soft note scales the envelope's amount | 0 … 100 | `vel_amp_amt` / `vel_mod_amt` = round(value × 127 / 100) |
 
 `[mod_env]` also has:
@@ -269,8 +269,11 @@ the distance `D`:
     D > y₁:  samples = ln((α·D + ½) / (α·max(y₁, E) + ½)) / g + max(0, y₁ − E)
 
 - `decay` covers `D = F − sustain level`, the distance to this
-  envelope's own sustain (sustain level = `sustain` × 2¹², a 10-bit `sustain`). The loader
-  therefore reads `sustain` before `decay`. Decay samples are rounded
+  envelope's own sustain (sustain level = `sustain` × 2¹², a 10-bit
+  `sustain`). Its range therefore depends on the sustain: 0.0047 …
+  30.9 s at sustain 0, down to 0.0031 … 0.043 s at the highest
+  sustain, where the distance is a single sustain step. The loader
+  reads `sustain` before `decay`. Decay samples are rounded
   to a whole number before conversion. Neighbouring codes whose decays
   differ by less than that are, at high sustain levels, codes that
   decay identically in the gateware.
@@ -433,7 +436,9 @@ New instrument-wide settings are added here as keys.
 
 ## Saving
 
-The synth writes only under `Patches/User`. To save `Name.toml`, it:
+Saves from MIDI, a GUI or the front panel go only under
+`Patches/User`; the developers' serial console writes wherever it is
+told. To save `Name.toml`, the synth:
 
 1. writes the new patch to `Name.toml.new`, ending with the line
    `# end`, and flushes it to the flash;
