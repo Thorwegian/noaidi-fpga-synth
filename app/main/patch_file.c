@@ -41,7 +41,7 @@ bool patch_file_parse(const char *text, size_t len, patch_t *p, char *err, size_
     }
 
     patch_t q;
-    patch_default(&q);
+    patch_init(&q);
     size_t n;
     const patch_field_t *fields = patch_fields(&n);
     for (size_t k = 0; k < n; k++) {               // table order: dependencies first

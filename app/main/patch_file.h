@@ -3,10 +3,10 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// A patch file is TOML in musical units. Reading starts from the default
-// patch, so a missing key keeps its default; unknown keys and tables are
-// ignored, an unknown name keeps the default, and an out-of-range value
-// clamps. A file that is not valid TOML, or whose format is newer than
+// A patch file is TOML in musical units. Reading starts from the init
+// patch (patch_init), so a missing key takes the init patch's value, as
+// does an unknown name; unknown keys and tables are ignored, and an
+// out-of-range value clamps. A file that is not valid TOML, or whose format is newer than
 // PATCH_FILE_FORMAT, is not read. The conversions are patch_units.h's.
 //
 // Plain C with stdio: the host test (app/test) uses it too.

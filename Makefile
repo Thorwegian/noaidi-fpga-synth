@@ -13,7 +13,7 @@
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
 #   make fw-test    host test: every patch-file value loads back exactly,
-#                   and the factory patch equals the default patch
+#                   and the factory patches read back exactly
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
@@ -66,7 +66,7 @@ fw-monitor:
 fw-test: $(FW_TEST_SRC)
 	mkdir -p $(dir $(FW_TEST))
 	$(HOST_CC) -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src -o $(FW_TEST) $(FW_TEST_SRC) -lm
-	$(FW_TEST) app/storage/Patches/Factory/Pads/Supersaw.toml
+	$(FW_TEST) $(shell find app/storage/Patches -name '*.toml')
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage

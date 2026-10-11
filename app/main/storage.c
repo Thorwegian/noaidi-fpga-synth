@@ -106,18 +106,14 @@ bool storage_load_startup(patch_t *p)
     char path[320], err[200];
     if (!s_mounted || !startup_patch_path(path, sizeof path))
         return false;
-    patch_t loaded, def;
+    patch_t loaded;
     int64_t t0 = esp_timer_get_time();
     if (!patch_file_read(path, &loaded, err, sizeof err)) {
-        ESP_LOGE(TAG, "%s: %s; keeping the default patch", path, err);
+        ESP_LOGE(TAG, "%s: %s; keeping the init patch", path, err);
         return false;
     }
     int64_t t1 = esp_timer_get_time();
-    patch_default(&def);
-    printf("storage: %s loaded in %lld ms; differences from the default patch:\n",
-           path, (long long)((t1 - t0) / 1000));
-    int diffs = patch_file_diff(stdout, &def, &loaded);
-    printf("storage: %d difference%s\n", diffs, diffs == 1 ? "" : "s");
+    ESP_LOGI(TAG, "%s loaded in %lld ms", path, (long long)((t1 - t0) / 1000));
     *p = loaded;
     return true;
 }

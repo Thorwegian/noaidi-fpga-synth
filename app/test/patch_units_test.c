@@ -14,10 +14,10 @@
 // depends on another key (decay on sustain, LFO depth on destination)
 // are checked across that key's values.
 //
-// Then it writes the default patch (patch_default) as a patch file,
-// reads it back, and reads the factory file given as the argument; both
-// must equal the default patch. The written file is printed, so the
-// factory file can be made from it.
+// Then it writes the init patch (patch_init) as a patch file and reads it
+// back, which must give the init patch. Each factory file given as an
+// argument must read, and must already hold the writer's own text for
+// its values (comment lines aside), so it reads back exactly.
 //
 //   make fw-test
 
@@ -122,7 +122,7 @@ int main(int argc, char **argv)
     for (size_t k = 0; k < n; k++) {
         const patch_field_t *f = &fields[k];
         for (int i = 0; i < f->count; i++) {
-            patch_default(&p);
+            patch_init(&p);
             if (!strcmp(f->key, "decay")) {
                 // decay depends on its envelope's sustain
                 int env = !strcmp(f->table, "amp_env") ? 0 : 1;
@@ -142,36 +142,53 @@ int main(int argc, char **argv)
         printf("%-8s %-14s %s\n", f->table, f->key, s_failures ? "..." : "ok");
     }
 
-    // The default patch, written and read back.
-    patch_t def, back, factory;
-    patch_default(&def);
+    // The init patch, written and read back.
+    patch_t init, back;
+    patch_init(&init);
     char *text = NULL;
     size_t text_len = 0;
     FILE *mem = open_memstream(&text, &text_len);
-    patch_file_write(mem, &def);
+    patch_file_write(mem, &init);
     fclose(mem);
     char err[200];
     if (!patch_file_parse(text, text_len, &back, err, sizeof err)) {
-        printf("FAIL reading the written default patch: %s\n", err);
+        printf("FAIL reading the written init patch: %s\n", err);
         s_failures++;
-    } else if (patch_file_diff(stdout, &def, &back) != 0) {
-        printf("FAIL the written default patch reads back different (above)\n");
+    } else if (patch_file_diff(stdout, &init, &back) != 0) {
+        printf("FAIL the written init patch reads back different (above)\n");
         s_failures++;
     }
-    printf("\ndefault patch, as written:\n%s", text);
     free(text);
 
-    // The factory file must hold the default patch.
-    if (argc > 1) {
-        if (!patch_file_read(argv[1], &factory, err, sizeof err)) {
-            printf("FAIL %s: %s\n", argv[1], err);
+    // Each factory file reads, and holds exactly the writer's text.
+    for (int a = 1; a < argc; a++) {
+        patch_t factory;
+        if (!patch_file_read(argv[a], &factory, err, sizeof err)) {
+            printf("FAIL %s: %s\n", argv[a], err);
             s_failures++;
-        } else if (patch_file_diff(stdout, &def, &factory) != 0) {
-            printf("FAIL %s differs from the default patch (above)\n", argv[1]);
+            continue;
+        }
+        mem = open_memstream(&text, &text_len);
+        patch_file_write(mem, &factory);
+        fclose(mem);
+        // the file without its comment lines
+        FILE *in = fopen(argv[a], "r");
+        char line[256], *body = NULL;
+        size_t body_len = 0;
+        FILE *bm = open_memstream(&body, &body_len);
+        while (in && fgets(line, sizeof line, in))
+            if (line[0] != '#')
+                fputs(line, bm);
+        if (in) fclose(in);
+        fclose(bm);
+        if (strcmp(body, text) != 0) {
+            printf("FAIL %s is not in the writer's form; the writer gives:\n%s", argv[a], text);
             s_failures++;
         } else {
-            printf("\n%s: equals the default patch\n", argv[1]);
+            printf("%s: reads back exactly\n", argv[a]);
         }
+        free(body);
+        free(text);
     }
 
     printf("\n%s (%d failures)\n", s_failures ? "FAIL" : "ALL PASS", s_failures);

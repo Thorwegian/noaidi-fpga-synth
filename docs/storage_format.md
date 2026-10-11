@@ -163,7 +163,10 @@ raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
 A patch file holds the sound: every field of `patch_t` that the synth
 renders today. `mod` (the modulation matrix) and `arp` are not
 rendered yet and are not stored. A missing key takes the value of the
-default patch (`patch_default`).
+**init patch** (`patch_init`): one saw, an open 24 dB/oct lowpass, an
+organ envelope (fastest attack, full sustain, ~9 ms release), velocity
+off, no modulation. The init patch is also the sound when no stored
+patch loads.
 
 ### `[voice]`
 
@@ -336,7 +339,7 @@ Patch-specific settings for the part that plays the patch.
 `pan` raw values −64 and −63 both mute the right side, and the synth
 stores −63.
 
-### Example: the default patch
+### Example: the factory patch `Pads/Supersaw.toml`
 
 ```toml
 format = 1
@@ -410,16 +413,16 @@ startup_patch = "Patches/Factory/Pads/Supersaw.toml"
 
 | Key | Meaning |
 |---|---|
-| `startup_patch` | the patch loaded at power-on, as a path from the root; absent or missing file = the default patch |
+| `startup_patch` | the patch loaded at power-on, as a path from the root; absent or missing file = the init patch |
 
 New instrument-wide settings are added here as keys.
 
 ## Loading
 
 - **Unknown keys and tables:** ignored.
-- **Missing keys:** take the default patch's value.
+- **Missing keys:** take the init patch's value.
 - **Out-of-range values:** clamped to the range.
-- **Unknown names:** the key takes its default.
+- **Unknown names:** the key takes the init patch's value.
 - **Arrays:** extra `[[osc]]` or `[[lfo]]` entries are ignored; missing
   ones take the defaults.
 - **Unreadable files:** a file that is not valid TOML, or whose
@@ -444,12 +447,14 @@ If power is lost partway, the next mount finishes or undoes the save:
 ## Factory content
 
 The factory patches and the default `system.toml` live in the repo
-under `app/storage/`, mirroring the root above. The factory set is the
-default patch, as `Patches/Factory/Pads/Supersaw.toml`, and
-`system.toml` starts it at power-on.
+under `app/storage/`, mirroring the root above. The factory set is
+`Patches/Factory/Pads/Supersaw.toml`, the sound the synth starts with:
+`system.toml` names it as the startup patch. `make fw-test` checks that
+every factory patch reads and is already in the writer's own form, so
+it reads back exactly.
 
 A firmware update never writes the `storage` partition, so it cannot
 overwrite user patches. `make fw-storage-flash` packs `app/storage/`
 and writes it; first-time setup uses it, and it erases all user
 patches. If the partition does not mount, the synth reports it, runs
-on the default patch, and never formats the partition on its own.
+on the init patch, and never formats the partition on its own.

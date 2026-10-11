@@ -1,7 +1,7 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 #
-# The default patch: a 7+1 supersaw with a sine an octave below.
+# The startup sound: a 7+1 supersaw with a sine an octave below.
 format = 1
 
 [voice]

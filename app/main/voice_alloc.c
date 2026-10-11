@@ -43,7 +43,7 @@
 // VOL_REF is the unity anchor, so a DMEM offset of 0 is unity gain:
 // the RTL adds (gain DMEM word >>> 6) to the UQ4.4 word gain, so a raw
 // DMEM value of 64 = one UQ4.4 step, and off = (vol−VOL_REF)·64.
-#define VOL_REF    0xCF               // unity anchor = patch_default volume
+#define VOL_REF    0xCF               // unity anchor = patch_init volume
 
 // Whole semitones ⇄ raw pitch (1024 per octave), rounded to the nearest
 // raw step, ties away from zero: one semitone is 85⅓ raw steps, so
@@ -147,7 +147,7 @@ static int64_t  s_last_flush;
 #define DMEM_VGATE(v)  (80 + (v))
 #define DMEM_TEST_TONE 511   // gateware test-tone latch (csp.sv)
 
-// Instruction plan: entries 0..31 = LFOs (0 is the boot vibrato),
+// Instruction plan: entries 0..31 = LFOs (0 and 1 are LFO 1 and 2),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
 // (MOD env, channel-cut MAC) — the pair MUST be adjacent: both
 // write DMEM_CUT(v), and chain-summing requires same-word writers in
@@ -213,7 +213,6 @@ static uint32_t mod_env_coef(uint8_t vel)
 // The amp envelope's A,D,S,R lives in g_patch.env[0] (patch.h);
 // patch_adsr_rate_ad() and patch_adsr_rate_dsr() convert it into the linear coefficients
 // the CSP multiplies by.
-// patch_default() carries the ear-tuned values (0x98/0x20/0x3C0/0x28).
 
 // The per-voice cutoff DMEM BASE is ZERO: velocity rides the MOD
 // envelope's COEF word, where it scales the excursion rather than
@@ -1077,7 +1076,7 @@ void voice_alloc_init(void)
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
-    patch_default(&g_patch);   // the active sound, in one struct
+    patch_init(&g_patch);      // the active sound, in one struct
     storage_load_startup(&g_patch);   // system.toml's startup patch, if any
     sync_cutoff_cc();
     init_param_pointers();

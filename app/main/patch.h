@@ -172,4 +172,5 @@ typedef struct {
 
 // ── The active patch ────────────────────────────────────
 extern patch_t g_patch;
-void     patch_default(patch_t *p);
+// The init patch: one saw, open filter, organ envelope, no modulation.
+void     patch_init(patch_t *p);

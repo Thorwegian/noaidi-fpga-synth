@@ -24,15 +24,14 @@ extern "C" {
 
 // Mount the storage partition and complete its folder layout. Returns
 // false if the partition is missing or does not mount; the synth then
-// runs on the default patch with no stored patches.
+// runs on the init patch with no stored patches.
 bool storage_init(void);
 
 // Whether storage_init() mounted the file system.
 bool storage_mounted(void);
 
-// Read system.toml's startup_patch into *p. Prints where the loaded patch
-// differs from the default patch. False, with *p untouched, if there is
-// no file system, no startup_patch, or the patch does not read.
+// Read system.toml's startup_patch into *p. False, with *p untouched, if
+// there is no file system, no startup_patch, or the patch does not read.
 bool storage_load_startup(patch_t *p);
 
 #ifdef __cplusplus
