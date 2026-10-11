@@ -1,0 +1,4 @@
+build/
+
+# The generated files are checked in (the root .gitignore ignores *.json)
+!src/generated/*.json
