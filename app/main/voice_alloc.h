@@ -13,6 +13,10 @@
 
 #pragma once
 
+#include <stdbool.h>
+
+#include "patch.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +24,15 @@ extern "C" {
 // Subscribe to the event bus and start the allocator task.
 // Call after event_bus_init() and engine_link_init().
 void voice_alloc_init(void);
+
+// Make *p the active patch, as a full set of CC edits would: every
+// instruction, DMEM word and sounding voice follows it. Runs in the
+// allocator task, in order with MIDI; waits until it is applied. False
+// if the allocator does not answer.
+bool voice_alloc_set_patch(const patch_t *p);
+
+// Copy the active patch to *p, in order with MIDI.
+bool voice_alloc_get_patch(patch_t *p);
 
 #ifdef __cplusplus
 }

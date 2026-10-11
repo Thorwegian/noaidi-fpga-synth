@@ -82,6 +82,26 @@ different facts:
   in use; a true retrigger of a HELD voice needs a gateware
   edge/pulse mechanism (GATE bit 1, retrig, is reserved for it).
 
+## Patch storage
+
+`storage` mounts the FAT partition at `/storage` and loads
+`system.toml`'s startup patch at boot; `patch_file` and `patch_units`
+read, write and save patch files ([storage_format.md](storage_format.md)).
+A patch reaches the synth model through `voice_alloc_set_patch()`,
+which queues it with the MIDI events, so a load lands between two
+events, never in the middle of one; `voice_alloc_get_patch()` copies the
+active patch out the same way.
+
+## Console
+
+`console` owns the USB serial port (USB-Serial/JTAG). On a VT100
+terminal it splits the screen like an IRC client: a scroll region for
+everything printed, a status bar, and an input line with a line
+editor, history and Tab completion. `stdout`, `stderr` and so ESP_LOG
+print through it, from any task, without breaking the line being
+typed. `cli` registers the commands: `load`, `save`, `ls`, `rm`,
+`patch`, `ble`, `help`. Commands run in the console task.
+
 ## Sequencers / arpeggiators
 
 A sequencer or arpeggiator is just another producer into the same

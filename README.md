@@ -67,7 +67,6 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 |---|---|---|
 | MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
 | Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — reserved for the Open Stage Control dev panel (requires the console on USB-Serial/JTAG, which it is) |
-| Panel slider | 1 (A1) | ADC1 ch 1: 10 kΩ linear pot wiper; pot sits between 680 Ω to GND and 3.6 kΩ to 3.3 V so the wiper stays inside the max-attenuation ADC range (~0.16–2.47 V). Calibrate via '1'/'2' keys in the serial monitor; ends persist in NVS |
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 
@@ -126,13 +125,37 @@ make sram        # load bitstream into FPGA SRAM (volatile, fast)
 make flash       # write bitstream to FPGA flash (persistent)
 make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
-make fw-monitor  # attach the IDF serial monitor
+make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
+make fw-console  # attach the console with screen (see Console below)
 make fw-test     # host test of the patch file format (about a minute)
 ```
 
 `make sim` starts every variable that has no initial value at a random
 value, with a new seed on each run; the seed is the first line of each
 `rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
+
+## Console
+
+`make fw-console` attaches `screen` to the ESP32's USB serial port
+(`ESPPORT` overrides the port it finds). The screen splits into a log
+region, a status bar and an input line:
+
+```
+I (2041) storage: /storage/Patches/Factory/Pads/Supersaw.toml loaded in 11 ms
+> load Patches/User/Pads/Arctic Ice
+loaded Patches/User/Pads/Arctic Ice
+ noaidi … | Patches/User/Pads/Arctic Ice
+> save Pads/Arctic Ice 2█
+```
+
+- **Commands:** `help`, `load <path>`, `save <path>` (into
+  `Patches/User/<category>/`), `ls [folder]`, `rm <path>`, `patch`
+  (print the active patch as a file), and `ble`.
+- **Paths:** relative to the storage root, without `.toml`. Tab
+  completes commands and paths; quote paths with spaces.
+- **Keys:** ↑/↓ recall earlier commands. **Ctrl-L** redraws the screen;
+  press it after attaching or resizing the window.
+- **Exiting:** `Ctrl-A K` leaves `screen`.
 
 ## Patch storage
 
@@ -160,7 +183,8 @@ make fw-storage-flash                 # app/storage → synth: the factory conte
   after `make fw-flash`. Firmware updates never touch the storage
   partition.
 - **Requirements:** the commands find ESP-IDF through the firmware
-  build, so run `make fw` once first. `ESPPORT=/dev/...` picks the
+  build, so run `make fw` once first. They need the serial port, so
+  leave the console (`Ctrl-A K`) before running them. `ESPPORT=/dev/...` picks the
   serial port if esptool doesn't find it.
 - **Reset:** the synth reads its storage at boot. esptool resets it
   after every command, so it boots with what was just written.

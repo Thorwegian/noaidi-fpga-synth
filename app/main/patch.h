@@ -129,7 +129,7 @@ typedef struct {
 } arp_seq_t;
 
 // ── The patch ───────────────────────────────────────────────────────
-typedef struct {
+typedef struct patch_s {
     osc_t           osc[PATCH_NUM_OSC];
     voice_struct_t  voice_struct;
     int8_t          osc_mix;         // osc1<->osc2 balance (CC 24), 0=center

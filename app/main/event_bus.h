@@ -17,10 +17,12 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 
 #include "midi_parser.h"
 
@@ -32,13 +34,25 @@ extern "C" {
 
 typedef enum {
     EVT_MIDI = 1,
+    EVT_PATCH,          // a patch request to voice_alloc (voice_alloc.h)
 } evt_kind_t;
+
+// A patch request: replace the active patch, or copy it out. Sent
+// straight to voice_alloc's queue, so it stays in order with MIDI; the
+// sender waits on done.
+typedef struct {
+    bool              set;      // true: *patch becomes the active patch;
+                                // false: the active patch is copied to *patch
+    struct patch_s   *patch;
+    SemaphoreHandle_t done;
+} patch_request_t;
 
 // Tagged union: extend with new kinds and members as the system grows.
 typedef struct {
     evt_kind_t kind;
     union {
-        midi_message_t midi;
+        midi_message_t  midi;
+        patch_request_t patch;
     };
 } evt_t;
 
