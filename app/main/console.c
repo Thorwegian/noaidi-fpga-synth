@@ -16,7 +16,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#define PROMPT          "> "
 #define LINE_MAX_BYTES  160        // the input line
 #define OUT_LINE_BYTES  256        // one printed line; longer ones split
 #define HISTORY_LEN     16
@@ -31,6 +30,7 @@ static bool    s_full;             // the VT100 layout is up
 static int     s_rows, s_cols;
 static int64_t s_query_sent;       // when the size query went out, 0 = none pending
 static char    s_status[128];
+static char    s_prompt[96] = "$ ";
 
 // Raw output to the USB serial port. Dropped when no host is attached,
 // and without waiting once a write has timed out (a host is attached but
@@ -83,9 +83,10 @@ static void draw_input(void)
         term_printf("\x1b[%d;1H", s_rows);
     else
         term_puts("\r");
-    term_puts("\x1b[2K" PROMPT);
+    term_puts("\x1b[2K");
+    term_puts(s_prompt);
     term_write(s_line, s_len);
-    int col = 1 + columns(PROMPT, strlen(PROMPT)) + columns(s_line, s_pos);
+    int col = 1 + columns(s_prompt, strlen(s_prompt)) + columns(s_line, s_pos);
     if (s_full)
         term_printf("\x1b[%d;%dH", s_rows, col);
     else if (col > 1)                      // ESC[0C would still move one
@@ -107,24 +108,32 @@ static void draw_status(void)
     term_puts("\x1b[0m\x1b" "8");
 }
 
-// Set up the layout for an s_rows × s_cols terminal: the scroll region
-// above, status bar and input line below.
-static void draw_layout(void)
+// Lay out an s_rows × s_cols terminal: output above, status bar and input
+// line on the bottom two rows. No scroll region: output scrolls the whole
+// screen, so the terminal keeps it in its own scrollback. entering: the
+// layout is new (or the size changed), so make room by scrolling the
+// screen up two rows; otherwise just redraw the bottom two rows.
+static void draw_layout(bool entering)
 {
-    term_printf("\x1b[r\x1b[2J\x1b[1;%dr", s_rows - 2);
+    term_puts("\x1b[r");                       // no scroll region
+    if (entering)
+        term_printf("\r\x1b[2K\x1b[%d;1H\r\n\r\n", s_rows);
+    term_printf("\x1b[%d;1H\x1b[J", s_rows - 1);
     draw_status();
     draw_input();
 }
 
-// One line of output into the log region, above the prompt.
+// One line of output above the status bar.
 static void emit_line(const char *text, size_t len)
 {
     if (s_full) {
-        // to the bottom of the scroll region, where the newline scrolls
-        // only the region, then back to the input line
-        term_printf("\x1b" "7\x1b[%d;1H\n", s_rows - 2);
+        // over the status bar, then two newlines scroll it up past the
+        // bottom two rows, which are drawn again
+        term_printf("\x1b[%d;1H\x1b[J", s_rows - 1);
         term_write(text, len);
-        term_puts("\x1b" "8");
+        term_puts("\r\n\r\n");
+        draw_status();
+        draw_input();
     } else {
         term_puts("\r\x1b[2K");
         term_write(text, len);
@@ -139,21 +148,31 @@ static void emit_line(const char *text, size_t len)
 static char   s_out[OUT_LINE_BYTES];
 static size_t s_out_len;
 
+void console_print(const char *buf, size_t len)
+{
+    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
+    for (size_t i = 0; i < len; i++) {
+        char c = buf[i];
+        if (c == '\n' || s_out_len == sizeof s_out) {
+            emit_line(s_out, s_out_len);
+            s_out_len = 0;
+        }
+        if (c != '\n' && c != '\r')
+            s_out[s_out_len++] = c;
+    }
+    xSemaphoreGiveRecursive(s_lock);
+}
+
+#ifdef FDEV_SETUP_STREAM                    // picolibc
 static int console_put(char c, FILE *f)
 {
     (void)f;
-    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
-    if (c == '\n' || s_out_len == sizeof s_out) {
-        emit_line(s_out, s_out_len);
-        s_out_len = 0;
-    }
-    if (c != '\n' && c != '\r')
-        s_out[s_out_len++] = c;
-    xSemaphoreGiveRecursive(s_lock);
+    console_print(&c, 1);
     return (unsigned char)c;
 }
 
 static FILE s_stream = FDEV_SETUP_STREAM(console_put, NULL, NULL, _FDEV_SETUP_WRITE);
+#endif
 
 // ── Commands ────────────────────────────────────────────────────────
 static const console_cmd_t *s_cmds[MAX_COMMANDS];
@@ -169,6 +188,14 @@ int console_commands(const console_cmd_t *const **cmds)
 {
     *cmds = s_cmds;
     return s_ncmds;
+}
+
+void console_set_prompt(const char *prompt)
+{
+    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
+    snprintf(s_prompt, sizeof s_prompt, "%s", prompt);
+    draw_input();
+    xSemaphoreGiveRecursive(s_lock);
 }
 
 void console_set_status(const char *fmt, ...)
@@ -364,12 +391,16 @@ static void enter(void)
     s_line[s_len] = '\0';
     char line[LINE_MAX_BYTES];
     snprintf(line, sizeof line, "%s", s_line);
-    history_add(line);
     s_hist_at = 0;
     s_len = s_pos = 0;
+    if (!line[0]) {                          // an empty line: just a fresh prompt
+        draw_input();
+        return;
+    }
+    history_add(line);
     // echo the command into the log, then run it
-    char echo[LINE_MAX_BYTES + 4];
-    int n = snprintf(echo, sizeof echo, PROMPT "%s", line);
+    char echo[LINE_MAX_BYTES + sizeof s_prompt];
+    int n = snprintf(echo, sizeof echo, "%s%s", s_prompt, line);
     emit_line(echo, n < (int)sizeof echo ? (size_t)n : sizeof echo - 1);
     draw_input();
     xSemaphoreGiveRecursive(s_lock);       // commands print
@@ -400,9 +431,10 @@ static void csi(const char *params, char final)
         break;
     case 'R':                                  // the size answer
         if (s_query_sent && a >= 4 && b >= 20) {
+            bool entering = !s_full || a != s_rows || b != s_cols;
             s_rows = a; s_cols = b; s_full = true;
             s_query_sent = 0;
-            draw_layout();
+            draw_layout(entering);
         }
         break;
     default: break;
@@ -476,6 +508,8 @@ static void console_task(void *arg)
                 delete_range(s_pos, p);
             } break;
             case 0x0C: query_size(); break;     // Ctrl-L: re-measure, redraw
+                                                // (Return does it too, while
+                                                // the layout is not up)
             default:
                 if (c >= 0x20) insert((const char *)&c, 1);
                 break;
@@ -497,8 +531,10 @@ void console_init(void)
         .tx_buffer_size = 1024,
     };
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
+#ifdef FDEV_SETUP_STREAM
     fflush(stdout);
     stdout = &s_stream;
     stderr = &s_stream;
+#endif
     xTaskCreate(console_task, "console", 6144, NULL, 2, NULL);   // commands run here
 }

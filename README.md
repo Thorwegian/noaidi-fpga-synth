@@ -137,24 +137,30 @@ value, with a new seed on each run; the seed is the first line of each
 ## Console
 
 `make fw-console` attaches `screen` to the ESP32's USB serial port
-(`ESPPORT` overrides the port it finds). The screen splits into a log
-region, a status bar and an input line:
+(`ESPPORT` overrides the port it finds). **Press Return** to bring up
+the layout: output scrolls above a status bar and an input line.
 
 ```
 I (2041) storage: /storage/Patches/Factory/Pads/Supersaw.toml loaded in 11 ms
-> load Patches/User/Pads/Arctic Ice
-loaded Patches/User/Pads/Arctic Ice
- noaidi … | Patches/User/Pads/Arctic Ice
-> save Pads/Arctic Ice 2█
+/Patches $ cd User/Pads
+/Patches/User/Pads $ save Arctic Ice 2
+saved /Patches/User/Pads/Arctic Ice 2
+ noaidi … | /Patches/User/Pads/Arctic Ice 2
+/Patches/User/Pads $ load ../../Factory/Pads/Supersaw█
 ```
 
-- **Commands:** `help`, `load <path>`, `save <path>` (into
-  `Patches/User/<category>/`), `ls [folder]`, `rm <path>`, `patch`
-  (print the active patch as a file), and `ble`.
-- **Paths:** relative to the storage root, without `.toml`. Tab
-  completes commands and paths; quote paths with spaces.
-- **Keys:** ↑/↓ recall earlier commands. **Ctrl-L** redraws the screen;
-  press it after attaching or resizing the window.
+- **Commands:** `help`, `cd [folder]`, `pwd`, `ls [folder]`,
+  `load <patch>`, `save <patch>` (only under `/Patches/User/<category>/`),
+  `rm <patch>`, `patch` (print the active patch as a file), and `ble`.
+- **Paths:** absolute from the storage root (`/Patches/User`) or
+  relative to the working folder in the prompt, with `.` and `..`;
+  patch names leave out `.toml`. Quote names with spaces, or let Tab
+  complete them.
+- **Keys:** ↑/↓ recall earlier commands; ←/→, Home/End, Ctrl-A/E/U/W
+  edit; Ctrl-C clears the line; **Return** or **Ctrl-L** redraws after
+  attaching or resizing.
+- **Scrollback:** output scrolls the whole screen, so the terminal's own
+  scrollback (`Ctrl-A Esc` in `screen`) keeps it.
 - **Exiting:** `Ctrl-A K` leaves `screen`.
 
 ## Patch storage

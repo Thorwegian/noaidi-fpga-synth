@@ -7,23 +7,27 @@
 // tio, picocom; "make fw-console") the screen is split like an IRC
 // client's:
 //
-//   rows 1 … N−2   log region: everything printed scrolls here
+//   rows 1 … N−2   output: everything printed scrolls up here
 //   row  N−1       status bar
 //   row  N         input line: prompt and line editor
 //
-// The log region is a scroll region (DECSTBM), so a line printed by
-// any task scrolls only that region: the status bar and a half-typed
-// command never move. The terminal size is asked for at start, on
-// Ctrl-L and on the first key after a quiet start; a terminal that does
-// not answer gets plain lines with the prompt reprinted below them.
+// A line printed by any task goes over the status bar and scrolls the
+// whole screen up; the status bar and input line, half-typed command
+// included, are drawn again below it. Scrolling the whole screen (no
+// scroll region) keeps the output in the terminal's own scrollback.
+// The terminal size is asked for at start, on Ctrl-L, and on any key
+// while the layout is not up (so Return wakes it after attaching); a
+// terminal that does not answer gets plain lines with the prompt
+// reprinted below them.
 //
 // stdout and stderr are this console's stream, so printf and ESP_LOG
-// both land in the log region. The line editor has cursor keys,
+// both land in the output above the status bar. The line editor has cursor keys,
 // Home/End, Delete, Ctrl-A/E/U/W/C/L, ↑/↓ history and Tab completion.
 
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,6 +49,12 @@ void console_init(void);
 
 // Add a command. The table entry must outlive the console.
 void console_register(const console_cmd_t *cmd);
+
+// Print text through the console (what stdout does).
+void console_print(const char *buf, size_t len);
+
+// Set the prompt, e.g. "/Patches $ ".
+void console_set_prompt(const char *prompt);
 
 // Set the status bar text.
 void console_set_status(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

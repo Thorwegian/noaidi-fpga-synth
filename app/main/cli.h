@@ -3,9 +3,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Patch commands (load, save, ls, rm, patch), ble, and help, on the
-// console (console.h). Paths are relative to the storage root and may
-// leave out ".toml"; Tab completes them.
+// Folder and patch commands (cd, pwd, ls, load, save, rm, patch), ble
+// and help, on the console (console.h). Paths are absolute from the
+// storage root ("/Patches/User") or relative to the working folder,
+// which the prompt shows; patch paths may leave out ".toml". Tab
+// completes them.
 
 #pragma once
 
