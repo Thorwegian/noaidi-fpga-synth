@@ -89,7 +89,8 @@ uint8_t  patch_adsr_rate_byte(uint8_t patch_rate);
 // ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
     uint8_t  shape;         // osc_core shape (saw/pulse/tri/sine)
-    uint16_t rate;          // UQ0.24 increment (subsonic..control rate)
+    uint16_t rate;          // phase increment per sample, in 2^-25 of a
+                            // cycle (subsonic..control rate)
     int16_t  depth;         // signed Q8.10 contribution amplitude
     uint8_t  dest;          // DMEM/sink selector (mod routing)
 } lfo_t;
