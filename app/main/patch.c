@@ -120,14 +120,13 @@ void patch_default(patch_t *p)
 
     // LFO 1 = the boot vibrato (instruction 0): 1 Hz triangle, ±19 cents
     p->lfo[0].shape = 2;               // triangle
-    p->lfo[0].rate  = 350;             // ~1 Hz (increment per 48 kHz
-                                       // walk)
+    p->lfo[0].rate  = 350;             // ~1 Hz (350 × 96000 / 2^25)
     p->lfo[0].depth = 16;
 
     // LFO 2 (instruction 1): triangle, ~1 Hz, depth 0 = OFF; default
     // destination is PWM (duty DMEM word) — the thing LFO 1 can't do.
     p->lfo[1].shape = 2;
-    p->lfo[1].rate  = 350;             // ~1 Hz at the 48 kHz walk
+    p->lfo[1].rate  = 350;             // ~1 Hz
     p->lfo[1].depth = 0;
     p->lfo[1].dest  = 0;               // 0 duty (PWM), 1 resonance,
                                        // 2 pitch (sums with LFO 1),

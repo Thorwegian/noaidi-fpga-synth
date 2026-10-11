@@ -292,7 +292,7 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `shape` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | | `shape` 0, 1, 2, 3 |
-| `rate` | Hz | 0.0029 … 187 | `rate` = round(value × 2²⁴ / 48000) |
+| `rate` | Hz | 0.0029 … 187 | `rate` = round(value × 2²⁵ / 96000) |
 | `destination` | name, see below | | `dest` |
 | `depth` | the destination's unit, peak | see below | `depth` |
 

@@ -64,8 +64,8 @@ bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 // partial image.
 //   word 0 OP:   [3:0] opcode bitmask (CSP_OPC_* below), [5:4] LFO shape
 //                 (saw/pulse/tri/sine), [15:6] target DMEM address,
-//                 LFO:  [31:16] rate (UQ0.24 increment low bits:
-//                       5.7 mHz steps, 375 Hz max)
+//                 LFO:  [31:16] rate: phase increment per sample in
+//                       2^-25 of a cycle (2.86 mHz steps, 187.5 Hz max)
 //                 ADSR: [25:16] gate DMEM word (level-sensitive: > 0 held)
 //                 MAC:  [25:16] source DMEM word
 //   words 1 and 3 (ADSR): linear rate coefficients kA/kD/kR and the

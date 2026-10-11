@@ -468,13 +468,14 @@ static void update_amp_env(void)
     }
 }
 
-// CC → LFO phase increment. The gateware increment is LINEAR in
-// frequency (freq = inc * Fs / 2^24, Fs = 96 kHz), so an even-sounding
+// CC → LFO phase increment. The CSP adds the increment to a 25-bit
+// phase accumulator once per sample, so it is LINEAR in frequency
+// (freq = inc * Fs / 2^25, Fs = 96 kHz), and an even-sounding
 // control needs the log2/exponential mapping HERE: a linear val<<7
 // crams the useful slow range into the bottom and makes everything
 // past ~40 uselessly fast. Exponential 0.03 Hz .. 30 Hz
 // across the CC — one equal frequency RATIO per step.
-//   inc = freq * 2^24 / 96000  ≈ freq * 174.76
+//   inc = freq * 2^25 / 96000  ≈ freq * 349.5
 // CC → pulse-width duty offset, Q0.24. The pulse's low time is
 // 0.5·10^(−v), v = val/127: equal ratio per step, 50% down to 5%, so
 // its high time rises from 50% to 95%, never the degenerate 0%/100%.
@@ -485,11 +486,13 @@ static int32_t duty_from_cc(uint8_t val)
     return (int32_t)((0.5f - duty) * 16777216.0f);
 }
 
-#define LFO_FS_HZ   48000.0f   // the rate an LFO's phase advances at
+#define SAMPLE_RATE_HZ    96000.0f      // one CSP pass per sample
+#define LFO_PHASE_CYCLE   33554432.0f   // 2^25: one LFO cycle in the CSP's
+                                        // 25-bit phase accumulator
 static uint16_t lfo_rate_from_cc(uint8_t val)
 {
     float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz
-    float inc  = freq * (16777216.0f / LFO_FS_HZ);
+    float inc  = freq * (LFO_PHASE_CYCLE / SAMPLE_RATE_HZ);
     if (inc < 1.0f)      inc = 1.0f;
     if (inc > 65535.0f)  inc = 65535.0f;
     return (uint16_t)(inc + 0.5f);
