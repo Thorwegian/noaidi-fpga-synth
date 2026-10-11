@@ -19,6 +19,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define PATCH_NUM_OSC   2
 #define PATCH_NUM_LFO   2
 #define PATCH_NUM_ENV   2   // env 0 = amp (fixed to gain), env 1 = MOD
@@ -174,3 +178,7 @@ typedef struct {
 extern patch_t g_patch;
 // The init patch: one saw, open filter, organ envelope, no modulation.
 void     patch_init(patch_t *p);
+
+#ifdef __cplusplus
+}
+#endif

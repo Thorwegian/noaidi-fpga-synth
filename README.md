@@ -127,7 +127,7 @@ make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
 make fw-console  # attach the console with screen (see Console below)
-make fw-test     # host test of the patch file format (about a minute)
+make fw-test     # host tests of patch files and banks (about a minute)
 ```
 
 `make sim` starts every variable that has no initial value at a random
@@ -154,6 +154,9 @@ saved /Patches/User/Pads/Arctic Ice.toml
 - **Patches:** `load <file>`, `save <file>` (anywhere: this is a
   developer's shell), `init` (the init patch), `patch` (print the active
   patch as a file).
+- **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
+  `bank add|insert|rm|new|del|build` edit `banks.toml` (see
+  [storage_format.md](docs/storage_format.md) "Banks").
 - **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
   `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
   `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
@@ -169,6 +172,10 @@ saved /Patches/User/Pads/Arctic Ice.toml
   **PgUp/PgDn** page through them; the status bar shows how far back
   you are, and PgDn past the newest line returns to live output.
 - **Exiting:** `Ctrl-A K` leaves `screen`.
+- **Log:** everything the console receives is written to
+  `app/build/console.log`, overwritten on every run (`less -R` shows it
+  with its escape sequences). For a crash, `make fw-monitor` is better:
+  it decodes the panic backtrace into source lines.
 
 ## Patch storage
 

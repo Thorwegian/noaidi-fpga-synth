@@ -72,9 +72,9 @@ bool storage_init(void)
         ok = make_dir(path);
     }
 
-    // Finish or undo saves a power loss interrupted. The synth writes
-    // only under Patches/User.
-    int repaired = patch_file_recover(STORAGE_ROOT "/Patches/User");
+    // Finish or undo saves a power loss interrupted, anywhere: the
+    // console and banks.toml write outside Patches/User too.
+    int repaired = patch_file_recover(STORAGE_ROOT);
     if (repaired)
         ESP_LOGW(TAG, "repaired %d interrupted save%s", repaired, repaired == 1 ? "" : "s");
 

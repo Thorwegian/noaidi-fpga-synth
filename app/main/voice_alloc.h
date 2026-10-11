@@ -34,6 +34,11 @@ bool voice_alloc_set_patch(const patch_t *p);
 // Copy the active patch to *p, in order with MIDI.
 bool voice_alloc_get_patch(patch_t *p);
 
+// Bank Select (CC 0/32) and Program Change load patches through
+// banks.toml (banks.hpp). listener, if set, is called from the allocator
+// task with the patch's path after each Program Change that loads one.
+void voice_alloc_set_patch_listener(void (*listener)(const char *name));
+
 #ifdef __cplusplus
 }
 #endif

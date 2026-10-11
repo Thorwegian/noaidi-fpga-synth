@@ -19,11 +19,15 @@
 #include "engine_link.h"
 #include "patch.h"
 #include "storage.h"
+#include "banks.hpp"
+#include "patch_file.h"
+
+#include <stdio.h>
 
 #define TAG "voice_alloc"
 
 #define VA_QUEUE_LEN   64
-#define VA_TASK_STACK  3072
+#define VA_TASK_STACK  6144   // Program Change reads banks.toml and a patch file here
 #define VA_TASK_PRIO   5
 
 #define NUM_VOICES     32
@@ -972,6 +976,9 @@ static void handle_cc(uint8_t num, uint8_t val)
     }
 }
 
+static uint8_t s_bank_msb[16], s_bank_lsb[16];   // each channel's bank (see program_change)
+static void program_change(uint8_t channel, uint8_t program);
+
 static void handle_midi(const midi_message_t *m)
 {
     uint8_t type = m->status & 0xF0;
@@ -985,7 +992,15 @@ static void handle_midi(const midi_message_t *m)
         note_off(m->data[0]);
         break;
     case 0xB0:
-        handle_cc(m->data[0], m->data[1]);
+        if (m->data[0] == 0)                  // Bank Select MSB
+            s_bank_msb[ch] = m->data[1];
+        else if (m->data[0] == 32)            // Bank Select LSB
+            s_bank_lsb[ch] = m->data[1];
+        else
+            handle_cc(m->data[0], m->data[1]);
+        break;
+    case 0xC0:
+        program_change(ch, m->data[0]);
         break;
     case 0xE0:                        // pitch wheel, 14-bit
         pitch_bend_update((uint16_t)(((uint16_t)m->data[1] << 7) | m->data[0]));
@@ -1017,20 +1032,60 @@ static void flush_pending_edits(int64_t now)
 // A patch request (voice_alloc_set_patch / _get_patch). Setting marks
 // everything dirty and flushes at once, so the new patch is in place
 // before the next event.
+// Make p the active patch: everything dirty, flushed at once, so the new
+// patch is in place before the next event. Held voices are re-rendered,
+// so sounding notes switch at once.
+static void apply_patch(const patch_t *p, int64_t now)
+{
+    g_patch = *p;
+    sync_cutoff_cc();
+    engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
+    s_pending |= DIRTY_AMP_ENV | DIRTY_MOD_ENV | DIRTY_CUTOFF | DIRTY_LFO1
+               | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
+    s_last_flush = 0;
+    flush_pending_edits(now);
+}
+
 static void handle_patch_request(const patch_request_t *r, int64_t now)
 {
-    if (r->set) {
-        g_patch = *r->patch;
-        sync_cutoff_cc();
-        engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
-        s_pending |= DIRTY_AMP_ENV | DIRTY_MOD_ENV | DIRTY_CUTOFF | DIRTY_LFO1
-                   | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
-        s_last_flush = 0;
-        flush_pending_edits(now);
-    } else {
+    if (r->set)
+        apply_patch(r->patch, now);
+    else
         *r->patch = g_patch;
-    }
     xSemaphoreGive(r->done);
+}
+
+// ── Banks: Bank Select and Program Change (storage_format.md "Banks") ──
+// Each channel's current bank (s_bank_msb/_lsb, declared above
+// handle_midi): CC 0 sets its MSB and CC 32 its LSB, and the bank applies
+// at the channel's next Program Change. Omni today: every channel plays
+// the one active patch, but the bank is kept per channel so parts can
+// follow.
+static void (*s_patch_listener)(const char *name);
+
+void voice_alloc_set_patch_listener(void (*listener)(const char *name))
+{
+    s_patch_listener = listener;
+}
+
+static void program_change(uint8_t channel, uint8_t program)
+{
+    int bank = s_bank_msb[channel] * 128 + s_bank_lsb[channel];
+    char rel[256], path[320], err[160];
+    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel, sizeof rel)) {
+        ESP_LOGW(TAG, "bank %d program %d: no such program", bank, program);
+        return;
+    }
+    snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
+    patch_t p;
+    if (!patch_file_read(path, &p, err, sizeof err)) {
+        ESP_LOGW(TAG, "bank %d program %d: %s", bank, program, err);
+        return;
+    }
+    apply_patch(&p, esp_timer_get_time());
+    ESP_LOGI(TAG, "bank %d program %d: %s", bank, program, rel);
+    if (s_patch_listener)
+        s_patch_listener(rel);
 }
 
 static bool patch_request(bool set, patch_t *p)
