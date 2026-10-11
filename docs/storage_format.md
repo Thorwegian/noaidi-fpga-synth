@@ -12,7 +12,7 @@ the device is plain text in a FAT file system.
 | Property | Value |
 |---|---|
 | Partition | `storage`, type `data`, subtype `fat`, in a custom partition table |
-| File system | FAT on the ESP-IDF wear-levelling layer, 4096-byte sectors |
+| File system | FAT on the ESP-IDF wear-levelling layer, 512-byte sectors (`CONFIG_WL_SECTOR_SIZE_512`, safety mode), 512-byte clusters |
 | Long filenames | on (`CONFIG_FATFS_LFN_HEAP`), up to 255 characters per name (`CONFIG_FATFS_MAX_LFN`) |
 | Filename encoding | UTF-8 (`CONFIG_FATFS_API_ENCODING_UTF_8`) |
 | Mount point | `/storage` |
@@ -29,9 +29,17 @@ On the ESP32-C3's 2 MB flash the partition table is:
 The format does not depend on the partition size. A board with more
 flash gets a larger `storage` partition and nothing else changes.
 
-A file takes at least one 4 KB cluster and a patch file is well under
-4 KB, so the 960 KB partition holds about 190 patches after the folders
-and the wear-levelling overhead.
+**Capacity.** A file takes whole clusters. A patch file is about 650
+bytes, two 512-byte clusters, plus up to about 200 bytes of directory
+entries for a long name. The 960 KB partition therefore holds about
+800 patches after the FAT tables, the folders and the wear-levelling
+overhead: six banks of 128. With 4096-byte clusters it would hold only about
+190.
+
+The 512-byte sectors cost write speed, because each write rewrites the
+4 KB flash sector beneath it. Saves are rare and small, so this does
+not matter. Safety mode keeps a copy of the flash sector while it is
+rewritten, so a power loss mid-write loses no neighbouring data.
 
 ### Reaching the files from a computer
 - **ESP32-C3:** no USB OTG. The partition is read over serial
@@ -130,7 +138,7 @@ in a file is always one raw value written in a musical unit.
   - A host test checks this for every raw value of every key.
 - **Number types:** any numeric key accepts a TOML integer or a float;
   `24` and `24.0` mean the same.
-- **Integer keys:** `slope` and `bend.range` take whole numbers only.
+- **Integer keys:** `slope` and `bend_range` take whole numbers only.
 - **Names:** keys that hold a name take a lowercase string from the
   list given for that key.
 
@@ -248,26 +256,22 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 | `"pitch"` | semitones | round(value × 1024 / 12) |
 | `"cutoff"` | semitones | round(value × 1024 / 12) |
 
-- **Destinations:** LFO 1 drives pitch only, so its `destination` is
-  `"pitch"` or absent. LFO 2 takes any of the four (`dest` 0
+- **Destinations:** both LFOs take any of the four (`dest` 0
   `pulse_width`, 1 `resonance`, 2 `pitch`, 3 `cutoff`).
 - **Reading order:** the loader reads `destination` before `depth`.
 
 ### `[part]`
 
+Patch-specific settings for the part that plays the patch.
+
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `volume` | dB, 0 = unity; `-inf` = off | −77.5 … +18 | `volume` = 207 + round(value / 0.37629); raw 0 = off |
 | `pan` | percent, −100 = left, +100 = right | −100 … +100 | `pan` = round(value × 63 / 100) |
+| `bend_range` | semitones, whole | 1 … 12 | `bend_range` |
 
 `pan` raw values −64 and −63 both mute the right side, and the synth
 stores −63.
-
-### `[bend]`
-
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `range` | semitones, whole | 1 … 12 | `bend_range` |
 
 ### Example: the default patch
 
@@ -328,9 +332,7 @@ depth = 0
 [part]
 volume = 0
 pan = 0
-
-[bend]
-range = 2
+bend_range = 2
 ```
 
 ## `system.toml`
