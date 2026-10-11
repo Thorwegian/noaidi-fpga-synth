@@ -44,6 +44,7 @@ static uint32_t s_param_image[ENGINE_NUM_PARTIALS][ENGINE_WORDS_PER_PARTIAL];
 #define DMEM_QUEUE_LEN      128    // init writes 32 envelope floors +
                                   // 4 global DMEM words in one burst
 #define IMEM_BASE_ADDR     0x0100
+#define IMEM_BURST_WORDS   8      // fpga_word_write_burst's per-transaction limit
 #define IMEM_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
                                   // + 32 MOD envs + 32 amp ADSRs (4
                                   // words each) + 32 MAC instructions
@@ -86,11 +87,20 @@ static inline void mark_dirty(int partial, int word)
 }
 
 // Write every image word to the current shadow page. Boot-time only.
+// Write the whole shadow page: every partial and every instruction. The
+// FPGA boots with its own instruction program (the boot image), so the
+// instruction words are written too, as all-off, and s_imem_image then
+// matches the FPGA. Without that, the no-op elision in engine_task would
+// drop a write equal to the zeroed mirror, a depth-0 LFO for example,
+// and the boot program's value would stay.
 static void write_full_image(void)
 {
     for (int e = 0; e < ENGINE_NUM_PARTIALS; e++)
         fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE, s_param_image[e],
                               ENGINE_WORDS_PER_PARTIAL);
+    const uint32_t *imem = &s_imem_image[0][0];
+    for (int i = 0; i < ENGINE_NUM_INSTR * 4; i += IMEM_BURST_WORDS)
+        fpga_word_write_burst(IMEM_BASE_ADDR + i, imem + i, IMEM_BURST_WORDS);
 }
 
 static TaskHandle_t s_task;

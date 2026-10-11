@@ -85,8 +85,8 @@ never sees.
    sharing a target need not sit in adjacent slots: a chain tolerates
    gaps of up to three, and extends to any length. **Allocator rule** (companion to law 3's table order):
    group instructions with the same target in adjacent slots; scattered
-   same-target instructions remain last-write-wins. First user: LFO 2 → pitch, summing
-   with LFO 1 (slots 0 and 1).
+   same-target instructions remain last-write-wins. First user: the two LFOs
+   (slots 0 and 1), which sum when both drive one DMEM word.
 2. **The audio pipeline is frozen** at the pointer-fetch stage.
    All future features are new opcodes, and an opcode is a
    combination of enable bits, so most are an encoding rather than a

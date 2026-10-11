@@ -70,7 +70,7 @@ only.**
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
 | LFO rate law | exponential, ~0.03–30 Hz (JP class; Nord Lead reaches audio-rate) | exponential 0.03–30 Hz | ✓ |
-| Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | CC 77 = val<<2 → max ±6 semitones, 4.7-cent steps | **F3** — neither fish nor fowl: too coarse at the bottom for vibrato, oddly capped for FX |
+| Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | CC 77 = val<<2 → max ±3 semitones, 2.3-cent steps | **F3** — neither fish nor fowl: too coarse at the bottom for vibrato, oddly capped for FX |
 | Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | fixed route → cutoff | ~ |
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct, square-law taper (fine near centre) | ✓ |
 | LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | ✗ |

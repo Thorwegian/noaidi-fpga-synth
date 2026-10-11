@@ -122,7 +122,9 @@ panel traffic and test traffic never contend.
 
 ### Default voice
 
-The power-on `patch_default()` timbre is a **7+1 supersaw with a sine
+The power-on timbre is the factory patch `Pads/Supersaw.toml`
+(`app/storage/`, loaded through `system.toml`'s startup patch;
+[storage_format.md](storage_format.md)), a **7+1 supersaw with a sine
 sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
 (fattens the saws without muddying the mid), through a **24 dB/oct**
 lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74/106

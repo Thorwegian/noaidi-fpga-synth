@@ -1,0 +1,7 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+# Instrument-wide settings (docs/storage_format.md).
+format = 1
+
+startup_patch = "Patches/Factory/Pads/Supersaw.toml"

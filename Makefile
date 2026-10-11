@@ -12,6 +12,17 @@
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
+#   make fw-test    host test: every patch-file value loads back exactly,
+#                   and the factory patches read back exactly
+#   make fw-storage-flash  write the patch storage partition, packed
+#                   from app/storage — ERASES all user patches
+#   make fw-storage-read DIR=x   replace folder x with the synth's storage
+#   make fw-storage-write DIR=x  replace the synth's storage with folder x
+#
+# The storage targets use tools/storage/storage_image.py (ESP-IDF's own
+# image generator loses the case of file names), which finds ESP-IDF
+# through the firmware build: run "make fw" once first. ESPPORT picks the
+# serial port.
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -23,6 +34,11 @@
 # "Build requirements"); override with IDF=idf.py inside an
 # already-activated shell.
 IDF ?= $(HOME)/bin/idf
+STORAGE_IMAGE = python3 tools/storage/storage_image.py
+HOST_CC ?= cc
+FW_TEST = app/build/host/patch_units_test
+FW_TEST_SRC = app/test/patch_units_test.c app/main/patch_units.c \
+              app/main/patch_file.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
 
 all: pack fw
 
@@ -47,7 +63,23 @@ fw-flash:
 fw-monitor:
 	cd app && $(IDF) monitor
 
+fw-test: $(FW_TEST_SRC)
+	mkdir -p $(dir $(FW_TEST))
+	$(HOST_CC) -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src -o $(FW_TEST) $(FW_TEST_SRC) -lm
+	$(FW_TEST) $(shell find app/storage/Patches -name '*.toml')
+
+fw-storage-flash:
+	$(MAKE) fw-storage-write DIR=app/storage
+
+fw-storage-write:
+	@test -n "$(DIR)" || { echo "usage: make fw-storage-write DIR=folder"; exit 2; }
+	$(STORAGE_IMAGE) write "$(DIR)"
+
+fw-storage-read:
+	@test -n "$(DIR)" || { echo "usage: make fw-storage-read DIR=folder"; exit 2; }
+	$(STORAGE_IMAGE) read "$(DIR)"
+
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-test fw-storage-flash fw-storage-write fw-storage-read clean

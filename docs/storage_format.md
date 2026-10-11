@@ -17,24 +17,24 @@ the device is plain text in a FAT file system.
 | Filename encoding | UTF-8 (`CONFIG_FATFS_API_ENCODING_UTF_8`) |
 | Mount point | `/storage` |
 
-On the ESP32-C3's 2 MB flash the partition table is:
+On the ESP32-C3 Super Mini's 4 MB flash the partition table is:
 
 | Name | Type | Subtype | Offset | Size |
 |---|---|---|---|---|
 | `nvs` | data | nvs | `0x9000` | `0x6000` |
 | `phy_init` | data | phy | `0xF000` | `0x1000` |
 | `factory` | app | factory | `0x10000` | `0x100000` (1 MB) |
-| `storage` | data | fat | `0x110000` | `0xF0000` (960 KB) |
+| `storage` | data | fat | `0x110000` | `0x2F0000` (2.9 MB) |
 
 The format does not depend on the partition size. A board with more
 flash gets a larger `storage` partition and nothing else changes.
 
 **Capacity.** A file takes whole clusters. A patch file is about 650
 bytes, two 512-byte clusters, plus up to about 200 bytes of directory
-entries for a long name. The 960 KB partition therefore holds about
-800 patches after the FAT tables, the folders and the wear-levelling
-overhead: six banks of 128. With 4096-byte clusters it would hold only about
-190.
+entries for a long name. The 2.9 MB partition therefore holds about
+2400 patches after the FAT tables, the folders and the wear-levelling
+overhead: eighteen banks of 128. With 4096-byte clusters it would hold
+only about 700.
 
 The 512-byte sectors cost write speed, because each write rewrites the
 4 KB flash sector beneath it. Saves are rare and small, so this does
@@ -42,10 +42,14 @@ not matter. Safety mode keeps a copy of the flash sector while it is
 rewritten, so a power loss mid-write loses no neighbouring data.
 
 ### Reaching the files from a computer
-- **ESP32-C3:** no USB OTG. The partition is read over serial
-  (`esptool.py read_flash`), unpacked into a folder with ESP-IDF's
-  `fatfsparse.py --wl-layer enabled`, edited, packed with
-  `wl_fatfsgen.py` and written back (`esptool.py write_flash`).
+- **ESP32-C3:** no USB OTG. `make fw-storage-read DIR=folder` reads
+  the partition over serial and unpacks it into a folder;
+  `make fw-storage-write DIR=folder` packs a folder and writes it back.
+  Both use `tools/storage/storage_image.py`. That tool runs ESP-IDF's
+  own FatFs on the computer, because ESP-IDF's image generator
+  (`wl_fatfsgen.py`) upper-cases folder names and lower-cases long
+  names. It also handles the wear-levelling layer, including a
+  partition the synth has been writing to.
 - **ESP32-S3:** USB OTG presents the partition to the computer as a USB
   drive. The firmware unmounts it while the computer has it.
 
@@ -159,7 +163,11 @@ raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
 A patch file holds the sound: every field of `patch_t` that the synth
 renders today. `mod` (the modulation matrix) and `arp` are not
 rendered yet and are not stored. A missing key takes the value of the
-default patch (`patch_default`).
+**init patch** (`patch_init`): one saw, an open 24 dB/oct lowpass with
+no key tracking, an
+organ envelope (fastest attack, full sustain, ~9 ms release), velocity
+off, no modulation. The init patch is also the sound when no stored
+patch loads.
 
 ### `[voice]`
 
@@ -306,10 +314,14 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 
 | `destination` | `depth` unit | `depth` range | `depth` raw value |
 |---|---|---|---|
-| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(value × 1024 / 50) |
-| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(value × 1024) |
-| `"pitch"` | semitones | −48 … +48 | round(value × 1024 / 12) |
-| `"cutoff"` | semitones | −129 … +129 | round(value × 1024 / 12) |
+| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(2 × value × 1024 / 50) |
+| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(2 × value × 1024) |
+| `"pitch"` | semitones | −48 … +48 | round(2 × value × 1024 / 12) |
+| `"cutoff"` | semitones | −129 … +129 | round(2 × value × 1024 / 12) |
+
+`depth` is the instruction's COEF. The LFO's wave swings ±0.5 in the
+CSP's Q2.16 scale, so a raw `depth` of `d` moves the DMEM word by
+±`d` / 2, hence the factor 2.
 
 - **Destinations:** both LFOs take any of the four (`dest` 0
   `pulse_width`, 1 `resonance`, 2 `pitch`, 3 `cutoff`).
@@ -328,7 +340,7 @@ Patch-specific settings for the part that plays the patch.
 `pan` raw values −64 and −63 both mute the right side, and the synth
 stores −63.
 
-### Example: the default patch
+### Example: the factory patch `Pads/Supersaw.toml`
 
 ```toml
 format = 1
@@ -358,15 +370,15 @@ key_track = 100
 
 [amp_env]
 attack = 0.042
+sustain = -3.76
 decay = 3
-sustain = -3.8
 release = 11
 velocity = 50
 
 [mod_env]
 attack = 0.042
+sustain = 93.75
 decay = 3
-sustain = 93.8
 release = 11
 velocity = 50
 destination = "cutoff"
@@ -376,7 +388,7 @@ depth = 24
 shape = "triangle"
 rate = 1
 destination = "pitch"
-depth = 0.19
+depth = 0.094
 
 [[lfo]]
 shape = "triangle"
@@ -402,16 +414,16 @@ startup_patch = "Patches/Factory/Pads/Supersaw.toml"
 
 | Key | Meaning |
 |---|---|
-| `startup_patch` | the patch loaded at power-on, as a path from the root; absent or missing file = the default patch |
+| `startup_patch` | the patch loaded at power-on, as a path from the root; absent or missing file = the init patch |
 
 New instrument-wide settings are added here as keys.
 
 ## Loading
 
 - **Unknown keys and tables:** ignored.
-- **Missing keys:** take the default patch's value.
+- **Missing keys:** take the init patch's value.
 - **Out-of-range values:** clamped to the range.
-- **Unknown names:** the key takes its default.
+- **Unknown names:** the key takes the init patch's value.
 - **Arrays:** extra `[[osc]]` or `[[lfo]]` entries are ignored; missing
   ones take the defaults.
 - **Unreadable files:** a file that is not valid TOML, or whose
@@ -421,26 +433,36 @@ New instrument-wide settings are added here as keys.
 
 ## Saving
 
-The synth writes only under `Patches/User`. To replace `Name.toml`, it:
+The synth writes only under `Patches/User`. To save `Name.toml`, it:
 
-1. writes the new patch to `Name.toml.new` and flushes it;
-2. deletes `Name.toml`;
+1. writes the new patch to `Name.toml.new`, ending with the line
+   `# end`, and flushes it to the flash;
+2. deletes `Name.toml`, if there is one;
 3. renames `Name.toml.new` to `Name.toml`.
 
-If power is lost partway, the next mount finishes or undoes the save:
-- `Name.toml.new` with no `Name.toml` beside it is complete (step 2
-  ran only after step 1 finished), so it is renamed;
-- `Name.toml.new` beside `Name.toml` may be incomplete, so it is
-  deleted and the old patch stays.
+If power is lost partway, the next mount finishes or undoes the save.
+The `# end` line tells a complete `.new` file from one cut off while
+being written; a cut-off file can still be valid TOML, missing keys,
+so parsing alone cannot tell.
+- A complete `Name.toml.new` finishes the save: any `Name.toml` is
+  deleted and the `.new` file renamed.
+- An incomplete `Name.toml.new` is deleted, so the old patch, if any,
+  stays.
+
+A saved file therefore ends with `# end`. The loader ignores it, like
+any comment.
 
 ## Factory content
 
 The factory patches and the default `system.toml` live in the repo
-under `app/storage/`, mirroring the root above. The factory set is the
-default patch, as `Patches/Factory/Pads/Supersaw.toml`, and
-`system.toml` starts it at power-on. The build packs that
-folder into a `storage` partition image with `wl_fatfsgen.py`.
+under `app/storage/`, mirroring the root above. The factory set is
+`Patches/Factory/Pads/Supersaw.toml`, the sound the synth starts with:
+`system.toml` names it as the startup patch. `make fw-test` checks that
+every factory patch reads and is already in the writer's own form, so
+it reads back exactly.
 
 A firmware update never writes the `storage` partition, so it cannot
-overwrite user patches. The image is written only by an explicit flash
-step, which first-time setup uses.
+overwrite user patches. `make fw-storage-flash` packs `app/storage/`
+and writes it; first-time setup uses it, and it erases all user
+patches. If the partition does not mount, the synth reports it, runs
+on the init patch, and never formats the partition on its own.
