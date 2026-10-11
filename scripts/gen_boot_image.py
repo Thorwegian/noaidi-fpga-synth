@@ -43,7 +43,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 # ---------------------------------------------------------------
 WAVE_SAW = 0x0
 
-#FC = 0x2AF8          # UQ4.10 ≈ 14 kHz, open LP
+FC = 0x1800          # UQ4.10 ≈ 14 kHz, open LP
 RESO = 0x200         # log2 resonance UQ4.10: 0.5 octave of Q above
                      # Butterworth -> q1 = 1.0
 VOL = 0x9F           # volume UQ4.4 (0x00 = silence): -36 dB of
@@ -94,11 +94,10 @@ for v in range(NUM_PARTIALS):
     left  = unison < (UNISON // 2)          # first 4 unisons → left
     detune = UNISON_DETUNE[unison]
     pitch = midi_to_pitch(note) + detune
-    fc = 0x1000
 
     p0.append(pitch_word(pitch) | (WAVE_SAW << 14))
     p1.append(0)                       # duty: saw ignores it
-    p2.append((RESO << 14) | fc)   # resonance + cutoff
+    p2.append((RESO << 14) | FC)   # resonance + cutoff
     if left:
         p3.append((FTYPE_LP << 17) | (CASCADE << 16) | (MUTE << 8) | VOL)
     else:

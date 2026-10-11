@@ -1,20 +1,18 @@
 # Rules
 
-- Agents have GitHub accounts and access tokens. They poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop.
+- Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop.
 
-- Agents always liveblog their progress directly to the comments section of the GitHub issues they are working on.
+- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues they are working on.
 
-- Agents should propose changes to AGENTS.md when they make mistakes, but never modify the file directly.
+- Agents *must* update comments and docs so they match the code before *every* commit.
 
-- All source files (except libraries that we use) shall carry the following copyright notice:
+- Variable names *must* be descriptive and use industry standard textbook terminology.
+
+- All source files (except libraries that we use) *must* carry the following copyright notice:
+
+- Raw values are raw values. There is no such unit as "LSB".
 
 ```
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 ```
-
-- Raw values are raw values. There is no such unit as "LSB".
-
-- Comments and docs files must always be updated to reflect changes to the code.
-
-- Variable names should be descriptive and use industry standard textbook terminology.
