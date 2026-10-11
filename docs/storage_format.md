@@ -310,10 +310,14 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 
 | `destination` | `depth` unit | `depth` range | `depth` raw value |
 |---|---|---|---|
-| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(value × 1024 / 50) |
-| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(value × 1024) |
-| `"pitch"` | semitones | −48 … +48 | round(value × 1024 / 12) |
-| `"cutoff"` | semitones | −129 … +129 | round(value × 1024 / 12) |
+| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(2 × value × 1024 / 50) |
+| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(2 × value × 1024) |
+| `"pitch"` | semitones | −48 … +48 | round(2 × value × 1024 / 12) |
+| `"cutoff"` | semitones | −129 … +129 | round(2 × value × 1024 / 12) |
+
+`depth` is the instruction's COEF. The LFO's wave swings ±0.5 in the
+CSP's Q2.16 scale, so a raw `depth` of `d` moves the DMEM word by
+±`d` / 2, hence the factor 2.
 
 - **Destinations:** both LFOs take any of the four (`dest` 0
   `pulse_width`, 1 `resonance`, 2 `pitch`, 3 `cutoff`).
@@ -380,7 +384,7 @@ depth = 24
 shape = "triangle"
 rate = 1
 destination = "pitch"
-depth = 0.19
+depth = 0.094
 
 [[lfo]]
 shape = "triangle"

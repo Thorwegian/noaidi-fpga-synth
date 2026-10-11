@@ -47,7 +47,7 @@ depth = 24
 shape = "triangle"
 rate = 1
 destination = "pitch"
-depth = 0.19
+depth = 0.094
 
 [[lfo]]
 shape = "triangle"

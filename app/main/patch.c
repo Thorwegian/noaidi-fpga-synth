@@ -118,7 +118,7 @@ void patch_default(patch_t *p)
     p->mod_env_dest      = 0;             // cutoff (the only dest yet)
     p->mod_env_depth     = 2048;          // +2 octaves send (CC 107 ≈ 87)
 
-    // LFO 1 = the boot vibrato (instruction 0): 1 Hz triangle, ±19 cents
+    // LFO 1 = the boot vibrato (instruction 0): 1 Hz triangle, ±9.4 cents
     p->lfo[0].shape = 2;               // triangle
     p->lfo[0].rate  = 350;             // ~1 Hz (350 × 96000 / 2^25)
     p->lfo[0].depth = 16;

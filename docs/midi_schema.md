@@ -102,7 +102,7 @@ equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
-| 77 | LFO 1 depth | standard "vibrato depth"; `val<<2` (raw value 508 at the top, ~½ octave) |
+| 77 | LFO 1 depth | standard "vibrato depth"; `val<<2` (COEF 508 at the top: ±254 on the pitch DMEM word, about ±3 semitones) |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
 | 114 | LFO 1 destination | NOT IMPLEMENTED (ignored): LFO 1 always drives pitch |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
