@@ -57,7 +57,7 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 ├── Patches
 │   ├── Factory
 │   │   ├── Arps
-│   │   ├── Bass
+│   │   ├── Basses
 │   │   │   └── Jamiro Buzz.toml
 │   │   ├── Bells
 │   │   ├── Brass
@@ -348,7 +348,7 @@ Settings that belong to the instrument rather than to a sound.
 ```toml
 format = 1
 
-startup_patch = "Patches/Factory/Pads/Arctic Ice.toml"
+startup_patch = "Patches/Factory/Pads/Supersaw.toml"
 ```
 
 | Key | Meaning |
@@ -387,7 +387,9 @@ If power is lost partway, the next mount finishes or undoes the save:
 ## Factory content
 
 The factory patches and the default `system.toml` live in the repo
-under `app/storage/`, mirroring the root above. The build packs that
+under `app/storage/`, mirroring the root above. The factory set is the
+default patch, as `Patches/Factory/Pads/Supersaw.toml`, and
+`system.toml` starts it at power-on. The build packs that
 folder into a `storage` partition image with `wl_fatfsgen.py`.
 
 A firmware update never writes the `storage` partition, so it cannot
