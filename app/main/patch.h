@@ -5,10 +5,9 @@
 //
 // This is the single source of truth for the active sound: the
 // CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
-// RENDER it to DMEM words and partial words. Program change is deferred
-// until the stored-configuration format is settled (docs/
-// control_map.md); when it lands it just loads/stores instances of
-// this. Multi-timbral layering / key split (channel awareness) is an
+// RENDER it to DMEM words and partial words. Stored patches are files
+// in the format of docs/storage_format.md; loading and saving one
+// converts between that file and an instance of this. Multi-timbral layering / key split (channel awareness) is an
 // array of parts, each a patch_t — see performance_t at the bottom.
 //
 // Fields mirror docs/control_map.md and docs/midi_schema.md. Units

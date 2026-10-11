@@ -475,9 +475,10 @@ static void update_amp_env(void)
 // past ~40 uselessly fast. Exponential 0.03 Hz .. 30 Hz
 // across the CC — one equal frequency RATIO per step.
 //   inc = freq * 2^24 / 96000  ≈ freq * 174.76
-// CC → pulse-width duty offset, Q0.24: duty = 0.5·10^(−v),
-// v = val/127 — equal duty RATIO per step, 50% down to 5%, never the
-// degenerate 0%/100%. Offset from square = 0.5 − duty.
+// CC → pulse-width duty offset, Q0.24. The pulse's low time is
+// 0.5·10^(−v), v = val/127: equal ratio per step, 50% down to 5%, so
+// its high time rises from 50% to 95%, never the degenerate 0%/100%.
+// The offset from square is 0.5 − low time.
 static int32_t duty_from_cc(uint8_t val)
 {
     float duty = 0.5f * powf(10.0f, -(float)val / 127.0f);

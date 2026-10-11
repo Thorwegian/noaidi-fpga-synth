@@ -77,7 +77,8 @@ Prophet-capable engine:
    (`app/main/patch.h`/`patch.c`) holds the whole currently-active
    sound — the single source of truth the CC handlers MUTATE and
    voice_alloc/engine_link RENDER to DMEM words and partial words.
-   Program change needs the stored-configuration format and
+   Stored patches are TOML files in the format of
+   [storage_format.md](storage_format.md); program change
    loads/stores instances of `patch_t`; multi-timbral layering
    (decision 5) is an array of parts, each a `patch_t`.
 4. **Clock source modes:** **Auto** (slave to external MIDI clock
