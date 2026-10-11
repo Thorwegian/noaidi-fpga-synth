@@ -112,6 +112,9 @@ def number_input(widget_id, maximum):
         "id": widget_id,
         "label": False,
         "numeric": True,
+        # commit every keystroke: otherwise the value commits only on
+        # Enter or blur, and SELECT would read the previous number
+        "asYouType": True,
         "default": 0,
         "bypass": True,
         "expand": True,
