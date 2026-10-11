@@ -234,8 +234,10 @@ segment a time constant
 - **Attack** charges toward 1.3 × full scale and ends at full scale, so
   `attack` is the time from zero to full scale: τ × ln(1.3 / 0.3).
 - **Decay and release** approach their target without reaching it, so
-  `decay` and `release` are the time to cover 99.9 % of the distance
-  (60 dB): τ × ln(1000).
+  `decay` and `release` are the time until the remaining distance to
+  the target is 60 dB below where it started (0.1 %): τ × ln(1000).
+  An exponential covers that fraction in the same time from any
+  starting level, so the time does not depend on the sustain level.
 
 Rate codes 0xF0–0xFF share one coefficient, and so do some slow codes.
 Of the 256 codes, 232 sound different.
