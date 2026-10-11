@@ -126,7 +126,9 @@ in a file is always one raw value written in a musical unit.
   - Linear units (semitones, dB, percent) compare by difference.
   - Ratio units (seconds, Hz, Q) compare by ratio.
   - An exact tie goes to the raw value further from zero.
-  - A value outside a key's range is clamped to the range.
+  - A value outside a key's range is clamped to the range. The ranges
+    are what the raw value can reach, so `sustain = 0` loads as the
+    highest sustain the envelope has.
 - **Save:** a raw value is written as the shortest decimal that loads
   back to that same raw value. A hand-typed `cutoff = 1000` therefore
   stays `1000` after a load and a save, instead of `1000.4174`.
@@ -193,7 +195,7 @@ reach every raw step: `-12.07` is an octave down and 7 cents flat.
 | `slope` | dB/octave | 12 or 24 | `cascade` 0 or 1 |
 | `cutoff` | Hz, for MIDI note 60 (C4) | 8.2 … 18 000 | the cutoff pitch for C4, see below |
 | `resonance` | Q | 0.707 … 32 | code = round(1024 × log₂(value × √2)) |
-| `key_track` | percent | 0 … 198 | `key_track` = round(value × 64 / 100) |
+| `key_track` | percent | 0 … 200 | `key_track` = round(value × 64 / 100) |
 
 **Cutoff.** For a note, the filter's pitch (raw) is
 
@@ -226,7 +228,7 @@ plus the CC 71 setting.
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
 | `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
-| `depth` | semitones of cutoff | −192 … +186 | `mod_env_depth` = round(value × 1024 / 12) |
+| `depth` | semitones of cutoff | −192 … +192 | `mod_env_depth` = round(value × 1024 / 12) |
 
 **Envelope times.** Once per sample at 96 kHz, a segment follows
 
