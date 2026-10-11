@@ -147,13 +147,14 @@ def program_select():
         },
     ]
 
-def section(title, widgets):
+def section(title, widgets, expand=True):
+    # expand: True, or a weight for sharing a row with other sections
     slug = title.lower().replace(" ", "_").replace("&", "and")
     return {
         "type": "panel",
         "id": f"sec_{slug}",
         "layout": "vertical",
-        "expand": True,
+        "expand": expand,
         "widgets": [
             {
                 "type": "text",
@@ -246,21 +247,30 @@ root_widgets = [
         switch(112, "LFO2 Dest",
                {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 0),
     ]),
-    section("Global", [
-        # knobs, because vertical sliders are nearly unusable here.
-        # No mod-wheel control: the physical keyboard has it, and
-        # wheel→cutoff is a temporary hardwiring anyway, due to become
-        # a routable per-channel destination.
-        knob(7, "Volume", 103),              # boot volume 0xCF ≈ cc 103 (206)
-        knob(10, "Pan", 64, bipolar=True),
-        knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
-        knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
-                                        # 0 = velocity OFF, full patch amount
-        switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
-        button(123, "NOTES OFF", 0),
-        button(120, "SOUND OFF", 0),
-    ]),
-    section("Program", program_select()),
+    {
+        # Global and Program share one row: plenty of width to the right.
+        "type": "panel",
+        "id": "global_row",
+        "layout": "horizontal",
+        "expand": True,
+        "widgets": [
+            section("Global", [
+                # knobs, because vertical sliders are nearly unusable here.
+                # No mod-wheel control: the physical keyboard has it, and
+                # wheel→cutoff is a temporary hardwiring anyway, due to become
+                # a routable per-channel destination.
+                knob(7, "Volume", 103),              # boot volume 0xCF ≈ cc 103 (206)
+                knob(10, "Pan", 64, bipolar=True),
+                knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
+                knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
+                                                # 0 = velocity OFF, full patch amount
+                switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
+                button(123, "NOTES OFF", 0),
+                button(120, "SOUND OFF", 0),
+            ], expand=3),
+            section("Program", program_select()),
+        ],
+    },
     # No virtual keyboard: the physical keyboard covers notes,
     # velocity and both wheels. This panel exists precisely for the
     # MIDI a keyboard CANNOT send.
