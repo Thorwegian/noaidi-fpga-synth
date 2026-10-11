@@ -511,8 +511,8 @@ under `app/storage/`, mirroring the root above. The factory set is
 `Patches/Factory/Pads/Supersaw.toml`, the sound the synth starts with:
 `system.toml` names it as the startup patch, and `banks.toml` makes it
 program 0 of bank 0, "Factory". `make fw-test` checks that
-every factory patch reads and is already in the writer's own form, so
-it reads back exactly.
+every factory patch and `banks.toml` read and are already in the
+writer's own form, so they read back exactly.
 
 A firmware update never writes the `storage` partition, so it cannot
 overwrite user patches. `make fw-storage-flash` packs `app/storage/`

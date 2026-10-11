@@ -87,6 +87,9 @@ different facts:
 `storage` mounts the FAT partition at `/storage` and loads
 `system.toml`'s startup patch at boot; `patch_file` and `patch_units`
 read, write and save patch files ([storage_format.md](storage_format.md)).
+`banks` maps Bank Select and Program Change onto patch files through
+`banks.toml`; `voice_alloc` keeps each channel's bank and loads the
+program at Program Change.
 A patch reaches the synth model through `voice_alloc_set_patch()`,
 which queues it with the MIDI events, so a load lands between two
 events, never in the middle of one; `voice_alloc_get_patch()` copies the
@@ -101,8 +104,9 @@ editor, history and Tab completion. `stdout`, `stderr` and so ESP_LOG
 print through it, from any task, without breaking the line being
 typed. It keeps the last 1000 printed lines (at most 80 KB of heap),
 paged with PgUp/PgDn; Return on an empty line redraws the screen from
-them. `cli` registers the commands: `load`, `save`, `ls`, `rm`,
-`patch`, `ble`, `help`. Commands run in the console task.
+them. `cli`, `cli_banks` and `cli_system` register the commands:
+files, patches, banks, and system state. Commands run in the console
+task.
 
 ## Sequencers / arpeggiators
 
