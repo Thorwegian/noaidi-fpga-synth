@@ -14,8 +14,13 @@
 //   file      where format 1 stores it: TOML table, array index, key
 //   kind      "number" or "name"
 //   names     a name key's names, by raw value
-//   default   the init patch's value (patch_init)
+//   initValue the init patch's value (patch_init): what a file that omits
+//             the key loads as. The init patch is a neutral fallback, not
+//             a representative sound
 //   integer   a number key that takes whole numbers only
+//   nearest   how a value converts to the nearest raw value: "difference"
+//             (linear units) or "ratio" (seconds, Hz, Q), found by probing
+//             the conversion (see nearest_metric)
 //   range     min and max of the finite values the key can hold. The
 //             loader clamps to this range; it is found by loading ±1e300
 //   special   values outside the finite range: "inf", "-inf"
@@ -31,7 +36,7 @@
 // where 6 do not load back to the same raw value (see format_raw). The
 // array is in the order the loader applies the keys.
 //
-// Self-checks: every listed value, every range end and every default loads
+// Self-checks: every listed value, every range end and every init value loads
 // back, through the firmware's own conversions, to the canonical raw value
 // it came from, and every ID is unique. A failed check exits non-zero.
 
@@ -357,6 +362,30 @@ static void put_union_range(const patch_field_t *f, int i, const patch_field_t *
     printf("\"max\": %s }", text);
 }
 
+// How the loader picks the nearest raw value: by "difference" (linear
+// units: semitones, dB, percent) or by "ratio" (seconds, Hz, Q). Found
+// between the two smallest positive values a < b: the loader's boundary
+// between them lies at (a + b) / 2 by difference and at √(a·b) by ratio,
+// and a value halfway between those two points loads as b only by ratio.
+// A key without two positive values is "difference".
+static const char *nearest_metric(const patch_field_t *f, int i, const patch_t *p)
+{
+    domain_t d = domain_of(f, i, p);
+    double a = INFINITY, b = INFINITY;
+    for (int32_t raw = d.lo; ; raw++) {
+        if (patch_field_canonical(f, i, p, raw) == raw) {
+            double v = f->to_value(p, i, raw);
+            if (v > 0.0 && v < a)               { b = a; a = v; }
+            else if (v > 0.0 && v > a && v < b) b = v;
+        }
+        if (raw == d.hi) break;
+    }
+    if (isinf(b))
+        return "difference";
+    double between = (sqrt(a * b) + (a + b) / 2.0) / 2.0;
+    return f->to_raw(p, i, between) == f->to_raw(p, i, b) ? "ratio" : "difference";
+}
+
 static void put_number(const patch_field_t *fields, size_t k, int i, const patch_t *init)
 {
     static value_set_t s;
@@ -436,7 +465,7 @@ int main(void)
             printf(" },\n");
 
             format_raw(f, i, &init, f->get(&init, i), text, sizeof text);
-            check_loads_back(f, i, &init, f->get(&init, i), text, "default does not load back");
+            check_loads_back(f, i, &init, f->get(&init, i), text, "init value does not load back");
 
             if (f->kind == PF_NAME) {
                 printf("      \"kind\": \"name\",\n      \"names\": [");
@@ -444,14 +473,15 @@ int main(void)
                     printf("%s", m ? ", " : "");
                     put_string(f->names[m]);
                 }
-                printf("],\n      \"default\": %s\n", text);
+                printf("],\n      \"initValue\": %s\n", text);
             } else {
                 printf("      \"kind\": \"number\",\n");
                 printf("      \"integer\": %s,\n", f->integer ? "true" : "false");
+                printf("      \"nearest\": \"%s\",\n", nearest_metric(f, i, &init));
                 if (strcmp(text, "inf") == 0 || strcmp(text, "-inf") == 0)
-                    printf("      \"default\": \"%s\",\n", text);
+                    printf("      \"initValue\": \"%s\",\n", text);
                 else
-                    printf("      \"default\": %s,\n", text);
+                    printf("      \"initValue\": %s,\n", text);
                 put_number(fields, k, i, &init);
             }
             printf("    }");

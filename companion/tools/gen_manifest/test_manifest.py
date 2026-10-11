@@ -12,8 +12,8 @@ things the app relies on:
 - IDs are unique and agree with their file location (table, index, key);
 - a dependency names an earlier parameter, and a name dependency has one
   byValue entry per name;
-- names: the default is one of the names;
-- numbers: min <= max; the default lies in the range or is a special value;
+- names: the init value is one of the names;
+- numbers: min <= max; the init value lies in the range or is a special value;
   values ascend, lie in the range, end at the range ends, and number
   valueCount (less the special values).
 
@@ -63,18 +63,18 @@ def main(path):
             errors.append(f"{pid}: duplicate ID")
 
         if p["kind"] == "name":
-            if p["default"] not in p["names"]:
-                errors.append(f"{pid}: default {p['default']!r} is not a name")
+            if p["initValue"] not in p["names"]:
+                errors.append(f"{pid}: initValue {p['initValue']!r} is not a name")
         elif p["kind"] == "number":
             check_values(pid, p, errors)
-            d, special = p["default"], p.get("special", [])
+            d, special = p["initValue"], p.get("special", [])
             if isinstance(d, str):
                 if d not in special:
-                    errors.append(f"{pid}: default {d!r} is not a special value")
+                    errors.append(f"{pid}: initValue {d!r} is not a special value")
             elif not p["range"]["min"] <= d <= p["range"]["max"]:
-                errors.append(f"{pid}: default {d} outside the range")
+                errors.append(f"{pid}: initValue {d} outside the range")
             if p.get("integer") and not isinstance(d, str) and d != int(d):
-                errors.append(f"{pid}: integer key with default {d}")
+                errors.append(f"{pid}: integer key with initValue {d}")
         else:
             errors.append(f"{pid}: unknown kind {p['kind']!r}")
 

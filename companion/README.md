@@ -12,17 +12,64 @@ The app works with semantic parameters such as `filter.cutoff` or
 `lfo[1].depth`, in musical units. It does not hold a second model of the
 synth: the parameter list comes from the firmware's own patch-file table.
 
+## Layout
+
+| Path | What |
+|---|---|
+| `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `patch`, `patchFile` (TOML format 1), `patchStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
+| `src/display/` | companion-owned display metadata: label, section, unit, formatting, interaction, Editor control |
+| `src/generated/` | generated from the firmware sources, checked in |
+| `test/` | vitest tests; `compat.test.ts` runs the firmware's own patch reader |
+| `tools/gen_manifest/` | writes the parameter manifest |
+| `tools/patch_tool/` | the firmware's patch reader and writer on the computer, for the compatibility tests |
+
+## Building and testing
+
+`npm install` once (`.npmrc` sets `legacy-peer-deps`: npm 10 otherwise
+crashes on vitest's optional peers).
+
+| Command | What it does |
+|---|---|
+| `make -C companion manifest` | regenerate the manifest (needs a host C compiler) |
+| `make -C companion check` | everything: manifest fresh and consistent, `tsc`, all tests including the compatibility tests (needs a host C compiler and `git submodule update --init app/lib/tomlc17`) |
+| `npm test` | the TypeScript tests; the compatibility tests are skipped |
+
+## Patch files
+
+`src/core/patchFile.ts` reads and writes format 1 as the firmware's loader
+does: keys apply in manifest order, a missing key takes its init value, a
+value outside the range clamps. In addition the companion keeps what it
+does not understand and writes it back: unknown keys and tables, unknown
+keys in known tables and in `[[osc]]`/`[[lfo]]` elements, extra array
+elements, and known keys with a value it cannot interpret (an unknown
+name from newer firmware) until that parameter is edited. A file with a
+newer `format` opens read-only with a warning. Comments and layout are not
+kept: the writer writes its own clean form.
+
+The compatibility contract is the musical patch, not the text, and
+`test/compat.test.ts` checks it against the firmware's reader: the factory
+patches and 300 random patches load to the same raw values both ways.
+
+Values are kept in musical units. A value of a key with listed values is
+snapped to the nearest one (by the key's `nearest` measure); other values
+keep 9 significant digits.
+
+## Display metadata
+
+`src/display/parameters.ts` gives every parameter a label, section, unit,
+formatter, interaction (`continuous`, `choice`, `toggle`, `stepped`) and
+Editor control. The interaction is a UX choice, not derived from the
+engine: an envelope time has 232 distinct values but is continuous to a
+player. `test/display.test.ts` fails if a generated parameter has no entry.
+Panel placement, range and taper are not display metadata; they belong to
+each panel layout (`src/core/surface.ts`).
+
 ## Parameter manifest
 
 `src/generated/parameters.json` lists every parameter a patch file holds,
 generated from `app/main/patch_units.c` by `tools/gen_manifest`, which
 compiles the firmware sources unchanged. The manifest is checked in, so
 building the app needs no C compiler.
-
-| Command | What it does |
-|---|---|
-| `make -C companion manifest` | regenerate the manifest (needs a host C compiler) |
-| `make -C companion check` | fail if the manifest is stale or inconsistent |
 
 Run `make -C companion manifest` after any change to the patch-file keys,
 and commit the result.
@@ -35,8 +82,9 @@ Each parameter entry has:
 | `file` | where format 1 stores it: TOML `table`, `index`, `key` |
 | `kind` | `"number"` or `"name"` |
 | `names` | a name key's names |
-| `default` | the init patch's value |
+| `initValue` | the init patch's value: what a file that omits the key loads as. The init patch is a neutral fallback, not a representative sound |
 | `integer` | a number key that takes whole numbers only |
+| `nearest` | how a value converts to the nearest engine value: `"difference"` (linear units) or `"ratio"` (seconds, Hz, Q) |
 | `range` | min and max of the finite values the engine can hold; a file value outside it is clamped |
 | `special` | values outside the finite range: `"inf"` (self-oscillating resonance), `"-inf"` (volume off) |
 | `valueCount` | how many distinct values the key can hold |

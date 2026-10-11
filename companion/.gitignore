@@ -1,4 +1,8 @@
 build/
+node_modules/
 
 # The generated files are checked in (the root .gitignore ignores *.json)
 !src/generated/*.json
+!package.json
+!package-lock.json
+!tsconfig.json
