@@ -172,7 +172,11 @@ default patch (`patch_default`).
 |---|---|---|---|
 | `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | | `wave` 0, 1, 2, 3 |
 | `tune` | semitones, decimals for the fine part | −24 … +24 | one pitch offset, round(value × 1024 / 12) |
-| `pulse_width` | percent | 5 … 95 | `duty` = round((50 − value) / 100 × 2²⁴) |
+| `pulse_width` | percent of the cycle the pulse is high | 50 … 95 | `duty` = round((value − 50) / 100 × 2²⁴) |
+
+The pulse is DC-free at every width, so a width below 50 % is the
+same wave as its mirror above 50 %, inverted, and sounds the same. The
+range therefore stops at 50.
 
 `tune` replaces the coarse/fine pair. Coarse and fine are two ways the
 CCs edit one pitch offset, so the file holds the sum. Two decimals
