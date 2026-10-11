@@ -91,12 +91,13 @@ void patch_init(patch_t *p)
     p->vel_amp_amt = 0;
     p->vel_mod_amt = 0;
 
-    // Open filter: 24 dB/oct lowpass at full key tracking, with C4's
-    // cutoff at the gateware's FC_MAX (0x2B20) — the key-tracked base
-    // for C4 is 5 × 1024 + 512 — and no resonance (Butterworth).
+    // Open filter: 24 dB/oct lowpass with no key tracking, so every note's
+    // cutoff sits at the gateware's FC_MAX (0x2B20) — the base for C4,
+    // which 0 % tracking pins every note to, is 5 × 1024 + 512 — and no
+    // resonance (Butterworth).
     p->filter.type      = 0;           // LP
     p->filter.cascade   = 1;           // 24 dB/oct
-    p->filter.key_track = 64;          // 100 %
+    p->filter.key_track = 0;           // 0 %
     p->filter.cutoff    = 0x2B20 - (5 * 1024 + 512);
     p->filter.resonance = 0;
 

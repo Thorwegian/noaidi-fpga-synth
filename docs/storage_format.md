@@ -163,7 +163,8 @@ raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
 A patch file holds the sound: every field of `patch_t` that the synth
 renders today. `mod` (the modulation matrix) and `arp` are not
 rendered yet and are not stored. A missing key takes the value of the
-**init patch** (`patch_init`): one saw, an open 24 dB/oct lowpass, an
+**init patch** (`patch_init`): one saw, an open 24 dB/oct lowpass with
+no key tracking, an
 organ envelope (fastest attack, full sustain, ~9 ms release), velocity
 off, no modulation. The init patch is also the sound when no stored
 patch loads.
