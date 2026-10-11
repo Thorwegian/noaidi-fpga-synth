@@ -157,10 +157,11 @@ saved /Patches/User/Pads/Arctic Ice 2
   patch names leave out `.toml`. Quote names with spaces, or let Tab
   complete them.
 - **Keys:** ↑/↓ recall earlier commands; ←/→, Home/End, Ctrl-A/E/U/W
-  edit; Ctrl-C clears the line; **Return** or **Ctrl-L** redraws after
-  attaching or resizing.
-- **Scrollback:** output scrolls the whole screen, so the terminal's own
-  scrollback (`Ctrl-A Esc` in `screen`) keeps it.
+  edit; Ctrl-C clears the line. **Return on an empty line** redraws the
+  screen: after attaching, or after resizing the window.
+- **Scrollback:** the console keeps the last 1000 lines (at most 80 KB).
+  **PgUp/PgDn** page through them; the status bar shows how far back
+  you are, and PgDn past the newest line returns to live output.
 - **Exiting:** `Ctrl-A K` leaves `screen`.
 
 ## Patch storage

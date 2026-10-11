@@ -99,7 +99,9 @@ terminal it splits the screen like an IRC client: a scroll region for
 everything printed, a status bar, and an input line with a line
 editor, history and Tab completion. `stdout`, `stderr` and so ESP_LOG
 print through it, from any task, without breaking the line being
-typed. `cli` registers the commands: `load`, `save`, `ls`, `rm`,
+typed. It keeps the last 1000 printed lines (at most 80 KB of heap),
+paged with PgUp/PgDn; Return on an empty line redraws the screen from
+them. `cli` registers the commands: `load`, `save`, `ls`, `rm`,
 `patch`, `ble`, `help`. Commands run in the console task.
 
 ## Sequencers / arpeggiators

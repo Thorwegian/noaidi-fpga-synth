@@ -138,7 +138,8 @@ static int cmd_help(int argc, char **argv)
     for (int i = 0; i < n; i++)
         printf("  %-6s %-10s %s\n", cmds[i]->name, cmds[i]->usage, cmds[i]->help);
     printf("  Paths are relative to the working directory; Tab completes,\n");
-    printf("  up/down recall, Return or Ctrl-L redraws the screen.\n");
+    printf("  up/down recall, PgUp/PgDn page the output, Return on an\n");
+    printf("  empty line redraws the screen.\n");
     return 0;
 }
 

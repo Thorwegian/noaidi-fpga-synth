@@ -7,22 +7,25 @@
 // tio, picocom; "make fw-console") the screen is split like an IRC
 // client's:
 //
-//   rows 1 … N−2   output: everything printed scrolls up here
+//   rows 1 … N−2   output, a scroll region (DECSTBM)
 //   row  N−1       status bar
 //   row  N         input line: prompt and line editor
 //
-// A line printed by any task goes over the status bar and scrolls the
-// whole screen up; the status bar and input line, half-typed command
-// included, are drawn again below it. Scrolling the whole screen (no
-// scroll region) keeps the output in the terminal's own scrollback.
-// The terminal size is asked for at start, on Ctrl-L, and on any key
-// while the layout is not up (so Return wakes it after attaching); a
-// terminal that does not answer gets plain lines with the prompt
-// reprinted below them.
+// A line printed by any task goes in at the bottom of the scroll region,
+// which scrolls only that region: the status bar and a half-typed
+// command never move, and nothing else is redrawn. Every line is also
+// kept in a scrollback of 1000 lines (at most 80 KB of text); PgUp and
+// PgDn page through it, and PgDn past the newest line returns to live
+// output.
+//
+// Return on an empty line wakes the console: it asks the terminal for
+// its size and redraws the whole screen from the scrollback. That is the
+// only full redraw; the size is also asked for at boot. A terminal that
+// does not answer gets plain lines with the prompt reprinted below them.
 //
 // stdout and stderr are this console's stream, so printf and ESP_LOG
-// both land in the output above the status bar. The line editor has cursor keys,
-// Home/End, Delete, Ctrl-A/E/U/W/C/L, ↑/↓ history and Tab completion.
+// both land in the output. The line editor has cursor keys, Home/End,
+// Delete, Ctrl-A/E/U/W/C, ↑/↓ history and Tab completion.
 
 #pragma once
 

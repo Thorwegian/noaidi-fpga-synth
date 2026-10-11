@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "driver/usb_serial_jtag.h"
@@ -23,6 +24,8 @@
 #define MAX_ARGS        8
 #define MAX_CANDIDATES  32
 #define SIZE_QUERY_US   300000     // a terminal that has not answered by then is not one
+#define SCROLLBACK_LINES 1000
+#define SCROLLBACK_BYTES (80 * 1024)   // text cap: ~80 bytes a line on average
 
 // ── Terminal state ──────────────────────────────────────────────────
 static SemaphoreHandle_t s_lock;   // everything written to the terminal
@@ -93,13 +96,81 @@ static void draw_input(void)
         term_printf("\r\x1b[%dC", col - 1);
 }
 
+// ── Scrollback ──────────────────────────────────────────────────────
+// Every printed line, newest last: up to SCROLLBACK_LINES lines and
+// SCROLLBACK_BYTES of text, the oldest dropped first. s_back is how far
+// the view is scrolled back from the newest line; 0 is live output.
+static char  *s_sb[SCROLLBACK_LINES];   // a ring from s_sb_first
+static int    s_sb_first, s_sb_count;
+static size_t s_sb_bytes;
+static int    s_back;
+
+static const char *sb_line(int i)       // 0 = the oldest held
+{
+    return s_sb[(s_sb_first + i) % SCROLLBACK_LINES];
+}
+
+static void sb_add(const char *text, size_t len)
+{
+    while (s_sb_count && (s_sb_count == SCROLLBACK_LINES ||
+                          s_sb_bytes + len + 1 > SCROLLBACK_BYTES)) {
+        s_sb_bytes -= strlen(s_sb[s_sb_first]) + 1;
+        free(s_sb[s_sb_first]);
+        s_sb_first = (s_sb_first + 1) % SCROLLBACK_LINES;
+        s_sb_count--;
+    }
+    char *copy = malloc(len + 1);
+    if (!copy)
+        return;
+    memcpy(copy, text, len);
+    copy[len] = '\0';
+    s_sb[(s_sb_first + s_sb_count) % SCROLLBACK_LINES] = copy;
+    s_sb_count++;
+    s_sb_bytes += len + 1;
+    if (s_back) {                           // scrolled back: the view stays put
+        s_back++;
+        if (s_back > s_sb_count) s_back = s_sb_count;
+    }
+}
+
+// Write text cut to the screen width. Escape sequences take no columns.
+static void write_clipped(const char *text)
+{
+    const char *p = text;
+    int col = 0;
+    while (*p && col < s_cols) {
+        const char *q = p;
+        if (*q == 0x1B) {                    // ESC [ … final, passed through
+            q++;
+            if (*q == '[') { q++; while (*q && (*q < 0x40 || *q > 0x7E)) q++; }
+            if (*q) q++;
+        } else {
+            q++;
+            while (((unsigned char)*q & 0xC0) == 0x80) q++;
+            col++;
+        }
+        p = q;
+    }
+    term_write(text, (size_t)(p - text));
+    term_puts("\x1b[0m");
+}
+
+// ── The screen ──────────────────────────────────────────────────────
+static int page_rows(void)
+{
+    return s_rows - 2;
+}
+
 static void draw_status(void)
 {
     if (!s_full)
         return;
-    char row[160];
-    int n = snprintf(row, sizeof row, " %s", s_status);
+    char row[200];
+    int n = s_back ? snprintf(row, sizeof row, " %d lines back, PgDn for live | %s",
+                              s_back, s_status)
+                   : snprintf(row, sizeof row, " %s", s_status);
     if (n < 0) n = 0;
+    if (n > (int)sizeof row - 1) n = (int)sizeof row - 1;
     while (n < s_cols && n < (int)sizeof row - 1)       // pad: reverse video
         row[n++] = ' ';                                // fills the whole row
     if (n > s_cols) n = s_cols;
@@ -108,32 +179,44 @@ static void draw_status(void)
     term_puts("\x1b[0m\x1b" "8");
 }
 
-// Lay out an s_rows × s_cols terminal: output above, status bar and input
-// line on the bottom two rows. No scroll region: output scrolls the whole
-// screen, so the terminal keeps it in its own scrollback. entering: the
-// layout is new (or the size changed), so make room by scrolling the
-// screen up two rows; otherwise just redraw the bottom two rows.
-static void draw_layout(bool entering)
+// Paint the output rows from the scrollback, ending s_back lines before
+// the newest line. Lines are cut to the screen width, so each takes one
+// row.
+static void draw_output(void)
 {
-    term_puts("\x1b[r");                       // no scroll region
-    if (entering)
-        term_printf("\r\x1b[2K\x1b[%d;1H\r\n\r\n", s_rows);
-    term_printf("\x1b[%d;1H\x1b[J", s_rows - 1);
+    int rows = page_rows();
+    int end = s_sb_count - s_back;            // one past the last line shown
+    for (int r = 0; r < rows; r++) {
+        int i = end - rows + r;
+        term_printf("\x1b[%d;1H\x1b[2K", r + 1);
+        if (i >= 0 && i < s_sb_count)
+            write_clipped(sb_line(i));
+    }
+}
+
+// Draw the whole screen: the output rows in a scroll region (DECSTBM),
+// the status bar and the input line below. Only on waking the console.
+static void draw_screen(void)
+{
+    term_printf("\x1b[r\x1b[2J\x1b[1;%dr", page_rows());
+    draw_output();
     draw_status();
     draw_input();
 }
 
-// One line of output above the status bar.
+// One line of output: into the scrollback, and onto the screen. Live, it
+// goes in at the bottom of the scroll region, whose newline scrolls only
+// that region: nothing else is redrawn. Scrolled back, only the status
+// bar's count changes.
 static void emit_line(const char *text, size_t len)
 {
-    if (s_full) {
-        // over the status bar, then two newlines scroll it up past the
-        // bottom two rows, which are drawn again
-        term_printf("\x1b[%d;1H\x1b[J", s_rows - 1);
+    sb_add(text, len);
+    if (s_full && s_back == 0) {
+        term_printf("\x1b" "7\x1b[%d;1H\n", page_rows());
         term_write(text, len);
-        term_puts("\r\n\r\n");
+        term_puts("\x1b" "8");
+    } else if (s_full) {
         draw_status();
-        draw_input();
     } else {
         term_puts("\r\x1b[2K");
         term_write(text, len);
@@ -393,8 +476,8 @@ static void enter(void)
     snprintf(line, sizeof line, "%s", s_line);
     s_hist_at = 0;
     s_len = s_pos = 0;
-    if (!line[0]) {                          // an empty line: just a fresh prompt
-        draw_input();
+    if (!line[0]) {                          // an empty line wakes the console:
+        query_size();                        // measure, then redraw it all
         return;
     }
     history_add(line);
@@ -423,18 +506,26 @@ static void csi(const char *params, char final)
     case '~':
         if (a == 1 || a == 7) s_pos = 0;
         else if (a == 4 || a == 8) s_pos = s_len;
+        else if ((a == 5 || a == 6) && s_full) {   // PgUp / PgDn: a page
+            int max_back = s_sb_count > page_rows() ? s_sb_count - page_rows() : 0;
+            s_back += (a == 5) ? page_rows() : -page_rows();
+            if (s_back > max_back) s_back = max_back;
+            if (s_back < 0) s_back = 0;            // at the bottom: live again
+            draw_output();
+            draw_status();
+        }
         else if (a == 3 && s_pos < s_len) {
             size_t p = s_pos;
             cursor_right();
             delete_range(p, s_pos);
         }
         break;
-    case 'R':                                  // the size answer
+    case 'R':                                  // the size answer: wake up
         if (s_query_sent && a >= 4 && b >= 20) {
-            bool entering = !s_full || a != s_rows || b != s_cols;
             s_rows = a; s_cols = b; s_full = true;
             s_query_sent = 0;
-            draw_layout(entering);
+            s_back = 0;
+            draw_screen();
         }
         break;
     default: break;
@@ -465,11 +556,6 @@ static void console_task(void *arg)
             xSemaphoreGiveRecursive(s_lock);
             continue;
         }
-        // a key on a console still in plain mode: a terminal may have
-        // attached since, so ask again
-        if (!s_full && !s_query_sent && state == NORMAL && c != 0x1B)
-            query_size();
-
         switch (state) {
         case ESC:
             state = (c == '[') ? CSI : (c == 'O') ? SS3 : NORMAL;
@@ -507,9 +593,6 @@ static void console_task(void *arg)
                 while (s_pos > 0 && s_line[s_pos - 1] != ' ') s_pos--;
                 delete_range(s_pos, p);
             } break;
-            case 0x0C: query_size(); break;     // Ctrl-L: re-measure, redraw
-                                                // (Return does it too, while
-                                                // the layout is not up)
             default:
                 if (c >= 0x20) insert((const char *)&c, 1);
                 break;
