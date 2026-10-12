@@ -163,8 +163,11 @@ module csp (
     //
     // 2.5x. That margin is what keeps a word from arriving mid-commit, and
     // nothing enforces it -- a denser instruction table or a faster SPI
-    // clock eats it silently. So the commit does not DEPEND on it (see
-    // dmem_cm_addr below).
+    // clock eats it silently. The commit DOES depend on it: a word that
+    // arrives while the previous one is still pending overwrites it (the
+    // capture below), and the previous write is lost. docs/csp_isa.md
+    // proposes a guaranteed write slot every 8 cycles to remove the
+    // dependence (#184).
     // dmem_mbox_take is the SINGLE condition for both committing and
     // clearing pending. Clearing pending on dmem_wr_window alone, while
     // the commit also requires !dmem_we, silently drops any write whose

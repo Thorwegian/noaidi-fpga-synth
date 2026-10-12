@@ -5,6 +5,8 @@ License: CERN-OHL-S v2
  
 The modulation half of the design; [memory_map.md](memory_map.md)
 holds the wire protocol, addresses and per-partial parameter ABI.
+[csp_isa.md](csp_isa.md) proposes what the CSP becomes: a general
+instruction set in the spirit of the EMU10K1 (#184).
 
 ## What this actually is
 
