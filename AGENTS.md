@@ -14,6 +14,8 @@
 
 - Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
 
+- When designing an IP core (such as the CSP), use the excellent RISC-V ISA and associated documentation for reference.
+
 - Apply principles of universal design in user interfaces (and user-adjacent interfaces such as MIDI).
 
 - Agents *must* update comments and docs so they match the code before *every* commit.
