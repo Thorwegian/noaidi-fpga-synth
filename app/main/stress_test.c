@@ -20,15 +20,14 @@
 
 #define TAG "stress"
 
-#define STRESS_SECONDS   60
-#define STRESS_BURST     1      // iterations (4 messages each) per pace step
+#define STRESS_SECONDS 60
+#define STRESS_BURST   1 // iterations (4 messages each) per pace step
 // -> ~2000 msg/s, 2x wired-MIDI saturation (a firm stress; real MIDI is
 // ~1000/s max)
-#define STRESS_PACE_MS   2
+#define STRESS_PACE_MS 2
 
-static void publish_midi(uint8_t status, uint8_t d0, uint8_t d1)
-{
-    evt_t e = { .kind = EVT_MIDI };
+static void publish_midi(uint8_t status, uint8_t d0, uint8_t d1) {
+    evt_t e        = {.kind = EVT_MIDI};
     e.midi.status  = status;
     e.midi.len     = 2;
     e.midi.data[0] = d0;
@@ -36,39 +35,40 @@ static void publish_midi(uint8_t status, uint8_t d0, uint8_t d1)
     event_bus_publish(&e);
 }
 
-static void stress_task(void *arg)
-{
-    (void)arg;
-    vTaskDelay(pdMS_TO_TICKS(3000));   // let boot + BLE settle
+static void stress_task(void *arg) {
+    (void) arg;
+    vTaskDelay(pdMS_TO_TICKS(3000)); // let boot + BLE settle
     ESP_LOGW(TAG, "STRESS FLOOD START (%d s): CC 26/7/24 sweeps + note churn",
              STRESS_SECONDS);
 
     static const uint8_t notes[] = {52, 55, 57, 60, 64, 48};
-    uint8_t  cc = 0;
-    unsigned ni = 0;
-    int64_t  t0 = esp_timer_get_time();
+    uint8_t cc                   = 0;
+    unsigned ni                  = 0;
+    int64_t t0                   = esp_timer_get_time();
 
-    while (esp_timer_get_time() - t0 < (int64_t)STRESS_SECONDS * 1000000LL) {
+    while (esp_timer_get_time() - t0 < (int64_t) STRESS_SECONDS * 1000000LL) {
         for (int b = 0; b < STRESS_BURST; b++) {
-            cc = (uint8_t)((cc + 3) & 0x7F);
-            publish_midi(0xB0, 26, cc);                       // voice mode (the trigger)
-            publish_midi(0xB0, 7,  (uint8_t)((cc * 2) & 0x7F)); // master volume
-            publish_midi(0xB0, 24, cc);                       // osc mix
+            cc = (uint8_t) ((cc + 3) & 0x7F);
+            publish_midi(0xB0, 26, cc); // voice mode (the trigger)
+            publish_midi(0xB0, 7, (uint8_t) ((cc * 2) & 0x7F)); // master volume
+            publish_midi(0xB0, 24, cc);                         // osc mix
             uint8_t n = notes[ni % (sizeof notes)];
-            if (ni & 1u) publish_midi(0x80, n, 0);            // note off
-            else         publish_midi(0x90, n, 40);           // note on
+            if (ni & 1u) {
+                publish_midi(0x80, n, 0); // note off
+            } else {
+                publish_midi(0x90, n, 40); // note on
+            }
             ni++;
         }
-        vTaskDelay(pdMS_TO_TICKS(STRESS_PACE_MS));   // pace to a realistic rate
+        vTaskDelay(pdMS_TO_TICKS(STRESS_PACE_MS)); // pace to a realistic rate
     }
 
-    publish_midi(0xB0, 123, 0);                    // all notes off
-    ESP_LOGW(TAG, "STRESS FLOOD SURVIVED %d s (%u note events)",
-             STRESS_SECONDS, ni);
+    publish_midi(0xB0, 123, 0); // all notes off
+    ESP_LOGW(TAG, "STRESS FLOOD SURVIVED %d s (%u note events)", STRESS_SECONDS,
+             ni);
     vTaskDelete(NULL);
 }
 
-void stress_test_start(void)
-{
+void stress_test_start(void) {
     xTaskCreate(stress_task, "stress", 3072, NULL, 4, NULL);
 }

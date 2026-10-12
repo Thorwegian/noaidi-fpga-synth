@@ -20,38 +20,38 @@
 #define TAG "engine_link"
 
 // voice_alloc's boot-time pointer push alone is 512 commands
-#define ENGINE_QUEUE_LEN   1024
-#define ENGINE_TASK_STACK  3072
+#define ENGINE_QUEUE_LEN  1024
+#define ENGINE_TASK_STACK 3072
 // highest app task: above midi_in/voice_alloc (5), midi_log/ble_rx (4)
-#define ENGINE_TASK_PRIO   6
+#define ENGINE_TASK_PRIO 6
 // 1 kHz control rate. Paced by an esp_timer notifying the task, so the
 // rate does not depend on the FreeRTOS tick (CONFIG_FREERTOS_HZ, pinned
 // to 1000 in sdkconfig.defaults).
-#define ENGINE_TICK_US     1000
+#define ENGINE_TICK_US 1000
 
-#define PARTIAL_BASE            0x2000
-#define PARTIAL_STRIDE          64
+#define PARTIAL_BASE   0x2000
+#define PARTIAL_STRIDE 64
 
 // GAIN word with both channels at 0x00 = exact mute (volume
 // semantics: 0xFF is loudest).
-#define GAIN_WORD_MUTE            0x00000000u
+#define GAIN_WORD_MUTE 0x00000000u
 
 static QueueHandle_t s_queue;
 static QueueHandle_t s_dmem_queue;
 static uint32_t s_param_image[ENGINE_NUM_PARTIALS][ENGINE_WORDS_PER_PARTIAL];
 
-#define DMEM_BASE_ADDR      0x0800
+#define DMEM_BASE_ADDR 0x0800
 // init writes 32 envelope floors + 4 global DMEM words in one burst
-#define DMEM_QUEUE_LEN      128
-#define IMEM_BASE_ADDR     0x0100
-#define IMEM_BURST_WORDS   8      // fpga_word_write_burst's per-transaction limit
+#define DMEM_QUEUE_LEN   128
+#define IMEM_BASE_ADDR   0x0100
+#define IMEM_BURST_WORDS 8 // fpga_word_write_burst's per-transaction limit
 // Boot burst: 2 LFOs (2 words each) + 32 MOD envs + 32 amp ADSRs (4 words
 // each) + 33 MAC instructions (2 words: the 32 cutoff fan-outs and the
 // pitch-tracking one) = 326 pushes before the 1 kHz tick can drain. A
 // 256-deep queue drops the tail = the last voices' amp-env configs = gain
 // floor forever = heard as the level dropping every 32 note-ons. Headroom
 // ~1.6x.
-#define IMEM_QUEUE_LEN     512
+#define IMEM_QUEUE_LEN 512
 
 typedef struct {
     uint16_t dmem_addr;
@@ -59,13 +59,13 @@ typedef struct {
 } dmem_cmd_t;
 
 typedef struct {
-    uint8_t  entry;
-    uint8_t  word;      // 0 OP, 1 RATE_AD, 2 COEF, 3 RATE_DSR
+    uint8_t entry;
+    uint8_t word; // 0 OP, 1 RATE_AD, 2 COEF, 3 RATE_DSR
     uint32_t value;
 } imem_cmd_t;
 
 static QueueHandle_t s_imem_queue;
-static uint32_t s_imem_image[ENGINE_NUM_INSTR][4];   // word 3 is the second
+static uint32_t s_imem_image[ENGINE_NUM_INSTR][4]; // word 3 is the second
                                                    // ADSR rate word
 #define IMEM_DIRTY_WORDS (ENGINE_NUM_INSTR * 4 / 32)
 static uint32_t s_imem_dirty_now[IMEM_DIRTY_WORDS];
@@ -73,12 +73,11 @@ static uint32_t s_imem_dirty_prev[IMEM_DIRTY_WORDS];
 
 // Dirty bitmaps, one bit per (partial, word): 1792 bits.
 #define DIRTY_WORDS (ENGINE_NUM_PARTIALS * ENGINE_WORDS_PER_PARTIAL / 32)
-static uint32_t s_dirty_now[DIRTY_WORDS];   // changed since last swap
-static uint32_t s_dirty_prev[DIRTY_WORDS];  // written before last swap
+static uint32_t s_dirty_now[DIRTY_WORDS];  // changed since last swap
+static uint32_t s_dirty_prev[DIRTY_WORDS]; // written before last swap
 
 
-static inline void mark_dirty(int partial, int word)
-{
+static inline void mark_dirty(int partial, int word) {
     int bit = partial * ENGINE_WORDS_PER_PARTIAL + word;
     s_dirty_now[bit >> 5] |= 1u << (bit & 31);
 }
@@ -90,25 +89,24 @@ static inline void mark_dirty(int partial, int word)
 // matches the FPGA. Without that, the no-op elision in engine_task would
 // drop a write equal to the zeroed mirror, a depth-0 LFO for example,
 // and the boot program's value would stay.
-static void write_full_image(void)
-{
-    for (int e = 0; e < ENGINE_NUM_PARTIALS; e++)
-        fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE, s_param_image[e],
-                              ENGINE_WORDS_PER_PARTIAL);
+static void write_full_image(void) {
+    for (int e = 0; e < ENGINE_NUM_PARTIALS; e++) {
+        fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE,
+                              s_param_image[e], ENGINE_WORDS_PER_PARTIAL);
+    }
     const uint32_t *imem = &s_imem_image[0][0];
-    for (int i = 0; i < ENGINE_NUM_INSTR * 4; i += IMEM_BURST_WORDS)
+    for (int i = 0; i < ENGINE_NUM_INSTR * 4; i += IMEM_BURST_WORDS) {
         fpga_word_write_burst(IMEM_BASE_ADDR + i, imem + i, IMEM_BURST_WORDS);
+    }
 }
 
 static TaskHandle_t s_task;
 
-static void tick_timer_cb(void *arg)
-{
-    xTaskNotifyGive(s_task);   // runs in the esp_timer task
+static void tick_timer_cb(void *arg) {
+    xTaskNotifyGive(s_task); // runs in the esp_timer task
 }
 
-static void engine_task(void *arg)
-{
+static void engine_task(void *arg) {
     engine_param_cmd_t cmd;
 
     while (1) {
@@ -121,15 +119,17 @@ static void engine_task(void *arg)
         // wait (~3.6 us), so back-to-back writes cannot overrun the
         // 1-deep mailbox.
         dmem_cmd_t bc;
-        while (xQueueReceive(s_dmem_queue, &bc, 0) == pdTRUE)
+        while (xQueueReceive(s_dmem_queue, &bc, 0) == pdTRUE) {
             fpga_word_write(DMEM_BASE_ADDR + bc.dmem_addr, bc.value & 0x3FFFF);
+        }
 
         // Drain the queues into the images (partials + instructions —
         // both paged, both covered by the same swap).
         bool changed = false;
         while (xQueueReceive(s_queue, &cmd, 0) == pdTRUE) {
-            if (cmd.word >= ENGINE_WORDS_PER_PARTIAL)
-                continue;   // partial is uint8_t: 0..255 by construction
+            if (cmd.word >= ENGINE_WORDS_PER_PARTIAL) {
+                continue; // partial is uint8_t: 0..255 by construction
+            }
             // No-op elision, so the cost tracks what actually changed:
             // the image IS the FPGA's state (the FPGA-reload → ESP-
             // reboot rule guarantees it), so a write of the value
@@ -138,8 +138,9 @@ static void engine_task(void *arg)
             // one-knob re-render's flush from all 256 rows (~15 ms of
             // SPI, enough to wedge the link) into just the touched
             // rows.
-            if (s_param_image[cmd.partial][cmd.word] == cmd.value)
+            if (s_param_image[cmd.partial][cmd.word] == cmd.value) {
                 continue;
+            }
             s_param_image[cmd.partial][cmd.word] = cmd.value;
             mark_dirty(cmd.partial, cmd.word);
             changed = true;
@@ -148,12 +149,14 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_imem_queue, &pc, 0) == pdTRUE) {
             // entry is uint8_t = 0..255 — exactly the pool size, so
             // the type IS the bound
-            if (pc.word >= 4)
+            if (pc.word >= 4) {
                 continue;
-            if (s_imem_image[pc.entry][pc.word] == pc.value)   // no-op elision
+            }
+            if (s_imem_image[pc.entry][pc.word] == pc.value) { // no-op elision
                 continue;
+            }
             s_imem_image[pc.entry][pc.word] = pc.value;
-            int bit = pc.entry * 4 + pc.word;
+            int bit                         = pc.entry * 4 + pc.word;
             s_imem_dirty_now[bit >> 5] |= 1u << (bit & 31);
             changed = true;
         }
@@ -161,12 +164,21 @@ static void engine_task(void *arg)
         // Nothing new this tick and the shadow is already current
         // (nothing was written last tick either): skip write + swap.
         bool prev_any = false;
-        for (int i = 0; i < DIRTY_WORDS; i++)
-            if (s_dirty_prev[i]) { prev_any = true; break; }
-        for (int i = 0; i < IMEM_DIRTY_WORDS; i++)
-            if (s_imem_dirty_prev[i]) { prev_any = true; break; }
-        if (!changed && !prev_any)
+        for (int i = 0; i < DIRTY_WORDS; i++) {
+            if (s_dirty_prev[i]) {
+                prev_any = true;
+                break;
+            }
+        }
+        for (int i = 0; i < IMEM_DIRTY_WORDS; i++) {
+            if (s_imem_dirty_prev[i]) {
+                prev_any = true;
+                break;
+            }
+        }
+        if (!changed && !prev_any) {
             continue;
+        }
 
         // Write dirty_now ∪ dirty_prev to the shadow, then swap. Burst
         // the WHOLE partial row (7 consecutive words, one CS-framed
@@ -181,21 +193,23 @@ static void engine_task(void *arg)
             for (int w = 0; w < ENGINE_WORDS_PER_PARTIAL; w++) {
                 int bit = e * ENGINE_WORDS_PER_PARTIAL + w;
                 if ((s_dirty_now[bit >> 5] | s_dirty_prev[bit >> 5])
-                        & (1u << (bit & 31))) {
+                    & (1u << (bit & 31))) {
                     row_dirty = true;
                     break;
                 }
             }
-            if (row_dirty)
+            if (row_dirty) {
                 fpga_word_write_burst(PARTIAL_BASE + e * PARTIAL_STRIDE,
-                                      s_param_image[e], ENGINE_WORDS_PER_PARTIAL);
+                                      s_param_image[e],
+                                      ENGINE_WORDS_PER_PARTIAL);
+            }
         }
         for (int i = 0; i < IMEM_DIRTY_WORDS; i++) {
             uint32_t bits = s_imem_dirty_now[i] | s_imem_dirty_prev[i];
             while (bits) {
                 int b = __builtin_ctz(bits);
                 bits &= bits - 1;
-                int idx = i * 32 + b;              // entry*4 + word
+                int idx = i * 32 + b; // entry*4 + word
                 // four words per entry and a stride of four, so the
                 // instruction address IS the bit index
                 fpga_word_write(IMEM_BASE_ADDR + idx,
@@ -215,13 +229,13 @@ static void engine_task(void *arg)
         // and we would never block — starving IDLE (priority 0) on this
         // one-core chip → task watchdog. Yield a tick so IDLE runs; the
         // SPI image lags at most ~1 ms, which is inaudible.
-        if (esp_timer_get_time() - wake0 > 800)
+        if (esp_timer_get_time() - wake0 > 800) {
             vTaskDelay(1);
+        }
     }
 }
 
-void engine_link_init(void)
-{
+void engine_link_init(void) {
     // Image: every partial gated off (and gain-muted for belt and
     // braces at boot), benign params otherwise. ALL pointers start on
     // DMEM word 0 (the zero word) — voice_alloc owns the plan and repoints
@@ -229,11 +243,11 @@ void engine_link_init(void)
     for (int e = 0; e < ENGINE_NUM_PARTIALS; e++) {
         s_param_image[e][0] = 0;
         s_param_image[e][1] = 0;
-        s_param_image[e][2] = 0;            // Butterworth, fc = 0
+        s_param_image[e][2] = 0; // Butterworth, fc = 0
         s_param_image[e][3] = GAIN_WORD_MUTE;
-        s_param_image[e][4] = 0;            // GATE off
-        s_param_image[e][5] = 0;            // PTRS0: all → DMEM 0 (none);
-        s_param_image[e][6] = 0;            // PTRS1: voice_alloc owns the plan
+        s_param_image[e][4] = 0; // GATE off
+        s_param_image[e][5] = 0; // PTRS0: all → DMEM 0 (none);
+        s_param_image[e][6] = 0; // PTRS1: voice_alloc owns the plan
     }
 
     // Both pages get the muted image before anything can play.
@@ -243,7 +257,7 @@ void engine_link_init(void)
     fpga_swap();
     ESP_LOGI(TAG, "both pages muted (%d partials)", ENGINE_NUM_PARTIALS);
 
-    s_queue = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
+    s_queue      = xQueueCreate(ENGINE_QUEUE_LEN, sizeof(engine_param_cmd_t));
     s_dmem_queue = xQueueCreate(DMEM_QUEUE_LEN, sizeof(dmem_cmd_t));
     s_imem_queue = xQueueCreate(IMEM_QUEUE_LEN, sizeof(imem_cmd_t));
     if (s_queue == NULL || s_dmem_queue == NULL || s_imem_queue == NULL) {
@@ -252,13 +266,15 @@ void engine_link_init(void)
     }
 
     if (xTaskCreate(engine_task, "engine_link", ENGINE_TASK_STACK, NULL,
-                    ENGINE_TASK_PRIO, &s_task) != pdPASS) {
+                    ENGINE_TASK_PRIO, &s_task)
+        != pdPASS) {
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
 
     const esp_timer_create_args_t targs = {
-        .callback = tick_timer_cb, .name = "engine_tick",
+            .callback = tick_timer_cb,
+            .name     = "engine_tick",
     };
     esp_timer_handle_t timer;
     ESP_ERROR_CHECK(esp_timer_create(&targs, &timer));
@@ -266,25 +282,25 @@ void engine_link_init(void)
     ESP_LOGI(TAG, "1 kHz tick running");
 }
 
-bool engine_link_param_write(const engine_param_cmd_t *cmd)
-{
-    if (s_queue == NULL)
+bool engine_link_param_write(const engine_param_cmd_t *cmd) {
+    if (s_queue == NULL) {
         return false;
+    }
     return xQueueSend(s_queue, cmd, 0) == pdTRUE;
 }
 
-bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810)
-{
-    if (s_dmem_queue == NULL || dmem_addr == 0 || dmem_addr >= 1024)
+bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810) {
+    if (s_dmem_queue == NULL || dmem_addr == 0 || dmem_addr >= 1024) {
         return false;
+    }
     dmem_cmd_t bc = {.dmem_addr = dmem_addr, .value = value_q810};
     return xQueueSend(s_dmem_queue, &bc, 0) == pdTRUE;
 }
 
-bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value)
-{
-    if (s_imem_queue == NULL || word >= 4)   // uint8_t entry spans the pool
+bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value) {
+    if (s_imem_queue == NULL || word >= 4) { // uint8_t entry spans the pool
         return false;
+    }
     imem_cmd_t pc = {.entry = entry, .word = word, .value = value};
     return xQueueSend(s_imem_queue, &pc, 0) == pdTRUE;
 }

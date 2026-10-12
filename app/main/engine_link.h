@@ -23,8 +23,8 @@
 extern "C" {
 #endif
 
-#define ENGINE_NUM_PARTIALS 256
-#define ENGINE_WORDS_PER_PARTIAL 7   // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
+#define ENGINE_NUM_PARTIALS      256
+#define ENGINE_WORDS_PER_PARTIAL 7 // OSC DUTY FILTER GAIN GATE PTRS0 PTRS1
 // GAIN word: volume UQ4.4 per channel — 0x00 = silence/
 // exact mute, 0xFF = loudest; positive gain DMEM values mean LOUDER.
 // FILTER word: [13:0] cutoff UQ4.10 log2; [27:14] resonance UQ4.10
@@ -33,8 +33,8 @@ extern "C" {
 // [31:28] reserved.
 
 typedef struct {
-    uint8_t  partial;    // partial index 0..255
-    uint8_t  word;    // 0..6 (OSC DUTY FILTER GAIN GATE PTRS0 PTRS1)
+    uint8_t partial; // partial index 0..255
+    uint8_t word;    // 0..6 (OSC DUTY FILTER GAIN GATE PTRS0 PTRS1)
     uint32_t value;
 } engine_param_cmd_t;
 
@@ -85,10 +85,10 @@ bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 // envelope and state alone means phase accumulator. These must match
 // synth_pkg.sv's OPC_* exactly -- a stale value here is silent: the gateware
 // decodes it as some other instruction rather than rejecting it.
-#define CSP_OPC_OFF   0x0u
-#define CSP_OPC_LFO   0xEu   // state + multiply + accumulate
-#define CSP_OPC_ADSR  0xFu   // source (gate) + state + multiply + accumulate
-#define CSP_OPC_MAC  0xDu   // source + multiply + accumulate
+#define CSP_OPC_OFF  0x0u
+#define CSP_OPC_LFO  0xEu // state + multiply + accumulate
+#define CSP_OPC_ADSR 0xFu // source (gate) + state + multiply + accumulate
+#define CSP_OPC_MAC  0xDu // source + multiply + accumulate
 
 bool engine_link_imem_write(uint8_t entry, uint8_t word, uint32_t value);
 

@@ -23,10 +23,10 @@ void fpga_spi_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
 // ── Word protocol (spi_bus.sv / docs/memory_map.md) ─────────────────
 // 16-bit word addresses, 32-bit data, MSB first on the wire.
 #include <stdbool.h>
-void     fpga_word_write(uint16_t addr, uint32_t value);
-void     fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
+void fpga_word_write(uint16_t addr, uint32_t value);
+void fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
 uint32_t fpga_word_read(uint16_t addr);
-bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
+bool fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 
 // ── Page swap (ping-pong) ───────────────────────────────────────────
 // Per-partial writes land in the SHADOW page; this requests the swap
@@ -37,7 +37,7 @@ bool     fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 // Discipline: a swap flips the WHOLE page — keep both halves
 // populated. After a swap the new shadow holds the previous
 // page; rewrite what you change before the next swap.
-void     fpga_swap(void);
+void fpga_swap(void);
 
 #ifdef __cplusplus
 }

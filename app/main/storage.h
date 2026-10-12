@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define STORAGE_ROOT    "/storage"
+#define STORAGE_ROOT "/storage"
 
 // Mount the storage partition and complete its folder layout. Returns
 // false if the partition is missing or does not mount; the synth then
@@ -43,8 +43,8 @@ const char *storage_startup_patch(void);
 // that name (FAT compares names case-insensitively). The category folder
 // must exist and the name must be valid (patch_name_valid). False, with
 // the reason in err, otherwise.
-bool storage_save_patch(const char *category, const char *name, const patch_t *p,
-                        char *err, size_t err_len);
+bool storage_save_patch(const char *category, const char *name,
+                        const patch_t *p, char *err, size_t err_len);
 
 #ifdef __cplusplus
 }

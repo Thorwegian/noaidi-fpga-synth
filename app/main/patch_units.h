@@ -38,24 +38,24 @@ extern "C" {
 #endif
 
 typedef enum {
-    PF_NUMBER,      // a float or integer in the key's unit
-    PF_NAME,        // a string from the key's name list
+    PF_NUMBER, // a float or integer in the key's unit
+    PF_NAME,   // a string from the key's name list
 } pf_kind_t;
 
 typedef struct patch_field {
-    const char *table;          // TOML table: "voice", "osc", "filter", ...
+    const char *table; // TOML table: "voice", "osc", "filter", ...
     const char *key;
-    pf_kind_t   kind;
-    uint8_t     count;          // 1, or PATCH_NUM_OSC / PATCH_NUM_LFO for
-                                // the [[osc]] and [[lfo]] arrays of tables
-    bool        integer;        // PF_NUMBER written without decimals
-    const char *const *names;   // PF_NAME: names by raw value, NULL-ended
+    pf_kind_t kind;
+    uint8_t count;            // 1, or PATCH_NUM_OSC / PATCH_NUM_LFO for
+                              // the [[osc]] and [[lfo]] arrays of tables
+    bool integer;             // PF_NUMBER written without decimals
+    const char *const *names; // PF_NAME: names by raw value, NULL-ended
     // The raw value in patch_t, element i of the array.
     int32_t (*get)(const patch_t *p, int i);
-    void    (*set)(patch_t *p, int i, int32_t raw);
+    void (*set)(patch_t *p, int i, int32_t raw);
     // PF_NUMBER conversions. to_raw clamps to the key's range and returns
     // the canonical raw value (see above).
-    double  (*to_value)(const patch_t *p, int i, int32_t raw);
+    double (*to_value)(const patch_t *p, int i, int32_t raw);
     int32_t (*to_raw)(const patch_t *p, int i, double value);
 } patch_field_t;
 
@@ -64,11 +64,13 @@ const patch_field_t *patch_fields(size_t *count);
 
 // Set element i of field f from a file value: a number for PF_NUMBER
 // (±inf allowed where the key has it), ignored for PF_NAME.
-void patch_field_set_number(const patch_field_t *f, int i, patch_t *p, double value);
+void patch_field_set_number(const patch_field_t *f, int i, patch_t *p,
+                            double value);
 
 // Set element i of PF_NAME field f from a name. False if the name is
 // unknown; the field keeps its value.
-bool patch_field_set_name(const patch_field_t *f, int i, patch_t *p, const char *name);
+bool patch_field_set_name(const patch_field_t *f, int i, patch_t *p,
+                          const char *name);
 
 // Write element i of field f as TOML: a quoted name, "inf"/"-inf", or the
 // shortest decimal that loads back to the same raw value. Returns the
@@ -78,7 +80,8 @@ int patch_field_format(const patch_field_t *f, int i, const patch_t *p,
 
 // The canonical form of a raw value: what loading its written value
 // gives. Equal to the raw value except where several behave identically.
-int32_t patch_field_canonical(const patch_field_t *f, int i, const patch_t *p, int32_t raw);
+int32_t patch_field_canonical(const patch_field_t *f, int i, const patch_t *p,
+                              int32_t raw);
 
 #ifdef __cplusplus
 }
