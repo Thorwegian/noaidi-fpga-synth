@@ -17,7 +17,8 @@
 #                   overwritten on every run
 #   make fw-test    host test: every patch-file value loads back exactly,
 #                   banks.toml reads and writes back, and the factory
-#                   patches and banks read back exactly
+#                   patches and banks read back exactly (a warning, not a
+#                   failure, where only their formatting differs)
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
