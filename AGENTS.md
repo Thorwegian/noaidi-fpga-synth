@@ -4,6 +4,8 @@
 
 - Agents *always* liveblog their progress directly to the comments sections of the GitHub issues they are working on.
 
+- GitHub has an API for issue ticket relations (relates-to, blocked-by, parent-child). Agents *must* actively use it.
+
 - Agents write elegant and highly structured code at a senior developer level.
 
 - Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
