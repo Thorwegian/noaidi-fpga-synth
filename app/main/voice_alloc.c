@@ -279,8 +279,9 @@ static void param_write(uint8_t partial, uint8_t word, uint32_t value)
         ESP_LOGW(TAG, "engine queue full, partial %d word %d lost", partial, word);
 }
 
-// Pitch tracking, the part fixed at note-on: the base cutoff follows
-// the note's pitch (UQ4.10 log2), 1/2 octave above it at 100 %. The live part, bend and the
+// Pitch tracking, the part fixed at note-on: a partial's base cutoff
+// follows its own pitch (note + oscillator tune + unison detune, UQ4.10
+// log2), 1/2 octave above it at 100 %. The live part, bend and the
 // pitch LFOs, is the INSTR_PITCH_TRACK MAC instruction. The mod wheel
 // rides DMEM_CH_CUT, fanned out to each voice's DMEM_CUT(v), which its
 // partials' cutoff pointers reference (init_param_pointers); it does
@@ -381,7 +382,6 @@ static void promote_idle(int64_t now)
 // released voice was GATE-muted by promote_idle.
 static void render_voice(int v, uint8_t note, uint8_t vel)
 {
-    uint16_t fc = tracked_cutoff((int32_t)midi_to_pitch(note));
     // Per-note ceiling only: fixed VOL_REF. MASTER volume is NOT here — it rides the
     // gain DMEM base (refresh_gain_dmem), so a CC 7 sweep is DMEM
     // writes, not a re-render of every partial.
@@ -418,6 +418,7 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
         int32_t pitch = base + o->tune + voicing[u].detune;
         if (pitch < 0)      pitch = 0;
         if (pitch > 0x3FFF) pitch = 0x3FFF;
+        uint16_t fc = tracked_cutoff(pitch);
 
         int32_t ovol = vol + makeup;
         if (voicing[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
