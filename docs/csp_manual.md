@@ -26,8 +26,9 @@ assembly language.
 
 The CSP computes the synthesizer's control signals: envelopes, LFOs, and
 the pitch, cutoff and gain values every partial reads. It runs one fixed
-program, from the first instruction to the last, once per sample (96 000
-times a second), executing one instruction per clock cycle. There are no
+program, from the first instruction to the last, once per pass (a pass
+is one or two samples: 96 000 or 48 000 times a second), executing one
+instruction per clock cycle. There are no
 jumps and no interrupts; the program takes the same number of cycles
 every sample, whatever its data.
 
@@ -210,9 +211,11 @@ instruction itself. The instruction's description says so.
 
 ## 5. Execution
 
-- **One pass per sample.** At every sample tick the program starts from
-  its first instruction and runs to its last, one instruction per cycle.
-  The program can be up to 736 instructions long.
+- **One pass per sample, or per two.** At the start of every pass the
+  program starts from its first instruction and runs to its last, one
+  instruction per cycle. Whether a pass is one sample (96 kHz, up to 736
+  instructions) or two (48 kHz, up to 1480) is still open
+  ([csp_isa.md](csp_isa.md) section 2).
 - **Fixed timing.** No instruction's timing depends on data. `SKIP`
   turns instructions into no-operations but they still take their
   cycles, and `LOOP` repeats a fixed number of times.
@@ -230,9 +233,9 @@ instruction itself. The instruction's description says so.
   firmware lands within 32 cycles. The program does not see the slot,
   except that a register may change between two of its instructions.
   Firmware should therefore write each value in one register write.
-- **The sinks are published per sample.** What the program writes to
-  the sink area becomes visible to the partial pipeline at the next
-  sample tick, all at once, so the partials never see half a pass.
+- **The sinks are published per pass.** What the program writes to
+  the sink area becomes visible to the partial pipeline at the end of
+  the pass, all at once, so the partials never see half a pass.
 
 ## 6. Assembly language
 
@@ -401,9 +404,9 @@ register, for the precision slow LFOs need), wrapping once per cycle.
 With X = 0 the result is A; with X = 1 it is Y; in between it is the
 point that far along the way.
 
-Used in place (A = R) once per sample, it is a one-pole low-pass filter
+Used in place (A = R) once per pass, it is a one-pole low-pass filter
 or an RC charge: R approaches Y by the same fraction of the remaining
-distance every sample. The envelope uses it for every segment, with Y
+distance every pass. The envelope uses it for every segment, with Y
 the segment's target and X its rate. Used once, it is a crossfade
 between A and Y.
 

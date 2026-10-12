@@ -57,11 +57,18 @@ add", and the per-partial immediates.
   selects and `SKIP` (a skipped instruction still takes its cycle), so
   the timing never depends on the data. Loops (`LOOP`) have a fixed
   count, so they keep that property.
-- **Everything runs at the full 96 kHz.** If a lower rate is ever
-  chosen for some work, it cannot come from skipping, since skipped
-  instructions still take their cycles; it would alternate instead (a
-  loop covers half the voices, and `i` starts on the other half on odd
-  samples). Not decided (section 14).
+- **Pass rate.** The partial pipeline runs at 96 kHz for oscillator
+  aliasing and filter headroom; control signals tolerate a lower rate
+  (Thor, #184). Two options (section 9):
+  - **A: one pass per sample** (96 kHz): 736 instructions. Fits one
+    channel, not sixteen.
+  - **B: one pass per two samples** (48 kHz, as the EMU10K1 runs):
+    1480 instructions. Fits sixteen channels with room to spare; the
+    sinks then change every second sample.
+  Work that should run slower still (LFOs at 24 kHz) cannot come from
+  skipping, since skipped instructions still take their cycles; it
+  alternates instead: a loop covers half the channels, and `i` starts
+  on the other half on alternate passes.
 - **Length:** up to **736 instructions**. Every 32nd cycle is a
   **firmware write slot**: the CSP issues no write-back in it, so a
   mailbox write commits within 32 cycles (0.43 µs) whatever the program
@@ -257,20 +264,25 @@ about 4 instructions. **2–5 instructions per LFO** (examples in
 
 ## 9. Budget (*estimate*)
 
-Cycles per sample at the full 96 kHz, out of 736:
+Instructions per pass. Option B's LFOs run at a quarter of 96 kHz,
+alternating halves of the channels.
 
-| Work | Instructions |
-|---|---|
-| 32 voices × both envelopes (17) | 544 |
-| voice pitch, cutoff, gain (32 voices × 3) | 96 |
-| channel arithmetic (bend, CCs, tracking) | 64 |
-| 2 LFOs, one channel | ~10 |
-| **total** | **~714 of 736** |
+| Work | A: 96 kHz, 1 channel | B: 48 kHz, 16 channels |
+|---|---|---|
+| 32 voices × both envelopes (17) | 544 | 544 |
+| voice pitch, cutoff, gain (32 voices × 3) | 96 | 96 |
+| channel arithmetic (bend, CCs, tracking: ~16 per channel) | 16 | 256 |
+| 2 LFOs per channel (~5 each) | 10 | 80 (160 at half the channels per pass) |
+| **total** | **~666 of 736** | **~976 of 1480** |
 
-That fits one channel, as today, with little room to spare. Sixteen
-channels add ~150 for their LFOs and more channel arithmetic, which does
-not fit. The ways out are in section 14. `LOOP` saves instruction
-memory, not cycles.
+**Recommendation: B.** It is the only one that fits sixteen channels,
+it needs no alternation for the envelopes, and its spare ~500
+instructions leave room for drift (#217), noise (#216) and whatever
+comes next. Costs: one more instruction-memory BSRAM (1480 × 36), the
+firmware's envelope rates computed for 48 kHz, and the sinks stepping
+at 48 kHz. If those steps are audible on fast gain changes, the partial
+pipeline can interpolate the gain sinks between passes. `LOOP` saves
+instruction memory, not cycles.
 
 ## 10. BSRAM
 
@@ -279,7 +291,7 @@ memory, not cycles.
 | Where | Blocks | What | Needed? |
 |---|---|---|---|
 | `spi_bus` `store_ram` | 4 | 2048 × 36 copy of every SPI write, for reading back | Only the boot self-test reads back (`main.c`). **Candidate: −3 or −4.** |
-| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction: 1024 × 36, single page = **2**. |
+| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction, single page: **2** for 736 instructions (A), **3** for 1480 (B). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y): **3**. |
 | CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | **6, or 12** with two reads per sink (section 6). |
@@ -289,7 +301,7 @@ memory, not cycles.
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 24 to 31 blocks, against 33 today, before #217.
+**Projected:** 24 to 32 blocks, against 33 today, before #217.
 
 ## 11. DSP blocks
 
@@ -333,10 +345,9 @@ Each its own PR, checked in sim and on the board:
 
 ## 14. Open questions
 
-- **The cycle budget for sixteen channels** (section 9). Options:
-  fewer instructions per envelope (a cheaper stage update), a write slot
-  less often, a faster CSP clock, a second CSP, or lower update rates for
-  some work (for example LFOs, which change slowly). None is chosen.
+- **The pass rate:** option A (96 kHz) or B (48 kHz, recommended), and
+  whether the partial pipeline interpolates the gain sinks (sections 2
+  and 9).
 - Two reads per sink: more replicas or two cycles per partial
   (section 6).
 - Register file size for 16 channels (section 5).
