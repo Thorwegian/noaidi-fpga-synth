@@ -14,12 +14,12 @@ pulse_width = 90.220684
 [[osc]]
 wave = "pulse"
 tune = 6
-pulse_width = 50
+pulse_width = 65.832305
 
 [filter]
 type = "lowpass"
 slope = 24
-cutoff = 35.66
+cutoff = 261.6
 resonance = 2.146
 key_track = 100
 
@@ -27,17 +27,17 @@ key_track = 100
 attack = 0
 sustain = -0.47
 decay = 0.341
-release = 15.7
+release = 9.9
 velocity = 50
 
 [mod_env]
-attack = 0
+attack = 0.9
 sustain = 0
-decay = 15.7
+decay = 14.4
 release = 11
 velocity = 50
 destination = "cutoff"
-depth = 90.75
+depth = 34.17
 
 [[lfo]]
 shape = "pulse"
