@@ -22,6 +22,8 @@
 
 - Raw values are raw values. There is no such unit as "LSB".
 
+- Before cloning SystemVerilog arrays for parallel access or implementing CDCs for memory access, remember that B-SRAM banks are dual-ported and dual-clocked.
+
 ```
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
