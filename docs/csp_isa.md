@@ -5,7 +5,9 @@ License: CERN-OHL-S v2
 
 **Status: proposal for review (#184).** Nothing here is built yet. The
 current CSP is described in [dmem_architecture.md](dmem_architecture.md);
-this document proposes what it becomes. Numbers marked *estimate* are
+this document proposes what it becomes and why. The instruction set
+itself, every instruction and the assembly language, is specified in
+[csp_manual.md](csp_manual.md). Numbers marked *estimate* are
 worked out on paper, not measured.
 
 The Control Signal Processor (CSP) computes every control signal the
@@ -55,14 +57,16 @@ add", and the per-partial immediates.
   selects and `SKIP` (a skipped instruction still takes its cycle), so
   the timing never depends on the data. Loops (`LOOP`) have a fixed
   count, so they keep that property.
-- **Lower update rates** cannot come from skipping work, since skipped
-  instructions still take their cycles. Work that may run at 48 kHz
-  instead alternates: a loop covers half the voices, and `i` starts on
-  the other half on odd samples.
-- **Length:** up to **640 instructions**. Every 8th cycle is a
+- **Everything runs at the full 96 kHz.** If a lower rate is ever
+  chosen for some work, it cannot come from skipping, since skipped
+  instructions still take their cycles; it would alternate instead (a
+  loop covers half the voices, and `i` starts on the other half on odd
+  samples). Not decided (section 14).
+- **Length:** up to **736 instructions**. Every 32nd cycle is a
   **firmware write slot**: the CSP issues no write-back in it, so a
-  mailbox write commits within 8 cycles (0.11 µs) whatever the program
-  does. 640 + 80 write slots + drain = 728 of 768 cycles.
+  mailbox write commits within 32 cycles (0.43 µs) whatever the program
+  does, against 3.2 µs per SPI word. 736 + 24 write slots + drain = 768
+  cycles. (A slot every 8 cycles would allow 665 instructions.)
 - **Results are visible at once:** an instruction reads the newest value
   of every register, including one written by the instruction just
   before it (forwarding, as today).
@@ -88,8 +92,8 @@ A textbook in-order pipeline, one instruction per cycle:
   instantiates (ALU54D then MULTALU36X18). `MAC`, `INTERP` and the
   envelope recurrence are all `A + X × (Y − A)` or `A + X × Y` on it.
   The CSP's separate 18 × 18 multiply retires.
-- **Accumulator:** 54 bits inside the DSP macro (Q12.42 for a Q8.28 ×
-  Q4.14 product). 72 bits is possible by chaining macros if a use for
+- **Accumulator:** 54 bits inside the DSP macro (Q8.46: a Q4.32 × Q4.14
+  product). 72 bits is possible by chaining macros if a use for
   it turns up.
 - **Condition flags** (zero, negative, saturated), set by every
   arithmetic instruction, read by `SEL` and `SKIP`.
@@ -106,7 +110,7 @@ One instruction = **one 36-bit BSRAM word**:
 | Bits | Field | Meaning |
 |---|---|---|
 | 35:32 | `op` | opcode (16) |
-| 31:30 | `a` | A operand: 0 = zero, 1 = R (read-modify-write), 2 = accumulator, 3 = Y |
+| 31:30 | `a` | A operand: 0 = zero, 1 = R (read-modify-write), 2 = accumulator, 3 = R and the instruction is wide |
 | 29:20 | `R` | result operand |
 | 19:10 | `X` | X operand |
 | 9:0 | `Y` | Y operand |
@@ -136,8 +140,11 @@ each read address in the D stage, off the multiply's critical path.
 
 The register file is **1024 × 18-bit words** (10-bit addresses), built
 as 512 × 36 BSRAM: an 18-bit operation addresses one half, a **wide**
-operation (`W` opcodes) an aligned pair as one 36-bit Q8.28 value. Wide
-pairs hold what needs precision: envelope levels, LFO phases.
+operation (`a` = 3, `.w` in assembly) an aligned pair as one 36-bit
+Q4.32 value. Wide pairs hold what needs precision: envelope levels, LFO
+phases. Q4.32 rather than the FPGA's usual Q8.28, so that a pair's upper
+word reads as an ordinary Q4.14 word ([csp_manual.md](csp_manual.md)
+section 3; open).
 
 | Region (proposed) | Words | Contents |
 |---|---|---|
@@ -180,35 +187,34 @@ and a DMEM word, so a partial is pointers only:
 
 ## 7. Opcodes
 
-Sixteen, modelled on the EMU10K1's. Arithmetic saturates unless it says
-wrap.
+Sixteen, modelled on the EMU10K1's, each described in full in
+[csp_manual.md](csp_manual.md) section 7:
 
 | op | Mnemonic | Operation |
 |---|---|---|
-| 0 | `MAC` | R = A + X × Y (A − X × Y with a negative constant) |
-| 1 | `LOOP` | repeat the next `R` instructions X times, adding Y to `i` after each pass; `i` starts at its value before the loop |
+| 0 | `MAC` | R = A + X × Y |
+| 1 | `LOOP` | repeat the next R instructions X times, stepping `i` by Y |
 | 2 | `MACW` | R = A + X × Y, wrapping (phase accumulators) |
 | 3 | `INTERP` | R = A + X × (Y − A) (RC step, crossfade) |
-| 4 | `ACC` | acc = A + X × Y, R unchanged (multi-term sums) |
+| 4 | `ACC` | acc = A + X × Y (sums of products) |
 | 5 | `ADD3` | R = A + X + Y |
-| 6 | `SEL` | R = flag ? X : Y |
-| 7 | `CMP` | flags from A − Y; R = A − Y |
+| 6 | `SEL` | R = N clear ? X : Y |
+| 7 | `CMP` | R = X − Y, setting the flags |
 | 8 | `MIN` | R = min(X, Y) |
 | 9 | `MAX` | R = max(X, Y) |
-| 10 | `ANDXOR` | R = (A & X) ^ Y (bit masks, abs, sign) |
-| 11 | `SHIFT` | R = A shifted by the signed count in Y |
-| 12 | `EXP2` | R = 2^A, A in octaves (log pitch/gain → linear) |
-| 13 | `WIDE` | the next instruction works on 36-bit pairs |
-| 14 | `SKIP` | skip the next Y instructions if the flags match X (they still take their cycles) |
-| 15 | `IDX` | `i` (R = 0) or `j` (R = 1) = X + Y |
+| 10 | `ANDXOR` | R = (X & Y) ^ A |
+| 11 | `SHIFT` | R = A × 2^Y |
+| 12 | `EXP2` | R = 2^X, X in octaves |
+| 13 | `ABS` | R = |X| |
+| 14 | `SKIP` | make the next Y instructions no-ops if the flags match X |
+| 15 | `IDX` | `i` or `j` = X + Y |
 
-A no-operation is any instruction whose result goes to register 0, the
-hard-wired zero. The firmware write slot is inserted by the hardware,
-not by the program.
+Wide arithmetic is the `a` field's fourth value rather than an opcode
+or a prefix, so it costs no cycle: wide operations always update a
+register in place.
 
-*Open:* whether `WIDE` is a prefix or a bit in each opcode; whether
-`EXP2` earns its place before #176 (linear gain) needs it; whether `j`
-also wants a nested `LOOP`.
+*Open:* whether `EXP2` earns its place before #176 (linear gain) needs
+it; whether `j` also wants a nested `LOOP`.
 
 ## 8. Envelopes and LFOs as instructions
 
@@ -219,45 +225,52 @@ in three rows of two words. Each voice block holds `level` (wide),
 `velocity` and the output. One loop serves every voice:
 
 ```
-LOOP   9, VOICES, VOICE_STRIDE     ; i steps through the voice blocks
-CMP    t, i+LEVEL, FULL            ; flag: level ≥ full scale
-MAX    u, i+STAGE, DECAY           ;   attack → decay; decay, release stay
-SEL    i+STAGE, u, i+STAGE
-ANDXOR u, i+STAGE, TWO, ZERO       ; release → attack if the gate is back: 0/2/4 → 0/2/0
-CMP    t, i+GATE, ONE              ; flag: gate held
-SEL    i+STAGE, u, RELEASE         ;   else release
-IDX    j, ENV_TABLE, i+STAGE       ; j = this segment's (target, rate) row
-INTERP i+LEVEL, j+RATE, j+TARGET   ; level += rate × (target − level)  (wide)
-MAC    i+OUT, i+LEVEL, i+VELOCITY  ; scaled for the gain sink
+IDX     i, =#VOICES, 0             ; i → voice 0
+LOOP    9, =#32, =#8               ; each voice
+IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
+CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
+MAX     U, [i+STAGE], =#2          ;     attack → decay
+SEL     [i+STAGE], U, [i+STAGE]
+ANDXOR  U, 0, [i+STAGE], =#2       ;   release → attack: 0/2/4 → 0/2/0
+CMP     ZERO, [i+GATE], ONE        ;   gate held?
+SEL     [i+STAGE], U, =#4          ;     else release
+INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
+MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
 
-Operands are written in the order the opcode uses them (section 7);
+`j` is set first, from the stage the previous sample left, because an
+index register takes effect three instructions after `IDX`; a stage
+change therefore lands one sample (~10 µs) later.
+
+Assembly syntax as in [csp_manual.md](csp_manual.md) section 6;
 `SEL` reads the flags of the latest `CMP`. That is **9 instructions per
 envelope**, written once for all voices, with no envelope-specific
 opcode: the stage is data, and indirect addressing picks the segment.
+A voice's two envelopes share one loop body and one gate compare: 17
+instructions per voice.
 
-**LFO** (per channel): `MACW phase, phase, ONE, rate` (wide), then the
-shape — saw: the phase; square: `CMP` + `SEL`; triangle: `ANDXOR`
-(abs) + `MAC`; sine: a polynomial, about 4 instructions. Then
-`MAC out, shape, depth`. **3–7 instructions per LFO.**
+**LFO** (per channel): `MACW.w PHASE, ONE, RATE` advances the wide
+phase, then the shape is scaled by the depth. Saw: one `MAC`; square:
+`CMP` + `SEL`; triangle: `ABS` + `MAC` + `ADD3`; sine: a polynomial,
+about 4 instructions. **2–5 instructions per LFO** (examples in
+[csp_manual.md](csp_manual.md) section 8).
 
 ## 9. Budget (*estimate*)
 
-Cycles per sample, out of 640:
+Cycles per sample at the full 96 kHz, out of 736:
 
-| Work | Full rate | MOD envelopes at 48 kHz |
-|---|---|---|
-| 32 amp envelopes × 9 | 288 | 288 |
-| 32 MOD envelopes × 9 | 288 | 144 (16 voices per sample, alternating) |
-| voice pitch, cutoff, gain (32 voices × 3) | 96 | 96 |
-| channel arithmetic (bend, CCs, tracking) | 64 | 64 |
-| 2 LFOs, one channel | ~10 | ~10 |
-| **total** | **~746** | **~602** |
+| Work | Instructions |
+|---|---|
+| 32 voices × both envelopes (17) | 544 |
+| voice pitch, cutoff, gain (32 voices × 3) | 96 |
+| channel arithmetic (bend, CCs, tracking) | 64 |
+| 2 LFOs, one channel | ~10 |
+| **total** | **~714 of 736** |
 
-So the MOD envelopes run at 48 kHz, alternating halves of the voices.
-Sixteen channels' LFOs (2 × 16 × ~5 = ~160) also need a lower rate:
-at a quarter rate (24 kHz, plenty for LFOs up to ~190 Hz) they take
-~40, for ~632 in all. `LOOP` saves instruction memory, not cycles.
+That fits one channel, as today, with little room to spare. Sixteen
+channels add ~150 for their LFOs and more channel arithmetic, which does
+not fit. The ways out are in section 14. `LOOP` saves instruction
+memory, not cycles.
 
 ## 10. BSRAM
 
@@ -309,7 +322,7 @@ Each its own PR, checked in sim and on the board:
 
 1. Reference model, assembler and the instruction-level bench, against
    a new CSP core beside the old one.
-2. The new core: datapath, register file, write slot, 640-instruction
+2. The new core: datapath, register file, write slot, 736-instruction
    program. Today's programs ported to it.
 3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
    `osc_core` retire.
@@ -320,8 +333,10 @@ Each its own PR, checked in sim and on the board:
 
 ## 14. Open questions
 
-- Which work runs at a lower rate: the MOD envelopes and the LFOs, as
-  section 9 assumes, or also the amp envelopes.
+- **The cycle budget for sixteen channels** (section 9). Options:
+  fewer instructions per envelope (a cheaper stage update), a write slot
+  less often, a faster CSP clock, a second CSP, or lower update rates for
+  some work (for example LFOs, which change slowly). None is chosen.
 - Two reads per sink: more replicas or two cycles per partial
   (section 6).
 - Register file size for 16 channels (section 5).
