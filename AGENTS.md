@@ -8,6 +8,8 @@
 
 - Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
 
+- Code in C-like languages is formatted in the style of the Oracle Java API Documentation.
+
 - Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
 
 - Apply principles of universal design in user interfaces (and user-adjacent interfaces such as MIDI).
