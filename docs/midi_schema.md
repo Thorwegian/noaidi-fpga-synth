@@ -104,7 +104,7 @@ equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
 | 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
-| 77 | LFO 1 depth, coarse | standard "vibrato depth". LINEAR in the raw depth, with Fine (CC 115) on top (`lfo_depth_from_knobs`). On PITCH: the span from low note to high note in WHOLE SEMITONES, raw depth = (coarse + fine/128) × 1024/12, 12 = one octave, 96 and up = ±48 semitones (raw value 8192, the top). Elsewhere: `val<<2` + `fine>>5` (raw value 511 at the top: ±¼ octave of cutoff or Q, or ±0.25 duty). A destination change (CC 114) works the depth out again from both knobs' last positions |
+| 77 | LFO 1 depth, coarse | standard "vibrato depth". LINEAR in the raw depth, with Fine (CC 115) on top (`lfo_depth_from_knobs`). On PITCH: the span from low note to high note in WHOLE SEMITONES, four knob steps per semitone: raw depth = ((coarse >> 2) + fine/128) × 1024/12, so 48 = one octave, 96 = two, 127 = 31 semitones (Coarse and Fine both at the top: just under 32). Elsewhere: `val<<2` + `fine>>5` (raw value 511 at the top: ±¼ octave of cutoff or Q, or ±0.25 duty). A destination change (CC 114) works the depth out again from both knobs' last positions |
 | 115 | LFO 1 depth, fine | the steps between Coarse's: on pitch 0…127/128 of a semitone of span (vibrato lives here, Coarse at 0), elsewhere 0…3 raw |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
 | 114 | LFO 1 destination | 4-way `(val*4)>>7`, as CC 112: duty/PWM / resonance / PITCH / **CUTOFF** |

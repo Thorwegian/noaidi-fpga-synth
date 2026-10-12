@@ -539,40 +539,46 @@ static uint16_t s_lfo_word[PATCH_NUM_LFO];   // DMEM word each LFO drives now
 // linear in the raw depth. The LFO swings its DMEM word by ±depth/2
 // (docs/storage_format.md), so on pitch a raw depth of 1024/12 is a
 // span of one semitone from the low note to the high one.
-//   pitch:  Coarse = span in whole semitones (12 = one octave, 96 =
-//           ±48, the top), Fine adds fine/128 of a semitone.
+//   pitch:  Coarse = span in whole semitones, four knob steps per
+//           semitone (coarse >> 2: 48 = one octave, 96 = two, 127 =
+//           31 semitones), Fine adds fine/128 of a semitone.
 //   others: Coarse = val << 2, Fine adds fine >> 5 (0..3), the steps
 //           in between.
 // The knob positions are kept so a destination change can work the
 // depth out again. A loaded patch makes them unknown; the first depth
 // knob moved after that takes the other one's position from the
 // patch's depth.
-#define LFO_PITCH_DEPTH_MAX  8192                  // ±48 semitones
-#define LFO_PITCH_FINE_STEPS 128                   // Fine steps per semitone
+#define LFO_PITCH_COARSE_SHIFT 2                   // Coarse steps per semitone: 4
+#define LFO_PITCH_FINE_STEPS   128                 // Fine steps per semitone
 struct lfo_depth_knobs { uint8_t coarse, fine; bool known; };
 static struct lfo_depth_knobs s_lfo_depth_knobs[PATCH_NUM_LFO];
 
 static int16_t lfo_depth_from_knobs(uint8_t dest, const struct lfo_depth_knobs *k)
 {
     if (dest == LFO_DEST_PITCH) {
-        int32_t fine_steps = k->coarse * LFO_PITCH_FINE_STEPS + k->fine;
-        int32_t depth = (fine_steps * 1024 + 12 * LFO_PITCH_FINE_STEPS / 2)
-                      / (12 * LFO_PITCH_FINE_STEPS);
-        return (int16_t)(depth < LFO_PITCH_DEPTH_MAX ? depth : LFO_PITCH_DEPTH_MAX);
+        int32_t fine_steps = (k->coarse >> LFO_PITCH_COARSE_SHIFT) * LFO_PITCH_FINE_STEPS + k->fine;
+        return (int16_t)((fine_steps * 1024 + 12 * LFO_PITCH_FINE_STEPS / 2)
+                         / (12 * LFO_PITCH_FINE_STEPS));
     }
     return (int16_t)((k->coarse << 2) + (k->fine >> 5));
 }
 
 // The knob positions nearest a patch's depth (its size: the knobs have
-// no sign).
+// no sign; past the knobs' top, the top).
 static struct lfo_depth_knobs lfo_knobs_from_depth(uint8_t dest, int16_t depth)
 {
     int32_t size = depth < 0 ? -depth : depth;
     struct lfo_depth_knobs k = { .known = true };
     if (dest == LFO_DEST_PITCH) {
         int32_t fine_steps = (size * 12 * LFO_PITCH_FINE_STEPS + 512) / 1024;
-        k.coarse = (uint8_t)(fine_steps / LFO_PITCH_FINE_STEPS);
-        k.fine   = (uint8_t)(fine_steps % LFO_PITCH_FINE_STEPS);
+        int32_t semitones  = fine_steps / LFO_PITCH_FINE_STEPS;
+        if (semitones > (127 >> LFO_PITCH_COARSE_SHIFT)) {
+            k.coarse = 127;
+            k.fine   = LFO_PITCH_FINE_STEPS - 1;
+        } else {
+            k.coarse = (uint8_t)(semitones << LFO_PITCH_COARSE_SHIFT);
+            k.fine   = (uint8_t)(fine_steps % LFO_PITCH_FINE_STEPS);
+        }
     } else {
         k.coarse = (uint8_t)(size >> 2 < 127 ? size >> 2 : 127);
         k.fine   = (uint8_t)((size & 3) << 5);
