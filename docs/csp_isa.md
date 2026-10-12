@@ -147,7 +147,7 @@ indexed operand reaches the whole register file. They work like a
 pointer to a record plus a field offset: `i` points at a voice's block
 and the offset picks `level`, `gate` and so on; `j` points at a row of
 a channel table, such as the current envelope segment's (target, rate)
-pair. `LOOP` steps `i`; `IDX` sets either. The adder sits in front of
+pair. `LOOP.i` steps `i` and `LOOP.j` steps `j`; `IDX` sets either. The adder sits in front of
 each read address in the D stage, off the multiply's critical path.
 
 ## 5. Register spaces
@@ -204,9 +204,12 @@ the start, when it began as a modulation-bus matrix.
   1024-word sink area.
 - **The PAP's own parameter RAM holds only the pointers**, 12 per
   partial (two per sink). They change only when the voice layout does.
-  Those writes come through the write queue and are applied in the
-  PAP's idle 256 cycles of a sample, so a voice's partials are never
-  half re-pointed. The pointer RAM needs no second page.
+  They are set so rarely that they need no buffering: the firmware
+  writes them directly through the pointer RAM's second port, in the
+  SPI clock (Gowin BSRAM is dual-port and dual-clock), as the parameter
+  RAMs are written today. A re-layout that must not tear holds the PAP
+  while it writes. The pointer RAM needs no second page. Only the
+  values go through the write queue.
 
 **Concurrency with the partial pipeline** stays today's ping-pong
 paging (proven in `tb_prog_pingpong`, `tb_csp` and on hardware): the CSP
@@ -232,7 +235,7 @@ Sixteen, modelled on the EMU10K1's, each described in full in
 | op | Mnemonic | Operation |
 |---|---|---|
 | 0 | `NOP` | nothing (all-zero memory is NOPs) |
-| 1 | `LOOP` | repeat the next R instructions X times, stepping `i` by Y |
+| 1 | `LOOP` | repeat the next R instructions X times, stepping `i` or `j` (`a` bit 0) by Y |
 | 2 | `MACW` | R = A + X × Y, wrapping (phase accumulators) |
 | 3 | `INTERP` | R = A + X × (Y − A) (RC step, crossfade) |
 | 4 | `ACC` | acc = A + X × Y (sums of products) |
@@ -257,7 +260,7 @@ nothing, flags included. There is no `EXP2`: linear gain (#176) is
 products only, the firmware turns dB settings into linear coefficients,
 and pitch and cutoff stay in octaves until the PAP's tables.
 
-*Open:* whether `j` also wants a nested `LOOP`.
+`LOOP.i` and `LOOP.j` nest one level, each with its own loop counter.
 
 ## 8. Envelopes and LFOs as instructions
 
@@ -269,7 +272,7 @@ in three rows of two words. Each voice block holds `level` (wide),
 
 ```
 IDX     i, =#VOICES, 0             ; i → voice 0
-LOOP    9, =#32, =#8               ; each voice
+LOOP.i  9, =#32, =#16              ; each voice
 IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
 CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
 MAX     U, [i+STAGE], =#2          ;     attack → decay
@@ -401,7 +404,8 @@ Decided on #184:
 | 8 | when a new `i`/`j` takes effect | three delay slots; the assembler warns |
 | 9 | rounding | truncate |
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
-| 11 | partial pointer writes | through the write queue, applied in the PAP's idle cycles; no second page |
+| 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |
+| — | nested loops | `LOOP.i` / `LOOP.j` (`a` bit 0), nesting one level |
 | 12 | LFOs | 2 per channel at 24 kHz |
 | — | pass rate | 48 kHz |
 | — | firmware writes | queued, applied on the swap |
@@ -409,5 +413,4 @@ Decided on #184:
 
 Still open:
 
-- Whether `j` also wants a nested `LOOP` (section 7).
 - How the pointer RAM packs 12 pointers per partial (section 10).

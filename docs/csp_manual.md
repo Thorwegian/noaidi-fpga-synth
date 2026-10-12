@@ -86,7 +86,7 @@ small offset (section 4). The usual use is a pointer to a block plus a
 field: `i` points at the current voice's block and `[i+LEVEL]` is that
 voice's level; `j` points at a row of a table.
 
-`i` is stepped by the `LOOP` instruction. Both are set by `IDX`.
+`LOOP.i` steps `i` and `LOOP.j` steps `j`; `IDX` sets either.
 
 ### Accumulator
 
@@ -112,8 +112,9 @@ and `SKIP` read them.
 ### Program counter and loop counter
 
 The program counter steps through the program one instruction per
-cycle. A loop counter beside it repeats a block of instructions for
-`LOOP`. Neither is visible to the program except through `LOOP`.
+cycle. Two loop counters beside it, one for each index register,
+repeat blocks of instructions for `LOOP.i` and `LOOP.j`. None of them
+is visible to the program except through `LOOP`.
 
 ## 3. Data formats and arithmetic
 
@@ -232,7 +233,7 @@ instruction itself. The instruction's description says so.
   processors have after a jump. (`IDX` is computed in the arithmetic stage,
   while addresses are formed earlier, in decode.) The assembler warns
   when an indexed operand falls inside that shadow. `LOOP` stepping `i`
-  has no such delay.
+  or `j` has no such delay.
 - **Firmware writes land between passes.** The firmware's register
   writes wait in a queue. When the firmware toggles the swap (the same
   CTRL swap that pages in new partial parameters), the queued writes
@@ -313,7 +314,7 @@ then always R and is not written: `INTERP.w LEVEL, K, TARGET`.
         .reg   T, 0x060
 
         IDX    i, =#0x600, 0        ; i → voice 0's block
-        LOOP   2, =#32, =#16        ; for each of 32 voices
+        LOOP.i 2, =#32, =#16        ; for each of 32 voices
         MAC    T, 0, [i+GATE], ONE  ;   T = gate × 1.0
         MAC    [i+OUT], 0, T, [i+VELOCITY]
 ```
@@ -355,34 +356,54 @@ level by its velocity.
 ### LOOP — repeat a block
 
 **Syntax**
-`LOOP length, count, stride`
+`LOOP.i length, count, stride` · `LOOP.j length, count, stride`
 
 **Operation**
 ```
 repeat count times:
     run the next `length` instructions
-    i ← i + stride
+    i (or j) ← i (or j) + stride
 ```
 
 **Description**
 `LOOP` runs the `length` instructions that follow it `count` times,
-adding `stride` to `i` after each pass, then carries on after the block.
-It is how one piece of code serves every voice: point `i` at the first
-voice's block with `IDX`, then loop with the block size as the stride.
+adding `stride` to its index register after each pass, then carries on
+after the block. It is how one piece of code serves every voice: point
+`i` at the first voice's block with `IDX`, then loop with the block
+size as the stride.
 
-`length` is an immediate in the R field (1 to 1023 instructions).
-`count` and `stride` are registers holding raw integers; write them as
-`=#n` constants. The loop costs one cycle for the `LOOP` instruction
-itself and nothing per pass. After the loop, `i` has moved on by
+`LOOP.i` steps `i` and `LOOP.j` steps `j` (bit 0 of the `a` field, which
+`LOOP` does not otherwise use). The two can nest one level: an `i` loop
+may contain a `j` loop, or the other way round, each with its own loop
+counter. A loop cannot contain a loop on the same index register.
+
+`length` is an immediate in the R field (1 to 1023 instructions). An
+inner loop must end at or before the end of the outer one. `count` and
+`stride` are registers holding raw integers; write them as `=#n`
+constants. A loop costs one cycle for the `LOOP` instruction itself and
+nothing per pass; an inner loop's `LOOP` instruction runs once per pass
+of the outer loop. After a loop, its index register has moved on by
 `count × stride`.
-
-A loop's body cannot contain another `LOOP`.
 
 **Flags** unchanged.
 
 **Example**
-`LOOP 9, =#32, =#16` runs the next 9 instructions for 32 voice blocks
+`LOOP.i 9, =#32, =#16` runs the next 9 instructions for 32 voice blocks
 of 16 words each.
+
+```
+        IDX     i, =#CHANNELS, 0
+        LOOP.i  5, =#16, =#64       ; each channel
+        IDX     j, LFO_BASE, 0      ;   (delay slots: the j loop's
+        NOP                         ;    first use of j is three
+        NOP                         ;    instructions on)
+        LOOP.j  1, =#2, =#4         ;   each of its 2 LFOs
+        MACW.w  [j+PHASE], ONE, [j+RATE]
+```
+
+The outer `length` (5) counts every instruction in its body, the inner
+`LOOP` and the inner body included. The inner loop is the last thing in
+the outer body, so both end on the same instruction.
 
 ---
 
@@ -735,7 +756,7 @@ later, about 21 µs.
 
 ```
         IDX     i, =#VOICES, 0             ; i → voice 0
-        LOOP    9, =#32, =#16              ; each voice
+        LOOP.i  9, =#32, =#16              ; each voice
         IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
         CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
         MAX     U, [i+STAGE], =#2          ;     attack → decay
@@ -779,7 +800,7 @@ voice's own.
 | op | Mnemonic | R | X | Y | Flags |
 |---|---|---|---|---|---|
 | 0 | `NOP` | — | — | — | — |
-| 1 | `LOOP` | immediate: length | register: count | register: stride | — |
+| 1 | `LOOP` | immediate: length | register: count | register: stride | — (`a` bit 0: 0 = `i`, 1 = `j`) |
 | 2 | `MACW` | register | register | register | N Z |
 | 3 | `INTERP` | register | register | register | N Z V |
 | 4 | `ACC` | — | register | register | — |
