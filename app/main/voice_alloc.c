@@ -140,9 +140,9 @@ static int64_t  s_last_flush;
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides the pitch DMEM word; the pitch-tracking MAC instruction
 // (INSTR_PITCH_TRACK) carries it, and the pitch LFOs, into the cutoff.
-#define DMEM_DUTY_GLOBAL  1   // global PWM DMEM word; every duty pointer
-                             // references it (DMEM word 0 stays the
-                             // strict null word)
+// global PWM DMEM word; every duty pointer references it (DMEM word 0 stays
+// the strict null word)
+#define DMEM_DUTY_GLOBAL  1
 #define DMEM_PITCH_GLOBAL 2
 #define DMEM_RESO_GLOBAL  3
 #define DMEM_CH_CUT       4   // channel cutoff DMEM word
@@ -157,18 +157,17 @@ static int64_t  s_last_flush;
 // write DMEM_CUT(v), and chain-summing requires same-word writers in
 // consecutive instruction slots.
 #define INSTR_AMP_ENV(v)   (32 + (v))
-#define INSTR_MOD_ENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
-                                       // voice, watches the gate DMEM
-                                       // word, drives the voice's
-                                       // CUTOFF DMEM word
-#define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))  // MAC instruction:
-                                       // DMEM_CH_CUT → DMEM_CUT(v), unity
+// MOD env: 2nd ADSR per voice, watches the gate DMEM word, drives the
+// voice's CUTOFF DMEM word
+#define INSTR_MOD_ENV(v) (64 + 2 * (v))
+// MAC instruction: DMEM_CH_CUT → DMEM_CUT(v), unity
+#define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))
 #define INSTR_LFO1     0            // global LFO 1
-#define INSTR_LFO2     1            // global LFO 2: adjacent to LFO 1,
-                                    // so both on one DMEM word sum
-#define INSTR_PITCH_TRACK 2         // MAC instruction: the global pitch
-                                    // DMEM word × key_track → DMEM_CH_CUT,
-                                    // after the LFOs, before the fan-out
+// global LFO 2: adjacent to LFO 1, so both on one DMEM word sum
+#define INSTR_LFO2     1
+// MAC instruction: the global pitch DMEM word × key_track → DMEM_CH_CUT,
+// after the LFOs, before the fan-out
+#define INSTR_PITCH_TRACK 2
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
 // one sustain step = span/1024 = 0.059 dB. The linear level ramp into the
 // log-encoded gain is an exponential-amplitude curve, slow-then-fast.
@@ -516,8 +515,8 @@ static int32_t duty_from_cc(uint8_t val)
 }
 
 #define SAMPLE_RATE_HZ    96000.0f      // one CSP pass per sample
-#define LFO_PHASE_CYCLE   33554432.0f   // 2^25: one LFO cycle in the CSP's
-                                        // 25-bit phase accumulator
+// 2^25: one LFO cycle in the CSP's 25-bit phase accumulator
+#define LFO_PHASE_CYCLE   33554432.0f
 static uint16_t lfo_rate_from_cc(uint8_t val)
 {
     float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz

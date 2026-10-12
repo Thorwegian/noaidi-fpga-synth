@@ -76,8 +76,8 @@ bool engine_link_dmem_write(uint16_t dmem_addr, uint32_t value_q810);
 // vibrato).
 // Amp-envelope idiom (volume semantics): base = −span (the quiet
 // floor), COEF POSITIVE — the envelope adds volume.
-#define ENGINE_NUM_INSTR 256   // instruction pool; all 256 entries
-                                    // execute every sample
+// instruction pool; all 256 entries execute every sample
+#define ENGINE_NUM_INSTR 256
 // CSP opcode = OP[3:0], a BITMASK of enables rather than an enum:
 //   bit 0 reads a source operand      bit 2 multiplies by COEF
 //   bit 1 has persistent state        bit 3 accumulates onto the target

@@ -22,8 +22,9 @@
 
 #define STRESS_SECONDS   60
 #define STRESS_BURST     1      // iterations (4 messages each) per pace step
-#define STRESS_PACE_MS   2      // -> ~2000 msg/s, 2x wired-MIDI saturation
-                                // (a firm stress; real MIDI is ~1000/s max)
+// -> ~2000 msg/s, 2x wired-MIDI saturation (a firm stress; real MIDI is
+// ~1000/s max)
+#define STRESS_PACE_MS   2
 
 static void publish_midi(uint8_t status, uint8_t d0, uint8_t d1)
 {

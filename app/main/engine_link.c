@@ -19,11 +19,11 @@
 
 #define TAG "engine_link"
 
-#define ENGINE_QUEUE_LEN   1024   // voice_alloc's boot-time pointer
-                                  // push alone is 512 commands
+// voice_alloc's boot-time pointer push alone is 512 commands
+#define ENGINE_QUEUE_LEN   1024
 #define ENGINE_TASK_STACK  3072
-#define ENGINE_TASK_PRIO   6          // highest app task: above midi_in/
-                                      // voice_alloc (5), midi_log/ble_rx (4)
+// highest app task: above midi_in/voice_alloc (5), midi_log/ble_rx (4)
+#define ENGINE_TASK_PRIO   6
 // 1 kHz control rate. Paced by an esp_timer notifying the task, so the
 // rate does not depend on the FreeRTOS tick (CONFIG_FREERTOS_HZ, pinned
 // to 1000 in sdkconfig.defaults).
@@ -41,20 +41,17 @@ static QueueHandle_t s_dmem_queue;
 static uint32_t s_param_image[ENGINE_NUM_PARTIALS][ENGINE_WORDS_PER_PARTIAL];
 
 #define DMEM_BASE_ADDR      0x0800
-#define DMEM_QUEUE_LEN      128    // init writes 32 envelope floors +
-                                  // 4 global DMEM words in one burst
+// init writes 32 envelope floors + 4 global DMEM words in one burst
+#define DMEM_QUEUE_LEN      128
 #define IMEM_BASE_ADDR     0x0100
 #define IMEM_BURST_WORDS   8      // fpga_word_write_burst's per-transaction limit
-#define IMEM_QUEUE_LEN     512    // boot burst: 2 LFOs (2 words each)
-                                  // + 32 MOD envs + 32 amp ADSRs (4
-                                  // words each) + 32 MAC instructions
-                                  // (2 words) = 324 pushes before the
-                                  // 1 kHz tick can drain. A 256-deep
-                                  // queue drops the tail = the last
-                                  // voices' amp-env configs = gain
-                                  // floor forever = heard as the level
-                                  // dropping every 32 note-ons.
-                                  // Headroom ~1.6x.
+// Boot burst: 2 LFOs (2 words each) + 32 MOD envs + 32 amp ADSRs (4 words
+// each) + 33 MAC instructions (2 words: the 32 cutoff fan-outs and the
+// pitch-tracking one) = 326 pushes before the 1 kHz tick can drain. A
+// 256-deep queue drops the tail = the last voices' amp-env configs = gain
+// floor forever = heard as the level dropping every 32 note-ons. Headroom
+// ~1.6x.
+#define IMEM_QUEUE_LEN     512
 
 typedef struct {
     uint16_t dmem_addr;

@@ -25,8 +25,9 @@ extern "C" {
 
 #define PATCH_NUM_OSC   2
 #define PATCH_NUM_LFO   2
-#define PATCH_NUM_ENV   2   // env 0 = amp (fixed to gain), env 1 = MOD
-                            // (routable, default -> filter cutoff)
+// env 0 = amp (fixed to gain), env 1 = MOD (routable, default -> filter
+// cutoff)
+#define PATCH_NUM_ENV   2
 
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum {                     // matches OSC word waveform field
