@@ -8,13 +8,13 @@ unison_stereo = 100
 
 [[osc]]
 wave = "pulse"
-tune = 0
-pulse_width = 95
+tune = -6
+pulse_width = 90.220684
 
 [[osc]]
 wave = "pulse"
-tune = 12
-pulse_width = 95
+tune = 6
+pulse_width = 81.554127
 
 [filter]
 type = "lowpass"
@@ -24,16 +24,16 @@ resonance = 2.42
 key_track = 100
 
 [amp_env]
-attack = 0.042
+attack = 0
 sustain = -0.47
 decay = 0.341
-release = 6
+release = 15.7
 velocity = 50
 
 [mod_env]
-attack = 0.042
+attack = 0
 sustain = 0
-decay = 12.4
+decay = 15.7
 release = 11
 velocity = 50
 destination = "cutoff"
@@ -41,15 +41,15 @@ depth = 90.75
 
 [[lfo]]
 shape = "pulse"
-rate = 6.543
+rate = 7.293
 destination = "pitch"
-depth = 2.58
+depth = 6
 
 [[lfo]]
 shape = "pulse"
 rate = 3.405
 destination = "pulse_width"
-depth = 3.03
+depth = 12.4
 
 [part]
 volume = 0
