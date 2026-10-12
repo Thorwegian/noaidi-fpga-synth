@@ -3,7 +3,10 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: proposal for review (#184).** Nothing here is built yet. The
+**Status: design accepted in principle (#184): the instruction set in
+[csp_manual.md](csp_manual.md) is approved, as are 48 kHz passes, the
+write queue, and loading programs with the CSP held in reset. Open
+points are in section 14. Nothing here is built yet.** The
 current CSP is described in [dmem_architecture.md](dmem_architecture.md);
 this document proposes what it becomes and why. The instruction set
 itself, every instruction and the assembly language, is specified in
@@ -73,6 +76,11 @@ add", and the per-partial immediates.
   port is never shared mid-pass. The window takes 48 writes; a larger
   group spreads over several passes. 1472 instructions + a 56-cycle
   window + drain = 1536.
+- **Programs load with the CSP held in reset.** The instruction memory
+  has one page: the firmware holds the CSP in reset, writes the program,
+  and releases it, so a pass never runs half an old and half a new
+  program. Changing the program is rare (start-up, a new routing), so
+  the CSP pausing for it is acceptable.
 - **Results are visible at once:** an instruction reads the newest value
   of every register, including one written by the instruction just
   before it (forwarding, as today).
@@ -190,6 +198,21 @@ and a DMEM word, so a partial is pointers only:
   512 cycles, so either the six sink replicas double (6 more BSRAM) or
   the pipeline takes two cycles per partial and reads both words through
   one port. *Open: needs a look at the pipeline's timing.*
+
+**Concurrency with the partial pipeline** stays today's ping-pong
+paging (proven in `tb_prog_pingpong`, `tb_csp` and on hardware): the CSP
+writes one page of the sink area while the partials read the other,
+and the pages flip at the end of a pass, after its drain. Two rules
+keep the pages consistent:
+
+1. **Every sink word the CSP owns is written every pass.** A word
+   skipped in one pass would leave the other page two passes stale, and
+   the partials would alternate between old and new values. Slower work
+   writes ordinary registers, and one instruction per pass copies the
+   result to its sink. The reference model and the assembler check this.
+2. **Sink words the firmware owns** (the channel words: detune, pan,
+   offsets) **are written to both pages**, by the write window, as
+   today's DMEM mailbox commits to both halves.
 
 ## 7. Opcodes
 
@@ -351,7 +374,5 @@ Each its own PR, checked in sim and on the board:
 - Two reads per sink: more replicas or two cycles per partial
   (section 6).
 - Register file size for 16 channels (section 5).
-- Whether instruction memory needs paging. Writing instructions in place
-  can run half an old and half a new program for one sample.
 - `store_ram`: drop it, or keep a small read-back window for the boot
   self-test.

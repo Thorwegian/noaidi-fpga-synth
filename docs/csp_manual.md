@@ -3,7 +3,8 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: proposal for review (#184), not yet built.** This manual
+**Status: the instruction set is approved (#184); not yet built.**
+Details still open are marked *Open*. This manual
 describes the Control Signal Processor (CSP) as proposed in
 [csp_isa.md](csp_isa.md), which gives the reasons behind the design.
 This manual is for whoever writes CSP programs: it says what every
@@ -240,7 +241,17 @@ instruction itself. The instruction's description says so.
   spreads over several passes.
 - **The sinks are published per pass.** What the program writes to
   the sink area becomes visible to the partial pipeline at the end of
-  the pass, all at once, so the partials never see half a pass.
+  the pass, all at once, so the partials never see half a pass. The
+  sink area has two pages that swap at every pass, so **a program must
+  write every sink word it owns in every pass**: a word it skips would
+  show the partials a value from two passes ago on every other pass.
+  Work that runs less often keeps its result in an ordinary register
+  and copies it to the sink each pass. The assembler checks this.
+- **Loading a program.** The firmware holds the CSP in reset, writes the
+  program, and releases it; the first pass after release starts from
+  the first instruction. *Open:* whether a reset also clears the
+  registers, or leaves the state (envelope levels, LFO phases) running
+  on from where it was.
 
 ## 6. Assembly language
 
