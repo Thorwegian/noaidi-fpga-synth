@@ -18,21 +18,23 @@ namespace {
 constexpr int file_format = 1;
 
 // A bank's key, "0" … "16383", as a number.
-std::optional<int> bank_number(std::string_view key)
-{
-    int n = 0;
+std::optional<int> bank_number(std::string_view key) {
+    int n          = 0;
     auto [end, ec] = std::from_chars(key.data(), key.data() + key.size(), n);
-    if (ec != std::errc() || end != key.data() + key.size() || n < 0 || n > max_bank)
+    if (ec != std::errc() || end != key.data() + key.size() || n < 0
+        || n > max_bank) {
         return std::nullopt;
+    }
     return n;
 }
 
 // A TOML basic string.
-std::string quoted(std::string_view s)
-{
+std::string quoted(std::string_view s) {
     std::string out = "\"";
     for (char c : s) {
-        if (c == '"' || c == '\\') out += '\\';
+        if (c == '"' || c == '\\') {
+            out += '\\';
+        }
         out += c;
     }
     return out + "\"";
@@ -40,18 +42,18 @@ std::string quoted(std::string_view s)
 
 } // namespace
 
-bool parse(std::string_view text, BankMap &banks, std::string &error)
-{
+bool parse(std::string_view text, BankMap &banks, std::string &error) {
     toml::Document doc(text);
     if (!doc.ok()) {
         error = doc.error();
         return false;
     }
-    auto format = doc.root().get("format");
+    auto format  = doc.root().get("format");
     auto version = format ? format->as_int() : std::nullopt;
     if (!version || *version < 1 || *version > file_format) {
-        error = version ? "format " + std::to_string(*version) + " is newer than " +
-                              std::to_string(file_format)
+        error = version ? "format " + std::to_string(*version)
+                                  + " is newer than "
+                                  + std::to_string(file_format)
                         : "no format key";
         return false;
     }
@@ -59,16 +61,23 @@ bool parse(std::string_view text, BankMap &banks, std::string &error)
     if (auto table = doc.root().get("bank")) {
         for (const auto &[key, value] : table->entries()) {
             auto number = bank_number(key);
-            if (!number || !value.is_table())
+            if (!number || !value.is_table()) {
                 continue;
+            }
             Bank bank;
-            if (auto name = value.get("name"); name && name->as_string())
+            if (auto name = value.get("name"); name && name->as_string()) {
                 bank.name = *name->as_string();
-            if (auto programs = value.get("programs"))
-                for (const toml::Value &entry : programs->elements())
+            }
+            if (auto programs = value.get("programs")) {
+                for (const toml::Value &entry : programs->elements()) {
                     if (auto path = entry.as_string();
-                        path && static_cast<int>(bank.programs.size()) < max_programs)
+                        path
+                        && static_cast<int>(bank.programs.size())
+                                   < max_programs) {
                         bank.programs.emplace_back(*path);
+                    }
+                }
+            }
             out[*number] = std::move(bank);
         }
     }
@@ -76,10 +85,9 @@ bool parse(std::string_view text, BankMap &banks, std::string &error)
     return true;
 }
 
-bool read(const std::string &path, BankMap &banks, std::string &error)
-{
+bool read(const std::string &path, BankMap &banks, std::string &error) {
     FILE *in = std::fopen(path.c_str(), "rb");
-    if (!in) {                                   // no file: no banks
+    if (!in) { // no file: no banks
         banks.clear();
         return true;
     }
@@ -88,7 +96,9 @@ bool read(const std::string &path, BankMap &banks, std::string &error)
     long size = std::ftell(in);
     std::fseek(in, 0, SEEK_SET);
     std::string text(size > 0 ? static_cast<size_t>(size) : 0, '\0');
-    bool read_ok = size >= 0 && std::fread(text.data(), 1, text.size(), in) == text.size();
+    bool read_ok =
+            size >= 0
+            && std::fread(text.data(), 1, text.size(), in) == text.size();
     std::fclose(in);
     if (!read_ok) {
         error = "cannot read " + path;
@@ -97,8 +107,7 @@ bool read(const std::string &path, BankMap &banks, std::string &error)
     return parse(text, banks, error);
 }
 
-std::string to_text(const BankMap &banks)
-{
+std::string to_text(const BankMap &banks) {
     std::string text = "format = " + std::to_string(file_format) + "\n";
     for (const auto &[number, bank] : banks) {
         text += "\n[bank." + std::to_string(number) + "]\n";
@@ -108,37 +117,42 @@ std::string to_text(const BankMap &banks)
             continue;
         }
         text += "programs = [\n";
-        for (size_t p = 0; p < bank.programs.size(); p++)
-            text += "    " + quoted(bank.programs[p]) + ",   # " + std::to_string(p) + "\n";
+        for (size_t p = 0; p < bank.programs.size(); p++) {
+            text += "    " + quoted(bank.programs[p]) + ",   # "
+                    + std::to_string(p) + "\n";
+        }
         text += "]\n";
     }
     return text;
 }
 
-bool save(const std::string &path, const BankMap &banks, std::string &error)
-{
+bool save(const std::string &path, const BankMap &banks, std::string &error) {
     return safe_file::save(path, to_text(banks), error);
 }
 
-std::optional<std::string> program_path(const BankMap &banks, int bank, int program)
-{
+std::optional<std::string> program_path(const BankMap &banks, int bank,
+                                        int program) {
     auto it = banks.find(bank);
-    if (it == banks.end() || program < 0 || program >= static_cast<int>(it->second.programs.size()))
+    if (it == banks.end() || program < 0
+        || program >= static_cast<int>(it->second.programs.size())) {
         return std::nullopt;
+    }
     return it->second.programs[static_cast<size_t>(program)];
 }
 
 } // namespace banks
 
-bool banks_program_path(const char *banks_path, int bank, int program, char *path, size_t len)
-{
+bool banks_program_path(const char *banks_path, int bank, int program,
+                        char *path, size_t len) {
     banks::BankMap map;
     std::string error;
-    if (!banks::read(banks_path, map, error))
+    if (!banks::read(banks_path, map, error)) {
         return false;
+    }
     auto found = banks::program_path(map, bank, program);
-    if (!found)
+    if (!found) {
         return false;
+    }
     std::snprintf(path, len, "%s", found->c_str());
     return true;
 }

@@ -1,0 +1,65 @@
+# .clang-format — C and C++ in the style of the Java Code Conventions
+# (Oracle), as AGENTS.md asks
+#
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+#   make format         reformat our C and C++ sources
+#   make format-check   list the files that are not formatted (a warning)
+#
+# Pinned to clang-format 21.1.8 (pip install clang-format==21.1.8):
+# other versions format some constructs differently.
+#
+# The conventions, and where they are below:
+#   - 4 spaces per indent, 8 for a continuation line, no tabs; lines up
+#     to 80 characters
+#   - the opening brace ends the line of the declaration or statement,
+#     the closing brace is on a line of its own; every if/for/while/do
+#     body has braces, and each statement is on a line of its own
+#   - case labels line up with their switch
+#   - a cast is followed by a space; a wrapped expression breaks before
+#     an operator, and wrapped arguments line up with the open bracket
+# Includes are never sorted: ESP-IDF headers depend on their order.
+# Comments are not reflowed, so tables and diagrams in them keep their
+# layout, and string literals are not split. #defines with a comment of
+# several lines have it above them, not trailing: a trailing one makes
+# clang-format wrap the #define with backslashes.
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+IndentWidth: 4
+ContinuationIndentWidth: 8
+UseTab: Never
+ColumnLimit: 80
+AccessModifierOffset: -4
+IndentCaseLabels: false
+NamespaceIndentation: None
+
+BreakBeforeBraces: Attach
+InsertBraces: true
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Empty
+AlwaysBreakTemplateDeclarations: Yes
+
+SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatements
+PointerAlignment: Right
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeTernaryOperators: true
+AlignAfterOpenBracket: Align
+
+AlignConsecutiveMacros: Consecutive
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveBitFields: Consecutive
+AlignTrailingComments: true
+MaxEmptyLinesToKeep: 2
+
+SortIncludes: Never
+IncludeBlocks: Preserve
+ReflowComments: false
+BreakStringLiterals: false

@@ -26,18 +26,19 @@
 
 #define TAG "voice_alloc"
 
-#define VA_QUEUE_LEN   64
-#define VA_TASK_STACK  6144   // Program Change reads banks.toml and a patch file here
-#define VA_TASK_PRIO   5
+#define VA_QUEUE_LEN 64
+#define VA_TASK_STACK                                                          \
+    6144 // Program Change reads banks.toml and a patch file here
+#define VA_TASK_PRIO 5
 
-#define NUM_VOICES     32
+#define NUM_VOICES         32
 #define PARTIALS_PER_VOICE 8
 
 // The active sound lives in g_patch (patch.h); WAVE_SAW / resonance /
 // base volume / ADSR come from there. Only the exact-mute code stays
 // a local constant. Resonance is log2-encoded, FILTER[27:14] =
 // octaves of Q above Butterworth; volume is UQ4.4, 0x00 = silence.
-#define VOL_MUTE   0x00               // exact mute (special-cased in RTL)
+#define VOL_MUTE 0x00 // exact mute (special-cased in RTL)
 
 // Master volume rides the per-voice gain DMEM BASE, summed with the
 // amp-envelope instruction — exactly what DMEM is for: one
@@ -47,17 +48,15 @@
 // VOL_REF is the unity anchor, so a DMEM offset of 0 is unity gain:
 // the RTL adds (gain DMEM word >>> 6) to the UQ4.4 word gain, so a raw
 // DMEM value of 64 = one UQ4.4 step, and off = (vol−VOL_REF)·64.
-#define VOL_REF    0xCF               // unity anchor = patch_init volume
+#define VOL_REF 0xCF // unity anchor = patch_init volume
 
 // Whole semitones ⇄ raw pitch (1024 per octave), rounded to the nearest
 // raw step, ties away from zero: one semitone is 85⅓ raw steps, so
 // truncating would leave every interval slightly flat.
-static int32_t semis_to_raw(int32_t semis)
-{
+static int32_t semis_to_raw(int32_t semis) {
     return (semis * 1024 + (semis >= 0 ? 6 : -6)) / 12;
 }
-static int32_t raw_to_semis(int32_t raw)
-{
+static int32_t raw_to_semis(int32_t raw) {
     return (raw * 12 + (raw >= 0 ? 512 : -512)) / 1024;
 }
 
@@ -84,19 +83,19 @@ typedef enum { V_IDLE = 0, V_HELD, V_RELEASING } voice_state_t;
 
 typedef struct {
     voice_state_t state;
-    uint8_t  note;
-    uint8_t  vel;           // stored so a live CC edit can re-render
-    uint8_t  channel;       // stored for later multi-timbrality; omni
-    uint32_t alloc_seq;         // allocation order, for oldest-steal
-    int64_t  release_until; // esp_timer µs when the release tail is done
-    bool     sustained;     // key up, held by the sustain pedal
+    uint8_t note;
+    uint8_t vel;           // stored so a live CC edit can re-render
+    uint8_t channel;       // stored for later multi-timbrality; omni
+    uint32_t alloc_seq;    // allocation order, for oldest-steal
+    int64_t release_until; // esp_timer µs when the release tail is done
+    bool sustained;        // key up, held by the sustain pedal
 } voice_t;
 
 static voice_t s_voices[NUM_VOICES];
 static uint32_t s_alloc_seq;
-static bool     s_sustain_pedal;   // CC 64 down, omni for now
-static uint8_t  s_wheel;   // CC1 mod wheel, 0..127, omni for now
-static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
+static bool s_sustain_pedal; // CC 64 down, omni for now
+static uint8_t s_wheel;      // CC1 mod wheel, 0..127, omni for now
+static int16_t s_bend;       // pitch bend as Q8.10 offset, ±2 semitones
 // Velocity scales the ENVELOPE AMOUNT, so there is no per-voice
 // velocity term on the cutoff DMEM word. The g(vel) helpers live further
 // down, below ENV_SPAN.
@@ -105,16 +104,16 @@ static int16_t  s_bend;    // pitch bend as Q8.10 offset, ±2 semitones
 // does the heavy work at a bounded rate. Rendering per-CC floods
 // engine_link and starves the CPU (task watchdog) when a controller
 // sweeps — render_active_voices() alone is ~320 partial writes.
-#define DIRTY_VOICES 1u   // re-render sounding voices (partial words)
-#define DIRTY_AMP_ENV    2u   // push amp env to instructions
-#define DIRTY_CUTOFF    4u   // refresh cutoff DMEM words
-#define DIRTY_LFO1    8u   // push LFO 1
-#define DIRTY_VOLUME  16u   // refresh gain DMEM bases (master volume)
-#define DIRTY_MOD_ENV  32u   // push MOD env instructions
-#define DIRTY_LFO2  64u   // push LFO 2
+#define DIRTY_VOICES  1u  // re-render sounding voices (partial words)
+#define DIRTY_AMP_ENV 2u  // push amp env to instructions
+#define DIRTY_CUTOFF  4u  // refresh cutoff DMEM words
+#define DIRTY_LFO1    8u  // push LFO 1
+#define DIRTY_VOLUME  16u // refresh gain DMEM bases (master volume)
+#define DIRTY_MOD_ENV 32u // push MOD env instructions
+#define DIRTY_LFO2    64u // push LFO 2
 static uint32_t s_pending;
-static int64_t  s_last_flush;
-#define FLUSH_MIN_US 15000   // ≤66 Hz apply rate, whatever the CC rate
+static int64_t s_last_flush;
+#define FLUSH_MIN_US 15000 // ≤66 Hz apply rate, whatever the CC rate
 
 // ── DMEM plan (B3/B5, firmware convention — dmem_architecture.md) ────
 // DMEM 2:     global pitch offset — the pitch wheel. Every partial's
@@ -140,35 +139,34 @@ static int64_t  s_last_flush;
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
 // Bend rides the pitch DMEM word; the pitch-tracking MAC instruction
 // (INSTR_PITCH_TRACK) carries it, and the pitch LFOs, into the cutoff.
-#define DMEM_DUTY_GLOBAL  1   // global PWM DMEM word; every duty pointer
-                             // references it (DMEM word 0 stays the
-                             // strict null word)
+// global PWM DMEM word; every duty pointer references it (DMEM word 0 stays
+// the strict null word)
+#define DMEM_DUTY_GLOBAL  1
 #define DMEM_PITCH_GLOBAL 2
 #define DMEM_RESO_GLOBAL  3
-#define DMEM_CH_CUT       4   // channel cutoff DMEM word
-#define DMEM_GAIN(v)   (16 + (v))
-#define DMEM_CUT(v)    (48 + (v))
-#define DMEM_VGATE(v)  (80 + (v))
-#define DMEM_TEST_TONE 511   // gateware test-tone latch (csp.sv)
+#define DMEM_CH_CUT       4 // channel cutoff DMEM word
+#define DMEM_GAIN(v)      (16 + (v))
+#define DMEM_CUT(v)       (48 + (v))
+#define DMEM_VGATE(v)     (80 + (v))
+#define DMEM_TEST_TONE    511 // gateware test-tone latch (csp.sv)
 
 // Instruction plan: entries 0..31 = LFOs (0 and 1 are LFO 1 and 2),
 // entries 32..63 = per-voice amp ADSRs, 64..127 = per-voice PAIRS of
 // (MOD env, channel-cut MAC) — the pair MUST be adjacent: both
 // write DMEM_CUT(v), and chain-summing requires same-word writers in
 // consecutive instruction slots.
-#define INSTR_AMP_ENV(v)   (32 + (v))
-#define INSTR_MOD_ENV(v) (64 + 2 * (v))  // MOD env: 2nd ADSR per
-                                       // voice, watches the gate DMEM
-                                       // word, drives the voice's
-                                       // CUTOFF DMEM word
-#define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))  // MAC instruction:
-                                       // DMEM_CH_CUT → DMEM_CUT(v), unity
-#define INSTR_LFO1     0            // global LFO 1
-#define INSTR_LFO2     1            // global LFO 2: adjacent to LFO 1,
-                                    // so both on one DMEM word sum
-#define INSTR_PITCH_TRACK 2         // MAC instruction: the global pitch
-                                    // DMEM word × key_track → DMEM_CH_CUT,
-                                    // after the LFOs, before the fan-out
+#define INSTR_AMP_ENV(v) (32 + (v))
+// MOD env: 2nd ADSR per voice, watches the gate DMEM word, drives the
+// voice's CUTOFF DMEM word
+#define INSTR_MOD_ENV(v) (64 + 2 * (v))
+// MAC instruction: DMEM_CH_CUT → DMEM_CUT(v), unity
+#define INSTR_CUTOFF_MAC(v) (65 + 2 * (v))
+#define INSTR_LFO1          0 // global LFO 1
+// global LFO 2: adjacent to LFO 1, so both on one DMEM word sum
+#define INSTR_LFO2 1
+// MAC instruction: the global pitch DMEM word × key_track → DMEM_CH_CUT,
+// after the LFOs, before the fan-out
+#define INSTR_PITCH_TRACK 2
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
 // one sustain step = span/1024 = 0.059 dB. The linear level ramp into the
 // log-encoded gain is an exponential-amplitude curve, slow-then-fast.
@@ -176,16 +174,15 @@ static int64_t  s_last_flush;
 // (RC-style, fast-then-slow) is an OPEN QUESTION. With volume
 // semantics the DMEM base is MINUS this span and the instruction COEF
 // is PLUS it.
-#define ENV_SPAN      0x2800 // 60 dB
+#define ENV_SPAN 0x2800 // 60 dB
 
 // ---- velocity scales the envelope AMOUNT -------------------------------
 //
 // c(vel), Q16. Linear, and a TABLE rather than an expression so the curve is
 // an ear-tuning surface that can change without touching the amount
 // arithmetic.
-static uint32_t velocity_curve_q16(uint8_t vel)
-{
-    return ((uint32_t)vel * 65536u) / 127u;
+static uint32_t velocity_curve_q16(uint8_t vel) {
+    return ((uint32_t) vel * 65536u) / 127u;
 }
 
 // g(vel) = 1 - (amt/127) * (1 - c(vel)), Q16.
@@ -193,28 +190,28 @@ static uint32_t velocity_curve_q16(uint8_t vel)
 //                 (the true-zero/isolation rule, design.md)
 //   vel = 127  -> g = 1 whatever the amount: full velocity, full amount
 // One-sided by construction -- no neutral point, the OB-8/DX7 convention.
-static uint32_t velocity_scale_q16(uint8_t vel, uint8_t amt)
-{
+static uint32_t velocity_scale_q16(uint8_t vel, uint8_t amt) {
     uint32_t c = velocity_curve_q16(vel);
-    return 65536u - ((uint32_t)amt * (65536u - c)) / 127u;
+    return 65536u - ((uint32_t) amt * (65536u - c)) / 127u;
 }
 
 // The amp envelope's COEF for this note: the full 60 dB span scaled by
 // g(vel). Base is -ENV_SPAN, so a soft note rises from the same silence to a
 // LOWER peak rather than starting higher -- smaller excursion, same ramp rate,
 // hence the shorter perceived attack.
-static uint32_t amp_env_coef(uint8_t vel)
-{
-    return (uint32_t)(((int64_t)ENV_SPAN * velocity_scale_q16(vel, g_patch.vel_amp_amt)) >> 16);
+static uint32_t amp_env_coef(uint8_t vel) {
+    return (uint32_t) (((int64_t) ENV_SPAN
+                        * velocity_scale_q16(vel, g_patch.vel_amp_amt))
+                       >> 16);
 }
 
 // The MOD envelope's COEF for this note. Signed: CC 107 is bipolar, so the
 // scaling must preserve the sign and the 18-bit mask is applied after.
-static uint32_t mod_env_coef(uint8_t vel)
-{
-    int32_t d = (int32_t)g_patch.mod_env_depth;
-    int64_t scaled = ((int64_t)d * velocity_scale_q16(vel, g_patch.vel_mod_amt)) >> 16;
-    return (uint32_t)(int32_t)scaled & 0x3FFFF;
+static uint32_t mod_env_coef(uint8_t vel) {
+    int32_t d = (int32_t) g_patch.mod_env_depth;
+    int64_t scaled =
+            ((int64_t) d * velocity_scale_q16(vel, g_patch.vel_mod_amt)) >> 16;
+    return (uint32_t) (int32_t) scaled & 0x3FFFF;
 }
 // ADSR wire format (words 1 and 3): see patch.h.
 // The amp envelope's A,D,S,R lives in g_patch.env[0] (patch.h);
@@ -226,27 +223,24 @@ static uint32_t mod_env_coef(uint8_t vel)
 // offsetting the starting point. The channel-wide terms live on
 // DMEM_CH_CUT, fanned out by the CSP's MAC instructions. The write is
 // kept so a re-used voice cannot inherit a stale base.
-static uint32_t cut_dmem_value(int v)
-{
-    (void)v;
+static uint32_t cut_dmem_value(int v) {
+    (void) v;
     return 0u;
 }
 
 // The CHANNEL cutoff value: the wheel opens up to ~+5 octaves and the
 // patch's cutoff (CC 74/106) spans ±8 octaves. Bend is not here: the
 // pitch-tracking MAC instruction adds it at the key_track ratio.
-static uint32_t ch_cut_value(void)
-{
-    return (uint32_t)((int32_t)s_wheel * 40 + g_patch.filter.cutoff);
+static uint32_t ch_cut_value(void) {
+    return (uint32_t) ((int32_t) s_wheel * 40 + g_patch.filter.cutoff);
 }
 
 // Resonance: every partial's FILTER word carries RESO_BASE (Q 1), and the
 // global resonance DMEM word adds the difference to the patch's
 // resonance, so a change is one live DMEM write rather than a re-render.
 #define RESO_BASE 0x200
-static uint32_t reso_dmem_value(void)
-{
-    return (uint32_t)((int32_t)g_patch.filter.resonance - RESO_BASE);
+static uint32_t reso_dmem_value(void) {
+    return (uint32_t) ((int32_t) g_patch.filter.resonance - RESO_BASE);
 }
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
@@ -257,26 +251,26 @@ static int s_sub_id = -1;
 // entry walked at 48 kHz. patch_adsr_rate_byte already bakes the ×2
 // rate compensation into the byte, so the samples count is in 48 kHz
 // walks: 1 walk = 1/48000 s ≈ 20.83 µs.
-static int64_t release_tail_us(void)
-{
-    uint32_t r    = patch_adsr_rate_byte(g_patch.env[0].release);
-    uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4);   // sixteenths of a raw step
-    uint64_t samples = (1ull << 26) / inc16;          // 2^22 * 16 / inc16
-    return (int64_t)(samples * 125u / 6u);            // µs at 48 kHz
+static int64_t release_tail_us(void) {
+    uint32_t r     = patch_adsr_rate_byte(g_patch.env[0].release);
+    uint32_t inc16 = (16u + (r & 0xF)) << (r >> 4); // sixteenths of a raw step
+    uint64_t samples = (1ull << 26) / inc16;        // 2^22 * 16 / inc16
+    return (int64_t) (samples * 125u / 6u);         // µs at 48 kHz
 }
 
 // MIDI note → UQ4.10 log₂ pitch (octave [13:10], fraction [9:0]).
 // A4 = 69 → 0x1700, verified 440 Hz by ear.
-static uint16_t midi_to_pitch(uint8_t note)
-{
-    return (uint16_t)((note / 12) << 10) | (uint16_t)((note % 12) * 1024 / 12);
+static uint16_t midi_to_pitch(uint8_t note) {
+    return (uint16_t) ((note / 12) << 10)
+           | (uint16_t) ((note % 12) * 1024 / 12);
 }
 
-static void param_write(uint8_t partial, uint8_t word, uint32_t value)
-{
+static void param_write(uint8_t partial, uint8_t word, uint32_t value) {
     engine_param_cmd_t c = {.partial = partial, .word = word, .value = value};
-    if (!engine_link_param_write(&c))
-        ESP_LOGW(TAG, "engine queue full, partial %d word %d lost", partial, word);
+    if (!engine_link_param_write(&c)) {
+        ESP_LOGW(TAG, "engine queue full, partial %d word %d lost", partial,
+                 word);
+    }
 }
 
 // Pitch tracking, the part fixed at note-on: a partial's base cutoff
@@ -286,16 +280,17 @@ static void param_write(uint8_t partial, uint8_t word, uint32_t value)
 // rides DMEM_CH_CUT, fanned out to each voice's DMEM_CUT(v), which its
 // partials' cutoff pointers reference (init_param_pointers); it does
 // not touch the FILTER words.
-static uint16_t tracked_cutoff(int32_t pitch)
-{
+static uint16_t tracked_cutoff(int32_t pitch) {
     // Tracking (CC 31): 0..200% with CENTER 64 = 100%; convention
     // overtracks to 200%. 0 pins the cutoff at the C4 reference
     // whatever the pitch.
-    int32_t ref = (int32_t)midi_to_pitch(60);
+    int32_t ref = (int32_t) midi_to_pitch(60);
     int32_t kt  = g_patch.filter.key_track;
     int32_t fc  = ref + ((pitch - ref) * kt) / 64 + 0x200;
-    if (fc < 0) fc = 0;
-    return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
+    if (fc < 0) {
+        fc = 0;
+    }
+    return (fc > 0x3FFF) ? 0x3FFF : (uint16_t) fc;
 }
 
 // How each of the 8 partials maps onto the two oscillators for the
@@ -305,40 +300,43 @@ static uint16_t tracked_cutoff(int32_t pitch)
 typedef struct {
     uint8_t osc;
     int16_t detune;
-    bool    l, r;
-    bool    active;
+    bool l, r;
+    bool active;
 } partial_voicing_t;
 
 // Fill the voicing plan for the current voice_struct. Returns the
 // number of active (sounding) partials, for loudness make-up.
-static int build_voicing(partial_voicing_t p[PARTIALS_PER_VOICE])
-{
-    for (int u = 0; u < PARTIALS_PER_VOICE; u++) p[u] = (partial_voicing_t){0};
-    int  ud = g_patch.unison_detune;         // raw pitch per spread step
-    int  n  = 0;
+static int build_voicing(partial_voicing_t p[PARTIALS_PER_VOICE]) {
+    for (int u = 0; u < PARTIALS_PER_VOICE; u++) {
+        p[u] = (partial_voicing_t) {0};
+    }
+    int ud = g_patch.unison_detune; // raw pitch per spread step
+    int n  = 0;
 
     // l/r mark which side a unison partial LEANS (alternating). How
     // FAR it leans is continuous: render_voice scales the far side
     // by g_patch.unison_stereo, CC 28 being a spread AMOUNT.
     switch (g_patch.voice_struct) {
-    case VOICE_2_PLAIN:                       // osc1 + osc2, centred
-        p[0] = (partial_voicing_t){0, 0, true, true, true};
-        p[1] = (partial_voicing_t){1, 0, true, true, true};
-        n = 2;
+    case VOICE_2_PLAIN: // osc1 + osc2, centred
+        p[0] = (partial_voicing_t) {0, 0, true, true, true};
+        p[1] = (partial_voicing_t) {1, 0, true, true, true};
+        n    = 2;
         break;
-    case VOICE_7_PLUS_1:                       // supersaw x7 + osc2
-        for (int i = 0; i < 7; i++)
-            p[i] = (partial_voicing_t){0, (int16_t)(UNISON_OFFSETS_7[i] * ud),
-                              !(i & 1), (i & 1) != 0, true};
-        p[7] = (partial_voicing_t){1, 0, true, true, true};
-        n = 8;
+    case VOICE_7_PLUS_1: // supersaw x7 + osc2
+        for (int i = 0; i < 7; i++) {
+            p[i] = (partial_voicing_t) {0, (int16_t) (UNISON_OFFSETS_7[i] * ud),
+                                        !(i & 1), (i & 1) != 0, true};
+        }
+        p[7] = (partial_voicing_t) {1, 0, true, true, true};
+        n    = 8;
         break;
-    case VOICE_4_PLUS_4:                       // both oscillators x4
+    case VOICE_4_PLUS_4: // both oscillators x4
         for (int i = 0; i < 4; i++) {
-            p[i]     = (partial_voicing_t){0, (int16_t)(UNISON_OFFSETS_4[i] * ud),
-                                  !(i & 1), (i & 1) != 0, true};
-            p[i + 4] = (partial_voicing_t){1, (int16_t)(UNISON_OFFSETS_4[i] * ud),
-                                  !(i & 1), (i & 1) != 0, true};
+            p[i] = (partial_voicing_t) {0, (int16_t) (UNISON_OFFSETS_4[i] * ud),
+                                        !(i & 1), (i & 1) != 0, true};
+            p[i + 4] = (partial_voicing_t) {
+                    1, (int16_t) (UNISON_OFFSETS_4[i] * ud), !(i & 1),
+                    (i & 1) != 0, true};
         }
         n = 8;
         break;
@@ -354,24 +352,24 @@ static int build_voicing(partial_voicing_t p[PARTIALS_PER_VOICE])
 // the ONE path that reaches exact zero; note_on re-gates via
 // render_voice. (Enlarging ENV_SPAN to floor the DMEM word into silence
 // would wreck the ear-tuned envelope feel — hence firmware muting.)
-static void hard_mute_voice(int v)
-{
-    for (int u = 0; u < PARTIALS_PER_VOICE; u++)
-        param_write((uint8_t)(v * PARTIALS_PER_VOICE + u), 4, 0);   // GATE off
+static void hard_mute_voice(int v) {
+    for (int u = 0; u < PARTIALS_PER_VOICE; u++) {
+        param_write((uint8_t) (v * PARTIALS_PER_VOICE + u), 4, 0); // GATE off
+    }
 }
 
 // Retire release tails that have run out: RELEASING → IDLE, and mute
 // the voice exactly (once, at the transition). Called both from the
 // note_on allocation scan and the task's periodic sweep, so an idle
 // voice reaches true silence even with no further notes played.
-static void promote_idle(int64_t now)
-{
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_RELEASING &&
-            now >= s_voices[v].release_until) {
+static void promote_idle(int64_t now) {
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (s_voices[v].state == V_RELEASING
+            && now >= s_voices[v].release_until) {
             s_voices[v].state = V_IDLE;
             hard_mute_voice(v);
         }
+    }
 }
 
 // Render a voice from the two-oscillator plan. Each active
@@ -380,8 +378,7 @@ static void promote_idle(int64_t now)
 // amp envelope articulates on the gain DMEM word above it. Inactive partials
 // (2-plain uses only 2 of 8) are GATE-muted. note_on re-gates here; a
 // released voice was GATE-muted by promote_idle.
-static void render_voice(int v, uint8_t note, uint8_t vel)
-{
+static void render_voice(int v, uint8_t note, uint8_t vel) {
     // Per-note ceiling only: fixed VOL_REF. MASTER volume is NOT here — it rides the
     // gain DMEM base (refresh_gain_dmem), so a CC 7 sweep is DMEM
     // writes, not a re-render of every partial.
@@ -389,13 +386,13 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
     // velocity scales the amp envelope's COEF so a soft note reaches a
     // lower peak from the same floor. vel stays in the signature
     // because note_on and the live re-render both pass it.
-    (void)vel;
-    int32_t vol = (int32_t)VOL_REF;
+    (void) vel;
+    int32_t vol = (int32_t) VOL_REF;
 
     // GAIN word carries the mode byte (filter type/cascade) from the patch
     // so CC 29/30 render on re-program.
-    uint32_t mode = ((uint32_t)(g_patch.filter.cascade & 1) << 16)
-                  | ((uint32_t)(g_patch.filter.type & 3) << 17);
+    uint32_t mode = ((uint32_t) (g_patch.filter.cascade & 1) << 16)
+                    | ((uint32_t) (g_patch.filter.type & 3) << 17);
 
     partial_voicing_t voicing[PARTIALS_PER_VOICE];
     int active = build_voicing(voicing);
@@ -404,63 +401,87 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
     // not jarringly quiet beside the 8-partial modes. Tuned by ear, or
     // folded into per-patch volume.
     int32_t makeup = (active <= 2) ? 8 : (active <= 4) ? 4 : 0;
-    int32_t base   = (int32_t)midi_to_pitch(note);
-    int      mix   = g_patch.osc_mix;      // ±: + favours osc2, − osc1
+    int32_t base   = (int32_t) midi_to_pitch(note);
+    int mix        = g_patch.osc_mix; // ±: + favours osc2, − osc1
 
     for (int u = 0; u < PARTIALS_PER_VOICE; u++) {
-        uint8_t partial = (uint8_t)(v * PARTIALS_PER_VOICE + u);
+        uint8_t partial = (uint8_t) (v * PARTIALS_PER_VOICE + u);
         if (!voicing[u].active) {
-            param_write(partial, 4, 0);              // GATE off = exact partial mute
+            param_write(partial, 4, 0); // GATE off = exact partial mute
             continue;
         }
         const osc_t *o = &g_patch.osc[voicing[u].osc];
 
         int32_t pitch = base + o->tune + voicing[u].detune;
-        if (pitch < 0)      pitch = 0;
-        if (pitch > 0x3FFF) pitch = 0x3FFF;
+        if (pitch < 0) {
+            pitch = 0;
+        }
+        if (pitch > 0x3FFF) {
+            pitch = 0x3FFF;
+        }
         uint16_t fc = tracked_cutoff(pitch);
 
         int32_t ovol = vol + makeup;
-        if (voicing[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
-        if (voicing[u].osc == 1 && mix < 0) ovol += mix;   // favour osc1
+        if (voicing[u].osc == 0 && mix > 0) {
+            ovol -= mix; // favour osc2
+        }
+        if (voicing[u].osc == 1 && mix < 0) {
+            ovol += mix; // favour osc1
+        }
         // Balance extremes are a MUTE: the mix term above tops
         // out at ~23.6 dB of attenuation (63 UQ4.4 steps), so CC 24 at
         // the rails must silence the disfavored oscillator outright.
         bool bal_mute = (voicing[u].osc == 0 && mix >= 63)
-                     || (voicing[u].osc == 1 && mix <= -63);
+                        || (voicing[u].osc == 1 && mix <= -63);
         // Pan (CC 10): log-domain per-side attenuation, full
         // deflection mutes the far side (same shape as balance).
         int32_t pan  = g_patch.pan;
-        int32_t lvol = ovol - (pan > 0 ?  pan : 0);
+        int32_t lvol = ovol - (pan > 0 ? pan : 0);
         int32_t rvol = ovol - (pan < 0 ? -pan : 0);
-        if (lvol < 0x01) lvol = 0x01;
-        if (lvol > 0xFF) lvol = 0xFF;
-        if (rvol < 0x01) rvol = 0x01;
-        if (rvol > 0xFF) rvol = 0xFF;
+        if (lvol < 0x01) {
+            lvol = 0x01;
+        }
+        if (lvol > 0xFF) {
+            lvol = 0xFF;
+        }
+        if (rvol < 0x01) {
+            rvol = 0x01;
+        }
+        if (rvol > 0xFF) {
+            rvol = 0xFF;
+        }
         // Continuous stereo spread (CC 28): a leaning unison partial
         // keeps its near side at full and attenuates the FAR side by
         // spread>>1 log-gain steps (0.375 dB each) — spread 0 =
         // centered, 126 = −23.6 dB, 127 = exact far-side mute.
         int32_t spread = g_patch.unison_stereo & 0x7F;
-        bool    lean   = voicing[u].l != voicing[u].r;
-        bool l_en = voicing[u].l || (lean && spread < 127);
-        bool r_en = voicing[u].r || (lean && spread < 127);
+        bool lean      = voicing[u].l != voicing[u].r;
+        bool l_en      = voicing[u].l || (lean && spread < 127);
+        bool r_en      = voicing[u].r || (lean && spread < 127);
         if (lean && spread < 127) {
-            if (voicing[u].l) rvol -= spread >> 1;
-            else           lvol -= spread >> 1;
-            if (lvol < 0x01) lvol = 0x01;
-            if (rvol < 0x01) rvol = 0x01;
+            if (voicing[u].l) {
+                rvol -= spread >> 1;
+            } else {
+                lvol -= spread >> 1;
+            }
+            if (lvol < 0x01) {
+                lvol = 0x01;
+            }
+            if (rvol < 0x01) {
+                rvol = 0x01;
+            }
         }
-        uint32_t l = (l_en && !bal_mute && pan <  63)
-                       ? (uint32_t)lvol : VOL_MUTE;
-        uint32_t r = (r_en && !bal_mute && pan > -63)
-                       ? (uint32_t)rvol : VOL_MUTE;
+        uint32_t l =
+                (l_en && !bal_mute && pan < 63) ? (uint32_t) lvol : VOL_MUTE;
+        uint32_t r =
+                (r_en && !bal_mute && pan > -63) ? (uint32_t) rvol : VOL_MUTE;
 
-        param_write(partial, 0, (uint32_t)pitch | ((uint32_t)o->wave << 14));   // OSC
-        param_write(partial, 1, (uint32_t)o->duty & 0xFFFFFF);                  // DUTY
-        param_write(partial, 2, ((uint32_t)RESO_BASE << 14) | fc);
-        param_write(partial, 3, (r << 8) | l | mode);                          // GAIN
-        param_write(partial, 4, 1);                  // GATE on
+        param_write(partial, 0,
+                    (uint32_t) pitch | ((uint32_t) o->wave << 14)); // OSC
+        param_write(partial, 1, (uint32_t) o->duty & 0xFFFFFF);     // DUTY
+        param_write(partial, 2, ((uint32_t) RESO_BASE << 14) | fc);
+        param_write(partial, 3, (r << 8) | l | mode); // GAIN
+        param_write(partial, 4, 1);                   // GATE on
     }
 }
 
@@ -471,18 +492,18 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
 // engine_link — DMEM params (pitch/cutoff/reso/gain)
 // still track tails, only the partial-word rewrite is skipped. Needs
 // the per-voice note+vel, which note_on stores.
-static void render_active_voices(void)
-{
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_HELD)
+static void render_active_voices(void) {
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (s_voices[v].state == V_HELD) {
             render_voice(v, s_voices[v].note, s_voices[v].vel);
+        }
+    }
 }
 
 // Push the amp envelope (patch env[0]) to all per-voice amp ADSR
 // instructions — live envelope editing. release_tail_us() already
 // reads the patch, so tail bookkeeping follows automatically.
-static void update_amp_env(void)
-{
+static void update_amp_env(void) {
     uint32_t r1 = patch_adsr_rate_ad(&g_patch.env[0]);
     uint32_t r2 = patch_adsr_rate_dsr(&g_patch.env[0]);
     for (int v = 0; v < NUM_VOICES; v++) {
@@ -509,22 +530,24 @@ static void update_amp_env(void)
 // 0.5·10^(−v), v = val/127: equal ratio per step, 50% down to 5%, so
 // its high time rises from 50% to 95%, never the degenerate 0%/100%.
 // The offset from square is 0.5 − low time.
-static int32_t duty_from_cc(uint8_t val)
-{
-    float duty = 0.5f * powf(10.0f, -(float)val / 127.0f);
-    return (int32_t)((0.5f - duty) * 16777216.0f);
+static int32_t duty_from_cc(uint8_t val) {
+    float duty = 0.5f * powf(10.0f, -(float) val / 127.0f);
+    return (int32_t) ((0.5f - duty) * 16777216.0f);
 }
 
-#define SAMPLE_RATE_HZ    96000.0f      // one CSP pass per sample
-#define LFO_PHASE_CYCLE   33554432.0f   // 2^25: one LFO cycle in the CSP's
-                                        // 25-bit phase accumulator
-static uint16_t lfo_rate_from_cc(uint8_t val)
-{
-    float freq = 0.03f * powf(1000.0f, (float)val / 127.0f);   // 0.03..30 Hz
+#define SAMPLE_RATE_HZ 96000.0f // one CSP pass per sample
+// 2^25: one LFO cycle in the CSP's 25-bit phase accumulator
+#define LFO_PHASE_CYCLE 33554432.0f
+static uint16_t lfo_rate_from_cc(uint8_t val) {
+    float freq = 0.03f * powf(1000.0f, (float) val / 127.0f); // 0.03..30 Hz
     float inc  = freq * (LFO_PHASE_CYCLE / SAMPLE_RATE_HZ);
-    if (inc < 1.0f)      inc = 1.0f;
-    if (inc > 65535.0f)  inc = 65535.0f;
-    return (uint16_t)(inc + 0.5f);
+    if (inc < 1.0f) {
+        inc = 1.0f;
+    }
+    if (inc > 65535.0f) {
+        inc = 65535.0f;
+    }
+    return (uint16_t) (inc + 0.5f);
 }
 
 // The two LFOs, instructions INSTR_LFO1 and INSTR_LFO2, are identical:
@@ -537,8 +560,8 @@ static uint16_t lfo_rate_from_cc(uint8_t val)
 // restored to its firmware base once no LFO drives it.
 // CCs: LFO 1 rate/depth coarse/depth fine/shape/destination
 // 76/77/115/113/114; LFO 2 109/110/116/111/112.
-static const uint16_t s_lfo_instr[PATCH_NUM_LFO] = { INSTR_LFO1, INSTR_LFO2 };
-static uint16_t s_lfo_word[PATCH_NUM_LFO];   // DMEM word each LFO drives now
+static const uint16_t s_lfo_instr[PATCH_NUM_LFO] = {INSTR_LFO1, INSTR_LFO2};
+static uint16_t s_lfo_word[PATCH_NUM_LFO]; // DMEM word each LFO drives now
 
 // Depth knobs: Coarse (CC 77, CC 110) and Fine (CC 115, CC 116), both
 // linear in the raw depth. The LFO swings its DMEM word by ±depth/2
@@ -553,27 +576,32 @@ static uint16_t s_lfo_word[PATCH_NUM_LFO];   // DMEM word each LFO drives now
 // depth out again. A loaded patch makes them unknown; the first depth
 // knob moved after that takes the other one's position from the
 // patch's depth.
-#define LFO_PITCH_COARSE_SHIFT 2                   // Coarse steps per semitone: 4
-#define LFO_PITCH_FINE_STEPS   128                 // Fine steps per semitone
-struct lfo_depth_knobs { uint8_t coarse, fine; bool known; };
+#define LFO_PITCH_COARSE_SHIFT 2   // Coarse steps per semitone: 4
+#define LFO_PITCH_FINE_STEPS   128 // Fine steps per semitone
+struct lfo_depth_knobs {
+    uint8_t coarse, fine;
+    bool known;
+};
 static struct lfo_depth_knobs s_lfo_depth_knobs[PATCH_NUM_LFO];
 
-static int16_t lfo_depth_from_knobs(uint8_t dest, const struct lfo_depth_knobs *k)
-{
+static int16_t lfo_depth_from_knobs(uint8_t dest,
+                                    const struct lfo_depth_knobs *k) {
     if (dest == LFO_DEST_PITCH) {
-        int32_t fine_steps = (k->coarse >> LFO_PITCH_COARSE_SHIFT) * LFO_PITCH_FINE_STEPS + k->fine;
-        return (int16_t)((fine_steps * 1024 + 12 * LFO_PITCH_FINE_STEPS / 2)
-                         / (12 * LFO_PITCH_FINE_STEPS));
+        int32_t fine_steps =
+                (k->coarse >> LFO_PITCH_COARSE_SHIFT) * LFO_PITCH_FINE_STEPS
+                + k->fine;
+        return (int16_t) ((fine_steps * 1024 + 12 * LFO_PITCH_FINE_STEPS / 2)
+                          / (12 * LFO_PITCH_FINE_STEPS));
     }
-    return (int16_t)((k->coarse << 2) + (k->fine >> 5));
+    return (int16_t) ((k->coarse << 2) + (k->fine >> 5));
 }
 
 // The knob positions nearest a patch's depth (its size: the knobs have
 // no sign; past the knobs' top, the top).
-static struct lfo_depth_knobs lfo_knobs_from_depth(uint8_t dest, int16_t depth)
-{
-    int32_t size = depth < 0 ? -depth : depth;
-    struct lfo_depth_knobs k = { .known = true };
+static struct lfo_depth_knobs lfo_knobs_from_depth(uint8_t dest,
+                                                   int16_t depth) {
+    int32_t size             = depth < 0 ? -depth : depth;
+    struct lfo_depth_knobs k = {.known = true};
     if (dest == LFO_DEST_PITCH) {
         int32_t fine_steps = (size * 12 * LFO_PITCH_FINE_STEPS + 512) / 1024;
         int32_t semitones  = fine_steps / LFO_PITCH_FINE_STEPS;
@@ -581,77 +609,94 @@ static struct lfo_depth_knobs lfo_knobs_from_depth(uint8_t dest, int16_t depth)
             k.coarse = 127;
             k.fine   = LFO_PITCH_FINE_STEPS - 1;
         } else {
-            k.coarse = (uint8_t)(semitones << LFO_PITCH_COARSE_SHIFT);
-            k.fine   = (uint8_t)(fine_steps % LFO_PITCH_FINE_STEPS);
+            k.coarse = (uint8_t) (semitones << LFO_PITCH_COARSE_SHIFT);
+            k.fine   = (uint8_t) (fine_steps % LFO_PITCH_FINE_STEPS);
         }
     } else {
-        k.coarse = (uint8_t)(size >> 2 < 127 ? size >> 2 : 127);
-        k.fine   = (uint8_t)((size & 3) << 5);
+        k.coarse = (uint8_t) (size >> 2 < 127 ? size >> 2 : 127);
+        k.fine   = (uint8_t) ((size & 3) << 5);
     }
     return k;
 }
 
-static void set_lfo_depth_cc(int i, uint8_t val, bool fine)
-{
-    lfo_t *l = &g_patch.lfo[i];
+static void set_lfo_depth_cc(int i, uint8_t val, bool fine) {
+    lfo_t *l                  = &g_patch.lfo[i];
     struct lfo_depth_knobs *k = &s_lfo_depth_knobs[i];
-    if (!k->known)
+    if (!k->known) {
         *k = lfo_knobs_from_depth(l->dest, l->depth);
-    if (fine) k->fine = val; else k->coarse = val;
+    }
+    if (fine) {
+        k->fine = val;
+    } else {
+        k->coarse = val;
+    }
     l->depth = lfo_depth_from_knobs(l->dest, k);
 }
 
 // Destination knob (CC 114, CC 112): four equal bands, see handle_cc.
-static void set_lfo_dest_cc(int i, uint8_t val)
-{
+static void set_lfo_dest_cc(int i, uint8_t val) {
     lfo_t *l = &g_patch.lfo[i];
-    l->dest = (uint8_t)((val * 4) >> 7);
-    if (s_lfo_depth_knobs[i].known)
+    l->dest  = (uint8_t) ((val * 4) >> 7);
+    if (s_lfo_depth_knobs[i].known) {
         l->depth = lfo_depth_from_knobs(l->dest, &s_lfo_depth_knobs[i]);
+    }
 }
-static void refresh_cut_dmem(void);   // defined below (dest restore)
+static void refresh_cut_dmem(void); // defined below (dest restore)
 
-static uint16_t lfo_dmem_word(uint8_t dest)
-{
+static uint16_t lfo_dmem_word(uint8_t dest) {
     switch (dest) {
-    case LFO_DEST_RESONANCE: return DMEM_RESO_GLOBAL;
-    case LFO_DEST_PITCH:     return DMEM_PITCH_GLOBAL;
-    case LFO_DEST_CUTOFF:    return DMEM_CH_CUT;
-    default:                 return DMEM_DUTY_GLOBAL;
+    case LFO_DEST_RESONANCE:
+        return DMEM_RESO_GLOBAL;
+    case LFO_DEST_PITCH:
+        return DMEM_PITCH_GLOBAL;
+    case LFO_DEST_CUTOFF:
+        return DMEM_CH_CUT;
+    default:
+        return DMEM_DUTY_GLOBAL;
     }
 }
 
-static void restore_dmem_base(uint16_t word)
-{
+static void restore_dmem_base(uint16_t word) {
     switch (word) {
-    case DMEM_DUTY_GLOBAL:  engine_link_dmem_write(DMEM_DUTY_GLOBAL, 0); break;
-    case DMEM_RESO_GLOBAL:  engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value()); break;
-    case DMEM_PITCH_GLOBAL: engine_link_dmem_write(DMEM_PITCH_GLOBAL, (uint32_t)(int32_t)s_bend); break;
-    case DMEM_CH_CUT:       refresh_cut_dmem(); break;   // rewrite the base → sum un-freezes
-    default: break;
+    case DMEM_DUTY_GLOBAL:
+        engine_link_dmem_write(DMEM_DUTY_GLOBAL, 0);
+        break;
+    case DMEM_RESO_GLOBAL:
+        engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
+        break;
+    case DMEM_PITCH_GLOBAL:
+        engine_link_dmem_write(DMEM_PITCH_GLOBAL, (uint32_t) (int32_t) s_bend);
+        break;
+    case DMEM_CH_CUT:
+        refresh_cut_dmem();
+        break; // rewrite the base → sum un-freezes
+    default:
+        break;
     }
 }
 
-static void update_lfo(int i)
-{
+static void update_lfo(int i) {
     const lfo_t *l = &g_patch.lfo[i];
-    uint16_t word = lfo_dmem_word(l->dest);
-    uint16_t left = s_lfo_word[i];
-    s_lfo_word[i] = word;
+    uint16_t word  = lfo_dmem_word(l->dest);
+    uint16_t left  = s_lfo_word[i];
+    s_lfo_word[i]  = word;
     if (left != 0 && left != word) {
         bool driven = false;
-        for (int j = 0; j < PATCH_NUM_LFO; j++)
+        for (int j = 0; j < PATCH_NUM_LFO; j++) {
             driven |= (s_lfo_word[j] == left);
-        if (!driven)
+        }
+        if (!driven) {
             restore_dmem_base(left);
+        }
     }
     engine_link_imem_write(s_lfo_instr[i], 0,
-        CSP_OPC_LFO | ((uint32_t)(l->shape & 3) << 4)
-           | ((uint32_t)word << 6)
-           | ((uint32_t)l->rate << 16));
+                           CSP_OPC_LFO | ((uint32_t) (l->shape & 3) << 4)
+                                   | ((uint32_t) word << 6)
+                                   | ((uint32_t) l->rate << 16));
     // COEF is 18-bit signed: sign-extend, or a negative depth would land
     // as a large positive one.
-    engine_link_imem_write(s_lfo_instr[i], 2, (uint32_t)(int32_t)l->depth & 0x3FFFF);
+    engine_link_imem_write(s_lfo_instr[i], 2,
+                           (uint32_t) (int32_t) l->depth & 0x3FFFF);
 }
 
 // MOD envelope = the even slots of the 64..127 pairs (each voice's
@@ -663,14 +708,13 @@ static void update_lfo(int i)
 // word is signed 18-bit) — bipolar. Rates from
 // patch env[1] (CCs 102–105), depth CC 107, dest CC 108 (stored;
 // cutoff is the implemented destination).
-static void update_mod_env(void)
-{
+static void update_mod_env(void) {
     uint32_t rate_ad  = patch_adsr_rate_ad(&g_patch.env[1]);
     uint32_t rate_dsr = patch_adsr_rate_dsr(&g_patch.env[1]);
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_MOD_ENV(v), 0,
-            CSP_OPC_ADSR | ((uint32_t)DMEM_CUT(v) << 6)
-               | ((uint32_t)DMEM_VGATE(v) << 16));
+                               CSP_OPC_ADSR | ((uint32_t) DMEM_CUT(v) << 6)
+                                       | ((uint32_t) DMEM_VGATE(v) << 16));
         engine_link_imem_write(INSTR_MOD_ENV(v), 1, rate_ad);
         // per-voice velocity scaling, same reason as update_amp_env
         engine_link_imem_write(INSTR_MOD_ENV(v), 2,
@@ -686,39 +730,50 @@ static void update_mod_env(void)
 // steal cases start their attack from a non-silent level (the gate
 // is level-sensitive), and they only happen when all 32 voices are
 // genuinely in use.
-static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
-{
+static void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     int64_t now = esp_timer_get_time();
-    int pick = -1;
+    int pick    = -1;
 
-    promote_idle(now);   // retire + hard-mute any finished tails
+    promote_idle(now); // retire + hard-mute any finished tails
 
     uint32_t best = UINT32_MAX;
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_IDLE && s_voices[v].alloc_seq < best)
-            { best = s_voices[v].alloc_seq; pick = v; }
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (s_voices[v].state == V_IDLE && s_voices[v].alloc_seq < best) {
+            best = s_voices[v].alloc_seq;
+            pick = v;
+        }
+    }
     if (pick < 0) {
         int64_t soonest = INT64_MAX;
-        for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].state == V_RELEASING &&
-                s_voices[v].release_until < soonest)
-                { soonest = s_voices[v].release_until; pick = v; }
+        for (int v = 0; v < NUM_VOICES; v++) {
+            if (s_voices[v].state == V_RELEASING
+                && s_voices[v].release_until < soonest) {
+                soonest = s_voices[v].release_until;
+                pick    = v;
+            }
+        }
     }
     if (pick < 0) {
         uint32_t oldest = UINT32_MAX;
-        for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].alloc_seq < oldest)
-                { oldest = s_voices[v].alloc_seq; pick = v; }
+        for (int v = 0; v < NUM_VOICES; v++) {
+            if (s_voices[v].alloc_seq < oldest) {
+                oldest = s_voices[v].alloc_seq;
+                pick   = v;
+            }
+        }
     }
 
-    s_voices[pick] = (voice_t){.state = V_HELD, .note = note, .vel = vel,
-                               .channel = channel, .alloc_seq = ++s_alloc_seq};
+    s_voices[pick] = (voice_t) {.state     = V_HELD,
+                                .note      = note,
+                                .vel       = vel,
+                                .channel   = channel,
+                                .alloc_seq = ++s_alloc_seq};
 
     // Velocity scales the AMOUNT of both envelopes. Both COEF words
     // are written BEFORE the gate, so the envelope the gate triggers is
     // already the right size for this note; writing them after would let
     // the first pass run at the previous note's amount.
-    engine_link_imem_write(INSTR_AMP_ENV(pick),   2, amp_env_coef(vel));
+    engine_link_imem_write(INSTR_AMP_ENV(pick), 2, amp_env_coef(vel));
     engine_link_imem_write(INSTR_MOD_ENV(pick), 2, mod_env_coef(vel));
     engine_link_dmem_write(DMEM_CUT(pick), cut_dmem_value(pick));
     engine_link_dmem_write(DMEM_VGATE(pick), 1);
@@ -730,8 +785,7 @@ static void note_on(uint8_t channel, uint8_t note, uint8_t vel)
 // terms are shared, so both events land here. This is ONE channel-word
 // write: the CSP's MAC fan-out entries distribute it to every
 // voice (channel → voice → partial).
-static void refresh_cut_dmem(void)
-{
+static void refresh_cut_dmem(void) {
     engine_link_dmem_write(DMEM_CH_CUT, ch_cut_value());
 }
 
@@ -741,12 +795,15 @@ static void refresh_cut_dmem(void)
 // an octave of cutoff. COEF 0x10000 is unity: key_track 64 (100 %) <<
 // 10. The 18-bit COEF field tops out one raw step short of 200 %.
 #define PITCH_TRACK_COEF_MAX 0x1FFFF
-static void update_pitch_tracking(void)
-{
-    int32_t coef = (int32_t)g_patch.filter.key_track << 10;
-    if (coef > PITCH_TRACK_COEF_MAX) coef = PITCH_TRACK_COEF_MAX;
-    if (coef < 0) coef = 0;
-    engine_link_imem_write(INSTR_PITCH_TRACK, 2, (uint32_t)coef);
+static void update_pitch_tracking(void) {
+    int32_t coef = (int32_t) g_patch.filter.key_track << 10;
+    if (coef > PITCH_TRACK_COEF_MAX) {
+        coef = PITCH_TRACK_COEF_MAX;
+    }
+    if (coef < 0) {
+        coef = 0;
+    }
+    engine_link_imem_write(INSTR_PITCH_TRACK, 2, (uint32_t) coef);
 }
 
 // Boot wiring for the fan-out: 32 stateless MAC instructions,
@@ -754,15 +811,16 @@ static void update_pitch_tracking(void)
 // slot adjacent to its voice's MOD env (same target DMEM word, and chain
 // summing requires consecutive slots). Word 1 (RATE_AD) is meaningless
 // for a MAC.
-static void init_fanout_sources(void)
-{
+static void init_fanout_sources(void) {
     engine_link_imem_write(INSTR_PITCH_TRACK, 0,
-        CSP_OPC_MAC | ((uint32_t)DMEM_CH_CUT << 6) | ((uint32_t)DMEM_PITCH_GLOBAL << 16));
+                           CSP_OPC_MAC | ((uint32_t) DMEM_CH_CUT << 6)
+                                   | ((uint32_t) DMEM_PITCH_GLOBAL << 16));
     update_pitch_tracking();
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_CUTOFF_MAC(v), 0,
-            CSP_OPC_MAC | ((uint32_t)DMEM_CUT(v) << 6) | ((uint32_t)DMEM_CH_CUT << 16));
-        engine_link_imem_write(INSTR_CUTOFF_MAC(v), 2, 0x10000u);   // unity
+                               CSP_OPC_MAC | ((uint32_t) DMEM_CUT(v) << 6)
+                                       | ((uint32_t) DMEM_CH_CUT << 16));
+        engine_link_imem_write(INSTR_CUTOFF_MAC(v), 2, 0x10000u); // unity
     }
 }
 
@@ -771,36 +829,36 @@ static void init_fanout_sources(void)
 // −ENV_SPAN + (g_patch.volume − VOL_REF)·64: at VOL_REF the offset is
 // 0 and the base is the plain envelope floor. No swap, no rewrite —
 // the amp-ADSR instruction keeps adding the envelope on top.
-static void refresh_gain_dmem(void)
-{
-    int32_t off  = ((int32_t)g_patch.volume - VOL_REF) * 64;
-    int32_t base = -(int32_t)ENV_SPAN + off;
-    for (int v = 0; v < NUM_VOICES; v++)
-        engine_link_dmem_write(DMEM_GAIN(v), (uint32_t)base & 0x3FFFF);
+static void refresh_gain_dmem(void) {
+    int32_t off  = ((int32_t) g_patch.volume - VOL_REF) * 64;
+    int32_t base = -(int32_t) ENV_SPAN + off;
+    for (int v = 0; v < NUM_VOICES; v++) {
+        engine_link_dmem_write(DMEM_GAIN(v), (uint32_t) base & 0x3FFFF);
+    }
 }
 
 // CC 71 → the patch's resonance, applied through the global resonance
 // DMEM word (TEMPORARY assignment, see DMEM plan): one live DMEM write
 // moves every partial. Code = cc·5632/127 — 0 = Butterworth, 127 = 5.5
 // octaves of Q (Q≈32). Conventional knob: up = more.
-static void resonance_update(uint8_t val)
-{
+static void resonance_update(uint8_t val) {
     // Tempered scale: a plain cc<<7 would run Q to ~15.9 octaves
     // (Q~42000) at the top, a hair-trigger into the undamped/static
     // zone. CC 127 tops out at r = 5.5 octaves = Q~32, a sharp but
     // stable peak, still linear in log2(Q) so each step is an equal Q
     // ratio (~3%/step).
-    g_patch.filter.resonance = (uint16_t)(((int32_t)val * 5632) / 127);   // 5632 = r 5.5 oct -> Q 32
+    g_patch.filter.resonance = (uint16_t) (((int32_t) val * 5632)
+                                           / 127); // 5632 = r 5.5 oct -> Q 32
     engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
 }
 
 // Mod wheel → cutoff term (0 to ~+5 octaves, raw Q8.10 value wheel*40).
-static void mod_wheel_update(uint8_t val)
-{
-    if (val == s_wheel)
+static void mod_wheel_update(uint8_t val) {
+    if (val == s_wheel) {
         return;
+    }
     s_wheel = val;
-    s_pending |= DIRTY_CUTOFF;   // coalesced (was refresh_cut_dmem per CC)
+    s_pending |= DIRTY_CUTOFF; // coalesced (was refresh_cut_dmem per CC)
 }
 
 // Pitch wheel: ±bend_range semitones (RPN 0; default ±2). Q8.10
@@ -808,23 +866,22 @@ static void mod_wheel_update(uint8_t val)
 // 8192 = delta × range / 96. ONE write to the global pitch DMEM word
 // moves every partial, and the pitch-tracking MAC instruction carries it
 // into the cutoff at the key_track ratio.
-static void pitch_bend_update(uint16_t bend14)
-{
-    int16_t off = (int16_t)(((int32_t)bend14 - 8192)
-                            * g_patch.bend_range / 96);
+static void pitch_bend_update(uint16_t bend14) {
+    int16_t off =
+            (int16_t) (((int32_t) bend14 - 8192) * g_patch.bend_range / 96);
     if (off == s_bend) {
         return;
     }
     s_bend = off;
-    engine_link_dmem_write(DMEM_PITCH_GLOBAL, (uint32_t)(int32_t)off);  // 1 write
+    engine_link_dmem_write(DMEM_PITCH_GLOBAL,
+                           (uint32_t) (int32_t) off); // 1 write
 }
 
 // Release one voice: one gate DMEM write, the ADSR sees the level drop
 // and releases. Partial GATE words stay on; parameters stay live.
-static void release_voice(int v)
-{
-    s_voices[v].state = V_RELEASING;
-    s_voices[v].sustained = false;
+static void release_voice(int v) {
+    s_voices[v].state         = V_RELEASING;
+    s_voices[v].sustained     = false;
     s_voices[v].release_until = esp_timer_get_time() + release_tail_us();
     engine_link_dmem_write(DMEM_VGATE(v), 0);
 }
@@ -835,32 +892,38 @@ static void release_voice(int v)
 // again while sustained pairs with its new voice. With the pedal down
 // the voice is marked sustained instead of released. A voice whose key
 // was stolen carries a different note by now and is correctly skipped.
-static void note_off(uint8_t note)
-{
-    int pick = -1;
+static void note_off(uint8_t note) {
+    int pick        = -1;
     uint32_t oldest = UINT32_MAX;
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_HELD && !s_voices[v].sustained &&
-            s_voices[v].note == note && s_voices[v].alloc_seq < oldest)
-            { oldest = s_voices[v].alloc_seq; pick = v; }
-    if (pick < 0)
-        return;   // off without a matching held on (steal ate it)
-    if (s_sustain_pedal)
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (s_voices[v].state == V_HELD && !s_voices[v].sustained
+            && s_voices[v].note == note && s_voices[v].alloc_seq < oldest) {
+            oldest = s_voices[v].alloc_seq;
+            pick   = v;
+        }
+    }
+    if (pick < 0) {
+        return; // off without a matching held on (steal ate it)
+    }
+    if (s_sustain_pedal) {
         s_voices[pick].sustained = true;
-    else
+    } else {
         release_voice(pick);
+    }
 }
 
 // Sustain (damper) pedal, CC 64: values >= 64 are down. Pedal up
 // releases every voice the pedal was holding.
-static void sustain_pedal_update(bool down)
-{
+static void sustain_pedal_update(bool down) {
     s_sustain_pedal = down;
-    if (down)
+    if (down) {
         return;
-    for (int v = 0; v < NUM_VOICES; v++)
-        if (s_voices[v].state == V_HELD && s_voices[v].sustained)
+    }
+    for (int v = 0; v < NUM_VOICES; v++) {
+        if (s_voices[v].state == V_HELD && s_voices[v].sustained) {
             release_voice(v);
+        }
+    }
 }
 
 // Program the active patch over MIDI CCs (docs/midi_schema.md).
@@ -873,28 +936,31 @@ static void sustain_pedal_update(bool down)
 //
 // STORED-but-not-yet-rendered: mod_env_dest (CC 108; cutoff is the only
 // live MOD-env destination). The arp has no CC yet.
-static uint8_t  s_cutoff_msb, s_cutoff_lsb;   // CC74 / CC106
+static uint8_t s_cutoff_msb, s_cutoff_lsb; // CC74 / CC106
 
 // Set the CC 74/106 pair from the patch's cutoff, so a lone CC 106 after
 // a patch load moves the fine part of that cutoff.
-static void sync_cutoff_cc(void)
-{
-    int32_t v14 = (int32_t)g_patch.filter.cutoff + 8192;
-    if (v14 < 0)     v14 = 0;
-    if (v14 > 16383) v14 = 16383;
-    s_cutoff_msb = (uint8_t)(v14 >> 7);
-    s_cutoff_lsb = (uint8_t)(v14 & 0x7F);
+static void sync_cutoff_cc(void) {
+    int32_t v14 = (int32_t) g_patch.filter.cutoff + 8192;
+    if (v14 < 0) {
+        v14 = 0;
+    }
+    if (v14 > 16383) {
+        v14 = 16383;
+    }
+    s_cutoff_msb = (uint8_t) (v14 >> 7);
+    s_cutoff_lsb = (uint8_t) (v14 & 0x7F);
 }
-static void apply_cutoff(void)
-{
+static void apply_cutoff(void) {
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so
     // coarse spans a few octaves, fine interpolates.
-    int32_t v14 = ((int32_t)s_cutoff_msb << 7) | s_cutoff_lsb;   // 0..16383
-    g_patch.filter.cutoff = (int16_t)(v14 - 8192);   // ±8 octaves — authority rule:
-                                     // full deflection must reach the
-                                     // rails, so cutoff can be dialled
-                                     // to 0
-    s_pending |= DIRTY_CUTOFF;   // coalesced
+    int32_t v14 = ((int32_t) s_cutoff_msb << 7) | s_cutoff_lsb; // 0..16383
+    g_patch.filter.cutoff =
+            (int16_t) (v14 - 8192); // ±8 octaves — authority rule:
+                                    // full deflection must reach the
+                                    // rails, so cutoff can be dialled
+                                    // to 0
+    s_pending |= DIRTY_CUTOFF;      // coalesced
 }
 
 // RPN state: CC 101/100 select an RPN, CC 6 (data entry MSB)
@@ -902,122 +968,219 @@ static void apply_cutoff(void)
 // 127/127 is RPN null; an NRPN select (99/98) also deselects.
 static uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
 
-static void handle_cc(uint8_t num, uint8_t val)
-{
+static void handle_cc(uint8_t num, uint8_t val) {
     switch (num) {
     // ---- live: DMEM ----
-    case 1:  mod_wheel_update(val); break;               // mod wheel → cutoff
-    case 64: sustain_pedal_update(val >= 64); break;     // sustain (damper) pedal
-    case 71: resonance_update(val); break;                // resonance (temp DMEM 3)
-    case 74: s_cutoff_msb = val; apply_cutoff(); break;
-    case 106:s_cutoff_lsb   = val; apply_cutoff(); break;
+    case 1:
+        mod_wheel_update(val);
+        break; // mod wheel → cutoff
+    case 64:
+        sustain_pedal_update(val >= 64);
+        break; // sustain (damper) pedal
+    case 71:
+        resonance_update(val);
+        break; // resonance (temp DMEM 3)
+    case 74:
+        s_cutoff_msb = val;
+        apply_cutoff();
+        break;
+    case 106:
+        s_cutoff_lsb = val;
+        apply_cutoff();
+        break;
 
     // ---- RPN 0: pitch-bend range ----
-    case 101: s_rpn_msb = val; break;
-    case 100: s_rpn_lsb = val; break;
-    case 99: case 98: s_rpn_msb = s_rpn_lsb = 127; break;  // NRPN deselects
+    case 101:
+        s_rpn_msb = val;
+        break;
+    case 100:
+        s_rpn_lsb = val;
+        break;
+    case 99:
+    case 98:
+        s_rpn_msb = s_rpn_lsb = 127;
+        break; // NRPN deselects
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
-            uint8_t semis = val < 1 ? 1 : (val > 12 ? 12 : val);
-            g_patch.bend_range = semis;   // takes effect on the next bend
+            uint8_t semis      = val < 1 ? 1 : (val > 12 ? 12 : val);
+            g_patch.bend_range = semis; // takes effect on the next bend
         }
         break;
-    case 38: break;                       // data entry LSB: cents, ignored
+    case 38:
+        break; // data entry LSB: cents, ignored
 
     // ---- live: amp envelope (instructions) ----
     // A/D/R are log2 RATES (higher byte = faster), so invert →
     // knob up = longer. Sustain is a LEVEL (higher byte = louder),
     // so it is NOT inverted → knob up = louder.
-    case 73: g_patch.env[0].attack  = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_AMP_ENV; break;
-    case 75: g_patch.env[0].decay   = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_AMP_ENV; break;
-    case 79: g_patch.env[0].sustain = (uint16_t)(val << 3);        s_pending |= DIRTY_AMP_ENV; break;
-    case 72: g_patch.env[0].release = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_AMP_ENV; break;
+    case 73:
+        g_patch.env[0].attack = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_AMP_ENV;
+        break;
+    case 75:
+        g_patch.env[0].decay = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_AMP_ENV;
+        break;
+    case 79:
+        g_patch.env[0].sustain = (uint16_t) (val << 3);
+        s_pending |= DIRTY_AMP_ENV;
+        break;
+    case 72:
+        g_patch.env[0].release = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_AMP_ENV;
+        break;
 
     // ---- live: LFO 1 (instruction 0) ----
-    case 76: g_patch.lfo[0].rate  = lfo_rate_from_cc(val); s_pending |= DIRTY_LFO1; break;
-    case 77: set_lfo_depth_cc(0, val, false);            s_pending |= DIRTY_LFO1; break;
-    case 115: set_lfo_depth_cc(0, val, true);            s_pending |= DIRTY_LFO1; break;
-    case 113: g_patch.lfo[0].shape = (uint8_t)(val >> 5); s_pending |= DIRTY_LFO1; break;
-    case 114: set_lfo_dest_cc(0, val);                   s_pending |= DIRTY_LFO1; break;
+    case 76:
+        g_patch.lfo[0].rate = lfo_rate_from_cc(val);
+        s_pending |= DIRTY_LFO1;
+        break;
+    case 77:
+        set_lfo_depth_cc(0, val, false);
+        s_pending |= DIRTY_LFO1;
+        break;
+    case 115:
+        set_lfo_depth_cc(0, val, true);
+        s_pending |= DIRTY_LFO1;
+        break;
+    case 113:
+        g_patch.lfo[0].shape = (uint8_t) (val >> 5);
+        s_pending |= DIRTY_LFO1;
+        break;
+    case 114:
+        set_lfo_dest_cc(0, val);
+        s_pending |= DIRTY_LFO1;
+        break;
 
     // ---- live: LFO 2 (instruction 1) ----
-    case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_pending |= DIRTY_LFO2; break;
+    case 109:
+        g_patch.lfo[1].rate = lfo_rate_from_cc(val);
+        s_pending |= DIRTY_LFO2;
+        break;
     // Coarse/Fine depth, as LFO 1's (lfo_depth_from_knobs). The LFO
     // swings its DMEM word by ±depth/2; what that means depends on the
     // sink (1024 = one octave of pitch, cutoff or Q, or full ±1.0 duty).
-    case 110: set_lfo_depth_cc(1, val, false);           s_pending |= DIRTY_LFO2; break;
-    case 116: set_lfo_depth_cc(1, val, true);            s_pending |= DIRTY_LFO2; break;
-    case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_pending |= DIRTY_LFO2; break;
+    case 110:
+        set_lfo_depth_cc(1, val, false);
+        s_pending |= DIRTY_LFO2;
+        break;
+    case 116:
+        set_lfo_depth_cc(1, val, true);
+        s_pending |= DIRTY_LFO2;
+        break;
+    case 111:
+        g_patch.lfo[1].shape = (uint8_t) (val >> 5);
+        s_pending |= DIRTY_LFO2;
+        break;
     // Four destinations, for either LFO (CC 114 for LFO 1, CC 112 for
     // LFO 2; the MAC fan-out makes cutoff reachable): 0..31 duty/PWM,
     // 32..63 resonance, 64..95 pitch, 96..127 CUTOFF (channel cut DMEM
     // word → the 32 per-voice MACs → every voice's filter). Both LFOs on
     // one destination sum.
-    case 112: set_lfo_dest_cc(1, val);                   s_pending |= DIRTY_LFO2; break;
+    case 112:
+        set_lfo_dest_cc(1, val);
+        s_pending |= DIRTY_LFO2;
+        break;
 
     // ---- live: master volume → gain DMEM base (not a re-render) ----
-    case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
-             s_pending |= DIRTY_VOLUME; break;
-    case 10: g_patch.pan = (int8_t)((int)val - 64);     // pan
-             s_pending |= DIRTY_VOICES; break;
-    case 31: g_patch.filter.key_track = (int16_t)val;   // key track
-             s_pending |= DIRTY_VOICES; break;
+    case 7:
+        g_patch.volume = (uint8_t) (val < 127 ? val << 1 : 0xFE);
+        s_pending |= DIRTY_VOLUME;
+        break;
+    case 10:
+        g_patch.pan = (int8_t) ((int) val - 64); // pan
+        s_pending |= DIRTY_VOICES;
+        break;
+    case 31:
+        g_patch.filter.key_track = (int16_t) val; // key track
+        s_pending |= DIRTY_VOICES;
+        break;
 
     // ---- live: partial-word params (re-render sounding voices) ----
-    case 20: g_patch.osc[0].wave = (waveform_t)(val >> 5);   // 0..3
-             s_pending |= DIRTY_VOICES; break;
-    case 21: g_patch.osc[1].wave = (waveform_t)(val >> 5);   // osc2 wave
-             s_pending |= DIRTY_VOICES; break;
+    case 20:
+        g_patch.osc[0].wave = (waveform_t) (val >> 5); // 0..3
+        s_pending |= DIRTY_VOICES;
+        break;
+    case 21:
+        g_patch.osc[1].wave = (waveform_t) (val >> 5); // osc2 wave
+        s_pending |= DIRTY_VOICES;
+        break;
     // Coarse and fine both edit the oscillator's one pitch offset, tune.
     // Coarse sets the whole semitones: ±12 in WHOLE semitone steps, ~5
     // CC steps per semitone, center = 64 — fine enough to hand-tune an
     // interval. Fine sets the rest: full travel = ±0.5 semitone; 0.5
     // semi = 1024/24 ≈ raw 42.7 → (val−64)*2/3 spans ±42. Same mapping on
     // both oscillators.
-    case 14: case 22: case 15: case 23: {
-        osc_t  *o     = &g_patch.osc[(num == 14 || num == 15) ? 0 : 1];
+    case 14:
+    case 22:
+    case 15:
+    case 23: {
+        osc_t *o      = &g_patch.osc[(num == 14 || num == 15) ? 0 : 1];
         int32_t semis = raw_to_semis(o->tune);
         int32_t fine  = o->tune - semis_to_raw(semis);
-        if (num == 14 || num == 22)
+        if (num == 14 || num == 22) {
             semis = (val * 25) / 128 - 12;
-        else
-            fine = (((int)val - 64) * 2) / 3;
-        o->tune = (int16_t)(semis_to_raw(semis) + fine);
+        } else {
+            fine = (((int) val - 64) * 2) / 3;
+        }
+        o->tune = (int16_t) (semis_to_raw(semis) + fine);
         s_pending |= DIRTY_VOICES;
     } break;
-    case 24: g_patch.osc_mix = (int8_t)((int)val - 64);     // osc balance
-             s_pending |= DIRTY_VOICES; break;
+    case 24:
+        g_patch.osc_mix = (int8_t) ((int) val - 64); // osc balance
+        s_pending |= DIRTY_VOICES;
+        break;
     // Pulse width: UNIPOLAR, because duty d and 1−d are the same
     // spectrum inverted, and a bipolar range would reach silent
     // 0%/100% at the rails.
     // 0 = square (50%), 127 = 5% pulse, EQUAL-RATIO duty steps
     // (log taper: duty = 0.5·10^(−val/127)) — fine resolution at the
     // thin end where the effect is dramatic, never degenerate.
-    case 25: g_patch.osc[0].duty = duty_from_cc(val);
-             s_pending |= DIRTY_VOICES; break;
-    case 85: g_patch.osc[1].duty = duty_from_cc(val);   // osc2 PW
-             s_pending |= DIRTY_VOICES; break;
+    case 25:
+        g_patch.osc[0].duty = duty_from_cc(val);
+        s_pending |= DIRTY_VOICES;
+        break;
+    case 85:
+        g_patch.osc[1].duty = duty_from_cc(val); // osc2 PW
+        s_pending |= DIRTY_VOICES;
+        break;
     // Velocity sensitivity: read at note_on — new notes pick the
     // change up; held notes keep their velocity terms until re-struck.
     // These are amounts. A live edit has to re-push
     // both envelopes' COEF words or the change is inaudible until the next
     // note-on -- which is exactly how a knob feels broken.
-    case 86: g_patch.vel_amp_amt = val; s_pending |= DIRTY_AMP_ENV;  break;
-    case 87: g_patch.vel_mod_amt = val; s_pending |= DIRTY_MOD_ENV; break;
-    case 26: { uint8_t m = (uint8_t)((val * 3) >> 7);       // 3 voice modes
-               g_patch.voice_struct = (voice_struct_t)(m > 2 ? 2 : m);
-               s_pending |= DIRTY_VOICES; } break;
-    case 27: g_patch.unison_detune = (int16_t)(val >> 2);   // 0..31 raw per step
-             s_pending |= DIRTY_VOICES; break;
-    case 28: g_patch.unison_stereo = (int16_t)val;          // stereo spread
-             s_pending |= DIRTY_VOICES; break;
+    case 86:
+        g_patch.vel_amp_amt = val;
+        s_pending |= DIRTY_AMP_ENV;
+        break;
+    case 87:
+        g_patch.vel_mod_amt = val;
+        s_pending |= DIRTY_MOD_ENV;
+        break;
+    case 26: {
+        uint8_t m            = (uint8_t) ((val * 3) >> 7); // 3 voice modes
+        g_patch.voice_struct = (voice_struct_t) (m > 2 ? 2 : m);
+        s_pending |= DIRTY_VOICES;
+    } break;
+    case 27:
+        g_patch.unison_detune = (int16_t) (val >> 2); // 0..31 raw per step
+        s_pending |= DIRTY_VOICES;
+        break;
+    case 28:
+        g_patch.unison_stereo = (int16_t) val; // stereo spread
+        s_pending |= DIRTY_VOICES;
+        break;
     // Three filter types only (RTL: 0=LP, 1=BP, 2=HP; anything else
     // falls into the LP default). Map the CC across exactly those
     // three so the top of travel is HP, not a second LP.
-    case 29: g_patch.filter.type = (uint8_t)((val * 3) >> 7);  // 0..2
-             s_pending |= DIRTY_VOICES; break;
-    case 30: g_patch.filter.cascade = val >= 64;
-             s_pending |= DIRTY_VOICES; break;
+    case 29:
+        g_patch.filter.type = (uint8_t) ((val * 3) >> 7); // 0..2
+        s_pending |= DIRTY_VOICES;
+        break;
+    case 30:
+        g_patch.filter.cascade = val >= 64;
+        s_pending |= DIRTY_VOICES;
+        break;
 
     // ---- test tone: ≥64 replaces BOTH outputs with the
     // gateware's full-scale 1500 Hz sine (DMEM-511 control latch) —
@@ -1030,73 +1193,92 @@ static void handle_cc(uint8_t num, uint8_t val)
     // ---- panic (found via the BLE fuzzer's stuck notes: its final
     // CC 123 was a no-op, so note-offs dropped under flood backpressure
     // left voices ringing forever) ----
-    case 123:                          // all notes off: release held voices,
-        s_sustain_pedal = false;       // sustained ones included
-        for (int v = 0; v < NUM_VOICES; v++)
-            if (s_voices[v].state == V_HELD)
+    case 123:                    // all notes off: release held voices,
+        s_sustain_pedal = false; // sustained ones included
+        for (int v = 0; v < NUM_VOICES; v++) {
+            if (s_voices[v].state == V_HELD) {
                 release_voice(v);
+            }
+        }
         break;
-    case 120:                          // all sound off: immediate silence
+    case 120: // all sound off: immediate silence
         s_sustain_pedal = false;
-        for (int v = 0; v < NUM_VOICES; v++)
+        for (int v = 0; v < NUM_VOICES; v++) {
             if (s_voices[v].state != V_IDLE) {
-                s_voices[v].state = V_IDLE;
+                s_voices[v].state     = V_IDLE;
                 s_voices[v].sustained = false;
                 engine_link_dmem_write(DMEM_VGATE(v), 0);
                 hard_mute_voice(v);
             }
+        }
         break;
 
     // ---- MOD env: live on the cutoff DMEM words ----
-    case 102: g_patch.env[1].attack  = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_MOD_ENV; break;
-    case 103: g_patch.env[1].decay   = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_MOD_ENV; break;
-    case 104: g_patch.env[1].sustain = (uint16_t)(val << 3);        s_pending |= DIRTY_MOD_ENV; break;
-    case 105: g_patch.env[1].release = (uint8_t)((127 - val) << 1); s_pending |= DIRTY_MOD_ENV; break;
+    case 102:
+        g_patch.env[1].attack = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_MOD_ENV;
+        break;
+    case 103:
+        g_patch.env[1].decay = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_MOD_ENV;
+        break;
+    case 104:
+        g_patch.env[1].sustain = (uint16_t) (val << 3);
+        s_pending |= DIRTY_MOD_ENV;
+        break;
+    case 105:
+        g_patch.env[1].release = (uint8_t) ((127 - val) << 1);
+        s_pending |= DIRTY_MOD_ENV;
+        break;
     // Depth: BIPOLAR, centre 64 = off. Square-law taper (linear over
     // ±16 oct would be 3 semitones per click —
     // overly sensitive): d·|d|·4 gives ~±1 oct at a quarter turn,
     // ±4 oct at half, ±16 oct at the rails — fine near centre, full
     // authority at the ends.
     case 107: {
-        int d = (int)val - 64;
-        g_patch.mod_env_depth = (int16_t)((d * (d < 0 ? -d : d)) << 2);
+        int d                 = (int) val - 64;
+        g_patch.mod_env_depth = (int16_t) ((d * (d < 0 ? -d : d)) << 2);
         s_pending |= DIRTY_MOD_ENV;
     } break;
-    case 108: g_patch.mod_env_dest = (uint8_t)(val >> 5);  // stored; cutoff live
-              break;
+    case 108:
+        g_patch.mod_env_dest = (uint8_t) (val >> 5); // stored; cutoff live
+        break;
 
-    default: break;   // unmapped / deferred CCs ignored
+    default:
+        break; // unmapped / deferred CCs ignored
     }
 }
 
-static uint8_t s_bank_msb[16], s_bank_lsb[16];   // each channel's bank (see program_change)
+static uint8_t s_bank_msb[16],
+        s_bank_lsb[16]; // each channel's bank (see program_change)
 static void program_change(uint8_t channel, uint8_t program);
 
-static void handle_midi(const midi_message_t *m)
-{
+static void handle_midi(const midi_message_t *m) {
     uint8_t type = m->status & 0xF0;
     uint8_t ch   = m->status & 0x0F;
 
     switch (type) {
-    case 0x90:                        // parser normalises vel 0 → note off
+    case 0x90: // parser normalises vel 0 → note off
         note_on(ch, m->data[0], m->data[1]);
         break;
     case 0x80:
         note_off(m->data[0]);
         break;
     case 0xB0:
-        if (m->data[0] == 0)                  // Bank Select MSB
+        if (m->data[0] == 0) { // Bank Select MSB
             s_bank_msb[ch] = m->data[1];
-        else if (m->data[0] == 32)            // Bank Select LSB
+        } else if (m->data[0] == 32) { // Bank Select LSB
             s_bank_lsb[ch] = m->data[1];
-        else
+        } else {
             handle_cc(m->data[0], m->data[1]);
+        }
         break;
     case 0xC0:
         program_change(ch, m->data[0]);
         break;
-    case 0xE0:                        // pitch wheel, 14-bit
-        pitch_bend_update((uint16_t)(((uint16_t)m->data[1] << 7) | m->data[0]));
+    case 0xE0: // pitch wheel, 14-bit
+        pitch_bend_update(
+                (uint16_t) (((uint16_t) m->data[1] << 7) | m->data[0]));
         break;
     default:
         break;
@@ -1107,21 +1289,33 @@ static void handle_midi(const midi_message_t *m)
 // A CC burst sets dirty bits cheaply; here the heavy work runs at
 // most every FLUSH_MIN_US, so no controller sweep can flood
 // engine_link or starve the CPU. Called from the task loop.
-static void flush_pending_edits(int64_t now)
-{
-    if (!s_pending || now - s_last_flush < FLUSH_MIN_US)
+static void flush_pending_edits(int64_t now) {
+    if (!s_pending || now - s_last_flush < FLUSH_MIN_US) {
         return;
-    if (s_pending & DIRTY_AMP_ENV)    update_amp_env();
-    if (s_pending & DIRTY_MOD_ENV)   update_mod_env();
-    if (s_pending & DIRTY_CUTOFF)    refresh_cut_dmem();
-    if (s_pending & DIRTY_LFO1)    update_lfo(0);
-    if (s_pending & DIRTY_LFO2)   update_lfo(1);
-    if (s_pending & DIRTY_VOLUME)   refresh_gain_dmem();
+    }
+    if (s_pending & DIRTY_AMP_ENV) {
+        update_amp_env();
+    }
+    if (s_pending & DIRTY_MOD_ENV) {
+        update_mod_env();
+    }
+    if (s_pending & DIRTY_CUTOFF) {
+        refresh_cut_dmem();
+    }
+    if (s_pending & DIRTY_LFO1) {
+        update_lfo(0);
+    }
+    if (s_pending & DIRTY_LFO2) {
+        update_lfo(1);
+    }
+    if (s_pending & DIRTY_VOLUME) {
+        refresh_gain_dmem();
+    }
     if (s_pending & DIRTY_VOICES) {
-        update_pitch_tracking();             // key_track may have changed
+        update_pitch_tracking(); // key_track may have changed
         render_active_voices();
     }
-    s_pending = 0;
+    s_pending    = 0;
     s_last_flush = now;
 }
 
@@ -1131,25 +1325,25 @@ static void flush_pending_edits(int64_t now)
 // Make p the active patch: everything dirty, flushed at once, so the new
 // patch is in place before the next event. Held voices are re-rendered,
 // so sounding notes switch at once.
-static void apply_patch(const patch_t *p, int64_t now)
-{
+static void apply_patch(const patch_t *p, int64_t now) {
     g_patch = *p;
     sync_cutoff_cc();
-    for (int i = 0; i < PATCH_NUM_LFO; i++)
-        s_lfo_depth_knobs[i].known = false;   // the patch's depths stand
+    for (int i = 0; i < PATCH_NUM_LFO; i++) {
+        s_lfo_depth_knobs[i].known = false; // the patch's depths stand
+    }
     engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
     s_pending |= DIRTY_AMP_ENV | DIRTY_MOD_ENV | DIRTY_CUTOFF | DIRTY_LFO1
-               | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
+                 | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
     s_last_flush = 0;
     flush_pending_edits(now);
 }
 
-static void handle_patch_request(const patch_request_t *r, int64_t now)
-{
-    if (r->set)
+static void handle_patch_request(const patch_request_t *r, int64_t now) {
+    if (r->set) {
         apply_patch(r->patch, now);
-    else
+    } else {
         *r->patch = g_patch;
+    }
     xSemaphoreGive(r->done);
 }
 
@@ -1161,16 +1355,15 @@ static void handle_patch_request(const patch_request_t *r, int64_t now)
 // follow.
 static void (*s_patch_listener)(const char *name);
 
-void voice_alloc_set_patch_listener(void (*listener)(const char *name))
-{
+void voice_alloc_set_patch_listener(void (*listener)(const char *name)) {
     s_patch_listener = listener;
 }
 
-static void program_change(uint8_t channel, uint8_t program)
-{
+static void program_change(uint8_t channel, uint8_t program) {
     int bank = s_bank_msb[channel] * 128 + s_bank_lsb[channel];
     char rel[256], path[320], err[160];
-    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel, sizeof rel)) {
+    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel,
+                            sizeof rel)) {
         ESP_LOGW(TAG, "bank %d program %d: no such program", bank, program);
         return;
     }
@@ -1182,35 +1375,37 @@ static void program_change(uint8_t channel, uint8_t program)
     }
     apply_patch(&p, esp_timer_get_time());
     ESP_LOGI(TAG, "bank %d program %d: %s", bank, program, rel);
-    if (s_patch_listener)
+    if (s_patch_listener) {
         s_patch_listener(rel);
+    }
 }
 
-static bool patch_request(bool set, patch_t *p)
-{
-    if (s_queue == NULL)
+static bool patch_request(bool set, patch_t *p) {
+    if (s_queue == NULL) {
         return false;
+    }
     SemaphoreHandle_t done = xSemaphoreCreateBinary();
-    if (done == NULL)
+    if (done == NULL) {
         return false;
-    evt_t evt = {.kind = EVT_PATCH, .patch = {.set = set, .patch = p, .done = done}};
+    }
+    evt_t evt = {.kind  = EVT_PATCH,
+                 .patch = {.set = set, .patch = p, .done = done}};
     // Once queued, the request holds pointers into this frame and to
     // done, so wait for it however long it takes.
     bool ok = xQueueSend(s_queue, &evt, pdMS_TO_TICKS(500)) == pdTRUE;
-    if (ok)
+    if (ok) {
         xSemaphoreTake(done, portMAX_DELAY);
+    }
     vSemaphoreDelete(done);
     return ok;
 }
 
-bool voice_alloc_set_patch(const patch_t *p)
-{
-    patch_t copy = *p;              // the caller's copy may go out of scope
+bool voice_alloc_set_patch(const patch_t *p) {
+    patch_t copy = *p; // the caller's copy may go out of scope
     return patch_request(true, &copy);
 }
 
-bool voice_alloc_get_patch(patch_t *p)
-{
+bool voice_alloc_get_patch(patch_t *p) {
     return patch_request(false, p);
 }
 
@@ -1218,26 +1413,26 @@ bool voice_alloc_get_patch(patch_t *p)
 // true silence within this of its tail ending, even if no further
 // notes arrive. 20 ms is well below noticeable and negligible load.
 // It also bounds how long a pending coalesced CC edit waits.
-#define VA_POLL_MS   20
+#define VA_POLL_MS 20
 
-static void voice_alloc_task(void *arg)
-{
+static void voice_alloc_task(void *arg) {
     evt_t evt;
     int64_t busy_since = esp_timer_get_time();
     while (1) {
         // Timed receive so the idle sweep runs during quiet passages,
         // not only when the next note_on happens to scan.
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(VA_POLL_MS)) == pdTRUE) {
-            if (evt.kind == EVT_MIDI)
+            if (evt.kind == EVT_MIDI) {
                 handle_midi(&evt.midi);
-            else if (evt.kind == EVT_PATCH)
+            } else if (evt.kind == EVT_PATCH) {
                 handle_patch_request(&evt.patch, esp_timer_get_time());
+            }
         } else {
-            busy_since = esp_timer_get_time();   // queue empty → we blocked
+            busy_since = esp_timer_get_time(); // queue empty → we blocked
         }
         int64_t now = esp_timer_get_time();
-        promote_idle(now);   // retire + mute tails
-        flush_pending_edits(now);    // coalesced CC edits
+        promote_idle(now);        // retire + mute tails
+        flush_pending_edits(now); // coalesced CC edits
 
         // Single-core backpressure. The ESP32-C3 has one core; a
         // sustained MIDI flood keeps this queue non-empty, so the
@@ -1247,7 +1442,7 @@ static void voice_alloc_task(void *arg)
         // queue empties and we block above); under flood it caps our
         // CPU share and lets the event bus drop the excess, which is
         // the correct backpressure on one core.
-        if (now - busy_since > 2000) {   // 2 ms of unbroken work
+        if (now - busy_since > 2000) { // 2 ms of unbroken work
             vTaskDelay(1);
             busy_since = esp_timer_get_time();
         }
@@ -1257,29 +1452,29 @@ static void voice_alloc_task(void *arg)
 // Push the DMEM plan into the pointer words: every partial's pitch →
 // the global pitch DMEM word, cutoff → its voice's cutoff DMEM word,
 // gains → its voice's gain DMEM word. Static wiring, written once, rides the swap.
-static void init_param_pointers(void)
-{
+static void init_param_pointers(void) {
     for (int e = 0; e < NUM_VOICES * PARTIALS_PER_VOICE; e++) {
         int v = e / PARTIALS_PER_VOICE;
-        param_write((uint8_t)e, 5,
-             (uint32_t)DMEM_PITCH_GLOBAL
-             | ((uint32_t)DMEM_DUTY_GLOBAL << 10)   // PWM DMEM word
-             | ((uint32_t)DMEM_CUT(v) << 20));
-        param_write((uint8_t)e, 6,
-             (uint32_t)DMEM_RESO_GLOBAL
-             | ((uint32_t)DMEM_GAIN(v) << 10) | ((uint32_t)DMEM_GAIN(v) << 20));
+        param_write(
+                (uint8_t) e, 5,
+                (uint32_t) DMEM_PITCH_GLOBAL
+                        | ((uint32_t) DMEM_DUTY_GLOBAL << 10) // PWM DMEM word
+                        | ((uint32_t) DMEM_CUT(v) << 20));
+        param_write((uint8_t) e, 6,
+                    (uint32_t) DMEM_RESO_GLOBAL
+                            | ((uint32_t) DMEM_GAIN(v) << 10)
+                            | ((uint32_t) DMEM_GAIN(v) << 20));
     }
 }
 
-void voice_alloc_init(void)
-{
+void voice_alloc_init(void) {
     s_queue = xQueueCreate(VA_QUEUE_LEN, sizeof(evt_t));
     if (s_queue == NULL) {
         ESP_LOGE(TAG, "failed to create event queue");
         return;
     }
-    patch_init(&g_patch);      // the active sound, in one struct
-    storage_load_startup(&g_patch);   // system.toml's startup patch, if any
+    patch_init(&g_patch);           // the active sound, in one struct
+    storage_load_startup(&g_patch); // system.toml's startup patch, if any
     sync_cutoff_cc();
     init_param_pointers();
     // Global DMEM words start at zero. DMEM word 0 needs nothing: the
@@ -1298,8 +1493,8 @@ void voice_alloc_init(void)
     // vibrato on pitch, and LFO 2 on duty at depth 0.
     update_lfo(0);
     update_lfo(1);
-    update_mod_env();  // MOD envs, even slots of the 64..127 pairs
-    init_fanout_sources();  // fan-out MAC instructions, odd slots
+    update_mod_env();      // MOD envs, even slots of the 64..127 pairs
+    init_fanout_sources(); // fan-out MAC instructions, odd slots
     refresh_cut_dmem();    // channel cutoff DMEM base (wheel/bend/CC74 = 0)
 
     // B5: per-voice amp envelopes — instructions 32..63. Each watches
@@ -1309,23 +1504,26 @@ void voice_alloc_init(void)
     // semantics). Bases are live DMEM writes; config rides the swap.
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_AMP_ENV(v), 0,
-            CSP_OPC_ADSR | ((uint32_t)DMEM_GAIN(v) << 6)
-               | ((uint32_t)DMEM_VGATE(v) << 16));
-        engine_link_imem_write(INSTR_AMP_ENV(v), 1, patch_adsr_rate_ad(&g_patch.env[0]));
+                               CSP_OPC_ADSR | ((uint32_t) DMEM_GAIN(v) << 6)
+                                       | ((uint32_t) DMEM_VGATE(v) << 16));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 1,
+                               patch_adsr_rate_ad(&g_patch.env[0]));
         engine_link_imem_write(INSTR_AMP_ENV(v), 2, ENV_SPAN);
-        engine_link_imem_write(INSTR_AMP_ENV(v), 3, patch_adsr_rate_dsr(&g_patch.env[0]));
+        engine_link_imem_write(INSTR_AMP_ENV(v), 3,
+                               patch_adsr_rate_dsr(&g_patch.env[0]));
     }
-    refresh_gain_dmem();   // gain DMEM bases from g_patch.volume
+    refresh_gain_dmem(); // gain DMEM bases from g_patch.volume
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {
         ESP_LOGE(TAG, "no free subscriber slot");
         return;
     }
     if (xTaskCreate(voice_alloc_task, "voice_alloc", VA_TASK_STACK, NULL,
-                    VA_TASK_PRIO, NULL) != pdPASS) {
+                    VA_TASK_PRIO, NULL)
+        != pdPASS) {
         ESP_LOGE(TAG, "failed to create task");
         return;
     }
-    ESP_LOGI(TAG, "%d voices x %d partials ready (sub id %d)",
-             NUM_VOICES, PARTIALS_PER_VOICE, s_sub_id);
+    ESP_LOGI(TAG, "%d voices x %d partials ready (sub id %d)", NUM_VOICES,
+             PARTIALS_PER_VOICE, s_sub_id);
 }

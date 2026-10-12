@@ -9,29 +9,25 @@
 
 #include "midi_parser.h"
 
-void midi_parser_init(midi_parser_t *p, midi_msg_cb_t cb, void *user)
-{
+void midi_parser_init(midi_parser_t *p, midi_msg_cb_t cb, void *user) {
     p->on_message = cb;
-    p->user = user;
+    p->user       = user;
     midi_parser_reset(p);
 }
 
-void midi_parser_reset_partial(midi_parser_t *p)
-{
+void midi_parser_reset_partial(midi_parser_t *p) {
     p->data_count = 0;
-    p->in_sysex = false;
+    p->in_sysex   = false;
 }
 
-void midi_parser_reset(midi_parser_t *p)
-{
+void midi_parser_reset(midi_parser_t *p) {
     p->running_status = 0;
-    p->data_count = 0;
-    p->data_len = 0;
-    p->in_sysex = false;
+    p->data_count     = 0;
+    p->data_len       = 0;
+    p->in_sysex       = false;
 }
 
-void midi_parser_feed(midi_parser_t *p, uint8_t byte)
-{
+void midi_parser_feed(midi_parser_t *p, uint8_t byte) {
     // ── System Real-Time (F8..FF) ──────────────────────────────────
     // May appear anywhere, including between the bytes of a running
     // message or inside SysEx. Ignored; never touch parser state.
@@ -39,7 +35,7 @@ void midi_parser_feed(midi_parser_t *p, uint8_t byte)
     if (byte >= 0xF8) {
         if (byte == 0xFF) {
             p->running_status = 0;
-            p->data_count = 0;
+            p->data_count     = 0;
         }
         return;
     }
@@ -54,7 +50,7 @@ void midi_parser_feed(midi_parser_t *p, uint8_t byte)
             p->in_sysex = false;
         }
         p->running_status = 0;
-        p->data_count = 0;
+        p->data_count     = 0;
         return;
     }
 
@@ -66,9 +62,9 @@ void midi_parser_feed(midi_parser_t *p, uint8_t byte)
     // ── Channel voice status (80..EF) ─────────────────────────────
     if (byte >= 0x80) {
         p->running_status = byte;
-        p->data_count = 0;
-        uint8_t type = byte & 0xF0;
-        p->data_len = (type == 0xC0 || type == 0xD0) ? 1 : 2;
+        p->data_count     = 0;
+        uint8_t type      = byte & 0xF0;
+        p->data_len       = (type == 0xC0 || type == 0xD0) ? 1 : 2;
         return;
     }
 
@@ -83,9 +79,9 @@ void midi_parser_feed(midi_parser_t *p, uint8_t byte)
     }
 
     midi_message_t msg = {
-        .status = p->running_status,
-        .len = p->data_len,
-        .data = {p->data[0], p->data[1]},
+            .status = p->running_status,
+            .len    = p->data_len,
+            .data   = {p->data[0], p->data[1]},
     };
     p->data_count = 0; // Running Status: next data byte starts a new message
 

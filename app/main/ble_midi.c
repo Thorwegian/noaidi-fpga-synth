@@ -60,15 +60,17 @@ void ble_store_config_init(void);
 // and its MIDI data I/O characteristic (7772E5DB-3868-4112-A1A9-F2669D106BF3).
 // BLE_UUID128_INIT takes the bytes in on-air (little-endian) order, i.e.
 // the printed UUID reversed.
-#define MIDI_SVC_UUID BLE_UUID128_INIT(0x00, 0xC7, 0xC4, 0x4E, 0xE3, 0x6C, 0x51, 0xA7, \
-                                       0x33, 0x4B, 0xE8, 0xED, 0x5A, 0x0E, 0xB8, 0x03)
-#define MIDI_IO_UUID BLE_UUID128_INIT(0xF3, 0x6B, 0x10, 0x9D, 0x66, 0xF2, 0xA9, 0xA1, \
-                                      0x12, 0x41, 0x68, 0x38, 0xDB, 0xE5, 0x72, 0x77)
+#define MIDI_SVC_UUID                                                          \
+    BLE_UUID128_INIT(0x00, 0xC7, 0xC4, 0x4E, 0xE3, 0x6C, 0x51, 0xA7, 0x33,     \
+                     0x4B, 0xE8, 0xED, 0x5A, 0x0E, 0xB8, 0x03)
+#define MIDI_IO_UUID                                                           \
+    BLE_UUID128_INIT(0xF3, 0x6B, 0x10, 0x9D, 0x66, 0xF2, 0xA9, 0xA1, 0x12,     \
+                     0x41, 0x68, 0x38, 0xDB, 0xE5, 0x72, 0x77)
 
 // Largest possible packet: the negotiated ATT MTU (we prefer 517).
 #define BLE_MIDI_MAX_PKT 517
 
-static const ble_uuid128_t gatt_svr_svc_midi_uuid = MIDI_SVC_UUID;
+static const ble_uuid128_t gatt_svr_svc_midi_uuid    = MIDI_SVC_UUID;
 static const ble_uuid128_t gatt_svr_chr_midi_io_uuid = MIDI_IO_UUID;
 static uint16_t gatt_svr_chr_midi_io_handle;
 
@@ -82,7 +84,7 @@ static midi_parser_t s_ble_parser;
 // Ingress ring buffer: NOSPLIT keeps packet boundaries, which
 // the BLE-MIDI framing needs. 4 KB ≈ 8 max-MTU packets or hundreds of
 // typical 5-byte ones.
-#define BLE_RX_RB_SIZE   4096
+#define BLE_RX_RB_SIZE    4096
 #define BLE_RX_TASK_STACK 3072
 #define BLE_RX_TASK_PRIO  4
 static RingbufHandle_t s_rx_rb;
@@ -91,11 +93,10 @@ static uint32_t s_rx_drops;
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
-static void ble_msg_to_bus(const midi_message_t *m, void *user)
-{
+static void ble_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
-        .kind = EVT_MIDI,
-        .midi = *m,
+            .kind = EVT_MIDI,
+            .midi = *m,
     };
     event_bus_publish(&evt);
 }
@@ -104,12 +105,11 @@ static void ble_msg_to_bus(const midi_message_t *m, void *user)
 // Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
 // set = timestamp present and a status byte follows; clear =
 // running status continues.
-static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n)
-{
+static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n) {
     int idx = 2;
     if (pkt[1] & 0x80) {
         if (idx >= n) {
-            return;   // status promised, absent — drop the runt
+            return; // status promised, absent — drop the runt
         }
         midi_parser_feed(&s_ble_parser, pkt[idx++]);
     }
@@ -120,21 +120,21 @@ static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n)
 
 // Drain the ingress ring buffer, with the standard single-core yield
 // guard: after ~2 ms of unbroken work, give IDLE a tick.
-static void ble_rx_task(void *arg)
-{
+static void ble_rx_task(void *arg) {
     int64_t busy_since = esp_timer_get_time();
     while (1) {
-        size_t n = 0;
+        size_t n     = 0;
         uint8_t *pkt = xRingbufferReceive(s_rx_rb, &n, pdMS_TO_TICKS(100));
         if (pkt == NULL) {
-            busy_since = esp_timer_get_time();   // we blocked
+            busy_since = esp_timer_get_time(); // we blocked
             continue;
         }
-        if (n >= 2)
-            process_ble_midi_pkt(pkt, (uint16_t)n);
-        else
-            midi_parser_reset(&s_ble_parser);   // 1-byte reset sentinel
-                                                // (connect/disconnect)
+        if (n >= 2) {
+            process_ble_midi_pkt(pkt, (uint16_t) n);
+        } else {
+            midi_parser_reset(&s_ble_parser); // 1-byte reset sentinel
+        }
+        // (connect/disconnect)
         vRingbufferReturnItem(s_rx_rb, pkt);
 
         if (s_rx_drops) {
@@ -155,14 +155,13 @@ static void ble_rx_task(void *arg)
 // under running status). COPY into the ring buffer and return — never
 // parse in the NimBLE host task.
 static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
-                               struct ble_gatt_access_ctxt *ctxt, void *arg)
-{
+                               struct ble_gatt_access_ctxt *ctxt, void *arg) {
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return 0; // reads (and CCCD bookkeeping) pass through
     }
 
     struct os_mbuf *om = ctxt->om;
-    uint16_t n = OS_MBUF_PKTLEN(om);
+    uint16_t n         = OS_MBUF_PKTLEN(om);
     if (n < 2) {
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN; // no header at all
     }
@@ -174,7 +173,7 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     os_mbuf_copydata(om, 0, n, pkt);
 
     if (xRingbufferSend(s_rx_rb, pkt, n, 0) != pdTRUE) {
-        s_rx_drops++;   // full: drop, count, never block the host task
+        s_rx_drops++; // full: drop, count, never block the host task
     }
     return 0;
 }
@@ -192,26 +191,26 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle,
 //   then has its writes rejected. Plain READ/WRITE serves both:
 //   Apple still encrypts, Android works.
 static const struct ble_gatt_chr_def gatt_svr_chrs[] = {
-    {
-        .uuid = &gatt_svr_chr_midi_io_uuid.u,
-        .access_cb = gatt_svr_chr_access,
-        .flags = BLE_GATT_CHR_F_READ |
-                 BLE_GATT_CHR_F_WRITE |
-                 BLE_GATT_CHR_F_WRITE_NO_RSP |
-                 BLE_GATT_CHR_F_NOTIFY,
-        .val_handle = &gatt_svr_chr_midi_io_handle,
-    },
-    { 0, }
-};
+        {
+                .uuid      = &gatt_svr_chr_midi_io_uuid.u,
+                .access_cb = gatt_svr_chr_access,
+                .flags     = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE
+                         | BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &gatt_svr_chr_midi_io_handle,
+        },
+        {
+                0,
+        }};
 
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
-    {
-        .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = &gatt_svr_svc_midi_uuid.u,
-        .characteristics = gatt_svr_chrs,
-    },
-    { 0, }
-};
+        {
+                .type            = BLE_GATT_SVC_TYPE_PRIMARY,
+                .uuid            = &gatt_svr_svc_midi_uuid.u,
+                .characteristics = gatt_svr_chrs,
+        },
+        {
+                0,
+        }};
 
 // ── Advertising ────────────────────────────────────────────────────
 
@@ -220,13 +219,14 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg);
 // Log the parameters actually in effect on a connection — the
 // supervision timeout is what a reason-520 (0x08) drop hinges on
 //. Units per HCI: interval 1.25 ms, timeout 10 ms.
-static void log_conn_params(uint16_t conn_handle)
-{
+static void log_conn_params(uint16_t conn_handle) {
     struct ble_gap_conn_desc d;
-    if (ble_gap_conn_find(conn_handle, &d) != 0)
+    if (ble_gap_conn_find(conn_handle, &d) != 0) {
         return;
-    ESP_LOGI(TAG, "conn params in effect: itvl=%u (%u.%02u ms) latency=%u "
-                  "timeout=%u (%u ms)",
+    }
+    ESP_LOGI(TAG,
+             "conn params in effect: itvl=%u (%u.%02u ms) latency=%u "
+             "timeout=%u (%u ms)",
              d.conn_itvl, (d.conn_itvl * 125) / 100, (d.conn_itvl * 125) % 100,
              d.conn_latency, d.supervision_timeout, d.supervision_timeout * 10);
 }
@@ -237,28 +237,28 @@ static void log_conn_params(uint16_t conn_handle)
 // encryption — requesting it in the CONNECT event collided with
 // macOS's own pairing procedure (observed status=554 = HCI 0x2A,
 // different transaction collision) and was rejected.
-static void request_conn_params(uint16_t conn_handle)
-{
+static void request_conn_params(uint16_t conn_handle) {
     struct ble_gap_upd_params up = {
-        .itvl_min = 12, .itvl_max = 24,
-        .latency = 0, .supervision_timeout = 600,
+            .itvl_min            = 12,
+            .itvl_max            = 24,
+            .latency             = 0,
+            .supervision_timeout = 600,
     };
     ble_gap_update_params(conn_handle, &up);
 }
 
-static void ble_midi_advertise(void)
-{
+static void ble_midi_advertise(void) {
     struct ble_gap_adv_params adv_params;
     struct ble_hs_adv_fields fields;
     int rc;
 
     memset(&fields, 0, sizeof fields);
-    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (uint8_t *)"Noaidi";
-    fields.name_len = strlen("Noaidi");
+    fields.flags            = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.name             = (uint8_t *) "Noaidi";
+    fields.name_len         = strlen("Noaidi");
     fields.name_is_complete = 1;
-    fields.uuids128 = (ble_uuid128_t *)&gatt_svr_svc_midi_uuid;
-    fields.num_uuids128 = 1;
+    fields.uuids128         = (ble_uuid128_t *) &gatt_svr_svc_midi_uuid;
+    fields.num_uuids128     = 1;
     fields.uuids128_is_complete = 1;
 
     rc = ble_gap_adv_set_fields(&fields);
@@ -279,8 +279,7 @@ static void ble_midi_advertise(void)
     s_advertising = true;
 }
 
-static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
-{
+static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
     // Parser resets ride the rx ring as a 1-byte sentinel so the
     // parser stays owned by ble_rx alone.
     static const uint8_t RESET_SENTINEL = 0;
@@ -329,8 +328,9 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
         ESP_LOGI(TAG, "encryption %s (status=%d)",
                  event->enc_change.status == 0 ? "established" : "FAILED",
                  event->enc_change.status);
-        if (event->enc_change.status == 0)
-            request_conn_params(event->enc_change.conn_handle);  // now valid
+        if (event->enc_change.status == 0) {
+            request_conn_params(event->enc_change.conn_handle); // now valid
+        }
         return 0;
 
     case BLE_GAP_EVENT_CONN_UPDATE:
@@ -350,11 +350,12 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg)
 
 // ── Host lifecycle ─────────────────────────────────────────────────
 
-static void ble_midi_on_sync(void)
-{
+static void ble_midi_on_sync(void) {
     int rc = ble_hs_util_ensure_addr(0);
     if (rc != 0) {
-        ESP_LOGW(TAG, "public address unavailable (rc=%d), falling back to random", rc);
+        ESP_LOGW(TAG,
+                 "public address unavailable (rc=%d), falling back to random",
+                 rc);
         rc = ble_hs_util_ensure_addr(1);
         if (rc != 0) {
             ESP_LOGE(TAG, "no usable address (rc=%d) - not advertising", rc);
@@ -364,8 +365,7 @@ static void ble_midi_on_sync(void)
     ble_midi_advertise();
 }
 
-static void ble_midi_host_task(void *param)
-{
+static void ble_midi_host_task(void *param) {
     nimble_port_run(); // blocks for the life of the stack
     nimble_port_freertos_deinit();
 }
@@ -373,20 +373,17 @@ static void ble_midi_host_task(void *param)
 // Console key 'p': print stack state and re-trigger advertising.
 // NimBLE APIs are safe to call from any task (they queue to the host
 // task), so this can run in the shared serial-console dispatcher.
-void ble_midi_console_status(void)
-{
+void ble_midi_console_status(void) {
     bool synced = ble_hs_is_enabled();
     ESP_LOGI(TAG, "BLE: host %s, advertising=%s, connections=%d",
-             synced ? "synced" : "NOT synced",
-             s_advertising ? "yes" : "no",
+             synced ? "synced" : "NOT synced", s_advertising ? "yes" : "no",
              s_conn_count);
     if (synced && !s_advertising) {
         ble_midi_advertise();
     }
 }
 
-void ble_midi_init(void)
-{
+void ble_midi_init(void) {
     midi_parser_init(&s_ble_parser, ble_msg_to_bus, NULL);
 
     // Ingress decoupling: ring buffer + drain task, so the
@@ -397,7 +394,8 @@ void ble_midi_init(void)
         return;
     }
     if (xTaskCreate(ble_rx_task, "ble_rx", BLE_RX_TASK_STACK, NULL,
-                    BLE_RX_TASK_PRIO, NULL) != pdPASS) {
+                    BLE_RX_TASK_PRIO, NULL)
+        != pdPASS) {
         ESP_LOGE(TAG, "failed to create ble_rx task");
         return;
     }
@@ -424,7 +422,7 @@ void ble_midi_init(void)
     ble_svc_gap_device_name_set("Noaidi");
 
     ble_hs_cfg.reset_cb = NULL;
-    ble_hs_cfg.sync_cb = ble_midi_on_sync;
+    ble_hs_cfg.sync_cb  = ble_midi_on_sync;
 
     // Security manager: Apple BLE-MIDI requires an
     // encrypted link. Just-Works pairing (no IO), bonded, LE Secure
@@ -432,14 +430,14 @@ void ble_midi_init(void)
     // persist in NVS (CONFIG_BT_NIMBLE_NVS_PERSIST=y +
     // ble_store_config_init below) so reconnects after a reboot can
     // re-establish encryption instead of being dropped.
-    ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
+    ble_hs_cfg.sm_io_cap  = BLE_SM_IO_CAP_NO_IO;
     ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_mitm = 0;
-    ble_hs_cfg.sm_sc = 1;
+    ble_hs_cfg.sm_mitm    = 0;
+    ble_hs_cfg.sm_sc      = 1;
     ble_hs_cfg.sm_our_key_dist =
-        BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+            BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist =
-        BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+            BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
     ble_store_config_init();
 

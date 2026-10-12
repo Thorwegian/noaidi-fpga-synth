@@ -34,10 +34,10 @@ void complete_dir(int argi, const char *prefix, void (*add)(const char *));
 
 // Register a table of commands.
 template <size_t N>
-void register_commands(const console_cmd_t (&commands)[N])
-{
-    for (const console_cmd_t &c : commands)
+void register_commands(const console_cmd_t (&commands)[N]) {
+    for (const console_cmd_t &c : commands) {
         console_register(&c);
+    }
 }
 
 // The bank commands (cli_banks.cpp).

@@ -42,33 +42,31 @@
 
 // ── Per-port context ───────────────────────────────────────────────
 typedef struct {
-    uart_port_t   uart;
-    const char   *name;      // task name + log tag
+    uart_port_t uart;
+    const char *name; // task name + log tag
     midi_parser_t parser;
-    uint8_t       hexdump_budget;  // first-bytes hex log budget (bring-up aid)
-    bool          ready;     // UART configured, RX task not yet started
+    uint8_t hexdump_budget; // first-bytes hex log budget (bring-up aid)
+    bool ready;             // UART configured, RX task not yet started
 } midi_port_t;
 
-static midi_port_t s_din_port   = { .uart = UART_NUM_1, .name = "midi_in"  };
-static midi_port_t s_panel_port = { .uart = UART_NUM_0, .name = "midi_pnl" };
+static midi_port_t s_din_port   = {.uart = UART_NUM_1, .name = "midi_in"};
+static midi_port_t s_panel_port = {.uart = UART_NUM_0, .name = "midi_pnl"};
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
 // happens through the event bus (non-blocking), so a slow consumer
 // can never stall MIDI reception.
 
-static void midi_msg_to_bus(const midi_message_t *m, void *user)
-{
+static void midi_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
-        .kind = EVT_MIDI,
-        .midi = *m,
+            .kind = EVT_MIDI,
+            .midi = *m,
     };
     event_bus_publish(&evt);
 }
 
-static void midi_in_task(void *arg)
-{
-    midi_port_t *p = (midi_port_t *)arg;
+static void midi_in_task(void *arg) {
+    midi_port_t *p = (midi_port_t *) arg;
     uint8_t byte;
     uint32_t idle_ms = 0;
     bool had_traffic = false;
@@ -85,7 +83,7 @@ static void midi_in_task(void *arg)
                 ESP_LOGI(p->name, "rx byte %02X", byte);
             }
             midi_parser_feed(&p->parser, byte);
-            idle_ms = 0;
+            idle_ms     = 0;
             had_traffic = true;
             continue;
         }
@@ -116,54 +114,52 @@ static void midi_in_task(void *arg)
     }
 }
 
-static void port_init(midi_port_t *p, int rx_pin)
-{
+static void port_init(midi_port_t *p, int rx_pin) {
     midi_parser_init(&p->parser, midi_msg_to_bus, NULL);
 
     uart_config_t cfg = {
-        .baud_rate  = MIDI_BAUD,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+            .baud_rate  = MIDI_BAUD,
+            .data_bits  = UART_DATA_8_BITS,
+            .parity     = UART_PARITY_DISABLE,
+            .stop_bits  = UART_STOP_BITS_1,
+            .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_driver_install(p->uart, MIDI_RX_BUF_SIZE, 0, 0,
-                                        NULL, 0));
+    ESP_ERROR_CHECK(
+            uart_driver_install(p->uart, MIDI_RX_BUF_SIZE, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(p->uart, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(p->uart, UART_PIN_NO_CHANGE, rx_pin,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     p->ready = true;
 
-    ESP_LOGI(p->name, "UART%d RX on GPIO%d, %d baud", (int)p->uart,
-             rx_pin, MIDI_BAUD);
+    ESP_LOGI(p->name, "UART%d RX on GPIO%d, %d baud", (int) p->uart, rx_pin,
+             MIDI_BAUD);
 }
 
 // Bytes that arrive before the task starts wait in the UART RX buffer.
-static void port_start(midi_port_t *p)
-{
-    if (!p->ready)
+static void port_start(midi_port_t *p) {
+    if (!p->ready) {
         return;
+    }
     p->ready = false;
-    if (xTaskCreate(midi_in_task, p->name, MIDI_TASK_STACK, p,
-                    MIDI_TASK_PRIO, NULL) != pdPASS)
+    if (xTaskCreate(midi_in_task, p->name, MIDI_TASK_STACK, p, MIDI_TASK_PRIO,
+                    NULL)
+        != pdPASS) {
         ESP_LOGE(p->name, "Failed to create RX task");
+    }
 }
 
-void midi_in_start(void)
-{
+void midi_in_start(void) {
     port_start(&s_din_port);
     port_start(&s_panel_port);
 }
 
-void midi_in_init(int rx_pin)
-{
+void midi_in_init(int rx_pin) {
     port_init(&s_din_port, rx_pin);
 }
 
-void midi_panel_init(int rx_pin)
-{
+void midi_panel_init(int rx_pin) {
     // UART0 is free for this since the console moved wholly to the
     // USB-Serial/JTAG controller (sdkconfig: ESP_CONSOLE_UART_NUM=-1).
     // RX moves to rx_pin (GPIO2 — idles high via the
@@ -177,25 +173,26 @@ void midi_panel_init(int rx_pin)
     // and say so loudly (a floating/broken line also reads low, so the
     // warning is the breadcrumb either way).
     gpio_config_t io = {
-        .pin_bit_mask = 1ULL << rx_pin,
-        .mode         = GPIO_MODE_INPUT,
+            .pin_bit_mask = 1ULL << rx_pin,
+            .mode         = GPIO_MODE_INPUT,
     };
     gpio_config(&io);
     int highs = 0;
     for (int i = 0; i < 32; i++) {
         highs += gpio_get_level(rx_pin);
-        esp_rom_delay_us(300);          // ~10 ms total, spans any byte
+        esp_rom_delay_us(300); // ~10 ms total, spans any byte
     }
-    bool idle_high = highs >= 24;       // ≥75% high = healthy idle
+    bool idle_high = highs >= 24; // ≥75% high = healthy idle
 
     port_init(&s_panel_port, rx_pin);
 
     if (!idle_high) {
-        ESP_ERROR_CHECK(uart_set_line_inverse(s_panel_port.uart,
-                                              UART_SIGNAL_RXD_INV));
+        ESP_ERROR_CHECK(
+                uart_set_line_inverse(s_panel_port.uart, UART_SIGNAL_RXD_INV));
         ESP_LOGW(s_panel_port.name,
                  "line idles LOW (%d/32 high) - RX inverted; if no bytes"
-                 " follow, check wiring/plug orientation", highs);
+                 " follow, check wiring/plug orientation",
+                 highs);
     } else {
         ESP_LOGI(s_panel_port.name, "line idles high (%d/32) - polarity OK",
                  highs);

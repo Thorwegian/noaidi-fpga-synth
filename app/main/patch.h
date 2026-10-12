@@ -23,51 +23,55 @@
 extern "C" {
 #endif
 
-#define PATCH_NUM_OSC   2
-#define PATCH_NUM_LFO   2
-#define PATCH_NUM_ENV   2   // env 0 = amp (fixed to gain), env 1 = MOD
-                            // (routable, default -> filter cutoff)
+#define PATCH_NUM_OSC 2
+#define PATCH_NUM_LFO 2
+// env 0 = amp (fixed to gain), env 1 = MOD (routable, default -> filter
+// cutoff)
+#define PATCH_NUM_ENV 2
 
 // ── Oscillator ──────────────────────────────────────────────────────
-typedef enum {                     // matches OSC word waveform field
-    WAVE_SAW = 0, WAVE_PULSE, WAVE_TRI, WAVE_SINE,   // idx 3 = true sine LUT
+typedef enum { // matches OSC word waveform field
+    WAVE_SAW = 0,
+    WAVE_PULSE,
+    WAVE_TRI,
+    WAVE_SINE, // idx 3 = true sine LUT
     // future gateware waveforms: noise, and a real parabola as its own type
 } waveform_t;
 
 // Voice structure — how the 2 oscillators map onto the 8 partials
 // (control_map.md decision 2). UNISON is a mode, any waveform.
 typedef enum {
-    VOICE_2_PLAIN = 0,   // 2 partials/voice (osc1 + osc2, no unison)
-    VOICE_7_PLUS_1,      // osc1 x7 unison + osc2 plain = 8 partials
-    VOICE_4_PLUS_4,      // both oscillators x4 unison = 8 partials
+    VOICE_2_PLAIN = 0, // 2 partials/voice (osc1 + osc2, no unison)
+    VOICE_7_PLUS_1,    // osc1 x7 unison + osc2 plain = 8 partials
+    VOICE_4_PLUS_4,    // both oscillators x4 unison = 8 partials
 } voice_struct_t;
 
 typedef struct {
     waveform_t wave;
-    int16_t    tune;        // pitch offset, raw (1024 per octave); the
-                            // coarse and fine CCs both edit it
-    int32_t    duty;        // pulse width / parabola skew, full Q0.24
-                            // signed (needs 24 bits — int16 truncated
-                            // CC 25's <<17 to zero)
+    int16_t tune; // pitch offset, raw (1024 per octave); the
+                  // coarse and fine CCs both edit it
+    int32_t duty; // pulse width / parabola skew, full Q0.24
+                  // signed (needs 24 bits — int16 truncated
+                  // CC 25's <<17 to zero)
 } osc_t;
 
 // ── Filter ──────────────────────────────────────────────────────────
 typedef struct {
-    int16_t  cutoff;        // offset from the key-tracked base, raw
-                            // (1024 per octave; CC 74 coarse + CC 106 fine)
-    uint16_t resonance;     // effective code, UQ4.10 log2 (r octaves of Q
-                            // above Butterworth); 0x3FFF self-oscillates
-    uint8_t  type;          // 0 LP .. (FILTER/GAIN mode field)
-    uint8_t  cascade;          // 12/24 dB
-    int16_t  key_track;     // cutoff-follows-pitch amount (per channel)
+    int16_t cutoff;     // offset from the key-tracked base, raw
+                        // (1024 per octave; CC 74 coarse + CC 106 fine)
+    uint16_t resonance; // effective code, UQ4.10 log2 (r octaves of Q
+                        // above Butterworth); 0x3FFF self-oscillates
+    uint8_t type;       // 0 LP .. (FILTER/GAIN mode field)
+    uint8_t cascade;    // 12/24 dB
+    int16_t key_track;  // cutoff-follows-pitch amount (per channel)
 } filter_t;
 
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
 // Rates are 8-bit log2 in the PATCH; the wire format is linear.
 typedef struct {
-    uint8_t  attack, decay;     // 8-bit log2 rate codes
-    uint16_t sustain;           // 10-bit level: sustain / 1024 of full scale
-    uint8_t  release;
+    uint8_t attack, decay; // 8-bit log2 rate codes
+    uint16_t sustain;      // 10-bit level: sustain / 1024 of full scale
+    uint8_t release;
 } adsr_t;
 
 // ── ADSR wire format ─────────────────────────────────────────
@@ -86,24 +90,24 @@ typedef struct {
 // Of the 256 rate codes, 224 land bit-exactly on the coefficient grid;
 // the worst error is 10% on a ~39 s release, affecting only settings
 // slower than ~11 s.
-#define ADSR_K_SHIFT    24u        // gateware's fixed output shift
-#define ADSR_K_MAX      253952u    // 18 bits: mantissa 31 << 13
-#define ADSR_SUSTAIN_SHIFT  12u        // 10-bit sustain of a 22-bit level
+#define ADSR_K_SHIFT       24u     // gateware's fixed output shift
+#define ADSR_K_MAX         253952u // 18 bits: mantissa 31 << 13
+#define ADSR_SUSTAIN_SHIFT 12u     // 10-bit sustain of a 22-bit level
 
 uint32_t patch_adsr_rate_ad(const adsr_t *e);
 uint32_t patch_adsr_rate_dsr(const adsr_t *e);
-uint8_t  patch_adsr_rate_byte(uint8_t patch_rate);
+uint8_t patch_adsr_rate_byte(uint8_t patch_rate);
 // One rate byte -> the 18-bit coefficient k the gateware multiplies by.
 uint32_t patch_adsr_rate_coeff(uint8_t rate_byte);
 
 // ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
-    uint8_t  shape;         // osc_core shape (saw/pulse/tri/sine)
-    uint16_t rate;          // phase increment per sample, in 2^-25 of a
-                            // cycle (subsonic..control rate)
-    int16_t  depth;         // signed COEF: the LFO swings its DMEM word
-                            // by ±depth/2 (the wave is ±0.5 in Q2.16)
-    uint8_t  dest;          // LFO_DEST_*: the DMEM word it drives
+    uint8_t shape; // osc_core shape (saw/pulse/tri/sine)
+    uint16_t rate; // phase increment per sample, in 2^-25 of a
+                   // cycle (subsonic..control rate)
+    int16_t depth; // signed COEF: the LFO swings its DMEM word
+                   // by ±depth/2 (the wave is ±0.5 in Q2.16)
+    uint8_t dest;  // LFO_DEST_*: the DMEM word it drives
 } lfo_t;
 
 // LFO destinations. Both LFOs take any of them.
@@ -113,61 +117,61 @@ enum { LFO_DEST_DUTY = 0, LFO_DEST_RESONANCE, LFO_DEST_PITCH, LFO_DEST_CUTOFF };
 // Fixed-function stage exposes only a few; the full matrix is the
 // deferred config structure. dest is a sink selector, amount signed.
 typedef struct {
-    uint8_t source;         // MOD_SRC_* (wheel, aftertouch, expr, MOD env, lfo0..)
-    uint8_t dest;           // sink selector
-    int16_t amount;         // signed
+    uint8_t source; // MOD_SRC_* (wheel, aftertouch, expr, MOD env, lfo0..)
+    uint8_t dest;   // sink selector
+    int16_t amount; // signed
 } mod_route_t;
 
-#define PATCH_MOD_ROUTES 8  // matrix slots (Prophet-ish); stage 1 fills few
+#define PATCH_MOD_ROUTES 8 // matrix slots (Prophet-ish); stage 1 fills few
 
 // ── Arpeggiator / step sequencer ────────────────────────────────────
 typedef enum { CLOCK_AUTO = 0, CLOCK_INTERNAL } clock_mode_t;
 
 typedef struct {
-    bool        enabled;
-    uint8_t     mode;           // up/down/updown/random/pattern/chord-aware
-    uint16_t    rate;           // steps per beat (synced to clock)
-    uint8_t     octaves;
-    clock_mode_t clock;         // Auto (ext if present) / Internal
+    bool enabled;
+    uint8_t mode;  // up/down/updown/random/pattern/chord-aware
+    uint16_t rate; // steps per beat (synced to clock)
+    uint8_t octaves;
+    clock_mode_t clock; // Auto (ext if present) / Internal
     // pattern/step data: grows via structured SysEx (schema follow-up)
 } arp_seq_t;
 
 // ── The patch ───────────────────────────────────────────────────────
 typedef struct patch_s {
-    osc_t           osc[PATCH_NUM_OSC];
-    voice_struct_t  voice_struct;
-    int8_t          osc_mix;         // osc1<->osc2 balance (CC 24), 0=center
-    int16_t         unison_detune;   // spread within a unison group
-    int16_t         unison_stereo;   // stereo spread of the group
+    osc_t osc[PATCH_NUM_OSC];
+    voice_struct_t voice_struct;
+    int8_t osc_mix;        // osc1<->osc2 balance (CC 24), 0=center
+    int16_t unison_detune; // spread within a unison group
+    int16_t unison_stereo; // stereo spread of the group
 
-    filter_t        filter;
-    adsr_t          env[PATCH_NUM_ENV];   // [0]=amp, [1]=MOD
-    uint8_t         mod_env_dest;            // MOD env destination (def: cutoff)
-    int16_t         mod_env_depth;           // MOD env depth, signed raw DMEM value
-                                          // (the CSP's COEF is signed 18-bit;
-                                          // ±4096 = ±4 octaves of cutoff)
-    lfo_t           lfo[PATCH_NUM_LFO];
+    filter_t filter;
+    adsr_t env[PATCH_NUM_ENV]; // [0]=amp, [1]=MOD
+    uint8_t mod_env_dest;      // MOD env destination (def: cutoff)
+    int16_t mod_env_depth;     // MOD env depth, signed raw DMEM value
+                               // (the CSP's COEF is signed 18-bit;
+                               // ±4096 = ±4 octaves of cutoff)
+    lfo_t lfo[PATCH_NUM_LFO];
 
-    mod_route_t     mod[PATCH_MOD_ROUTES];
+    mod_route_t mod[PATCH_MOD_ROUTES];
 
     // Velocity sensitivity: 64 = the historical hardwired feel,
     // 0 = OFF (full amount on every note, isolation testing),
     // 127 = full velocity scaling. CC 86/87.
-    uint8_t         vel_amp_amt;   // CC 86: vel -> amp-env AMOUNT
-    uint8_t         vel_mod_amt;   // CC 87: vel -> MOD-env AMOUNT
+    uint8_t vel_amp_amt; // CC 86: vel -> amp-env AMOUNT
+    uint8_t vel_mod_amt; // CC 87: vel -> MOD-env AMOUNT
 
-    uint8_t         bend_range;      // 1..12 semitones
-    uint8_t         volume;          // per-channel/part volume (UQ4.4)
-    int8_t          pan;             // per-channel/part pan
+    uint8_t bend_range; // 1..12 semitones
+    uint8_t volume;     // per-channel/part volume (UQ4.4)
+    int8_t pan;         // per-channel/part pan
 
-    arp_seq_t       arp;
+    arp_seq_t arp;
 } patch_t;
 
 // ── Performance: per-MIDI-channel parts (layering / key split) ───────
 // Channel awareness is cheap (control_map.md decision 5) and this is
 // where layering lives: one patch_t per part, plus split/layer
 // routing. Single-timbre today = one active part; omni writes it.
-#define PERF_NUM_PARTS 16   // one per MIDI channel
+#define PERF_NUM_PARTS 16 // one per MIDI channel
 
 typedef struct {
     patch_t part[PERF_NUM_PARTS];
@@ -177,7 +181,7 @@ typedef struct {
 // ── The active patch ────────────────────────────────────
 extern patch_t g_patch;
 // The init patch: one saw, open filter, organ envelope, no modulation.
-void     patch_init(patch_t *p);
+void patch_init(patch_t *p);
 
 #ifdef __cplusplus
 }

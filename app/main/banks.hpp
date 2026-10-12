@@ -24,12 +24,12 @@
 
 namespace banks {
 
-constexpr int max_bank = 16383;      // MSB × 128 + LSB
-constexpr int max_programs = 128;    // per bank: programs 0 … 127
+constexpr int max_bank     = 16383; // MSB × 128 + LSB
+constexpr int max_programs = 128;   // per bank: programs 0 … 127
 
 struct Bank {
     std::string name;
-    std::vector<std::string> programs;   // paths from the storage root
+    std::vector<std::string> programs; // paths from the storage root
 };
 
 using BankMap = std::map<int, Bank>;
@@ -48,7 +48,8 @@ std::string to_text(const BankMap &banks);
 bool save(const std::string &path, const BankMap &banks, std::string &error);
 
 // The path of a program, if bank and program exist.
-std::optional<std::string> program_path(const BankMap &banks, int bank, int program);
+std::optional<std::string> program_path(const BankMap &banks, int bank,
+                                        int program);
 
 } // namespace banks
 
@@ -58,7 +59,8 @@ extern "C" {
 // Look a program up in the banks file at banks_path: copies the patch's
 // path (from the storage root) to path. False if the file, the bank or the
 // program does not exist.
-bool banks_program_path(const char *banks_path, int bank, int program, char *path, size_t len);
+bool banks_program_path(const char *banks_path, int bank, int program,
+                        char *path, size_t len);
 
 #ifdef __cplusplus
 }

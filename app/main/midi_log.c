@@ -29,23 +29,26 @@
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
-static void log_midi_event(const midi_message_t *m)
-{
+static void log_midi_event(const midi_message_t *m) {
     uint8_t type = m->status & 0xF0;
     uint8_t ch   = (m->status & 0x0F) + 1;
 
     switch (type) {
     case 0x80:
-        printf("note_off  ch=%2d note=%3d vel=%3d\n", ch, m->data[0], m->data[1]);
+        printf("note_off  ch=%2d note=%3d vel=%3d\n", ch, m->data[0],
+               m->data[1]);
         break;
     case 0x90:
-        printf("note_on   ch=%2d note=%3d vel=%3d\n", ch, m->data[0], m->data[1]);
+        printf("note_on   ch=%2d note=%3d vel=%3d\n", ch, m->data[0],
+               m->data[1]);
         break;
     case 0xA0:
-        printf("poly_at   ch=%2d note=%3d val=%3d\n", ch, m->data[0], m->data[1]);
+        printf("poly_at   ch=%2d note=%3d val=%3d\n", ch, m->data[0],
+               m->data[1]);
         break;
     case 0xB0:
-        printf("cc        ch=%2d num=%3d val=%3d\n", ch, m->data[0], m->data[1]);
+        printf("cc        ch=%2d num=%3d val=%3d\n", ch, m->data[0],
+               m->data[1]);
         break;
     case 0xC0:
         printf("program   ch=%2d num=%3d\n", ch, m->data[0]);
@@ -54,7 +57,8 @@ static void log_midi_event(const midi_message_t *m)
         printf("ch_at     ch=%2d val=%3d\n", ch, m->data[0]);
         break;
     case 0xE0:
-        printf("pitch     ch=%2d val=%5d\n", ch, (m->data[1] << 7) | m->data[0]);
+        printf("pitch     ch=%2d val=%5d\n", ch,
+               (m->data[1] << 7) | m->data[0]);
         break;
     default:
         printf("unknown   status=0x%02X\n", m->status);
@@ -62,8 +66,7 @@ static void log_midi_event(const midi_message_t *m)
     }
 }
 
-static void midi_log_task(void *arg)
-{
+static void midi_log_task(void *arg) {
     evt_t evt;
     int64_t busy_since = esp_timer_get_time();
 
@@ -82,7 +85,7 @@ static void midi_log_task(void *arg)
             vTaskDelay(1);
             busy_since = esp_timer_get_time();
         } else if (uxQueueMessagesWaiting(s_queue) == 0) {
-            busy_since = now;   // queue drained — next receive blocks
+            busy_since = now; // queue drained — next receive blocks
         }
 
         switch (evt.kind) {
@@ -96,8 +99,7 @@ static void midi_log_task(void *arg)
     }
 }
 
-void midi_log_init(void)
-{
+void midi_log_init(void) {
     s_queue = xQueueCreate(MIDI_LOG_QUEUE_LEN, sizeof(evt_t));
     if (s_queue == NULL) {
         ESP_LOGE("midi_log", "Failed to create event queue");

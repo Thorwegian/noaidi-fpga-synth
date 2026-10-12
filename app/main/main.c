@@ -24,8 +24,7 @@
 #include "stress_test.h"
 #include "storage.h"
 
-void app_main(void)
-{
+void app_main(void) {
     // The serial console first: from here on stdout and ESP_LOG print
     // through it (console.h).
     console_init();
@@ -36,33 +35,36 @@ void app_main(void)
     // running (a USB-JTAG hard-reset quirk): trust this line, not
     // esptool's exit code.
     const esp_app_desc_t *ad = esp_app_get_description();
-    printf("=== noaidi fw %s (built %s %s) ===\n",
-           ad->version, ad->date, ad->time);
+    printf("=== noaidi fw %s (built %s %s) ===\n", ad->version, ad->date,
+           ad->time);
 
     /* Print chip information */
     esp_chip_info_t chip_info;
     uint32_t flash_size;
     esp_chip_info(&chip_info);
-    printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
-           CONFIG_IDF_TARGET,
+    printf("This is %s chip with %d CPU core(s), %s%s%s%s, ", CONFIG_IDF_TARGET,
            chip_info.cores,
            (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi/" : "",
            (chip_info.features & CHIP_FEATURE_BT) ? "BT" : "",
            (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
-           (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
+           (chip_info.features & CHIP_FEATURE_IEEE802154)
+                   ? ", 802.15.4 (Zigbee/Thread)"
+                   : "");
 
     unsigned major_rev = chip_info.revision / 100;
     unsigned minor_rev = chip_info.revision % 100;
     printf("silicon revision v%d.%d, ", major_rev, minor_rev);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
+    if (esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
         printf("Get flash size failed");
         return;
     }
 
-    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+    printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t) (1024 * 1024),
+           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded"
+                                                         : "external");
 
-    printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
+    printf("Minimum free heap size: %" PRIu32 " bytes\n",
+           esp_get_minimum_free_heap_size());
 
     // Patch storage: mount before anything loads a patch.
     storage_init();
@@ -91,7 +93,7 @@ void app_main(void)
     printf("=== 1. single word write/read ===\n");
     fpga_word_write(0x0005, 0xDEADBEEF);
     uint32_t v = fpga_word_read(0x0005);
-    printf("word[0x0005] = %08lX %s\n", (unsigned long)v,
+    printf("word[0x0005] = %08lX %s\n", (unsigned long) v,
            v == 0xDEADBEEF ? "OK" : "FAIL");
     fails += (v != 0xDEADBEEF);
 
@@ -101,7 +103,7 @@ void app_main(void)
     fpga_word_write_burst(0x0100, wq, 4);
     bool id_ok = fpga_word_read_burst(0x0100, rq, 4);
     for (int i = 0; i < 4; i++) {
-        printf("word[0x%04X] = %08lX %s\n", 0x0100 + i, (unsigned long)rq[i],
+        printf("word[0x%04X] = %08lX %s\n", 0x0100 + i, (unsigned long) rq[i],
                rq[i] == wq[i] ? "OK" : "FAIL");
         fails += (rq[i] != wq[i]);
     }
@@ -114,12 +116,12 @@ void app_main(void)
     // (an address inside DMEM would fire the DMEM mailbox and move a
     // live value at every boot):
     // backed 0x0000-0x07FF, DMEM 0x0800-0x0BFF, partials 0x2000-0x5FFF.
-    fpga_word_write(0x1005, 0xBAD0BAD0);      // would alias 0x0005 if broken
-    uint32_t z = fpga_word_read(0x1005);
+    fpga_word_write(0x1005, 0xBAD0BAD0); // would alias 0x0005 if broken
+    uint32_t z    = fpga_word_read(0x1005);
     uint32_t keep = fpga_word_read(0x0005);
     printf("word[0x1005] = %08lX %s, word[0x0005] = %08lX %s\n",
-           (unsigned long)z, z == 0 ? "OK" : "FAIL",
-           (unsigned long)keep, keep == 0xDEADBEEF ? "OK" : "FAIL");
+           (unsigned long) z, z == 0 ? "OK" : "FAIL", (unsigned long) keep,
+           keep == 0xDEADBEEF ? "OK" : "FAIL");
     fails += (z != 0) + (keep != 0xDEADBEEF);
 
     printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
@@ -131,21 +133,22 @@ void app_main(void)
     printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();
-    midi_in_start();   // subscribers are registered: start publishing
+    midi_in_start(); // subscribers are registered: start publishing
     // NVS holds the BLE bonds. A full or version-mismatched partition is
     // erased and reinitialized: it only ever holds settings.
     esp_err_t nvs = nvs_flash_init();
-    if (nvs == ESP_ERR_NVS_NO_FREE_PAGES || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (nvs == ESP_ERR_NVS_NO_FREE_PAGES
+        || nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         nvs = nvs_flash_init();
     }
     ESP_ERROR_CHECK(nvs);
     ble_midi_init(); // MIDI over BLE: advertise "Noaidi" (standard MIDI service)
 #if CONFIG_NOAIDI_STRESS_TEST
-    stress_test_start();  // synthetic MIDI flood; off by default
+    stress_test_start(); // synthetic MIDI flood; off by default
 #endif
     // NOTE: boot-capture tooling waits for the "play the keyboard"
     // marker - keep the prefix if this line ever changes.
     printf("play the keyboard\n");
-    cli_init();      // console commands and status bar
+    cli_init(); // console commands and status bar
 }

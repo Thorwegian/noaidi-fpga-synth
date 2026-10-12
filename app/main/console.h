@@ -39,12 +39,13 @@ extern "C" {
 
 typedef struct {
     const char *name;
-    const char *usage;      // arguments, for help: "<path>"
-    const char *help;       // one line
-    int  (*run)(int argc, char **argv);
+    const char *usage; // arguments, for help: "<path>"
+    const char *help;  // one line
+    int (*run)(int argc, char **argv);
     // Offer completions for argument argi (1 = first) starting with
     // prefix, by calling add() for each. NULL: no completion.
-    void (*complete)(int argi, const char *prefix, void (*add)(const char *candidate));
+    void (*complete)(int argi, const char *prefix,
+                     void (*add)(const char *candidate));
 } console_cmd_t;
 
 // Take over the USB serial port and stdout/stderr, and start the
@@ -61,7 +62,8 @@ void console_print(const char *buf, size_t len);
 void console_set_prompt(const char *prompt);
 
 // Set the status bar text.
-void console_set_status(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void console_set_status(const char *fmt, ...)
+        __attribute__((format(printf, 1, 2)));
 
 // The registered commands, for help.
 int console_commands(const console_cmd_t *const **cmds);
