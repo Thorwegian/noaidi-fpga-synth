@@ -208,17 +208,22 @@ reach every raw step: `-12.07` is an octave down and 7 cents flat.
 | `resonance` | Q, or `inf` | 0.707 … 32, or `inf` | code = round(1024 × log₂(value × √2)); `inf` = code 0x3FFF |
 | `key_track` | percent | 0 … 200 | `key_track` = round(value × 64 / 100) |
 
-**Cutoff.** For a note, the filter's pitch (raw) is
+**Cutoff.** The filter tracks the pitch, not just the key. For a note,
+the filter's pitch (raw) is
 
     note_pitch(60) + (note_pitch(note) − note_pitch(60)) × key_track / 64 + 512 + cutoff_offset
+      + pitch_modulation × key_track / 64
 
-where `note_pitch(n) = n × 1024 / 12` and `cutoff_offset` is the
-CC 74/106 setting. `cutoff` is that pitch for note 60, in Hz:
+where `note_pitch(n) = n × 1024 / 12`, `pitch_modulation` is the pitch
+bend plus the pitch LFOs, and
+`cutoff_offset` is the CC 74/106 setting. So at 100 %, an octave of
+pitch from any source moves the filter an octave. `cutoff` is the
+filter's pitch for note 60 with no modulation, in Hz:
 
     Hz = 440 × 2^((pitch × 12 / 1024 − 69) / 12)
 
 C4 is the reference that key tracking pivots on, so at 0 % key
-tracking `cutoff` is the frequency for every note.
+tracking `cutoff` is the frequency for every note and bend.
 
 The gateware clamps the cutoff at `FC_MAX` (14.4 kHz), its
 measured-clean limit, so `cutoff` stops there.

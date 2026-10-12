@@ -84,7 +84,7 @@ units live in patch.h).
 | 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel resonance DMEM word (DMEM word 3) |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete: single section (12 dB/oct) / cascade (two 2-pole sections, 24 dB/oct) |
-| 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention) |
+| 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention). Tracks the PITCH: note, pitch bend and pitch LFOs, so at 100 % an octave of pitch is an octave of cutoff |
 
 **Envelopes** — the amp envelope (standard sound-controller CCs) and
 the MOD envelope (undefined block; standard CCs only ever covered one envelope).

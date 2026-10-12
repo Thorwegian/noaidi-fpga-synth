@@ -203,8 +203,10 @@ Notes:
   1/16-octave fraction); firmware decodes them to the linear
   coefficients in the instruction's `RATE_AD`/`RATE_DSR` words.
 - Velocity and key tracking are firmware-baked into base parameters,
-  DMEM bases and COEF words at note-on (key tracking that must follow
-  bends rides a DMEM word updated by firmware). Future oscillator types may need
+  DMEM bases and COEF words at note-on. Key tracking follows the
+  note's pitch; the part that must
+  follow bend and the pitch LFOs is a MAC instruction from the pitch
+  DMEM word into the channel cutoff DMEM word, COEF = key_track. Future oscillator types may need
   extra data words (wavetable index, sample pointer) — they take
   reserved words in this block.
 - Controllers are computed by firmware: one DMEM-base or instruction

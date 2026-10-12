@@ -248,6 +248,12 @@ obj_dir/tb_csp/sim: $(CSP_SIM) tb/tb_csp.sv Makefile
 sim-csp: obj_dir/tb_csp/sim
 	$(call run_sim,$<,tb/sim-csp.out)
 
+obj_dir/tb_pitch_track/sim: $(CSP_SIM) tb/tb_pitch_track.sv Makefile
+	$(VERILATE) $(CSP_SIM) tb/tb_pitch_track.sv $(VL_DSP)
+
+sim-pitch-track: obj_dir/tb_pitch_track/sim
+	$(call run_sim,$<,tb/sim-pitch-track.out)
+
 # The mailbox's two-take commit under back-to-back traffic.
 obj_dir/tb_mbox_burst/sim: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
 	$(VERILATE) $(CSP_SIM) tb/tb_mbox_burst.sv $(VL_DSP)
@@ -309,10 +315,10 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
+sim: sim-pulse-dc sim-csp sim-pitch-track sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-output-lpf sim-limiter
-	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
+	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-pitch-track.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
 	     tb/sim-partial.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \

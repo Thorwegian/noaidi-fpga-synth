@@ -215,18 +215,20 @@ BSRAM geometry (18-bit-wide blocks).
   offset), duty, cutoff, Q, gain L and gain R — read the six-replica
   DMEM pool through their per-sink slices.
 - **Firmware-routed DMEM words.** The pitch wheel writes the channel pitch
-  DMEM word (DMEM word 2) that every partial's pitch pointer references, and the
-  channel cutoff DMEM word (DMEM word 4) carries bend + mod wheel + the cutoff
-  knob, so filter key tracking follows bends: a pitch bend is two
-  base writes rather than 256 OSC-word writes. Per-voice MAC instructions fan
-  the channel cutoff DMEM word out to each voice's cutoff DMEM word. Velocity
+  DMEM word (DMEM word 2) that every partial's pitch pointer references:
+  a pitch bend is one base write rather than 256 OSC-word writes. The
+  channel cutoff DMEM word (DMEM word 4) carries the mod wheel and the
+  cutoff knob, and the pitch-tracking MAC instruction (entry 2) adds
+  the pitch DMEM word × key_track to it, so the filter follows bend and
+  the pitch LFOs (#213). Per-voice MAC instructions fan the channel
+  cutoff DMEM word out to each voice's cutoff DMEM word. Velocity
   scales the amp and MOD envelopes' COEF words at note-on.
 - **Instruction sequencer + LFO instruction.** 256 instructions × 4
   words at 0x0100 (paged — wiring), one instruction per cycle, with
   the one instruction multiply in its own registered stage; osc_core
   is reused for shapes. A DMEM word is its base plus instruction results,
   so bend and vibrato coexist on the pitch DMEM word. Entries 0 and 1 are
-  LFO 1 and LFO 2.
+  LFO 1 and LFO 2; entry 2 is the pitch-tracking MAC instruction.
 - **ADSR instruction + gate-DMEM-word triggering.** Amp envelopes are
   instructions 32–63, one per voice, watching gate DMEM words 80+v, with
   the envelope-adds-volume idiom and the log₂ rate ladder (decoded to
