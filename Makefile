@@ -19,6 +19,10 @@
 #                   banks.toml reads and writes back, and the factory
 #                   patches and banks read back exactly (a warning, not a
 #                   failure, where only their formatting differs)
+#   make format     reformat our C and C++ sources (.clang-format: the
+#                   Java Code Conventions); app/lib is left alone
+#   make format-check  list the sources that are not formatted — a
+#                   warning, not a failure
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
@@ -93,6 +97,28 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
 
+# Our own C and C++ sources; the libraries in app/lib keep their style.
+# .clang-format is written for clang-format 21.1.8 (pip install
+# clang-format==21.1.8); other versions format some constructs
+# differently, so the check names the version it ran.
+CLANG_FORMAT ?= clang-format
+CLANG_FORMAT_VERSION = 21.1.8
+FORMAT_SOURCES = $(shell git ls-files '*.c' '*.h' '*.cpp' '*.hpp' | grep -v '^app/lib/')
+
+format:
+	$(CLANG_FORMAT) -i $(FORMAT_SOURCES)
+
+format-check:
+	@$(CLANG_FORMAT) --version | grep -q ' $(CLANG_FORMAT_VERSION)' \
+	    || echo "WARN clang-format is not $(CLANG_FORMAT_VERSION): results may differ"
+	@unformatted=$$(for f in $(FORMAT_SOURCES); do \
+	    $(CLANG_FORMAT) --dry-run --Werror "$$f" 2>/dev/null || echo "$$f"; done); \
+	if [ -n "$$unformatted" ]; then \
+	    echo "WARN not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; \
+	else \
+	    echo "all sources formatted"; \
+	fi
+
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
 
@@ -107,4 +133,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean

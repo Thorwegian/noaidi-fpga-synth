@@ -108,6 +108,10 @@ pll_clk O0=73728K -s
   (default `/opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v`)
 - **ESP-IDF v6** for the ESP32-C3 firmware
 - **Python 3** for the LUT/boot-image generators (`scripts/`)
+- **clang-format 21.1.8** for `make format` (`pip install
+  clang-format==21.1.8`; `CLANG_FORMAT=` points the Makefile at it if it
+  is not on the path). Our C and C++ follow the Java Code Conventions,
+  set out in `.clang-format`
 
 The `idf.py` invocation is machine-specific for now (Espressif's
 environment activation does not lend itself to standardized
@@ -128,6 +132,8 @@ make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
 make fw-console  # attach the console with screen (see Console below)
 make fw-test     # host tests of patch files and banks (about a minute)
+make format      # reformat our C and C++ sources (.clang-format)
+make format-check  # list sources that are not formatted (a warning only)
 ```
 
 `make sim` starts every variable that has no initial value at a random
