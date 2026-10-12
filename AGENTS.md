@@ -6,9 +6,11 @@
 
 - Agents write elegant and highly structured code at a senior developer level.
 
-- Elegant C++ with STL is *always* preferred over clunky C. Agents *will* port C modules to C++ at every chance (dependencies excepted).
+- Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
 
-- Elegant SystemVerilog is *always* preferred over clunky Verilog. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
+- Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
+
+- Apply principles of universal design in user interfaces (and user-adjacent interfaces such as MIDI).
 
 - Agents *must* update comments and docs so they match the code before *every* commit.
 
