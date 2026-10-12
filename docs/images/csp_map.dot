@@ -1,0 +1,116 @@
+// csp_map.dot — the CSP and everything it connects to (#184, #219)
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+//
+// Regenerate:  dot -Tpng -Gdpi=150 docs/images/csp_map.dot -o docs/images/csp_map.png
+//
+// Top to bottom is the data's way: the firmware builds a program and
+// writes settings; SPI carries them into the FPGA; the CSP turns them
+// into control signals once per pass (48 kHz); the partial pipeline
+// reads those, twice per sample's partial slot, and makes sound (96 kHz).
+// Solid edges carry data in the running synth; dashed ones are the host
+// tools that check it. Numbers in brackets are BSRAM blocks.
+
+digraph csp_map {
+    graph [rankdir=TB, fontname="Helvetica", fontsize=13, nodesep=0.45, ranksep=0.55,
+           newrank=true, splines=spline, pad=0.3,
+           label="The CSP and what it connects to (docs/csp_isa.md, docs/csp_manual.md)",
+           labelloc=t];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11,
+           fillcolor="#ffffff", color="#555555", margin="0.15,0.08"];
+    edge  [fontname="Helvetica", fontsize=9, color="#444444", arrowsize=0.7];
+
+    // ---- ESP32 ----------------------------------------------------------------
+    subgraph cluster_esp32 {
+        label="ESP32 firmware"; style="rounded,filled"; fillcolor="#e8f0fb"; color="#7a9cc6";
+        voices   [label="voice_alloc\nnote-on/off, CCs, bend,\nchannel settings"];
+        builder  [label="csp::ProgramBuilder\n(app/main/csp)\nprogram → machine code", fillcolor="#fff6d6"];
+        link     [label="engine_link\nwrites over SPI"];
+        voices  -> link [label="voice & channel\nregister values"];
+        builder -> link [label="program\n(36-bit words)"];
+        voices  -> link [label="pointers\n(on a re-layout)", style=dotted];
+    }
+
+    // ---- SPI side of the FPGA (SPI clock) -------------------------------------------
+    subgraph cluster_spi {
+        label="FPGA, SPI clock"; style="rounded,filled"; fillcolor="#eef7ee"; color="#7fb07f";
+        queue    [label="write queue\ndual-clock FIFO [1]\nheld until the swap"];
+        imem     [label="instruction memory\n1472 × 36 [3]\nwritten while the CSP\nis held in reset"];
+        pointers [label="pointer RAM\n12 pointers per partial [2]\nwritten directly"];
+        ctrl     [label="CTRL\nswap, CSP reset"];
+    }
+    link -> queue    [label="registers"];
+    link -> imem     [label="instructions"];
+    link -> pointers [label="pointers"];
+    link -> ctrl     [label="swap,\nreset"];
+
+    // ---- the CSP (system clock, one pass per two samples) ---------------------------------
+    subgraph cluster_csp {
+        label="CSP: one pass per two samples (48 kHz), one instruction per cycle, up to 1472"; style="rounded,filled";
+        fillcolor="#fdf0e6"; color="#d29a6a";
+        pc       [label="PC + loop counters\nLOOP.i / LOOP.j"];
+        decode   [label="decode\noperand = direct, or\ni / j + offset"];
+        index    [label="index registers\ni, j (12-bit)\nIDX: 3 delay slots"];
+        regfile  [label="register file\n2048 × 18, wide pairs\n3 read copies A, X, Y [6]\nZERO hard-wired"];
+        alu      [label="multiply-add unit\nALU54D: Y − A\nMULTALU36X18: X × (…) + A"];
+        accflags [label="accumulator (54-bit)\nflags N Z V"];
+        window   [label="write window\n48 queued writes\nat the end of a pass"];
+        pc -> decode;
+        index -> decode [label="i, j"];
+        decode -> regfile [label="addresses"];
+        regfile -> alu [label="A, X, Y"];
+        alu -> accflags;
+        alu -> regfile [label="write-back\n(forwarded)"];
+        accflags -> decode [label="flags for\nSEL / SKIP", style=dashed, constraint=false];
+        window -> regfile [label="firmware\nvalues"];
+    }
+    imem  -> pc     [label="fetch"];
+    queue -> window [label="on swap"];
+    ctrl  -> window [label="swap", style=dotted];
+    ctrl  -> pc     [label="reset", style=dotted];
+
+    // ---- the sink area (paged) ------------------------------------------------------------
+    subgraph cluster_sinks {
+        label="sink area: 1024 words × 2 pages, flip at the end of a pass"; style="rounded,filled";
+        fillcolor="#f3ecf9"; color="#a083c0";
+        shadow [label="shadow page\nCSP writes every\nowned word, every pass"];
+        active [label="active page\n3 dual-port replicas [6]\nboth ports to the PAP"];
+        shadow -> active [label="flip", style=bold];
+    }
+    alu -> shadow [label="sink writes"];
+
+    // ---- the partial pipeline (96 kHz) ---------------------------------------------------------
+    subgraph cluster_pap {
+        label="partial pipeline (PAP): 96 kHz, 256 partials, two cycles each"; style="rounded,filled";
+        fillcolor="#eaf6f6"; color="#6fb1b1";
+        sum    [label="per sink: voice word\n+ channel word"];
+        osc    [label="oscillator\npitch, duty, mode"];
+        svf    [label="filter (SVF)\ncutoff, Q"];
+        gain   [label="gain L / R"];
+        sum -> osc -> svf -> gain;
+    }
+    pointers -> sum [label="12 pointers"];
+    active   -> sum [label="6 reads\nper cycle"];
+    audio [label="audio out\nlimiter, I2S", shape=ellipse, fillcolor="#f0f0f0"];
+    gain -> audio;
+
+    // ---- host tools (they check the design; they don't run in it) -------------------------------
+    subgraph cluster_host {
+        label="host tools (tools/csp)"; style="rounded,dashed"; color="#999999"; fontcolor="#666666";
+        assembler [label="macro assembler\ncsp asm", fillcolor="#fafafa"];
+        model     [label="reference model\ncsp sim, csp-test", fillcolor="#fafafa"];
+        bench     [label="RTL benches (#220)\nmatch the model\nevery pass", fillcolor="#fafafa"];
+    }
+    assembler -> builder [label="front end to", style=dashed, color="#999999"];
+    model -> bench [label="expected\nregisters & sinks", style=dashed, color="#999999"];
+    bench -> regfile [label="checks", style=dashed, color="#999999", constraint=false];
+
+    // Rows: each stage of the way side by side, so the map balances.
+    {rank=same; voices; builder; assembler}
+    {rank=same; queue; imem; pointers; ctrl}
+    {rank=same; pc; index; window}
+    {rank=same; alu; accflags}
+    {rank=same; shadow; active}
+    {rank=same; sum; osc; svf; gain; audio}
+}

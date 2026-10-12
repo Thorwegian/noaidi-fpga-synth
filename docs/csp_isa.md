@@ -19,6 +19,12 @@ opcodes, a fixed program run once per sample), so that channel-wide and
 voice-level arithmetic runs on the FPGA and the partials only point at
 the results.
 
+![The CSP and what it connects to](images/csp_map.png)
+
+*The map: firmware, SPI, the CSP, the sink area and the partial
+pipeline, with the BSRAM each part uses in brackets. Source:
+`images/csp_map.dot`.*
+
 Terms: a **channel** is a MIDI channel and everything set on it (the
 current sound's settings, its LFOs, pitch bend, CCs). A **voice** is one
 sounding note on a channel. A **partial** is one oscillator + filter +
