@@ -3,10 +3,9 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: design accepted in principle (#184): the instruction set in
-[csp_manual.md](csp_manual.md) is approved, as are 48 kHz passes, the
-write queue, and loading programs with the CSP held in reset. Open
-points are in section 14. Nothing here is built yet.** The
+**Status: design decided (#184): the instruction set in
+[csp_manual.md](csp_manual.md) is approved, and the decisions are
+listed in section 14. Nothing here is built yet.** The
 current CSP is described in [dmem_architecture.md](dmem_architecture.md);
 this document proposes what it becomes and why. The instruction set
 itself, every instruction and the assembly language, is specified in
@@ -80,7 +79,8 @@ add", and the per-partial immediates.
   has one page: the firmware holds the CSP in reset, writes the program,
   and releases it, so a pass never runs half an old and half a new
   program. Changing the program is rare (start-up, a new routing), so
-  the CSP pausing for it is acceptable.
+  the CSP pausing for it is acceptable. A reset clears no registers:
+  constants, settings and running state survive a program load.
 - **Results are visible at once:** an instruction reads the newest value
   of every register, including one written by the instruction just
   before it (forwarding, as today).
@@ -152,67 +152,77 @@ each read address in the D stage, off the multiply's critical path.
 
 ## 5. Register spaces
 
-The register file is **1024 × 18-bit words** (10-bit addresses), built
-as 512 × 36 BSRAM: an 18-bit operation addresses one half, a **wide**
-operation (`a` = 3, `.w` in assembly) an aligned pair as one 36-bit
-Q4.32 value. Wide pairs hold what needs precision: envelope levels, LFO
-phases. Q4.32 rather than the FPGA's usual Q8.28, so that a pair's upper
-word reads as an ordinary Q4.14 word ([csp_manual.md](csp_manual.md)
-section 3; open).
+The register file is **2048 × 18-bit words**, built as 1024 × 36 BSRAM:
+an 18-bit operation addresses one half, a **wide** operation (`a` = 3,
+`.w` in assembly) an aligned pair as one 36-bit Q4.32 value. Wide pairs
+hold what needs precision: envelope levels, LFO phases. Q4.32 rather
+than the FPGA's usual Q8.28, so that a pair's upper word reads as an
+ordinary Q4.14 word.
 
-| Region (proposed) | Words | Contents |
+The **sink area** follows the registers in the same address space: the
+CSP writes it but does not read it. The index registers hold 12-bit
+addresses, so indexed operands reach both.
+
+| Region | Words | Contents |
 |---|---|---|
 | `0x000–0x03F` | 64 | constants: 0, ±1, powers of two, the attack target, … (firmware writes once) |
-| `0x040–0x05F` | 32 | I/O: noise (#216), sample counter, test tone |
-| `0x060–0x0FF` | 160 | temporaries, LFO phases and outputs |
-| `0x100–0x2FF` | 512 | channels: 16 × 32 words (settings, bend, CCs, LFO rates and depths) |
-| `0x300–0x3FF` | 256 | voices: 32 × 8 words (note, velocity, gate, envelope levels) |
+| `0x040–0x05F` | 32 | I/O: noise (#216), pass counter, test tone |
+| `0x060–0x1FF` | 416 | work: temporaries, LFO state, global settings |
+| `0x200–0x5FF` | 1024 | channels: 16 × 64 words (settings, envelope tables, bend, CCs, pan, LFO rates and depths) |
+| `0x600–0x7FF` | 512 | voices: 32 × 16 words (note, velocity, gate, envelope levels and stages) |
+| `0x800–0xBFF` | 1024 | sinks (write-only): what the partials read (section 6) |
 
-Plus the **sink area** (section 6), which the CSP writes but does not
-read.
-
-*Open:* 32 words per channel is a first guess. Sixteen channels with
-everything per channel may need more, and then the register file grows
-to 2K words (one more BSRAM per read copy).
+Direct operands reach `0x000–0x1FF`; channel and voice blocks and the
+sinks are reached through `i` and `j`.
 
 ## 6. Partial sinks: DMEM + DMEM
 
-Each partial sink adds **two sink-area words** instead of an immediate
-and a DMEM word, so a partial is pointers only:
+Each partial sink adds **two sink-area words**, a voice word and a
+channel word, so a partial is pointers only and nothing writes the
+partials directly over SPI any more: which is what the CSP was for from
+the start, when it began as a modulation-bus matrix.
 
-| Sink | Word 1 (voice) | Word 2 (channel) |
+| Sink | Word 1 (voice) | Word 2 (channel, per osc and unison position) |
 |---|---|---|
-| pitch | voice pitch: note + bend + pitch LFOs | detune(osc, unison position), tune folded in |
-| cutoff | voice cutoff: envelope, tracking | offset(osc, unison position): tracking of tune and detune |
-| gain L / R | voice gain: envelope × velocity | pan / spread / osc mix (osc, unison position, side) |
+| pitch | voice pitch per osc: note + bend + pitch LFOs + tune | detune |
+| cutoff | voice cutoff per osc: envelope, tracking | offset: tracking of tune and detune |
+| gain L / R | voice gain: envelope × velocity | pan / spread / osc mix, per side |
 | duty | channel duty(osc) | word 0 |
 | Q | channel resonance | word 0 |
+| mode | channel mode(osc): waveform, filter type, cascade | word 0 |
 
-- **Note-on** writes a few voice words (note, velocity, gate), not 40
-  partial words. Changing a channel setting writes channel words, not a
-  re-render.
-- **Mode bits** (waveform, filter type, cascade) select rather than add.
-  They stay a small per-partial field beside the pointers.
-- **Read ports:** two reads per sink per partial. The partial pipeline
-  issues one partial per cycle in slots 0–255 and idles for the other
-  512 cycles, so either the six sink replicas double (6 more BSRAM) or
-  the pipeline takes two cycles per partial and reads both words through
-  one port. *Open: needs a look at the pipeline's timing.*
+- **All of it is CSP-written** and can therefore be modulated or
+  automated: pan above all, which MIDI automates often.
+- **Note-on** writes a few voice registers (note, velocity, gate);
+  changing a channel setting writes channel registers. Neither writes a
+  partial.
+- **Two cycles per partial.** The partial pipeline (PAP) reads both
+  words of a sink through one port, over two cycles: 256 partials × 2 =
+  512 of the 768 cycles per sample. The partials never go beyond 256,
+  so the PAP may as well use the time.
+- **Size:** ~880 sink words (32 voices × 6 + 16 channels × ~43), so a
+  1024-word sink area.
+- **The PAP's own parameter RAM holds only the pointers**, 12 per
+  partial (two per sink). They change only when the voice layout does.
+  Those writes come through the write queue and are applied in the
+  PAP's idle 256 cycles of a sample, so a voice's partials are never
+  half re-pointed. The pointer RAM needs no second page.
 
 **Concurrency with the partial pipeline** stays today's ping-pong
 paging (proven in `tb_prog_pingpong`, `tb_csp` and on hardware): the CSP
-writes one page of the sink area while the partials read the other,
-and the pages flip at the end of a pass, after its drain. Two rules
-keep the pages consistent:
+writes one page of the sink area while the PAP reads the other, and the
+pages flip at the end of a pass, after its drain. A pointer names a word
+and the hardware supplies the page, so the pointers never change at a
+flip. Two rules keep the pages consistent:
 
 1. **Every sink word the CSP owns is written every pass.** A word
    skipped in one pass would leave the other page two passes stale, and
    the partials would alternate between old and new values. Slower work
    writes ordinary registers, and one instruction per pass copies the
    result to its sink. The reference model and the assembler check this.
-2. **Sink words the firmware owns** (the channel words: detune, pan,
-   offsets) **are written to both pages**, by the write window, as
-   today's DMEM mailbox commits to both halves.
+2. **Firmware writes to the sink area**, if any remain, **go to both
+   pages**, by the write window, as today's DMEM mailbox commits to both
+   halves.
 
 ## 7. Opcodes
 
@@ -221,7 +231,7 @@ Sixteen, modelled on the EMU10K1's, each described in full in
 
 | op | Mnemonic | Operation |
 |---|---|---|
-| 0 | `MAC` | R = A + X × Y |
+| 0 | `NOP` | nothing (all-zero memory is NOPs) |
 | 1 | `LOOP` | repeat the next R instructions X times, stepping `i` by Y |
 | 2 | `MACW` | R = A + X × Y, wrapping (phase accumulators) |
 | 3 | `INTERP` | R = A + X × (Y − A) (RC step, crossfade) |
@@ -233,7 +243,7 @@ Sixteen, modelled on the EMU10K1's, each described in full in
 | 9 | `MAX` | R = max(X, Y) |
 | 10 | `ANDXOR` | R = (X & Y) ^ A |
 | 11 | `SHIFT` | R = A × 2^Y |
-| 12 | `EXP2` | R = 2^X, X in octaves |
+| 12 | `MAC` | R = A + X × Y |
 | 13 | `ABS` | R = |X| |
 | 14 | `SKIP` | make the next Y instructions no-ops if the flags match X |
 | 15 | `IDX` | `i` or `j` = X + Y |
@@ -242,8 +252,12 @@ Wide arithmetic is the `a` field's fourth value rather than an opcode
 or a prefix, so it costs no cycle: wide operations always update a
 register in place.
 
-*Open:* whether `EXP2` earns its place before #176 (linear gain) needs
-it; whether `j` also wants a nested `LOOP`.
+`NOP` is opcode 0 so that cleared or unwritten instruction memory does
+nothing, flags included. There is no `EXP2`: linear gain (#176) is
+products only, the firmware turns dB settings into linear coefficients,
+and pitch and cutoff stay in octaves until the PAP's tables.
+
+*Open:* whether `j` also wants a nested `LOOP`.
 
 ## 8. Envelopes and LFOs as instructions
 
@@ -267,9 +281,10 @@ INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
 MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
 
-`j` is set first, from the stage the previous sample left, because an
-index register takes effect three instructions after `IDX`; a stage
-change therefore lands one sample (~10 µs) later.
+`j` is set first, from the stage the previous pass left, because an
+index register takes effect three instructions after `IDX` (delay
+slots, as some processors have after a jump); a stage change therefore
+lands one pass (~21 µs) later.
 
 Assembly syntax as in [csp_manual.md](csp_manual.md) section 6;
 `SEL` reads the flags of the latest `CMP`. That is **9 instructions per
@@ -310,20 +325,23 @@ the partial pipeline can interpolate the gain sinks between passes.
 
 | Where | Blocks | What | Needed? |
 |---|---|---|---|
-| `spi_bus` `store_ram` | 4 | 2048 × 36 copy of every SPI write, for reading back | Only the boot self-test reads back (`main.c`). **Candidate: −3 or −4.** |
-| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction, single page, 1472 instructions: **3**. |
+| `spi_bus` `store_ram` | 4 | 2048 × 36 copy of every SPI write, for reading back | Only the boot self-test reads it: removed, the self-test uses an ID register and a scratch register instead: **0**. |
+| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction, single page (loaded in reset), 1472 instructions: **3**. |
 | (new) write queue | — | firmware register writes waiting for the swap (section 2) | **1** (512 × 36: address + data). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
-| CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y): **3**. |
-| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | **6, or 12** with two reads per sink (section 6). |
-| partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone with DMEM + DMEM sinks: **0**. |
-| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | Twice the pointers (12 × 10 bits) + mode bits: **4**. |
+| CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y), 2048 words each: **6**. |
+| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area × 2 pages per replica: **12**. |
+| partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone: everything a partial reads is a sink: **0**. |
+| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | 12 pointers per partial, one page: **2–4** depending on packing. |
 | partial SVF state `ic*eq*_ram` | 4 | filter state | Needed. |
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 26 to 33 blocks, against 33 today, before #217: the
-BSRAM count stays level while the CSP grows.
+**Projected:** 33 to 35 blocks, against 33 today, before #217. The CSP
+grows to a 2048-word register file, a 1024-word sink area and 1472
+instructions for about the BSRAM it uses now, paid for by `store_ram`,
+the second instruction page, the partials' immediates and their second
+page.
 
 ## 11. DSP blocks
 
@@ -357,22 +375,39 @@ Each its own PR, checked in sim and on the board:
 1. Reference model, assembler and the instruction-level bench, against
    a new CSP core beside the old one.
 2. The new core: datapath, register file, write queue on the swap,
-   48 kHz passes of up to 1472 instructions. Today's programs ported
-   to it.
+   loading in reset, 48 kHz passes of up to 1472 instructions. Today's
+   programs ported to it.
 3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
    `osc_core` retire.
-4. Sink area + DMEM + DMEM partial sinks; the per-partial immediates
-   retire; note-on becomes voice-word writes.
-5. SPI protocol on 18/36-bit words (#151), with the new address map.
+4. Sink area and DMEM + DMEM partial sinks, two cycles per partial; the
+   per-partial immediates retire; note-on becomes voice-register writes.
+5. SPI protocol on 18/36-bit words (#151), with the new address map;
+   `store_ram` retires.
 6. Linear gain (#176) on top.
 
-## 14. Open questions
+## 14. Decisions and open questions
 
-- Whether the partial pipeline interpolates the gain sinks between
-  48 kHz passes (section 9).
-- The write window's size: 48 writes per pass (section 2).
-- Two reads per sink: more replicas or two cycles per partial
-  (section 6).
-- Register file size for 16 channels (section 5).
-- `store_ram`: drop it, or keep a small read-back window for the boot
-  self-test.
+Decided on #184:
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | voice + channel value per sink | two cycles per partial, both words through one port |
+| 2 | register file size | 2048 words; pan and every partial value are CSP-written, nothing is written to the partials directly |
+| 3 | wide format | Q4.32 |
+| 4 | does reset clear registers | no |
+| 5 | interpolate sinks between 48 kHz passes | no |
+| 6 | `store_ram` | removed |
+| 7 | write window | 48 writes per pass |
+| 8 | when a new `i`/`j` takes effect | three delay slots; the assembler warns |
+| 9 | rounding | truncate |
+| 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
+| 11 | partial pointer writes | through the write queue, applied in the PAP's idle cycles; no second page |
+| 12 | LFOs | 2 per channel at 24 kHz |
+| — | pass rate | 48 kHz |
+| — | firmware writes | queued, applied on the swap |
+| — | program loading | CSP held in reset |
+
+Still open:
+
+- Whether `j` also wants a nested `LOOP` (section 7).
+- How the pointer RAM packs 12 pointers per partial (section 10).

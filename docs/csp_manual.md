@@ -3,8 +3,9 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: the instruction set is approved (#184); not yet built.**
-Details still open are marked *Open*. This manual
+**Status: the instruction set is approved and the design decided
+(#184); not yet built.** Details still open are marked *Open*. This
+manual
 describes the Control Signal Processor (CSP) as proposed in
 [csp_isa.md](csp_isa.md), which gives the reasons behind the design.
 This manual is for whoever writes CSP programs: it says what every
@@ -50,22 +51,23 @@ Three levels of data recur throughout:
 
 ### Register file
 
-The register file holds 1024 words of 18 bits, addressed 0 to 1023.
-Any instruction can read any register and write any register, except
-where the map below says otherwise. Register 0 always reads as zero;
-writing to it discards the result.
+The register file holds 2048 words of 18 bits, addressed `0x000` to
+`0x7FF`. Any instruction can read any register and write any register,
+except where the map below says otherwise. Register 0 always reads as
+zero; writing to it discards the result.
 
-Proposed layout (sizes are open, see [csp_isa.md](csp_isa.md) section 14):
+Above the registers lies the **sink area**, `0x800–0xBFF`: everything
+the partial pipeline reads. The CSP writes it but cannot read it back.
 
 | Addresses | Name | Contents |
 |---|---|---|
 | `0x000` | `ZERO` | always zero |
 | `0x001–0x03F` | constants | values the firmware writes once at start-up: 1.0, −1.0, powers of two, the attack target, … |
-| `0x040–0x05F` | I/O | inputs from outside the CSP: the noise source, the sample counter, … (read-only) |
-| `0x060–0x0FF` | work | temporaries and LFO state |
-| `0x100–0x1FF` | channels | 16 blocks of 16 words: each channel's settings and modulation |
-| `0x200–0x2FF` | voices | 32 blocks of 8 words: each voice's note, gate, velocity, envelope state |
-| `0x300–0x3FF` | sinks | write-only: the voice-level words the partial pipeline reads |
+| `0x040–0x05F` | I/O | inputs from outside the CSP: the noise source, the pass counter, … (read-only) |
+| `0x060–0x1FF` | work | temporaries, LFO state, global settings |
+| `0x200–0x5FF` | channels | 16 blocks of 64 words: each channel's settings, envelope tables, bend, controllers, pan, LFO rates and depths |
+| `0x600–0x7FF` | voices | 32 blocks of 16 words: each voice's note, gate, velocity, envelope levels and stages |
+| `0x800–0xBFF` | sinks | write-only: the values the partials read |
 
 The firmware can write any register over SPI. Its writes wait in a
 queue and are applied together between passes, never during one
@@ -78,8 +80,8 @@ than 18 bits: envelope levels and LFO phases.
 
 ### Index registers
 
-Two index registers, **`i`** and **`j`**, each hold a 10-bit register
-address. An instruction operand can name a register as `i` or `j` plus a
+Two index registers, **`i`** and **`j`**, each hold a 12-bit address,
+enough for the registers and the sink area. An instruction operand can name a register as `i` or `j` plus a
 small offset (section 4). The usual use is a pointer to a block plus a
 field: `i` points at the current voice's block and `[i+LEVEL]` is that
 voice's level; `j` points at a row of a table.
@@ -132,10 +134,9 @@ so its upper word, read as a word, is the value truncated to Q4.14. An
 envelope level can be compared with 1.0, or scaled by a velocity,
 without converting it first.
 
-*Open:* Thor's standard 36-bit format is Q8.28. Q4.32 is proposed here
-because it keeps a wide register's upper word in the word format;
-with Q8.28 that word would be Q8.10 and every such use would need a
-`SHIFT`.
+(The FPGA's usual 36-bit format is Q8.28. The CSP uses Q4.32 because it
+keeps a wide register's upper word in the word format; with Q8.28 that
+word would be Q8.10 and every such use would need a `SHIFT`.)
 
 Some quantities are integers rather than fractions: register addresses,
 loop counts, strides and envelope stages. Those instructions and
@@ -207,9 +208,9 @@ through an index register:
 | `1 0 oooooooo` | `i`-indexed | `i + o` (offset 0–255) |
 | `1 1 oooooooo` | `j`-indexed | `j + o` (offset 0–255) |
 
-Direct addressing reaches the constants, I/O, work registers and channel
-blocks. Indexed addressing reaches the whole register file, voice
-blocks and sinks included. The sum `i + o` or `j + o` wraps at 1024.
+Direct addressing reaches the constants, I/O and work registers.
+Indexed addressing reaches everything: channel and voice blocks, and
+the sinks. The sum `i + o` or `j + o` wraps at 4096.
 
 Some instructions use a field as an **immediate**, a number in the
 instruction itself. The instruction's description says so.
@@ -227,7 +228,8 @@ instruction itself. The instruction's description says so.
   flags alike.
 - **Index registers take effect three instructions later.** After an
   `IDX`, the next three instructions still see the old `i` or `j`; the
-  fourth sees the new one. (`IDX` is computed in the arithmetic stage,
+  fourth sees the new one. These are delay slots, like those some
+  processors have after a jump. (`IDX` is computed in the arithmetic stage,
   while addresses are formed earlier, in decode.) The assembler warns
   when an indexed operand falls inside that shadow. `LOOP` stepping `i`
   has no such delay.
@@ -249,9 +251,9 @@ instruction itself. The instruction's description says so.
   and copies it to the sink each pass. The assembler checks this.
 - **Loading a program.** The firmware holds the CSP in reset, writes the
   program, and releases it; the first pass after release starts from
-  the first instruction. *Open:* whether a reset also clears the
-  registers, or leaves the state (envelope levels, LFO phases) running
-  on from where it was.
+  the first instruction. A reset clears no registers: constants,
+  settings, envelope levels and LFO phases carry on from where they
+  were, so loading a program does not silence held notes.
 
 ## 6. Assembly language
 
@@ -310,8 +312,8 @@ then always R and is not written: `INTERP.w LEVEL, K, TARGET`.
         .const ONE, 1.0
         .reg   T, 0x060
 
-        IDX    i, =#0x200, 0        ; i → voice 0's block
-        LOOP   2, =#32, =#8         ; for each of 32 voices
+        IDX    i, =#0x600, 0        ; i → voice 0's block
+        LOOP   2, =#32, =#16        ; for each of 32 voices
         MAC    T, 0, [i+GATE], ONE  ;   T = gate × 1.0
         MAC    [i+OUT], 0, T, [i+VELOCITY]
 ```
@@ -379,8 +381,8 @@ A loop's body cannot contain another `LOOP`.
 **Flags** unchanged.
 
 **Example**
-`LOOP 9, =#32, =#8` runs the next 9 instructions for 32 voice blocks
-of 8 words each.
+`LOOP 9, =#32, =#16` runs the next 9 instructions for 32 voice blocks
+of 16 words each.
 
 ---
 
@@ -610,26 +612,32 @@ precision and converts between formats.
 
 ---
 
-### EXP2 — two to the power
+### NOP — no operation
 
 **Syntax**
-`EXP2 R, X`
+`NOP`
 
 **Operation**
-`R ← sat(2^X)`
+nothing
 
 **Description**
-`EXP2` raises two to the power X, with X in octaves (Q4.14): X = 0
-gives 1.0, X = −1 gives 0.5, X = 1 gives 2.0. It converts the synth's
-logarithmic quantities (pitch and cutoff at 1024 per octave, gains in
-octaves) into linear ones, which linear gain (#176) needs. Results
-from 2⁻¹⁴ up to just under 8 are representable; larger ones saturate
-and smaller ones become 0.
+`NOP` does nothing for one cycle: it writes no register and leaves the
+accumulator, the flags and the index registers as they were. Its
+encoding is all zeros, so instruction memory that has been cleared, or
+never written, is a run of `NOP`s.
 
-**Flags** N, Z, V from the result.
+The assembler can also fill a delay slot after `IDX` with one.
+
+**Flags** unchanged.
 
 **Example**
-`EXP2 [i+GAIN], [i+GAIN_OCT]`
+```
+IDX  j, TABLE, ROW
+NOP                       ; j is not ready for the next three
+NOP
+NOP
+MAC  OUT, 0, [j+0], ONE
+```
 
 ---
 
@@ -697,7 +705,7 @@ SKIP   nonzero, 2            ; on odd samples, skip the next two
 `IDX i, X, Y` · `IDX j, X, Y`
 
 **Operation**
-`i or j ← (X + Y) mod 1024`, on raw values
+`i or j ← (X + Y) mod 4096`, on raw values
 
 **Description**
 `IDX` adds the raw values of X and Y and puts the sum in `i` or `j`
@@ -721,18 +729,18 @@ the voice's current stage.
 Each channel holds an envelope table of three rows, (rate, target) for
 attack, decay and release; each voice holds its level (wide), stage (0,
 2 or 4: the row offset), gate, velocity and output. `j` is set first,
-from the stage left by the previous sample, so it is ready by the time
-`INTERP` uses it; a stage change therefore takes effect one sample
-later, about 10 µs.
+from the stage left by the previous pass, so it is ready by the time
+`INTERP` uses it; a stage change therefore takes effect one pass
+later, about 21 µs.
 
 ```
         IDX     i, =#VOICES, 0             ; i → voice 0
-        LOOP    9, =#32, =#8               ; each voice
+        LOOP    9, =#32, =#16              ; each voice
         IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
         CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
         MAX     U, [i+STAGE], =#2          ;     attack → decay
         SEL     [i+STAGE], U, [i+STAGE]
-        ANDXOR  U, [i+STAGE], =#2, 0       ;   release → attack: 0/2/4 → 0/2/0
+        ANDXOR  U, 0, [i+STAGE], =#2       ;   release → attack: 0/2/4 → 0/2/0
         CMP     ZERO, [i+GATE], ONE        ;   gate held?
         SEL     [i+STAGE], U, =#4          ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
@@ -770,7 +778,7 @@ voice's own.
 
 | op | Mnemonic | R | X | Y | Flags |
 |---|---|---|---|---|---|
-| 0 | `MAC` | register | register | register | N Z V |
+| 0 | `NOP` | — | — | — | — |
 | 1 | `LOOP` | immediate: length | register: count | register: stride | — |
 | 2 | `MACW` | register | register | register | N Z |
 | 3 | `INTERP` | register | register | register | N Z V |
@@ -782,7 +790,7 @@ voice's own.
 | 9 | `MAX` | register | register | register | N Z |
 | 10 | `ANDXOR` | register | register | register | N Z |
 | 11 | `SHIFT` | register | — | register | N Z V |
-| 12 | `EXP2` | register | register | — | N Z V |
+| 12 | `MAC` | register | register | register | N Z V |
 | 13 | `ABS` | register | register | — | N Z V |
 | 14 | `SKIP` | — | immediate: condition | immediate: count | — |
 | 15 | `IDX` | immediate: 0 = `i`, 1 = `j` | register | register | — |
