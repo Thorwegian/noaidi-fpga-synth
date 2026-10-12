@@ -26,9 +26,9 @@ assembly language.
 
 The CSP computes the synthesizer's control signals: envelopes, LFOs, and
 the pitch, cutoff and gain values every partial reads. It runs one fixed
-program, from the first instruction to the last, once per pass (a pass
-is one or two samples: 96 000 or 48 000 times a second), executing one
-instruction per clock cycle. There are no
+program, from the first instruction to the last, once every two samples
+(48 000 times a second), executing one instruction per clock cycle.
+One run of the program is a **pass**. There are no
 jumps and no interrupts; the program takes the same number of cycles
 every sample, whatever its data.
 
@@ -66,8 +66,9 @@ Proposed layout (sizes are open, see [csp_isa.md](csp_isa.md) section 14):
 | `0x200–0x2FF` | voices | 32 blocks of 8 words: each voice's note, gate, velocity, envelope state |
 | `0x300–0x3FF` | sinks | write-only: the voice-level words the partial pipeline reads |
 
-The firmware can write any register at any time over SPI. Its writes
-land between instructions and never interrupt the program (section 5).
+The firmware can write any register over SPI. Its writes wait in a
+queue and are applied together between passes, never during one
+(section 5).
 
 A **wide register** is an aligned pair of registers, `2n` and `2n + 1`,
 read and written together as one 36-bit value. The even address holds
@@ -140,8 +141,11 @@ loop counts, strides and envelope stages. Those instructions and
 operands use the **raw** value, the 18-bit integer itself. Each
 instruction's description says which it uses.
 
-Pitch and cutoff use 1024 per octave (raw), as everywhere else in the
-synth: in Q4.14 terms, one octave is 1/16.
+**Pitch and cutoff are in octaves:** one octave is 1.0. A word spans
+±8 octaves, so absolute pitches are measured from C4 (MIDI note 60):
+every MIDI note lies between −5 and +5.6. The partial pipeline's own
+scale (1024 per octave, UQ4.10, set by the size of its cutoff table)
+appears only where the sinks are converted for it.
 
 ### Arithmetic rules
 
@@ -211,11 +215,9 @@ instruction itself. The instruction's description says so.
 
 ## 5. Execution
 
-- **One pass per sample, or per two.** At the start of every pass the
-  program starts from its first instruction and runs to its last, one
-  instruction per cycle. Whether a pass is one sample (96 kHz, up to 736
-  instructions) or two (48 kHz, up to 1480) is still open
-  ([csp_isa.md](csp_isa.md) section 2).
+- **One pass per two samples.** Every 1536 cycles (48 kHz) the program
+  starts from its first instruction and runs to its last, one
+  instruction per cycle. It can be up to 1472 instructions long.
 - **Fixed timing.** No instruction's timing depends on data. `SKIP`
   turns instructions into no-operations but they still take their
   cycles, and `LOOP` repeats a fixed number of times.
@@ -228,11 +230,14 @@ instruction itself. The instruction's description says so.
   while addresses are formed earlier, in decode.) The assembler warns
   when an indexed operand falls inside that shadow. `LOOP` stepping `i`
   has no such delay.
-- **Firmware writes.** Every 32nd cycle the hardware inserts a write
-  slot in which the CSP does not write, so a register write from the
-  firmware lands within 32 cycles. The program does not see the slot,
-  except that a register may change between two of its instructions.
-  Firmware should therefore write each value in one register write.
+- **Firmware writes land between passes.** The firmware's register
+  writes wait in a queue. When the firmware toggles the swap (the same
+  CTRL swap that pages in new partial parameters), the queued writes
+  are applied in a window at the end of the next pass, before the next
+  pass starts. A program never sees a register change under it during
+  a pass, and a group of writes (a note-on's note, velocity and gate)
+  appears all at once. The window takes 48 writes; a larger group
+  spreads over several passes.
 - **The sinks are published per pass.** What the program writes to
   the sink area becomes visible to the partial pipeline at the end of
   the pass, all at once, so the partials never see half a pass.

@@ -52,35 +52,34 @@ add", and the per-partial immediates.
 
 ## 2. Execution model
 
-- **One fixed program per sample**, run from the top at every sample
-  tick, one instruction per cycle, no branches. Conditional work uses
-  selects and `SKIP` (a skipped instruction still takes its cycle), so
-  the timing never depends on the data. Loops (`LOOP`) have a fixed
-  count, so they keep that property.
-- **Pass rate.** The partial pipeline runs at 96 kHz for oscillator
-  aliasing and filter headroom; control signals tolerate a lower rate
-  (Thor, #184). Two options (section 9):
-  - **A: one pass per sample** (96 kHz): 736 instructions. Fits one
-    channel, not sixteen.
-  - **B: one pass per two samples** (48 kHz, as the EMU10K1 runs):
-    1480 instructions. Fits sixteen channels with room to spare; the
-    sinks then change every second sample.
-  Work that should run slower still (LFOs at 24 kHz) cannot come from
-  skipping, since skipped instructions still take their cycles; it
-  alternates instead: a loop covers half the channels, and `i` starts
-  on the other half on alternate passes.
-- **Length:** up to **736 instructions**. Every 32nd cycle is a
-  **firmware write slot**: the CSP issues no write-back in it, so a
-  mailbox write commits within 32 cycles (0.43 µs) whatever the program
-  does, against 3.2 µs per SPI word. 736 + 24 write slots + drain = 768
-  cycles. (A slot every 8 cycles would allow 665 instructions.)
+- **One pass per two samples: 48 kHz** (decided, #184). The partial
+  pipeline runs at 96 kHz for oscillator aliasing and filter headroom;
+  control signals do not need it. A pass has 1536 cycles.
+- **One fixed program per pass**, run from the top at every pass, one
+  instruction per cycle, no branches, up to **1472 instructions**.
+  Conditional work uses selects and `SKIP` (a skipped instruction still
+  takes its cycle), so the timing never depends on the data. Loops
+  (`LOOP`) have a fixed count, so they keep that property.
+- **Slower work alternates.** Work that runs slower still (LFOs at a
+  quarter of 96 kHz) cannot come from skipping, since skipped
+  instructions still take their cycles; a loop covers half the channels
+  and `i` starts on the other half on alternate passes.
+- **Firmware writes ride the swap.** The firmware's register writes go
+  into a queue, as its partial-parameter writes go to the shadow page.
+  When it toggles the CTRL swap, the queued writes are applied in a
+  window at the end of the next pass, and the partial pages swap at the
+  same boundary. A note-on's partial words and register words (note,
+  velocity, gate) become visible in the same pass, and the CSP's write
+  port is never shared mid-pass. The window takes 48 writes; a larger
+  group spreads over several passes. 1472 instructions + a 56-cycle
+  window + drain = 1536.
 - **Results are visible at once:** an instruction reads the newest value
   of every register, including one written by the instruction just
   before it (forwarding, as today).
-- **Published per sample:** the partial pipeline reads a separate,
-  ping-pong-paged **sink area** (section 6), swapped at the sample tick,
-  so it always sees one complete pass. The CSP's own registers are not
-  paged: like the EMU10K1's GPRs, they are read and written in place.
+- **Published per pass:** the partial pipeline reads a separate,
+  ping-pong-paged **sink area** (section 6), swapped at the end of each
+  pass, so it always sees one complete pass. The CSP's own registers are
+  not paged: like the EMU10K1's GPRs, they are read and written in place.
 
 ## 3. Datapath
 
@@ -264,25 +263,23 @@ about 4 instructions. **2–5 instructions per LFO** (examples in
 
 ## 9. Budget (*estimate*)
 
-Instructions per pass. Option B's LFOs run at a quarter of 96 kHz,
-alternating halves of the channels.
+Instructions per pass, sixteen channels, LFOs at a quarter of 96 kHz
+(alternating halves of the channels):
 
-| Work | A: 96 kHz, 1 channel | B: 48 kHz, 16 channels |
-|---|---|---|
-| 32 voices × both envelopes (17) | 544 | 544 |
-| voice pitch, cutoff, gain (32 voices × 3) | 96 | 96 |
-| channel arithmetic (bend, CCs, tracking: ~16 per channel) | 16 | 256 |
-| 2 LFOs per channel (~5 each) | 10 | 80 (160 at half the channels per pass) |
-| **total** | **~666 of 736** | **~976 of 1480** |
+| Work | Instructions |
+|---|---|
+| 32 voices × both envelopes (17) | 544 |
+| voice pitch, cutoff, gain (32 voices × 3) | 96 |
+| channel arithmetic (bend, CCs, tracking: ~16 per channel) | 256 |
+| 2 LFOs per channel (~5 each), half the channels per pass | 80 |
+| **total** | **~976 of 1472** |
 
-**Recommendation: B.** It is the only one that fits sixteen channels,
-it needs no alternation for the envelopes, and its spare ~500
-instructions leave room for drift (#217), noise (#216) and whatever
-comes next. Costs: one more instruction-memory BSRAM (1480 × 36), the
+That leaves ~500 instructions for drift (#217), noise (#216) and what
+comes next. Costs of 48 kHz: one more instruction-memory BSRAM, the
 firmware's envelope rates computed for 48 kHz, and the sinks stepping
-at 48 kHz. If those steps are audible on fast gain changes, the partial
-pipeline can interpolate the gain sinks between passes. `LOOP` saves
-instruction memory, not cycles.
+every second sample. If those steps are audible on fast gain changes,
+the partial pipeline can interpolate the gain sinks between passes.
+`LOOP` saves instruction memory, not cycles.
 
 ## 10. BSRAM
 
@@ -291,7 +288,8 @@ instruction memory, not cycles.
 | Where | Blocks | What | Needed? |
 |---|---|---|---|
 | `spi_bus` `store_ram` | 4 | 2048 × 36 copy of every SPI write, for reading back | Only the boot self-test reads back (`main.c`). **Candidate: −3 or −4.** |
-| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction, single page: **2** for 736 instructions (A), **3** for 1480 (B). |
+| CSP `imem_*` | 4 | four 512 × 32 RAMs: OP, RATE_AD, COEF, RATE_DSR × 2 pages | One 36-bit word per instruction, single page, 1472 instructions: **3**. |
+| (new) write queue | — | firmware register writes waiting for the swap (section 2) | **1** (512 × 36: address + data). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y): **3**. |
 | CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | **6, or 12** with two reads per sink (section 6). |
@@ -301,7 +299,8 @@ instruction memory, not cycles.
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 24 to 32 blocks, against 33 today, before #217.
+**Projected:** 26 to 33 blocks, against 33 today, before #217: the
+BSRAM count stays level while the CSP grows.
 
 ## 11. DSP blocks
 
@@ -318,12 +317,12 @@ small program. The new CSP gets:
 
 - **A reference model** in C++ (`tools/csp/`): the ISA as a function
   from (program, registers, firmware writes) to (registers, sink area)
-  per sample. The same code is the assembler and a host simulator, so
+  per pass. The same code is the assembler and a host simulator, so
   firmware programs are tested on the host before they reach the FPGA.
 - **An instruction-level bench**: per opcode, directed cases (saturation,
-  wrap, flags, forwarding back-to-back, the write slot); then random
+  wrap, flags, forwarding back-to-back, the write queue and the swap); then random
   programs and random firmware writes, with the RTL's register file and
-  sink area compared against the model every sample.
+  sink area compared against the model every pass.
 - **Program benches**: the envelope and LFO sequences against the
   current `adsr.sv` and `osc_core` output, sample for sample, before the
   fixed-function units retire.
@@ -334,8 +333,9 @@ Each its own PR, checked in sim and on the board:
 
 1. Reference model, assembler and the instruction-level bench, against
    a new CSP core beside the old one.
-2. The new core: datapath, register file, write slot, 736-instruction
-   program. Today's programs ported to it.
+2. The new core: datapath, register file, write queue on the swap,
+   48 kHz passes of up to 1472 instructions. Today's programs ported
+   to it.
 3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
    `osc_core` retire.
 4. Sink area + DMEM + DMEM partial sinks; the per-partial immediates
@@ -345,9 +345,9 @@ Each its own PR, checked in sim and on the board:
 
 ## 14. Open questions
 
-- **The pass rate:** option A (96 kHz) or B (48 kHz, recommended), and
-  whether the partial pipeline interpolates the gain sinks (sections 2
-  and 9).
+- Whether the partial pipeline interpolates the gain sinks between
+  48 kHz passes (section 9).
+- The write window's size: 48 writes per pass (section 2).
 - Two reads per sink: more replicas or two cycles per partial
   (section 6).
 - Register file size for 16 channels (section 5).
