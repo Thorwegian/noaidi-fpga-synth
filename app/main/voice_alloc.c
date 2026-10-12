@@ -138,8 +138,8 @@ static int64_t  s_last_flush;
 //             and the channel-word fan-out on top, by chaining.
 // DMEM 80+v:  voice v's GATE DMEM word — the ADSR watches it (level-
 //             sensitive, > 0 = held). Note-on/off is ONE live write.
-// Bend rides BOTH pitch and cutoff DMEM words so filter key tracking
-// follows bends.
+// Bend rides the pitch DMEM word; the pitch-tracking MAC instruction
+// (INSTR_PITCH_TRACK) carries it, and the pitch LFOs, into the cutoff.
 #define DMEM_DUTY_GLOBAL  1   // global PWM DMEM word; every duty pointer
                              // references it (DMEM word 0 stays the
                              // strict null word)
@@ -166,6 +166,9 @@ static int64_t  s_last_flush;
 #define INSTR_LFO1     0            // global LFO 1
 #define INSTR_LFO2     1            // global LFO 2: adjacent to LFO 1,
                                     // so both on one DMEM word sum
+#define INSTR_PITCH_TRACK 2         // MAC instruction: the global pitch
+                                    // DMEM word × key_track → DMEM_CH_CUT,
+                                    // after the LFOs, before the fan-out
 // Envelope span: 0x2800 Q8.10 = 10 octaves = 60 dB, ear-tuned;
 // one sustain step = span/1024 = 0.059 dB. The linear level ramp into the
 // log-encoded gain is an exponential-amplitude curve, slow-then-fast.
@@ -229,12 +232,12 @@ static uint32_t cut_dmem_value(int v)
     return 0u;
 }
 
-// The CHANNEL cutoff value: the wheel opens up to ~+5 octaves, bend
-// tracks the pitch bend, and the patch's cutoff (CC 74/106) spans
-// ±8 octaves.
+// The CHANNEL cutoff value: the wheel opens up to ~+5 octaves and the
+// patch's cutoff (CC 74/106) spans ±8 octaves. Bend is not here: the
+// pitch-tracking MAC instruction adds it at the key_track ratio.
 static uint32_t ch_cut_value(void)
 {
-    return (uint32_t)((int32_t)s_wheel * 40 + s_bend + g_patch.filter.cutoff);
+    return (uint32_t)((int32_t)s_wheel * 40 + g_patch.filter.cutoff);
 }
 
 // Resonance: every partial's FILTER word carries RESO_BASE (Q 1), and the
@@ -276,19 +279,21 @@ static void param_write(uint8_t partial, uint8_t word, uint32_t value)
         ESP_LOGW(TAG, "engine queue full, partial %d word %d lost", partial, word);
 }
 
-// Base cutoff: 1/2 octave above the note (UQ4.10 log2). The mod
-// wheel rides DMEM_CH_CUT, fanned out to each voice's DMEM_CUT(v),
-// which its partials' cutoff pointers reference (init_param_pointers); it
-// does not touch the FILTER words.
-static uint16_t voice_cutoff(uint8_t note)
+// Pitch tracking, the part fixed at note-on: a partial's base cutoff
+// follows its own pitch (note + oscillator tune + unison detune, UQ4.10
+// log2), 1/2 octave above it at 100 %. The live part, bend and the
+// pitch LFOs, is the INSTR_PITCH_TRACK MAC instruction. The mod wheel
+// rides DMEM_CH_CUT, fanned out to each voice's DMEM_CUT(v), which its
+// partials' cutoff pointers reference (init_param_pointers); it does
+// not touch the FILTER words.
+static uint16_t tracked_cutoff(int32_t pitch)
 {
-    // Key tracking (CC 31): 0..200% with CENTER 64 = 100%; convention
+    // Tracking (CC 31): 0..200% with CENTER 64 = 100%; convention
     // overtracks to 200%. 0 pins the cutoff at the C4 reference
-    // regardless of note.
-    int32_t p   = (int32_t)midi_to_pitch(note);
+    // whatever the pitch.
     int32_t ref = (int32_t)midi_to_pitch(60);
     int32_t kt  = g_patch.filter.key_track;
-    int32_t fc  = ref + ((p - ref) * kt) / 64 + 0x200;
+    int32_t fc  = ref + ((pitch - ref) * kt) / 64 + 0x200;
     if (fc < 0) fc = 0;
     return (fc > 0x3FFF) ? 0x3FFF : (uint16_t)fc;
 }
@@ -377,7 +382,6 @@ static void promote_idle(int64_t now)
 // released voice was GATE-muted by promote_idle.
 static void render_voice(int v, uint8_t note, uint8_t vel)
 {
-    uint16_t fc = voice_cutoff(note);
     // Per-note ceiling only: fixed VOL_REF. MASTER volume is NOT here — it rides the
     // gain DMEM base (refresh_gain_dmem), so a CC 7 sweep is DMEM
     // writes, not a re-render of every partial.
@@ -414,6 +418,7 @@ static void render_voice(int v, uint8_t note, uint8_t vel)
         int32_t pitch = base + o->tune + voicing[u].detune;
         if (pitch < 0)      pitch = 0;
         if (pitch > 0x3FFF) pitch = 0x3FFF;
+        uint16_t fc = tracked_cutoff(pitch);
 
         int32_t ovol = vol + makeup;
         if (voicing[u].osc == 0 && mix > 0) ovol -= mix;   // favour osc2
@@ -730,6 +735,20 @@ static void refresh_cut_dmem(void)
     engine_link_dmem_write(DMEM_CH_CUT, ch_cut_value());
 }
 
+// Pitch tracking, the live part: the INSTR_PITCH_TRACK MAC instruction
+// adds the global pitch DMEM word (bend + pitch LFOs) × key_track into
+// the channel cutoff word, so at 100 % an octave of pitch modulation is
+// an octave of cutoff. COEF 0x10000 is unity: key_track 64 (100 %) <<
+// 10. The 18-bit COEF field tops out one raw step short of 200 %.
+#define PITCH_TRACK_COEF_MAX 0x1FFFF
+static void update_pitch_tracking(void)
+{
+    int32_t coef = (int32_t)g_patch.filter.key_track << 10;
+    if (coef > PITCH_TRACK_COEF_MAX) coef = PITCH_TRACK_COEF_MAX;
+    if (coef < 0) coef = 0;
+    engine_link_imem_write(INSTR_PITCH_TRACK, 2, (uint32_t)coef);
+}
+
 // Boot wiring for the fan-out: 32 stateless MAC instructions,
 // entry INSTR_CUTOFF_MAC(v) = DMEM_CH_CUT × unity → DMEM_CUT(v), each in the
 // slot adjacent to its voice's MOD env (same target DMEM word, and chain
@@ -737,6 +756,9 @@ static void refresh_cut_dmem(void)
 // for a MAC.
 static void init_fanout_sources(void)
 {
+    engine_link_imem_write(INSTR_PITCH_TRACK, 0,
+        CSP_OPC_MAC | ((uint32_t)DMEM_CH_CUT << 6) | ((uint32_t)DMEM_PITCH_GLOBAL << 16));
+    update_pitch_tracking();
     for (int v = 0; v < NUM_VOICES; v++) {
         engine_link_imem_write(INSTR_CUTOFF_MAC(v), 0,
             CSP_OPC_MAC | ((uint32_t)DMEM_CUT(v) << 6) | ((uint32_t)DMEM_CH_CUT << 16));
@@ -784,17 +806,17 @@ static void mod_wheel_update(uint8_t val)
 // Pitch wheel: ±bend_range semitones (RPN 0; default ±2). Q8.10
 // has a raw value of 1024/12 ≈ 85.3 per semitone: off = delta × range × 85.33 /
 // 8192 = delta × range / 96. ONE write to the global pitch DMEM word
-// moves every partial; the cutoff DMEM words get the same term so filter key
-// tracking follows the bend.
+// moves every partial, and the pitch-tracking MAC instruction carries it
+// into the cutoff at the key_track ratio.
 static void pitch_bend_update(uint16_t bend14)
 {
     int16_t off = (int16_t)(((int32_t)bend14 - 8192)
                             * g_patch.bend_range / 96);
-    if (off == s_bend)
+    if (off == s_bend) {
         return;
+    }
     s_bend = off;
     engine_link_dmem_write(DMEM_PITCH_GLOBAL, (uint32_t)(int32_t)off);  // 1 write
-    s_pending |= DIRTY_CUTOFF;   // cut DMEM refresh coalesced
 }
 
 // Release one voice: one gate DMEM write, the ADSR sees the level drop
@@ -1095,7 +1117,10 @@ static void flush_pending_edits(int64_t now)
     if (s_pending & DIRTY_LFO1)    update_lfo(0);
     if (s_pending & DIRTY_LFO2)   update_lfo(1);
     if (s_pending & DIRTY_VOLUME)   refresh_gain_dmem();
-    if (s_pending & DIRTY_VOICES) render_active_voices();
+    if (s_pending & DIRTY_VOICES) {
+        update_pitch_tracking();             // key_track may have changed
+        render_active_voices();
+    }
     s_pending = 0;
     s_last_flush = now;
 }
