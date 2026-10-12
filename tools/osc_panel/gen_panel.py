@@ -241,10 +241,15 @@ root_widgets = [
     ]),
     section("LFOs", [
         knob(76, "Vibrato Rate", 64),
-        knob(77, "Vibrato Depth", 4),        # boot depth 16 = cc 4
+        knob(77, "Vibrato Coarse", 0),       # pitch: whole semitones of span, 4 steps each
+        knob(115, "Vibrato Fine", 24),       # + fine/128 semitone; startup
+                                             # depth 16 = span 0.1875 = 0 + 24
         switch(113, "LFO1 Shape", WAVES, 64),
+        switch(114, "LFO1 Dest",
+               {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 64),
         knob(109, "LFO2 Rate", 64),
-        knob(110, "LFO2 Depth", 0),
+        knob(110, "LFO2 Coarse", 0),
+        knob(116, "LFO2 Fine", 0),
         switch(111, "LFO2 Shape", WAVES, 64),
         switch(112, "LFO2 Dest",
                {"PWM": 0, "Reso": 32, "Pitch": 64, "Cutoff": 96}, 0),

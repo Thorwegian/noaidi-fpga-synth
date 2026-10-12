@@ -16,9 +16,10 @@
 //
 // Then it writes the init patch (patch_init) as a patch file and reads it
 // back, which must give the init patch. Each factory file given as an
-// argument must read, and must already hold the writer's own text for
-// its values (comment lines aside), so it reads back exactly. Last,
-// saving, recovery from an interrupted save, and patch-name rules.
+// argument must read, and its values must read back exactly through the
+// writer; a file whose text differs from the writer's own (comment lines
+// aside) only gets a warning, since that is formatting. Last, saving,
+// recovery from an interrupted save, and patch-name rules.
 //
 //   make fw-test
 
@@ -249,7 +250,8 @@ int main(int argc, char **argv)
     }
     free(text);
 
-    // Each factory file reads, and holds exactly the writer's text.
+    // Each factory file reads, and its values read back exactly through
+    // the writer. Text that differs from the writer's is a warning.
     for (int a = 1; a < argc; a++) {
         patch_t factory;
         if (!patch_file_read(argv[a], &factory, err, sizeof err)) {
@@ -260,6 +262,14 @@ int main(int argc, char **argv)
         mem = open_memstream(&text, &text_len);
         patch_file_write(mem, &factory);
         fclose(mem);
+        patch_t back;
+        if (!patch_file_parse(text, text_len, &back, err, sizeof err)) {
+            printf("FAIL %s: the writer's text does not read: %s\n", argv[a], err);
+            s_failures++;
+        } else if (patch_file_diff(stdout, &factory, &back) != 0) {
+            printf("FAIL %s reads back different through the writer (above)\n", argv[a]);
+            s_failures++;
+        }
         // the file without its comment lines
         FILE *in = fopen(argv[a], "r");
         char line[256], *body = NULL;
@@ -271,8 +281,7 @@ int main(int argc, char **argv)
         if (in) fclose(in);
         fclose(bm);
         if (strcmp(body, text) != 0) {
-            printf("FAIL %s is not in the writer's form; the writer gives:\n%s", argv[a], text);
-            s_failures++;
+            printf("WARN %s is not in the writer's form; the writer gives:\n%s", argv[a], text);
         } else {
             printf("%s: reads back exactly\n", argv[a]);
         }

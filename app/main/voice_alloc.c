@@ -530,10 +530,80 @@ static uint16_t lfo_rate_from_cc(uint8_t val)
 // accumulates and the two sit in adjacent slots, so both LFOs on one
 // word sum. A word an LFO leaves keeps the last value it wrote, so it is
 // restored to its firmware base once no LFO drives it.
-// CCs: LFO 1 rate/depth/shape 76/77/113; LFO 2 109/110/111, destination
-// 112. LFO 1's destination comes from the patch only.
+// CCs: LFO 1 rate/depth coarse/depth fine/shape/destination
+// 76/77/115/113/114; LFO 2 109/110/116/111/112.
 static const uint16_t s_lfo_instr[PATCH_NUM_LFO] = { INSTR_LFO1, INSTR_LFO2 };
 static uint16_t s_lfo_word[PATCH_NUM_LFO];   // DMEM word each LFO drives now
+
+// Depth knobs: Coarse (CC 77, CC 110) and Fine (CC 115, CC 116), both
+// linear in the raw depth. The LFO swings its DMEM word by ±depth/2
+// (docs/storage_format.md), so on pitch a raw depth of 1024/12 is a
+// span of one semitone from the low note to the high one.
+//   pitch:  Coarse = span in whole semitones, four knob steps per
+//           semitone (coarse >> 2: 48 = one octave, 96 = two, 127 =
+//           31 semitones), Fine adds fine/128 of a semitone.
+//   others: Coarse = val << 2, Fine adds fine >> 5 (0..3), the steps
+//           in between.
+// The knob positions are kept so a destination change can work the
+// depth out again. A loaded patch makes them unknown; the first depth
+// knob moved after that takes the other one's position from the
+// patch's depth.
+#define LFO_PITCH_COARSE_SHIFT 2                   // Coarse steps per semitone: 4
+#define LFO_PITCH_FINE_STEPS   128                 // Fine steps per semitone
+struct lfo_depth_knobs { uint8_t coarse, fine; bool known; };
+static struct lfo_depth_knobs s_lfo_depth_knobs[PATCH_NUM_LFO];
+
+static int16_t lfo_depth_from_knobs(uint8_t dest, const struct lfo_depth_knobs *k)
+{
+    if (dest == LFO_DEST_PITCH) {
+        int32_t fine_steps = (k->coarse >> LFO_PITCH_COARSE_SHIFT) * LFO_PITCH_FINE_STEPS + k->fine;
+        return (int16_t)((fine_steps * 1024 + 12 * LFO_PITCH_FINE_STEPS / 2)
+                         / (12 * LFO_PITCH_FINE_STEPS));
+    }
+    return (int16_t)((k->coarse << 2) + (k->fine >> 5));
+}
+
+// The knob positions nearest a patch's depth (its size: the knobs have
+// no sign; past the knobs' top, the top).
+static struct lfo_depth_knobs lfo_knobs_from_depth(uint8_t dest, int16_t depth)
+{
+    int32_t size = depth < 0 ? -depth : depth;
+    struct lfo_depth_knobs k = { .known = true };
+    if (dest == LFO_DEST_PITCH) {
+        int32_t fine_steps = (size * 12 * LFO_PITCH_FINE_STEPS + 512) / 1024;
+        int32_t semitones  = fine_steps / LFO_PITCH_FINE_STEPS;
+        if (semitones > (127 >> LFO_PITCH_COARSE_SHIFT)) {
+            k.coarse = 127;
+            k.fine   = LFO_PITCH_FINE_STEPS - 1;
+        } else {
+            k.coarse = (uint8_t)(semitones << LFO_PITCH_COARSE_SHIFT);
+            k.fine   = (uint8_t)(fine_steps % LFO_PITCH_FINE_STEPS);
+        }
+    } else {
+        k.coarse = (uint8_t)(size >> 2 < 127 ? size >> 2 : 127);
+        k.fine   = (uint8_t)((size & 3) << 5);
+    }
+    return k;
+}
+
+static void set_lfo_depth_cc(int i, uint8_t val, bool fine)
+{
+    lfo_t *l = &g_patch.lfo[i];
+    struct lfo_depth_knobs *k = &s_lfo_depth_knobs[i];
+    if (!k->known)
+        *k = lfo_knobs_from_depth(l->dest, l->depth);
+    if (fine) k->fine = val; else k->coarse = val;
+    l->depth = lfo_depth_from_knobs(l->dest, k);
+}
+
+// Destination knob (CC 114, CC 112): four equal bands, see handle_cc.
+static void set_lfo_dest_cc(int i, uint8_t val)
+{
+    lfo_t *l = &g_patch.lfo[i];
+    l->dest = (uint8_t)((val * 4) >> 7);
+    if (s_lfo_depth_knobs[i].known)
+        l->depth = lfo_depth_from_knobs(l->dest, &s_lfo_depth_knobs[i]);
+}
 static void refresh_cut_dmem(void);   // defined below (dest restore)
 
 static uint16_t lfo_dmem_word(uint8_t dest)
@@ -843,24 +913,25 @@ static void handle_cc(uint8_t num, uint8_t val)
 
     // ---- live: LFO 1 (instruction 0) ----
     case 76: g_patch.lfo[0].rate  = lfo_rate_from_cc(val); s_pending |= DIRTY_LFO1; break;
-    case 77: g_patch.lfo[0].depth = (int16_t)(val << 2);  s_pending |= DIRTY_LFO1; break;
+    case 77: set_lfo_depth_cc(0, val, false);            s_pending |= DIRTY_LFO1; break;
+    case 115: set_lfo_depth_cc(0, val, true);            s_pending |= DIRTY_LFO1; break;
     case 113: g_patch.lfo[0].shape = (uint8_t)(val >> 5); s_pending |= DIRTY_LFO1; break;
-    case 114: g_patch.lfo[0].dest  = (uint8_t)((val * 4) >> 7); s_pending |= DIRTY_LFO1; break;
+    case 114: set_lfo_dest_cc(0, val);                   s_pending |= DIRTY_LFO1; break;
 
     // ---- live: LFO 2 (instruction 1) ----
     case 109: g_patch.lfo[1].rate = lfo_rate_from_cc(val); s_pending |= DIRTY_LFO2; break;
-    // Same depth scale as LFO 1 (CC 77), whatever the destination: the
-    // knob sets the same COEF everywhere, and the LFO swings its DMEM word
-    // by ±COEF/2. What that means depends on the sink (1024 = one octave
-    // of pitch, cutoff or Q, or full ±1.0 duty).
-    case 110: g_patch.lfo[1].depth = (int16_t)(val << 2); s_pending |= DIRTY_LFO2; break;
+    // Coarse/Fine depth, as LFO 1's (lfo_depth_from_knobs). The LFO
+    // swings its DMEM word by ±depth/2; what that means depends on the
+    // sink (1024 = one octave of pitch, cutoff or Q, or full ±1.0 duty).
+    case 110: set_lfo_depth_cc(1, val, false);           s_pending |= DIRTY_LFO2; break;
+    case 116: set_lfo_depth_cc(1, val, true);            s_pending |= DIRTY_LFO2; break;
     case 111: g_patch.lfo[1].shape = (uint8_t)(val >> 5); s_pending |= DIRTY_LFO2; break;
     // Four destinations, for either LFO (CC 114 for LFO 1, CC 112 for
     // LFO 2; the MAC fan-out makes cutoff reachable): 0..31 duty/PWM,
     // 32..63 resonance, 64..95 pitch, 96..127 CUTOFF (channel cut DMEM
     // word → the 32 per-voice MACs → every voice's filter). Both LFOs on
     // one destination sum.
-    case 112: g_patch.lfo[1].dest  = (uint8_t)((val * 4) >> 7); s_pending |= DIRTY_LFO2; break;
+    case 112: set_lfo_dest_cc(1, val);                   s_pending |= DIRTY_LFO2; break;
 
     // ---- live: master volume → gain DMEM base (not a re-render) ----
     case 7:  g_patch.volume = (uint8_t)(val < 127 ? val << 1 : 0xFE);
@@ -1039,6 +1110,8 @@ static void apply_patch(const patch_t *p, int64_t now)
 {
     g_patch = *p;
     sync_cutoff_cc();
+    for (int i = 0; i < PATCH_NUM_LFO; i++)
+        s_lfo_depth_knobs[i].known = false;   // the patch's depths stand
     engine_link_dmem_write(DMEM_RESO_GLOBAL, reso_dmem_value());
     s_pending |= DIRTY_AMP_ENV | DIRTY_MOD_ENV | DIRTY_CUTOFF | DIRTY_LFO1
                | DIRTY_LFO2 | DIRTY_VOLUME | DIRTY_VOICES;
