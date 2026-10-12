@@ -1,0 +1,11 @@
+# .git-blame-ignore-revs — formatting-only commits for git blame to skip
+#
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# (GitHub's blame view reads this file by itself.)
+
+# Format our C and C++ sources with .clang-format (#212)
+0272917af24826343388df3d1134c216882c757b
