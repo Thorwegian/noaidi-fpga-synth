@@ -222,7 +222,7 @@ flip. Two rules keep the pages consistent:
    skipped in one pass would leave the other page two passes stale, and
    the partials would alternate between old and new values. Slower work
    writes ordinary registers, and one instruction per pass copies the
-   result to its sink. The reference model and the assembler check this.
+   result to its sink. The reference model checks this as it runs.
 2. **Firmware writes to the sink area**, if any remain, **go to both
    pages**, by the write window, as today's DMEM mailbox commits to both
    halves.
@@ -265,21 +265,24 @@ and pitch and cutoff stay in octaves until the PAP's tables.
 ## 8. Envelopes and LFOs as instructions
 
 **Envelope** (per voice, RC recurrence as in `adsr.sv`). Each channel
-keeps an envelope table: (target, rate) for attack, decay and release,
-in three rows of two words. Each voice block holds `level` (wide),
-`stage` (0 attack, 2 decay, 4 release: the row offset), `gate`,
+keeps an envelope table for attack, decay and release, in three rows of
+four words: target (wide), rate, spare. Each voice block holds `level`
+(wide), `stage` (0 attack, 4 decay, 8 release: the row offset), `gate`,
 `velocity` and the output. One loop serves every voice:
 
 ```
 IDX     i, =#VOICES, 0             ; i → voice 0
+NOP                                ; (i's delay slots)
+NOP
+NOP
 LOOP.i  9, =#32, =#16              ; each voice
 IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
-CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
-MAX     U, [i+STAGE], =#2          ;     attack → decay
-SEL     [i+STAGE], U, [i+STAGE]
-ANDXOR  U, 0, [i+STAGE], =#2       ;   release → attack: 0/2/4 → 0/2/0
-CMP     ZERO, [i+GATE], ONE        ;   gate held?
-SEL     [i+STAGE], U, =#4          ;     else release
+MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
+CMP     ZERO, [i+LEVEL], FULL      ;   …full scale is reached
+SEL     [i+STAGE], U, [i+STAGE]    ;   (SEL reads the CMP's flags)
+ANDXOR  U, 0, [i+STAGE], =#4       ;   release → attack: 0/4/8 → 0/4/0
+CMP     ZERO, [i+GATE], FULL       ;   gate held?
+SEL     [i+STAGE], U, =#8          ;     else release
 INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
 MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
@@ -290,7 +293,9 @@ slots, as some processors have after a jump); a stage change therefore
 lands one pass (~21 µs) later.
 
 Assembly syntax as in [csp_manual.md](csp_manual.md) section 6;
-`SEL` reads the flags of the latest `CMP`. That is **9 instructions per
+`SEL` reads the flags of the latest flag-setting instruction, so `MAX`
+comes before the `CMP` (the reference model's tests caught the other
+order). That is **9 instructions per
 envelope**, written once for all voices, with no envelope-specific
 opcode: the stage is data, and indirect addressing picks the segment.
 A voice's two envelopes share one loop body and one gate compare: 17
@@ -333,18 +338,18 @@ the partial pipeline can interpolate the gain sinks between passes.
 | (new) write queue | — | firmware register writes waiting for the swap (section 2) | **1** (512 × 36: address + data). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y), 2048 words each: **6**. |
-| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area × 2 pages per replica: **12**. |
+| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **3 replicas** × 2 pages (one BSRAM per page): **6**. The active page's BSRAM serves the PAP on both ports while the CSP writes the other page, so 3 replicas give the 6 reads per cycle (#184). |
 | partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone: everything a partial reads is a sink: **0**. |
 | partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | 12 pointers per partial, one page: **2–4** depending on packing. |
 | partial SVF state `ic*eq*_ram` | 4 | filter state | Needed. |
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 33 to 35 blocks, against 33 today, before #217. The CSP
+**Projected:** 27 to 29 blocks, against 33 today, before #217. The CSP
 grows to a 2048-word register file, a 1024-word sink area and 1472
-instructions for about the BSRAM it uses now, paid for by `store_ram`,
-the second instruction page, the partials' immediates and their second
-page.
+instructions on fewer BSRAM than today, paid for by `store_ram`, the
+second instruction page, the partials' immediates and their second
+page, and the sink area's two read ports per page.
 
 ## 11. DSP blocks
 

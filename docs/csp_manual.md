@@ -249,7 +249,9 @@ instruction itself. The instruction's description says so.
   write every sink word it owns in every pass**: a word it skips would
   show the partials a value from two passes ago on every other pass.
   Work that runs less often keeps its result in an ordinary register
-  and copies it to the sink each pass. The assembler checks this.
+  and copies it to the sink each pass. The reference model checks this
+  as it runs passes (`tools/csp`), since which words a pass writes can
+  depend on data.
 - **Loading a program.** The firmware holds the CSP in reset, writes the
   program, and releases it; the first pass after release starts from
   the first instruction. A reset clears no registers: constants,
@@ -257,6 +259,12 @@ instruction itself. The instruction's description says so.
   were, so loading a program does not silence held notes.
 
 ## 6. Assembly language
+
+The assembler and a simulator built on the reference model are in
+`tools/csp`: `make csp` builds `app/build/host/csp`, then
+`csp asm program.s` prints the instruction words and the constant
+registers, and `csp sim program.s` runs the program pass by pass.
+`make csp-test` runs the model's and the assembler's tests.
 
 ### Lines
 
@@ -296,7 +304,7 @@ then always R and is not written: `INTERP.w LEVEL, K, TARGET`.
 | `.reg NAME, address` | names a register |
 | `.wide NAME, address` | names a wide register (the address must be even) |
 | `.const NAME, value` | allocates a constant register holding `value` |
-| `.block NAME` … `.end` | defines a block layout: inside it, `.field NAME, words` gives each field its offset, for use as `[i+NAME]` |
+| `.block NAME` … `.end` | defines a block layout: inside it, `.field NAME, words` gives each field its offset, for use as `[i+NAME]`; `.end` defines `NAME_SIZE` |
 | `.org address` | the next instruction's position in the program |
 
 ### Example
@@ -518,7 +526,9 @@ positive, and Y if it was negative. Paired with `CMP`, it is the CSP's
 if–else: `CMP` compares, `SEL` picks. Since nothing branches, both
 values are always computed; `SEL` only chooses which one is kept.
 
-**Flags** unchanged, so several `SEL`s can follow one `CMP`.
+**Flags** unchanged, so several `SEL`s can follow one `CMP`. Mind
+that `MIN`, `MAX`, `ANDXOR` and the arithmetic instructions set the
+flags too: anything placed between a `CMP` and its `SEL` must not.
 
 **Example**
 ```
@@ -584,8 +594,8 @@ stage.
 **Flags** N, Z from the result.
 
 **Example**
-`MAX U, [i+STAGE], =#2` moves an envelope from attack (0) to decay (2),
-and leaves decay and release (4) as they are.
+`MAX U, [i+STAGE], =#4` moves an envelope from attack (0) to decay (4),
+and leaves decay and release (8) as they are.
 
 ---
 
@@ -606,7 +616,7 @@ their values.
 **Flags** N, Z from the result.
 
 **Example**
-`ANDXOR U, 0, [i+STAGE], =#2` maps stages 0, 2, 4 to 0, 2, 0:
+`ANDXOR U, 0, [i+STAGE], =#4` maps stages 0, 4, 8 to 0, 4, 0:
 release becomes attack again.
 
 ---
@@ -747,23 +757,29 @@ the voice's current stage.
 
 ### Envelope, for all voices
 
-Each channel holds an envelope table of three rows, (rate, target) for
-attack, decay and release; each voice holds its level (wide), stage (0,
-2 or 4: the row offset), gate, velocity and output. `j` is set first,
+Each channel holds an envelope table of three rows of four words, for
+attack, decay and release: the segment's target (wide, so at an even
+offset), its rate, and a spare word. Each voice holds its level (wide),
+stage (0, 4 or 8: the row offset), gate, velocity and output; the
+firmware starts an idle voice in release (8). `j` is set first,
 from the stage left by the previous pass, so it is ready by the time
 `INTERP` uses it; a stage change therefore takes effect one pass
-later, about 21 µs.
+later, about 21 µs. This program, with a voice and table layout, is
+the envelope test in `tools/csp/test/csp_test.cpp`.
 
 ```
         IDX     i, =#VOICES, 0             ; i → voice 0
+        NOP                                ; (i's delay slots)
+        NOP
+        NOP
         LOOP.i  9, =#32, =#16              ; each voice
         IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
-        CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
-        MAX     U, [i+STAGE], =#2          ;     attack → decay
-        SEL     [i+STAGE], U, [i+STAGE]
-        ANDXOR  U, 0, [i+STAGE], =#2       ;   release → attack: 0/2/4 → 0/2/0
-        CMP     ZERO, [i+GATE], ONE        ;   gate held?
-        SEL     [i+STAGE], U, =#4          ;     else release
+        MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
+        CMP     ZERO, [i+LEVEL], FULL      ;   …full scale is reached
+        SEL     [i+STAGE], U, [i+STAGE]    ;   (SEL reads the CMP's flags)
+        ANDXOR  U, 0, [i+STAGE], =#4       ;   release → attack: 0/4/8 → 0/4/0
+        CMP     ZERO, [i+GATE], FULL       ;   gate held?
+        SEL     [i+STAGE], U, =#8          ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
