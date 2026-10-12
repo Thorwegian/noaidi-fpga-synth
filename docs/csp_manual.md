@@ -260,11 +260,24 @@ instruction itself. The instruction's description says so.
 
 ## 6. Assembly language
 
+Programs are written in one of two ways:
+
+- **In C++, as machine code.** This is how the firmware builds them:
+  `csp::ProgramBuilder` (`app/main/csp/program_builder.hpp`) has one
+  call per instruction, `b.interp_wide(level, rate, target)` and so on,
+  and checks the operands as it emits. Its `check()` then looks at the
+  whole program: `IDX` delay slots, loop nesting and ends, `SKIP`
+  ranges, the program's length.
+- **As text, in the macro assembler** described here: a front end to the
+  same builder, for people. Names, blocks, constants and labels exist
+  for the reader; the processor never sees them.
+
 The assembler and a simulator built on the reference model are in
 `tools/csp`: `make csp` builds `app/build/host/csp`, then
 `csp asm program.s` prints the instruction words and the constant
 registers, and `csp sim program.s` runs the program pass by pass.
-`make csp-test` runs the model's and the assembler's tests.
+`make csp-test` runs the model's, the builder's and the assembler's
+tests.
 
 ### Lines
 
@@ -275,6 +288,16 @@ label:  MNEMONIC operand, operand, ...   ; comment
 Each line holds at most one instruction. A label names the address of
 the instruction after it. A comment runs from `;` to the end of the
 line. Mnemonics and directives are not case-sensitive; names are.
+
+A `LOOP`'s length and a `SKIP`'s count can be written as a label: the
+first instruction after the loop's body, or after the skipped run. The
+assembler works out the number, even when the label comes later:
+
+```
+        LOOP.i  voice_done, =#32, =#VOICE_SIZE
+        ...                                 ; the body
+voice_done:
+```
 
 ### Operands
 
@@ -385,10 +408,12 @@ size as the stride.
 may contain a `j` loop, or the other way round, each with its own loop
 counter. A loop cannot contain a loop on the same index register.
 
-`length` is an immediate in the R field (1 to 1023 instructions). An
-inner loop must end at or before the end of the outer one. `count` and
-`stride` are registers holding raw integers; write them as `=#n`
-constants. A loop costs one cycle for the `LOOP` instruction itself and
+`length` is an immediate in the R field (1 to 1023 instructions); in
+assembly it can be a label (section 6). An inner loop must end at or
+before the end of the outer one. `count` and `stride` are registers
+holding raw integers; write them as `=#n` constants. `count` is
+**unsigned**: 0 runs the body no times, and a negative raw value is a
+very large count, which runs into the pass limit. `stride` is signed. A loop costs one cycle for the `LOOP` instruction itself and
 nothing per pass; an inner loop's `LOOP` instruction runs once per pass
 of the outer loop. After a loop, its index register has moved on by
 `count × stride`.
@@ -709,7 +734,8 @@ flags match the condition: they write nothing and change nothing, but
 still take their cycles, so the timing does not change. It makes a run
 of instructions conditional where a single `SEL` would not do.
 
-`condition` (X field) and `count` (Y field) are immediates:
+`condition` (X field) and `count` (Y field) are immediates; in
+assembly, `count` can be a label (section 6):
 
 | condition | skip when |
 |---|---|

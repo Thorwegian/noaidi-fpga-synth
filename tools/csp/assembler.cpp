@@ -1,11 +1,12 @@
-// assembler.cpp — the CSP assembler (see assembler.hpp)
+// assembler.cpp — the CSP macro assembler (see assembler.hpp)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// One pass over the source builds the words; the checks that need the
-// whole program (delay slots, loops, SKIP ranges, length) run after it.
-// Names must be defined before they are used.
+// A text front end to csp::ProgramBuilder (app/main/csp), which the
+// firmware uses directly: this file parses and names, the builder emits
+// and checks. One pass over the source; names must be defined before
+// use, except labels, which a LOOP or SKIP may name before they appear.
 
 #include "assembler.hpp"
 
@@ -15,7 +16,8 @@
 #include <cstdlib>
 #include <optional>
 
-#include "csp.hpp"
+#include "csp/csp.hpp"
+#include "csp/program_builder.hpp"
 
 namespace csp {
 
@@ -119,16 +121,11 @@ struct Symbol {
     int64_t value;
 };
 
-struct LoopRecord {
-    size_t at;  // the LOOP instruction
-    size_t end; // one past its body
-    IndexRegister index;
-    int line;
-};
-
-struct SkipRecord {
+// A LOOP or SKIP whose end is a label further on.
+struct ForwardEnd {
     size_t at;
-    size_t count;
+    std::string label;
+    bool is_loop;
     int line;
 };
 
@@ -140,35 +137,29 @@ private:
     void statement(std::string_view text);
     void directive(const std::string &name, std::string_view operands);
     void instruction(const std::string &name, std::string_view operands);
-    void emit(const Instruction &instruction);
+    void note_lines();
 
     std::optional<int64_t> number(std::string_view text);
     std::optional<int32_t> constant_value(std::string_view text);
     std::optional<int> constant_register(int32_t raw);
     std::optional<Operand> operand(std::string_view text);
-    std::optional<uint16_t> field(std::string_view text);
-    std::optional<ASelect> a_operand(std::string_view text, uint16_t result);
+    std::optional<ASelect> a_operand(std::string_view text,
+                                     const Operand &result);
     bool define(const std::string &name, SymbolKind kind, int64_t value);
-
-    void check_delay_slots();
-    void check_loops();
-    void check_skips();
+    void close_at_end(size_t at, std::string_view end, bool is_loop);
 
     void error(std::string message) {
         program_.diagnostics.push_back({line_, true, std::move(message)});
     }
-    void warning(int line, std::string message) {
-        program_.diagnostics.push_back({line, false, std::move(message)});
-    }
 
     Program program_;
+    ProgramBuilder builder_;
     std::map<std::string, Symbol> symbols_;
     std::map<int32_t, int> pool_; // constant value → register
     int next_constant_ = constant_base;
     std::optional<std::string> block_;
     int64_t block_offset_ = 0;
-    std::vector<LoopRecord> loops_;
-    std::vector<SkipRecord> skips_;
+    std::vector<ForwardEnd> forward_ends_;
     int line_ = 0;
 };
 
@@ -187,15 +178,30 @@ Program Assembler::run(std::string_view source) {
     if (block_) {
         error(".block " + *block_ + " has no .end");
     }
-    if (program_.words.size() > max_program_length) {
-        line_ = 0;
-        error("program is " + std::to_string(program_.words.size())
-              + " instructions; a pass holds "
-              + std::to_string(max_program_length));
+    for (const ForwardEnd &forward : forward_ends_) {
+        line_            = forward.line;
+        const auto label = symbols_.find(forward.label);
+        if (label == symbols_.end()
+            || label->second.kind != SymbolKind::label) {
+            error("unknown label " + forward.label);
+            continue;
+        }
+        const auto end = static_cast<size_t>(label->second.value);
+        if (forward.is_loop) {
+            builder_.close_loop(forward.at, end);
+        } else {
+            builder_.close_skip(forward.at, end);
+        }
     }
-    check_delay_slots();
-    check_loops();
-    check_skips();
+
+    program_.words = builder_.words();
+    for (const BuildIssue &found : builder_.check()) {
+        const int line = found.at < program_.source_lines.size()
+                                 ? program_.source_lines[found.at]
+                                 : line_;
+        program_.diagnostics.push_back({line, found.error, found.message});
+    }
+    std::ranges::stable_sort(program_.diagnostics, {}, &Diagnostic::line);
     for (const auto &[name, symbol] : symbols_) {
         program_.symbols[name] = static_cast<int>(symbol.value);
     }
@@ -212,7 +218,7 @@ void Assembler::statement(std::string_view text) {
     if (colon != std::string_view::npos
         && is_identifier(trim(text.substr(0, colon)))) {
         define(std::string(trim(text.substr(0, colon))), SymbolKind::label,
-               static_cast<int64_t>(program_.words.size()));
+               static_cast<int64_t>(builder_.size()));
         text = trim(text.substr(colon + 1));
     }
     if (text.empty()) {
@@ -239,6 +245,11 @@ bool Assembler::define(const std::string &name, SymbolKind kind,
         return false;
     }
     return true;
+}
+
+// Record this line as the source of every word the builder just emitted.
+void Assembler::note_lines() {
+    program_.source_lines.resize(builder_.size(), line_);
 }
 
 // ---- values and operands ----------------------------------------------------
@@ -319,8 +330,8 @@ std::optional<Operand> Assembler::operand(std::string_view text) {
         }
         const IndexRegister index =
                 which == 'i' ? IndexRegister::i : IndexRegister::j;
-        std::string_view rest = trim(inside.substr(1));
-        int64_t offset        = 0;
+        const std::string_view rest = trim(inside.substr(1));
+        int64_t offset              = 0;
         if (!rest.empty()) {
             if (rest.front() != '+') {
                 error("bad indexed operand: " + std::string(text));
@@ -331,10 +342,6 @@ std::optional<Operand> Assembler::operand(std::string_view text) {
                 return std::nullopt;
             }
             offset = *value;
-        }
-        if (offset < 0 || offset > 255) {
-            error("index offset " + std::to_string(offset) + " outside 0–255");
-            return std::nullopt;
         }
         return Operand::indexed(index, static_cast<int>(offset));
     }
@@ -365,25 +372,12 @@ std::optional<Operand> Assembler::operand(std::string_view text) {
         error("unknown register: " + std::string(text));
         return std::nullopt;
     }
-    if (address < 0 || address >= direct_reach) {
-        error("register 0x" + std::to_string(address)
-              + " is beyond direct reach (0–511): use i or j");
-        return std::nullopt;
-    }
     return Operand::direct(static_cast<int>(address));
-}
-
-std::optional<uint16_t> Assembler::field(std::string_view text) {
-    const auto parsed = operand(text);
-    if (!parsed) {
-        return std::nullopt;
-    }
-    return parsed->encode();
 }
 
 // The A operand: `0`, `acc`, or the R operand written again.
 std::optional<ASelect> Assembler::a_operand(std::string_view text,
-                                            uint16_t result) {
+                                            const Operand &result) {
     text = trim(text);
     if (text == "0") {
         return ASelect::zero;
@@ -391,16 +385,43 @@ std::optional<ASelect> Assembler::a_operand(std::string_view text,
     if (upper(text) == "ACC") {
         return ASelect::accumulator;
     }
-    const auto parsed = field(text);
+    const auto parsed = operand(text);
     if (!parsed) {
         return std::nullopt;
     }
-    if (*parsed != result) {
+    if (!(*parsed == result)) {
         error("the A operand must be 0, acc or the R operand: "
               + std::string(text));
         return std::nullopt;
     }
     return ASelect::result;
+}
+
+// A LOOP's length or a SKIP's count: a number, or a label naming the
+// first instruction after the body or the skipped run.
+void Assembler::close_at_end(size_t at, std::string_view end, bool is_loop) {
+    end             = trim(end);
+    size_t position = 0;
+    if (const auto value = parse_integer(end)) {
+        position = at + 1 + static_cast<size_t>(std::max<int64_t>(*value, 0));
+    } else if (const auto symbol = symbols_.find(std::string(end));
+               symbol != symbols_.end()
+               && symbol->second.kind == SymbolKind::number) {
+        position = at + 1
+                   + static_cast<size_t>(
+                           std::max<int64_t>(symbol->second.value, 0));
+    } else if (is_identifier(end)) {
+        forward_ends_.push_back({at, std::string(end), is_loop, line_});
+        return;
+    } else {
+        error("not a count or a label: " + std::string(end));
+        return;
+    }
+    if (is_loop) {
+        builder_.close_loop(at, position);
+    } else {
+        builder_.close_skip(at, position);
+    }
 }
 
 // ---- directives -------------------------------------------------------------
@@ -428,7 +449,7 @@ void Assembler::directive(const std::string &name, std::string_view text) {
                 return;
             }
             if (*address <= 0 || *address >= register_count) {
-                error("register address outside 0x001–0x7FF");
+                error("register address outside 0x001-0x7FF");
                 return;
             }
             if (name == ".WIDE" && *address % 2 != 0) {
@@ -483,14 +504,12 @@ void Assembler::directive(const std::string &name, std::string_view text) {
             if (!position) {
                 return;
             }
-            if (*position < static_cast<int64_t>(program_.words.size())) {
+            if (*position < static_cast<int64_t>(builder_.size())) {
                 error(".org moves backwards");
                 return;
             }
-            while (static_cast<int64_t>(program_.words.size()) < *position) {
-                program_.words.push_back(Instruction{}.encode());
-                program_.source_lines.push_back(0);
-            }
+            builder_.pad_to(static_cast<size_t>(*position));
+            program_.source_lines.resize(builder_.size(), 0);
         }
     } else {
         error("unknown directive " + name);
@@ -499,11 +518,6 @@ void Assembler::directive(const std::string &name, std::string_view text) {
 
 // ---- instructions -----------------------------------------------------------
 
-void Assembler::emit(const Instruction &instruction) {
-    program_.words.push_back(instruction.encode());
-    program_.source_lines.push_back(line_);
-}
-
 void Assembler::instruction(const std::string &full_name,
                             std::string_view text) {
     const auto operands    = split_operands(text);
@@ -511,32 +525,8 @@ void Assembler::instruction(const std::string &full_name,
     const std::string name = full_name.substr(0, dot);
     const std::string suffix =
             dot == std::string::npos ? "" : full_name.substr(dot + 1);
-
-    static const std::map<std::string, Opcode> opcodes = {
-            {"NOP", Opcode::nop},       {"LOOP", Opcode::loop},
-            {"MACW", Opcode::macw},     {"INTERP", Opcode::interp},
-            {"ACC", Opcode::acc},       {"ADD3", Opcode::add3},
-            {"SEL", Opcode::sel},       {"CMP", Opcode::cmp},
-            {"MIN", Opcode::min},       {"MAX", Opcode::max},
-            {"ANDXOR", Opcode::andxor}, {"SHIFT", Opcode::shift},
-            {"MAC", Opcode::mac},       {"ABS", Opcode::abs},
-            {"SKIP", Opcode::skip},     {"IDX", Opcode::idx}};
-    const auto found = opcodes.find(name);
-    if (found == opcodes.end()) {
-        error("unknown instruction " + full_name);
-        return;
-    }
-    Instruction ins;
-    ins.op             = found->second;
     const bool is_wide = suffix == "W";
-    if (is_wide && !has_wide_form(ins.op)) {
-        error(name + " has no wide form");
-        return;
-    }
-    if (!suffix.empty() && !is_wide && ins.op != Opcode::loop) {
-        error("unknown suffix ." + suffix + " on " + name);
-        return;
-    }
+
     auto need = [&](size_t count) {
         if (operands.size() != count) {
             error(full_name + " takes " + std::to_string(count) + " operands");
@@ -544,277 +534,138 @@ void Assembler::instruction(const std::string &full_name,
         }
         return true;
     };
-    auto set = [&](uint16_t &target, std::string_view text) {
-        const auto value = field(text);
-        if (value) {
-            target = *value;
+    // Parse operands in order; all must succeed.
+    auto parse = [&](std::initializer_list<size_t> positions,
+                     std::vector<Operand> &out) {
+        for (const size_t position : positions) {
+            const auto parsed = operand(operands[position]);
+            if (!parsed) {
+                return false;
+            }
+            out.push_back(*parsed);
         }
-        return value.has_value();
+        return true;
     };
 
-    switch (ins.op) {
-    case Opcode::nop:
-        if (!need(0)) {
-            return;
-        }
-        break;
+    using Arithmetic =
+            size_t (ProgramBuilder::*)(Operand, ASelect, Operand, Operand);
+    using Wide = size_t (ProgramBuilder::*)(Operand, Operand, Operand);
+    struct ArithmeticForms {
+        Arithmetic word;
+        Wide wide; // nullptr: no wide form
+    };
+    static const std::map<std::string, ArithmeticForms> arithmetic = {
+            {"MAC", {&ProgramBuilder::mac, &ProgramBuilder::mac_wide}},
+            {"MACW", {&ProgramBuilder::macw, &ProgramBuilder::macw_wide}},
+            {"INTERP", {&ProgramBuilder::interp, &ProgramBuilder::interp_wide}},
+            {"ADD3", {&ProgramBuilder::add3, &ProgramBuilder::add3_wide}},
+            {"ANDXOR", {&ProgramBuilder::andxor, nullptr}}};
+    using ThreeOperand = size_t (ProgramBuilder::*)(Operand, Operand, Operand);
+    static const std::map<std::string, ThreeOperand> three_operand = {
+            {"SEL", &ProgramBuilder::sel},
+            {"CMP", &ProgramBuilder::cmp},
+            {"MIN", &ProgramBuilder::min},
+            {"MAX", &ProgramBuilder::max}};
 
-    case Opcode::mac:
-    case Opcode::macw:
-    case Opcode::interp:
-    case Opcode::add3:
-    case Opcode::andxor:
+    std::vector<Operand> parsed;
+    const bool takes_wide = arithmetic.contains(name)
+                                    ? arithmetic.at(name).wide != nullptr
+                                    : name == "SHIFT";
+    if (is_wide && !takes_wide) {
+        error(name + " has no wide form");
+        return;
+    }
+    if (!suffix.empty() && !is_wide && name != "LOOP") {
+        error("unknown suffix ." + suffix + " on " + name);
+        return;
+    }
+
+    if (const auto forms = arithmetic.find(name); forms != arithmetic.end()) {
         if (is_wide) {
-            if (!need(3) || !set(ins.r, operands[0]) || !set(ins.x, operands[1])
-                || !set(ins.y, operands[2])) {
-                return;
+            if (need(3) && parse({0, 1, 2}, parsed)) {
+                (builder_.*forms->second.wide)(parsed[0], parsed[1], parsed[2]);
             }
-            ins.a = ASelect::wide;
-        } else {
-            if (!need(4) || !set(ins.r, operands[0])) {
-                return;
+        } else if (need(4) && parse({0}, parsed)) {
+            const auto a = a_operand(operands[1], parsed[0]);
+            if (a && parse({2, 3}, parsed)) {
+                (builder_.*forms->second.word)(parsed[0], *a, parsed[1],
+                                               parsed[2]);
             }
-            const auto a = a_operand(operands[1], ins.r);
-            if (!a || !set(ins.x, operands[2]) || !set(ins.y, operands[3])) {
-                return;
+        }
+    } else if (const auto three = three_operand.find(name);
+               three != three_operand.end()) {
+        if (need(3) && parse({0, 1, 2}, parsed)) {
+            (builder_.*three->second)(parsed[0], parsed[1], parsed[2]);
+        }
+    } else if (name == "NOP") {
+        if (need(0)) {
+            builder_.nop();
+        }
+    } else if (name == "ACC") {
+        if (need(3)) {
+            const std::string a = upper(trim(operands[0]));
+            if (a != "0" && a != "ACC") {
+                error("ACC's A operand must be 0 or acc");
+            } else if (parse({1, 2}, parsed)) {
+                builder_.acc(a == "0" ? ASelect::zero : ASelect::accumulator,
+                             parsed[0], parsed[1]);
             }
-            ins.a = *a;
         }
-        break;
-
-    case Opcode::acc: {
-        if (!need(3)) {
-            return;
-        }
-        const std::string a = upper(trim(operands[0]));
-        if (a != "0" && a != "ACC") {
-            error("ACC's A operand must be 0 or acc");
-            return;
-        }
-        ins.a = a == "0" ? ASelect::zero : ASelect::accumulator;
-        if (!set(ins.x, operands[1]) || !set(ins.y, operands[2])) {
-            return;
-        }
-        break;
-    }
-
-    case Opcode::sel:
-    case Opcode::cmp:
-    case Opcode::min:
-    case Opcode::max:
-        if (!need(3) || !set(ins.r, operands[0]) || !set(ins.x, operands[1])
-            || !set(ins.y, operands[2])) {
-            return;
-        }
-        break;
-
-    case Opcode::shift:
+    } else if (name == "SHIFT") {
         if (is_wide) {
-            if (!need(2) || !set(ins.r, operands[0])
-                || !set(ins.y, operands[1])) {
-                return;
+            if (need(2) && parse({0, 1}, parsed)) {
+                builder_.shift_wide(parsed[0], parsed[1]);
             }
-            ins.a = ASelect::wide;
-        } else {
-            if (!need(3) || !set(ins.r, operands[0])) {
-                return;
+        } else if (need(3) && parse({0}, parsed)) {
+            const auto a = a_operand(operands[1], parsed[0]);
+            if (a && parse({2}, parsed)) {
+                builder_.shift(parsed[0], *a, parsed[1]);
             }
-            const auto a = a_operand(operands[1], ins.r);
-            if (!a || !set(ins.y, operands[2])) {
-                return;
+        }
+    } else if (name == "ABS") {
+        if (need(2) && parse({0, 1}, parsed)) {
+            builder_.abs(parsed[0], parsed[1]);
+        }
+    } else if (name == "IDX") {
+        if (need(3)) {
+            const std::string which = upper(trim(operands[0]));
+            if (which != "I" && which != "J") {
+                error("IDX sets i or j");
+            } else if (parse({1, 2}, parsed)) {
+                builder_.idx(which == "J" ? IndexRegister::j : IndexRegister::i,
+                             parsed[0], parsed[1]);
             }
-            ins.a = *a;
         }
-        break;
-
-    case Opcode::abs:
-        if (!need(2) || !set(ins.r, operands[0]) || !set(ins.x, operands[1])) {
-            return;
+    } else if (name == "SKIP") {
+        if (need(2)) {
+            static const std::map<std::string, Condition> conditions = {
+                    {"ALWAYS", Condition::always},
+                    {"NEG", Condition::negative},
+                    {"POS", Condition::positive},
+                    {"ZERO", Condition::zero},
+                    {"NONZERO", Condition::nonzero},
+                    {"OVF", Condition::overflow}};
+            const auto condition = conditions.find(upper(trim(operands[0])));
+            if (condition == conditions.end()) {
+                error("unknown SKIP condition " + std::string(operands[0]));
+            } else {
+                const size_t at = builder_.open_skip(condition->second);
+                close_at_end(at, operands[1], false);
+            }
         }
-        break;
-
-    case Opcode::skip: {
-        if (!need(2)) {
-            return;
-        }
-        static const std::map<std::string, Condition> conditions = {
-                {"ALWAYS", Condition::always},   {"NEG", Condition::negative},
-                {"POS", Condition::positive},    {"ZERO", Condition::zero},
-                {"NONZERO", Condition::nonzero}, {"OVF", Condition::overflow}};
-        const auto condition = conditions.find(upper(trim(operands[0])));
-        if (condition == conditions.end()) {
-            error("unknown SKIP condition " + std::string(operands[0]));
-            return;
-        }
-        const auto count = number(operands[1]);
-        if (!count) {
-            return;
-        }
-        if (*count < 1 || *count > 1023) {
-            error("SKIP count outside 1–1023");
-            return;
-        }
-        ins.x = static_cast<uint16_t>(condition->second);
-        ins.y = static_cast<uint16_t>(*count);
-        skips_.push_back(
-                {program_.words.size(), static_cast<size_t>(*count), line_});
-        break;
-    }
-
-    case Opcode::idx: {
-        if (!need(3)) {
-            return;
-        }
-        const std::string which = upper(trim(operands[0]));
-        if (which != "I" && which != "J") {
-            error("IDX sets i or j");
-            return;
-        }
-        ins.r = which == "J" ? 1 : 0;
-        if (!set(ins.x, operands[1]) || !set(ins.y, operands[2])) {
-            return;
-        }
-        break;
-    }
-
-    case Opcode::loop: {
+    } else if (name == "LOOP") {
         if (suffix != "I" && suffix != "J") {
             error("LOOP needs .i or .j");
-            return;
+        } else if (need(3) && parse({1, 2}, parsed)) {
+            const size_t at = builder_.open_loop(
+                    suffix == "J" ? IndexRegister::j : IndexRegister::i,
+                    parsed[0], parsed[1]);
+            close_at_end(at, operands[0], true);
         }
-        if (!need(3)) {
-            return;
-        }
-        const auto length = number(operands[0]);
-        if (!length) {
-            return;
-        }
-        if (*length < 1 || *length > 1023) {
-            error("LOOP length outside 1–1023");
-            return;
-        }
-        ins.r = static_cast<uint16_t>(*length);
-        ins.a = suffix == "J" ? ASelect::result : ASelect::zero; // a bit 0
-        if (!set(ins.x, operands[1]) || !set(ins.y, operands[2])) {
-            return;
-        }
-        const size_t at = program_.words.size();
-        loops_.push_back({at, at + 1 + static_cast<size_t>(*length),
-                          suffix == "J" ? IndexRegister::j : IndexRegister::i,
-                          line_});
-        break;
+    } else {
+        error("unknown instruction " + full_name);
     }
-    }
-    emit(ins);
-}
-
-// ---- whole-program checks -----------------------------------------------------
-
-// Which of an instruction's fields are register operands.
-struct OperandFields {
-    bool r, x, y;
-};
-
-OperandFields operand_fields(Opcode op) {
-    switch (op) {
-    case Opcode::nop:
-    case Opcode::skip:
-        return {false, false, false};
-    case Opcode::loop:
-    case Opcode::idx:
-    case Opcode::acc:
-        return {false, true, true};
-    case Opcode::abs:
-        return {true, true, false};
-    case Opcode::shift:
-        return {true, false, true};
-    default:
-        return {true, true, true};
-    }
-}
-
-void Assembler::check_delay_slots() {
-    const auto &words = program_.words;
-    for (size_t at = 0; at < words.size(); ++at) {
-        const Instruction ins = Instruction::decode(words[at]);
-        if (ins.op != Opcode::idx) {
-            continue;
-        }
-        const auto target = (ins.r & 1) ? IndexRegister::j : IndexRegister::i;
-        const char name   = target == IndexRegister::j ? 'j' : 'i';
-        for (size_t later = at + 1;
-             later <= at + index_delay && later < words.size(); ++later) {
-            const Instruction next     = Instruction::decode(words[later]);
-            const OperandFields fields = operand_fields(next.op);
-            const bool uses =
-                    (fields.r
-                     && Operand::decode(next.r).mode == Operand::Mode::indexed
-                     && Operand::decode(next.r).index == target)
-                    || (fields.x
-                        && Operand::decode(next.x).mode
-                                   == Operand::Mode::indexed
-                        && Operand::decode(next.x).index == target)
-                    || (fields.y
-                        && Operand::decode(next.y).mode
-                                   == Operand::Mode::indexed
-                        && Operand::decode(next.y).index == target);
-            if (uses) {
-                warning(program_.source_lines[later],
-                        std::string("uses ") + name
-                                + " in a delay slot of the IDX on line "
-                                + std::to_string(program_.source_lines[at])
-                                + ": it still sees the old value");
-            }
-        }
-    }
-}
-
-void Assembler::check_loops() {
-    for (const LoopRecord &loop : loops_) {
-        line_ = loop.line;
-        if (loop.end > program_.words.size()) {
-            error("LOOP body runs past the end of the program");
-        }
-        int depth = 0;
-        for (const LoopRecord &outer : loops_) {
-            if (&outer == &loop) {
-                continue;
-            }
-            const bool inside = loop.at > outer.at && loop.at < outer.end;
-            if (!inside) {
-                continue;
-            }
-            ++depth;
-            if (loop.end > outer.end) {
-                error("LOOP body ends past its outer loop's end");
-            }
-            if (outer.index == loop.index) {
-                error("LOOP inside a loop on the same index register");
-            }
-        }
-        if (depth > 1) {
-            error("LOOP nested more than one level deep");
-        }
-    }
-}
-
-void Assembler::check_skips() {
-    for (const SkipRecord &skip : skips_) {
-        line_              = skip.line;
-        const size_t first = skip.at + 1;
-        const size_t last  = skip.at + skip.count; // inclusive
-        for (const LoopRecord &loop : loops_) {
-            const bool skips_loop_word = loop.at >= first && loop.at <= last;
-            const size_t body_first    = loop.at + 1;
-            const size_t body_last     = loop.end - 1;
-            const bool overlaps  = first <= body_last && last >= body_first;
-            const bool contained = first >= body_first && last <= body_last;
-            if (skips_loop_word || (overlaps && !contained)) {
-                error("SKIP range crosses a loop boundary");
-                break;
-            }
-        }
-    }
+    note_lines();
 }
 
 } // namespace

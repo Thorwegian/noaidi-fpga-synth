@@ -3,10 +3,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Shared by the reference model (processor.hpp) and the assembler
-// (assembler.hpp). docs/csp_manual.md is the specification: section 3
-// for the formats, section 4 for the instruction word and operands,
-// section 9 for the opcodes.
+// Shared by the firmware, which builds CSP programs as machine code
+// (program_builder.hpp), and the host tools in tools/csp (the reference
+// model and the macro assembler). docs/csp_manual.md is the
+// specification: section 3 for the formats, section 4 for the
+// instruction word and operands, section 9 for the opcodes.
 
 #pragma once
 

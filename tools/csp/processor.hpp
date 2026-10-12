@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "csp.hpp"
+#include "csp/csp.hpp"
 
 namespace csp {
 

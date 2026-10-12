@@ -59,8 +59,10 @@ BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 CSP_DIR     = tools/csp
-CSP_SRC     = $(CSP_DIR)/csp.cpp $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
-CSP_HDR     = $(CSP_DIR)/csp.hpp $(CSP_DIR)/processor.hpp $(CSP_DIR)/assembler.hpp
+CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp
+CSP_SRC     = $(CSP_SHARED) $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
+CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp $(CSP_DIR)/processor.hpp \
+              $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test
 
@@ -129,13 +131,13 @@ format-check:
 
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -o $@ $(CSP_SRC) $(CSP_DIR)/main.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $@ $(CSP_SRC) $(CSP_DIR)/main.cpp
 
 csp: $(CSP_TOOL)
 
 csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
 
 fw-storage-flash:

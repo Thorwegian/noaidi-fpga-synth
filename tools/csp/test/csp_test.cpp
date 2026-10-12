@@ -18,6 +18,7 @@
 
 #include "../assembler.hpp"
 #include "../processor.hpp"
+#include "csp/program_builder.hpp"
 
 namespace {
 
@@ -481,6 +482,93 @@ void test_assembler() {
                 ".end defines the block's size");
 }
 
+void test_labels_and_count() {
+    // A LOOP and a SKIP closed by labels further on, as firmware authors
+    // would write them: nobody counts body lengths by hand.
+    Machine m(std::string(registers) + R"(
+        LOOP.i done, =#3, ZERO
+        ADD3   A_, A_, =1.0, ZERO
+        ADD3   B_, B_, =1.0, ZERO
+done:   CMP    ZERO, ZERO, =1.0         ; negative
+        SKIP   neg, after
+        MAC    C_, 0, =1.0, =1.0
+        MAC    C_, 0, =2.0, =1.0
+after:  MAC    D_, 0, =3.0, =1.0
+)");
+    m.start().run();
+    check_equal(m.get("A_"), q(3.0),
+                "LOOP closed by a label runs its whole body");
+    check_equal(m.get("B_"), q(3.0), "both body instructions, three times");
+    check_equal(m.get("C_"), 0, "SKIP closed by a label skips up to it");
+    check_equal(m.get("D_"), q(3.0), "and the labelled instruction runs");
+    check(has_diagnostic(csp::assemble("LOOP.i nowhere, =#2, =#1\nNOP\n"), true,
+                         "unknown label"),
+          "a LOOP naming an unknown label");
+
+    // The count is unsigned: −1 is a huge count, which the pass limit stops.
+    Machine negative(std::string(registers)
+                     + "LOOP.i 1, =-0.00006103515625, ZERO\nNOP\n");
+    negative.start();
+    check(!negative.run().errors.empty(),
+          "a negative raw count runs into the pass limit");
+}
+
+// The firmware builds programs with ProgramBuilder directly: the same
+// program built in C++ and assembled from text gives the same words.
+void test_builder() {
+    using csp::ASelect;
+    using csp::IndexRegister;
+    using csp::Operand;
+    csp::ProgramBuilder b;
+    const Operand level  = Operand::indexed(IndexRegister::i, 0);
+    const Operand rate   = Operand::direct(0x061);
+    const Operand target = Operand::direct(0x062);
+    b.idx(IndexRegister::i, Operand::direct(0x060), Operand::direct(0));
+    b.nop();
+    b.nop();
+    b.nop();
+    const size_t loop = b.open_loop(IndexRegister::i, Operand::direct(0x063),
+                                    Operand::direct(0x064));
+    b.interp(level, ASelect::result, rate, target);
+    b.close_loop(loop);
+    check(b.check().empty(), "a well-formed built program has no issues");
+
+    const csp::Program text = csp::assemble(R"(
+        .reg BASE, 0x060
+        .reg RATE, 0x061
+        .reg TARGET, 0x062
+        .reg COUNT, 0x063
+        .reg STRIDE, 0x064
+        IDX    i, BASE, ZERO
+        NOP
+        NOP
+        NOP
+        LOOP.i end, COUNT, STRIDE
+        INTERP [i+0], [i+0], RATE, TARGET
+end:
+)");
+    check(text.ok() && text.words == b.words(),
+          "the builder and the assembler emit the same words");
+
+    csp::ProgramBuilder bad;
+    bad.idx(IndexRegister::j, Operand::direct(1), Operand::direct(2));
+    bad.mac(Operand::indexed(IndexRegister::j, 0), ASelect::zero,
+            Operand::direct(600), Operand::direct(1));
+    const size_t open = bad.open_loop(IndexRegister::i, Operand::direct(1),
+                                      Operand::direct(1));
+    (void) open;
+    bool delay = false, reach = false, unclosed = false;
+    for (const csp::BuildIssue &found : bad.check()) {
+        delay = delay || found.message.find("delay slot") != std::string::npos;
+        reach = reach
+                || found.message.find("direct reach") != std::string::npos;
+        unclosed = unclosed
+                   || found.message.find("never closed") != std::string::npos;
+    }
+    check(delay && reach && unclosed,
+          "the builder reports delay slots, reach, and a loop never closed");
+}
+
 // ---- the manual's programs (docs/csp_manual.md section 8) ---------------------------
 
 const char *envelope_program = R"(
@@ -639,6 +727,8 @@ int main() {
     test_pass_limit();
     test_sinks();
     test_assembler();
+    test_labels_and_count();
+    test_builder();
     test_envelope();
     test_lfo();
     std::printf("csp: %s (%d checks, %d failures)\n",

@@ -409,10 +409,13 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
                                       ? IndexRegister::j
                                       : IndexRegister::i;
         const size_t length = instruction.r;
-        const int64_t count = read_operand(instruction.x, state);
-        const int stride    = read_operand(instruction.y, state);
-        const size_t start  = state.pc; // already past the LOOP instruction
-        const size_t end    = start + length;
+        // The count is unsigned: a negative raw value is a huge count,
+        // which the pass limit stops.
+        const int64_t count = read_operand(instruction.x, state)
+                              & ((int64_t{1} << word_bits) - 1);
+        const int stride   = read_operand(instruction.y, state);
+        const size_t start = state.pc; // already past the LOOP instruction
+        const size_t end   = start + length;
         if (length == 0) {
             state.report.errors.push_back("LOOP with an empty body");
             break;

@@ -366,8 +366,12 @@ small program. The new CSP gets:
 
 - **A reference model** in C++ (`tools/csp/`): the ISA as a function
   from (program, registers, firmware writes) to (registers, sink area)
-  per pass. The same code is the assembler and a host simulator, so
-  firmware programs are tested on the host before they reach the FPGA.
+  per pass, with a macro assembler and a host simulator beside it.
+- **A shared program builder** (`app/main/csp/`): the instruction
+  encoding and `csp::ProgramBuilder`, which the firmware uses to
+  generate programs as machine code and the assembler uses as its back
+  end. Firmware programs are therefore built by the same code the host
+  tests run.
 - **An instruction-level bench**: per opcode, directed cases (saturation,
   wrap, flags, forwarding back-to-back, the write queue and the swap); then random
   programs and random firmware writes, with the RTL's register file and
