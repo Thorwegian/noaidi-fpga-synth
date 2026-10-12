@@ -26,6 +26,8 @@
 
 - Before cloning SystemVerilog arrays for parallel access or implementing CDCs for memory access, remember that B-SRAM banks are dual-ported and dual-clocked.
 
+- All source files shall carry the following copyright notice:
+
 ```
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
