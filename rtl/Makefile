@@ -282,6 +282,16 @@ obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(CSP_COSIM_CPP) 
 sim-csp-cosim: obj_dir/csp_cosim/sim
 	$(call run_sim,$<,tb/sim-csp-cosim.out)
 
+# The new CSP alone on the chip (csp/fit/csp_fit.sv): its BSRAM, DSP and
+# logic, and its timing at 73.728 MHz. A check, not a bitstream.
+csp-fit: $(CSP_NEW) csp/fit/csp_fit.sv csp/fit/csp_fit.cst Makefile
+	mkdir -p obj_dir/csp_fit
+	set -o pipefail; yosys -p 'read_verilog -sv $(CSP_NEW) csp/fit/csp_fit.sv; synth_gowin -family gw2a -top csp_fit -json obj_dir/csp_fit/yosys.json' > obj_dir/csp_fit/yosys.log 2>&1
+	nextpnr-himbaechel --json obj_dir/csp_fit/yosys.json --write obj_dir/csp_fit/pnr.json \
+		--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C --vopt cst=csp/fit/csp_fit.cst \
+		--freq 73.728 --seed 1 > obj_dir/csp_fit/pnr.log 2>&1 || true
+	@grep -E 'BSRAM|MULTALU|LUT4:|DFF:|Max frequency' obj_dir/csp_fit/pnr.log | grep -v ': *0/'
+
 obj_dir/tb_pitch_track/sim: $(CSP_SIM) tb/tb_pitch_track.sv Makefile
 	$(VERILATE) $(CSP_SIM) tb/tb_pitch_track.sv $(VL_DSP)
 
