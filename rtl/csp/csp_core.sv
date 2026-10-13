@@ -39,6 +39,15 @@
 //   next instruction issues three cycles after them at the earliest.
 //   The loop records and i/j then hold their new values for decode.
 //
+// Vector loops (LOOP.vi, LOOP.vj; docs/csp_manual.md): once LOOP has
+// resolved, decode issues the body instruction by instruction, each for
+// every element in turn. Element k has the loop's index register at
+// base + k × stride, its own copy of the other index register and its own
+// flags, in small arrays; what is in flight carries its run and element, so
+// the hazard check lets a flag reader wait for its own element only, and an
+// operand indexed by the element's index register wait for its IDX. The
+// loop ends three cycles after the last issue, as a LOOP's resolution does.
+//
 // The pass (1536 clocks, 48 kHz): the pass start writes the pass counter
 // to register 0x040 and fetches instruction 0. Instructions issue before
 // cycle 1472, so the pipeline has drained by cycle 1478. The window from
@@ -185,11 +194,42 @@ module csp_core (
     typedef struct packed {
         logic              active;
         logic              on_j;
-        logic [PC_W-1:0]   start, end_pc;   // first body instruction, one past the last
+        logic [PC_W-1:0]   start, last_pc;  // first and last body instruction
         logic [17:0]       remaining;       // passes still to start, this one included
         logic [AW-1:0]     stride;
     } loop_t;
     loop_t loop_outer, loop_inner;
+
+    // ---- vector loops ----------------------------------------------------------------------
+    // LOOP.vi issues its body instruction by instruction, each for every
+    // element in turn (docs/csp_manual.md, LOOP). Element k has the loop's
+    // index register at base + k × stride, a private copy of the other index
+    // register, and private flags. The elements' private values live in
+    // small arrays. The body runs instruction by instruction across the
+    // elements, so an element has written its private register (or its
+    // flags) exactly when an earlier body instruction that writes it has
+    // finished issuing for every element; until then every element sees the
+    // values the loop was entered with (private_written, flags_written).
+    // Everything issued
+    // in a vector loop carries its run (alternating, so the hazard check can
+    // tell this loop's instructions from an earlier loop's) and its element.
+    localparam int MAX_ELEMENTS = csp_pkg::MAX_VECTOR_LENGTH;
+
+    logic            vector_issuing;       // the body is being issued
+    logic [1:0]      vector_finish;        // cycles to the loop's end, after the last issue
+    logic            vector_run;
+    logic            vector_on_j;          // the loop steps j; the private register is i
+    logic [csp_pkg::PROGRAM_W-1:0] vector_end, vector_last_pc;   // one past the body, its last instruction
+    logic [6:0]      vector_count;
+    logic [5:0]      vector_element;       // the element decode is issuing
+    logic [5:0]      vector_last_element_number;   // count − 1
+    logic [csp_pkg::ADDRESS_W-1:0] last_private;   // the last element's private register
+    logic [csp_pkg::ADDRESS_W-1:0] vector_stride, vector_own;   // own: this element's index
+
+    logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
+    logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
+    logic                          private_written;
+    logic                          flags_written;
 
     // ---- the pipeline's control: what each stage holds ---------------------------------------
     // What a hazard check and the write-back need, decided in decode. The
@@ -206,6 +246,10 @@ module csp_core (
         logic                  writes_sink;
         logic                  writes_accumulator;
         logic                  sets_flags;
+        logic                  vector;              // issued inside a vector loop
+        logic                  run;                 // which vector loop (alternates)
+        logic [5:0]            element;             // its element
+        logic                  entry_flags;         // vector: the flags are the loop's entry flags
     } control_t;
 
     control_t read_stage, execute1_stage, execute2_stage, execute3_stage, execute4_stage,
@@ -241,10 +285,19 @@ module csp_core (
     csp_pkg::instruction_t decoded;
     assign decoded = csp_pkg::instruction_t'(fetch_data);
 
+    // The index registers decode sees: in a vector loop, the element's.
+    wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
+    wire [AW-1:0] private_current = private_written ? private_value[vector_element]
+                                                    : entry_private;
+    wire [AW-1:0] decode_index_i  = vector_issuing ? (vector_on_j ? private_current : vector_own)
+                                                   : index_i;
+    wire [AW-1:0] decode_index_j  = vector_issuing ? (vector_on_j ? vector_own : private_current)
+                                                   : index_j;
+
     wire [3:0] decoded_op = decoded.op;
-    wire [AW-1:0] decode_r_address = csp_pkg::operand_address(decoded.r, index_i, index_j);
-    wire [AW-1:0] decode_x_address = csp_pkg::operand_address(decoded.x, index_i, index_j);
-    wire [AW-1:0] decode_y_address = csp_pkg::operand_address(decoded.y, index_i, index_j);
+    wire [AW-1:0] decode_r_address = csp_pkg::operand_address(decoded.r, decode_index_i, decode_index_j);
+    wire [AW-1:0] decode_x_address = csp_pkg::operand_address(decoded.x, decode_index_i, decode_index_j);
+    wire [AW-1:0] decode_y_address = csp_pkg::operand_address(decoded.y, decode_index_i, decode_index_j);
     wire          decode_a_wide    = decoded.a == csp_pkg::A_WIDE;
     wire          decode_y_wide    = wide_y(decoded_op, decoded.a);
     wire          decode_r_wide    = decode_a_wide && csp_pkg::has_wide_form(decoded_op);
@@ -255,7 +308,9 @@ module csp_core (
     wire reads_y = uses_y(decoded_op) && in_registers(decode_y_address, decode_y_wide);
     wire reads_accumulator = uses_accumulator(decoded_op, decoded.a);
     wire reads_flags = decoded_op == csp_pkg::OP_SEL || decoded_op == csp_pkg::OP_SKIP;
-    wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || decoded_op == csp_pkg::OP_IDX;
+    // LOOP and IDX hold the front end, except an IDX in a vector loop, which
+    // only holds its own element's private index register.
+    wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
     always_comb begin
         read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
@@ -294,12 +349,34 @@ module csp_core (
                     end
                 end
                 if (in_flight[stage].writes_accumulator && reads_accumulator) hazard = 1'b1;
-                if (in_flight[stage].sets_flags && reads_flags) hazard = 1'b1;
+                // A flag reader in a vector loop waits for its own element's
+                // flag setter, and for any that is not of this loop.
+                if (in_flight[stage].sets_flags && reads_flags
+                        && (!vector_issuing || !in_flight[stage].vector
+                            || in_flight[stage].run != vector_run
+                            || in_flight[stage].element == vector_element)) begin
+                    hazard = 1'b1;
+                end
             end
         end
     end
 
-    wire issue = decode_valid && run_open && !hazard;
+    // An operand indexed by the element's private index register waits while
+    // that element's IDX is in R or E1: the register is written at the end
+    // of E1, three cycles after the IDX issues.
+    wire private_used = vector_issuing
+            && (((uses_a(decoded_op, decoded.a) || writes_result(decoded_op))
+                 && decoded.r[9] && decoded.r[8] == !vector_on_j)
+                || (uses_x(decoded_op) && decoded.x[9] && decoded.x[8] == !vector_on_j)
+                || (uses_y(decoded_op) && decoded.y[9] && decoded.y[8] == !vector_on_j));
+    wire private_pending =
+            (read_stage.valid && read_stage.vector && read_stage.run == vector_run
+             && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
+            || (execute1_stage.valid && execute1_stage.vector && execute1_stage.run == vector_run
+                && execute1_stage.element == vector_element
+                && execute1_stage.instruction.op == csp_pkg::OP_IDX);
+
+    wire issue = decode_valid && run_open && !hazard && !(private_used && private_pending);
 
     control_t issued;
     always_comb begin
@@ -317,6 +394,10 @@ module csp_core (
                                     && csp_pkg::is_sink(decode_r_address);
         issued.writes_accumulator = decoded_op == csp_pkg::OP_ACC;
         issued.sets_flags         = writes_result(decoded_op) && decoded_op != csp_pkg::OP_SEL;
+        issued.vector             = vector_issuing;
+        issued.run                = vector_run;
+        issued.element            = vector_element;
+        issued.entry_flags        = !flags_written;
     end
 
     // ---- R: operands ---------------------------------------------------------------------------
@@ -371,9 +452,17 @@ module csp_core (
     logic               e1_y_wide;
     logic signed [18:0] e1_shift_total;
     logic [PC_W-1:0]    e1_body_end;        // LOOP: one past its body
-    logic               e1_count_zero;      // LOOP: a count of 0
+    logic [PC_W-1:0]    e1_body_last;       // LOOP: its last instruction
+    logic [PC_W-1:0]    e1_pc_plus_one;     // the pc after this instruction
+    logic               e1_skips_body;      // LOOP: a count of 0, or a vector loop over too many
 
     wire [3:0] e1_op = execute1_stage.instruction.op;
+
+    // SEL's flags: in a vector loop an element's own, once the loop has
+    // written any, else the flags the loop was entered with, which no vector
+    // instruction has yet changed.
+    wire select_negative = (execute1_stage.vector && !execute1_stage.entry_flags)
+                           ? element_flags[execute1_stage.element][0] : flag_negative;
 
     // INTERP: Y − A in Q4.32 (saturated in E2, decision 3a). ADD3: A + Y.
     wire signed [54:0] difference_full = 55'(e1_y_value) - 55'(e1_a_value);
@@ -391,7 +480,7 @@ module csp_core (
         case (e1_op)
             csp_pkg::OP_MIN: logic_result = e1_x_word < e1_y_word ? e1_x_word : e1_y_word;
             csp_pkg::OP_MAX: logic_result = e1_x_word > e1_y_word ? e1_x_word : e1_y_word;
-            csp_pkg::OP_SEL: logic_result = flag_negative ? e1_y_word : e1_x_word;
+            csp_pkg::OP_SEL: logic_result = select_negative ? e1_y_word : e1_x_word;
             default:         logic_result = (e1_x_word & e1_y_word) ^ a_bits;     // ANDXOR
         endcase
     end
@@ -416,10 +505,23 @@ module csp_core (
     // the loops whose end is the next pc step their index register and
     // repeat or close: the inner one first, the outer one if the inner did
     // not repeat (a skipped body may land on the outer loop's end).
+    //
+    // A vector loop is sequenced by the issue of its body (below); its end
+    // comes three cycles after the last issue, as a LOOP's resolution does:
+    // the loop's index register has stepped count × stride, the private
+    // register and the flags are the last element's, and the loops ending
+    // with the body step and repeat as they do after a LOOP.
+    wire e1_vector_idx = execute1_stage.valid && execute1_stage.vector && e1_op == csp_pkg::OP_IDX;
     wire resolving = execute1_stage.valid
-                     && (e1_op == csp_pkg::OP_LOOP || e1_op == csp_pkg::OP_IDX);
+                     && (e1_op == csp_pkg::OP_LOOP
+                         || (e1_op == csp_pkg::OP_IDX && !execute1_stage.vector));
+    wire vector_done = vector_finish == 2'd1;
     wire [PC_W-1:0] sequence_pc = resolving ? execute1_stage.pc : decode_pc;
     wire is_loop = resolving && execute1_stage.live && e1_op == csp_pkg::OP_LOOP;
+    // A vector loop over more than MAX_VECTOR_LENGTH elements is an error
+    // (the reference model reports it); the loop is skipped like one of
+    // count 0 (e1_skips_body, decided in R).
+    wire opens_vector = is_loop && execute1_stage.instruction.a[1] && !e1_skips_body;
     wire [17:0]   loop_count  = e1_x_word;                       // unsigned
     wire [AW-1:0] loop_stride = AW'(e1_y_word);                  // signed, mod 4096
 
@@ -428,13 +530,24 @@ module csp_core (
     logic            step_i, step_j;
     logic [AW-1:0]   stride_i, stride_j;
 
+    // The last pc this resolution consumes: the loops whose last pc it is
+    // end here. (Comparing last pcs instead of the pc after them keeps the
+    // increment out of the comparison.)
+    wire skips_loop = is_loop && e1_skips_body;
+    wire [PC_W-1:0] position = vector_done ? vector_last_pc
+                             : (skips_loop ? e1_body_last : sequence_pc);
+    wire [PC_W-1:0] following = skips_loop ? e1_body_end
+                              : (vector_done ? vector_end
+                                             : (resolving ? e1_pc_plus_one : decode_pc + 1'b1));
+    wire inner_ends = loop_inner.active && position == loop_inner.last_pc;
+    wire outer_ends = loop_outer.active && position == loop_outer.last_pc;
+
     always_comb begin
         logic   inner_repeats;
         loop_t  opened;
-        logic [PC_W-1:0] following;
         next_outer    = loop_outer;
         next_inner    = loop_inner;
-        following     = sequence_pc + 1'b1;
+        next_pc       = following;
         step_i        = 1'b0;
         step_j        = 1'b0;
         stride_i      = '0;
@@ -443,53 +556,53 @@ module csp_core (
 
         opened.active    = 1'b1;
         opened.on_j      = execute1_stage.instruction.a[0];
-        opened.start     = sequence_pc + 1'b1;
-        opened.end_pc    = e1_body_end;
+        opened.start     = e1_pc_plus_one;
+        opened.last_pc   = e1_body_last;
         opened.remaining = loop_count;
         opened.stride    = loop_stride;
 
-        if (is_loop) begin
-            if (e1_count_zero) begin
-                following = e1_body_end;
-            end else if (!loop_outer.active) begin
+        // A LOOP that runs opens a record (a vector loop none: its body is
+        // issued element by element). Its body has at least one instruction,
+        // so it cannot end where it opens.
+        if (is_loop && !e1_skips_body && !execute1_stage.instruction.a[1]) begin
+            if (!loop_outer.active) begin
                 next_outer = opened;
             end else begin
                 next_inner = opened;
             end
         end
 
-        if (next_inner.active && following == next_inner.end_pc) begin
-            if (next_inner.on_j) begin
+        if (inner_ends) begin
+            if (loop_inner.on_j) begin
                 step_j = 1'b1;
-                stride_j = next_inner.stride;
+                stride_j = loop_inner.stride;
             end else begin
                 step_i = 1'b1;
-                stride_i = next_inner.stride;
+                stride_i = loop_inner.stride;
             end
-            if (next_inner.remaining > 18'd1) begin
-                next_inner.remaining = next_inner.remaining - 1'b1;
-                following = next_inner.start;
+            if (loop_inner.remaining > 18'd1) begin
+                next_inner.remaining = loop_inner.remaining - 1'b1;
+                next_pc = loop_inner.start;
                 inner_repeats = 1'b1;
             end else begin
                 next_inner.active = 1'b0;
             end
         end
-        if (!inner_repeats && next_outer.active && following == next_outer.end_pc) begin
-            if (next_outer.on_j) begin
+        if (!inner_repeats && outer_ends) begin
+            if (loop_outer.on_j) begin
                 step_j = 1'b1;
-                stride_j = next_outer.stride;
+                stride_j = loop_outer.stride;
             end else begin
                 step_i = 1'b1;
-                stride_i = next_outer.stride;
+                stride_i = loop_outer.stride;
             end
-            if (next_outer.remaining > 18'd1) begin
-                next_outer.remaining = next_outer.remaining - 1'b1;
-                following = next_outer.start;
+            if (loop_outer.remaining > 18'd1) begin
+                next_outer.remaining = loop_outer.remaining - 1'b1;
+                next_pc = loop_outer.start;
             end else begin
                 next_outer.active = 1'b0;
             end
         end
-        next_pc = following;
     end
 
     // IDX, then the loop steps on top (as the model: the instruction runs,
@@ -497,16 +610,34 @@ module csp_core (
     wire writes_index = resolving && execute1_stage.live && e1_op == csp_pkg::OP_IDX;
     wire index_on_j   = execute1_stage.instruction.r[0];
     wire [AW-1:0] index_value  = AW'(e1_x_word) + AW'(e1_y_word);
-    wire [AW-1:0] next_index_i = ((writes_index && !index_on_j) ? index_value : index_i)
-                                 + (step_i ? stride_i : AW'(0));
-    wire [AW-1:0] next_index_j = ((writes_index && index_on_j) ? index_value : index_j)
-                                 + (step_j ? stride_j : AW'(0));
 
-    // Whether the front end moves on: past a resolved LOOP or IDX, or past
-    // an issued instruction that is neither.
-    wire advance = resolving || (issue && !is_barrier);
+    // At a vector loop's end: the last element's private register, which
+    // may be written by the IDX in E1 this very cycle.
+    // (In the cycle the loop ends, E1 holds the instruction issued last: if it
+    // is an IDX, it is the last element's.)
+    wire [AW-1:0] vector_final_private = e1_vector_idx ? index_value : last_private;
+    wire [AW-1:0] base_index_i = vector_done ? (vector_on_j ? vector_final_private : vector_own)
+                                             : ((writes_index && !index_on_j) ? index_value : index_i);
+    wire [AW-1:0] base_index_j = vector_done ? (vector_on_j ? vector_own : vector_final_private)
+                                             : ((writes_index && index_on_j) ? index_value : index_j);
+    wire [AW-1:0] next_index_i = base_index_i + (step_i ? stride_i : AW'(0));
+    wire [AW-1:0] next_index_j = base_index_j + (step_j ? stride_j : AW'(0));
 
-    assign fetch_address = pass_start ? '0 : (advance ? next_pc : decode_pc);
+    // Issuing a vector loop's body: the next element, or when the last
+    // element has issued, the next instruction; after the last instruction's
+    // last element the loop is finished.
+    wire vector_issue            = vector_issuing && issue;
+    wire vector_last_element     = vector_element == vector_last_element_number;
+    wire vector_last_instruction = decode_pc == vector_last_pc;
+    wire vector_next_instruction = vector_issue && vector_last_element && !vector_last_instruction;
+
+    // Whether the front end moves on: past a resolved LOOP or IDX, past a
+    // finished vector loop, or past an issued instruction that is neither.
+    wire advance = resolving || vector_done || (issue && !is_barrier && !vector_issuing);
+
+    assign fetch_address = pass_start ? '0
+                         : (advance ? next_pc
+                                    : (vector_next_instruction ? decode_pc + 1'b1 : decode_pc));
 
     // ---- E2 ------------------------------------------------------------------------------------
     logic signed [54:0] e2_difference_full, e2_sum_full;
@@ -682,6 +813,7 @@ module csp_core (
     logic signed [53:0] w_accumulator;
 
     wire writing = writeback_stage.valid && writeback_stage.live;
+    wire element_flags_write = writing && writeback_stage.sets_flags && writeback_stage.vector;
 
     // ---- the stage registers -------------------------------------------------------------------
     localparam control_t BUBBLE = '0;
@@ -701,6 +833,11 @@ module csp_core (
             flag_negative <= 1'b0; flag_zero <= 1'b0; flag_overflow <= 1'b0;
             skip_remaining <= '0;
             loop_outer <= '0; loop_inner <= '0;
+            vector_issuing <= 1'b0; vector_finish <= '0; vector_run <= 1'b0;
+            vector_on_j <= 1'b0; vector_end <= '0; vector_last_pc <= '0; vector_count <= '0; vector_element <= '0;
+            vector_last_element_number <= '0; last_private <= '0;
+            vector_stride <= '0; vector_own <= '0;
+            private_written <= 1'b0; flags_written <= 1'b0;
         end else if (pass_start) begin
             decode_valid    <= !held;
             decode_pc       <= '0;
@@ -713,6 +850,8 @@ module csp_core (
             skip_remaining  <= '0;
             loop_outer      <= '0;
             loop_inner      <= '0;
+            vector_issuing  <= 1'b0;
+            vector_finish   <= '0;
         end else begin
             // D: issue, or wait; a LOOP or IDX empties decode until it resolves.
             if (advance) begin
@@ -722,8 +861,56 @@ module csp_core (
                 index_j      <= next_index_j;
                 loop_outer   <= next_outer;
                 loop_inner   <= next_inner;
+            end else if (vector_issue) begin
+                if (vector_next_instruction) begin
+                    decode_pc <= decode_pc + 1'b1;
+                end else if (vector_last_element) begin
+                    decode_valid <= 1'b0;
+                end
             end else if (issue) begin
                 decode_valid <= 1'b0;
+            end
+
+            // Vector loops: open at LOOP.vi's resolution, step through the
+            // elements as the body issues, end three cycles after the last.
+            if (opens_vector) begin
+                vector_issuing       <= 1'b1;
+                vector_on_j          <= execute1_stage.instruction.a[0];
+                vector_end           <= e1_body_end;
+                vector_last_pc       <= e1_body_last;
+                vector_count         <= loop_count[6:0];
+                vector_last_element_number <= 6'(loop_count[5:0] - 6'd1);
+                last_private         <= execute1_stage.instruction.a[0] ? index_i : index_j;
+                vector_element       <= '0;
+                vector_stride        <= loop_stride;
+                vector_own           <= execute1_stage.instruction.a[0] ? index_j : index_i;
+                vector_run           <= !vector_run;
+                private_written      <= 1'b0;
+                flags_written        <= 1'b0;
+            end else if (vector_issue) begin
+                if (vector_last_element) begin
+                    // every element has issued this instruction
+                    private_written <= private_written || decoded_op == csp_pkg::OP_IDX;
+                    flags_written   <= flags_written || issued.sets_flags;
+                end
+                if (!vector_last_element) begin
+                    vector_element <= vector_element + 1'b1;
+                    vector_own     <= vector_own + vector_stride;
+                end else if (!vector_last_instruction) begin
+                    vector_element <= '0;
+                    vector_own     <= vector_on_j ? index_j : index_i;
+                end else begin
+                    vector_issuing <= 1'b0;
+                    vector_own     <= vector_own + vector_stride;
+                    vector_finish  <= 2'd2;
+                end
+            end
+            if (vector_finish != 2'd0 && !vector_issue) begin
+                vector_finish <= vector_finish - 1'b1;
+            end
+            if (e1_vector_idx && execute1_stage.live
+                    && execute1_stage.element == vector_last_element_number) begin
+                last_private <= index_value;
             end
 
             read_stage <= issue ? issued : BUBBLE;
@@ -752,6 +939,17 @@ module csp_core (
                 flag_zero     <= w_zero;
                 flag_overflow <= w_overflow;
             end
+
+        end
+    end
+
+    // The elements' private values: no reset, valid only once written.
+    always_ff @(posedge clk) begin
+        if (e1_vector_idx && execute1_stage.live) begin
+            private_value[execute1_stage.element] <= index_value;
+        end
+        if (element_flags_write) begin
+            element_flags[writeback_stage.element] <= {w_overflow, w_zero, w_negative};
         end
     end
 
@@ -770,7 +968,11 @@ module csp_core (
         e1_y_wide      <= read_y_wide;
         e1_shift_total <= shift_total;
         e1_body_end    <= read_stage.pc + PC_W'(read_stage.instruction.r) + 1'b1;
-        e1_count_zero  <= x_operand == '0;
+        e1_body_last   <= read_stage.pc + PC_W'(read_stage.instruction.r);
+        e1_pc_plus_one <= read_stage.pc + 1'b1;
+        e1_skips_body  <= x_operand == '0
+                          || (read_stage.instruction.a[1]
+                              && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
 
         e2_difference_full <= difference_full;
         e2_sum_full        <= sum_full;

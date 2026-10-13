@@ -16,6 +16,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -178,7 +179,16 @@ public:
         if (!report.errors.empty() && verbose_) {
             std::printf("  (model: %s)\n", report.errors.front().c_str());
         }
-        int differences = compare(what);
+        // A pass the model stopped at the limit ends in a state the
+        // hardware has no way to match: the model finishes the loop it was
+        // in, the RTL stops issuing. Registers and sinks still have to agree.
+        bool stopped_at_limit = false;
+        for (const std::string &error : report.errors) {
+            stopped_at_limit |= error.rfind("pass longer", 0) == 0;
+        }
+        ++passes_run;
+        passes_at_limit += stopped_at_limit;
+        int differences = compare(what, !stopped_at_limit);
         // The interlocks' timing: the RTL issues its last instruction in the
         // cycle the model counts. (A pass the model stopped at the limit
         // ends differently: the RTL runs on through memory past the
@@ -191,6 +201,11 @@ public:
         return differences;
     }
 
+    // How many passes ran, and how many of those the model stopped at the
+    // pass limit (their end state is not compared).
+    static inline int passes_run      = 0;
+    static inline int passes_at_limit = 0;
+
     void verbose(bool on) {
         verbose_ = on;
     }
@@ -200,7 +215,7 @@ public:
     }
 
 private:
-    int compare(const std::string &what) {
+    int compare(const std::string &what, bool compare_control_state) {
         int differences = 0;
         auto report     = [&](const std::string &where, int64_t rtl,
                           int64_t model) {
@@ -223,6 +238,9 @@ private:
                 std::snprintf(where, sizeof where, "sink 0x%03x", offset);
                 report(where, rtl_.sink(offset), model_.sink(offset));
             }
+        }
+        if (!compare_control_state) {
+            return differences;
         }
         if (rtl_.index(0) != model_.index(csp::IndexRegister::i)) {
             report("i", rtl_.index(0), model_.index(csp::IndexRegister::i));
@@ -248,6 +266,7 @@ private:
 };
 
 // ---- directed programs: the manual's examples ------------------------------------------------
+// The envelope, as LOOP.i and as LOOP.vi (U becomes a voice field).
 
 const char *envelope_program = R"(
         .block VOICE
@@ -279,6 +298,46 @@ const char *envelope_program = R"(
         ANDXOR  U, 0, [i+STAGE], =#4
         CMP     ZERO, [i+GATE], FULL
         SEL     [i+STAGE], U, =#8
+        INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
+        MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
+done:
+        IDX     j, =#0x800, 0
+        NOP
+        NOP
+        NOP
+        MAC     [j+0], 0, [i+0], =1.0       ; i is past the voices: a sink write
+)";
+
+const char *envelope_vector_program = R"(
+        .block VOICE
+        .field LEVEL, 2
+        .field STAGE, 1
+        .field GATE, 1
+        .field VELOCITY, 1
+        .field OUT, 1
+        .field U, 1
+        .end
+        .block SEGMENT
+        .field TARGET, 2
+        .field RATE, 1
+        .field SPARE, 1
+        .end
+        .equ   VOICES, 0x600
+        .const FULL, 1.0
+        .reg   ENV_TABLE, 0x060
+
+        IDX     i, =#VOICES, 0
+        NOP
+        NOP
+        NOP
+        LOOP.vi done, =#4, =#16
+        IDX     j, ENV_TABLE, [i+STAGE]
+        MAX     [i+U], [i+STAGE], =#4
+        CMP     ZERO, [i+LEVEL], FULL
+        SEL     [i+STAGE], [i+U], [i+STAGE]
+        ANDXOR  [i+U], 0, [i+STAGE], =#4
+        CMP     ZERO, [i+GATE], FULL
+        SEL     [i+STAGE], [i+U], =#8
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 done:
@@ -335,6 +394,9 @@ constexpr int stride_base = 0x034; // 0x034–0x037: strides 2, 4, −2, 16
 constexpr int base_i      = 0x038; // holds 0x200
 constexpr int base_j      = 0x039; // holds 0x300
 constexpr int base_sink   = 0x03A; // holds 0x800
+constexpr int count_nine =
+        0x03B; // holds 9: more elements than a wait takes cycles
+constexpr int count_zero = 0x03C; // holds 0: a loop that runs its body no times
 
 class Generator {
 public:
@@ -355,6 +417,8 @@ public:
         writes.push_back({base_i, 0x200});
         writes.push_back({base_j, 0x300});
         writes.push_back({base_sink, 0x800});
+        writes.push_back({count_nine, 9});
+        writes.push_back({count_zero, 0});
         for (int address = 0x060; address < 0x100; ++address) {
             writes.push_back({address, word()});
         }
@@ -384,9 +448,11 @@ public:
               direct(0));
         const int items = pick(10, 60);
         for (int item = 0; item < items; ++item) {
-            const int kind = pick(0, 19);
+            const int kind = pick(0, 21);
             if (kind == 0) {
                 loop(b, true);
+            } else if (kind == 20 || kind == 21) {
+                vector_loop(b);
             } else if (kind == 1) {
                 skip(b);
             } else {
@@ -557,6 +623,127 @@ private:
         }
     }
 
+    // ---- vector loops ---------------------------------------------------------------------
+    // A vector loop's iterations must not share registers, so a body writes
+    // only the element's own block ([own+k], k < 16, a stride of 16) and
+    // reads constants, registers nothing in the body writes, that block, and
+    // the table the element's private index register points at.
+    static csp::IndexRegister other_index(csp::IndexRegister own) {
+        return own == csp::IndexRegister::i ? csp::IndexRegister::j
+                                            : csp::IndexRegister::i;
+    }
+
+    csp::Operand block_operand(csp::IndexRegister own) {
+        return csp::Operand::indexed(own, pick(0, 15));
+    }
+
+    csp::Operand vector_read(csp::IndexRegister own) {
+        switch (pick(0, 8)) {
+        case 0:
+            return direct(0);
+        case 1:
+        case 2:
+            return direct(pick(0x001, 0x02F));
+        case 3:
+            return direct(pick(0x060, 0x0DF));
+        case 4:
+        case 5:
+            return csp::Operand::indexed(other_index(own), pick(0, 15));
+        default:
+            return block_operand(own);
+        }
+    }
+
+    csp::ASelect vector_a_select() {
+        return chance(2) ? csp::ASelect::zero : csp::ASelect::result;
+    }
+
+    void vector_instruction(csp::ProgramBuilder &b, csp::IndexRegister own) {
+        const csp::Operand r = chance(8) ? direct(0) : block_operand(own);
+        const csp::Operand x = vector_read(own);
+        const csp::Operand y = vector_read(own);
+        switch (pick(0, 13)) {
+        case 0:
+            b.mac(r, vector_a_select(), x, y);
+            break;
+        case 1:
+            b.macw(r, vector_a_select(), x, y);
+            break;
+        case 2:
+            b.interp(r, vector_a_select(), x, y);
+            break;
+        case 3:
+            b.add3(r, vector_a_select(), x, y);
+            break;
+        case 4:
+        case 5:
+            b.cmp(r, x, y);
+            break;
+        case 6:
+        case 7:
+            b.sel(r, x, y);
+            break;
+        case 8:
+            chance(2) ? b.min(r, x, y) : b.max(r, x, y);
+            break;
+        case 9:
+            b.andxor(r, vector_a_select(), x, y);
+            break;
+        case 10:
+            b.shift(r, vector_a_select(), direct(pick(0x001, 0x02F)));
+            break;
+        case 11:
+            b.abs(r, x);
+            break;
+        case 12: {
+            // the element's private index register, from a constant or from
+            // a value of the element's own
+            b.idx(other_index(own), direct(chance(2) ? base_j : base_i),
+                  chance(2) ? direct(0) : block_operand(own));
+            break;
+        }
+        default: {
+            const csp::Operand wide =
+                    csp::Operand::indexed(own, 2 * pick(0, 7));
+            switch (pick(0, 3)) {
+            case 0:
+                b.mac_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
+                break;
+            case 1:
+                b.macw_wide(wide, x, wide);
+                break;
+            case 2:
+                b.interp_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
+                break;
+            default:
+                b.add3_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
+                break;
+            }
+            break;
+        }
+        }
+    }
+
+    // A vector loop on `own`, which must not be the index register of an
+    // enclosing loop.
+    void vector_loop(csp::ProgramBuilder &b,
+                     std::optional<csp::IndexRegister> enclosing = {}) {
+        const csp::IndexRegister own =
+                enclosing ? other_index(*enclosing)
+                          : (chance(2) ? csp::IndexRegister::i
+                                       : csp::IndexRegister::j);
+        const int counts[] = {count_base + 0, count_base + 1, count_base + 2,
+                              count_base + 3, count_nine,     count_nine,
+                              count_zero};
+        const size_t at    = b.open_loop(own, direct(counts[pick(0, 6)]),
+                                         direct(stride_base + 3), true);
+        const int body     = pick(1, 6);
+        for (int n = 0; n < body; ++n) {
+            vector_instruction(b, own);
+        }
+        b.close_loop(at);
+    }
+
     void loop(csp::ProgramBuilder &b, bool may_nest) {
         const bool on_j = chance(2);
         const size_t at = b.open_loop(on_j ? csp::IndexRegister::j
@@ -565,7 +752,10 @@ private:
                                       direct(stride_base + pick(0, 3)));
         const int body = pick(1, 5);
         for (int n = 0; n < body; ++n) {
-            if (may_nest && chance(5)) {
+            if (may_nest && chance(7)) {
+                vector_loop(b, on_j ? csp::IndexRegister::j
+                                    : csp::IndexRegister::i);
+            } else if (may_nest && chance(5)) {
                 // the inner loop steps the other index register
                 const size_t inner = b.open_loop(
                         on_j ? csp::IndexRegister::i : csp::IndexRegister::j,
@@ -617,9 +807,27 @@ int main(int argc, char **argv) {
 
     int failures = 0;
 
-    // The manual's programs, with firmware writes to drive them.
-    {
-        const csp::Program envelope      = csp::assemble(envelope_program);
+    // The manual's programs, with firmware writes to drive them. The
+    // envelope runs as LOOP.i and as LOOP.vi, for voice counts below and
+    // above the 7 elements that hide an instruction's wait.
+    struct EnvelopeCase {
+        const char *name;
+        const char *program;
+        int voices;
+    };
+    const EnvelopeCase envelope_cases[] = {
+            {"envelope", envelope_program, 4},
+            {"envelope vector", envelope_vector_program, 4},
+            {"envelope vector of 1", envelope_vector_program, 1},
+            {"envelope vector of 9", envelope_vector_program, 9},
+            {"envelope vector of 32", envelope_vector_program, 32},
+    };
+    for (const EnvelopeCase &variant : envelope_cases) {
+        std::string source           = variant.program;
+        const std::string count_text = "=#4, =#16";
+        source.replace(source.find(count_text), count_text.size(),
+                       "=#" + std::to_string(variant.voices) + ", =#16");
+        const csp::Program envelope      = csp::assemble(source);
         std::vector<FirmwareWrite> setup = constants_of(envelope);
         setup.push_back({0x060, 0x200}); // ENV_TABLE
         // Rows of the envelope table: target (wide: upper, lower), rate.
@@ -630,13 +838,15 @@ int main(int argc, char **argv) {
         for (const auto &entry : table) {
             setup.push_back({entry[0], entry[1]});
         }
-        for (int voice = 0; voice < 4; ++voice) {
-            setup.push_back(
-                    {0x600 + 16 * voice + 2, voice == 3 ? 8 : 0}); // stage
-            setup.push_back(
-                    {0x600 + 16 * voice + 3, voice < 2 ? 16384 : 0}); // gate
-            setup.push_back(
-                    {0x600 + 16 * voice + 4, 8192 * (voice + 1)}); // velocity
+        for (int voice = 0; voice < variant.voices; ++voice) {
+            const int stage =
+                    voice < 4 ? (voice == 3 ? 8 : 0) : 4 * (voice % 3);
+            const int gate     = voice < 4 ? (voice < 2 ? 16384 : 0)
+                                           : (voice % 2 ? 16384 : 0);
+            const int velocity = 8192 * (voice < 4 ? voice + 1 : voice % 5 + 1);
+            setup.push_back({0x600 + 16 * voice + 2, stage});
+            setup.push_back({0x600 + 16 * voice + 3, gate});
+            setup.push_back({0x600 + 16 * voice + 4, velocity});
         }
         CoSim cosim(context);
         cosim.start(envelope.words, setup);
@@ -647,9 +857,10 @@ int main(int argc, char **argv) {
                 writes.push_back({0x600 + 3, 0}); // voice 0: gate off
             }
             differences =
-                    cosim.pass(writes, "envelope pass " + std::to_string(pass));
+                    cosim.pass(writes, std::string(variant.name) + " pass "
+                                               + std::to_string(pass));
         }
-        std::printf("envelope: %s\n", differences ? "FAIL" : "match");
+        std::printf("%s: %s\n", variant.name, differences ? "FAIL" : "match");
         failures += differences != 0;
     }
     {
@@ -675,6 +886,7 @@ int main(int argc, char **argv) {
         CoSim cosim(context);
         const char *trace = std::getenv("CSP_TRACE_PROGRAM");
         cosim.trace(trace != nullptr && std::atoi(trace) == n);
+        cosim.verbose(std::getenv("CSP_VERBOSE") != nullptr);
         cosim.start(words, generator.setup());
         int differences = 0;
         for (int pass = 0; pass < 4 && differences == 0; ++pass) {
@@ -699,7 +911,9 @@ int main(int argc, char **argv) {
             }
         }
     }
-    std::printf("random programs: %d of %d match\n", matched, programs);
+    std::printf("random programs: %d of %d match (%d of %d passes ran into the "
+                "pass limit)\n",
+                matched, programs, CoSim::passes_at_limit, CoSim::passes_run);
 
     if (failures) {
         std::printf("%d FAILURE(S)\n", failures);

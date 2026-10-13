@@ -118,6 +118,33 @@ module tb_csp_cosim (
         end
     end
 
+    // +rtltrace: every issue, in the format of the model's trace
+    // (CSP_TRACE_PROGRAM), to diff the two.
+    bit trace_issues;
+    initial trace_issues = $test$plusargs("rtltrace");
+    always_ff @(posedge clk) begin
+        if (trace_issues && u_core.writes_result_now) begin
+            if (u_core.rf_write_wide) begin
+                $display("rtl write %0d %0d", int'(u_core.rf_write_address),
+                         $signed(u_core.rf_write_data[35:18]));
+                $display("rtl write %0d %0d", int'(u_core.rf_write_address) + 1,
+                         $signed(u_core.rf_write_data[17:0]));
+            end else begin
+                $display("rtl write %0d %0d", int'(u_core.rf_write_address),
+                         $signed(u_core.rf_write_data[17:0]));
+            end
+        end
+        if (trace_issues && u_core.sink_write_enable) begin
+            $display("rtl sink %0d %0d", int'(u_core.sink_write_address),
+                     $signed(u_core.sink_write_data));
+        end
+        if (trace_issues && u_core.issue && int'(u_core.decode_pc) < program_length) begin
+            $display("rtl pc %0d cycle %0d i %0d j %0d", int'(u_core.decode_pc),
+                     int'(u_core.pass_cycle), int'(u_core.decode_index_i),
+                     int'(u_core.decode_index_j));
+        end
+    end
+
     // ---- the harness's view of the state ---------------------------------------
     export "DPI-C" function cosim_register;
     export "DPI-C" function cosim_sink;

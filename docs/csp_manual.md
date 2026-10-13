@@ -4,9 +4,13 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 **Status: the instruction set is approved and the design decided
-(#184); not yet built.** Details still open are marked *Open*. This
-manual
-describes the Control Signal Processor (CSP) as proposed in
+(#184). The core is built as an in-order pipeline with interlocks
+(#220): it matches the reference model in co-simulation and meets
+timing at 73.728 MHz, but is not yet in the synthesizer. Vector loops
+(`LOOP.vi`, `LOOP.vj`, section 7) are built too, decided on #220, and
+match the model in cycles as well as in results.** Details still open
+are marked *Open*. This
+manual describes the Control Signal Processor (CSP) as proposed in
 [csp_isa.md](csp_isa.md), which gives the reasons behind the design.
 This manual is for whoever writes CSP programs: it says what every
 instruction does, in prose and in pseudo-code, and how to write it in
@@ -31,8 +35,8 @@ the pitch, cutoff and gain values every partial reads. It runs one fixed
 program, from the first instruction to the last, once every two samples
 (48 000 times a second), one instruction after the other.
 One run of the program is a **pass**. There are no
-jumps and no interrupts; the program takes the same number of cycles
-every sample, whatever its data.
+jumps and no interrupts: every pass runs the same instructions, and
+conditions are selects and skips, not branches.
 
 Its instruction set follows the DSP of the E-mu EMU10K1: sixteen
 instructions, each naming up to three operands in a register file, and
@@ -86,7 +90,9 @@ small offset (section 4). The usual use is a pointer to a block plus a
 field: `i` points at the current voice's block and `[i+LEVEL]` is that
 voice's level; `j` points at a row of a table.
 
-`LOOP.i` steps `i` and `LOOP.j` steps `j`; `IDX` sets either.
+`LOOP.i` steps `i` and `LOOP.j` steps `j`; `IDX` sets either. In a
+vector loop (section 7, `LOOP`), every element has its own copy of the
+index register the loop does not step.
 
 ### Accumulator
 
@@ -107,12 +113,13 @@ sets them:
 | `V` (overflow) | the result did not fit and was saturated |
 
 Each instruction's description says whether it sets the flags. `SEL`
-and `SKIP` read them.
+and `SKIP` read them. In a vector loop, every element has its own
+flags.
 
 ### Program counter and loop counter
 
-The program counter steps through the program one instruction per
-cycle. Two loop counters beside it, one for each index register,
+The program counter steps through the program one instruction at a
+time. Two loop counters beside it, one for each index register,
 repeat blocks of instructions for `LOOP.i` and `LOOP.j`. None of them
 is visible to the program except through `LOOP`.
 
@@ -222,21 +229,53 @@ instruction itself. The instruction's description says so.
   starts from its first instruction and runs to its last. Instructions
   issue in order, at most one per cycle, and must issue before cycle
   1472 of the pass.
-- **Waits.** An instruction that reads a register, the accumulator or
-  the flags that an instruction shortly before it writes waits until the
-  value is written: it issues 7 cycles after that instruction at the
-  earliest. The instruction after a `LOOP` or `IDX` issues 3 cycles after
-  it at the earliest. Independent instructions issue one per cycle, so
-  work placed between a result and its use costs nothing. A skipped
-  instruction waits and is waited for like any other. The reference
-  model counts every wait (`tools/csp`, the pass's cycles).
+- **Meaning: results are visible at once.** What a program computes is
+  defined as if each instruction finished before the next one began.
+  An instruction sees the result of the instruction just before it, for
+  registers, the accumulator, the flags and the index registers alike.
+  There are no delay slots: a program means the same whatever its order
+  costs in time.
+- **Cost: waits.** The pipeline cannot deliver that at once, so it
+  makes the later instruction wait, and the waiting is how the meaning
+  above is kept. An instruction's result is written 6 cycles after it
+  issues. An instruction that reads a register, the accumulator or the
+  flags that an instruction shortly before it writes therefore waits
+  until the value is written: it issues 7 cycles after that instruction
+  at the earliest. The instruction after a `LOOP` or `IDX` issues 3
+  cycles after it at the earliest. Independent instructions issue one
+  per cycle, so work placed between a result and its use costs nothing.
+  A skipped instruction waits and is waited for like any other. Waits
+  change only *when* an instruction issues, never *what* it computes.
+- **Data dependencies.** Two instructions are dependent when the later
+  one reads something the earlier one writes (a register, the
+  accumulator, the flags or an index register). The program is written
+  as if each instruction finished before the next began, and the
+  hardware keeps that promise by making the later instruction wait.
+  The wait is a fixed number of cycles, so it can be counted:
 
-- **Fixed timing.** No instruction's timing depends on data. `SKIP`
-  turns instructions into no-operations but they still take their
-  cycles, and `LOOP` repeats a fixed number of times.
-- **Results are visible at once.** An instruction sees the result of
-  the instruction just before it, for registers, the accumulator, the
-  flags and the index registers alike. There are no delay slots.
+  | instruction | needs the result of | earliest issue |
+  |---|---|---|
+  | any, in a register | an instruction that writes that register | 7 cycles after it |
+  | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
+  | any, independent | nothing before it | 1 cycle after the one before |
+
+  Example: `MAC r1, 0, a, b` followed by `MAC r2, 0, r1, c` waits, since
+  the second reads `r1`. `MAC r1, 0, a, b` followed by `MAC r2, 0, d, c`
+  does not. Put independent instructions between a result and its use
+  and the wait is filled with useful work at no cost.
+- **Ordering for speed.** A chain of dependent instructions costs 7
+  cycles a link; the same chain for many voices costs 1 cycle a link if
+  it runs instruction by instruction across the voices. A vector loop
+  (`LOOP.vi`, section 7) does that while the source stays written per
+  voice.
+- **Timing depends on registers, not on values.** `SKIP` turns
+  instructions into no-operations that still take their cycles, and
+  `LOOP` repeats a fixed number of times, so a pass runs the same
+  instructions every time. Its waits depend on which registers they
+  read and write. When an address comes from data (`IDX j, TABLE,
+  [i+STAGE]`), so can a wait, so leave the pass some margin. The
+  reference model counts every wait as the RTL does and reports a pass
+  that runs past cycle 1472 (`tools/csp`, the pass's cycles).
 - **Firmware writes land between passes.** The firmware's register
   writes wait in a queue. When the firmware toggles the swap (the same
   CTRL swap that pages in new partial parameters), the queued writes
@@ -260,6 +299,31 @@ instruction itself. The instruction's description says so.
   the first instruction. A reset clears no registers: constants,
   settings, envelope levels and LFO phases carry on from where they
   were, so loading a program does not silence held notes.
+
+### Vector processing
+
+A scalar loop (`LOOP.i`) runs the whole body for voice 0, then the whole
+body for voice 1. Inside the body most instructions depend on the one
+before, so many of them wait 7 cycles for it. Measured, the envelope's
+9-instruction body costs about 35 cycles a voice, and 32 voices take
+1126 cycles, of which only 26 % issue an instruction.
+
+A vector loop (`LOOP.vi`) turns this inside out, as a vector processor
+does (the Cray-1 chains vector elements through a pipeline the same
+way): it issues instruction 1 for voice 0, voice 1, ... voice 31, one
+per cycle, then instruction 2 for every voice, and so on. Voice 1's
+instruction 1 does not depend on voice 0's instruction 1 (they touch
+different registers), so nothing waits; voice 0's instruction 2 comes
+32 cycles after its instruction 1, long after the 7-cycle wait. The
+same envelope takes 294 cycles, 98 % of them issuing.
+
+This gives the same result as `LOOP.i` **only if voices are
+independent**: no iteration may read a register another iteration
+writes (a shared scratch register would be overwritten by the next
+voice before the first one finished with it, so keep scratch values in
+the voice's own block, `[i+U]`). The reference model reports a shared
+register. With fewer than 7 elements there are not enough independent
+instructions to fill the wait, so the loop stalls as `LOOP.i` would.
 
 ## 6. Assembly language
 
@@ -390,7 +454,8 @@ level by its velocity.
 ### LOOP — repeat a block
 
 **Syntax**
-`LOOP.i length, count, stride` · `LOOP.j length, count, stride`
+`LOOP.i length, count, stride` · `LOOP.j length, count, stride` ·
+`LOOP.vi length, count, stride` · `LOOP.vj length, count, stride`
 
 **Operation**
 ```
@@ -435,9 +500,34 @@ of 16 words each.
         MACW.w  [j+PHASE], ONE, [j+RATE]
 ```
 
-The outer `length` (5) counts every instruction in its body, the inner
+The outer `length` (3) counts every instruction in its body, the inner
 `LOOP` and the inner body included. The inner loop is the last thing in
 the outer body, so both end on the same instruction.
+
+**Vector loops** (`LOOP.vi`, `LOOP.vj`; bit 1 of the `a` field). The body is
+written for one element, exactly as for `LOOP`, but runs instruction by
+instruction: the first body instruction for every element, one per
+cycle, then the second, and so on. The loop's index register steps per
+element as usual. Each element has its **own flags** and its **own copy
+of the other index register**, so a `CMP` → `SEL` pair or an `IDX j` →
+`[j+…]` pair works per element. Element k of an instruction waits only
+for element k of what it reads, so a vector loop of 7 or more elements
+never waits (section 5). After the loop, `i`, `j` and the flags are as
+the last element left them, as after `LOOP`.
+
+The results are those of `LOOP` as long as no iteration reads a register
+another iteration writes; keep per-element values in per-element fields
+(`[i+…]`), not in shared registers. The reference model reports a
+register that iterations share. A vector body may not contain `LOOP`,
+`SKIP`, `ACC` or an `acc` operand, or an `IDX` on the loop's own index
+register; a vector loop can be the inner loop of a `LOOP`. `count` is at
+most 64: a larger count is an error (the model reports it), and the loop
+is skipped, as a count of 0 is, in the model and in the hardware alike.
+After the last element issues, the next instruction issues 3 cycles
+later at the earliest, as after `LOOP`.
+
+Section 8's envelope is a vector loop: 294 cycles per pass for 32
+voices, against 1126 as a `LOOP`.
 
 ---
 
@@ -504,7 +594,9 @@ level one step toward the current segment's target.
 at full precision, writing no register. A sum of several products is a
 chain of `ACC acc, X, Y`, started with `ACC 0, X, Y` and finished by a
 `MAC R, acc, X, Y` that adds the last product and writes the result.
-Rounding happens once, in that last step.
+Rounding happens once, in that last step. Each link of the chain waits
+for the one before (section 5), so a long chain is best interleaved
+with other work.
 
 The R field is not used.
 
@@ -769,8 +861,9 @@ SKIP   nonzero, 2            ; on odd samples, skip the next two
 a `LOOP`, or point `j` at a table row computed from data, such as
 an envelope's segment row from its stage.
 
-The new value is used from the fourth instruction after `IDX` (section
-5).
+The next instruction sees the new value; it issues 3 cycles after `IDX`
+at the earliest (section 5). In a vector loop, `IDX` on the other index
+register sets that element's own copy and holds up nothing else.
 
 **Flags** unchanged.
 
@@ -785,26 +878,34 @@ the voice's current stage.
 Each channel holds an envelope table of three rows of four words, for
 attack, decay and release: the segment's target (wide, so at an even
 offset), its rate, and a spare word. Each voice holds its level (wide),
-stage (0, 4 or 8: the row offset), gate, velocity and output; the
-firmware starts an idle voice in release (8). `j` is set first,
-from the stage left by the previous pass, so it is ready by the time
-`INTERP` uses it; a stage change therefore takes effect one pass
-later, about 21 µs. This program, with a voice and table layout, is
-the envelope test in `tools/csp/test/csp_test.cpp`.
+stage (0, 4 or 8: the row offset), gate, velocity, output and a
+scratch word `U`; the firmware starts an idle voice in release (8). `j`
+is set first, from the stage the previous pass left, so a stage change
+takes effect one pass later, about 21 µs. `SEL` reads the flags of the
+`CMP` just before it.
 
 ```
-        IDX     i, =#VOICES, 0             ; i → voice 0
-        LOOP.i  9, =#32, =#16              ; each voice
-        IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
-        MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
-        CMP     ZERO, [i+LEVEL], FULL      ;   …full scale is reached
-        SEL     [i+STAGE], U, [i+STAGE]    ;   (SEL reads the CMP's flags)
-        ANDXOR  U, 0, [i+STAGE], =#4       ;   release → attack: 0/4/8 → 0/4/0
-        CMP     ZERO, [i+GATE], FULL       ;   gate held?
-        SEL     [i+STAGE], U, =#8          ;     else release
+        IDX     i, =#VOICES, 0              ; i → voice 0
+        LOOP.vi 9, =#32, =#16               ; every voice
+        IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
+        MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
+        CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
+        SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
+        ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
+        CMP     ZERO, [i+GATE], FULL        ;   gate held?
+        SEL     [i+STAGE], [i+U], =#8       ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
+
+As a vector loop this takes 294 cycles per pass for 32 voices: 288
+instructions, one per cycle, and the 3-cycle waits after `IDX` and
+`LOOP`. Written with `LOOP.i` (and `U` as one shared register), the
+same envelope takes 1126 cycles, since each voice's instructions wait
+for each other. Both leave the same values in every register (measured
+on the reference model over 400 passes with changing gates). This
+program, with a voice and table layout, is the envelope test in
+`tools/csp/test/csp_test.cpp`.
 
 ### LFO: sawtooth, square and triangle
 
@@ -838,7 +939,7 @@ voice's own.
 | op | Mnemonic | R | X | Y | Flags |
 |---|---|---|---|---|---|
 | 0 | `NOP` | — | — | — | — |
-| 1 | `LOOP` | immediate: length | register: count | register: stride | — (`a` bit 0: 0 = `i`, 1 = `j`) |
+| 1 | `LOOP` | immediate: length | register: count | register: stride | — (`a` bit 0: 0 = `i`, 1 = `j`; bit 1: vector loop) |
 | 2 | `MACW` | register | register | register | N Z |
 | 3 | `INTERP` | register | register | register | N Z V |
 | 4 | `ACC` | — | register | register | — |

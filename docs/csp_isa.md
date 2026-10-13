@@ -5,12 +5,17 @@ License: CERN-OHL-S v2
 
 **Status: design decided (#184): the instruction set in
 [csp_manual.md](csp_manual.md) is approved, and the decisions are
-listed in section 14. Nothing here is built yet.** The
+listed in section 14. The core is built (#220) as the pipeline of
+section 3: it matches the reference model in co-simulation and meets
+timing, but is not wired into the synthesizer yet. Vector loops
+(section 3) are decided (#220) and built: they match the model in
+cycles as well as in results.** The
 current CSP is described in [dmem_architecture.md](dmem_architecture.md);
 this document proposes what it becomes and why. The instruction set
 itself, every instruction and the assembly language, is specified in
-[csp_manual.md](csp_manual.md). Numbers marked *estimate* are
-worked out on paper, not measured.
+[csp_manual.md](csp_manual.md). Cycle counts and resources here are
+measured (reference model, `make csp-fit`); counts of words and
+instructions are worked out from the layouts.
 
 The Control Signal Processor (CSP) computes every control signal the
 partial pipeline reads: envelopes, LFOs, pitch, cutoff, gain. The aim is
@@ -30,13 +35,16 @@ current sound's settings, its LFOs, pitch bend, CCs). A **voice** is one
 sounding note on a channel. A **partial** is one oscillator + filter +
 gain slot in the partial pipeline; a voice has 8.
 
-## 1. Where it stands
+## 1. Where it stood
 
-Measured on main (7c959b4):
+What this document started from: the **old CSP** on main (7c959b4),
+which the new core replaces. Its figures below are the old ones, not
+those of the new core (a program of up to 1472 instructions per pass,
+section 2).
 
-- **Program:** 256 instructions, one per cycle, then a 5-cycle drain:
-  261 of the 768 cycles in a sample (73.728 MHz / 96 kHz). The firmware
-  uses 99 entries.
+- **Program (old):** 256 instructions, one per cycle, then a 5-cycle
+  drain: 261 of the 768 cycles in a sample (73.728 MHz / 96 kHz). The
+  firmware uses 99 entries.
 - **Opcodes:** a 4-bit enable mask (source, state, multiply, accumulate)
   giving three instructions: `LFO` (an `osc_core` on a phase in
   `state_mem`), `ADSR` (`adsr.sv`: the RC recurrence on an ALU54D and a
@@ -67,8 +75,11 @@ add", and the per-partial immediates.
   instruction after the other, no branches. Instructions issue in the
   first **1472 cycles**, at most one per cycle (section 3).
   Conditional work uses selects and `SKIP` (a skipped instruction still
-  takes its cycle), so the timing never depends on the data. Loops
-  (`LOOP`) have a fixed count, so they keep that property.
+  takes its cycle), and loops (`LOOP`) have a fixed count, so every pass
+  runs the same instructions. Their waits (section 3) depend on which
+  registers they touch; where an address comes from data (`IDX`), so can
+  a wait. The reference model counts them exactly and checks the pass
+  limit every pass.
 - **Slower work alternates.** Work that runs slower still (LFOs at a
   quarter of 96 kHz) cannot come from skipping, since skipped
   instructions still take their cycles; a loop covers half the channels
@@ -90,7 +101,8 @@ add", and the per-partial immediates.
   constants, settings and running state survive a program load.
 - **Results are visible at once:** an instruction reads the newest value
   of every register, including one written by the instruction just
-  before it (forwarding, as today).
+  before it. The pipeline's interlocks make it wait for that value
+  (section 3); there are no delay slots.
 - **Published per pass:** the partial pipeline reads a separate,
   ping-pong-paged **sink area** (section 6), swapped at the end of each
   pass, so it always sees one complete pass. The CSP's own registers are
@@ -115,13 +127,50 @@ value still in the pipeline waits in decode until it has been written.
 A dependent instruction issues 7 cycles after the one it depends on; the
 instruction after `LOOP` or `IDX` issues 3 cycles after it
 (`csp::result_latency`, `csp::barrier_latency`; the model counts both).
-The first try, a two-cycle machine without a pipeline, closed at
-32.48 MHz.
+Independent instructions issue every cycle. There is no forwarding: it
+would shorten the 7 cycles but lengthen the paths, and vector loops
+(below) hide the wait instead.
 
-- **One multiply-add unit**, generalising the one `adsr.sv` already
-  instantiates (ALU54D then MULTALU36X18). `MAC`, `INTERP` and the
-  envelope recurrence are all `A + X × (Y − A)` or `A + X × Y` on it.
-  The CSP's separate 18 × 18 multiply retires.
+**Measured** (`make csp-fit`, the CSP alone on the GW2A, seed 1): 98.15
+MHz against the 73.728 MHz system clock; LUT4 5319, DFF 1697, BSRAM 10,
+one MULTALU36X18. Without vector loops it was 91 MHz, with 3827 LUT4
+and 1522 DFF. The slowest path is the next-pc logic (the loop records,
+into the instruction memory's address); comparing each loop's last pc,
+not the pc after it, keeps the increment out of the comparison. The
+first try, a two-cycle machine without a pipeline (each instruction
+finished before the next), closed at 32.48 MHz.
+
+**Vector loops** (decided on #220, built). A chain of
+dependent instructions costs 7 cycles a link, but the same chain for
+many voices need not wait at all: run each instruction for every voice
+before the next, and voice k's input was written long before voice k
+needs it. That is a vector processor in the Cray sense, one element
+per cycle through a deep pipeline (Asanović, *Vector
+Microprocessors*, Berkeley 1998; the line continues in Hwacha and the
+RISC-V V extension). `LOOP.vi` / `LOOP.vj` (`a` bit 1 of `LOOP`) run
+their body that way. The body is still written per element, and each
+element keeps its own flags and its own copy of the index register the
+loop does not step, so `CMP` → `SEL` and `IDX j` → `[j+…]` work per
+element. With 7 or more elements nothing waits. The hardware cost
+is an element counter in the sequencer, two small LUT RAMs for the
+per-element flags (3 bits) and index register (12 bits), up to 64
+elements, and the run and element number carried by every instruction
+in flight, for the hazard check (a flag reader waits for its own
+element's flag setter; an operand indexed by the private register
+waits while that element's `IDX` is in R or E1). The body runs
+instruction by instruction, so an element has written its flags or
+index register exactly when an earlier body instruction that writes
+it has issued for every element: two bits per loop say so, and until
+then the elements see the values the loop was entered with. Measured
+on the model and the RTL alike, the envelope of section 8 for 32 voices
+takes 294 cycles per pass as a vector loop and 1126 as a `LOOP`. About
+1500 LUT4 more than the scalar core (section 3 above).
+
+- **One multiply-add unit**: one MULTALU36X18 computes `a × b + c`;
+  `INTERP`'s `Y − A` and `ADD3`'s `A + Y` are fabric adders in E1, and
+  the saturations are fabric logic in E2 and E4. `MAC`, `INTERP` and
+  the envelope recurrence are all `A + X × (Y − A)` or `A + X × Y` on
+  it. The CSP's separate 18 × 18 multiply retires.
 - **Accumulator:** 54 bits inside the DSP macro (Q8.46: a Q4.32 × Q4.14
   product). 72 bits is possible by chaining macros if a use for
   it turns up.
@@ -130,8 +179,10 @@ The first try, a two-cycle machine without a pipeline, closed at
 - **Index registers `i` and `j`** and a **loop counter** beside the PC
   (section 4). An indexed operand's address is formed in decode.
 - **PC, loop counter, instruction register, decoder, index registers,
-  register file, ALU, flags, accumulator** are separate, named units in
-  the RTL, each with its own bench.
+  register file, ALU, flags, accumulator** become separate, named units
+  in the RTL, each with its own bench (#220, next). Today the register
+  file, instruction memory and write queue are separate units with
+  benches; the rest is one module, `rtl/csp/csp_core.sv`.
 
 ## 4. Instruction format
 
@@ -158,8 +209,8 @@ level)`, `phase = phase + rate`.
 | `1 0 oooooooo` | `i` + offset (0–255) |
 | `1 1 oooooooo` | `j` + offset (0–255) |
 
-The **index registers `i` and `j`** hold full 10-bit addresses, so an
-indexed operand reaches the whole register file. They work like a
+The **index registers `i` and `j`** hold full 12-bit addresses, so an
+indexed operand reaches the whole register file and the sink area. They work like a
 pointer to a record plus a field offset: `i` points at a voice's block
 and the offset picks `level`, `gate` and so on; `j` points at a row of
 a channel table, such as the current envelope segment's (target, rate)
@@ -251,7 +302,7 @@ Sixteen, modelled on the EMU10K1's, each described in full in
 | op | Mnemonic | Operation |
 |---|---|---|
 | 0 | `NOP` | nothing (all-zero memory is NOPs) |
-| 1 | `LOOP` | repeat the next R instructions X times, stepping `i` or `j` (`a` bit 0) by Y |
+| 1 | `LOOP` | repeat the next R instructions X times, stepping `i` or `j` (`a` bit 0) by Y; `a` bit 1: a vector loop |
 | 2 | `MACW` | R = A + X × Y, wrapping (phase accumulators) |
 | 3 | `INTERP` | R = A + X × (Y − A) (RC step, crossfade) |
 | 4 | `ACC` | acc = A + X × Y (sums of products) |
@@ -277,6 +328,9 @@ products only, the firmware turns dB settings into linear coefficients,
 and pitch and cutoff stay in octaves until the PAP's tables.
 
 `LOOP.i` and `LOOP.j` nest one level, each with its own loop counter.
+A vector loop (`LOOP.vi`, `LOOP.vj`) runs its body instruction by
+instruction across its elements (section 3); it holds no loop, `SKIP`,
+`ACC` or `acc`, and can be the inner loop of a `LOOP`.
 
 ## 8. Envelopes and LFOs as instructions
 
@@ -287,23 +341,24 @@ four words: target (wide), rate, spare. Each voice block holds `level`
 `velocity` and the output. One loop serves every voice:
 
 ```
-IDX     i, =#VOICES, 0             ; i → voice 0
-LOOP.i  9, =#32, =#16              ; each voice
-IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
-MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
-CMP     ZERO, [i+LEVEL], FULL      ;   …full scale is reached
-SEL     [i+STAGE], U, [i+STAGE]    ;   (SEL reads the CMP's flags)
-ANDXOR  U, 0, [i+STAGE], =#4       ;   release → attack: 0/4/8 → 0/4/0
-CMP     ZERO, [i+GATE], FULL       ;   gate held?
-SEL     [i+STAGE], U, =#8          ;     else release
+IDX     i, =#VOICES, 0              ; i → voice 0
+LOOP.vi 9, =#32, =#16               ; every voice
+IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
+MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
+CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
+SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
+ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
+CMP     ZERO, [i+GATE], FULL        ;   gate held?
+SEL     [i+STAGE], [i+U], =#8       ;     else release
 INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
 MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```
 
-`j` is set first, from the stage the previous pass left, because an
-index register takes effect three instructions after `IDX` (delay
-slots, as some processors have after a jump); a stage change therefore
-lands one pass (~21 µs) later.
+`j` is set first, from the stage the previous pass left, so a stage
+change lands one pass (~21 µs) later. `U` is a scratch word in each
+voice's block: in a vector loop, per-voice values live in per-voice
+fields. Measured on the reference model: 294 cycles per pass for 32
+voices; 1126 written with `LOOP.i`.
 
 Assembly syntax as in [csp_manual.md](csp_manual.md) section 6;
 `SEL` reads the flags of the latest flag-setting instruction, so `MAX`
@@ -320,25 +375,26 @@ phase, then the shape is scaled by the depth. Saw: one `MAC`; square:
 about 4 instructions. **2–5 instructions per LFO** (examples in
 [csp_manual.md](csp_manual.md) section 8).
 
-## 9. Budget (*estimate*)
+## 9. Budget
 
-Instructions per pass, sixteen channels, LFOs at a quarter of 96 kHz
-(alternating halves of the channels):
+A pass has **1472 issue cycles** (section 2). What a program costs is
+measured, not estimated: the reference model counts every cycle as the
+RTL does, and `csp sim program.s` prints it per pass.
 
-| Work | Instructions |
+Measured so far:
+
+| Program | Cycles per pass |
 |---|---|
-| 32 voices × both envelopes (17) | 544 |
-| voice pitch, cutoff, gain (32 voices × 3) | 96 |
-| channel arithmetic (bend, CCs, tracking: ~16 per channel) | 256 |
-| 2 LFOs per channel (~5 each), half the channels per pass | 80 |
-| **total** | **~976 of 1472** |
+| envelope, 32 voices, `LOOP.vi` (section 8) | 294 |
+| the same, `LOOP.i` | 1126 |
 
-That leaves ~500 instructions for drift (#217), noise (#216) and what
-comes next. Costs of 48 kHz: one more instruction-memory BSRAM, the
-firmware's envelope rates computed for 48 kHz, and the sinks stepping
-every second sample. If those steps are audible on fast gain changes,
-the partial pipeline can interpolate the gain sinks between passes.
-`LOOP` saves instruction memory, not cycles.
+The rest (both envelopes per voice, voice pitch, cutoff and gain,
+channel arithmetic, LFOs, drift #217, noise #216) is measured as its
+programs are written (#221). Costs of 48 kHz: one more
+instruction-memory BSRAM, the firmware's envelope rates computed for
+48 kHz, and the sinks stepping every second sample. If those steps are
+audible on fast gain changes, the partial pipeline can interpolate the
+gain sinks between passes.
 
 ## 10. BSRAM
 
@@ -358,7 +414,9 @@ the partial pipeline can interpolate the gain sinks between passes.
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 27 to 29 blocks, against 33 today, before #217. The CSP
+**Projected:** 27 to 29 blocks, against 33 today, before #217. The
+new CSP alone measures 10 (register file 6, instruction memory 3, write
+queue 1), as planned. The CSP
 grows to a 2048-word register file, a 1024-word sink area and 1472
 instructions on fewer BSRAM than today, paid for by `store_ram`, the
 second instruction page, the partials' immediates and their second
@@ -367,10 +425,10 @@ page, and the sink area's two read ports per page.
 ## 11. DSP blocks
 
 On main, about 40 of 48 18 × 18 equivalents are used (6 × MULT36X36 = 24,
-12 × MULT18X18, 1 × MULTALU36X18 = 2, 4 × MULT9X9 = 2). The CSP's one
-multiply-add unit reuses the ADSR's ALU54D + MULTALU36X18 and retires the
-CSP's MULT18X18, so the CSP's share does not grow. A second 36-bit
-datapath anywhere would not fit.
+12 × MULT18X18, 1 × MULTALU36X18 = 2, 4 × MULT9X9 = 2). The new CSP
+uses one MULTALU36X18 (measured, `make csp-fit`); once `adsr.sv` and the
+old CSP's MULT18X18 retire, the CSP's share does not grow. A second
+36-bit datapath anywhere would not fit.
 
 ## 12. Testbench
 
@@ -385,10 +443,14 @@ small program. The new CSP gets:
   generate programs as machine code and the assembler uses as its back
   end. Firmware programs are therefore built by the same code the host
   tests run.
-- **An instruction-level bench**: per opcode, directed cases (saturation,
-  wrap, flags, forwarding back-to-back, the write queue and the swap); then random
-  programs and random firmware writes, with the RTL's register file and
-  sink area compared against the model every pass.
+- **An instruction-level bench** (`rtl/tb/csp_cosim`, `make
+  sim-csp-cosim`): the RTL Verilated beside the model, running the
+  manual's programs and random programs with random firmware writes;
+  after every pass it compares every register, the published sinks,
+  `i`, `j`, the accumulator, the flags and the cycle the program's last
+  instruction issued in. Directed cases per opcode (saturation, wrap,
+  flags, the interlocks, the write queue and the swap) are in the
+  model's tests.
 - **Program benches**: the envelope and LFO sequences against the
   current `adsr.sv` and `osc_core` output, sample for sample, before the
   fixed-function units retire.
@@ -424,10 +486,12 @@ Decided on #184:
 | 6 | `store_ram` | removed |
 | 7 | write window | 48 writes per pass |
 | 8 | when a new `i`/`j` takes effect | at once, for the next instruction (#220; no delay slots) |
+| — | pipeline | in order, full interlocks, no forwarding (#220) |
 | 9 | rounding | truncate |
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
 | 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |
 | — | nested loops | `LOOP.i` / `LOOP.j` (`a` bit 0), nesting one level |
+| — | vector loops | `LOOP.vi` / `LOOP.vj` (`a` bit 1), up to 64 elements; a larger count skips the loop (#220) |
 | 12 | LFOs | 2 per channel at 24 kHz |
 | — | pass rate | 48 kHz |
 | — | firmware writes | queued, applied on the swap |

@@ -19,6 +19,8 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -123,6 +125,17 @@ private:
         int64_t accumulator_ready = 0;
         int64_t flags_ready       = 0;
         int64_t front_ready       = 0;
+        int64_t index_ready       = 0; // a vector element's own index register
+    };
+
+    // A vector loop in progress: which element is issuing, the index
+    // register every element has its own copy of, and who wrote and read
+    // which register, to catch iterations that depend on each other.
+    struct VectorRun {
+        IndexRegister private_index;
+        int element = 0;
+        std::map<int, int> writer; // register → element, -1 if several
+        std::map<int, std::set<int>> readers; // register → elements
     };
 
     // Execution state for one pass.
@@ -133,6 +146,8 @@ private:
         std::vector<Loop> loops;
         int skip = 0;
         std::set<int> sinks_written;
+        std::optional<VectorRun> vector;
+        bool stopped = false; // the pass limit was reached
         PassReport report;
     };
 
@@ -143,6 +158,10 @@ private:
     void write_wide_operand(uint16_t field, int64_t raw, PassState &state);
     int64_t issue(const Instruction &instruction, PassState &state) const;
     void execute(const Instruction &instruction, PassState &state);
+    void run_vector(const Instruction &loop, PassState &state);
+    void note_access(int address, bool write, PassState &state) const;
+    bool issue_or_stop(const Instruction &instruction, size_t pc,
+                       PassState &state);
     void end_loops(PassState &state);
     void set_flags(int64_t result, bool overflow);
     int apply_window(int limit);
