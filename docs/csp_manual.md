@@ -228,19 +228,23 @@ instruction itself. The instruction's description says so.
   starts from its first instruction and runs to its last. Instructions
   issue in order, at most one per cycle, and must issue before cycle
   1472 of the pass.
-- **Results are visible at once.** An instruction sees the result of
-  the instruction just before it, for registers, the accumulator, the
-  flags and the index registers alike. There are no delay slots: a
-  program means the same whatever its order costs in time.
-- **Waits.** The CSP is a pipeline: an instruction's result is written
-  6 cycles after it issues. An instruction that reads a register, the
-  accumulator or the flags that an instruction shortly before it writes
-  therefore waits until the value is written: it issues 7 cycles after
-  that instruction at the earliest. The instruction after a `LOOP` or
-  `IDX` issues 3 cycles after it at the earliest. Independent
-  instructions issue one per cycle, so work placed between a result and
-  its use costs nothing. A skipped instruction waits and is waited for
-  like any other.
+- **Meaning: results are visible at once.** What a program computes is
+  defined as if each instruction finished before the next one began.
+  An instruction sees the result of the instruction just before it, for
+  registers, the accumulator, the flags and the index registers alike.
+  There are no delay slots: a program means the same whatever its order
+  costs in time.
+- **Cost: waits.** The pipeline cannot deliver that at once, so it
+  makes the later instruction wait, and the waiting is how the meaning
+  above is kept. An instruction's result is written 6 cycles after it
+  issues. An instruction that reads a register, the accumulator or the
+  flags that an instruction shortly before it writes therefore waits
+  until the value is written: it issues 7 cycles after that instruction
+  at the earliest. The instruction after a `LOOP` or `IDX` issues 3
+  cycles after it at the earliest. Independent instructions issue one
+  per cycle, so work placed between a result and its use costs nothing.
+  A skipped instruction waits and is waited for like any other. Waits
+  change only *when* an instruction issues, never *what* it computes.
 - **Data dependencies.** Two instructions are dependent when the later
   one reads something the earlier one writes (a register, the
   accumulator, the flags or an index register). The program is written
