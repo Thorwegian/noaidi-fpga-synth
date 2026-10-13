@@ -241,6 +241,23 @@ instruction itself. The instruction's description says so.
   instructions issue one per cycle, so work placed between a result and
   its use costs nothing. A skipped instruction waits and is waited for
   like any other.
+- **Data dependencies.** Two instructions are dependent when the later
+  one reads something the earlier one writes (a register, the
+  accumulator, the flags or an index register). The program is written
+  as if each instruction finished before the next began, and the
+  hardware keeps that promise by making the later instruction wait.
+  The wait is a fixed number of cycles, so it can be counted:
+
+  | instruction | needs the result of | earliest issue |
+  |---|---|---|
+  | any, in a register | an instruction that writes that register | 7 cycles after it |
+  | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
+  | any, independent | nothing before it | 1 cycle after the one before |
+
+  Example: `MAC r1, 0, a, b` followed by `MAC r2, 0, r1, c` waits, since
+  the second reads `r1`. `MAC r1, 0, a, b` followed by `MAC r2, 0, d, c`
+  does not. Put independent instructions between a result and its use
+  and the wait is filled with useful work at no cost.
 - **Ordering for speed.** A chain of dependent instructions costs 7
   cycles a link; the same chain for many voices costs 1 cycle a link if
   it runs instruction by instruction across the voices. A vector loop
@@ -277,6 +294,31 @@ instruction itself. The instruction's description says so.
   the first instruction. A reset clears no registers: constants,
   settings, envelope levels and LFO phases carry on from where they
   were, so loading a program does not silence held notes.
+
+### Vector processing
+
+A scalar loop (`LOOP.i`) runs the whole body for voice 0, then the whole
+body for voice 1. Inside the body most instructions depend on the one
+before, so many of them wait 7 cycles for it. Measured, the envelope's
+9-instruction body costs about 35 cycles a voice, and 32 voices take
+1126 cycles, of which only 26 % issue an instruction.
+
+A vector loop (`LOOP.vi`) turns this inside out, as a vector processor
+does (the Cray-1 chains vector elements through a pipeline the same
+way): it issues instruction 1 for voice 0, voice 1, ... voice 31, one
+per cycle, then instruction 2 for every voice, and so on. Voice 1's
+instruction 1 does not depend on voice 0's instruction 1 (they touch
+different registers), so nothing waits; voice 0's instruction 2 comes
+32 cycles after its instruction 1, long after the 7-cycle wait. The
+same envelope takes 294 cycles, 98 % of them issuing.
+
+This gives the same result as `LOOP.i` **only if voices are
+independent**: no iteration may read a register another iteration
+writes (a shared scratch register would be overwritten by the next
+voice before the first one finished with it, so keep scratch values in
+the voice's own block, `[i+U]`). The reference model reports a shared
+register. With fewer than 7 elements there are not enough independent
+instructions to fill the wait, so the loop stalls as `LOOP.i` would.
 
 ## 6. Assembly language
 

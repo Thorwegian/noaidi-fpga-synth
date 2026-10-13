@@ -35,13 +35,16 @@ current sound's settings, its LFOs, pitch bend, CCs). A **voice** is one
 sounding note on a channel. A **partial** is one oscillator + filter +
 gain slot in the partial pipeline; a voice has 8.
 
-## 1. Where it stands
+## 1. Where it stood
 
-Measured on main (7c959b4):
+What this document started from: the **old CSP** on main (7c959b4),
+which the new core replaces. Its figures below are the old ones, not
+those of the new core (a program of up to 1472 instructions per pass,
+section 2).
 
-- **Program:** 256 instructions, one per cycle, then a 5-cycle drain:
-  261 of the 768 cycles in a sample (73.728 MHz / 96 kHz). The firmware
-  uses 99 entries.
+- **Program (old):** 256 instructions, one per cycle, then a 5-cycle
+  drain: 261 of the 768 cycles in a sample (73.728 MHz / 96 kHz). The
+  firmware uses 99 entries.
 - **Opcodes:** a 4-bit enable mask (source, state, multiply, accumulate)
   giving three instructions: `LFO` (an `osc_core` on a phase in
   `state_mem`), `ADSR` (`adsr.sv`: the RC recurrence on an ALU54D and a
