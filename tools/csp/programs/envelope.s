@@ -7,18 +7,19 @@
 ; channel keeps an envelope table at the address its voices' CHANNEL field
 ; holds: three rows of four words for the amp envelope's attack (+0), decay
 ; (+4) and release (+8), and three for the mod envelope's (+16, +20, +24). A
-; row is the segment's target (wide: 1.3 for the attack, the sustain level,
-; 0), its rate and its shift. A segment moves the level toward its target
-; by the fraction RATE × 2^SHIFT / 16384 of the distance left each pass: an
-; RC charge, as adsr.sv at 96 kHz (the firmware converts, app/main/csp/
-; envelope.hpp). The shift is what reaches slow segments: a rate is a Q4.14
-; word, whose smallest step is 2^-14, a time constant of 0.34 s at 48 kHz, and
-; a shift of -10 brings it down to adsr.sv's 2^-24.
+; row is two wide registers: the segment's target (1.3 for the attack, the
+; sustain level, 0) and its rate. A segment moves the level toward its
+; target by the fraction RATE of the distance left each pass: an RC charge,
+; as adsr.sv at 96 kHz (the firmware converts, app/main/csp/envelope.hpp).
+; The rate is wide, Q4.32, so it can be as slow as adsr.sv's 2^-24: a
+; word's smallest step would be 2^-14, a time constant of 0.34 s at 48 kHz.
+; The distance is a word: the upper words of target and level, subtracted.
+; The level stops within a word's step (2^-14) of its target.
 ;
 ; A voice holds, for each envelope, its level (wide) and stage (the row's
 ; offset in the table: 0, 4 or 8, and 16, 20 or 24), and the voice's gate,
-; velocity, the outputs, and scratch fields (U per envelope, DELTA), per
-; voice because a vector loop's iterations must not share registers. The
+; velocity, the outputs, and scratch fields (U per envelope, D), per voice
+; because a vector loop's iterations must not share registers. The
 ; firmware starts an idle voice in release (8 and 24), and sets its levels
 ; to 0 at a note-on.
 ;
@@ -43,18 +44,16 @@
         .field LEVEL_M, 2       ; 8
         .field STAGE_M, 1       ; 10
         .field OUT_A, 1         ; 11
-        .field DELTA, 2         ; 12
+        .field D, 1             ; 12
         .field OUT_M, 1         ; 14
         .end
         .block SEGMENT
         .field TARGET, 2
-        .field RATE, 1
-        .field SHIFT, 1
+        .field RATE, 2
         .end
         .equ   VOICES, 0x600
         .const FULL, 1.0
         .const ONE, 1.0
-        .const MINUS_ONE, -1.0
 
         IDX     i, =#VOICES, 0              ; i → voice 0
         LOOP.vi done, =#8, =#16             ; every voice
@@ -71,16 +70,12 @@
         SEL     [i+STAGE_M], [i+U_M], =#24
 
         IDX     j, [i+CHANNEL], [i+STAGE_A] ;   the amp envelope: j → its row
-        INTERP.w [i+DELTA], ONE, [j+TARGET]     ; DELTA ← target
-        MAC.w   [i+DELTA], MINUS_ONE, [i+LEVEL_A]   ; DELTA ← target − level
-        SHIFT.w [i+DELTA], [j+SHIFT]        ;   DELTA ← DELTA × 2^SHIFT
-        MAC.w   [i+LEVEL_A], [j+RATE], [i+DELTA]    ; level ← level + rate × DELTA
+        CMP     [i+D], [j+TARGET], [i+LEVEL_A]  ; D ← target − level
+        MAC.w   [i+LEVEL_A], [i+D], [j+RATE]    ; level ← level + D × rate
         MAC     [i+OUT_A], 0, [i+LEVEL_A], [i+VELOCITY]
 
         IDX     j, [i+CHANNEL], [i+STAGE_M] ;   the mod envelope
-        INTERP.w [i+DELTA], ONE, [j+TARGET]
-        MAC.w   [i+DELTA], MINUS_ONE, [i+LEVEL_M]
-        SHIFT.w [i+DELTA], [j+SHIFT]
-        MAC.w   [i+LEVEL_M], [j+RATE], [i+DELTA]
+        CMP     [i+D], [j+TARGET], [i+LEVEL_M]
+        MAC.w   [i+LEVEL_M], [i+D], [j+RATE]
         MAC     [i+OUT_M], 0, [i+LEVEL_M], ONE
 done:

@@ -832,31 +832,26 @@ void test_lfo() {
 
 } // namespace
 
-// An envelope coefficient (adsr.sv's k, per 96 kHz sample) as a rate and
-// shift for a 48 kHz pass: the same fraction of the distance in two samples.
+// An envelope coefficient (adsr.sv's k, per 96 kHz sample) as a wide rate for a
+// 48 kHz pass: the same fraction of the distance in two samples.
 void test_envelope_rates() {
     const uint32_t coefficients[] = {1,    7,     100,   250,    1000,
                                      4096, 16384, 65535, 131071, 262143};
     for (const uint32_t k : coefficients) {
-        const csp::EnvelopeRate rate = csp::envelope_rate(k);
-        const double sample          = static_cast<double>(k) / (1 << 24);
-        const double want            = 1.0 - (1.0 - sample) * (1.0 - sample);
-        const double got             = csp::envelope_fraction(rate);
-        const std::string name       = "k=" + std::to_string(k);
-        check(rate.rate >= 0 && rate.rate <= 131071, name + ": rate in range");
-        check(rate.shift >= -16 && rate.shift <= 0, name + ": shift in range");
-        // The rate has 17 bits unless the shift runs out (k below ~16)
-        const double tolerance = k >= 16 ? 2e-5 : 0.1;
-        check(std::fabs(got / want - 1.0) <= tolerance,
+        const double sample = static_cast<double>(k) / (1 << 24);
+        const double want   = 1.0 - (1.0 - sample) * (1.0 - sample);
+        const double got    = static_cast<double>(csp::envelope_rate(k))
+                           / static_cast<double>(int64_t{1} << 32);
+        const std::string name = "k=" + std::to_string(k);
+        // within a unit of the rate's last place, 2^-32
+        check(std::fabs(got - want)
+                      <= 1.0 / static_cast<double>(int64_t{1} << 32),
               name + ": fraction " + std::to_string(got) + ", want "
                       + std::to_string(want));
+        check(csp::envelope_rate(k) < (int64_t{1} << 35),
+              name + ": a rate below 8");
     }
-    check_equal(csp::envelope_rate(0).rate, 0, "k=0: no movement");
-    // Slow enough for a ten-second release (a time constant of ~1.4 s,
-    // 70,000 passes): the INTERP rate alone could not say it.
-    const csp::EnvelopeRate slow = csp::envelope_rate(200);
-    check(csp::envelope_fraction(slow) < 1.0 / 16384.0,
-          "k=200 is below INTERP's smallest rate");
+    check_equal(csp::envelope_rate(0), 0, "k=0: no movement");
 }
 
 // An LFO's old increment as a RATE: the same cycles a second.

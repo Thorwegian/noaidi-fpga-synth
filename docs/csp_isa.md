@@ -337,56 +337,61 @@ instruction across its elements (section 3); it holds no loop, `SKIP`,
 
 **Envelope** (per voice, the RC recurrence of `adsr.sv`). Each channel
 keeps an envelope table for the amp and mod envelopes' attack, decay and
-release, three rows of four words each: target (wide), rate, shift. Each
-voice block holds, for each envelope, `level` (wide) and `stage` (the
-row's offset in the table), and the voice's `gate` and `velocity`. One
-loop serves every voice, both envelopes of each
+release, three rows of four words each: the target (wide) and the rate
+(wide). Each voice block holds, for each envelope, `level` (wide) and
+`stage` (the row's offset in the table), and the voice's `gate` and
+`velocity`. One loop serves every voice, both envelopes of each
 ([tools/csp/programs/envelope.s](../tools/csp/programs/envelope.s)):
 
 ```
 LOOP.vi done, =#32, =#16                    ; every voice
   ...                                       ;   both stages: 11 instructions
   IDX     j, [i+CHANNEL], [i+STAGE_A]       ;   the amp envelope: j → its row
-  INTERP.w [i+DELTA], ONE, [j+TARGET]       ;     DELTA ← target
-  MAC.w   [i+DELTA], MINUS_ONE, [i+LEVEL_A] ;     DELTA ← target − level
-  SHIFT.w [i+DELTA], [j+SHIFT]              ;     DELTA ← DELTA × 2^SHIFT
-  MAC.w   [i+LEVEL_A], [j+RATE], [i+DELTA]  ;     level ← level + rate × DELTA
+  CMP     [i+D], [j+TARGET], [i+LEVEL_A]    ;     D ← target − level (a word)
+  MAC.w   [i+LEVEL_A], [i+D], [j+RATE]      ;     level ← level + D × rate
   MAC     [i+OUT_A], 0, [i+LEVEL_A], [i+VELOCITY]
   ...                                       ;   the same for the mod envelope
 ```
 
-**A segment's step needs four instructions, not `INTERP`'s one,** because
-`INTERP`'s rate is a Q4.14 word: its smallest step is 2⁻¹⁴, a time constant
-of 16384 passes (0.34 s at 48 kHz), and the next rate up is twice as fast.
-`adsr.sv` takes 18-bit rates scaled by 2⁻²⁴, time constants up to ~170 s,
-and a release of several seconds is a time constant of about a second. The
-shift (the row's fourth word) scales the *difference* instead: the step is
-`RATE × 2^SHIFT / 16384` of the distance left, which reaches 2⁻²⁴ with a
-shift of −10, and the firmware picks rate and shift together
-(`csp::envelope_rate`, `app/main/csp/envelope.hpp`, from `adsr.sv`'s
-coefficient). `INTERP` stays the right instruction where the rate is not
-slow: one pole in one instruction.
+**A segment's step is two instructions: the distance as a word, the rate
+as a wide register.** `INTERP`'s one-instruction form, `level + rate ×
+(target − level)`, takes its rate as a Q4.14 word, whose smallest step is
+2⁻¹⁴: a time constant of 16384 passes (0.34 s at 48 kHz), the next rate
+up twice as fast. `adsr.sv` takes 18-bit rates scaled by 2⁻²⁴, time
+constants up to ~170 s, and a release of several seconds is a time
+constant of about a second. The multiply-add unit takes a word and a wide
+operand, so the rate is the wide one (Q4.32, down to 2⁻³²: this is why a
+row has four words) and the distance is the word. The firmware's side is
+`csp::envelope_rate` (`app/main/csp/envelope.hpp`): `adsr.sv`'s
+coefficient as the wide rate, 1 − (1 − k)² for two samples to a pass.
+**The price** is that the distance, the upper words subtracted, has a
+word's resolution: the level settles half a word's step (3×10⁻⁵) above its
+target, which is 3 % of a −60 dB level (0.27 dB) and 0.03 dB at −40 dB.
+(A first version scaled the difference with a `SHIFT` and kept the wide
+resolution, in four instructions: within 0.04 dB down to −60 dB, 4
+instructions more a voice.) `INTERP` stays the right instruction where the
+rate is not slow: one pole in one instruction.
 
 The stage is worked out first, from the gate and the level the previous
 pass left, and `j` is set from it, so a stage change takes effect in the
 same pass, as in `adsr.sv`. `SEL` reads the flags of the latest flag-setting
 instruction, so each stage's `MAX` comes before its `CMP` (the reference
 model's tests caught the other order). The gate is compared once for the
-two envelopes. `U` and `DELTA` are scratch words in each voice's block: in a
-vector loop, per-voice values live in per-voice fields. That is **23
+two envelopes. `U` and `D` are scratch words in each voice's block: in a
+vector loop, per-voice values live in per-voice fields. That is **19
 instructions per voice**, no envelope-specific opcode: the stage is data, and
 indirect addressing picks the segment. Measured on the reference model:
-**742 cycles per pass for 32 voices**; one envelope of the same shape takes
-390; written with `LOOP.i` it does not fit a pass (1466 cycles for one
-envelope, each voice's instructions waiting for each other).
+**614 cycles per pass for 32 voices**; written with `LOOP.i` it does not
+fit a pass (each voice's instructions waiting for each other).
 
 **Measured against `adsr.sv`** (`make sim-csp-bench`, section 12): the program
-stays within 0.04 dB of the exact RC curve above −60 dB for rates from the
-fastest `adsr.sv` takes to ones that barely move, and within 0.06 dB of the
-unit itself except where the unit is off: `adsr.sv` truncates each step to
-a whole number of 2⁻²² units, which for its slowest rates is up to 8 % of the
-step (1.2 dB after 0.27 s). The attack overshoots full scale by up to one
-step (0.4 % at `adsr.sv`'s fastest rate) before the stage flips.
+stays within 0.04 dB of the exact RC curve above −40 dB and 0.27 dB above
+−60 dB, for rates from the fastest `adsr.sv` takes to ones that barely
+move; and within 0.07 dB of the unit above −40 dB, except where the unit
+is off: `adsr.sv` truncates each step to a whole number of 2⁻²² units,
+which for its slowest rates is up to 8 % of the step (1.2 dB after 0.27
+s). The attack overshoots full scale by up to one step (0.4 % at `adsr.sv`'s
+fastest rate) before the stage flips.
 
 **LFO.** `MACW.w PHASE, ONE, RATE` advances the wide phase, which runs
 from −8 to +8 and wraps once a cycle, then the shape is scaled by the
@@ -419,8 +424,7 @@ Measured so far:
 
 | Program | Cycles per pass |
 |---|---|
-| both envelopes of 32 voices, `LOOP.vi` (section 8) | 742 |
-| one envelope of 32 voices, `LOOP.vi` | 390 |
+| both envelopes of 32 voices, `LOOP.vi` (section 8) | 614 |
 | 16 sine LFOs (the worst case at 24 kHz); all 32 every pass | 191; 367 |
 | the manual's envelope (`INTERP`, one pole in one instruction), `LOOP.vi` | 294 |
 | the same, `LOOP.i` | 1126 |

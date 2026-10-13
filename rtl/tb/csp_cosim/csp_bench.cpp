@@ -134,9 +134,7 @@ uint32_t rate_dsr_of(const Setting &s) {
 void segment(std::vector<FirmwareWrite> &writes, int row, int64_t target22,
              uint32_t coefficient) {
     write_wide(writes, row, target22 << 10); // UQ4.22 → Q4.32
-    const csp::EnvelopeRate rate = csp::envelope_rate(coefficient);
-    writes.push_back({row + 2, rate.rate});
-    writes.push_back({row + 3, rate.shift});
+    write_wide(writes, row + 2, csp::envelope_rate(coefficient));
 }
 
 // adsr.sv's state machine in double precision: the same stages, targets and
@@ -182,13 +180,16 @@ private:
     double level_ = 0.0;
 };
 
-// How far a level is from another, as the largest absolute difference (of
-// full scale) and the largest ratio in dB where the level is above -60 dB.
+// How far a level is from another: the largest absolute difference (of full
+// scale), and the largest ratio in dB where the level is above -40 dB and
+// above -60 dB.
 struct Difference {
-    double absolute   = 0;
-    int absolute_pass = 0;
-    double decibels   = 0;
-    int decibels_pass = 0;
+    double absolute      = 0;
+    int absolute_pass    = 0;
+    double decibels      = 0; // above -40 dB
+    int decibels_pass    = 0;
+    double decibels_60   = 0; // above -60 dB
+    int decibels_60_pass = 0;
 
     void add(double level, double reference, int pass) {
         if (std::fabs(level - reference) > absolute) {
@@ -197,9 +198,13 @@ struct Difference {
         }
         if (reference >= 0.001 && level > 0.0) {
             const double db = 20.0 * std::log10(level / reference);
-            if (std::fabs(db) > std::fabs(decibels)) {
+            if (reference >= 0.01 && std::fabs(db) > std::fabs(decibels)) {
                 decibels      = db;
                 decibels_pass = pass;
+            }
+            if (std::fabs(db) > std::fabs(decibels_60)) {
+                decibels_60      = db;
+                decibels_60_pass = pass;
             }
         }
     }
@@ -366,31 +371,39 @@ int bench_envelope(VerilatedContext &context) {
     std::printf("envelope: %d voices of two, %d passes (%.2f s)\n", voices,
                 passes, passes / 48000.0);
     std::printf(
-            "  largest difference (of full scale) / largest ratio above -60 dB\n");
-    std::printf("  voice   program vs ideal       unit vs ideal          "
-                "program vs unit\n");
+            "  largest difference (of full scale), largest ratio above -40 dB, "
+            "above -60 dB\n");
+    std::printf("  voice   program vs ideal                 unit vs ideal"
+                "                    program vs unit\n");
     int failures = 0;
     for (int envelope = 0; envelope < 2 * voices; ++envelope) {
         const Error &e = errors[envelope];
         auto cell      = [](const Difference &d) {
-            char text[48];
-            std::snprintf(text, sizeof text, "%.1e %+.3f dB", d.absolute,
-                               d.decibels);
+            char text[64];
+            std::snprintf(text, sizeof text, "%.0e %+.3f %+.3f dB", d.absolute,
+                               d.decibels, d.decibels_60);
             return std::string(text);
         };
         // The bounds. The program stays within 0.1 dB of the exact RC curve
-        // above -60 dB, and within 1 % of full scale of it everywhere (the
-        // attack overshoots full scale by up to a step before it ends); and
-        // within 0.1 dB of the old unit, plus the old unit's own distance
-        // from the exact curve, which for slow rates is its truncation.
-        const bool ok = std::fabs(e.program_vs_ideal.decibels) <= 0.1
-                        && e.program_vs_ideal.absolute <= 0.01
-                        && std::fabs(e.program_vs_unit.decibels)
-                                   <= 0.1 + std::fabs(e.unit_vs_ideal.decibels);
+        // above -40 dB and 0.5 dB above -60 dB (it takes the distance as a
+        // word, so it settles half a word's step, 3e-5, above the target:
+        // 3 % of a -60 dB level), and within 1 % of full scale of it
+        // everywhere (the attack overshoots full scale by up to a step
+        // before it ends); and within the same of the old unit, plus the
+        // old unit's own distance from the exact curve, which for slow
+        // rates is its truncation.
+        const bool ok =
+                std::fabs(e.program_vs_ideal.decibels) <= 0.1
+                && std::fabs(e.program_vs_ideal.decibels_60) <= 0.5
+                && e.program_vs_ideal.absolute <= 0.01
+                && std::fabs(e.program_vs_unit.decibels)
+                           <= 0.1 + std::fabs(e.unit_vs_ideal.decibels)
+                && std::fabs(e.program_vs_unit.decibels_60)
+                           <= 0.5 + std::fabs(e.unit_vs_ideal.decibels_60);
         char name[16];
         std::snprintf(name, sizeof name, "%d%s", envelope / 2,
                       envelope % 2 ? " mod" : " amp");
-        std::printf("  %-6s  %-22s %-22s %-22s %s\n", name,
+        std::printf("  %-6s  %-30s %-30s %-30s %s\n", name,
                     cell(e.program_vs_ideal).c_str(),
                     cell(e.unit_vs_ideal).c_str(),
                     cell(e.program_vs_unit).c_str(), ok ? "ok" : "FAIL");
