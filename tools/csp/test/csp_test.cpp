@@ -700,6 +700,7 @@ const char *envelope_program = R"(
         .field GATE, 1
         .field VELOCITY, 1
         .field OUT, 1
+        .field U, 1                         ; scratch
         .end
         .block SEGMENT                      ; a row of the envelope table
         .field TARGET, 2                    ; wide
@@ -709,20 +710,16 @@ const char *envelope_program = R"(
         .equ   VOICES, 0x600
         .const FULL, 1.0
         .reg   ENV_TABLE, 0x060             ; the table's address, raw
-        .reg   U, 0x061
 
         IDX     i, =#VOICES, 0              ; i → voice 0
-        NOP
-        NOP
-        NOP
-        LOOP.i  9, =#2, =#16                ; each voice
+        LOOP.vi 9, =#2, =#16                ; every voice
         IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
-        MAX     U, [i+STAGE], =#4           ;   attack → decay, if…
+        MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
         CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
-        SEL     [i+STAGE], U, [i+STAGE]     ;   (SEL reads the CMP's flags)
-        ANDXOR  U, 0, [i+STAGE], =#4        ;   release → attack: 0/4/8 → 0/4/0
+        SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
+        ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
         CMP     ZERO, [i+GATE], FULL        ;   gate held?
-        SEL     [i+STAGE], U, =#8           ;     else release
+        SEL     [i+STAGE], [i+U], =#8       ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 )";

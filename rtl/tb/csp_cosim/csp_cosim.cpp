@@ -248,6 +248,7 @@ private:
 };
 
 // ---- directed programs: the manual's examples ------------------------------------------------
+// The envelope is written as LOOP.i: the RTL has no vector loops yet.
 
 const char *envelope_program = R"(
         .block VOICE
