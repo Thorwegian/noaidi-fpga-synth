@@ -162,8 +162,9 @@ instruction by instruction, so an element has written its flags or
 index register exactly when an earlier body instruction that writes
 it has issued for every element: two bits per loop say so, and until
 then the elements see the values the loop was entered with. Measured
-on the model and the RTL alike, the envelope of section 8 for 32 voices
-takes 294 cycles per pass as a vector loop and 1126 as a `LOOP`. About
+on the model and the RTL alike, a one-instruction envelope step for 32
+voices (the manual's example, section 8 there) takes 294 cycles per pass
+as a vector loop and 1126 as a `LOOP`. About
 1500 LUT4 more than the scalar core (section 3 above).
 
 - **One multiply-add unit**: one MULTALU36X18 computes `a × b + c`;
@@ -334,40 +335,58 @@ instruction across its elements (section 3); it holds no loop, `SKIP`,
 
 ## 8. Envelopes and LFOs as instructions
 
-**Envelope** (per voice, RC recurrence as in `adsr.sv`). Each channel
-keeps an envelope table for attack, decay and release, in three rows of
-four words: target (wide), rate, spare. Each voice block holds `level`
-(wide), `stage` (0 attack, 4 decay, 8 release: the row offset), `gate`,
-`velocity` and the output. One loop serves every voice:
+**Envelope** (per voice, the RC recurrence of `adsr.sv`). Each channel
+keeps an envelope table for the amp and mod envelopes' attack, decay and
+release, three rows of four words each: target (wide), rate, shift. Each
+voice block holds, for each envelope, `level` (wide) and `stage` (the
+row's offset in the table), and the voice's `gate` and `velocity`. One
+loop serves every voice, both envelopes of each
+([tools/csp/programs/envelope.s](../tools/csp/programs/envelope.s)):
 
 ```
-IDX     i, =#VOICES, 0              ; i → voice 0
-LOOP.vi 9, =#32, =#16               ; every voice
-IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
-MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
-CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
-SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
-ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
-CMP     ZERO, [i+GATE], FULL        ;   gate held?
-SEL     [i+STAGE], [i+U], =#8       ;     else release
-INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
-MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
+LOOP.vi done, =#32, =#16                    ; every voice
+  ...                                       ;   both stages: 11 instructions
+  IDX     j, [i+CHANNEL], [i+STAGE_A]       ;   the amp envelope: j → its row
+  INTERP.w [i+DELTA], ONE, [j+TARGET]       ;     DELTA ← target
+  MAC.w   [i+DELTA], MINUS_ONE, [i+LEVEL_A] ;     DELTA ← target − level
+  SHIFT.w [i+DELTA], [j+SHIFT]              ;     DELTA ← DELTA × 2^SHIFT
+  MAC.w   [i+LEVEL_A], [j+RATE], [i+DELTA]  ;     level ← level + rate × DELTA
+  MAC     [i+OUT_A], 0, [i+LEVEL_A], [i+VELOCITY]
+  ...                                       ;   the same for the mod envelope
 ```
 
-`j` is set first, from the stage the previous pass left, so a stage
-change lands one pass (~21 µs) later. `U` is a scratch word in each
-voice's block: in a vector loop, per-voice values live in per-voice
-fields. Measured on the reference model: 294 cycles per pass for 32
-voices; 1126 written with `LOOP.i`.
+**A segment's step needs four instructions, not `INTERP`'s one,** because
+`INTERP`'s rate is a Q4.14 word: its smallest step is 2⁻¹⁴, a time constant
+of 16384 passes (0.34 s at 48 kHz), and the next rate up is twice as fast.
+`adsr.sv` takes 18-bit rates scaled by 2⁻²⁴, time constants up to ~170 s,
+and a release of several seconds is a time constant of about a second. The
+shift (the row's fourth word) scales the *difference* instead: the step is
+`RATE × 2^SHIFT / 16384` of the distance left, which reaches 2⁻²⁴ with a
+shift of −10, and the firmware picks rate and shift together
+(`csp::envelope_rate`, `app/main/csp/envelope.hpp`, from `adsr.sv`'s
+coefficient). `INTERP` stays the right instruction where the rate is not
+slow: one pole in one instruction.
 
-Assembly syntax as in [csp_manual.md](csp_manual.md) section 6;
-`SEL` reads the flags of the latest flag-setting instruction, so `MAX`
-comes before the `CMP` (the reference model's tests caught the other
-order). That is **9 instructions per
-envelope**, written once for all voices, with no envelope-specific
-opcode: the stage is data, and indirect addressing picks the segment.
-A voice's two envelopes share one loop body and one gate compare: 17
-instructions per voice.
+The stage is worked out first, from the gate and the level the previous
+pass left, and `j` is set from it, so a stage change takes effect in the
+same pass, as in `adsr.sv`. `SEL` reads the flags of the latest flag-setting
+instruction, so each stage's `MAX` comes before its `CMP` (the reference
+model's tests caught the other order). The gate is compared once for the
+two envelopes. `U` and `DELTA` are scratch words in each voice's block: in a
+vector loop, per-voice values live in per-voice fields. That is **23
+instructions per voice**, no envelope-specific opcode: the stage is data, and
+indirect addressing picks the segment. Measured on the reference model:
+**742 cycles per pass for 32 voices**; one envelope of the same shape takes
+390; written with `LOOP.i` it does not fit a pass (1466 cycles for one
+envelope, each voice's instructions waiting for each other).
+
+**Measured against `adsr.sv`** (`make sim-csp-bench`, section 12): the program
+stays within 0.04 dB of the exact RC curve above −60 dB for rates from the
+fastest `adsr.sv` takes to ones that barely move, and within 0.06 dB of the
+unit itself except where the unit is off: `adsr.sv` truncates each step to
+a whole number of 2⁻²² units, which for its slowest rates is up to 8 % of the
+step (1.2 dB after 0.27 s). The attack overshoots full scale by up to one
+step (0.4 % at `adsr.sv`'s fastest rate) before the stage flips.
 
 **LFO** (per channel): `MACW.w PHASE, ONE, RATE` advances the wide
 phase, then the shape is scaled by the depth. Saw: one `MAC`; square:
@@ -385,7 +404,9 @@ Measured so far:
 
 | Program | Cycles per pass |
 |---|---|
-| envelope, 32 voices, `LOOP.vi` (section 8) | 294 |
+| both envelopes of 32 voices, `LOOP.vi` (section 8) | 742 |
+| one envelope of 32 voices, `LOOP.vi` | 390 |
+| the manual's envelope (`INTERP`, one pole in one instruction), `LOOP.vi` | 294 |
 | the same, `LOOP.i` | 1126 |
 
 The rest (both envelopes per voice, voice pitch, cutoff and gain,
@@ -451,9 +472,12 @@ small program. The new CSP gets:
   instruction issued in. Directed cases per opcode (saturation, wrap,
   flags, the interlocks, the write queue and the swap) are in the
   model's tests.
-- **Program benches**: the envelope and LFO sequences against the
-  current `adsr.sv` and `osc_core` output, sample for sample, before the
-  fixed-function units retire.
+- **Program benches** (`rtl/tb/csp_cosim/csp_bench.cpp`, `make
+  sim-csp-bench`): the programs in `tools/csp/programs` Verilated next to
+  the units they replace, driven by the same gates and settings, and
+  compared once per 48 kHz pass against both the unit and an exact
+  double-precision model of what it computes. Bounds are in the bench. So
+  far the envelope (`adsr.sv`); the LFOs against `osc_core` follow.
 
 ## 13. Steps
 

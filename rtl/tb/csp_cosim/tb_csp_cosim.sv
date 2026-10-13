@@ -12,7 +12,9 @@
 // into the hierarchy, so the RTL itself carries no debug ports.
 //------------------------------------------------------------------------
 `default_nettype none
-module tb_csp_cosim (
+module tb_csp_cosim #(
+    parameter int REF_VOICES = 0     // adsr.sv references, for the program benches
+) (
     input  wire                                 clk,
     input  wire                                 reset_n,
     input  wire                                 pass_start,
@@ -144,6 +146,73 @@ module tb_csp_cosim (
                      int'(u_core.decode_index_j));
         end
     end
+
+    // ---- adsr.sv references: the envelopes the CSP program replaces -------------------
+    // REF_VOICES instances of the old unit, stepped at 96 kHz (twice a pass,
+    // at cycles 10 and 778) with the gate and the coefficients the harness
+    // sets, so the harness can compare their levels with the program's.
+    localparam int REFS = REF_VOICES > 0 ? REF_VOICES : 1;
+    logic [REFS-1:0]       ref_gate;
+    logic [31:0]           ref_rate_ad  [REFS];
+    logic [31:0]           ref_rate_dsr [REFS];
+    logic [27:0]           ref_state    [REFS];
+    logic                  ref_step;
+    initial begin
+        ref_gate = '0;
+        for (int voice = 0; voice < REFS; voice++) begin
+            ref_rate_ad[voice]  = '0;
+            ref_rate_dsr[voice] = '0;
+        end
+    end
+
+    logic [10:0] ref_cycle;
+    always_ff @(posedge clk) begin
+        if (pass_start) ref_cycle <= '0;
+        else ref_cycle <= ref_cycle + 1'b1;
+        ref_step <= REF_VOICES > 0 && (ref_cycle == 11'd9 || ref_cycle == 11'd777);
+    end
+
+    generate
+        for (genvar voice = 0; voice < REFS; voice++) begin : g_ref
+            if (REF_VOICES > 0) begin : g_on
+                logic [27:0] state_out;
+                logic        state_we;
+                logic signed [17:0] level_out;
+                adsr u_adsr (
+                    .clk        (clk),
+                    .rst_n      (reset_n),
+                    .step_en    (ref_step),
+                    .state_in   (ref_state[voice]),
+                    .gate       (ref_gate[voice]),
+                    .rate_ad    (ref_rate_ad[voice]),
+                    .rate_dsr   (ref_rate_dsr[voice]),
+                    .level_out  (level_out),
+                    .state_out  (state_out),
+                    .state_we   (state_we)
+                );
+                always_ff @(posedge clk or negedge reset_n) begin
+                    if (!reset_n) ref_state[voice] <= '0;
+                    else if (state_we) ref_state[voice] <= state_out;
+                end
+            end else begin : g_off
+                initial ref_state[voice] = '0;
+            end
+        end
+    endgenerate
+
+    export "DPI-C" function cosim_ref_set;
+    export "DPI-C" function cosim_ref_state;
+
+    function void cosim_ref_set(input int voice, input int gate, input int rate_ad,
+                                input int rate_dsr);
+        ref_gate[voice]     = gate != 0;
+        ref_rate_ad[voice]  = rate_ad;
+        ref_rate_dsr[voice] = rate_dsr;
+    endfunction
+
+    function int cosim_ref_state(input int voice);
+        return int'(ref_state[voice]);
+    endfunction
 
     // ---- the harness's view of the state ---------------------------------------
     export "DPI-C" function cosim_register;

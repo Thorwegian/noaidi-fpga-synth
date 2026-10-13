@@ -569,9 +569,12 @@ point that far along the way.
 
 Used in place (A = R) once per pass, it is a one-pole low-pass filter
 or an RC charge: R approaches Y by the same fraction of the remaining
-distance every pass. The envelope uses it for every segment, with Y
-the segment's target and X its rate. Used once, it is a crossfade
-between A and Y.
+distance every pass. An envelope segment is that, with Y the segment's
+target and X its rate. X is a Q4.14 word, so the slowest step is 2⁻¹⁴ of
+the distance a pass (a time constant of 0.34 s at 48 kHz) and the next is
+twice as fast: a slower envelope scales the difference with `SHIFT`
+before it steps (tools/csp/programs/envelope.s). Used once, it is a
+crossfade between A and Y.
 
 **Flags** N, Z, V from the result.
 
@@ -906,6 +909,12 @@ for each other. Both leave the same values in every register (measured
 on the reference model over 400 passes with changing gates). This
 program, with a voice and table layout, is the envelope test in
 `tools/csp/test/csp_test.cpp`.
+
+The envelope the synthesizer runs is the longer
+[tools/csp/programs/envelope.s](../tools/csp/programs/envelope.s): two
+envelopes a voice, and a four-instruction step with a shift, which
+reaches the slow rates a one-instruction `INTERP` cannot. It is checked
+against `adsr.sv` (`make sim-csp-bench`).
 
 ### LFO: sawtooth, square and triangle
 

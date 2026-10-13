@@ -286,6 +286,24 @@ obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(CSP_COSIM_CPP) 
 sim-csp-cosim: obj_dir/csp_cosim/sim
 	$(call run_sim,$<,tb/sim-csp-cosim.out)
 
+# The program benches: the CSP's programs (../tools/csp/programs) next to the
+# fixed-function units they replace, driven by the same gates and settings,
+# compared once per 48 kHz pass (tb/csp_cosim/csp_bench.cpp). The Verilated
+# bench is the co-simulation's, with REF_VOICES adsr.sv references added.
+CSP_BENCH_CPP = tb/csp_cosim/csp_bench.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.cpp \
+                ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
+obj_dir/csp_bench/sim: $(CSP_NEW) dsp/adsr.sv tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp \
+                       $(CSP_BENCH_CPP) $(CSP_COSIM_HPP) ../app/main/csp/envelope.hpp \
+                       $(wildcard ../tools/csp/programs/*.s) Makefile
+	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -GREF_VOICES=16 \
+	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -I$(abspath tb/csp_cosim) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
+	    $(CSP_NEW) dsp/adsr.sv tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_BENCH_CPP))
+
+sim-csp-bench: obj_dir/csp_bench/sim
+	$(call run_sim,$<,tb/sim-csp-bench.out)
+
 # The new CSP alone on the chip (csp/fit/csp_fit.sv): its BSRAM, DSP and
 # logic, and its timing at 73.728 MHz. A check, not a bitstream.
 csp-fit: $(CSP_NEW) csp/fit/csp_fit.sv csp/fit/csp_fit.cst Makefile
@@ -363,12 +381,12 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-pitch-track sim-csp-register-file sim-csp-write-queue sim-csp-cosim \
+sim: sim-pulse-dc sim-csp sim-pitch-track sim-csp-register-file sim-csp-write-queue sim-csp-cosim sim-csp-bench \
      sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
      sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
      sim-stab sim-output-lpf sim-limiter
 	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-pitch-track.out tb/sim-csp-register-file.out \
-	     tb/sim-csp-write-queue.out tb/sim-csp-cosim.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
+	     tb/sim-csp-write-queue.out tb/sim-csp-cosim.out tb/sim-csp-bench.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
 	     tb/sim-partial.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
 	     tb/sim-bus.out \
