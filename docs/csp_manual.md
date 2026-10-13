@@ -249,7 +249,9 @@ instruction itself. The instruction's description says so.
   write every sink word it owns in every pass**: a word it skips would
   show the partials a value from two passes ago on every other pass.
   Work that runs less often keeps its result in an ordinary register
-  and copies it to the sink each pass. The assembler checks this.
+  and copies it to the sink each pass. The reference model checks this
+  as it runs passes (`tools/csp`), since which words a pass writes can
+  depend on data.
 - **Loading a program.** The firmware holds the CSP in reset, writes the
   program, and releases it; the first pass after release starts from
   the first instruction. A reset clears no registers: constants,
@@ -257,6 +259,25 @@ instruction itself. The instruction's description says so.
   were, so loading a program does not silence held notes.
 
 ## 6. Assembly language
+
+Programs are written in one of two ways:
+
+- **In C++, as machine code.** This is how the firmware builds them:
+  `csp::ProgramBuilder` (`app/main/csp/program_builder.hpp`) has one
+  call per instruction, `b.interp_wide(level, rate, target)` and so on,
+  and checks the operands as it emits. Its `check()` then looks at the
+  whole program: `IDX` delay slots, loop nesting and ends, `SKIP`
+  ranges, the program's length.
+- **As text, in the macro assembler** described here: a front end to the
+  same builder, for people. Names, blocks, constants and labels exist
+  for the reader; the processor never sees them.
+
+The assembler and a simulator built on the reference model are in
+`tools/csp`: `make csp` builds `app/build/host/csp`, then
+`csp asm program.s` prints the instruction words and the constant
+registers, and `csp sim program.s` runs the program pass by pass.
+`make csp-test` runs the model's, the builder's and the assembler's
+tests.
 
 ### Lines
 
@@ -267,6 +288,16 @@ label:  MNEMONIC operand, operand, ...   ; comment
 Each line holds at most one instruction. A label names the address of
 the instruction after it. A comment runs from `;` to the end of the
 line. Mnemonics and directives are not case-sensitive; names are.
+
+A `LOOP`'s length and a `SKIP`'s count can be written as a label: the
+first instruction after the loop's body, or after the skipped run. The
+assembler works out the number, even when the label comes later:
+
+```
+        LOOP.i  voice_done, =#32, =#VOICE_SIZE
+        ...                                 ; the body
+voice_done:
+```
 
 ### Operands
 
@@ -296,7 +327,7 @@ then always R and is not written: `INTERP.w LEVEL, K, TARGET`.
 | `.reg NAME, address` | names a register |
 | `.wide NAME, address` | names a wide register (the address must be even) |
 | `.const NAME, value` | allocates a constant register holding `value` |
-| `.block NAME` … `.end` | defines a block layout: inside it, `.field NAME, words` gives each field its offset, for use as `[i+NAME]` |
+| `.block NAME` … `.end` | defines a block layout: inside it, `.field NAME, words` gives each field its offset, for use as `[i+NAME]`; `.end` defines `NAME_SIZE` |
 | `.org address` | the next instruction's position in the program |
 
 ### Example
@@ -377,10 +408,12 @@ size as the stride.
 may contain a `j` loop, or the other way round, each with its own loop
 counter. A loop cannot contain a loop on the same index register.
 
-`length` is an immediate in the R field (1 to 1023 instructions). An
-inner loop must end at or before the end of the outer one. `count` and
-`stride` are registers holding raw integers; write them as `=#n`
-constants. A loop costs one cycle for the `LOOP` instruction itself and
+`length` is an immediate in the R field (1 to 1023 instructions); in
+assembly it can be a label (section 6). An inner loop must end at or
+before the end of the outer one. `count` and `stride` are registers
+holding raw integers; write them as `=#n` constants. `count` is
+**unsigned**: 0 runs the body no times, and a negative raw value is a
+very large count, which runs into the pass limit. `stride` is signed. A loop costs one cycle for the `LOOP` instruction itself and
 nothing per pass; an inner loop's `LOOP` instruction runs once per pass
 of the outer loop. After a loop, its index register has moved on by
 `count × stride`.
@@ -518,7 +551,9 @@ positive, and Y if it was negative. Paired with `CMP`, it is the CSP's
 if–else: `CMP` compares, `SEL` picks. Since nothing branches, both
 values are always computed; `SEL` only chooses which one is kept.
 
-**Flags** unchanged, so several `SEL`s can follow one `CMP`.
+**Flags** unchanged, so several `SEL`s can follow one `CMP`. Mind
+that `MIN`, `MAX`, `ANDXOR` and the arithmetic instructions set the
+flags too: anything placed between a `CMP` and its `SEL` must not.
 
 **Example**
 ```
@@ -584,8 +619,8 @@ stage.
 **Flags** N, Z from the result.
 
 **Example**
-`MAX U, [i+STAGE], =#2` moves an envelope from attack (0) to decay (2),
-and leaves decay and release (4) as they are.
+`MAX U, [i+STAGE], =#4` moves an envelope from attack (0) to decay (4),
+and leaves decay and release (8) as they are.
 
 ---
 
@@ -606,7 +641,7 @@ their values.
 **Flags** N, Z from the result.
 
 **Example**
-`ANDXOR U, 0, [i+STAGE], =#2` maps stages 0, 2, 4 to 0, 2, 0:
+`ANDXOR U, 0, [i+STAGE], =#4` maps stages 0, 4, 8 to 0, 4, 0:
 release becomes attack again.
 
 ---
@@ -699,7 +734,8 @@ flags match the condition: they write nothing and change nothing, but
 still take their cycles, so the timing does not change. It makes a run
 of instructions conditional where a single `SEL` would not do.
 
-`condition` (X field) and `count` (Y field) are immediates:
+`condition` (X field) and `count` (Y field) are immediates; in
+assembly, `count` can be a label (section 6):
 
 | condition | skip when |
 |---|---|
@@ -747,23 +783,29 @@ the voice's current stage.
 
 ### Envelope, for all voices
 
-Each channel holds an envelope table of three rows, (rate, target) for
-attack, decay and release; each voice holds its level (wide), stage (0,
-2 or 4: the row offset), gate, velocity and output. `j` is set first,
+Each channel holds an envelope table of three rows of four words, for
+attack, decay and release: the segment's target (wide, so at an even
+offset), its rate, and a spare word. Each voice holds its level (wide),
+stage (0, 4 or 8: the row offset), gate, velocity and output; the
+firmware starts an idle voice in release (8). `j` is set first,
 from the stage left by the previous pass, so it is ready by the time
 `INTERP` uses it; a stage change therefore takes effect one pass
-later, about 21 µs.
+later, about 21 µs. This program, with a voice and table layout, is
+the envelope test in `tools/csp/test/csp_test.cpp`.
 
 ```
         IDX     i, =#VOICES, 0             ; i → voice 0
+        NOP                                ; (i's delay slots)
+        NOP
+        NOP
         LOOP.i  9, =#32, =#16              ; each voice
         IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
-        CMP     ZERO, [i+LEVEL], FULL      ;   reached full scale?
-        MAX     U, [i+STAGE], =#2          ;     attack → decay
-        SEL     [i+STAGE], U, [i+STAGE]
-        ANDXOR  U, 0, [i+STAGE], =#2       ;   release → attack: 0/2/4 → 0/2/0
-        CMP     ZERO, [i+GATE], ONE        ;   gate held?
-        SEL     [i+STAGE], U, =#4          ;     else release
+        MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
+        CMP     ZERO, [i+LEVEL], FULL      ;   …full scale is reached
+        SEL     [i+STAGE], U, [i+STAGE]    ;   (SEL reads the CMP's flags)
+        ANDXOR  U, 0, [i+STAGE], =#4       ;   release → attack: 0/4/8 → 0/4/0
+        CMP     ZERO, [i+GATE], FULL       ;   gate held?
+        SEL     [i+STAGE], U, =#8          ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 ```

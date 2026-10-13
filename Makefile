@@ -19,6 +19,9 @@
 #                   banks.toml reads and writes back, and the factory
 #                   patches and banks read back exactly (a warning, not a
 #                   failure, where only their formatting differs)
+#   make csp        build tools/csp: the CSP assembler and simulator
+#                   (app/build/host/csp asm|sim program.s)
+#   make csp-test   host tests of the CSP reference model and assembler
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  list the sources that are not formatted — a
@@ -55,6 +58,13 @@ FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch_file.cpp app/main/saf
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
+CSP_DIR     = tools/csp
+CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp
+CSP_SRC     = $(CSP_SHARED) $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
+CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp $(CSP_DIR)/processor.hpp \
+              $(CSP_DIR)/assembler.hpp
+CSP_TOOL    = $(HOST_DIR)/csp
+CSP_TEST    = $(HOST_DIR)/csp_test
 
 all: pack fw
 
@@ -119,6 +129,17 @@ format-check:
 	    echo "all sources formatted"; \
 	fi
 
+$(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
+	mkdir -p $(HOST_DIR)
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $@ $(CSP_SRC) $(CSP_DIR)/main.cpp
+
+csp: $(CSP_TOOL)
+
+csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp
+	mkdir -p $(HOST_DIR)
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
+	$(CSP_TEST)
+
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
 
@@ -133,4 +154,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
