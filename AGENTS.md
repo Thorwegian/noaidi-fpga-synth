@@ -14,7 +14,7 @@
 
 - Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
 
-- When designing an IP core (such as the CSP), rely mostly on Berkley, Princeton and Stanford research, such as the STK.
+- When designing an IP core (such as the CSP), rely mostly on Berkley, Princeton and Stanford research.
 
 - Apply principles of universal design in user interfaces (and user-adjacent interfaces such as MIDI).
 
