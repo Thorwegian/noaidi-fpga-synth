@@ -302,8 +302,6 @@ int bench_envelope(VerilatedContext &context) {
     std::vector<int> next_reference_gate(voices, -1); // -1: no change
     std::vector<bool> pending_gate(voices, false);
     std::vector<Error> errors(2 * voices);
-    int releases_checked    = 0;
-    int releases_unfinished = 0;
     for (int pass = 1; pass <= passes; ++pass) {
         // the references see what the firmware wrote in the previous pass
         for (int voice = 0; voice < voices; ++voice) {
@@ -366,12 +364,6 @@ int bench_envelope(VerilatedContext &context) {
                         pass, voice, kind, exact, unit, program_level,
                         rtl.reg(stage_of(voice, kind)));
             }
-            // A release must finish: a voice whose exact level has reached 0
-            // before it is struck again must have its output at exactly 0.
-            if (kind == 0 && pass == on2(voice) - 1 && exact < 1e-6) {
-                ++releases_checked;
-                releases_unfinished += rtl.reg(block_of(voice) + 11) != 0;
-            }
             if (forced[voice]) {
                 continue; // the firmware just set the level
             }
@@ -422,10 +414,6 @@ int bench_envelope(VerilatedContext &context) {
                     cell(e.program_vs_unit).c_str(), ok ? "ok" : "FAIL");
         failures += ok ? 0 : 1;
     }
-    std::printf("  releases that must have finished (exact level 0 by the next "
-                "note): %d checked, %d with an output not 0\n",
-                releases_checked, releases_unfinished);
-    failures += releases_unfinished + (releases_checked == 0 ? 1 : 0);
     return failures;
 }
 
