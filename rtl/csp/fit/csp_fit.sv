@@ -43,10 +43,12 @@ module csp_fit (
     wire [csp_pkg::WORD_W-1:0]           queue_data    = shift[17:0];
 
     // ---- reset and the pass tick (every 1536 system clocks) ----------------------
+    // A registered reset, as the synth's reset synchroniser gives one.
     logic [3:0]  reset_count = '0;
-    wire         reset_n     = reset_count == 4'hf;
+    logic        reset_n     = 1'b0;
     always_ff @(posedge clk) begin
-        if (!reset_n) reset_count <= reset_count + 1'b1;
+        if (reset_count != 4'hf) reset_count <= reset_count + 1'b1;
+        reset_n <= reset_count == 4'hf;
     end
 
     logic [10:0] pass_counter;

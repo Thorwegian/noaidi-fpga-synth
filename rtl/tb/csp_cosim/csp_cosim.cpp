@@ -66,6 +66,7 @@ public:
             spi_clock();
         }
         top_.imem_write_enable = 0;
+        cosim_set_program_length(static_cast<int>(words.size()));
     }
 
     void write(int address, int32_t raw) {
@@ -108,6 +109,9 @@ public:
     }
     int flags() const {
         return cosim_flags();
+    }
+    int cycles() const {
+        return cosim_cycles();
     }
 
 private:
@@ -174,7 +178,17 @@ public:
         if (!report.errors.empty() && verbose_) {
             std::printf("  (model: %s)\n", report.errors.front().c_str());
         }
-        return compare(what);
+        int differences = compare(what);
+        // The interlocks' timing: the RTL issues its last instruction in the
+        // cycle the model counts. (A pass the model stopped at the limit
+        // ends differently: the RTL runs on through memory past the
+        // program, which may hold anything.)
+        if (report.errors.empty() && rtl_.cycles() != report.cycles) {
+            std::printf("  %s: cycles rtl %d model %d\n", what.c_str(),
+                        rtl_.cycles(), report.cycles);
+            ++differences;
+        }
+        return differences;
     }
 
     void verbose(bool on) {
@@ -368,9 +382,6 @@ public:
         b.idx(csp::IndexRegister::i, direct(base_i), direct(0));
         b.idx(csp::IndexRegister::j, direct(chance(4) ? base_sink : base_j),
               direct(0));
-        b.nop();
-        b.nop();
-        b.nop();
         const int items = pick(10, 60);
         for (int item = 0; item < items; ++item) {
             const int kind = pick(0, 19);

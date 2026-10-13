@@ -105,12 +105,27 @@ module tb_csp_cosim (
         end
     end
 
+    // The cycle after the last instruction of the program issued this pass
+    // (the NOPs in memory past it run on): what the reference model reports
+    // as the pass's cycles.
+    int program_length = 0;
+    int issue_end;
+    always_ff @(posedge clk) begin
+        if (pass_start) begin
+            issue_end <= 0;
+        end else if (u_core.issue && int'(u_core.decode_pc) < program_length) begin
+            issue_end <= int'(u_core.pass_cycle) + 1;
+        end
+    end
+
     // ---- the harness's view of the state ---------------------------------------
     export "DPI-C" function cosim_register;
     export "DPI-C" function cosim_sink;
     export "DPI-C" function cosim_index;
     export "DPI-C" function cosim_accumulator;
     export "DPI-C" function cosim_flags;
+    export "DPI-C" function cosim_cycles;
+    export "DPI-C" function cosim_set_program_length;
 
     function int cosim_register(input int address);
         logic [csp_pkg::WORD_W-1:0] word;
@@ -131,6 +146,14 @@ module tb_csp_cosim (
 
     function longint cosim_accumulator();
         return longint'(u_core.accumulator);
+    endfunction
+
+    function void cosim_set_program_length(input int length);
+        program_length = length;
+    endfunction
+
+    function int cosim_cycles();
+        return issue_end;
     endfunction
 
     function int cosim_flags();

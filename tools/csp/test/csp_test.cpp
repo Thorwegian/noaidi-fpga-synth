@@ -283,8 +283,36 @@ void test_skip() {
     const csp::PassReport report = m.run();
     check_equal(m.get("A_"), 0, "SKIP neg skips the next two");
     check_equal(m.get("D_"), q(3.0), "the instruction after them runs");
-    check_equal(report.cycles, 5 * csp::cycles_per_instruction,
-                "skipped instructions still take their two cycles");
+    // SKIP waits for CMP's flags; the rest issue one per cycle.
+    check_equal(report.cycles, csp::result_latency + 4,
+                "skipped instructions still take their cycles");
+}
+
+// The pipeline's interlocks change the cycle count, never the result: a
+// dependent instruction waits result_latency cycles, the one after LOOP or
+// IDX barrier_latency, and independent ones issue every cycle.
+void test_interlocks() {
+    const auto cycles = [](std::string_view body) {
+        Machine m(std::string(registers) + std::string(body));
+        m.start();
+        return m.run().cycles;
+    };
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC B_, 0, =1.0, =1.0\n"), 2,
+                "independent instructions issue every cycle");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC B_, 0, A_, =1.0\n"),
+                csp::result_latency + 1, "a read of R waits for its write");
+    check_equal(cycles(".reg W_LOWER, 0x065\nMAC.w W_, =1.0, V_\n"
+                       "MAC B_, 0, W_LOWER, =1.0\n"),
+                csp::result_latency + 1,
+                "a read of a pair's lower word waits for the wide write");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC C_, 0, B_, =1.0\n"), 2,
+                "the other register of the pair does not wait");
+    check_equal(cycles("ACC 0, =1.0, =1.0\nMAC A_, acc, =1.0, =1.0\n"),
+                csp::result_latency + 1, "a read of acc waits for ACC");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, =2.0\n"),
+                csp::result_latency + 1, "SEL waits for the flags");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"),
+                csp::barrier_latency + 1, "the instruction after IDX waits");
 }
 
 // IDX takes effect for the very next instruction: each instruction
@@ -738,6 +766,7 @@ int main() {
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();
     test_skip();
+    test_interlocks();
     test_index_immediate();
     test_loops();
     test_empty_inner_loop_at_outer_end();

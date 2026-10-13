@@ -64,9 +64,8 @@ add", and the per-partial immediates.
   pipeline runs at 96 kHz for oscillator aliasing and filter headroom;
   control signals do not need it. A pass has 1536 cycles.
 - **One fixed program per pass**, run from the top at every pass, one
-  instruction after the other, no branches. Instructions start in the
-  first **1472 cycles**; at two cycles each (section 3), that is up to
-  736 instructions.
+  instruction after the other, no branches. Instructions issue in the
+  first **1472 cycles**, at most one per cycle (section 3).
   Conditional work uses selects and `SKIP` (a skipped instruction still
   takes its cycle), so the timing never depends on the data. Loops
   (`LOOP`) have a fixed count, so they keep that property.
@@ -99,18 +98,25 @@ add", and the per-partial immediates.
 
 ## 3. Datapath
 
-A linear machine: each instruction finishes before the next starts, two
-cycles each (#220):
+An in-order pipeline with full interlocks and no forwarding (#220). A
+program behaves as on a linear machine; an instruction that needs a
+value still in the pipeline waits in decode until it has been written.
 
-| Cycle | Work |
+| Stage | Work |
 |---|---|
-| READ | the operands come out of the register file (three ports, one bypass for the write on the same edge) and settle through the datapath: `Y − A`, then MULTALU36X18 `X × (Y − A) + A` or `X × Y + A`, then saturation |
-| WRITE | write R (register file or sink area), the accumulator, the flags, `i`/`j`; decode the next instruction and present its read addresses |
+| D | decode: operand addresses from `i`/`j`, the hazard check; the register-file read addresses go in as the instruction issues |
+| R | register read (three ports) → operands in the accumulator's format; `SKIP` decides |
+| E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
+| E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; `SHIFT` saturates |
+| E3 | MULTALU36X18: `a × b + c` |
+| E4 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
+| W | write R (register file or sink area); the accumulator and the flags |
 
-Measured with `make csp-fit`, this closes at 32.48 MHz, not the
-73.728 MHz system clock. #220 moves to a pipeline with interlocks: the
-hardware waits where a result is not ready, so programs keep these
-semantics and only the cycle count changes.
+A dependent instruction issues 7 cycles after the one it depends on; the
+instruction after `LOOP` or `IDX` issues 3 cycles after it
+(`csp::result_latency`, `csp::barrier_latency`; the model counts both).
+The first try, a two-cycle machine without a pipeline, closed at
+32.48 MHz.
 
 - **One multiply-add unit**, generalising the one `adsr.sv` already
   instantiates (ALU54D then MULTALU36X18). `MAC`, `INTERP` and the

@@ -80,6 +80,61 @@ bool is_sink(int address) {
     return address >= sink_base && address < sink_base + sink_count;
 }
 
+// ---- what the pipeline's interlocks see (rtl/csp/csp_core.sv) ----
+
+// Whether an instruction reads R through its a field.
+bool uses_a(Opcode op, ASelect a) {
+    const bool reads_r = a == ASelect::result || a == ASelect::wide;
+    switch (op) {
+    case Opcode::mac:
+    case Opcode::macw:
+    case Opcode::interp:
+    case Opcode::add3:
+    case Opcode::andxor:
+    case Opcode::shift:
+        return reads_r;
+    default:
+        return false;
+    }
+}
+
+bool uses_x(Opcode op) {
+    return op != Opcode::nop && op != Opcode::skip && op != Opcode::shift;
+}
+
+bool uses_y(Opcode op) {
+    return op != Opcode::nop && op != Opcode::skip && op != Opcode::abs;
+}
+
+bool uses_accumulator(Opcode op, ASelect a) {
+    return a == ASelect::accumulator
+           && (uses_a(op, ASelect::result) || op == Opcode::acc);
+}
+
+bool writes_result(Opcode op) {
+    return op != Opcode::nop && op != Opcode::loop && op != Opcode::acc
+           && op != Opcode::skip && op != Opcode::idx;
+}
+
+bool sets_flags(Opcode op) {
+    return writes_result(op) && op != Opcode::sel;
+}
+
+// Whether an access names registers: inside the file, a pair at an even
+// address.
+bool in_registers(int address, bool wide) {
+    return address < register_count && !(wide && address % 2 != 0);
+}
+
+// The registers an access touches: none, one, or a pair.
+std::span<const int> touched(int address, bool wide, std::array<int, 2> &out) {
+    if (!in_registers(address, wide)) {
+        return {};
+    }
+    out = {address, address + 1};
+    return {out.data(), wide ? 2u : 1u};
+}
+
 
 } // namespace
 
@@ -234,6 +289,57 @@ void Processor::write_wide_operand(uint16_t field, int64_t raw,
 
 void Processor::set_flags(int64_t result, bool overflow) {
     flags_ = {result < 0, result == 0, overflow};
+}
+
+// ---- the pipeline's timing ------------------------------------------------
+
+// The cycle the instruction issues in, after the one before and once
+// every value it reads has been written; then what it holds up. As in the
+// RTL, this is decided before a skip is known: a skipped instruction
+// waits and is waited for all the same.
+int64_t Processor::issue(const Instruction &instruction,
+                         PassState &state) const {
+    Scoreboard &board = state.scoreboard;
+    const Opcode op   = instruction.op;
+    const bool a_wide = instruction.a == ASelect::wide;
+    const bool r_wide = a_wide && has_wide_form(op);
+    const bool y_wide = r_wide && op != Opcode::shift;
+    const int r       = resolve(instruction.r);
+    std::array<int, 2> scratch{};
+
+    int64_t cycle = board.front_ready;
+    auto wait_for = [&](bool reads, int address, bool wide) {
+        if (reads) {
+            for (const int reg : touched(address, wide, scratch)) {
+                cycle = std::max(cycle, board.register_ready[reg]);
+            }
+        }
+    };
+    wait_for(uses_a(op, instruction.a), r, a_wide);
+    wait_for(uses_x(op), resolve(instruction.x), false);
+    wait_for(uses_y(op), resolve(instruction.y), y_wide);
+    if (uses_accumulator(op, instruction.a)) {
+        cycle = std::max(cycle, board.accumulator_ready);
+    }
+    if (op == Opcode::sel || op == Opcode::skip) {
+        cycle = std::max(cycle, board.flags_ready);
+    }
+
+    const int64_t ready = cycle + result_latency;
+    if (writes_result(op) && r != 0 && !is_input(r)) {
+        for (const int reg : touched(r, r_wide, scratch)) {
+            board.register_ready[reg] = ready;
+        }
+    }
+    if (op == Opcode::acc) {
+        board.accumulator_ready = ready;
+    }
+    if (sets_flags(op)) {
+        board.flags_ready = ready;
+    }
+    const bool barrier = op == Opcode::loop || op == Opcode::idx;
+    board.front_ready  = cycle + (barrier ? barrier_latency : 1);
+    return cycle;
 }
 
 // ---- one instruction ------------------------------------------------------
@@ -477,17 +583,18 @@ PassReport Processor::pass() {
         return state.report;
     }
 
-    // One instruction every two cycles (rtl/csp/csp_core.sv): each runs to
-    // completion, the next sees everything it did. Instructions start
-    // before cycle 1472.
+    // Each instruction runs to completion before the next, which sees
+    // everything it did; the cycle it issues in follows the RTL's
+    // interlocks. Instructions issue before cycle 1472.
     while (state.pc < program_.size()) {
+        const Instruction instruction = Instruction::decode(program_[state.pc]);
+        state.cycle                   = issue(instruction, state);
         if (state.cycle >= pass_cycle_limit) {
             state.report.errors.push_back("pass longer than "
                                           + std::to_string(pass_cycle_limit)
                                           + " cycles");
             break;
         }
-        const Instruction instruction = Instruction::decode(program_[state.pc]);
         if (trace_) {
             std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n",
                          state.pc, static_cast<long long>(state.cycle),
@@ -500,9 +607,8 @@ PassReport Processor::pass() {
             execute(instruction, state);
         }
         end_loops(state);
-        state.cycle += cycles_per_instruction;
+        state.report.cycles = static_cast<int>(state.cycle) + 1;
     }
-    state.report.cycles = static_cast<int>(state.cycle);
 
     // Every sink word the program has ever written must be written every
     // pass, or the partials would see a stale page every other pass.

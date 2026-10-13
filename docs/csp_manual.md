@@ -219,9 +219,18 @@ instruction itself. The instruction's description says so.
 ## 5. Execution
 
 - **One pass per two samples.** Every 1536 cycles (48 kHz) the program
-  starts from its first instruction and runs to its last. Each
-  instruction takes two cycles, and an instruction must start before
-  cycle 1472 of the pass, so up to 736 instructions run per pass.
+  starts from its first instruction and runs to its last. Instructions
+  issue in order, at most one per cycle, and must issue before cycle
+  1472 of the pass.
+- **Waits.** An instruction that reads a register, the accumulator or
+  the flags that an instruction shortly before it writes waits until the
+  value is written: it issues 7 cycles after that instruction at the
+  earliest. The instruction after a `LOOP` or `IDX` issues 3 cycles after
+  it at the earliest. Independent instructions issue one per cycle, so
+  work placed between a result and its use costs nothing. A skipped
+  instruction waits and is waited for like any other. The reference
+  model counts every wait (`tools/csp`, the pass's cycles).
+
 - **Fixed timing.** No instruction's timing depends on data. `SKIP`
   turns instructions into no-operations but they still take their
   cycles, and `LOOP` repeats a fixed number of times.
@@ -407,7 +416,7 @@ assembly it can be a label (section 6). An inner loop must end at or
 before the end of the outer one. `count` and `stride` are registers
 holding raw integers; write them as `=#n` constants. `count` is
 **unsigned**: 0 runs the body no times, and a negative raw value is a
-very large count, which runs into the pass limit. `stride` is signed. A loop costs one instruction, the `LOOP` itself, and
+very large count, which runs into the pass limit. `stride` is signed. A loop costs the `LOOP` instruction itself, with its wait (section 5), and
 nothing per pass; an inner loop's `LOOP` instruction runs once per pass
 of the outer loop. After a loop, its index register has moved on by
 `count × stride`.

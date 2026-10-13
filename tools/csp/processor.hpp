@@ -8,9 +8,11 @@
 // CSP programs. It models what a program and the firmware can observe:
 // registers, the published sink page, the index registers, the
 // accumulator and flags, the write queue, reset and the pass's limit.
-// Each instruction takes two cycles and finishes before the next starts
-// (rtl/csp/csp_core.sv), so the order of instructions is all there is to
-// timing.
+// Instructions run one after the other, each seeing everything the one
+// before did. The cycle count follows the RTL's pipeline
+// (rtl/csp/csp_core.sv): an instruction that needs a value still in the
+// pipeline waits for it, so the pass limit is checked as the RTL meets
+// it.
 
 #pragma once
 
@@ -35,8 +37,8 @@ struct Flags {
 
 // What one pass did.
 struct PassReport {
-    int cycles         = 0;       // instructions issued, skipped ones included
-    int writes_applied = 0;       // firmware writes the window applied
+    int cycles         = 0; // the cycle after the last issue, stalls included
+    int writes_applied = 0; // firmware writes the window applied
     std::vector<int> stale_sinks; // owned sink words this pass did not write
     std::vector<std::string> errors;
 };
@@ -93,9 +95,7 @@ public:
         return queue_.size();
     }
 
-    // Print each instruction as it is decoded (pc, cycle, i, j) to
-    // stderr, to compare with the RTL's trace (rtl/csp/csp_core.sv,
-    // CSP_TRACE).
+    // Print each instruction as it issues (pc, cycle, i, j) to stderr.
     void trace(bool on) {
         trace_ = on;
     }
@@ -115,10 +115,21 @@ private:
         int stride;
     };
 
+    // The pipeline's timing: the cycle from which an instruction that
+    // reads each register, the accumulator or the flags may issue, and from
+    // which the front end may issue at all.
+    struct Scoreboard {
+        std::array<int64_t, register_count> register_ready{};
+        int64_t accumulator_ready = 0;
+        int64_t flags_ready       = 0;
+        int64_t front_ready       = 0;
+    };
+
     // Execution state for one pass.
     struct PassState {
         size_t pc     = 0;
-        int64_t cycle = 0;
+        int64_t cycle = 0; // the cycle the current instruction issues in
+        Scoreboard scoreboard;
         std::vector<Loop> loops;
         int skip = 0;
         std::set<int> sinks_written;
@@ -130,6 +141,7 @@ private:
     int64_t read_wide_operand(uint16_t field, PassState &state) const;
     void write_operand(uint16_t field, int32_t raw, PassState &state);
     void write_wide_operand(uint16_t field, int64_t raw, PassState &state);
+    int64_t issue(const Instruction &instruction, PassState &state) const;
     void execute(const Instruction &instruction, PassState &state);
     void end_loops(PassState &state);
     void set_flags(int64_t result, bool overflow);

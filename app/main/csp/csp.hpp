@@ -18,20 +18,30 @@ namespace csp {
 
 // ---- sizes ---------------------------------------------------------------
 
-constexpr int register_count         = 2048;  // 0x000–0x7FF
-constexpr int sink_base              = 0x800; // sink area 0x800–0xBFF
-constexpr int sink_count             = 1024;
-constexpr int address_space          = 4096;  // what i and j can address
-constexpr int io_base                = 0x040; // read-only inputs
-constexpr int io_count               = 32;
-constexpr int constant_base          = 0x001; // the constant pool
-constexpr int constant_count         = 63;
-constexpr int direct_reach           = 512;  // direct operands: 0–511
-constexpr int max_program_length     = 1472; // instructions per pass
-constexpr int write_window           = 48;   // queued writes per pass
-constexpr int cycles_per_pass        = 1536; // two samples at 73.728 MHz
-constexpr int cycles_per_instruction = 2; // READ, WRITE (rtl/csp/csp_core.sv)
-constexpr int pass_cycle_limit = 1472; // instructions start before this cycle
+constexpr int register_count     = 2048;  // 0x000–0x7FF
+constexpr int sink_base          = 0x800; // sink area 0x800–0xBFF
+constexpr int sink_count         = 1024;
+constexpr int address_space      = 4096;  // what i and j can address
+constexpr int io_base            = 0x040; // read-only inputs
+constexpr int io_count           = 32;
+constexpr int constant_base      = 0x001; // the constant pool
+constexpr int constant_count     = 63;
+constexpr int direct_reach       = 512;  // direct operands: 0–511
+constexpr int max_program_length = 1472; // instructions per pass
+constexpr int write_window       = 48;   // queued writes per pass
+constexpr int cycles_per_pass    = 1536; // two samples at 73.728 MHz
+constexpr int pass_cycle_limit   = 1472; // instructions issue before this
+
+// ---- pipeline timing (rtl/csp/csp_core.sv) ---------------------------------
+//
+// One instruction issues per cycle at most. An instruction that reads a
+// register, the accumulator or the flags an older one writes issues
+// result_latency cycles after it at the earliest; the instruction after a
+// LOOP or IDX issues barrier_latency cycles after it at the earliest.
+// Program semantics do not depend on this: only the cycle count does.
+
+constexpr int result_latency  = 7;
+constexpr int barrier_latency = 3;
 
 // ---- number formats -------------------------------------------------------
 //
