@@ -8,8 +8,8 @@ License: CERN-OHL-S v2
 listed in section 14. The core is built (#220) as the pipeline of
 section 3: it matches the reference model in co-simulation and meets
 timing, but is not wired into the synthesizer yet. Vector loops
-(section 7) are proposed on #220 and exist in the reference model
-only.** The
+(section 3) are decided (#220) and built: they match the model in
+cycles as well as in results.** The
 current CSP is described in [dmem_architecture.md](dmem_architecture.md);
 this document proposes what it becomes and why. The instruction set
 itself, every instruction and the assembly language, is specified in
@@ -131,13 +131,16 @@ Independent instructions issue every cycle. There is no forwarding: it
 would shorten the 7 cycles but lengthen the paths, and vector loops
 (below) hide the wait instead.
 
-**Measured** (`make csp-fit`, the CSP alone on the GW2A): 87.44 MHz
-against the 73.728 MHz system clock; LUT4 3890, DFF 1522, BSRAM 10,
-one MULTALU36X18. The slowest path is the loop sequencer (11.44 ns of
-13.56). The first try, a two-cycle machine without a pipeline (each
-instruction finished before the next), closed at 32.48 MHz.
+**Measured** (`make csp-fit`, the CSP alone on the GW2A, seed 1): 98.15
+MHz against the 73.728 MHz system clock; LUT4 5319, DFF 1697, BSRAM 10,
+one MULTALU36X18. Without vector loops it was 91 MHz, with 3827 LUT4
+and 1522 DFF. The slowest path is the next-pc logic (the loop records,
+into the instruction memory's address); comparing each loop's last pc,
+not the pc after it, keeps the increment out of the comparison. The
+first try, a two-cycle machine without a pipeline (each instruction
+finished before the next), closed at 32.48 MHz.
 
-**Vector loops** (proposed on #220; reference model only). A chain of
+**Vector loops** (decided on #220, built). A chain of
 dependent instructions costs 7 cycles a link, but the same chain for
 many voices need not wait at all: run each instruction for every voice
 before the next, and voice k's input was written long before voice k
@@ -149,11 +152,19 @@ their body that way. The body is still written per element, and each
 element keeps its own flags and its own copy of the index register the
 loop does not step, so `CMP` → `SEL` and `IDX j` → `[j+…]` work per
 element. With 7 or more elements nothing waits. The hardware cost
-is an element counter in the sequencer, small LUT RAMs for the
+is an element counter in the sequencer, two small LUT RAMs for the
 per-element flags (3 bits) and index register (12 bits), up to 64
-elements, and element numbers in the hazard check. Measured on the
-model, the envelope of section 8 for 32 voices takes 294 cycles per
-pass as a vector loop and 1126 as a `LOOP`.
+elements, and the run and element number carried by every instruction
+in flight, for the hazard check (a flag reader waits for its own
+element's flag setter; an operand indexed by the private register
+waits while that element's `IDX` is in R or E1). The body runs
+instruction by instruction, so an element has written its flags or
+index register exactly when an earlier body instruction that writes
+it has issued for every element: two bits per loop say so, and until
+then the elements see the values the loop was entered with. Measured
+on the model and the RTL alike, the envelope of section 8 for 32 voices
+takes 294 cycles per pass as a vector loop and 1126 as a `LOOP`. About
+1500 LUT4 more than the scalar core (section 3 above).
 
 - **One multiply-add unit**: one MULTALU36X18 computes `a × b + c`;
   `INTERP`'s `Y − A` and `ADD3`'s `A + Y` are fabric adders in E1, and
@@ -480,15 +491,12 @@ Decided on #184:
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
 | 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |
 | — | nested loops | `LOOP.i` / `LOOP.j` (`a` bit 0), nesting one level |
+| — | vector loops | `LOOP.vi` / `LOOP.vj` (`a` bit 1), up to 64 elements; a larger count skips the loop (#220) |
 | 12 | LFOs | 2 per channel at 24 kHz |
 | — | pass rate | 48 kHz |
 | — | firmware writes | queued, applied on the swap |
 | — | program loading | CSP held in reset |
 
 Still open:
-
-- Vector loops (`LOOP.vi`, `LOOP.vj`, section 3): proposed on #220,
-  in the reference model; for the RTL after review, with the most
-  elements per loop (64 proposed).
 
 - How the pointer RAM packs 12 pointers per partial (section 10).

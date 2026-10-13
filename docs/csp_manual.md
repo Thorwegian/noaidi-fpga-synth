@@ -7,8 +7,9 @@ License: CERN-OHL-S v2
 (#184). The core is built as an in-order pipeline with interlocks
 (#220): it matches the reference model in co-simulation and meets
 timing at 73.728 MHz, but is not yet in the synthesizer. Vector loops
-(`LOOP.vi`, `LOOP.vj`, section 7) are proposed on #220 and exist in the
-reference model only.** Details still open are marked *Open*. This
+(`LOOP.vi`, `LOOP.vj`, section 7) are built too, decided on #220, and
+match the model in cycles as well as in results.** Details still open
+are marked *Open*. This
 manual describes the Control Signal Processor (CSP) as proposed in
 [csp_isa.md](csp_isa.md), which gives the reasons behind the design.
 This manual is for whoever writes CSP programs: it says what every
@@ -503,8 +504,7 @@ The outer `length` (3) counts every instruction in its body, the inner
 `LOOP` and the inner body included. The inner loop is the last thing in
 the outer body, so both end on the same instruction.
 
-**Vector loops** (`LOOP.vi`, `LOOP.vj`; bit 1 of the `a` field;
-proposed on #220, in the reference model only so far). The body is
+**Vector loops** (`LOOP.vi`, `LOOP.vj`; bit 1 of the `a` field). The body is
 written for one element, exactly as for `LOOP`, but runs instruction by
 instruction: the first body instruction for every element, one per
 cycle, then the second, and so on. The loop's index register steps per
@@ -521,7 +521,10 @@ another iteration writes; keep per-element values in per-element fields
 register that iterations share. A vector body may not contain `LOOP`,
 `SKIP`, `ACC` or an `acc` operand, or an `IDX` on the loop's own index
 register; a vector loop can be the inner loop of a `LOOP`. `count` is at
-most 64.
+most 64: a larger count is an error (the model reports it), and the loop
+is skipped, as a count of 0 is, in the model and in the hardware alike.
+After the last element issues, the next instruction issues 3 cycles
+later at the earliest, as after `LOOP`.
 
 Section 8's envelope is a vector loop: 294 cycles per pass for 32
 voices, against 1126 as a `LOOP`.
