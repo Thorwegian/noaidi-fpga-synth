@@ -5,9 +5,10 @@
 // License: CERN-OHL-S v2
 //
 // One MULTALU36X18 DSP block, the same primitive dsp/adsr.sv uses for
-// its RC step: an 18-bit × 36-bit signed product plus a 54-bit addend,
-// registered on the way out, so the result arrives one clock after the
-// operands (the pipeline's E2 → W step).
+// its RC step: an 18-bit × 36-bit signed product plus a 54-bit addend.
+// Combinational, with none of the block's registers: the CSP executes an
+// instruction within one clock, from register file read to result
+// register (rtl/csp/csp_core.sv).
 //
 // In the CSP's formats (docs/csp_manual.md section 3): a is a word
 // (Q4.14), b a wide value (Q4.32) and c the accumulator's format
@@ -21,7 +22,7 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_multiply_add (
-    input  wire               clk,
+    input  wire               clk,      // unused: the block is combinational
     input  wire               reset_n,
     input  wire signed [17:0] a,
     input  wire signed [35:0] b,
@@ -47,7 +48,7 @@ module csp_multiply_add (
         .BSIGN_REG         (1'b0),
         .ACCLOAD_REG0      (1'b0),
         .ACCLOAD_REG1      (1'b0),
-        .OUT_REG           (1'b1),   // registered: the E2 → W boundary
+        .OUT_REG           (1'b0),   // combinational: the core registers the result
         .PIPE_REG          (1'b0),
         .C_ADD_SUB         (1'b0),   // add c
         .MULTALU36X18_MODE (0),      // a × b ± c

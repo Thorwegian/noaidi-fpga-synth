@@ -29,7 +29,7 @@ assembly language.
 The CSP computes the synthesizer's control signals: envelopes, LFOs, and
 the pitch, cutoff and gain values every partial reads. It runs one fixed
 program, from the first instruction to the last, once every two samples
-(48 000 times a second), executing one instruction per clock cycle.
+(48 000 times a second), one instruction after the other.
 One run of the program is a **pass**. There are no
 jumps and no interrupts; the program takes the same number of cycles
 every sample, whatever its data.
@@ -219,21 +219,15 @@ instruction itself. The instruction's description says so.
 ## 5. Execution
 
 - **One pass per two samples.** Every 1536 cycles (48 kHz) the program
-  starts from its first instruction and runs to its last, one
-  instruction per cycle. It can be up to 1472 instructions long.
+  starts from its first instruction and runs to its last. Each
+  instruction takes two cycles, and an instruction must start before
+  cycle 1472 of the pass, so up to 736 instructions run per pass.
 - **Fixed timing.** No instruction's timing depends on data. `SKIP`
   turns instructions into no-operations but they still take their
   cycles, and `LOOP` repeats a fixed number of times.
 - **Results are visible at once.** An instruction sees the result of
-  the instruction just before it, for registers, the accumulator and the
-  flags alike.
-- **Index registers take effect three instructions later.** After an
-  `IDX`, the next three instructions still see the old `i` or `j`; the
-  fourth sees the new one. These are delay slots, like those some
-  processors have after a jump. (`IDX` is computed in the arithmetic stage,
-  while addresses are formed earlier, in decode.) The assembler warns
-  when an indexed operand falls inside that shadow. `LOOP` stepping `i`
-  or `j` has no such delay.
+  the instruction just before it, for registers, the accumulator, the
+  flags and the index registers alike. There are no delay slots.
 - **Firmware writes land between passes.** The firmware's register
   writes wait in a queue. When the firmware toggles the swap (the same
   CTRL swap that pages in new partial parameters), the queued writes
@@ -266,7 +260,7 @@ Programs are written in one of two ways:
   `csp::ProgramBuilder` (`app/main/csp/program_builder.hpp`) has one
   call per instruction, `b.interp_wide(level, rate, target)` and so on,
   and checks the operands as it emits. Its `check()` then looks at the
-  whole program: `IDX` delay slots, loop nesting and ends, `SKIP`
+  whole program: loop nesting and ends, `SKIP`
   ranges, the program's length.
 - **As text, in the macro assembler** described here: a front end to the
   same builder, for people. Names, blocks, constants and labels exist
@@ -413,7 +407,7 @@ assembly it can be a label (section 6). An inner loop must end at or
 before the end of the outer one. `count` and `stride` are registers
 holding raw integers; write them as `=#n` constants. `count` is
 **unsigned**: 0 runs the body no times, and a negative raw value is a
-very large count, which runs into the pass limit. `stride` is signed. A loop costs one cycle for the `LOOP` instruction itself and
+very large count, which runs into the pass limit. `stride` is signed. A loop costs one instruction, the `LOOP` itself, and
 nothing per pass; an inner loop's `LOOP` instruction runs once per pass
 of the outer loop. After a loop, its index register has moved on by
 `count × stride`.
@@ -426,10 +420,8 @@ of 16 words each.
 
 ```
         IDX     i, =#CHANNELS, 0
-        LOOP.i  5, =#16, =#64       ; each channel
-        IDX     j, LFO_BASE, 0      ;   (delay slots: the j loop's
-        NOP                         ;    first use of j is three
-        NOP                         ;    instructions on)
+        LOOP.i  3, =#16, =#64       ; each channel
+        IDX     j, LFO_BASE, 0      ;   j → this channel's LFOs
         LOOP.j  1, =#2, =#4         ;   each of its 2 LFOs
         MACW.w  [j+PHASE], ONE, [j+RATE]
 ```
@@ -677,12 +669,10 @@ precision and converts between formats.
 nothing
 
 **Description**
-`NOP` does nothing for one cycle: it writes no register and leaves the
+`NOP` does nothing for one instruction's time: it writes no register and leaves the
 accumulator, the flags and the index registers as they were. Its
 encoding is all zeros, so instruction memory that has been cleared, or
 never written, is a run of `NOP`s.
-
-The assembler can also fill a delay slot after `IDX` with one.
 
 **Flags** unchanged.
 
@@ -795,9 +785,6 @@ the envelope test in `tools/csp/test/csp_test.cpp`.
 
 ```
         IDX     i, =#VOICES, 0             ; i → voice 0
-        NOP                                ; (i's delay slots)
-        NOP
-        NOP
         LOOP.i  9, =#32, =#16              ; each voice
         IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
         MAX     U, [i+STAGE], =#4          ;   attack → decay, if…

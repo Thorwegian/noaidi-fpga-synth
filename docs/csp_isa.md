@@ -64,7 +64,9 @@ add", and the per-partial immediates.
   pipeline runs at 96 kHz for oscillator aliasing and filter headroom;
   control signals do not need it. A pass has 1536 cycles.
 - **One fixed program per pass**, run from the top at every pass, one
-  instruction per cycle, no branches, up to **1472 instructions**.
+  instruction after the other, no branches. Instructions start in the
+  first **1472 cycles**; at two cycles each (section 3), that is up to
+  736 instructions.
   Conditional work uses selects and `SKIP` (a skipped instruction still
   takes its cycle), so the timing never depends on the data. Loops
   (`LOOP`) have a fixed count, so they keep that property.
@@ -79,8 +81,8 @@ add", and the per-partial immediates.
   same boundary. A note-on's partial words and register words (note,
   velocity, gate) become visible in the same pass, and the CSP's write
   port is never shared mid-pass. The window takes 48 writes; a larger
-  group spreads over several passes. 1472 instructions + a 56-cycle
-  window + drain = 1536.
+  group spreads over several passes. 1472 cycles of instructions + a
+  56-cycle window + drain = 1536.
 - **Programs load with the CSP held in reset.** The instruction memory
   has one page: the firmware holds the CSP in reset, writes the program,
   and releases it, so a pass never runs half an old and half a new
@@ -97,16 +99,18 @@ add", and the per-partial immediates.
 
 ## 3. Datapath
 
-A textbook in-order pipeline, one instruction per cycle:
+A linear machine: each instruction finishes before the next starts, two
+cycles each (#220):
 
-| Stage | Work |
+| Cycle | Work |
 |---|---|
-| F | fetch: PC → instruction memory |
-| D | decode; register-file read addresses for A, X, Y |
-| R | register read (three ports), forwarding from E/W |
-| E1 | ALU54D: `Y − A` (or pass-through) |
-| E2 | MULTALU36X18: `X × E1 + (A << s)`; flags |
-| W | write R (register file or sink area); update the accumulator and condition flags |
+| READ | the operands come out of the register file (three ports, one bypass for the write on the same edge) and settle through the datapath: `Y − A`, then MULTALU36X18 `X × (Y − A) + A` or `X × Y + A`, then saturation |
+| WRITE | write R (register file or sink area), the accumulator, the flags, `i`/`j`; decode the next instruction and present its read addresses |
+
+Measured with `make csp-fit`, this closes at 32.48 MHz, not the
+73.728 MHz system clock. #220 moves to a pipeline with interlocks: the
+hardware waits where a result is not ready, so programs keep these
+semantics and only the cycle count changes.
 
 - **One multiply-add unit**, generalising the one `adsr.sv` already
   instantiates (ALU54D then MULTALU36X18). `MAC`, `INTERP` and the
@@ -118,7 +122,7 @@ A textbook in-order pipeline, one instruction per cycle:
 - **Condition flags** (zero, negative, saturated), set by every
   arithmetic instruction, read by `SEL` and `SKIP`.
 - **Index registers `i` and `j`** and a **loop counter** beside the PC
-  (section 4). An indexed operand's address is formed in D.
+  (section 4). An indexed operand's address is formed in decode.
 - **PC, loop counter, instruction register, decoder, index registers,
   register file, ALU, flags, accumulator** are separate, named units in
   the RTL, each with its own bench.
@@ -278,9 +282,6 @@ four words: target (wide), rate, spare. Each voice block holds `level`
 
 ```
 IDX     i, =#VOICES, 0             ; i → voice 0
-NOP                                ; (i's delay slots)
-NOP
-NOP
 LOOP.i  9, =#32, =#16              ; each voice
 IDX     j, ENV_TABLE, [i+STAGE]    ;   j → this segment's row
 MAX     U, [i+STAGE], =#4          ;   attack → decay, if…
@@ -393,7 +394,7 @@ Each its own PR, checked in sim and on the board:
 1. Reference model, assembler and the instruction-level bench, against
    a new CSP core beside the old one.
 2. The new core: datapath, register file, write queue on the swap,
-   loading in reset, 48 kHz passes of up to 1472 instructions. Today's
+   loading in reset, 48 kHz passes of up to 1472 cycles of instructions. Today's
    programs ported to it.
 3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
    `osc_core` retire.
@@ -416,7 +417,7 @@ Decided on #184:
 | 5 | interpolate sinks between 48 kHz passes | no |
 | 6 | `store_ram` | removed |
 | 7 | write window | 48 writes per pass |
-| 8 | when a new `i`/`j` takes effect | three delay slots; the assembler warns |
+| 8 | when a new `i`/`j` takes effect | at once, for the next instruction (#220; no delay slots) |
 | 9 | rounding | truncate |
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
 | 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |

@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // Every instruction at its edges (formats, truncation, saturation, wrap,
-// flags), the rules a program can see (IDX delay slots, loops, SKIP, the
+// flags), the rules a program can see (IDX at once, loops, SKIP, the
 // write queue and swap, reset, pass limits, sink pages), the assembler's
 // checks, and the programs in docs/csp_manual.md section 8.
 //
@@ -283,41 +283,37 @@ void test_skip() {
     const csp::PassReport report = m.run();
     check_equal(m.get("A_"), 0, "SKIP neg skips the next two");
     check_equal(m.get("D_"), q(3.0), "the instruction after them runs");
-    check_equal(report.cycles, 5,
-                "skipped instructions still take their cycles");
+    check_equal(report.cycles, 5 * csp::cycles_per_instruction,
+                "skipped instructions still take their two cycles");
 }
 
-void test_index_delay() {
+// IDX takes effect for the very next instruction: each instruction
+// finishes before the next starts (#220).
+void test_index_immediate() {
     Machine m(std::string(registers) + R"(
         .equ BASE, 0x100
         IDX   i, =#BASE, 0
-        MAC   [i+1], 0, =1.0, =1.0   ; slot 1: old i (0) → register 1
-        MAC   [i+2], 0, =1.0, =1.0   ; slot 2
-        MAC   [i+3], 0, =1.0, =1.0   ; slot 3
-        MAC   [i+4], 0, =1.0, =1.0   ; fourth: new i → 0x104
+        MAC   [i+1], 0, =1.0, =1.0      ; the next instruction: the new i
+        IDX   i, =#0x180, 0
+        MAC   [i+2], 0, =2.0, =1.0
 )");
-    check(has_diagnostic(m.program, false, "delay slot"),
-          "the assembler warns about delay slots");
+    check(m.program.diagnostics.empty(), "IDX followed by a use: no warning");
     m.start().run();
-    check_equal(m.processor.read(0x104), q(1.0),
-                "the fourth instruction after IDX sees the new i");
-    check_equal(m.processor.read(0x101), 0, "the first three do not");
-    check_equal(m.processor.read(1), q(1.0), "they still used the old i (0)");
+    check_equal(m.processor.read(0x101), q(1.0),
+                "the instruction after IDX sees the new i");
+    check_equal(m.processor.read(0x182), q(2.0),
+                "and again after the second IDX");
+    check_equal(m.processor.read(1), 0x100,
+                "nothing used the old i (0): register 1, =#BASE, is untouched");
 }
 
 void test_loops() {
     Machine m(std::string(registers) + R"(
         .equ BASE, 0x200
         IDX    i, =#BASE, 0
-        NOP
-        NOP
-        NOP
         LOOP.i 1, =#4, =#16           ; 4 blocks of 16
         ADD3   [i+0], [i+0], =1.0, ZERO
         IDX    j, =#0x300, 0
-        NOP
-        NOP
-        NOP
         LOOP.i 3, =#2, =#1            ; outer: 2 passes over i
         NOP
         LOOP.j 1, =#3, =#1            ;   inner: 3 passes over j
@@ -580,16 +576,15 @@ end:
     const size_t open = bad.open_loop(IndexRegister::i, Operand::direct(1),
                                       Operand::direct(1));
     (void) open;
-    bool delay = false, reach = false, unclosed = false;
+    bool reach = false, unclosed = false;
     for (const csp::BuildIssue &found : bad.check()) {
-        delay = delay || found.message.find("delay slot") != std::string::npos;
         reach = reach
                 || found.message.find("direct reach") != std::string::npos;
         unclosed = unclosed
                    || found.message.find("never closed") != std::string::npos;
     }
-    check(delay && reach && unclosed,
-          "the builder reports delay slots, reach, and a loop never closed");
+    check(reach && unclosed,
+          "the builder reports reach, and a loop never closed");
 }
 
 // ---- the manual's programs (docs/csp_manual.md section 8) ---------------------------
@@ -743,7 +738,7 @@ int main() {
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();
     test_skip();
-    test_index_delay();
+    test_index_immediate();
     test_loops();
     test_empty_inner_loop_at_outer_end();
     test_queue_and_swap();

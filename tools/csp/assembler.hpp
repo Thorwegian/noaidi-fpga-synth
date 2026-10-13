@@ -5,7 +5,7 @@
 //
 // Turns CSP assembly (docs/csp_manual.md section 6) into instruction
 // words plus the constant registers the firmware writes at start-up,
-// and checks what the hardware cannot: IDX delay slots, loop nesting,
+// and checks what the hardware cannot: loop nesting,
 // SKIP ranges, direct operands beyond reach and `.w` where an
 // instruction has no wide form.
 

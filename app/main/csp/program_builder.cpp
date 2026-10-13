@@ -11,38 +11,6 @@ namespace {
 
 constexpr size_t max_length = 1023; // a LOOP's or SKIP's 10-bit count
 
-// Which of an instruction's fields are register operands.
-struct OperandFields {
-    bool r, x, y;
-};
-
-OperandFields operand_fields(Opcode op) {
-    switch (op) {
-    case Opcode::nop:
-    case Opcode::skip:
-        return {false, false, false};
-    case Opcode::loop:
-    case Opcode::idx:
-    case Opcode::acc:
-        return {false, true, true};
-    case Opcode::abs:
-        return {true, true, false};
-    case Opcode::shift:
-        return {true, false, true};
-    default:
-        return {true, true, true};
-    }
-}
-
-bool uses_index(uint16_t field, IndexRegister index) {
-    const Operand operand = Operand::decode(field);
-    return operand.mode == Operand::Mode::indexed && operand.index == index;
-}
-
-char name_of(IndexRegister index) {
-    return index == IndexRegister::j ? 'j' : 'i';
-}
-
 } // namespace
 
 // ---- emitting -----------------------------------------------------------------
@@ -258,30 +226,6 @@ std::vector<BuildIssue> ProgramBuilder::check() const {
                           "program is " + std::to_string(words_.size())
                                   + " instructions; a pass holds "
                                   + std::to_string(max_program_length)});
-    }
-
-    // IDX delay slots: the next three instructions still see the old value.
-    for (size_t at = 0; at < words_.size(); ++at) {
-        const Instruction instruction = Instruction::decode(words_[at]);
-        if (instruction.op != Opcode::idx) {
-            continue;
-        }
-        const auto target =
-                (instruction.r & 1) ? IndexRegister::j : IndexRegister::i;
-        for (size_t later = at + 1;
-             later <= at + index_delay && later < words_.size(); ++later) {
-            const Instruction next     = Instruction::decode(words_[later]);
-            const OperandFields fields = operand_fields(next.op);
-            if ((fields.r && uses_index(next.r, target))
-                || (fields.x && uses_index(next.x, target))
-                || (fields.y && uses_index(next.y, target))) {
-                issues.push_back({later, false,
-                                  std::string("uses ") + name_of(target)
-                                          + " in a delay slot of the IDX at "
-                                          + std::to_string(at)
-                                          + ": it still sees the old value"});
-            }
-        }
     }
 
     // Loops: closed, inside the program, nested at most one level, on

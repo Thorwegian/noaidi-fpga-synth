@@ -6,7 +6,7 @@
 // The firmware writes CSP programs with this, one call per instruction,
 // and the macro assembler in tools/csp is a text front end to it. Each
 // call checks its operands as it emits; check() then looks at the
-// program as a whole: IDX delay slots, loop nesting and ends, SKIP
+// program as a whole: loop nesting and ends, SKIP
 // ranges and the program's length (docs/csp_manual.md sections 5 and 7).
 //
 // Built without exceptions or RTTI, as the firmware is.

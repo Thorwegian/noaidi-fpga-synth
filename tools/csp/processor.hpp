@@ -7,9 +7,10 @@
 // yardstick the RTL is checked against (#220) and the host simulator for
 // CSP programs. It models what a program and the firmware can observe:
 // registers, the published sink page, the index registers, the
-// accumulator and flags, the write queue, reset and the pass limits. It
-// does not model the pipeline's cycle-by-cycle internals, except the one
-// a program can see: the IDX delay slots.
+// accumulator and flags, the write queue, reset and the pass's limit.
+// Each instruction takes two cycles and finishes before the next starts
+// (rtl/csp/csp_core.sv), so the order of instructions is all there is to
+// timing.
 
 #pragma once
 
@@ -114,30 +115,11 @@ private:
         int stride;
     };
 
-    struct PendingIndex {
-        int64_t visible_from; // the issue cycle from which it is seen
-        IndexRegister index;
-        int value;
-    };
-
-    // A register or accumulator write, as the hazard check at D sees an
-    // instruction that has not yet finished (rtl/csp/csp_core.sv).
-    struct SlotWrite {
-        bool writes_register    = false;
-        int address             = 0;
-        bool wide               = false;
-        bool writes_accumulator = false;
-    };
-
     // Execution state for one pass.
     struct PassState {
         size_t pc     = 0;
         int64_t cycle = 0;
-        // What the instructions decoded one and two cycles ago write (a
-        // bubble writes nothing): the producers in R and E1.
-        std::array<SlotWrite, 2> recent{};
         std::vector<Loop> loops;
-        std::deque<PendingIndex> pending;
         int skip = 0;
         std::set<int> sinks_written;
         PassReport report;
@@ -149,9 +131,6 @@ private:
     void write_operand(uint16_t field, int32_t raw, PassState &state);
     void write_wide_operand(uint16_t field, int64_t raw, PassState &state);
     void execute(const Instruction &instruction, PassState &state);
-    SlotWrite writes_of(const Instruction &instruction) const;
-    bool hazard(const Instruction &instruction, const PassState &state) const;
-    void advance(PassState &state, const SlotWrite &decoded);
     void end_loops(PassState &state);
     void set_flags(int64_t result, bool overflow);
     int apply_window(int limit);
