@@ -19,6 +19,7 @@
 
 #include "../assembler.hpp"
 #include "../processor.hpp"
+#include "csp/envelope.hpp"
 #include "csp/program_builder.hpp"
 
 namespace {
@@ -830,6 +831,33 @@ void test_lfo() {
 
 } // namespace
 
+// An envelope coefficient (adsr.sv's k, per 96 kHz sample) as a rate and
+// shift for a 48 kHz pass: the same fraction of the distance in two samples.
+void test_envelope_rates() {
+    const uint32_t coefficients[] = {1,    7,     100,   250,    1000,
+                                     4096, 16384, 65535, 131071, 262143};
+    for (const uint32_t k : coefficients) {
+        const csp::EnvelopeRate rate = csp::envelope_rate(k);
+        const double sample          = static_cast<double>(k) / (1 << 24);
+        const double want            = 1.0 - (1.0 - sample) * (1.0 - sample);
+        const double got             = csp::envelope_fraction(rate);
+        const std::string name       = "k=" + std::to_string(k);
+        check(rate.rate >= 0 && rate.rate <= 131071, name + ": rate in range");
+        check(rate.shift >= -16 && rate.shift <= 0, name + ": shift in range");
+        // The rate has 17 bits unless the shift runs out (k below ~16)
+        const double tolerance = k >= 16 ? 2e-5 : 0.1;
+        check(std::fabs(got / want - 1.0) <= tolerance,
+              name + ": fraction " + std::to_string(got) + ", want "
+                      + std::to_string(want));
+    }
+    check_equal(csp::envelope_rate(0).rate, 0, "k=0: no movement");
+    // Slow enough for a ten-second release (a time constant of ~1.4 s,
+    // 70,000 passes): the INTERP rate alone could not say it.
+    const csp::EnvelopeRate slow = csp::envelope_rate(200);
+    check(csp::envelope_fraction(slow) < 1.0 / 16384.0,
+          "k=200 is below INTERP's smallest rate");
+}
+
 int main() {
     test_encoding();
     test_mac();
@@ -853,6 +881,7 @@ int main() {
     test_builder();
     test_envelope();
     test_lfo();
+    test_envelope_rates();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;
