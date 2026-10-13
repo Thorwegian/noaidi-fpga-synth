@@ -26,6 +26,7 @@
 #include "Vtb_csp_cosim__Dpi.h"
 #include "assembler.hpp"
 #include "csp/envelope.hpp"
+#include "csp/lfo.hpp"
 #include "csp_rtl.hpp"
 #include "processor.hpp"
 #include "svdpi.h"
@@ -398,12 +399,166 @@ int bench_envelope(VerilatedContext &context) {
     return failures;
 }
 
+// ---- the LFOs ---------------------------------------------------------------------------------
+//
+// tools/csp/programs/lfo.s, in 8 LFOs (two of each shape, sorted), against
+// osc_core: the same phase goes to both, and the program's output must be
+// osc_core's wave at that phase, scaled to ±depth (osc_core's full scale is
+// ±0.5). The rates run from a cycle in a few thousand passes to several
+// cycles a pass; the depths from a tenth to two.
+
+struct LfoSetting {
+    int shape;          // 0 saw, 1 square, 2 triangle, 3 sine
+    uint32_t increment; // the old unit's 16-bit phase increment
+    double depth;
+};
+
+constexpr int lfos = 8;
+
+const LfoSetting lfo_settings[lfos] = {
+        {0, 2000, 1.0}, {0, 40, 0.5},   {1, 3000, 1.0}, {1, 100, 0.25},
+        {2, 1500, 2.0}, {2, 7000, 0.1}, {3, 500, 1.0},  {3, 10000, 2.0},
+};
+
+constexpr int lfo_base = 0x300;
+
+int lfo_block(int lfo) {
+    return lfo_base + 16 * lfo;
+}
+
+int to_word(double value) {
+    return static_cast<int>(std::lround(value * 16384.0));
+}
+
+int bench_lfo(VerilatedContext &context) {
+    const csp::Program program =
+            assemble_file(std::string(CSP_PROGRAMS_DIR) + "/lfo.s");
+    Rtl rtl(context);
+
+    std::vector<FirmwareWrite> setup;
+    for (const csp::ConstantWrite &constant : program.constants) {
+        setup.push_back({constant.address, constant.raw});
+    }
+    int counts[4] = {0, 0, 0, 0};
+    for (int lfo = 0; lfo < lfos; ++lfo) {
+        const LfoSetting &s = lfo_settings[lfo];
+        ++counts[s.shape];
+        const int block = lfo_block(lfo);
+        write_wide(setup, block + 2, csp::lfo_rate(s.increment, 1));
+        setup.push_back({block + 4, to_word(s.depth)});
+        setup.push_back({block + 5, to_word(-s.depth)});
+        setup.push_back({block + 6, s.shape == 0   ? to_word(s.depth / 8)
+                                    : s.shape == 2 ? to_word(s.depth / 4)
+                                                   : 0});
+    }
+    for (int shape = 0; shape < 4; ++shape) {
+        setup.push_back({program.symbols.at("N_SAW") + shape, counts[shape]});
+    }
+    rtl.hold(true);
+    rtl.load(program.words);
+    for (const FirmwareWrite &write : setup) {
+        rtl.write(write.address, write.raw);
+    }
+    rtl.swap();
+    rtl.pass();
+    rtl.hold(false);
+
+    struct Worst {
+        double program_vs_unit  = 0;
+        double program_vs_exact = 0;
+        double unit_vs_exact    = 0;
+        int pass                = 0;
+    };
+    std::vector<Worst> worst(lfos);
+    constexpr int passes = 4000;
+    constexpr double pi  = 3.14159265358979323846;
+    for (int pass = 1; pass <= passes; ++pass) {
+        rtl.pass();
+        for (int lfo = 0; lfo < lfos; ++lfo) {
+            const LfoSetting &s = lfo_settings[lfo];
+            const int64_t phase = read_wide(rtl, lfo_block(lfo));
+            // the 36-bit phase's top 24 bits are osc_core's phase
+            const int phase24        = static_cast<int>(phase >> 12);
+            const double program_out = rtl.reg(lfo_block(lfo) + 7) / 16384.0;
+            // osc_core is ±0.5 at full scale: Q2.16 of 32768
+            const double unit =
+                    2.0 * s.depth * rtl.osc_wave(s.shape, phase24) / 65536.0;
+            const double x = static_cast<double>(phase24) / (1 << 24); // cycles
+            double exact;
+            switch (s.shape) {
+            case 0:
+                exact = 2.0 * x;
+                break;
+            case 1:
+                exact = x < 0 ? 1.0 : -1.0;
+                break;
+            case 2:
+                exact = 4.0 * std::fabs(x) - 1.0;
+                break;
+            default:
+                exact = std::sin(2.0 * pi * x);
+                break;
+            }
+            exact *= s.depth;
+            Worst &w            = worst[lfo];
+            const double d_unit = std::fabs(program_out - unit);
+            if (d_unit > w.program_vs_unit) {
+                w.program_vs_unit = d_unit;
+                w.pass            = pass;
+            }
+            w.program_vs_exact = std::max(w.program_vs_exact,
+                                          std::fabs(program_out - exact));
+            w.unit_vs_exact =
+                    std::max(w.unit_vs_exact, std::fabs(unit - exact));
+        }
+    }
+
+    static const char *const shapes[4] = {"saw", "square", "triangle", "sine"};
+    std::printf("lfo: %d LFOs, %d passes (%.2f s); differences in units of the "
+                "depth\n",
+                lfos, passes, passes / 48000.0);
+    std::printf("  lfo  shape     increment depth |  program vs osc_core  "
+                "program vs exact  osc_core vs exact\n");
+    int failures = 0;
+    for (int lfo = 0; lfo < lfos; ++lfo) {
+        const LfoSetting &s = lfo_settings[lfo];
+        const Worst &w      = worst[lfo];
+        // The bounds. The saw, square and triangle are exact up to the
+        // words' rounding (2^-14) and the rounding of the gain constant
+        // (depth ÷ 8 or ÷ 4 in a word: half a raw unit of it, relative). The
+        // sine's polynomial is good to 0.15 % of the depth, and osc_core's
+        // table is itself 0.31 % off the exact sine, which the program is
+        // allowed on top of.
+        const double word     = 1.0 / 16384.0;
+        const double gain_raw = s.shape == 0   ? s.depth / 8 * 16384
+                                : s.shape == 2 ? s.depth / 4 * 16384
+                                               : 0;
+        const double gain_error =
+                gain_raw > 0 ? 2.0 * s.depth * 0.5 / gain_raw : 0;
+        const double bound =
+                (s.shape == 3 ? 0.0015 : 0.0) * s.depth + gain_error + 4 * word;
+        const double bound_unit =
+                (s.shape == 3 ? 0.0050 : 0.0) * s.depth + gain_error + 4 * word;
+        const bool ok =
+                w.program_vs_exact <= bound && w.program_vs_unit <= bound_unit;
+        std::printf("  %3d  %-8s %9u %5.2f | %.2e (@%d)       %.2e          "
+                    "%.2e  %s\n",
+                    lfo, shapes[s.shape], s.increment, s.depth,
+                    w.program_vs_unit / s.depth, w.pass,
+                    w.program_vs_exact / s.depth, w.unit_vs_exact / s.depth,
+                    ok ? "ok" : "FAIL");
+        failures += ok ? 0 : 1;
+    }
+    return failures;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     VerilatedContext context;
     context.commandArgs(argc, argv);
     int failures = bench_envelope(context);
+    failures += bench_lfo(context);
     std::printf(failures ? "%d FAILURE(S)\n" : "ALL PASS\n", failures);
     return failures ? 1 : 0;
 }

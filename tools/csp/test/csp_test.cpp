@@ -20,6 +20,7 @@
 #include "../assembler.hpp"
 #include "../processor.hpp"
 #include "csp/envelope.hpp"
+#include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
 
 namespace {
@@ -805,7 +806,7 @@ void test_lfo() {
         MACW.w  PHASE, ONE, RATE            ; advance and wrap
         MAC     SAW, 0, PHASE, DEPTH_8      ; sawtooth, ±depth
         CMP     ZERO, PHASE, ZERO
-        SEL     SQUARE, DEPTH, NEG_DEPTH    ; square, ±depth
+        SEL     SQUARE, NEG_DEPTH, DEPTH    ; square, ±depth
         ABS     T, PHASE                    ; 0 … 8
         MAC     TRI, 0, T, DEPTH_4          ; 0 … 2 × depth
         ADD3    TRI, TRI, NEG_DEPTH, ZERO   ; triangle, ±depth
@@ -822,7 +823,7 @@ void test_lfo() {
         previous_saw = saw;
         lowest       = std::min(lowest, m.get("TRI"));
         highest      = std::max(highest, m.get("TRI"));
-        check(m.get("SQUARE") == (m.get("PHASE") < 0 ? q(-1.0) : q(1.0)),
+        check(m.get("SQUARE") == (m.get("PHASE") < 0 ? q(1.0) : q(-1.0)),
               "square follows the phase's sign");
     }
     check_equal(wraps, 2, "the saw wraps once per 8 passes");
@@ -858,6 +859,23 @@ void test_envelope_rates() {
           "k=200 is below INTERP's smallest rate");
 }
 
+// An LFO's old increment as a RATE: the same cycles a second.
+void test_lfo_rate() {
+    // 1000 per sample at 96 kHz is 1000 / 2^25 of a cycle: 2.861 Hz
+    const double old_hertz = 1000.0 * 96000.0 / (1 << 25);
+    for (const int passes : {1, 2}) {
+        const int64_t rate = csp::lfo_rate(1000, passes);
+        const double hertz = static_cast<double>(rate)
+                             / static_cast<double>(int64_t{1} << 36)
+                             * (48000.0 / passes);
+        check(std::fabs(hertz / old_hertz - 1.0) < 1e-12,
+              "lfo_rate: " + std::to_string(passes) + " pass(es) an update");
+    }
+    check_equal(csp::lfo_rate(0, 2), 0, "lfo_rate: a stopped LFO");
+    check(csp::lfo_rate(65535, 2) < (int64_t{1} << 35),
+          "lfo_rate: the fastest LFO is below half a cycle an update");
+}
+
 int main() {
     test_encoding();
     test_mac();
@@ -882,6 +900,7 @@ int main() {
     test_envelope();
     test_lfo();
     test_envelope_rates();
+    test_lfo_rate();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;

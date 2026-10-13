@@ -920,17 +920,22 @@ against `adsr.sv` (`make sim-csp-bench`).
 
 The phase runs from −8 to +8 and wraps; its upper word is a sawtooth
 over that range, so the depth constants carry the scale: `DEPTH_8` is
-depth ÷ 8 and `DEPTH_4` is depth ÷ 4.
+depth ÷ 8 and `DEPTH_4` is depth ÷ 4. The square is high while the phase
+is negative, as the fixed-function LFO's was.
 
 ```
         MACW.w  PHASE, ONE, RATE           ; advance and wrap
         MAC     SAW, 0, PHASE, DEPTH_8     ; sawtooth, ±depth
         CMP     ZERO, PHASE, ZERO
-        SEL     SQUARE, DEPTH, NEG_DEPTH   ; square, ±depth
+        SEL     SQUARE, NEG_DEPTH, DEPTH   ; square, ±depth
         ABS     T, PHASE                   ; 0 … 8
         MAC     TRI, 0, T, DEPTH_4         ; 0 … 2 × depth
         ADD3    TRI, TRI, NEG_DEPTH, ZERO  ; triangle, ±depth
 ```
+
+The synthesizer's own LFOs, with a sine, are the vector loops of
+[tools/csp/programs/lfo.s](../tools/csp/programs/lfo.s), checked against
+`osc_core` (`make sim-csp-bench`).
 
 ### A voice's pitch
 

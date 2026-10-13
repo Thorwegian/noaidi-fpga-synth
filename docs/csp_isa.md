@@ -388,11 +388,26 @@ a whole number of 2⁻²² units, which for its slowest rates is up to 8 % of th
 step (1.2 dB after 0.27 s). The attack overshoots full scale by up to one
 step (0.4 % at `adsr.sv`'s fastest rate) before the stage flips.
 
-**LFO** (per channel): `MACW.w PHASE, ONE, RATE` advances the wide
-phase, then the shape is scaled by the depth. Saw: one `MAC`; square:
-`CMP` + `SEL`; triangle: `ABS` + `MAC` + `ADD3`; sine: a polynomial,
-about 4 instructions. **2–5 instructions per LFO** (examples in
-[csp_manual.md](csp_manual.md) section 8).
+**LFO.** `MACW.w PHASE, ONE, RATE` advances the wide phase, which runs
+from −8 to +8 and wraps once a cycle, then the shape is scaled by the
+depth ([tools/csp/programs/lfo.s](../tools/csp/programs/lfo.s)). Saw: one
+`MAC`; square: `CMP` + `SEL`, high while the phase is negative, as
+`osc_core`'s pulse; triangle: `ABS` + `MAC` + `ADD3`; sine: the parabola
+4p − 4p|p| and its correction y + 0.225 (y|y| − y), good to 0.15 %, in
+nine instructions. **2, 3, 4 and 11 instructions an LFO** with the phase
+update. The records are sorted by shape and the firmware writes how many of
+each (a loop's count is a register, and a loop over none costs nothing),
+so each shape costs only what its LFOs use; the scratch words a vector loop
+needs are in the record. Measured on the reference model: 16 sine LFOs, the
+worst case for the 24 kHz alternating halves, take 191 cycles a pass; all 32
+every pass, 367. The firmware's side is `csp::lfo_rate`
+(`app/main/csp/lfo.hpp`): the old 16-bit increment as the wide `RATE`.
+
+**Measured against `osc_core`** (`make sim-csp-bench`): the saw, square and
+triangle equal `osc_core`'s wave at the same phase, scaled to ±depth
+(`osc_core`'s full scale is ±0.5), to the rounding of the words. The sine is
+within 0.15 % of the exact sine, and within 0.42 % of `osc_core`'s, whose
+256-entry table is itself 0.31 % off.
 
 ## 9. Budget
 
@@ -406,6 +421,7 @@ Measured so far:
 |---|---|
 | both envelopes of 32 voices, `LOOP.vi` (section 8) | 742 |
 | one envelope of 32 voices, `LOOP.vi` | 390 |
+| 16 sine LFOs (the worst case at 24 kHz); all 32 every pass | 191; 367 |
 | the manual's envelope (`INTERP`, one pole in one instruction), `LOOP.vi` | 294 |
 | the same, `LOOP.i` | 1126 |
 
@@ -477,7 +493,7 @@ small program. The new CSP gets:
   the units they replace, driven by the same gates and settings, and
   compared once per 48 kHz pass against both the unit and an exact
   double-precision model of what it computes. Bounds are in the bench. So
-  far the envelope (`adsr.sv`); the LFOs against `osc_core` follow.
+  far the envelope (`adsr.sv`) and the LFOs (`osc_core`).
 
 ## 13. Steps
 

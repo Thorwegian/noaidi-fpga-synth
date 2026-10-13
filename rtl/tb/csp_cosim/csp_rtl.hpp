@@ -109,6 +109,13 @@ public:
         cosim_ref_set(voice, gate ? 1 : 0, static_cast<int>(rate_ad),
                       static_cast<int>(rate_dsr));
     }
+    // osc_core's wave (Q2.16) for a shape (0 saw, 1 pulse, 2 triangle, 3 sine)
+    // at a 24-bit signed phase.
+    int osc_wave(int shape, int phase) {
+        cosim_osc_set(phase);
+        top_.eval();
+        return cosim_osc_wave(shape);
+    }
     uint32_t ref_state(int voice) const {
         return static_cast<uint32_t>(cosim_ref_state(voice));
     }

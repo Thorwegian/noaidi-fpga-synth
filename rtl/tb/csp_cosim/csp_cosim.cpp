@@ -264,7 +264,7 @@ const char *lfo_program = R"(
         MACW.w  PHASE, ONE, RATE
         MAC     SAW, 0, PHASE, DEPTH_8
         CMP     ZERO, PHASE, ZERO
-        SEL     SQUARE, DEPTH, NEG_DEPTH
+        SEL     SQUARE, NEG_DEPTH, DEPTH
         ABS     T, PHASE
         MAC     TRI, 0, T, DEPTH_4
         ADD3    TRI, TRI, NEG_DEPTH, ZERO

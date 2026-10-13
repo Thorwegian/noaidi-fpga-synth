@@ -214,6 +214,38 @@ module tb_csp_cosim #(
         return int'(ref_state[voice]);
     endfunction
 
+    // ---- osc_core references: the LFO waveforms the CSP programs replace --------------
+    // osc_core is a combinational function of the phase: the harness sets one,
+    // evaluates, and reads the four shapes.
+    logic signed [23:0] osc_phase;
+    logic signed [17:0] osc_wave [4];
+    initial osc_phase = '0;
+    generate
+        for (genvar shape = 0; shape < 4; shape++) begin : g_osc
+            if (REF_VOICES > 0) begin : g_on
+                osc_core u_osc (
+                    .phase_next (osc_phase),
+                    .duty       (24'sd0),
+                    .wave       (2'(shape)),
+                    .sample_out (osc_wave[shape])
+                );
+            end else begin : g_off
+                initial osc_wave[shape] = '0;
+            end
+        end
+    endgenerate
+
+    export "DPI-C" function cosim_osc_set;
+    export "DPI-C" function cosim_osc_wave;
+
+    function void cosim_osc_set(input int phase);
+        osc_phase = 24'(phase);
+    endfunction
+
+    function int cosim_osc_wave(input int shape);
+        return int'(osc_wave[shape]);
+    endfunction
+
     // ---- the harness's view of the state ---------------------------------------
     export "DPI-C" function cosim_register;
     export "DPI-C" function cosim_sink;
