@@ -24,6 +24,7 @@ package csp_pkg;
     parameter int PROGRAM_W      = 11;            // $clog2(MAX_PROGRAM)
     parameter int WRITE_WINDOW   = 48;            // queued writes per pass
     parameter int CYCLES_PER_PASS = 1536;         // two samples
+    parameter int MAX_VECTOR_LENGTH = 64;         // elements of a vector loop
 
     // ---- number formats ---------------------------------------------------------
     //   word         18 bits  Q4.14
