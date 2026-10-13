@@ -6,6 +6,8 @@
 
 - GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child). Agents *must* actively use it.
 
+- Agents provide unique hashes to reply to when asking for input from the user.
+
 - Agents write elegant and highly structured code at a senior developer level.
 
 - Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
@@ -14,7 +16,7 @@
 
 - Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
 
-- When designing an IP core (such as the CSP), rely mostly on Berkley, Princeton and Stanford research, such as the STK.
+- When designing an IP core (such as the CSP), rely mostly on Berkley, Princeton and Stanford research.
 
 - Apply principles of universal design in user interfaces (and user-adjacent interfaces such as MIDI).
 
