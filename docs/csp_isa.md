@@ -390,6 +390,17 @@ indirect addressing picks the segment. Measured on the reference model:
 **614 cycles per pass for 32 voices**; written with `LOOP.i` it does not
 fit a pass (each voice's instructions waiting for each other).
 
+**Where precision goes** (Thor's rule of thumb on #221): pitch and filter are
+really sensitive; everything else, such as volume, gain and attenuation, has
+lots of leeway. The control program follows it. A word's step in a pitch or
+cutoff is 2⁻¹⁴ of an octave (0.07 cents); the pitch and cutoff arithmetic
+(`channel.s`, `voice.s`) is single-rounded words at that step, and the LFO
+sine is good to 0.15 % of its depth (0.07 cents on a 50-cent vibrato). The
+amp envelope, which drives gain, takes the cheaper two-instruction step and
+settles half a raw unit above its target (0.27 dB at −60 dB), which is well
+inside what gain forgives; only the mod envelope, which drives the filter,
+is sensitive, and there a raw unit is 0.07 cents of an octave of depth.
+
 **Measured against `adsr.sv`** (`make sim-csp-bench`, section 12): the program
 stays within 0.04 dB of the exact RC curve above −40 dB and 0.27 dB above
 −60 dB, for rates from the fastest `adsr.sv` takes to ones that barely
