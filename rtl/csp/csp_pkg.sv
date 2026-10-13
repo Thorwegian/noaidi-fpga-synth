@@ -107,28 +107,29 @@ package csp_pkg;
             input logic [9:0] field, input logic [ADDRESS_W-1:0] index_i,
             input logic [ADDRESS_W-1:0] index_j);
         if (!field[9]) begin
-            operand_address = ADDRESS_W'(field[8:0]);
+            operand_address = csp_pkg::ADDRESS_W'(field[8:0]);
         end else begin
-            operand_address = (field[8] ? index_j : index_i) + ADDRESS_W'(field[7:0]);
+            operand_address = (field[8] ? index_j : index_i) + csp_pkg::ADDRESS_W'(field[7:0]);
         end
     endfunction
 
     // Whether an opcode has a wide form (a = 3).
     function automatic logic has_wide_form(input logic [3:0] op);
-        has_wide_form = op == OP_MAC || op == OP_MACW || op == OP_INTERP || op == OP_ADD3
-                        || op == OP_SHIFT;
+        has_wide_form = op == csp_pkg::OP_MAC || op == csp_pkg::OP_MACW
+                        || op == csp_pkg::OP_INTERP || op == csp_pkg::OP_ADD3
+                        || op == csp_pkg::OP_SHIFT;
     endfunction
 
     function automatic logic is_register(input logic [ADDRESS_W-1:0] address);
-        is_register = address < REGISTER_COUNT;
+        is_register = address < csp_pkg::REGISTER_COUNT;
     endfunction
 
     function automatic logic is_input(input logic [ADDRESS_W-1:0] address);
-        is_input = address >= IO_BASE && address < IO_BASE + IO_COUNT;
+        is_input = address >= csp_pkg::IO_BASE && address < csp_pkg::IO_BASE + csp_pkg::IO_COUNT;
     endfunction
 
     function automatic logic is_sink(input logic [ADDRESS_W-1:0] address);
-        is_sink = address >= SINK_BASE && address < SINK_BASE + SINK_COUNT;
+        is_sink = address >= csp_pkg::SINK_BASE && address < csp_pkg::SINK_BASE + csp_pkg::SINK_COUNT;
     endfunction
 
 endpackage

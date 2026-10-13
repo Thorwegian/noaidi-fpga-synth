@@ -13,6 +13,7 @@
 #include "processor.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <iterator>
 #include <string>
 
@@ -303,10 +304,14 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
         break;
     }
     case Opcode::interp: {
-        const Wide a     = a_value();
-        const int64_t x  = read_operand(instruction.x, state);
-        const Wide delta = y_value() - a;
-        store(a + ((delta * x) >> word_fraction_bits), false);
+        // Y - A in Q4.32, saturated to 36 bits: the multiplier's input
+        // (#220, decision 3a). Exact unless |Y - A| >= 8, or A comes from
+        // the accumulator with fraction bits below Q4.32.
+        const Wide a    = a_value();
+        const int64_t x = read_operand(instruction.x, state);
+        const Reduced delta =
+                saturate((y_value() - a) >> wide_to_accumulator, wide_bits);
+        store(a + Wide{delta.value} * x, false);
         break;
     }
     case Opcode::acc: {
@@ -440,6 +445,124 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
     }
 }
 
+// ---- the pipeline's timing ------------------------------------------------
+//
+// rtl/csp/csp_core.sv's hazard rules, which decide how many cycles a pass
+// takes and so which instructions see a new i or j (an IDX is visible from
+// the fourth cycle after it): INTERP and ADD3 wait a cycle for an A, Y or
+// accumulator the instruction just before writes; LOOP waits for a count or
+// stride either of the two before write, and then holds fetch for two
+// cycles. Addresses are compared as resolved, whatever they name.
+
+namespace {
+
+bool overlaps(int write_address, bool write_wide, int read_address,
+              bool read_wide) {
+    const int write_last =
+            (write_address + (write_wide ? 1 : 0)) % address_space;
+    const int read_last = (read_address + (read_wide ? 1 : 0)) % address_space;
+    return write_address <= read_last && read_address <= write_last;
+}
+
+bool writes_result(Opcode op) {
+    return !(op == Opcode::nop || op == Opcode::loop || op == Opcode::acc
+             || op == Opcode::skip || op == Opcode::idx);
+}
+
+bool uses_a(const Instruction &instruction) {
+    const Opcode op = instruction.op;
+    return (instruction.a == ASelect::result || instruction.a == ASelect::wide)
+           && (op == Opcode::mac || op == Opcode::macw || op == Opcode::interp
+               || op == Opcode::add3 || op == Opcode::andxor
+               || op == Opcode::shift);
+}
+
+bool uses_accumulator(const Instruction &instruction) {
+    const Opcode op = instruction.op;
+    return instruction.a == ASelect::accumulator
+           && (op == Opcode::mac || op == Opcode::macw || op == Opcode::interp
+               || op == Opcode::acc || op == Opcode::add3
+               || op == Opcode::andxor || op == Opcode::shift);
+}
+
+bool uses_y(Opcode op) {
+    return !(op == Opcode::nop || op == Opcode::skip || op == Opcode::abs);
+}
+
+bool wide_y(const Instruction &instruction) {
+    return instruction.a == ASelect::wide && has_wide_form(instruction.op)
+           && instruction.op != Opcode::shift;
+}
+
+} // namespace
+
+Processor::SlotWrite
+Processor::writes_of(const Instruction &instruction) const {
+    SlotWrite slot;
+    slot.writes_register = writes_result(instruction.op);
+    slot.address         = resolve(instruction.r);
+    slot.wide = instruction.a == ASelect::wide && has_wide_form(instruction.op);
+    slot.writes_accumulator = instruction.op == Opcode::acc;
+    return slot;
+}
+
+bool Processor::hazard(const Instruction &instruction,
+                       const PassState &state) const {
+    auto produces = [](const SlotWrite &producer, int address, bool wide) {
+        return producer.writes_register
+               && overlaps(producer.address, producer.wide, address, wide);
+    };
+    const Opcode op = instruction.op;
+    if (op == Opcode::interp || op == Opcode::add3) {
+        const SlotWrite &previous = state.recent[0];
+        if (uses_a(instruction)
+            && produces(previous, resolve(instruction.r),
+                        instruction.a == ASelect::wide)) {
+            return true;
+        }
+        if (uses_y(op)
+            && produces(previous, resolve(instruction.y),
+                        wide_y(instruction))) {
+            return true;
+        }
+        if (uses_accumulator(instruction) && previous.writes_accumulator) {
+            return true;
+        }
+    }
+    if (op == Opcode::loop) {
+        for (const SlotWrite &producer : state.recent) {
+            if (produces(producer, resolve(instruction.x), false)
+                || produces(producer, resolve(instruction.y), false)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Loop ends at the current pc: step the index register; repeat the body
+// or leave the loop, then check the outer loop, which may end at the same
+// place.
+void Processor::end_loops(PassState &state) {
+    while (!state.loops.empty() && state.pc == state.loops.back().end) {
+        Loop &loop       = state.loops.back();
+        int &index_value = index_[static_cast<size_t>(loop.index)];
+        index_value      = modulo_address(int64_t{index_value} + loop.stride);
+        if (--loop.remaining > 0) {
+            state.pc = loop.start;
+            break;
+        }
+        state.loops.pop_back();
+    }
+}
+
+// One cycle passes: what was decoded in it becomes the newest producer.
+void Processor::advance(PassState &state, const SlotWrite &decoded) {
+    state.recent[1] = state.recent[0];
+    state.recent[0] = decoded;
+    ++state.cycle;
+}
+
 // ---- one pass -------------------------------------------------------------
 
 PassReport Processor::pass() {
@@ -449,45 +572,63 @@ PassReport Processor::pass() {
             static_cast<int32_t>(sign_extend(pass_count_, word_bits));
 
     if (held_) {
+        // No program, but the pass still ends: the window applies every
+        // committed write, and the sink pages flip as at every pass end.
         state.report.writes_applied = apply_window(cycles_per_pass);
+        active_page_                = 1 - active_page_;
         return state.report;
     }
 
-    while (state.pc < program_.size()) {
+    auto apply_pending = [&] {
         while (!state.pending.empty()
                && state.pending.front().visible_from <= state.cycle) {
             const PendingIndex &pending                = state.pending.front();
             index_[static_cast<size_t>(pending.index)] = pending.value;
             state.pending.pop_front();
         }
+    };
 
+    while (state.pc < program_.size()) {
         const Instruction instruction = Instruction::decode(program_[state.pc]);
+
+        // Decode, waiting while a hazard holds it in D. Each cycle it is
+        // decoded again with the index registers of that cycle.
+        apply_pending();
+        while (hazard(instruction, state)) {
+            advance(state, SlotWrite{});
+            apply_pending();
+        }
+        if (state.cycle >= max_program_length) {
+            state.report.errors.push_back("pass longer than "
+                                          + std::to_string(max_program_length)
+                                          + " cycles");
+            break;
+        }
+
+        const SlotWrite decoded = writes_of(instruction);
+        if (trace_) {
+            std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n",
+                         state.pc, static_cast<long long>(state.cycle),
+                         index_[0], index_[1]);
+        }
         ++state.pc;
         if (state.skip > 0) {
             --state.skip;
         } else {
             execute(instruction, state);
         }
-        ++state.cycle;
-
-        // Loop ends: step the index register; repeat the body or leave the
-        // loop, then check the outer loop, which may end at the same place.
-        while (!state.loops.empty() && state.pc == state.loops.back().end) {
-            Loop &loop       = state.loops.back();
-            int &index_value = index_[static_cast<size_t>(loop.index)];
-            index_value = modulo_address(int64_t{index_value} + loop.stride);
-            if (--loop.remaining > 0) {
-                state.pc = loop.start;
-                break;
-            }
-            state.loops.pop_back();
+        if (instruction.op != Opcode::loop) {
+            end_loops(state);
         }
-
-        if (state.cycle > max_program_length) {
-            state.report.errors.push_back("pass longer than "
-                                          + std::to_string(max_program_length)
-                                          + " instructions");
-            break;
+        advance(state, decoded);
+        if (instruction.op == Opcode::loop) {
+            // Fetch waits two cycles for the count. A count of 0 has
+            // jumped past the body, maybe onto the outer loop's end, which
+            // the hardware handles at the end of the first of them.
+            apply_pending();
+            end_loops(state);
+            advance(state, SlotWrite{});
+            advance(state, SlotWrite{});
         }
     }
     for (const PendingIndex &pending : state.pending) {

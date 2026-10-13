@@ -92,6 +92,13 @@ public:
         return queue_.size();
     }
 
+    // Print each instruction as it is decoded (pc, cycle, i, j) to
+    // stderr, to compare with the RTL's trace (rtl/csp/csp_core.sv,
+    // CSP_TRACE).
+    void trace(bool on) {
+        trace_ = on;
+    }
+
 private:
     struct QueuedWrite {
         int address;
@@ -113,10 +120,22 @@ private:
         int value;
     };
 
+    // A register or accumulator write, as the hazard check at D sees an
+    // instruction that has not yet finished (rtl/csp/csp_core.sv).
+    struct SlotWrite {
+        bool writes_register    = false;
+        int address             = 0;
+        bool wide               = false;
+        bool writes_accumulator = false;
+    };
+
     // Execution state for one pass.
     struct PassState {
         size_t pc     = 0;
         int64_t cycle = 0;
+        // What the instructions decoded one and two cycles ago write (a
+        // bubble writes nothing): the producers in R and E1.
+        std::array<SlotWrite, 2> recent{};
         std::vector<Loop> loops;
         std::deque<PendingIndex> pending;
         int skip = 0;
@@ -130,6 +149,10 @@ private:
     void write_operand(uint16_t field, int32_t raw, PassState &state);
     void write_wide_operand(uint16_t field, int64_t raw, PassState &state);
     void execute(const Instruction &instruction, PassState &state);
+    SlotWrite writes_of(const Instruction &instruction) const;
+    bool hazard(const Instruction &instruction, const PassState &state) const;
+    void advance(PassState &state, const SlotWrite &decoded);
+    void end_loops(PassState &state);
     void set_flags(int64_t result, bool overflow);
     int apply_window(int limit);
 
@@ -143,6 +166,7 @@ private:
     std::vector<uint64_t> program_;
     std::deque<QueuedWrite> queue_;
     bool held_          = true;
+    bool trace_         = false;
     int64_t pass_count_ = 0;
 };
 

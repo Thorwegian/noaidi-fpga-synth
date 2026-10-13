@@ -346,6 +346,29 @@ void test_loops() {
     check(report.errors.empty(), "loops run without errors");
 }
 
+// A loop with a count of 0 whose body was the tail of its outer loop's
+// body: skipping it lands on the outer loop's end, which must still step
+// the outer index register and repeat the outer loop (found by the RTL
+// co-simulation, #220).
+void test_empty_inner_loop_at_outer_end() {
+    Machine m(std::string(registers) + R"(
+        LOOP.j outer_end, =#3, =#1      ; outer: 3 passes, j steps by 1
+        ADD3   A_, A_, =1.0, ZERO       ;   counts the outer passes
+        LOOP.i outer_end, ZERO, =#1     ;   inner: count 0, body ends with the outer's
+        ADD3   B_, B_, =1.0, ZERO       ;     never runs
+outer_end:
+        MAC    C_, 0, =1.0, =1.0        ; after both
+)");
+    m.start();
+    const csp::PassReport report = m.run();
+    check_equal(m.get("A_"), q(3.0), "the outer loop still runs three times");
+    check_equal(m.get("B_"), 0, "the empty inner loop's body never runs");
+    check_equal(m.get("C_"), q(1.0), "the program continues after both");
+    check_equal(m.processor.index(csp::IndexRegister::j), 3,
+                "the outer loop stepped j three times");
+    check(report.errors.empty(), "without errors");
+}
+
 void test_queue_and_swap() {
     Machine m(std::string(registers) + "MAC B_, 0, A_, =1.0\n");
     m.start();
@@ -722,6 +745,7 @@ int main() {
     test_skip();
     test_index_delay();
     test_loops();
+    test_empty_inner_loop_at_outer_end();
     test_queue_and_swap();
     test_reset();
     test_pass_limit();

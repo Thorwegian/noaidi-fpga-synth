@@ -17,7 +17,14 @@ module tb_csp_write_queue;
     logic clk = 0, sclk = 0;
     always #6.781 clk = ~clk;
 
-    logic reset_n = 0, sclk_reset_n = 0;
+    // Both resets start high and then fall: the asynchronous resets act
+    // on the edge, and the SPI clock is idle during reset.
+    logic reset_n = 1, sclk_reset_n = 1;
+    initial begin
+        #1;
+        reset_n      = 0;
+        sclk_reset_n = 0;
+    end
     logic write_enable = 0, swap = 0, pop = 0;
     logic [csp_pkg::REGISTER_W-1:0] write_address = '0;
     logic [csp_pkg::WORD_W-1:0]     write_data = '0;
