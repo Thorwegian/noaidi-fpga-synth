@@ -265,8 +265,15 @@ void Processor::write_operand(uint16_t field, int32_t raw, PassState &state) {
     if (address < register_count) {
         note_access(address, true, state);
         registers_[address] = raw;
+        if (trace_) {
+            std::fprintf(stderr, "model write %d %d\n", address, raw);
+        }
     } else if (is_sink(address)) {
         sink_pages_[1 - active_page_][address - sink_base] = raw;
+        if (trace_) {
+            std::fprintf(stderr, "model sink %d %d\n", address - sink_base,
+                         raw);
+        }
         state.sinks_written.insert(address - sink_base);
     } else {
         state.report.errors.push_back("write to 0x" + std::to_string(address)
@@ -291,6 +298,10 @@ void Processor::write_wide_operand(uint16_t field, int64_t raw,
     note_access(address + 1, true, state);
     registers_[address]     = static_cast<int32_t>(raw >> word_bits);
     registers_[address + 1] = static_cast<int32_t>(sign_extend(raw, word_bits));
+    if (trace_) {
+        std::fprintf(stderr, "model write %d %d\nmodel write %d %d\n", address,
+                     registers_[address], address + 1, registers_[address + 1]);
+    }
 }
 
 void Processor::set_flags(int64_t result, bool overflow) {

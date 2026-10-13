@@ -266,8 +266,12 @@ sim-csp-write-queue: obj_dir/tb_csp_write_queue/sim
 
 # The co-simulation: the RTL, Verilated to C++, against tools/csp's
 # reference model in one executable (tb/csp_cosim/csp_cosim.cpp). It runs
-# the manual's programs and 200 random ones, comparing every register, the
-# published sinks, i, j, the accumulator and the flags after every pass.
+# the manual's programs (the envelope as LOOP.i and as LOOP.vi) and 200
+# random ones, vector loops among them, comparing every register, the
+# published sinks, i, j, the accumulator, the flags and the cycles after
+# every pass. (A pass the model stops at the pass limit is compared on
+# registers and sinks only.) `sim +rtltrace` prints the RTL's issues and
+# register writes in the format of the model's trace (CSP_TRACE_PROGRAM=n).
 CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
                 ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp
 CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp \
