@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -333,6 +334,81 @@ void test_index_immediate() {
                 "and again after the second IDX");
     check_equal(m.processor.read(1), 0x100,
                 "nothing used the old i (0): register 1, =#BASE, is untouched");
+}
+
+// LOOP.vi runs its body instruction by instruction across all elements:
+// the same results as LOOP.i when iterations are independent, without the
+// waits; per-element flags and j; shared registers reported.
+void test_vector_loops() {
+    const std::string body      = R"(
+        .block ITEM
+        .field X, 1
+        .field DOUBLE, 1
+        .field SIGN, 1
+        .field ROW, 1
+        .field PICK, 1
+        .end
+        .equ   ITEMS, 0x200
+        .equ   TABLE, 0x300
+        IDX    i, =#ITEMS, 0
+)";
+    const std::string loop_body = R"(
+        MAC    [i+DOUBLE], 0, [i+X], =2.0     ; each needs the one before
+        CMP    ZERO, [i+DOUBLE], ZERO         ;   flags, per element
+        SEL    [i+SIGN], =1.0, =-1.0
+        IDX    j, =#TABLE, [i+ROW]            ;   j, per element
+        MAC    [i+PICK], 0, [j+0], =1.0
+)";
+    auto make                   = [&](const char *loop) {
+        auto m = std::make_unique<Machine>(body + loop + loop_body);
+        for (int item = 0; item < 8; ++item) {
+            m->processor.write(0x200 + 8 * item, q(item % 2 ? 0.25 : -0.25));
+            m->processor.write(0x200 + 8 * item + 3, item);
+            m->processor.write(0x300 + item, q(0.125 * item));
+        }
+        m->start();
+        return m;
+    };
+    auto scalar                         = make("        LOOP.i  5, =#8, =#8\n");
+    auto vector                         = make("        LOOP.vi 5, =#8, =#8\n");
+    const csp::PassReport scalar_report = scalar->run();
+    const csp::PassReport vector_report = vector->run();
+    check(vector->program.diagnostics.empty() && vector_report.errors.empty(),
+          "a vector loop assembles and runs");
+    bool same = true;
+    for (int address = 0x200; address < 0x240; ++address) {
+        same = same
+               && scalar->processor.read(address)
+                          == vector->processor.read(address);
+    }
+    check(same, "LOOP.vi gives LOOP.i's results");
+    check_equal(vector->processor.read(0x200 + 2), q(-1.0),
+                "SEL sees its own element's flags (negative)");
+    check_equal(vector->processor.read(0x200 + 8 + 2), q(1.0),
+                "and the next element's (positive)");
+    check_equal(vector->processor.read(0x200 + 8 * 5 + 4), q(0.625),
+                "an element's [j+…] uses its own j");
+    check_equal(vector->processor.index(csp::IndexRegister::j), 0x307,
+                "after the loop, j is the last element's");
+    // IDX, LOOP.vi (3 cycles each), then 5 × 8 issues without a wait.
+    check_equal(vector_report.cycles, 2 * csp::barrier_latency + 40,
+                "a vector loop of 8 elements never waits");
+    check(scalar_report.cycles > vector_report.cycles,
+          "the scalar loop waits inside each iteration");
+
+    Machine shared(body
+                   + "        .reg T, 0x060\n"
+                     "        LOOP.vi 2, =#8, =#8\n"
+                     "        MAC T, 0, [i+X], =1.0\n"
+                     "        MAC [i+PICK], 0, T, =1.0\n");
+    shared.start();
+    check(!shared.run().errors.empty(),
+          "iterations sharing a register are reported");
+    check(has_diagnostic(csp::assemble(body
+                                       + "LOOP.vi 2, =#8, =#8\n"
+                                         "SKIP always, 1\nNOP\n"),
+                         true, "not allowed in a vector loop"),
+          "SKIP in a vector loop's body is rejected");
 }
 
 void test_loops() {
@@ -769,6 +845,7 @@ int main() {
     test_interlocks();
     test_index_immediate();
     test_loops();
+    test_vector_loops();
     test_empty_inner_loop_at_outer_end();
     test_queue_and_swap();
     test_reset();

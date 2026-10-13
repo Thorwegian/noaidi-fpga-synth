@@ -390,7 +390,8 @@ level by its velocity.
 ### LOOP — repeat a block
 
 **Syntax**
-`LOOP.i length, count, stride` · `LOOP.j length, count, stride`
+`LOOP.i length, count, stride` · `LOOP.j length, count, stride` ·
+`LOOP.vi length, count, stride` · `LOOP.vj length, count, stride`
 
 **Operation**
 ```
@@ -435,9 +436,42 @@ of 16 words each.
         MACW.w  [j+PHASE], ONE, [j+RATE]
 ```
 
-The outer `length` (5) counts every instruction in its body, the inner
+The outer `length` (3) counts every instruction in its body, the inner
 `LOOP` and the inner body included. The inner loop is the last thing in
 the outer body, so both end on the same instruction.
+
+**Vector loops** (`LOOP.vi`, `LOOP.vj`; bit 1 of the `a` field; a
+proposal on #220, in the reference model only so far). The body is
+written for one element, exactly as for `LOOP`, but runs instruction by
+instruction: the first body instruction for every element, one per
+cycle, then the second, and so on. The loop's index register steps per
+element as usual. Each element has its **own flags** and its **own copy
+of the other index register**, so a `CMP` → `SEL` pair or an `IDX j` →
+`[j+…]` pair works per element. Element k of an instruction waits only
+for element k of what it reads, so a vector loop of 7 or more elements
+never waits (section 5). After the loop, `i`, `j` and the flags are as
+the last element left them, as after `LOOP`.
+
+The results are those of `LOOP` as long as no iteration reads a register
+another iteration writes; keep per-element values in per-element fields
+(`[i+…]`), not in shared registers. The reference model reports a
+register that iterations share. A vector body may not contain `LOOP`,
+`SKIP`, `ACC` or an `acc` operand, or an `IDX` on the loop's own index
+register; a vector loop can be the inner loop of a `LOOP`. `count` is at
+most 64.
+
+```
+        IDX     i, =#VOICES, 0
+        LOOP.vi 9, =#32, =#16       ; every voice, instruction by instruction
+        IDX     j, ENV_TABLE, [i+STAGE]
+        MAX     [i+U], [i+STAGE], =#4
+        ...                         ; the envelope of section 8, U per voice
+```
+
+The envelope of section 8 takes 1126 cycles per pass for 32
+voices as a `LOOP`, mostly waiting within each voice. As a vector loop
+it takes 294 cycles: its 288 instructions and the two 3-cycle waits
+after `IDX` and `LOOP`.
 
 ---
 
@@ -838,7 +872,7 @@ voice's own.
 | op | Mnemonic | R | X | Y | Flags |
 |---|---|---|---|---|---|
 | 0 | `NOP` | — | — | — | — |
-| 1 | `LOOP` | immediate: length | register: count | register: stride | — (`a` bit 0: 0 = `i`, 1 = `j`) |
+| 1 | `LOOP` | immediate: length | register: count | register: stride | — (`a` bit 0: 0 = `i`, 1 = `j`; bit 1: vector loop) |
 | 2 | `MACW` | register | register | register | N Z |
 | 3 | `INTERP` | register | register | register | N Z V |
 | 4 | `ACC` | — | register | register | — |

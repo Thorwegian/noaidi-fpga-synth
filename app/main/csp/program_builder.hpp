@@ -62,10 +62,13 @@ public:
 
     // A loop over `length` instructions, or an open one whose end is set
     // later with close_loop(): at the current position, or at a given one
-    // (a forward label in the assembler).
+    // (a forward label in the assembler). A vector loop runs its body
+    // instruction by instruction across all its iterations
+    // (docs/csp_manual.md, LOOP).
     size_t loop(IndexRegister which, size_t length, Operand count,
-                Operand stride);
-    size_t open_loop(IndexRegister which, Operand count, Operand stride);
+                Operand stride, bool vector = false);
+    size_t open_loop(IndexRegister which, Operand count, Operand stride,
+                     bool vector = false);
     void close_loop(size_t at);
     void close_loop(size_t at, size_t end);
 
@@ -93,6 +96,7 @@ private:
         size_t at;
         size_t end; // one past the body; 0 while open
         IndexRegister index;
+        bool vector;
     };
     struct SkipRecord {
         size_t at;
@@ -104,6 +108,8 @@ private:
     size_t wide(Opcode op, Operand r, Operand x, Operand y);
     uint16_t field(Operand operand);
     void issue(std::string message, bool error = true);
+    void check_vector_body(const LoopRecord &loop,
+                           std::vector<BuildIssue> &issues) const;
 
     std::vector<uint64_t> words_;
     std::vector<LoopRecord> loops_;

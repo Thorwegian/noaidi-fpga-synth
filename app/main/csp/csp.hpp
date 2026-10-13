@@ -31,6 +31,7 @@ constexpr int max_program_length = 1472; // instructions per pass
 constexpr int write_window       = 48;   // queued writes per pass
 constexpr int cycles_per_pass    = 1536; // two samples at 73.728 MHz
 constexpr int pass_cycle_limit   = 1472; // instructions issue before this
+constexpr int max_vector_length  = 64;   // iterations of a vector loop
 
 // ---- pipeline timing (rtl/csp/csp_core.sv) ---------------------------------
 //
