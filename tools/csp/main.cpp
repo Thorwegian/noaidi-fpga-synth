@@ -15,6 +15,7 @@
 // Diagnostics go to stderr as file:line: error|warning: message; the
 // exit status is 1 if there was an error.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -30,8 +31,9 @@ namespace {
 
 int usage() {
     std::fputs(
-            "usage: csp asm program.s\n"
-            "       csp sim program.s [-n passes] [-w name]... [-s name=value@pass]...\n",
+            "usage: csp asm program.s...\n"
+            "       csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]...\n"
+            "       (several program files are joined into one, in order)\n",
             stderr);
     return 2;
 }
@@ -47,9 +49,29 @@ bool read_file(const std::string &path, std::string &text) {
     return true;
 }
 
-bool report(const std::string &path, const csp::Program &program) {
+// The files a program was joined from, to say which one a line is in.
+struct Sources {
+    struct Part {
+        std::string path;
+        int first_line; // of the joined text, from 1
+    };
+    std::vector<Part> parts;
+    std::string text;
+
+    std::string where(int line) const {
+        const Part *part = &parts.front();
+        for (const Part &candidate : parts) {
+            if (candidate.first_line <= line) {
+                part = &candidate;
+            }
+        }
+        return part->path + ":" + std::to_string(line - part->first_line + 1);
+    }
+};
+
+bool report(const Sources &sources, const csp::Program &program) {
     for (const csp::Diagnostic &d : program.diagnostics) {
-        std::fprintf(stderr, "%s:%d: %s: %s\n", path.c_str(), d.line,
+        std::fprintf(stderr, "%s: %s: %s\n", sources.where(d.line).c_str(),
                      d.error ? "error" : "warning", d.message.c_str());
     }
     return program.ok();
@@ -126,14 +148,30 @@ int main(int argc, char **argv) {
         return usage();
     }
     const std::string command = argv[1];
-    const std::string path    = argv[2];
-    std::string source;
-    if (!read_file(path, source)) {
-        std::fprintf(stderr, "cannot read %s\n", path.c_str());
-        return 2;
+    // the program: every leading argument that is a file, joined
+    Sources sources;
+    int arg = 2;
+    for (; arg < argc && argv[arg][0] != '-'; ++arg) {
+        std::string text;
+        if (!read_file(argv[arg], text)) {
+            std::fprintf(stderr, "cannot read %s\n", argv[arg]);
+            return 2;
+        }
+        const int first_line =
+                1
+                + static_cast<int>(std::count(sources.text.begin(),
+                                              sources.text.end(), '\n'));
+        sources.parts.push_back({argv[arg], first_line});
+        sources.text += text;
+        if (!text.empty() && text.back() != '\n') {
+            sources.text += '\n';
+        }
     }
-    const csp::Program program = csp::assemble(source);
-    if (!report(path, program)) {
+    if (sources.parts.empty()) {
+        return usage();
+    }
+    const csp::Program program = csp::assemble(sources.text);
+    if (!report(sources, program)) {
         return 1;
     }
     if (command == "asm") {
@@ -146,7 +184,7 @@ int main(int argc, char **argv) {
     int passes = 4;
     std::vector<std::string> watch;
     std::vector<ScriptedWrite> writes;
-    for (int arg = 3; arg < argc; ++arg) {
+    for (; arg < argc; ++arg) {
         const std::string option = argv[arg];
         if (arg + 1 >= argc) {
             return usage();

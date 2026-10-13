@@ -235,10 +235,16 @@ addresses, so indexed operands reach both.
 |---|---|---|
 | `0x000–0x03F` | 64 | constants: 0, ±1, powers of two, the attack target, … (firmware writes once) |
 | `0x040–0x05F` | 32 | I/O: noise (#216), pass counter, test tone |
-| `0x060–0x1FF` | 416 | work: temporaries, LFO state, global settings |
-| `0x200–0x5FF` | 1024 | channels: 16 × 64 words (settings, envelope tables, bend, CCs, pan, LFO rates and depths) |
-| `0x600–0x7FF` | 512 | voices: 32 × 16 words (note, velocity, gate, envelope levels and stages) |
+| `0x060–0x07F` | 32 | globals: the LFOs' two sets (which half, how many of each shape) |
+| `0x080–0x1FF` | 384 | the LFO pool: 32 records of 12 words (phase, step, depths, output, scratch) |
+| `0x200–0x5FF` | 1024 | channels: 16 × 64 words (envelope table, bend, LFO depths and routing, cutoff, key tracking, volume, the channel's pitch and cutoff) |
+| `0x600–0x7FF` | 512 | voices: 32 × 16 words (note, velocity, gate, envelope levels and stages, the channel and sink pointers) |
 | `0x800–0xBFF` | 1024 | sinks (write-only): what the partials read (section 6) |
+
+The layout of every block is `tools/csp/programs/map.s`, the one definition
+the control program's parts share (`lfo.s`, `channel.s`, `envelope.s`,
+`voice.s`, joined in that order after it; `csp sim map.s lfo.s …` takes
+several files).
 
 Direct operands reach `0x000–0x1FF`; channel and voice blocks and the
 sinks are reached through `i` and `j`.
@@ -420,18 +426,36 @@ A pass has **1472 issue cycles** (section 2). What a program costs is
 measured, not estimated: the reference model counts every cycle as the
 RTL does, and `csp sim program.s` prints it per pass.
 
-Measured so far:
+**The control program** (`tools/csp/programs`, #221), measured on the
+reference model with 16 channels and 32 voices, every one configured:
 
-| Program | Cycles per pass |
+| Part | Cycles per pass |
 |---|---|
-| both envelopes of 32 voices, `LOOP.vi` (section 8) | 614 |
-| 16 sine LFOs (the worst case at 24 kHz); all 32 every pass | 191; 367 |
-| the manual's envelope (`INTERP`, one pole in one instruction), `LOOP.vi` | 294 |
-| the same, `LOOP.i` | 1126 |
+| the LFOs (`lfo.s`), none running; 16 sine LFOs, the worst case at 24 kHz | 30; 191 |
+| the channels' pitch and cutoff (`channel.s`), 16 channels | 152 |
+| both envelopes of 32 voices (`envelope.s`) | 616 |
+| the voices' pitch, cutoff and gain, and their sinks (`voice.s`), 32 voices | 328 |
+| **the program, LFOs idle** | **1126** |
+| **the program, 16 sine LFOs a pass** | **1304** |
 
-The rest (both envelopes per voice, voice pitch, cutoff and gain,
-channel arithmetic, LFOs, drift #217, noise #216) is measured as its
-programs are written (#221). Costs of 48 kHz: one more
+That leaves 168 of the 1472 cycles for what is not in it yet (drift #217,
+noise #216, a second sink word or two). Other measurements: the manual's
+one-instruction envelope step for 32 voices, as `LOOP.vi` 294 and as
+`LOOP.i` 1126; the LFOs every pass, all 32 sines, 367.
+
+**The program writes three sink words a voice, 96 in all, and no channel's.**
+Section 6 counts ~880 sink words, and one instruction a word, every pass
+(rule 1 below), is 880 cycles for the sinks alone: with the envelopes and
+LFOs above that is over 1685, against 1472. So the program owns only the
+words that change with time (a voice's pitch, cutoff and gain), and the
+channel words (detune, pan and spread, oscillator mix, duty, Q, mode,
+tracking offsets), which change when a knob moves, are the firmware's: it
+writes them to both pages through the write window (rule 2). That takes
+pan out of the CSP, which section 6 first listed as CSP-written so that it
+could be automated; automating one sink word costs one instruction a pass.
+(Proposed on #221, for Thor's decision.)
+
+Costs of 48 kHz: one more
 instruction-memory BSRAM, the firmware's envelope rates computed for
 48 kHz, and the sinks stepping every second sample. If those steps are
 audible on fast gain changes, the partial pipeline can interpolate the
@@ -486,7 +510,10 @@ small program. The new CSP gets:
   tests run.
 - **An instruction-level bench** (`rtl/tb/csp_cosim`, `make
   sim-csp-cosim`): the RTL Verilated beside the model, running the
-  manual's programs and random programs with random firmware writes;
+  manual's programs, the whole control program (16 channels, 32 voices,
+  32 LFOs of every shape, notes struck and released for 400 passes: at
+  most 1260 cycles a pass, every voice sink live) and random programs
+  with random firmware writes;
   after every pass it compares every register, the published sinks,
   `i`, `j`, the accumulator, the flags and the cycle the program's last
   instruction issued in. Directed cases per opcode (saturation, wrap,
@@ -497,7 +524,9 @@ small program. The new CSP gets:
   the units they replace, driven by the same gates and settings, and
   compared once per 48 kHz pass against both the unit and an exact
   double-precision model of what it computes. Bounds are in the bench. So
-  far the envelope (`adsr.sv`) and the LFOs (`osc_core`).
+  far the envelope (`adsr.sv`) and the LFOs (`osc_core`); the voice and
+  channel arithmetic has no old unit, and `tools/csp/test/csp_test.cpp`
+  checks its sinks against the formulas in double precision.
 
 ## 13. Steps
 

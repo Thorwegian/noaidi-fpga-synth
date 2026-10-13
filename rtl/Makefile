@@ -266,21 +266,23 @@ sim-csp-write-queue: obj_dir/tb_csp_write_queue/sim
 
 # The co-simulation: the RTL, Verilated to C++, against tools/csp's
 # reference model in one executable (tb/csp_cosim/csp_cosim.cpp). It runs
-# the manual's programs (the envelope as LOOP.i and as LOOP.vi) and 200
-# random ones, vector loops among them, comparing every register, the
+# the manual's programs (the envelope as LOOP.i and as LOOP.vi), the whole
+# control program (tools/csp/programs) and 200 random ones, vector loops
+# among them, comparing every register, the
 # published sinks, i, j, the accumulator, the flags and the cycles after
 # every pass. (A pass the model stops at the pass limit is compared on
 # registers and sinks only.) `sim +rtltrace` prints the RTL's issues and
 # register writes in the format of the model's trace (CSP_TRACE_PROGRAM=n).
 CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
-                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp
+                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
 CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp \
                 ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp
-obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) Makefile
+obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
+                       ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
 	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
 	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
-	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main)" \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
 	    $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_COSIM_CPP))
 
 sim-csp-cosim: obj_dir/csp_cosim/sim

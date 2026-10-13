@@ -54,14 +54,19 @@ std::string read_file(const std::string &path) {
     return text.str();
 }
 
-csp::Program assemble_file(const std::string &path,
-                           const std::string &from = "",
-                           const std::string &to   = "") {
-    std::string source = read_file(path);
+// The program joined from files in tools/csp/programs, in order, with one
+// replacement in the text if asked.
+csp::Program assemble_files(const std::vector<std::string> &names,
+                            const std::string &from = "",
+                            const std::string &to   = "") {
+    std::string source;
+    for (const std::string &name : names) {
+        source += read_file(std::string(CSP_PROGRAMS_DIR) + "/" + name) + "\n";
+    }
     if (!from.empty()) {
         const size_t at = source.find(from);
         if (at == std::string::npos) {
-            std::printf("%s: no \"%s\"\n", path.c_str(), from.c_str());
+            std::printf("no \"%s\" in the program\n", from.c_str());
             std::exit(2);
         }
         source.replace(at, from.size(), to);
@@ -69,7 +74,7 @@ csp::Program assemble_file(const std::string &path,
     csp::Program program = csp::assemble(source);
     bool failed          = false;
     for (const csp::Diagnostic &d : program.diagnostics) {
-        std::printf("%s:%d: %s\n", path.c_str(), d.line, d.message.c_str());
+        std::printf("program line %d: %s\n", d.line, d.message.c_str());
         failed |= d.error;
     }
     if (failed) {
@@ -114,11 +119,11 @@ const Setting settings[voices] = {
 };
 
 constexpr int64_t full_level = int64_t{1} << 22; // UQ4.22
-constexpr int table_base     = 0x200;            // a table of 28 words a voice
-constexpr int voice_base     = 0x600;            // a block of 16 words a voice
+constexpr int table_base     = 0x200; // the channels: voice v has channel v
+constexpr int voice_base     = 0x600; // a block of 16 words a voice
 
 int table_of(int voice) {
-    return table_base + 32 * voice;
+    return table_base + 64 * voice;
 }
 int block_of(int voice) {
     return voice_base + 16 * voice;
@@ -237,9 +242,9 @@ int bench_envelope(VerilatedContext &context) {
         std::sscanf(trace, "%d,%d,%d,%d", &trace_voice, &trace_kind,
                     &trace_from, &trace_to);
     }
-    const csp::Program program = assemble_file(
-            std::string(CSP_PROGRAMS_DIR) + "/envelope.s", "=#8, =#16",
-            "=#" + std::to_string(voices) + ", =#16");
+    const csp::Program program =
+            assemble_files({"map.s", "envelope.s"}, "=#32, =#16",
+                           "=#" + std::to_string(voices) + ", =#16");
     Rtl rtl(context);
 
     std::vector<FirmwareWrite> setup;
@@ -418,7 +423,8 @@ int bench_envelope(VerilatedContext &context) {
 // osc_core: the same phase goes to both, and the program's output must be
 // osc_core's wave at that phase, scaled to ±depth (osc_core's full scale is
 // ±0.5). The rates run from a cycle in a few thousand passes to several
-// cycles a pass; the depths from a tenth to two.
+// cycles a pass; the depths from a tenth to two. The program updates an LFO
+// every other pass, so each pass compares the phase it has and its output.
 
 struct LfoSetting {
     int shape;          // 0 saw, 1 square, 2 triangle, 3 sine
@@ -433,10 +439,10 @@ const LfoSetting lfo_settings[lfos] = {
         {2, 1500, 2.0}, {2, 7000, 0.1}, {3, 500, 1.0},  {3, 10000, 2.0},
 };
 
-constexpr int lfo_base = 0x300;
+constexpr int lfo_base = 0x080; // the pool (map.s); the first half's records
 
 int lfo_block(int lfo) {
-    return lfo_base + 16 * lfo;
+    return lfo_base + 12 * lfo;
 }
 
 int to_word(double value) {
@@ -444,8 +450,7 @@ int to_word(double value) {
 }
 
 int bench_lfo(VerilatedContext &context) {
-    const csp::Program program =
-            assemble_file(std::string(CSP_PROGRAMS_DIR) + "/lfo.s");
+    const csp::Program program = assemble_files({"map.s", "lfo.s"});
     Rtl rtl(context);
 
     std::vector<FirmwareWrite> setup;
@@ -457,15 +462,24 @@ int bench_lfo(VerilatedContext &context) {
         const LfoSetting &s = lfo_settings[lfo];
         ++counts[s.shape];
         const int block = lfo_block(lfo);
-        write_wide(setup, block + 2, csp::lfo_rate(s.increment, 1));
+        write_wide(setup, block + 2, csp::lfo_rate(s.increment, 2));
         setup.push_back({block + 4, to_word(s.depth)});
         setup.push_back({block + 5, to_word(-s.depth)});
         setup.push_back({block + 6, s.shape == 0   ? to_word(s.depth / 8)
                                     : s.shape == 2 ? to_word(s.depth / 4)
                                                    : 0});
     }
-    for (int shape = 0; shape < 4; ++shape) {
-        setup.push_back({program.symbols.at("N_SAW") + shape, counts[shape]});
+    // the LFOs are in the pool's first half; one pass in two updates them, the
+    // other pass runs the second half, which holds none
+    const int sets = program.symbols.at("LFO_SETS");
+    for (int half = 0; half < 2; ++half) {
+        const int set = sets + 8 * half;
+        setup.push_back(
+                {set + program.symbols.at("BASE"), lfo_base + half * 16 * 12});
+        for (int shape = 0; shape < 4; ++shape) {
+            setup.push_back({set + program.symbols.at("N_SAW") + shape,
+                             half == 0 ? counts[shape] : 0});
+        }
     }
     rtl.hold(true);
     rtl.load(program.words);

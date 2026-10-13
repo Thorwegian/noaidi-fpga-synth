@@ -12,6 +12,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -871,6 +874,204 @@ void test_lfo_rate() {
           "lfo_rate: the fastest LFO is below half a cycle an update");
 }
 
+// ---- the control program ----------------------------------------------------
+
+// tools/csp/programs: the map and the parts, joined in order.
+std::string control_program() {
+    std::string source;
+    for (const char *part :
+         {"map.s", "lfo.s", "channel.s", "envelope.s", "voice.s"}) {
+        std::ifstream file(std::string("tools/csp/programs/") + part);
+        check(static_cast<bool>(file), std::string("reads ") + part);
+        std::stringstream text;
+        text << file.rdbuf();
+        source += text.str() + "\n";
+    }
+    return source;
+}
+
+// The whole program on 16 channels and 32 voices, every one different. The
+// envelopes' rates are 0, so their levels stay where they are set, and the
+// LFOs' outputs are set directly (with no LFO updating), so that every sink
+// has a value to check against the formulas in voice.s and channel.s.
+void test_control_program() {
+    Machine m(control_program());
+    csp::Processor &cpu    = m.processor;
+    const int channels     = m.address("CHANNELS");
+    const int voices       = m.address("VOICES");
+    const int sinks        = m.address("SINKS");
+    const int lfos         = m.address("LFOS");
+    const int channel_size = m.address("CHANNEL_SIZE");
+    const int voice_size   = m.address("VOICE_SIZE");
+    const int lfo_size     = m.address("LFO_SIZE");
+    auto at                = [&](int base, const char *field) {
+        return base + m.address(field);
+    };
+
+    // 32 LFOs with outputs between -1 and 1
+    std::vector<double> lfo_out(32);
+    for (int k = 0; k < 32; ++k) {
+        lfo_out[k] = std::sin(0.7 * k);
+        cpu.write(at(lfos + k * lfo_size, "OUT"), q(lfo_out[k]));
+    }
+    struct Channel {
+        double bend, p1, c1, p2, c2, base, track, amount, volume;
+        int lfo1, lfo2;
+    };
+    std::vector<Channel> channel(16);
+    for (int c = 0; c < 16; ++c) {
+        channel[c]     = {0.02 * (c - 8), 0.1 + 0.01 * c,  -0.2 + 0.03 * c,
+                          0.05 * (c % 4), 0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
+                          0.25 * (c % 5), 0.3 + 0.05 * c,  0.2 + 0.05 * c,
+                          (3 * c) % 32,   (7 * c + 5) % 32};
+        const int base = channels + c * channel_size;
+        cpu.write(at(base, "BEND"), q(channel[c].bend));
+        cpu.write(at(base, "LFO1_PITCH"), q(channel[c].p1));
+        cpu.write(at(base, "LFO1_CUTOFF"), q(channel[c].c1));
+        cpu.write(at(base, "LFO2_PITCH"), q(channel[c].p2));
+        cpu.write(at(base, "LFO2_CUTOFF"), q(channel[c].c2));
+        cpu.write(at(base, "CUTOFF_BASE"), q(channel[c].base));
+        cpu.write(at(base, "KEY_TRACK"), q(channel[c].track));
+        cpu.write(at(base, "MOD_AMOUNT"), q(channel[c].amount));
+        cpu.write(at(base, "VOLUME"), q(channel[c].volume));
+        cpu.write(at(base, "LFO1"), lfos + channel[c].lfo1 * lfo_size);
+        cpu.write(at(base, "LFO2"), lfos + channel[c].lfo2 * lfo_size);
+    }
+    struct Voice {
+        double note, level_a, level_m, velocity;
+        int channel;
+    };
+    std::vector<Voice> voice(32);
+    for (int v = 0; v < 32; ++v) {
+        voice[v]       = {-1.0 + 0.1 * v, 0.1 + 0.02 * v, 0.9 - 0.02 * v,
+                          0.3 + 0.02 * v, (5 * v + 1) % 16};
+        const int base = voices + v * voice_size;
+        cpu.write(at(base, "NOTE"), q(voice[v].note));
+        cpu.write_wide(at(base, "LEVEL_A"), q_wide(voice[v].level_a));
+        cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
+        cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
+        cpu.write(at(base, "GATE"), q(1.0));
+        cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
+        cpu.write(at(base, "STAGE_M"), 20);
+        cpu.write(at(base, "CHANNEL"),
+                  channels + voice[v].channel * channel_size);
+        cpu.write(at(base, "SINK"), sinks + v * 8);
+    }
+    m.start();
+    // two passes: the second sees the channel values the first computed
+    m.run();
+    if (std::getenv("CSP_TRACE")) {
+        cpu.trace(true);
+    }
+    const csp::PassReport report = m.run();
+    for (size_t error = 0; error < report.errors.size() && error < 5; ++error) {
+        std::printf("  model: %s\n", report.errors[error].c_str());
+    }
+    check(report.errors.empty(), "the control program runs without errors");
+    check(report.stale_sinks.empty(), "every sink is written every pass");
+    check(report.cycles <= csp::pass_cycle_limit,
+          "the control program fits a pass: " + std::to_string(report.cycles));
+    std::printf("control program (LFOs idle): %d cycles a pass\n",
+                report.cycles);
+
+    // the formulas; the program's sinks are those published at the pass's end
+    double worst = 0;
+    for (int v = 0; v < 32; ++v) {
+        const Voice &a   = voice[v];
+        const Channel &c = channel[a.channel];
+        const double ch_pitch =
+                c.bend + lfo_out[c.lfo1] * c.p1 + lfo_out[c.lfo2] * c.p2;
+        const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
+                                 + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
+        const double want[3]        = {a.note + ch_pitch,
+                                       a.level_m * c.amount + a.note * c.track
+                                               + ch_cutoff,
+                                       a.level_a * a.velocity * c.volume};
+        const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF",
+                                       "SINK_GAIN"};
+        for (int k = 0; k < 3; ++k) {
+            const int offset =
+                    (sinks - csp::sink_base) + v * 8 + m.address(fields[k]);
+            const double got = cpu.sink(offset) / 16384.0;
+            worst            = std::max(worst, std::fabs(got - want[k]));
+        }
+    }
+    // a few raw units of the words' rounding, through up to seven operations
+    check(worst <= 8.0 / 16384.0,
+          "the voices' sinks match their formulas: largest difference "
+                  + std::to_string(worst));
+}
+
+// The LFOs in their worst case, all sines, 16 in each half, with the rest of the
+// program as above: the program must fit a pass on both parities of the
+// pass counter, and each LFO updates once in two passes.
+void test_control_program_lfos() {
+    Machine m(control_program());
+    csp::Processor &cpu = m.processor;
+    const int lfos      = m.address("LFOS");
+    const int lfo_size  = m.address("LFO_SIZE");
+    const int set_size  = m.address("SET_SIZE");
+    const int sets      = m.address("LFO_SETS");
+    auto at             = [&](int base, const char *field) {
+        return base + m.address(field);
+    };
+    for (int half = 0; half < 2; ++half) {
+        const int set = sets + half * set_size;
+        cpu.write(at(set, "BASE"), lfos + half * 16 * lfo_size);
+        cpu.write(at(set, "N_SINE"), 16);
+    }
+    // the pointers, so that no two voices or channels share a register
+    const int channels     = m.address("CHANNELS");
+    const int voices       = m.address("VOICES");
+    const int sinks        = m.address("SINKS");
+    const int channel_size = m.address("CHANNEL_SIZE");
+    const int voice_size   = m.address("VOICE_SIZE");
+    for (int c = 0; c < 16; ++c) {
+        const int base = channels + c * channel_size;
+        cpu.write(at(base, "LFO1"), lfos + ((3 * c) % 32) * lfo_size);
+        cpu.write(at(base, "LFO2"), lfos + ((7 * c + 5) % 32) * lfo_size);
+    }
+    for (int v = 0; v < 32; ++v) {
+        const int base = voices + v * voice_size;
+        cpu.write(at(base, "CHANNEL"),
+                  channels + ((5 * v + 1) % 16) * channel_size);
+        cpu.write(at(base, "SINK"), sinks + v * 8);
+        cpu.write(at(base, "STAGE_A"), 4);
+        cpu.write(at(base, "STAGE_M"), 20);
+    }
+    const double step = 0.01; // of a cycle an update
+    for (int k = 0; k < 32; ++k) {
+        const int record = lfos + k * lfo_size;
+        cpu.write_wide(at(record, "PHASE_STEP"), q_wide(step * 16.0));
+        cpu.write(at(record, "DEPTH"), q(1.0));
+    }
+    m.start();
+    int worst = 0;
+    std::vector<int64_t> phase_after_four(32);
+    for (int pass = 1; pass <= 4; ++pass) {
+        const csp::PassReport report = m.run();
+        worst                        = std::max(worst, report.cycles);
+        for (size_t error = 0; error < report.errors.size() && error < 3;
+             ++error) {
+            std::printf("  model (pass %d): %s\n", pass,
+                        report.errors[error].c_str());
+        }
+        check(report.errors.empty(),
+              "the control program with LFOs runs without errors");
+    }
+    check(worst <= csp::pass_cycle_limit,
+          "the control program with 32 sine LFOs fits a pass: "
+                  + std::to_string(worst));
+    std::printf("control program (16 sine LFOs a pass): %d cycles a pass\n",
+                worst);
+    // every LFO has been updated twice in four passes
+    for (int k = 0; k < 32; ++k) {
+        const int64_t phase = cpu.read_wide(at(lfos + k * lfo_size, "PHASE"));
+        check_equal(phase, 2 * q_wide(step * 16.0),
+                    "LFO " + std::to_string(k) + " updated twice");
+    }
+}
+
 int main() {
     test_encoding();
     test_mac();
@@ -896,6 +1097,8 @@ int main() {
     test_lfo();
     test_envelope_rates();
     test_lfo_rate();
+    test_control_program();
+    test_control_program_lfos();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;

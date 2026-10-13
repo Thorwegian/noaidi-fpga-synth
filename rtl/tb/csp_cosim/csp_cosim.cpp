@@ -15,15 +15,20 @@
 
 #include <cinttypes>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <optional>
 #include <random>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "Vtb_csp_cosim.h"
 #include "Vtb_csp_cosim__Dpi.h"
 #include "assembler.hpp"
+#include "csp/envelope.hpp"
+#include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
 #include "processor.hpp"
 #include "svdpi.h"
@@ -44,20 +49,27 @@ class CoSim {
 public:
     explicit CoSim(VerilatedContext &context) : rtl_(context) {}
 
-    // Load constants and the program while held, then release.
+    // Load the program and apply the setup while held, then release. The write
+    // queue holds 512 writes, so a large setup goes in chunks, a swap and a
+    // held pass for each.
     void start(const std::vector<uint64_t> &words,
                const std::vector<FirmwareWrite> &setup) {
+        constexpr size_t chunk = 256;
         rtl_.hold(true);
         rtl_.load(words);
         model_.load(words);
-        for (const FirmwareWrite &write : setup) {
-            rtl_.write(write.address, write.raw);
-            model_.write(write.address, write.raw);
-        }
-        rtl_.swap();
-        model_.swap();
-        rtl_.pass();
-        model_.pass(); // held: applies the setup
+        size_t done = 0;
+        do {
+            const size_t end = std::min(setup.size(), done + chunk);
+            for (; done < end; ++done) {
+                rtl_.write(setup[done].address, setup[done].raw);
+                model_.write(setup[done].address, setup[done].raw);
+            }
+            rtl_.swap();
+            model_.swap();
+            rtl_.pass();
+            model_.pass(); // held: applies the chunk
+        } while (done < setup.size());
         rtl_.hold(false);
         model_.release();
     }
@@ -105,6 +117,15 @@ public:
     // pass limit (their end state is not compared).
     static inline int passes_run      = 0;
     static inline int passes_at_limit = 0;
+
+    // What the RTL has published and how long its last pass took, for a
+    // case to say it did something.
+    int sink(int offset) const {
+        return rtl_.sink(offset);
+    }
+    int cycles() const {
+        return rtl_.cycles();
+    }
 
     void verbose(bool on) {
         verbose_ = on;
@@ -280,6 +301,170 @@ std::vector<FirmwareWrite> constants_of(const csp::Program &program) {
         writes.push_back({constant.address, constant.raw});
     }
     return writes;
+}
+
+// ---- the control program ------------------------------------------------------------------
+//
+// tools/csp/programs, the whole of it on the RTL and the model: 16 channels,
+// 32 voices with both envelopes, 32 LFOs of every shape, notes struck and
+// released while it runs.
+
+#ifndef CSP_PROGRAMS_DIR
+#define CSP_PROGRAMS_DIR "../tools/csp/programs"
+#endif
+
+std::string control_program_text() {
+    std::string source;
+    for (const char *part :
+         {"map.s", "lfo.s", "channel.s", "envelope.s", "voice.s"}) {
+        std::ifstream file(std::string(CSP_PROGRAMS_DIR) + "/" + part);
+        if (!file) {
+            std::printf("cannot read %s\n", part);
+            std::exit(2);
+        }
+        std::stringstream text;
+        text << file.rdbuf();
+        source += text.str() + "\n";
+    }
+    return source;
+}
+
+void write_wide_words(std::vector<FirmwareWrite> &writes, int address,
+                      int64_t raw36) {
+    writes.push_back({address, static_cast<int32_t>((raw36 >> 18) & 0x3FFFF)});
+    writes.push_back({address + 1, static_cast<int32_t>(raw36 & 0x3FFFF)});
+}
+
+int word_of(double value) {
+    return static_cast<int>(std::lround(value * 16384.0));
+}
+
+int run_control_program(VerilatedContext &context) {
+    const csp::Program program = csp::assemble(control_program_text());
+    for (const csp::Diagnostic &d : program.diagnostics) {
+        std::printf("control program, line %d: %s\n", d.line,
+                    d.message.c_str());
+        if (d.error) {
+            return 1;
+        }
+    }
+    auto symbol = [&](const char *name) {
+        return program.symbols.at(name);
+    };
+    const int channels     = symbol("CHANNELS"),
+              channel_size = symbol("CHANNEL_SIZE");
+    const int voices = symbol("VOICES"), voice_size = symbol("VOICE_SIZE");
+    const int lfos = symbol("LFOS"), lfo_size = symbol("LFO_SIZE");
+    const int sinks = symbol("SINKS");
+
+    std::vector<FirmwareWrite> setup = constants_of(program);
+    std::mt19937 random(7);
+    auto pick = [&](int low, int high) {
+        return std::uniform_int_distribution<int>(low, high)(random);
+    };
+
+    // The LFOs: each half of the pool sorted by shape (3 saws, 4 squares,
+    // 4 triangles, 5 sines), two sets
+    const int counts[4] = {3, 4, 4, 5};
+    for (int half = 0; half < 2; ++half) {
+        const int set = symbol("LFO_SETS") + half * symbol("SET_SIZE");
+        setup.push_back({set + symbol("BASE"), lfos + half * 16 * lfo_size});
+        for (int shape = 0; shape < 4; ++shape) {
+            setup.push_back({set + symbol("N_SAW") + shape, counts[shape]});
+        }
+        int slot = half * 16;
+        for (int shape = 0; shape < 4; ++shape) {
+            for (int n = 0; n < counts[shape]; ++n, ++slot) {
+                const int record   = lfos + slot * lfo_size;
+                const double depth = 0.25 * pick(1, 8);
+                write_wide_words(setup, record + symbol("PHASE"),
+                                 int64_t{pick(0, 1 << 30)} << 6);
+                write_wide_words(setup, record + symbol("PHASE_STEP"),
+                                 csp::lfo_rate(pick(30, 12000), 2));
+                setup.push_back({record + symbol("DEPTH"), word_of(depth)});
+                setup.push_back(
+                        {record + symbol("NEG_DEPTH"), word_of(-depth)});
+                setup.push_back({record + symbol("GAIN"),
+                                 shape == 0   ? word_of(depth / 8)
+                                 : shape == 2 ? word_of(depth / 4)
+                                              : 0});
+            }
+        }
+    }
+    // The channels: envelope tables, routing, depths
+    for (int channel = 0; channel < 16; ++channel) {
+        const int base = channels + channel * channel_size;
+        auto table     = [&](int row, int64_t target22, uint32_t coefficient) {
+            write_wide_words(setup, base + row, target22 << 10);
+            write_wide_words(setup, base + row + 2,
+                                 csp::envelope_rate(coefficient));
+        };
+        for (int kind = 0; kind < 2; ++kind) {
+            const int row = 16 * kind;
+            table(row + 0, 0x533333, pick(500, 60000));
+            table(row + 4, int64_t{pick(100, 1000)} << 12, pick(100, 20000));
+            table(row + 8, 0, pick(60, 8000));
+        }
+        auto field = [&](const char *name, int raw) {
+            setup.push_back({base + symbol(name), raw});
+        };
+        field("BEND", word_of(0.01 * pick(-12, 12)));
+        field("LFO1_PITCH", word_of(0.01 * pick(0, 30)));
+        field("LFO1_CUTOFF", word_of(0.1 * pick(-10, 10)));
+        field("LFO2_PITCH", word_of(0.01 * pick(0, 30)));
+        field("LFO2_CUTOFF", word_of(0.1 * pick(-10, 10)));
+        field("LFO1", lfos + pick(0, 31) * lfo_size);
+        field("LFO2", lfos + pick(0, 31) * lfo_size);
+        field("CUTOFF_BASE", word_of(0.1 * pick(0, 40)));
+        field("KEY_TRACK", word_of(0.25 * pick(0, 6)));
+        field("MOD_AMOUNT", word_of(0.1 * pick(-30, 30)));
+        field("VOLUME", word_of(0.1 * pick(2, 10)));
+    }
+    // The voices: idle, in release
+    for (int voice = 0; voice < 32; ++voice) {
+        const int base = voices + voice * voice_size;
+        setup.push_back({base + symbol("STAGE_A"), 8});
+        setup.push_back({base + symbol("STAGE_M"), 24});
+        setup.push_back(
+                {base + symbol("VELOCITY"), word_of(0.1 * pick(3, 10))});
+        setup.push_back({base + symbol("CHANNEL"),
+                         channels + pick(0, 15) * channel_size});
+        setup.push_back({base + symbol("NOTE"), word_of(0.1 * pick(-20, 20))});
+        setup.push_back({base + symbol("SINK"), sinks + 8 * voice});
+    }
+
+    CoSim cosim(context);
+    cosim.start(program.words, setup);
+    int differences      = 0;
+    constexpr int passes = 400;
+    int most_cycles      = 0;
+    for (int pass = 0; pass < passes && differences == 0; ++pass) {
+        std::vector<FirmwareWrite> writes;
+        for (int voice = 0; voice < 32; ++voice) {
+            const int base = voices + voice * voice_size;
+            if (pass == 3 + 5 * voice) { // struck
+                write_wide_words(writes, base + symbol("LEVEL_A"), 0);
+                write_wide_words(writes, base + symbol("LEVEL_M"), 0);
+                writes.push_back({base + symbol("GATE"), 16384});
+            } else if (pass == 190 + 4 * voice) { // released
+                writes.push_back({base + symbol("GATE"), 0});
+            }
+        }
+        differences = cosim.pass(writes, "control program pass "
+                                                 + std::to_string(pass));
+        most_cycles = std::max(most_cycles, cosim.cycles());
+    }
+    int live = 0; // sink words that are not 0 at the end
+    for (int voice = 0; voice < 32; ++voice) {
+        for (int word = 0; word < 3; ++word) {
+            live += cosim.sink((sinks - csp::sink_base) + 8 * voice + word)
+                    != 0;
+        }
+    }
+    std::printf("control program: %d passes, at most %d cycles a pass, "
+                "%d of 96 voice sinks live\n",
+                passes, most_cycles, live);
+    return differences;
 }
 
 // ---- random programs ---------------------------------------------------------------------------
@@ -775,6 +960,12 @@ int main(int argc, char **argv) {
             differences = cosim.pass({}, "lfo pass " + std::to_string(pass));
         }
         std::printf("lfo: %s\n", differences ? "FAIL" : "match");
+        failures += differences != 0;
+    }
+
+    {
+        const int differences = run_control_program(context);
+        std::printf("control program: %s\n", differences ? "FAIL" : "match");
         failures += differences != 0;
     }
 
