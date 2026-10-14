@@ -1,8 +1,13 @@
 //------------------------------------------------------------------------
-// adsr.sv -- the RC envelope, as its own module
+// adsr_reference.sv -- the RC envelope of the fixed-function CSP, as a reference
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
+//
+// RETIRED from the design (#222): the envelope is a CSP program now
+// (tools/csp/programs/envelope.s). Kept here as what the program was
+// matched to (`make sim-csp-bench` runs it beside the program), and for
+// nothing else.
 //
 // The envelope is the one instruction with a real state machine, so it
 // earns a module; the LFO is an adder and the MAC is a wire.

@@ -50,7 +50,7 @@ module top (
     logic       sample_tick48, cell_tick48;
     logic [9:0] slot;
 
-    timebase #(.NUM_ISSUE_SLOTS(synth_pkg::CYCLES_PER_PARTIAL * synth_pkg::NUM_PARTIALS)) u_timebase (
+    timebase u_timebase (
         .clk           (sysclk),
         .rst_n         (rst_n),
         .sample_tick   (sample_tick),

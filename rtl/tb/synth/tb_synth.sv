@@ -63,6 +63,18 @@ module tb_synth (
         if (dut.sink_write_enable && dut.sink_write_both) firmware_sink_writes <= firmware_sink_writes + 1;
         if (dut.pass_done) flips <= flips + 1;
     end
+    int queued = 0, dropped_full = 0, popped = 0;
+    always @(posedge sclk) begin
+        if (dut.queue_write_enable) begin
+            queued <= queued + 1;
+            if (dut.u_write_queue.full) dropped_full <= dropped_full + 1;
+        end
+    end
+    always_ff @(posedge sysclk) if (dut.queue_pop) popped <= popped + 1;
+    export "DPI-C" function synth_queue_counters;
+    function int synth_queue_counters(input int which);
+        return which == 0 ? queued : which == 1 ? dropped_full : popped;
+    endfunction
     export "DPI-C" function synth_counters;
     function int synth_counters(input int which);
         case (which)

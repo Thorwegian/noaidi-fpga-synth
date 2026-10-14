@@ -41,6 +41,7 @@ int synth_register(int address);
 int synth_sink(int offset);
 int synth_pointer(int partial, int position);
 int synth_counters(int which);
+int synth_queue_counters(int which);
 }
 
 namespace {
@@ -67,10 +68,14 @@ class Synth {
 public:
     explicit Synth(VerilatedContext &context) : top_(&context) {
         svSetScope(svGetScopeFromName("TOP.tb_synth"));
-        top_.rst  = 1;
         top_.sclk = 0;
         top_.cs   = 1;
         top_.mosi = 0;
+        // A real falling edge of the reset, for the flip-flops that have only
+        // an asynchronous one: Verilator does not see a level that starts low.
+        top_.rst = 0;
+        cycle();
+        top_.rst = 1;
         for (int n = 0; n < 8; ++n) {
             cycle();
         }
@@ -494,6 +499,17 @@ void case_tone(VerilatedContext &context, const Layout &layout) {
                     synth_register(voice + layout.symbol("OUT_A")),
                     synth_register(voice + layout.symbol("D")),
                     synth_register(voice + layout.symbol("U_M")));
+        std::printf("  queue: %d written, %d while full, %d popped\n", synth_queue_counters(0),
+                    synth_queue_counters(1), synth_queue_counters(2));
+        for (int v = 0; v < 32; ++v) {
+            const int base = layout.voices + v * layout.voice_size;
+            const int sink = synth_register(base + layout.symbol("SINK"));
+            if (sink != layout.sinks + 8 * v) {
+                std::printf("  voice %d: SINK %d (want %d), CHANNEL %d, STAGE_A %d NOTE %d\n", v, sink,
+                            layout.sinks + 8 * v, synth_register(base + layout.symbol("CHANNEL")),
+                            synth_register(base + layout.symbol("STAGE_A")), synth_register(base + layout.symbol("NOTE")));
+            }
+        }
         for (const csp::ConstantWrite &c : layout.program.constants) {
             std::printf("  constant at %d = %d, register holds %d\n", c.address, c.raw, synth_register(c.address));
         }

@@ -37,11 +37,7 @@ LUTS = \
 	dsp/att_lut.hex \
 	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
-	dsp/sine_lut.hex \
-	dsp/boot_p0.hex \
-	dsp/boot_p1.hex \
-	dsp/boot_p2.hex \
-	dsp/boot_p3.hex
+	dsp/sine_lut.hex
 
 all: pack.fs
 
@@ -67,9 +63,6 @@ dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
 dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
-	python3 $<
-
-dsp/boot_p%.hex: ../scripts/gen_boot_image.py
 	python3 $<
 
 yosys.json: $(SRC) $(LUTS) Makefile
@@ -152,12 +145,13 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (Verilator)
 #----------------------------------------------------------------------
-# Gowin's behavioural models for the DSP primitives adsr.sv instantiates
-# explicitly (yosys cannot infer a fused DSP cell, so they are written out
-# by hand). Vendor code, so it is referenced where the toolchain installs it
-# rather than vendored into this CERN-OHL-S tree. Override on the command line
-# if your copy lives somewhere else. -DSIM_GOWIN_PRIM turns on the GSR
-# instance inside adsr.sv, which the models need somewhere up the hierarchy.
+# Gowin's behavioural models for the DSP primitives csp_multiply_add.sv
+# instantiates explicitly (yosys cannot infer a fused DSP cell, so they are
+# written out by hand). Vendor code, so it is referenced where the toolchain
+# installs it rather than vendored into this CERN-OHL-S tree. Override on the
+# command line if your copy lives somewhere else. -DSIM_GOWIN_PRIM turns on
+# the GSR instance inside csp_multiply_add.sv, which the models need somewhere
+# up the hierarchy.
 GOWIN_SIM ?= /opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v
 VL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
 
@@ -185,7 +179,6 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_PARTIAL = tb/tb_partial_pipeline.sv
 
 PARTIAL_SIM = $(PKG) csp/csp_pkg.sv csp/csp_sink_area.sv dsp/timebase.sv dsp/limiter.sv \
@@ -217,45 +210,7 @@ obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDI
 sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)
 
-PROG_COMMON = tb/partial_prog_common.svh
-
-obj_dir/tb_prog_%/sim: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) spi/spi_bus.sv $< $(VL_DSP)
-
-sim-prog-boot: obj_dir/tb_prog_boot/sim
-	$(call run_sim,$<,tb/sim-prog-boot.out)
-
-sim-prog-sweep: obj_dir/tb_prog_sweep/sim
-	$(call run_sim,$<,tb/sim-prog-sweep.out)
-
-sim-prog-bus: obj_dir/tb_prog_bus/sim
-	$(call run_sim,$<,tb/sim-prog-bus.out)
-
-sim-prog-sources: obj_dir/tb_prog_sources/sim
-	$(call run_sim,$<,tb/sim-prog-sources.out)
-
-# The ping-pong DMEM page. Timing and resource numbers
-# cannot tell a right-page read from a wrong one, and hardware
-# cannot see DMEM at all -- these invariants only exist in sim.
-sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
-	$(call run_sim,$<,tb/sim-prog-pingpong.out)
-
-# Active master limiter in situ: hot chord must not rail, must not
-# go near-silent, and 10 ms windowed RMS must not jump > 3 dB.
-sim-prog-limiter: obj_dir/tb_prog_limiter/sim
-	$(call run_sim,$<,tb/sim-prog-limiter.out)
-
-# All of these elaborate the CSP alone -- without the SVF, the
-# oscillators' audio path or the limiter.
-CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
-
-obj_dir/tb_csp/sim: $(CSP_SIM) tb/tb_csp.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_csp.sv $(VL_DSP)
-
-sim-csp: obj_dir/tb_csp/sim
-	$(call run_sim,$<,tb/sim-csp.out)
-
-# ---- the new CSP (rtl/csp, #184): unit benches and the co-simulation ----
+# ---- the CSP (rtl/csp, #184): unit benches and the co-simulation ----
 CSP_NEW = csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
           csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv
 
@@ -298,17 +253,17 @@ sim-csp-cosim: obj_dir/csp_cosim/sim
 # The program benches: the CSP's programs (../tools/csp/programs) next to the
 # fixed-function units they replace, driven by the same gates and settings,
 # compared once per 48 kHz pass (tb/csp_cosim/csp_bench.cpp). The Verilated
-# bench is the co-simulation's, with REF_VOICES adsr.sv references added.
+# bench is the co-simulation's, with REF_VOICES adsr_reference.sv references added.
 CSP_BENCH_CPP = tb/csp_cosim/csp_bench.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.cpp \
                 ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
-obj_dir/csp_bench/sim: $(CSP_NEW) dsp/adsr.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp \
+obj_dir/csp_bench/sim: $(CSP_NEW) tb/csp_cosim/adsr_reference.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp \
                        $(CSP_BENCH_CPP) $(CSP_COSIM_HPP) ../app/main/csp/envelope.hpp \
                        $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
 	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -GREF_VOICES=16 \
 	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
 	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -I$(abspath tb/csp_cosim) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
-	    $(CSP_NEW) dsp/adsr.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_BENCH_CPP))
+	    $(CSP_NEW) tb/csp_cosim/adsr_reference.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_BENCH_CPP))
 
 sim-csp-bench: obj_dir/csp_bench/sim
 	$(call run_sim,$<,tb/sim-csp-bench.out)
@@ -343,27 +298,6 @@ csp-fit: $(CSP_NEW) csp/fit/csp_fit.sv csp/fit/csp_fit.cst Makefile
 		--freq 73.728 --seed 1 > obj_dir/csp_fit/pnr.log 2>&1 || true
 	@grep -E 'BSRAM|MULTALU|LUT4:|DFF:|Max frequency' obj_dir/csp_fit/pnr.log | grep -v ': *0/'
 
-obj_dir/tb_pitch_track/sim: $(CSP_SIM) tb/tb_pitch_track.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_pitch_track.sv $(VL_DSP)
-
-sim-pitch-track: obj_dir/tb_pitch_track/sim
-	$(call run_sim,$<,tb/sim-pitch-track.out)
-
-# The mailbox's two-take commit under back-to-back traffic.
-obj_dir/tb_mbox_burst/sim: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_mbox_burst.sv $(VL_DSP)
-
-sim-mbox-burst: obj_dir/tb_mbox_burst/sim
-	$(call run_sim,$<,tb/sim-mbox-burst.out)
-
-# The real program mix under constant mailbox rewrites. Not in the
-# default gate.
-obj_dir/tb_prog_soak/sim: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_prog_soak.sv $(VL_DSP)
-
-sim-prog-soak: obj_dir/tb_prog_soak/sim
-	$(call run_sim,$<,/dev/stdout)
-
 TB_BUS = tb/tb_spi_bus.sv
 obj_dir/tb_spi_bus/sim: $(PKG) csp/csp_pkg.sv spi/spi_bus.sv $(TB_BUS) Makefile
 	$(VERILATE) $(PKG) csp/csp_pkg.sv spi/spi_bus.sv $(TB_BUS)
@@ -373,8 +307,8 @@ sim-bus: obj_dir/tb_spi_bus/sim
 
 # SVF stability spot-check at the FC_MAX clamp corner.
 TB_STAB = tb/tb_svf_stability.sv
-obj_dir/tb_svf_stability/sim: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_STAB) $(VL_DSP)
+obj_dir/tb_svf_stability/sim: $(PARTIAL_SIM) $(TB_STAB) $(LUTS) Makefile
+	$(VERILATE) $(PARTIAL_SIM) $(TB_STAB) $(VL_DSP)
 
 sim-stab: obj_dir/tb_svf_stability/sim
 	$(call run_sim,$<,tb/sim-stab.out)
@@ -410,17 +344,14 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-pitch-track sim-csp-register-file sim-csp-write-queue sim-csp-cosim sim-csp-bench \
-     sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
-     sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
+sim: sim-pulse-dc sim-csp-register-file sim-csp-write-queue sim-csp-cosim sim-csp-bench \
+     sim-partial sim-spdif sim-spdif48 sim-bus sim-synth \
      sim-stab sim-output-lpf sim-limiter
-	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-pitch-track.out tb/sim-csp-register-file.out \
-	     tb/sim-csp-write-queue.out tb/sim-csp-cosim.out tb/sim-csp-bench.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
+	@cat tb/sim-pulse-dc.out tb/sim-csp-register-file.out \
+	     tb/sim-csp-write-queue.out tb/sim-csp-cosim.out tb/sim-csp-bench.out \
 	     tb/sim-partial.out tb/sim-spdif.out \
 	     tb/sim-spdif48.out \
-	     tb/sim-bus.out \
-	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
-	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
+	     tb/sim-bus.out tb/sim-synth.out \
 	     tb/sim-stab.out tb/sim-output-lpf.out tb/sim-limiter.out
 	@# A bench that FAILS must fail the build. Before this, `make sim`
 	@# printed "3 FAILURE(S)" and still exited 0, because this target only

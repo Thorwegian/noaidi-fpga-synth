@@ -12,8 +12,9 @@
 //   sample_tick : high during slot 0 of each sample period.
 //                 "A new sample is ready": consumers latch the mix
 //                 output and the mix accumulators are cleared on it.
-//   slot_issue  : high during the NUM_ISSUE_SLOTS slots in which a partial
-//                 enters the pipeline (slot 0..255).
+//   slot_issue  : high during the NUM_ISSUE_SLOTS slots in which the
+//                 partial pipeline takes partials (slot 0..511: two
+//                 cycles a partial, 256 partials).
 //   cell_tick   : high during the first slot of every CELL_DIV — the
 //                 SPDIF cell boundary (768 = 128 cells × 6). Counted
 //                 from the same reset and realigned at every wrap
@@ -32,7 +33,7 @@
 `default_nettype none
 module timebase #(
     parameter int CYCLES    = synth_pkg::CYCLES_PER_SAMPLE,
-    parameter int NUM_ISSUE_SLOTS = synth_pkg::NUM_PARTIALS,
+    parameter int NUM_ISSUE_SLOTS = synth_pkg::CYCLES_PER_PARTIAL * synth_pkg::NUM_PARTIALS,
     parameter int CELLDIV   = synth_pkg::CELL_DIV
 ) (
     input  logic                   clk,
