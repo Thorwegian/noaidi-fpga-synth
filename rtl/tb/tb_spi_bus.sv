@@ -46,7 +46,9 @@ module tb_spi_bus;
         .imem_write_enable(imem_write_enable),
         .imem_write_address(imem_write_address),
         .imem_write_data(imem_write_data),
-        .csp_held(csp_held), .test_tone_enable(test_tone_enable)
+        .csp_held(csp_held), .test_tone_enable(test_tone_enable),
+        .status_0(32'hA0000001), .status_1(32'hA0000002),
+        .status_2(32'hA0000003), .status_3(32'hA0000004)
     );
 
     integer errors = 0;
@@ -191,17 +193,25 @@ module tb_spi_bus;
 
         $display("--- 3. burst auto-inc write + read (system registers) ---");
         wq[0] = 32'h11111111; wq[1] = 32'h22222222;
-        wq[2] = 32'h33333333; wq[3] = 32'h44444444;
-        wr_burst(16'h0006, 4);
-        rd_burst(16'h0006, 4, 1);
-        for (j = 0; j < 4; j = j + 1)
+        wr_burst(16'h0006, 2);
+        rd_burst(16'h0006, 2, 1);
+        for (j = 0; j < 2; j = j + 1)
             check32($sformatf("word[0x%04h]", 16'h0006+j), rq[j],
                     {8{j[3:0]+4'd1}});
 
         $display("--- 4. non-incrementing read repeats one address ---");
-        rd_burst(16'h0008, 2, 0);
-        check32("re-read a", rq[0], 32'h33333333);
-        check32("re-read b", rq[1], 32'h33333333);
+        rd_burst(16'h0006, 2, 0);
+        check32("re-read a", rq[0], 32'h11111111);
+        check32("re-read b", rq[1], 32'h11111111);
+
+        $display("--- 4b. the diagnostic words read the status inputs, and ignore writes ---");
+        wq[0] = 32'hFFFFFFFF;
+        wr_burst(16'h0008, 1);
+        rd_burst(16'h0008, 4, 1);
+        check32("status_0", rq[0], 32'hA0000001);
+        check32("status_1", rq[1], 32'hA0000002);
+        check32("status_2", rq[2], 32'hA0000003);
+        check32("status_3", rq[3], 32'hA0000004);
 
         $display("--- 5. out-of-window: write dropped, reads zero, no alias ---");
         wq[0] = 32'hBAD0BAD0;
@@ -298,8 +308,8 @@ module tb_spi_bus;
 
         $display("--- 10. the read suite again at 40 MHz-class SCLK ---");
         half = 13;                        // ~38 MHz
-        rd_burst(16'h0006, 4, 1);
-        for (j = 0; j < 4; j = j + 1)
+        rd_burst(16'h0006, 2, 1);
+        for (j = 0; j < 2; j = j + 1)
             check32($sformatf("fast word[0x%04h]", 16'h0006+j), rq[j],
                     {8{j[3:0]+4'd1}});
         rd_burst(16'h0005, 1, 1);

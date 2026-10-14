@@ -114,6 +114,7 @@ module top (
         .fetch_data    (fetch_data)
     );
 
+    logic [9:0] queue_read_gray;
     csp_write_queue u_write_queue (
         .sclk          (sclk),
         .sclk_reset_n  (rst_n),
@@ -127,11 +128,13 @@ module top (
         .pop           (queue_pop),
         .committed     (queue_committed),
         .head_address  (queue_address),
-        .head_data     (queue_data)
+        .head_data     (queue_data),
+        .read_pointer_gray (queue_read_gray)
     );
 
     // A pass is two samples: it starts with the 48 kHz sample, and ends
     // in the last cycle before the next one, when the sink pages flip.
+    logic [17:0] csp_pass_counter;
     csp_core u_csp (
         .clk                (sysclk),
         .reset_n            (rst_n),
@@ -147,7 +150,8 @@ module top (
         .sink_write_both    (sink_write_both),
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data),
-        .pass_done          (pass_done)
+        .pass_done          (pass_done),
+        .pass_counter       (csp_pass_counter)
     );
 
     logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address;
@@ -168,6 +172,7 @@ module top (
     //----------------------------------------------------------------
     // 256-partial pipeline
     //----------------------------------------------------------------
+    logic [18:0] master_gain_q;
     partial_pipeline u_partial_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
@@ -181,7 +186,8 @@ module top (
         .sink_read_address    (sink_read_address),
         .sink_read_data       (sink_read_data),
         .mix_left    (sample_left),
-        .mix_right   (sample_right)
+        .mix_right   (sample_right),
+        .master_gain_q (master_gain_q)
     );
 
     //----------------------------------------------------------------
@@ -311,6 +317,33 @@ module top (
     // (The byte-protocol bring-up slave spi_slave_regs.sv remains in
     // the tree as reference; this is its successor.)
     //----------------------------------------------------------------
+    // Diagnostics for the firmware to read back (memory_map.md, 0x0008-0x000B):
+    // is the CSP still running passes, where the write queue stands, what the
+    // master limiter has settled at, and how many queue writes were dropped.
+    // Sysclk values cross to the SPI clock through two flip-flops. They are
+    // not coherent across bits; a reader takes two reads and compares.
+    logic [17:0] pass_meta, pass_sync;
+    logic [18:0] gain_meta, gain_sync;
+    logic [9:0]  pop_pointer_meta, pop_pointer_sync;
+    logic [15:0] dropped_writes;
+    always_ff @(posedge sclk or negedge rst_n)
+        if (!rst_n) begin
+            pass_meta <= '0; pass_sync <= '0;
+            gain_meta <= '0; gain_sync <= '0;
+            pop_pointer_meta <= '0; pop_pointer_sync <= '0;
+            dropped_writes <= '0;
+        end else begin
+            pass_meta <= csp_pass_counter;  pass_sync <= pass_meta;
+            gain_meta <= master_gain_q;     gain_sync <= gain_meta;
+            pop_pointer_meta <= queue_read_gray; pop_pointer_sync <= pop_pointer_meta;
+            if (queue_write_enable && queue_full && dropped_writes != '1)
+                dropped_writes <= dropped_writes + 1'b1;
+        end
+    wire [31:0] status_pass    = {14'd0, pass_sync};
+    wire [31:0] status_queue   = {21'd0, queue_full, pop_pointer_sync};   // read pointer, Gray-coded
+    wire [31:0] status_limiter = {13'd0, gain_sync};
+    wire [31:0] status_dropped = {16'd0, dropped_writes};
+
     spi_bus u_spi (
         .sclk     (sclk),
         .cs       (cs),
@@ -327,7 +360,11 @@ module top (
         .imem_write_address   (imem_write_address),
         .imem_write_data      (imem_write_data),
         .csp_held             (csp_held_sclk),
-        .test_tone_enable     (test_tone_sclk)
+        .test_tone_enable     (test_tone_sclk),
+        .status_0             (status_pass),
+        .status_1             (status_queue),
+        .status_2             (status_limiter),
+        .status_3             (status_dropped)
     );
 
     //----------------------------------------------------------------

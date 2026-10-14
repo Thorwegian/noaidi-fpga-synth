@@ -31,6 +31,7 @@ module tb_csp_write_queue;
     logic full, committed;
     logic [csp_pkg::QUEUE_ADDRESS_W-1:0] head_address;
     logic [csp_pkg::WORD_W-1:0]     head_data;
+    logic [9:0] read_pointer_gray;
 
     csp_write_queue dut (.*);
 

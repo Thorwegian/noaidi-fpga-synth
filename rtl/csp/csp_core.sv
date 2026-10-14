@@ -78,7 +78,8 @@ module csp_core (
     output logic                                sink_write_both,    // a firmware write: both pages
     output logic [9:0]                          sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]          sink_write_data,
-    output logic                                pass_done        // one clock: flip the sink pages
+    output logic                                pass_done,       // one clock: flip the sink pages
+    output logic [17:0]                         pass_counter     // passes run since reset (diagnostics)
 );
 
     // ---- constants --------------------------------------------------------------------
@@ -182,6 +183,7 @@ module csp_core (
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
+    assign pass_counter = pass_count;
 
     // ---- architectural state -------------------------------------------------------------
     logic [AW-1:0]      index_i, index_j;

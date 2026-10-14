@@ -21,6 +21,15 @@ constexpr uint32_t ctrl_swap      = 1u << 0;
 constexpr uint32_t ctrl_hold      = 1u << 1;
 constexpr uint32_t ctrl_test_tone = 1u << 2;
 
+// Read-only diagnostics (spi_bus.sv): the CSP's pass counter, the write
+// queue's Gray-coded read pointer and full flag, the master limiter's
+// envelope state and the count of writes the queue dropped.
+constexpr uint16_t diag_pass    = 0x0008;
+constexpr uint16_t diag_queue   = 0x0009;
+constexpr uint16_t diag_limiter = 0x000A;
+constexpr uint16_t diag_dropped = 0x000B;
+constexpr int diag_words        = 4;
+
 // Bits 35:32 of the next instruction written to the program memory.
 constexpr uint16_t program_high = 0x0010;
 

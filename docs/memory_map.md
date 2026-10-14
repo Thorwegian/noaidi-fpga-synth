@@ -93,7 +93,14 @@ Everything else is reserved.
 | `0x000` | `ID` | reserved (the ID byte rides MISO byte 0 of every frame) |
 | `0x001` | `STATUS` | reserved |
 | `0x002` | `CTRL` | `[0]` commit the write queue (an event: write 1 to commit), `[1]` hold the CSP in reset, `[2]` replace the output with the test tone |
-| `0x003–0x00F` | scratch | read back what was written |
+| `0x003–0x007` | scratch | read back what was written |
+| `0x008` | `DIAG_PASS` | read-only. `[17:0]` passes the CSP has run since reset (two reads a few ms apart must differ, or the CSP has stopped) |
+| `0x009` | `DIAG_QUEUE` | read-only. `[9:0]` the write queue's read pointer, Gray-coded; `[10]` the queue is full |
+| `0x00A` | `DIAG_LIMITER` | read-only. `[18:0]` the master limiter's envelope state (`[18:11]` is the reduction in codes of 0.375 dB, `[10:0]` the fraction; 0 = none, 255 codes = 95.6 dB) |
+| `0x00B` | `DIAG_DROPPED` | read-only. `[15:0]` writes dropped because the queue was full (saturating) |
+| `0x00C–0x00F` | scratch | read back what was written |
+
+The diagnostic words cross from the system clock through two flip-flops and are not coherent across bits; read twice.
 
 `CTRL[1]` is 1 at power-up: the CSP runs no program until the firmware has
 loaded one and written `CTRL = 0`. A held CSP applies every committed write in

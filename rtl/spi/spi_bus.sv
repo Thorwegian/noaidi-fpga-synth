@@ -69,7 +69,13 @@ module spi_bus #(
     output logic [csp_pkg::PROGRAM_W-1:0]       imem_write_address,
     output logic [35:0] imem_write_data,
     output logic        csp_held,             // CTRL[1]: the CSP is held in reset
-    output logic        test_tone_enable      // CTRL[2]
+    output logic        test_tone_enable,     // CTRL[2]
+
+    // ---- diagnostics (sclk domain, read-only words 0x0008-0x000B) ----------
+    input  logic [31:0] status_0,
+    input  logic [31:0] status_1,
+    input  logic [31:0] status_2,
+    input  logic [31:0] status_3
 );
 
     //--------------------------------------------------------------------
@@ -106,7 +112,13 @@ module spi_bus #(
     initial for (int word = 0; word < SYSTEM_WORDS; word++) system_register[word] = '0;
 
     function automatic logic [31:0] read_word(input logic [15:0] address);
-        read_word = address < 16'(SYSTEM_WORDS) ? system_register[address[3:0]] : 32'd0;
+        case (address)
+            16'h0008: read_word = status_0;
+            16'h0009: read_word = status_1;
+            16'h000A: read_word = status_2;
+            16'h000B: read_word = status_3;
+            default:  read_word = address < 16'(SYSTEM_WORDS) ? system_register[address[3:0]] : 32'd0;
+        endcase
     endfunction
 
     //--------------------------------------------------------------------

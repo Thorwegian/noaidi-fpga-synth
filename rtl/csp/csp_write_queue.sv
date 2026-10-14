@@ -44,7 +44,8 @@ module csp_write_queue (
     input  wire                                 pop,           // take the head entry
     output logic                                committed,     // a committed entry waits
     output logic [csp_pkg::QUEUE_ADDRESS_W-1:0]      head_address,
-    output logic [csp_pkg::WORD_W-1:0]          head_data
+    output logic [csp_pkg::WORD_W-1:0]          head_data,
+    output wire  [9:0]                          read_pointer_gray  // diagnostics: where the CSP has read to
 );
 
     localparam int DEPTH     = 512;
@@ -131,6 +132,7 @@ module csp_write_queue (
     end
 
     assign committed = read_pointer != committed_pointer;
+    assign read_pointer_gray = read_gray;
 
     // The head entry: a registered BSRAM read that reads ahead to the next
     // entry when popping, so `head` always holds the entry at the read

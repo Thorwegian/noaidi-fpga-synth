@@ -70,7 +70,49 @@ void tick_timer_cb(void *) {
     xTaskNotifyGive(task); // runs in the esp_timer task
 }
 
+// Once a second, ask the gateware how it is doing and say so if it is not
+// well: the CSP has stopped running passes, the queue dropped writes, or the
+// master limiter holds the output down. Silence that outlasts the notes is
+// then explained by the log, not guessed at.
+void check_gateware_health() {
+    static uint32_t previous_passes  = 0;
+    static uint32_t previous_dropped = 0;
+    static int healthy_seconds       = 0;
+    std::array<uint32_t, fpga_map::diag_words> diag{};
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const bool read_ok =
+            fpga_word_read_burst(fpga_map::diag_pass, diag.data(), diag.size());
+    xSemaphoreGive(lock);
+    if (!read_ok) {
+        ESP_LOGW(tag, "diagnostic read failed");
+        return;
+    }
+    const uint32_t passes    = diag[0] & 0x3FFFF;
+    const bool queue_full    = (diag[1] >> 10) & 1;
+    const uint32_t reduction = diag[2] >> 11; // codes of 0.375 dB
+    const uint32_t dropped   = diag[3] & 0xFFFF;
+    const bool csp_stopped   = passes == previous_passes;
+    const bool dropped_new   = dropped != previous_dropped;
+    previous_passes          = passes;
+    previous_dropped         = dropped;
+    if (csp_stopped || dropped_new || queue_full || reduction > 16) {
+        healthy_seconds = 0;
+        ESP_LOGW(
+                tag,
+                "gateware: passes %lu%s, queue %s, dropped %lu%s, limiter -%.1f dB (raw %05lx)",
+                static_cast<unsigned long>(passes),
+                csp_stopped ? " (NOT RUNNING)" : "", queue_full ? "FULL" : "ok",
+                static_cast<unsigned long>(dropped),
+                dropped_new ? " (new)" : "", reduction * 0.375,
+                static_cast<unsigned long>(diag[2]));
+    } else if (++healthy_seconds % 60 == 0) {
+        ESP_LOGI(tag, "gateware ok: passes %lu, limiter -%.1f dB",
+                 static_cast<unsigned long>(passes), reduction * 0.375);
+    }
+}
+
 void engine_task(void *) {
+    int ticks = 0;
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const int64_t woke = esp_timer_get_time();
@@ -78,6 +120,11 @@ void engine_task(void *) {
         xSemaphoreTake(lock, portMAX_DELAY);
         send(writes_per_tick, 0);
         xSemaphoreGive(lock);
+
+        if (++ticks == 1000) {
+            ticks = 0;
+            check_gateware_health();
+        }
 
         // Single-core guard. If this wake ran long, the 1 kHz notify is
         // already pending, so the ulTaskNotifyTake above would return at once

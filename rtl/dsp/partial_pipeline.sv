@@ -85,7 +85,8 @@ module partial_pipeline #(
                                              // limiter); stable by
                                              // the next tick, which is when
                                              // every consumer latches it
-    output logic signed [23:0] mix_right
+    output logic signed [23:0] mix_right,
+    output logic        [18:0] master_gain_q   // the master limiter's envelope state (diagnostics)
 );
 
     localparam int VW = $clog2(NUM_PARTIALS);   // partial index width
@@ -710,14 +711,15 @@ module partial_pipeline #(
     //----------------------------------------------------------------
     localparam int          LIM_SUB       = 11;
     localparam logic [7:0]  LIM_THRESH    = 8'd192;
-    localparam logic [17:0] LIM_ATTACK_Q  = 18'd256;
-    localparam logic [17:0] LIM_RELEASE_Q = 18'd1;
+    localparam logic [18:0] LIM_ATTACK_Q  = 19'd256;
+    localparam logic [18:0] LIM_RELEASE_Q = 19'd1;
     logic signed [25:0] lim_acc_l, lim_acc_r, lim_prod_l, lim_prod_r;
     logic        [25:0] lim_abs_l, lim_abs_r, lim_level;   // unsigned magnitudes
-    logic        [17:0] lim_gain_q;                        // envelope state
+    logic        [18:0] lim_gain_q;                        // envelope state
+    assign master_gain_q = lim_gain_q;
     logic        [16:0] lim_gain;                          // UQ0.16 applied gain
     logic        [3:0]  lim_step;
-    wire         [17:0] lim_gain_q_next;
+    wire         [18:0] lim_gain_q_next;
     wire         [16:0] lim_gain_lin;
     limiter #(.LEVEL_W(26), .SUB(LIM_SUB)) u_lim (
         .clk(clk), .rst_n(rst_n),
