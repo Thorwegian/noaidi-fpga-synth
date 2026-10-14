@@ -5,30 +5,33 @@
 // License: CERN-OHL-S v2
 //
 // The partial pipeline is a time-division-multiplexed pipeline: one
-// datapath, 256 partials, one per clock. One partial enters the
-// pipeline every sysclk cycle for 256 cycles of each sample period
-// (time slot 0..255).  Every cycle, every stage processes a different
-// partial: stage Sk at time slot t holds the partial that entered at
-// slot t-k.  The pipeline is 26 stages deep
-// (s10_valid follows s1_valid by 24 cycles in tb_partial_pipeline), so it
-// occupies 256 + 26 - 1 = 281 contiguous slots (~37% of the 768-slot
-// sample period).
+// datapath, 256 partials, one every two sysclk cycles. A partial is
+// pointers only (docs/csp_isa.md section 6): its pointer entry names ten
+// words of the sink area, which the CSP publishes, and the pipeline reads
+// them over two cycles. Every cycle, every stage processes a different
+// partial: a partial enters at time slot 2p and the front end is complete
+// at slot 2p + 4. The pipeline is deep, so the 256 partials occupy about
+// 540 of the sample period's 768 slots.
 //
 // Stage map:
-//   S0  state/param RAM read address issued
-//   S1  state/param RAM read data available
-//   S2  issue phase-increment + svf_fc_lut reads
-//   S3  LUT data → phase_inc, K, q1; phase_next = phase + phase_inc (ONE adder)
+//   F0  the pointer RAM's read address
+//   F1  the pointers; the first six sink words are addressed
+//   F2  the first six sink words; the last four are addressed
+//   F3  the last four sink words; the state RAM's read address
+//   S1  sink words and state in registers
+//   S2  the pitch and cutoff sums (voice word + channel word)
+//   S3  effective parameters: biases, clamps, LUT reads; phase_next
 //   S3B register phase_next / barrel-shifted K / q1 / duty / wave
-//   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux)
-//   S3D resonance attenuation multiply on registered operands (DSP)
+//   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux);
+//       the gain products (voice word × channel word)
+//   S3D resonance attenuation multiply on registered operands (DSP);
+//       the gains scaled and clamped
 //   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
 //       7 per 2-pole section); its output is the partial output
-//   S9B attenuation decode: lin gains via LUT + barrel shift
-//   S10 attenuation multiply on registered operands      (DSP); its
+//   S10 gain multiply on registered operands                (DSP); its
 //       output is accumulated into the mix and the state written back
 //
-// S3B/S3C/S3D/S9B exist because chaining adder trees or LUT+barrel-
+// S3B/S3C/S3D exist because chaining adder trees or LUT+barrel-
 // shift decodes into a DSP multiply in one cycle violated setup on
 // real silicon at 98.304 MHz (audible corruption, clean at half
 // clock) — paths nextpnr's approximate timing model passes. Rule: a
@@ -44,74 +47,45 @@
 //              resonance headroom)
 //   SVF states Q8.28   (36-bit)
 //   pitch/fc   UQ4.10  (14-bit)
-//   gain       UQ4.4   (8-bit, log: 6 dB int steps + 0.375 dB frac)
+//   sink words Q4.14   (18-bit): pitch and cutoff in octaves from
+//              middle C, resonance in octaves of Q, duty with 1.0 the
+//              rail, gain linear (see the effective parameters)
 //
-// State RAM is semi dual-port: read address is issued with the partial
-// entering at S0, writeback happens 25 cycles later — the read
+// State RAM is semi dual-port: the read address is issued with the
+// partial at F3, writeback happens about 25 cycles later — the read
 // and write addresses can never collide.
 //--------------------------------------------------------------------
 `default_nettype none
 module partial_pipeline #(
-    parameter int NUM_PARTIALS = synth_pkg::NUM_PARTIALS,
-    // Boot parameter images. Synthesis uses the tree's generated
-    // images; testbenches override with rtl/tb/ref_boot_* (committed
-    // fixtures) so bench expectations never depend on bench-local
-    // experiments in scripts/gen_boot_image.py.
-    parameter P0_HEX = "dsp/boot_p0.hex",
-    parameter P1_HEX = "dsp/boot_p1.hex",
-    parameter P2_HEX = "dsp/boot_p2.hex",
-    parameter P3_HEX = "dsp/boot_p3.hex"
+    parameter int NUM_PARTIALS = synth_pkg::NUM_PARTIALS
 ) (
     input  logic           clk,
     input  logic           rst_n,
 
     input  logic [9:0]     slot,
-    input  logic           slot_issue,
+    input  logic           slot_issue,      // slots 0 … 2 × NUM_PARTIALS − 1
     input  logic           sample_tick,
 
-    // Per-partial parameter writes from the SPI control plane.
-    // sclk-domain write port on the param RAMs; the pipeline reads on
-    // clk (sysclk) — the dual-clock BSRAM is the CDC (design doc).
-    //
-    // PING-PONG (memory map decision 7): the pages are doubled —
-    // reads always hit the ACTIVE half, writes always the SHADOW half,
-    // so a read and a write can never collide on one address (the
-    // click-on-sweep bug). swap_toggle (an sclk-domain toggle from
-    // CTRL@0x0002) flips the active half at time slot 512: the
-    // pipeline is drained there (the span ends at slot 280), so every sample's
-    // 256 partials read one consistent page.
+    // The pointer RAM's write port, in the SPI clock domain: one whole
+    // entry at a time, valid exactly on the sclk edge that completes the
+    // entry (the master may stop clocking after it). The dual-clock BSRAM
+    // is the clock-domain crossing; a partial's entry changes atomically.
     input  logic           sclk,
-    input  logic           partial_write_enable,
-    input  logic [2:0]     partial_write_word,     // 0..6 = p0..p3, GATE, PTRS0, PTRS1
+    input  logic           pointer_write_enable,
+    input  logic [7:0]     pointer_write_index,
+    input  logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data,
 
-    // DMEM-write mailbox from spi_bus (sclk-domain toggle + payload).
-    // Synced here and committed to DMEM only in an idle time slot,
-    // so a commit never collides with a partial's DMEM read.
-    input  logic [9:0]     dmem_wr_addr,
-    input  logic [17:0]    dmem_wr_data,
-    input  logic           dmem_wr_toggle,
-
-    // Instruction table writes (sclk domain, paged — wiring per law 4)
-    input  logic           imem_write_enable,
-    input  logic [9:0]     imem_write_addr,     // {entry[7:0], word[1:0]}
-    input  logic [31:0]    imem_write_data,
-    input  logic [7:0]     partial_write_index,
-    input  logic [31:0]    partial_write_data,
-    input  logic           swap_toggle,    // sclk-domain toggle
+    // The sink area (csp_sink_area): six read ports, a word a cycle
+    // after its address.
+    output logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address,
+    input  logic [synth_pkg::SINK_READ_PORTS-1:0][17:0] sink_read_data,
 
     output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
                                              // after sample_tick (S11
                                              // limiter); stable by
                                              // the next tick, which is when
                                              // every consumer latches it
-    output logic signed [23:0] mix_right,
-
-    // Test-tone control (audio-chain purity check): DMEM
-    // address 511 is reserved as a control latch — bit 0 enables the
-    // top-level 1500 Hz full-scale sine that replaces the mix at the
-    // outputs. Latched here because the DMEM mailbox already has the
-    // sclk→sysclk CDC; no pointer ever references DMEM word 511.
-    output logic           test_tone_en
+    output logic signed [23:0] mix_right
 );
 
     localparam int VW = $clog2(NUM_PARTIALS);   // partial index width
@@ -129,7 +103,6 @@ module partial_pipeline #(
                                        // proven for loudness-class
                                        // percepts; fabric
                                        // LUTs, no BSRAM block
-    reg [16:0] att_lut   [0:15];       // log-gain fractional part
     reg [15:0] reso_att_lut [0:63];    // resonance-indexed input
                                        // attenuation, UQ0.16 (cascade)
 
@@ -137,124 +110,17 @@ module partial_pipeline #(
         $readmemh("dsp/phase_lut.hex", phase_lut);
         $readmemh("dsp/svf_fc_lut.hex", svf_fc_lut);
         $readmemh("dsp/q1_lut.hex", q1_lut);
-        $readmemh("dsp/att_lut.hex", att_lut);
         $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
     end
 
     //----------------------------------------------------------------
     // Per-partial internal state RAM — semi dual-port
-    // read address: entering partial (S0), write: 25 cycles later
     //----------------------------------------------------------------
     reg signed [23:0] phase_ram  [0:NUM_PARTIALS-1];
     reg signed [35:0] ic1eq1_ram [0:NUM_PARTIALS-1];
     reg signed [35:0] ic2eq1_ram [0:NUM_PARTIALS-1];
     reg signed [35:0] ic1eq2_ram [0:NUM_PARTIALS-1];
     reg signed [35:0] ic2eq2_ram [0:NUM_PARTIALS-1];
-
-    //----------------------------------------------------------------
-    // Per-partial parameter RAM — SPI-writable (sclk write port below),
-    // hex init is the boot image
-    //
-    //   p0[13:0]  pitch UQ4.10     p0[15:14] waveform
-    //   p1[23:0]  duty  Q0.24 signed
-    //   p2[13:0]  fc    UQ4.10     p2[27:14] resonance UQ4.10 log2
-    //             (r octaves of Q above Butterworth; q1 = sqrt2*2^-r,
-    //              decoded via q1_lut like cutoff K; p2[31:28] reserved)
-    //   p3[7:0]   volume L UQ4.4   p3[15:8] volume R UQ4.4
-    //             (0x00 = silence/exact mute .. 0xFF = loudest;
-    //              inverted to the attenuation code at the effective-
-    //              parameter seam)
-    //   p3[16]    cascade (24 dB)  p3[18:17] filter type
-    //----------------------------------------------------------------
-    // Doubled for ping-pong: {page, partial} addressing, both halves
-    // initialized to the boot image so an unwritten shadow is sane
-    // (all-zeros would be 0 dB gains at pitch zero — NOT mute).
-    reg [35:0] osc_param_ram [0:2*NUM_PARTIALS-1];
-    reg [35:0] duty_param_ram [0:2*NUM_PARTIALS-1];
-    reg [35:0] filter_param_ram [0:2*NUM_PARTIALS-1];
-    reg [35:0] gain_param_ram [0:2*NUM_PARTIALS-1];
-
-    // Pointer words: per-partial DMEM pointers, three 10-bit fields
-    // each. +5 (PTRS0): [9:0] pitch, [19:10] duty, [29:20] cutoff.
-    // +6 (PTRS1): [9:0] Q, [19:10] gain L, [29:20] gain R. Pointers
-    // are wiring, so they ride the ping-pong pages like every
-    // parameter. Init 0: every parameter points at DMEM word 0 (hardwired
-    // zero), so boot behavior is exactly the unmodulated behavior.
-    reg [29:0] ptrs0_param_ram [0:2*NUM_PARTIALS-1];
-    reg [29:0] ptrs1_param_ram [0:2*NUM_PARTIALS-1];
-    integer pi;
-    initial for (pi = 0; pi < 2*NUM_PARTIALS; pi = pi + 1) begin
-        ptrs0_param_ram[pi] = 30'd0;
-        ptrs1_param_ram[pi] = 30'd0;
-    end
-
-    // GATE word (map offset +4): [0] gate, [1] retrig (reserved).
-    // Gate 0 silences the partial (gain decode forced to exact mute);
-    // the oscillator and filters free-run regardless. This is NOT an
-    // ADSR trigger: envelopes are sequencer SOURCES, gated by a control
-    // input (a gate DMEM word shared across a voice's partials), rather than
-    // partial traits. GATE's only job is the exact-mute path, and
-    // dropping GATE and RETRIG as partial parameters entirely is under
-    // discussion.
-    // Both pages boot gated ON so the boot image keeps sounding (the
-    // power-up liveness check).
-    reg [1:0] gate_param_ram [0:2*NUM_PARTIALS-1];
-    integer gi;
-    initial for (gi = 0; gi < 2*NUM_PARTIALS; gi = gi + 1)
-        gate_param_ram[gi] = 2'b01;
-
-    initial begin
-        $readmemh(P0_HEX, osc_param_ram, 0, NUM_PARTIALS-1);
-        $readmemh(P1_HEX, duty_param_ram, 0, NUM_PARTIALS-1);
-        $readmemh(P2_HEX, filter_param_ram, 0, NUM_PARTIALS-1);
-        $readmemh(P3_HEX, gain_param_ram, 0, NUM_PARTIALS-1);
-        $readmemh(P0_HEX, osc_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
-        $readmemh(P1_HEX, duty_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
-        $readmemh(P2_HEX, filter_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
-        $readmemh(P3_HEX, gain_param_ram, NUM_PARTIALS, 2*NUM_PARTIALS-1);
-    end
-
-    //----------------------------------------------------------------
-    // Page control: active half (sysclk) flips at time slot 512 when a
-    // swap is pending; the sclk write side steers by a synced
-    // complement of the active page (memory map wording, literally).
-    //----------------------------------------------------------------
-    logic page_active;
-    logic swap_toggle_meta, swap_toggle_sync, swap_toggle_prev;          // swap_toggle sync (sysclk)
-    logic swap_pending;
-
-    initial begin
-        page_active  = 1'b0;
-        {swap_toggle_meta, swap_toggle_sync, swap_toggle_prev} = '0;
-        swap_pending = 1'b0;
-    end
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            page_active  <= 1'b0;
-            swap_toggle_meta <= 1'b0; swap_toggle_sync <= 1'b0; swap_toggle_prev <= 1'b0;
-            swap_pending <= 1'b0;
-        end else begin
-            swap_toggle_meta <= swap_toggle;
-            swap_toggle_sync <= swap_toggle_meta;
-            swap_toggle_prev <= swap_toggle_sync;
-            if (swap_toggle_sync != swap_toggle_prev)
-                swap_pending <= 1'b1;
-            else if (swap_pending && slot == synth_pkg::SWAP_SLOT[9:0]) begin
-                page_active  <= ~page_active;
-                swap_pending <= 1'b0;
-            end
-        end
-    end
-
-    // write side: shadow = complement of active, synced into sclk
-    logic page_active_meta, page_active_sync;
-    initial {page_active_meta, page_active_sync} = '0;
-    always_ff @(posedge sclk) begin
-        page_active_meta <= page_active;
-        page_active_sync <= page_active_meta;
-    end
-    wire page_shadow = ~page_active_sync;
 
     // State RAMs start at zero (power-on init; also keeps X out of sim)
     integer i0;
@@ -268,147 +134,177 @@ module partial_pipeline #(
         end
     end
 
-
     //----------------------------------------------------------------
-    // S0/S1 — RAM reads (address = partial entering this cycle)
-    //
-    // Sync-only process: yosys memory inference (BSRAM read port).
-    // Read data validity is gated by s1_valid, so no reset is needed.
+    // The pointer RAM: ten pointers a partial, 100 bits in three
+    // 36-bit-wide blocks. Written whole in the SPI clock, read in the
+    // system clock; nothing else about a partial is stored here, and it
+    // needs no second page because an entry changes atomically and only
+    // when the voice layout does.
     //----------------------------------------------------------------
-    logic [VW-1:0] partial_read_index;
-    assign partial_read_index = slot_issue ? slot[VW-1:0] : '0;
-
-    logic        s1_valid;
-    logic [VW-1:0] s1_idx;
-    logic [13:0] s1_pitch;
-    logic [1:0]  s1_wave;
-    logic signed [23:0] s1_duty;
-    logic [13:0] s1_fc;
-    logic [13:0] s1_reso;   // log2 resonance code (UQ4.10)
-    logic [7:0]  s1_vol_l, s1_vol_r;
-    logic        s1_cascade;
-    logic [1:0]  s1_filter_mode;
-    logic signed [23:0] s1_phase;
-    logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
-
-    // Param RAM reads are SYNCHRONOUS on clk: sync-read + separate-clock
-    // write is the shape yosys infers as dual-clock BSRAM. Sync-only
-    // process: yosys does not infer BSRAM from a process with an async
-    // reset. Validity is gated by the valid flag.
-    logic [35:0] s1_osc_word, s1_duty_word, s1_filter_word, s1_gain_word;
-    logic [1:0]  s1_gate_word;
-    logic [29:0] s1_ptrs0_word, s1_ptrs1_word;
-    always_ff @(posedge clk) begin
-        s1_osc_word     <= osc_param_ram[{page_active, partial_read_index}];
-        s1_duty_word     <= duty_param_ram[{page_active, partial_read_index}];
-        s1_filter_word     <= filter_param_ram[{page_active, partial_read_index}];
-        s1_gain_word     <= gain_param_ram[{page_active, partial_read_index}];
-        s1_gate_word     <= gate_param_ram[{page_active, partial_read_index}];
-        s1_ptrs0_word     <= ptrs0_param_ram[{page_active, partial_read_index}];
-        s1_ptrs1_word     <= ptrs1_param_ram[{page_active, partial_read_index}];
-        s1_phase  <= phase_ram[partial_read_index];
-        s1_ic1eq1 <= ic1eq1_ram[partial_read_index];
-        s1_ic2eq1 <= ic2eq1_ram[partial_read_index];
-        s1_ic1eq2 <= ic1eq2_ram[partial_read_index];
-        s1_ic2eq2 <= ic2eq2_ram[partial_read_index];
+    localparam int POINTER_RAM_W = 108;
+    reg [35:0] pointer_ram [3][0:NUM_PARTIALS-1];
+    initial begin
+        for (int block = 0; block < 3; block++) begin
+            for (int partial = 0; partial < NUM_PARTIALS; partial++) begin
+                pointer_ram[block][partial] = '0;   // every pointer at sink word 0
+            end
+        end
     end
 
-    // SPI-side write ports (sclk domain) — sync-only, one per page
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd0) osc_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd1) duty_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd2) filter_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd3) gain_param_ram[{page_shadow, partial_write_index}] <= {4'b0, partial_write_data};
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd4) gate_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[1:0];
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd5) ptrs0_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
-    always_ff @(posedge sclk)
-        if (partial_write_enable && partial_write_word == 3'd6) ptrs1_param_ram[{page_shadow, partial_write_index}] <= partial_write_data[29:0];
-
-    // field views of the registered param words
-    assign s1_pitch = s1_osc_word[13:0];
-    assign s1_wave  = s1_osc_word[15:14];
-    assign s1_duty  = s1_duty_word[23:0];
-    assign s1_fc    = s1_filter_word[13:0];
-    assign s1_reso  = s1_filter_word[27:14];
-    // GAIN word carries VOLUME (0x00 = silence.. 0xFF =
-    // loudest): a zeroed parameter word is silent by default. GATE off = volume zero, which the
-    // effective-parameter stage maps onto the existing exact-mute
-    // machinery:
-    // one decode-stage mux, no new carry registers down the pipeline.
-    assign s1_vol_l    = s1_gate_word[0] ? s1_gain_word[7:0]  : 8'h00;
-    assign s1_vol_r    = s1_gate_word[0] ? s1_gain_word[15:8] : 8'h00;
-    assign s1_cascade  = s1_gain_word[16];
-    assign s1_filter_mode = s1_gain_word[18:17];
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s1_valid   <= 1'b0;
-            s1_idx   <= '0;
-        end else begin
-            s1_valid   <= slot_issue;
-            s1_idx   <= slot[VW-1:0];
+    wire [POINTER_RAM_W-1:0] pointer_write_word = POINTER_RAM_W'(pointer_write_data);
+    always_ff @(posedge sclk) begin
+        if (pointer_write_enable) begin
+            pointer_ram[0][pointer_write_index] <= pointer_write_word[35:0];
+        end
+    end
+    always_ff @(posedge sclk) begin
+        if (pointer_write_enable) begin
+            pointer_ram[1][pointer_write_index] <= pointer_write_word[71:36];
+        end
+    end
+    always_ff @(posedge sclk) begin
+        if (pointer_write_enable) begin
+            pointer_ram[2][pointer_write_index] <= pointer_write_word[107:72];
         end
     end
 
     //----------------------------------------------------------------
-    // S2 — issue phase_inc + svf_fc_lut reads; carry everything
+    // F0/F1 — the pointer RAM read. A partial enters every second slot.
+    //----------------------------------------------------------------
+    wire             partial_start = slot_issue && !slot[0];
+    wire [VW-1:0]    partial_index = slot[VW:1];
+
+    logic [POINTER_RAM_W-1:0] f1_entry;
+    always_ff @(posedge clk) begin
+        f1_entry[35:0]   <= pointer_ram[0][partial_index];
+        f1_entry[71:36]  <= pointer_ram[1][partial_index];
+        f1_entry[107:72] <= pointer_ram[2][partial_index];
+    end
+
+    function automatic logic [synth_pkg::POINTER_W-1:0] pointer_of(
+            input logic [POINTER_RAM_W-1:0] entry, input int position);
+        pointer_of = entry[position * synth_pkg::POINTER_W +: synth_pkg::POINTER_W];
+    endfunction
+
+    logic            f1_valid, f2_valid, f3_valid;
+    logic [VW-1:0]   f1_idx, f2_idx, f3_idx;
+    logic [synth_pkg::POINTER_W-1:0] f2_pointer [synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS];
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            f1_valid <= 1'b0;  f1_idx <= '0;
+            f2_valid <= 1'b0;  f2_idx <= '0;
+            f3_valid <= 1'b0;  f3_idx <= '0;
+        end else begin
+            f1_valid <= partial_start;  f1_idx <= partial_index;
+            f2_valid <= f1_valid;       f2_idx <= f1_idx;
+            f3_valid <= f2_valid;       f3_idx <= f2_idx;
+        end
+    end
+
+    // F1: the first six words. F2: the last four, with the pointers kept
+    // from F1. A partial is in F1 on odd slots and in F2 on even ones, so
+    // the ports never serve two partials at once.
+    always_ff @(posedge clk) begin
+        for (int second = 0; second < synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS; second++) begin
+            f2_pointer[second] <= pointer_of(f1_entry, synth_pkg::SINK_READ_PORTS + second);
+        end
+    end
+
+    always_comb begin
+        for (int port = 0; port < synth_pkg::SINK_READ_PORTS; port++) begin
+            if (f1_valid) begin
+                sink_read_address[port] = 10'(pointer_of(f1_entry, port));
+            end else if (port < synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS) begin
+                sink_read_address[port] = 10'(f2_pointer[port]);
+            end else begin
+                sink_read_address[port] = '0;
+            end
+        end
+    end
+
+    //----------------------------------------------------------------
+    // F2/F3 — the sink words. The first six arrive in F2 and wait a
+    // cycle; the last four arrive in F3, with the state RAM's data.
+    //----------------------------------------------------------------
+    logic signed [17:0] f3_word [synth_pkg::SINK_READ_PORTS];
+    always_ff @(posedge clk) begin
+        for (int port = 0; port < synth_pkg::SINK_READ_PORTS; port++) begin
+            f3_word[port] <= sink_read_data[port];
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S1 — everything the partial needs, in registers. State RAM reads
+    // are synchronous on clk, issued in F3.
+    //----------------------------------------------------------------
+    logic        s1_valid;
+    logic [VW-1:0] s1_idx;
+    logic signed [17:0] s1_pitch_voice, s1_pitch_channel;
+    logic signed [17:0] s1_cutoff_voice, s1_cutoff_channel;
+    logic signed [17:0] s1_gain_voice, s1_gain_left, s1_gain_right;
+    logic signed [17:0] s1_duty, s1_resonance, s1_mode;
+    logic signed [23:0] s1_phase;
+    logic signed [35:0] s1_ic1eq1, s1_ic2eq1, s1_ic1eq2, s1_ic2eq2;
+
+    always_ff @(posedge clk) begin
+        s1_phase  <= phase_ram[f3_idx];
+        s1_ic1eq1 <= ic1eq1_ram[f3_idx];
+        s1_ic2eq1 <= ic2eq1_ram[f3_idx];
+        s1_ic1eq2 <= ic1eq2_ram[f3_idx];
+        s1_ic2eq2 <= ic2eq2_ram[f3_idx];
+
+        // the first group, held from F2
+        s1_pitch_voice    <= f3_word[synth_pkg::POINTER_PITCH_VOICE];
+        s1_pitch_channel  <= f3_word[synth_pkg::POINTER_PITCH_CHANNEL];
+        s1_cutoff_voice   <= f3_word[synth_pkg::POINTER_CUTOFF_VOICE];
+        s1_cutoff_channel <= f3_word[synth_pkg::POINTER_CUTOFF_CHANNEL];
+        s1_gain_voice     <= f3_word[synth_pkg::POINTER_GAIN_VOICE];
+        s1_gain_left      <= f3_word[synth_pkg::POINTER_GAIN_LEFT];
+        // the second group, arriving now
+        s1_gain_right     <= sink_read_data[synth_pkg::POINTER_GAIN_RIGHT - synth_pkg::SINK_READ_PORTS];
+        s1_duty           <= sink_read_data[synth_pkg::POINTER_DUTY - synth_pkg::SINK_READ_PORTS];
+        s1_resonance      <= sink_read_data[synth_pkg::POINTER_RESONANCE - synth_pkg::SINK_READ_PORTS];
+        s1_mode           <= sink_read_data[synth_pkg::POINTER_MODE - synth_pkg::SINK_READ_PORTS];
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            s1_valid <= 1'b0;
+            s1_idx   <= '0;
+        end else begin
+            s1_valid <= f3_valid;
+            s1_idx   <= f3_idx;
+        end
+    end
+
+    //----------------------------------------------------------------
+    // S2 — the sums of a voice word and a channel word (adds only), and
+    // the rest carried
     //----------------------------------------------------------------
     logic        s2_valid;
     logic [VW-1:0] s2_idx;
-    logic [13:0] s2_pitch;
+    logic signed [18:0] s2_pitch_sum, s2_cutoff_sum;
+    logic signed [17:0] s2_gain_voice, s2_gain_left, s2_gain_right;
+    logic signed [17:0] s2_duty, s2_resonance;
     logic [1:0]  s2_wave;
-    logic signed [23:0] s2_duty;
-    logic [13:0] s2_fc;
-    logic [13:0] s2_reso;
-    logic [7:0]  s2_vol_l, s2_vol_r;
     logic        s2_cascade;
     logic [1:0]  s2_filter_mode;
     logic signed [23:0] s2_phase;
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
-    //----------------------------------------------------------------
-    // The Control Signal Processor lives in its own module (csp.sv).
-    // Six read ports: S1 pointers in, S2 data out.
-    //----------------------------------------------------------------
-    logic signed [17:0] s2_dmem_pitch, s2_dmem_duty, s2_dmem_fc;
-    logic signed [17:0] s2_dmem_q, s2_dmem_gain_l, s2_dmem_gain_r;
-
-    csp u_csp (
-        .clk(clk), .rst_n(rst_n), .sample_tick(sample_tick), .sclk(sclk),
-        .page_active(page_active), .page_shadow(page_shadow),
-        .dmem_wr_addr(dmem_wr_addr), .dmem_wr_data(dmem_wr_data),
-        .dmem_wr_toggle(dmem_wr_toggle),
-        .imem_write_enable(imem_write_enable),
-        .imem_write_addr(imem_write_addr),
-        .imem_write_data(imem_write_data),
-        .rd_pitch_a(s1_ptrs0_word[8:0]),
-        .rd_duty_a (s1_ptrs0_word[18:10]),
-        .rd_fc_a   (s1_ptrs0_word[28:20]),
-        .rd_q_a    (s1_ptrs1_word[8:0]),
-        .rd_gl_a   (s1_ptrs1_word[18:10]),
-        .rd_gr_a   (s1_ptrs1_word[28:20]),
-        .rd_pitch_d(s2_dmem_pitch), .rd_duty_d(s2_dmem_duty), .rd_fc_d(s2_dmem_fc),
-        .rd_q_d(s2_dmem_q), .rd_gl_d(s2_dmem_gain_l), .rd_gr_d(s2_dmem_gain_r),
-        .test_tone_en(test_tone_en)
-    );
-
-
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s2_valid   <= 1'b0;
             s2_idx   <= '0;
-            s2_pitch <= '0;
-            s2_wave  <= '0;
+            s2_pitch_sum <= '0;
+            s2_cutoff_sum <= '0;
+            s2_gain_voice <= '0;
+            s2_gain_left <= '0;
+            s2_gain_right <= '0;
             s2_duty  <= '0;
-            s2_fc    <= '0;
-            s2_reso  <= '0;
-            s2_vol_l    <= '0;
-            s2_vol_r    <= '0;
+            s2_resonance <= '0;
+            s2_wave  <= '0;
             s2_cascade  <= 1'b0;
             s2_filter_mode <= '0;
             s2_phase <= '0;
@@ -419,15 +315,19 @@ module partial_pipeline #(
         end else begin
             s2_valid   <= s1_valid;
             s2_idx   <= s1_idx;
-            s2_pitch <= s1_pitch;
-            s2_wave  <= s1_wave;
+            s2_pitch_sum  <= {s1_pitch_voice[17], s1_pitch_voice}
+                           + {s1_pitch_channel[17], s1_pitch_channel};
+            s2_cutoff_sum <= {s1_cutoff_voice[17], s1_cutoff_voice}
+                           + {s1_cutoff_channel[17], s1_cutoff_channel};
+            s2_gain_voice <= s1_gain_voice;
+            s2_gain_left  <= s1_gain_left;
+            s2_gain_right <= s1_gain_right;
             s2_duty  <= s1_duty;
-            s2_fc    <= s1_fc;
-            s2_reso  <= s1_reso;
-            s2_vol_l    <= s1_vol_l;
-            s2_vol_r    <= s1_vol_r;
-            s2_cascade  <= s1_cascade;
-            s2_filter_mode <= s1_filter_mode;
+            s2_resonance <= s1_resonance;
+            // the mode word: [1:0] waveform, [2] cascade, [4:3] filter type
+            s2_wave  <= s1_mode[1:0];
+            s2_cascade  <= s1_mode[2];
+            s2_filter_mode <= s1_mode[4:3];
             s2_phase <= s1_phase;
             s2_ic1eq1 <= s1_ic1eq1;
             s2_ic2eq1 <= s1_ic2eq1;
@@ -437,80 +337,40 @@ module partial_pipeline #(
     end
 
     //----------------------------------------------------------------
-    // Effective parameters: base + DMEM[pointer], all SATURATING into
-    // each parameter's legal range so extreme DMEM values clamp
-    // instead of wrapping. Six parallel adders + clamps between S2
-    // registers and S3 registers: adds/decode only, no multiply —
-    // within the silicon timing rule. Per-sink slices of the Q8.10
-    // DMEM word (dmem_architecture.md law 5):
-    //   pitch/cutoff/resonance: as-is (one DMEM integer = one octave;
-    //          for resonance that is one octave of Q ≈ +6 dB of peak)
-    //   duty:  <<< 13 (DMEM ±1.0 → duty ±1.0 in Q0.24)
-    //   gains: >>> 6  (DMEM 1 octave = 6 dB = 16 UQ4.4 steps; positive
-    //          DMEM = LOUDER — volume semantics). A base of
-    //          0x00 (exact mute — hard-panned channels, gated
-    //          partials) is preserved regardless of DMEM, and the
-    //          DMEM word alone can never reach exact mute (sums clamp to
-    //          the quietest audible step). The sum is converted to
-    //          the attenuation code here, at ONE seam, so everything
-    //          downstream (S9B decode, mute == 0xFF) is untouched.
+    // Effective parameters, SATURATING into each parameter's legal range
+    // so extreme sink values clamp instead of wrapping: adds, shifts and
+    // clamps only, no multiply, within the silicon timing rule. Sink words
+    // are Q4.14, 2^14 to the unit; the pipeline's pitch, cutoff and
+    // resonance are UQ4.10, 2^10 to the octave, so a word is shifted right
+    // by four.
+    //   pitch, cutoff: octaves from middle C, biased to the pipeline's
+    //          scale (synth_pkg::PITCH_REFERENCE); the cutoff clamps to
+    //          the flat FC_MAX
+    //   resonance: octaves of Q above Butterworth, never below it
+    //   duty:  Q4.14 → Q0.24 with 1.0 = 2^23, <<< 9
     //----------------------------------------------------------------
-    // Resonance is log2-encoded, breaking with convention: r =
-    // octaves of Q above Butterworth, UQ4.10; q1 = sqrt(2) * 2^-r via
-    // q1_lut + barrel shift, the same decode shape as cutoff K. The
-    // [0, sqrt2] damping clamp is STRUCTURAL: r = 0 IS Butterworth and
-    // nothing decodes heavier;
-    // at the top of the range the shift underflows q1 toward zero,
-    // so self-oscillation is the natural top of scale — reachable as
-    // a feature, no special code.
-    wire signed [18:0] reso_sum =
-        $signed({5'b0, s2_reso}) + {s2_dmem_q[17], s2_dmem_q};
-    wire [13:0] eff_reso =
-        reso_sum[18]            ? 14'd0    :
-        (reso_sum > 19'sd16383) ? 14'h3FFF : reso_sum[13:0];
-
-    // Cutoff clamps to the flat FC_MAX (14.4 kHz, measured clean at
-    // the Butterworth worst case — see synth_pkg).
-    wire signed [18:0] fc_sum =
-        $signed({5'b0, s2_fc}) + {s2_dmem_fc[17], s2_dmem_fc};
-    wire [13:0] eff_fc =
-        fc_sum[18] ? 14'd0 :
-        (fc_sum > 19'($signed({5'b0, synth_pkg::FC_MAX})))
-            ? synth_pkg::FC_MAX :
-        fc_sum[13:0];
-
-    wire signed [18:0] pitch_sum =
-        $signed({5'b0, s2_pitch}) + {s2_dmem_pitch[17], s2_dmem_pitch};
+    wire signed [18:0] pitch_octaves = (s2_pitch_sum >>> 4)
+                                       + 19'($signed({5'b0, synth_pkg::PITCH_REFERENCE}));
     wire [13:0] eff_pitch =
-        pitch_sum[18]            ? 14'd0    :
-        (pitch_sum > 19'sd16383) ? 14'h3FFF : pitch_sum[13:0];
+        pitch_octaves[18]            ? 14'd0    :
+        (pitch_octaves > 19'sd16383) ? 14'h3FFF : pitch_octaves[13:0];
 
-    wire signed [31:0] duty_sum =
-        {{8{s2_duty[23]}}, s2_duty}
-        + {{1{s2_dmem_duty[17]}}, s2_dmem_duty, 13'b0};
+    wire signed [18:0] cutoff_octaves = (s2_cutoff_sum >>> 4)
+                                        + 19'($signed({5'b0, synth_pkg::PITCH_REFERENCE}));
+    wire [13:0] eff_fc =
+        cutoff_octaves[18] ? 14'd0 :
+        (cutoff_octaves > 19'($signed({5'b0, synth_pkg::FC_MAX})))
+            ? synth_pkg::FC_MAX :
+        cutoff_octaves[13:0];
+
+    wire signed [17:0] resonance_octaves = s2_resonance >>> 4;
+    wire [13:0] eff_reso =
+        resonance_octaves[17] ? 14'd0 : resonance_octaves[13:0];
+
+    wire signed [26:0] duty_scaled = 27'(s2_duty) <<< 9;
     wire signed [23:0] eff_duty =
-        (duty_sum >  32'sd8388607) ? 24'sd8388607  :
-        (duty_sum < -32'sd8388608) ? -24'sd8388608 : duty_sum[23:0];
-
-    wire signed [17:0] gain_mod_l = s2_dmem_gain_l >>> 6;
-    wire signed [17:0] gain_mod_r = s2_dmem_gain_r >>> 6;
-    wire signed [18:0] gl_sum =
-        $signed({11'b0, s2_vol_l}) + {gain_mod_l[17], gain_mod_l};
-    wire signed [18:0] gr_sum =
-        $signed({11'b0, s2_vol_r}) + {gain_mod_r[17], gain_mod_r};
-    // volume in, attenuation code out (the one subtract)
-    wire [7:0] eff_atten_l =
-        (s2_vol_l == 8'h00)      ? 8'hFF :             // base mute wins
-        (gl_sum[18] || gl_sum == 19'sd0)
-                              ? 8'hFE :             // quietest audible
-        (gl_sum > 19'sd255)   ? 8'h00 :             // full volume
-        8'hFF - gl_sum[7:0];
-    wire [7:0] eff_atten_r =
-        (s2_vol_r == 8'h00)      ? 8'hFF :
-        (gr_sum[18] || gr_sum == 19'sd0)
-                              ? 8'hFE :
-        (gr_sum > 19'sd255)   ? 8'h00 :
-        8'hFF - gr_sum[7:0];
+        (duty_scaled >  27'sd8388607) ? 24'sd8388607  :
+        (duty_scaled < -27'sd8388608) ? -24'sd8388608 : duty_scaled[23:0];
 
     //----------------------------------------------------------------
     // S3 — LUT data, phase_inc/K, phase_next, oscillator waveform
@@ -527,7 +387,7 @@ module partial_pipeline #(
     logic [3:0]  s3_fc_oct;
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
-    logic [7:0]  s3_atten_l, s3_atten_r;
+    logic signed [17:0] s3_gain_voice, s3_gain_left, s3_gain_right;
     logic        s3_cascade;
     logic [1:0]  s3_filter_mode;
     logic [15:0] s3_reso_att;   // input-atten gain (UQ0.16)
@@ -546,8 +406,9 @@ module partial_pipeline #(
             s3_fc_oct    <= '0;
             s3_wave  <= '0;
             s3_duty  <= '0;
-            s3_atten_l    <= '0;
-            s3_atten_r    <= '0;
+            s3_gain_voice <= '0;
+            s3_gain_left  <= '0;
+            s3_gain_right <= '0;
             s3_cascade  <= 1'b0;
             s3_filter_mode <= '0;
             s3_reso_att <= 16'hffff;
@@ -567,8 +428,9 @@ module partial_pipeline #(
             s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
             s3_duty  <= eff_duty;
-            s3_atten_l    <= eff_atten_l;
-            s3_atten_r    <= eff_atten_r;
+            s3_gain_voice <= s2_gain_voice;
+            s3_gain_left  <= s2_gain_left;
+            s3_gain_right <= s2_gain_right;
             s3_cascade  <= s2_cascade;
             s3_filter_mode <= s2_filter_mode;
             s3_reso_att <= s2_cascade ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
@@ -621,14 +483,15 @@ module partial_pipeline #(
     logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
     logic               s3b_cascade;  logic [1:0] s3b_filter_mode;
-    logic signed [23:0] s3b_phase; logic [7:0] s3b_atten_l, s3b_atten_r;
+    logic signed [23:0] s3b_phase;
+    logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3b_valid<=1'b0; s3b_idx<='0; s3b_att<='0;
             s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
             s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_cascade<=1'b0; s3b_filter_mode<='0;
-            s3b_phase<='0; s3b_atten_l<='0; s3b_atten_r<='0;
+            s3b_phase<='0; s3b_gain_voice<='0; s3b_gain_left<='0; s3b_gain_right<='0;
             s3b_duty<='0; s3b_wave<='0;
         end else begin
             s3b_valid<=s3_valid; s3b_idx<=s3_idx;
@@ -636,7 +499,8 @@ module partial_pipeline #(
             s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
             s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
             s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
-            s3b_phase<=phase_next; s3b_atten_l<=s3_atten_l; s3b_atten_r<=s3_atten_r;
+            s3b_phase<=phase_next; s3b_gain_voice<=s3_gain_voice;
+            s3b_gain_left<=s3_gain_left; s3b_gain_right<=s3_gain_right;
             s3b_duty<=s3_duty; s3b_wave<=s3_wave;
         end
     end
@@ -658,13 +522,14 @@ module partial_pipeline #(
     logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
     logic               s3c_cascade;  logic [1:0] s3c_filter_mode;
-    logic signed [23:0] s3c_phase; logic [7:0] s3c_atten_l, s3c_atten_r;
+    logic signed [23:0] s3c_phase;
+    logic signed [35:0] s3c_gain_left, s3c_gain_right;   // voice × channel, Q8.28
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3c_valid<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
             s3c_k<='0; s3c_q1<='0;
             s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
-            s3c_cascade<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_atten_l<='0; s3c_atten_r<='0;
+            s3c_cascade<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_gain_left<='0; s3c_gain_right<='0;
         end else begin
             s3c_valid<=s3b_valid; s3c_idx<=s3b_idx;
             s3c_osc <= osc_sample; s3c_att <= s3b_att;
@@ -672,7 +537,9 @@ module partial_pipeline #(
             s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
             s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
             s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
-            s3c_phase<=s3b_phase; s3c_atten_l<=s3b_atten_l; s3c_atten_r<=s3b_atten_r;
+            s3c_phase<=s3b_phase;
+            s3c_gain_left  <= s3b_gain_voice * s3b_gain_left;      // multiply only
+            s3c_gain_right <= s3b_gain_voice * s3b_gain_right;
         end
     end
 
@@ -683,18 +550,32 @@ module partial_pipeline #(
     // after the read, against a 256-slot half, so read and write still
     // cannot collide.
     //----------------------------------------------------------------
+    // A product of two Q4.14 gains is Q8.28; back to Q4.14, clamped.
+    function automatic logic signed [17:0] gain_of(input logic signed [35:0] product);
+        logic signed [21:0] scaled;
+        scaled = 22'(product >>> 14);
+        if (scaled > 22'sd131071) begin
+            gain_of = 18'sd131071;
+        end else if (scaled < -22'sd131072) begin
+            gain_of = -18'sd131072;
+        end else begin
+            gain_of = scaled[17:0];
+        end
+    endfunction
+
     wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
     logic               s3d_valid;   logic [VW-1:0] s3d_idx;
     logic signed [17:0] s3d_osc;
     logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
     logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
     logic               s3d_cascade;  logic [1:0] s3d_filter_mode;
-    logic signed [23:0] s3d_phase; logic [7:0] s3d_atten_l, s3d_atten_r;
+    logic signed [23:0] s3d_phase;
+    logic signed [17:0] s3d_gain_left, s3d_gain_right;   // Q4.14, clamped
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             s3d_valid<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
             s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
-            s3d_cascade<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_atten_l<='0; s3d_atten_r<='0;
+            s3d_cascade<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_gain_left<='0; s3d_gain_right<='0;
         end else begin
             s3d_valid<=s3c_valid; s3d_idx<=s3c_idx;
             s3d_osc <= 18'($signed(osc_mul >>> 16));
@@ -702,7 +583,9 @@ module partial_pipeline #(
             s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
             s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
             s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
-            s3d_phase<=s3c_phase; s3d_atten_l<=s3c_atten_l; s3d_atten_r<=s3c_atten_r;
+            s3d_phase<=s3c_phase;
+            s3d_gain_left  <= gain_of(s3c_gain_left);
+            s3d_gain_right <= gain_of(s3c_gain_right);
         end
     end
 
@@ -718,7 +601,7 @@ module partial_pipeline #(
     wire signed [17:0] s9_sample;
     wire signed [23:0] s9_phase;
     wire signed [35:0] s9_ic1eq1n, s9_ic2eq1n, s9_ic1eq2n, s9_ic2eq2n;
-    wire [7:0]         s9_atten_l, s9_atten_r;
+    wire signed [17:0] s9_gain_l, s9_gain_r;
 
     svf_tpt #(.IDXW(VW)) u_svf (
         .clk(clk), .rst_n(rst_n),
@@ -727,83 +610,26 @@ module partial_pipeline #(
         .in_ic1eq1(s3d_ic1eq1), .in_ic2eq1(s3d_ic2eq1),
         .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
         .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
-        .in_phase(s3d_phase), .in_atten_l(s3d_atten_l), .in_atten_r(s3d_atten_r),
+        .in_phase(s3d_phase), .in_gain_l(s3d_gain_left), .in_gain_r(s3d_gain_right),
         .out_valid(s9_valid), .out_idx(s9_idx), .out_sample(s9_sample),
         .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),
         .out_ic1eq2n(s9_ic1eq2n), .out_ic2eq2n(s9_ic2eq2n),
-        .out_phase(s9_phase), .out_atten_l(s9_atten_l), .out_atten_r(s9_atten_r)
+        .out_phase(s9_phase), .out_gain_l(s9_gain_l), .out_gain_r(s9_gain_r)
     );
 
     //----------------------------------------------------------------
-    // S9B — attenuation decode: lin = att_lut[frac] >>> int, REGISTERED
-    //
-    //   gain UQ4.4: att_lut[i] = 2^(-i/16) in UQ0.16 → 6 dB per int
-    //   step, 0.375 dB per frac step.
-    //
-    // Split from the multiply for the silicon timing rule (see the
-    // header): LUT read + 16-position barrel shift chained into a DSP
-    // multiply in one cycle violates setup on real silicon, audibly,
-    // on whichever channel draws the longer route. Decode and multiply
-    // are separate stages.
-    //----------------------------------------------------------------
-    logic        s9b_valid;
-    logic [VW-1:0] s9b_idx;
-    logic signed [17:0] s9b_sample;
-    logic signed [17:0] s9b_lin_l, s9b_lin_r;
-    logic signed [23:0] s9b_phase;
-    logic signed [35:0] s9b_ic1eq1n, s9b_ic2eq1n, s9b_ic1eq2n, s9b_ic2eq2n;
-
-    // Gain 0xFF is EXACT mute, not -96 dB: the log decode bottoms out at
-    // lin = raw value 1, and 256 correlated muted partials sum 48 dB of that
-    // right back (measured: -48 dBFS of ghost organ). A muted voice
-    // must contribute zero.
-    logic signed [17:0] lin_l, lin_r;
-    always_comb begin
-        lin_l = (s9_atten_l == 8'hFF) ? 18'sd0
-              : 18'($signed({1'b0, att_lut[s9_atten_l[3:0]]})) >>> s9_atten_l[7:4];
-        lin_r = (s9_atten_r == 8'hFF) ? 18'sd0
-              : 18'($signed({1'b0, att_lut[s9_atten_r[3:0]]})) >>> s9_atten_r[7:4];
-    end
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s9b_valid  <= 1'b0;
-            s9b_idx  <= '0;
-            s9b_sample <= '0;
-            s9b_lin_l <= '0;
-            s9b_lin_r <= '0;
-            s9b_phase <= '0;
-            s9b_ic1eq1n <= '0;
-            s9b_ic2eq1n <= '0;
-            s9b_ic1eq2n <= '0;
-            s9b_ic2eq2n <= '0;
-        end else begin
-            s9b_valid  <= s9_valid;
-            s9b_idx  <= s9_idx;
-            s9b_sample <= s9_sample;
-            s9b_lin_l <= lin_l;
-            s9b_lin_r <= lin_r;
-            s9b_phase <= s9_phase;
-            s9b_ic1eq1n <= s9_ic1eq1n;
-            s9b_ic2eq1n <= s9_ic2eq1n;
-            s9b_ic1eq2n <= s9_ic1eq2n;
-            s9b_ic2eq2n <= s9_ic2eq2n;
-        end
-    end
-
-    //----------------------------------------------------------------
-    // S10 — attenuation multiply on REGISTERED operands  (DSP)
+    // S10 — gain multiply on the SVF's registered outputs  (DSP)
     //----------------------------------------------------------------
     logic        s10_valid;
     logic [VW-1:0] s10_idx;
-    logic signed [17:0] s10_outl, s10_outr;
+    logic signed [21:0] s10_outl, s10_outr;   // Q4.14 × gain up to ±8: 22 bits, no clamp
     logic signed [23:0] s10_phase;
     logic signed [35:0] s10_ic1eq1n, s10_ic2eq1n, s10_ic1eq2n, s10_ic2eq2n;
 
-    logic signed [34:0] prod_l, prod_r;
+    logic signed [35:0] prod_l, prod_r;
     always_comb begin
-        prod_l = s9b_sample * s9b_lin_l;
-        prod_r = s9b_sample * s9b_lin_r;
+        prod_l = s9_sample * s9_gain_l;
+        prod_r = s9_sample * s9_gain_r;
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -818,15 +644,15 @@ module partial_pipeline #(
             s10_ic1eq2n <= '0;
             s10_ic2eq2n <= '0;
         end else begin
-            s10_valid  <= s9b_valid;
-            s10_idx  <= s9b_idx;
-            s10_outl <= prod_l >>> 16;
-            s10_outr <= prod_r >>> 16;
-            s10_phase <= s9b_phase;
-            s10_ic1eq1n <= s9b_ic1eq1n;
-            s10_ic2eq1n <= s9b_ic2eq1n;
-            s10_ic1eq2n <= s9b_ic1eq2n;
-            s10_ic2eq2n <= s9b_ic2eq2n;
+            s10_valid  <= s9_valid;
+            s10_idx  <= s9_idx;
+            s10_outl <= 22'(prod_l >>> 14);
+            s10_outr <= 22'(prod_r >>> 14);
+            s10_phase <= s9_phase;
+            s10_ic1eq1n <= s9_ic1eq1n;
+            s10_ic2eq1n <= s9_ic2eq1n;
+            s10_ic1eq2n <= s9_ic1eq2n;
+            s10_ic2eq2n <= s9_ic2eq2n;
         end
     end
 
@@ -922,8 +748,8 @@ module partial_pipeline #(
                 mix_acc_r  <= '0;
                 lim_step  <= 4'd1;
             end else if (s10_valid) begin
-                mix_acc_l <= mix_acc_l + {{8{s10_outl[17]}}, s10_outl};
-                mix_acc_r <= mix_acc_r + {{8{s10_outr[17]}}, s10_outr};
+                mix_acc_l <= mix_acc_l + {{4{s10_outl[21]}}, s10_outl};
+                mix_acc_r <= mix_acc_r + {{4{s10_outr[21]}}, s10_outr};
             end
             case (lim_step)
                 4'd1: begin   // |acc|: explicit two's-complement negate on the bits

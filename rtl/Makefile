@@ -184,8 +184,11 @@ run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator
 SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
 TB_PARTIAL = tb/tb_partial_pipeline.sv
 
-obj_dir/tb_partial_pipeline/sim: $(SIM_MOD) $(TB_PARTIAL) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_PARTIAL) $(VL_DSP)
+PARTIAL_SIM = $(PKG) csp/csp_pkg.sv csp/csp_sink_area.sv dsp/timebase.sv dsp/limiter.sv \
+              dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/osc_core.sv
+
+obj_dir/tb_partial_pipeline/sim: $(PARTIAL_SIM) $(TB_PARTIAL) $(LUTS) Makefile
+	$(VERILATE) $(PARTIAL_SIM) $(TB_PARTIAL) $(VL_DSP)
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel without interleaving output; `sim` prints the logs in a

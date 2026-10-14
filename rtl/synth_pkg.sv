@@ -91,6 +91,31 @@ package synth_pkg;
     parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum
     parameter logic [3:0] OPC_MAC = 4'hD;  // source + mul + accum
 
+
+    //--- Partial sinks (docs/csp_isa.md section 6) --------------------
+    // A partial reads ten sink words, named by ten pointers into the sink
+    // area, over two cycles. Words are Q4.14; pitch and cutoff are
+    // octaves from the reference below, the gains linear.
+    parameter int POINTER_W            = 10;    // $clog2(sink words)
+    parameter int POINTERS_PER_PARTIAL = 10;
+    parameter int POINTER_ENTRY_W      = POINTER_W * POINTERS_PER_PARTIAL;
+    parameter int CYCLES_PER_PARTIAL   = 2;
+    parameter int SINK_READ_PORTS      = 6;     // a cycle's worth of the sink area
+    // The pointers of a partial, by position in its entry.
+    parameter int POINTER_PITCH_VOICE   = 0;    // the voice's pitch
+    parameter int POINTER_PITCH_CHANNEL = 1;    //   and the oscillator's detune
+    parameter int POINTER_CUTOFF_VOICE  = 2;
+    parameter int POINTER_CUTOFF_CHANNEL = 3;   // the tracking of tune and detune
+    parameter int POINTER_GAIN_VOICE    = 4;    // envelope × velocity
+    parameter int POINTER_GAIN_LEFT     = 5;    // the channel's side of it
+    parameter int POINTER_GAIN_RIGHT    = 6;
+    parameter int POINTER_DUTY          = 7;
+    parameter int POINTER_RESONANCE     = 8;
+    parameter int POINTER_MODE          = 9;    // waveform, cascade, filter type
+    // Octave zero of the pitch and cutoff sinks: middle C (MIDI note 60),
+    // in the pipeline's UQ4.10 log2 pitch.
+    parameter logic [13:0] PITCH_REFERENCE = 14'h1400;
+
     //--- Filter stability clamp --------------------------------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not
     // from resonance — theory and the autocorrelation bench agree.
