@@ -42,7 +42,7 @@ package synth_pkg;
     parameter logic [7:0]  SPI_ID_BYTE     = 8'hA5;
     parameter logic [15:0] MAP_CTRL_ADDR   = 16'h0002; // [0] commit the write queue, [1] hold the CSP, [2] test tone
     parameter logic [15:0] MAP_PROGRAM_HIGH_ADDR = 16'h0010; // bits 35:32 of the next instruction
-    parameter logic [15:0] MAP_QUEUE_BASE  = 16'h4000; // the CSP's write queue: + register or sink address
+    parameter logic [15:0] MAP_QUEUE_BASE  = 16'h6000; // the CSP's write queue: + register or sink address
     parameter logic [15:0] MAP_PROGRAM_BASE = 16'h8000; // the CSP's instruction memory: + pc
     parameter logic [15:0] MAP_PARTIAL_BASE   = 16'h2000; // per-partial params
     parameter int          MAP_PARTIAL_STRIDE = 64;       // words per partial
@@ -101,6 +101,8 @@ package synth_pkg;
     // octaves from the reference below, the gains linear.
     parameter int POINTER_W            = 10;    // $clog2(sink words)
     parameter int POINTERS_PER_PARTIAL = 10;
+    // The last word of the sink area, which nobody writes: always zero.
+    parameter logic [9:0] POINTER_ZERO = 10'h3FF;
     parameter int POINTER_ENTRY_W      = POINTER_W * POINTERS_PER_PARTIAL;
     parameter int CYCLES_PER_PARTIAL   = 2;
     parameter int SINK_READ_PORTS      = 6;     // a cycle's worth of the sink area

@@ -15,6 +15,7 @@
 ;   0x200–0x5FF  16 channels of 64 words
 ;   0x600–0x7FF  32 voices of 16 words
 ;   0x800–0x8FF  the sinks the program owns: 32 voices of 8 words
+;   0x900–0xBFF  the sinks the firmware owns: 16 channels of 48 words
 ;
 ; Wide fields are at even offsets. A vector loop's iterations must not
 ; share registers, so every scratch word a loop uses is in its record; a
@@ -116,3 +117,26 @@
         .field SINK_GAIN, 1
         .field SINK_SPARE, 5
         .end
+
+; The channels' sinks are the firmware's: what only a MIDI message moves
+; (docs/memory_map.md). A partial points at its voice's sinks above and at
+; its channel's here: one word for each of its oscillator and unison
+; positions (eight, two oscillators of four) for the detune, the cutoff's
+; offset and the gain of each side, and one for each oscillator's duty and
+; mode and for the resonance. The firmware writes them through the queue
+; (to both pages of the sink area).
+        .equ   CHANNEL_SINKS, 0x900
+        .block CHANNEL_SINK
+        .field DETUNE, 8            ; pitch: the oscillator's tune and the unison spread, in octaves
+        .field CUTOFF_OFFSET, 8     ; cutoff: the tracking of tune and spread, in octaves
+        .field GAIN_LEFT, 8         ; the pan, the spread and the oscillator mix, linear
+        .field GAIN_RIGHT, 8
+        .field DUTY, 2              ; per oscillator: 1.0 is the rail
+        .field MODE, 2              ; per oscillator: waveform [1:0], cascade [2], filter type [4:3]
+        .field RESONANCE, 1         ; octaves of Q above Butterworth
+        .field SPARE_SINKS, 11      ; a channel's block is 48 words
+        .end
+
+; The last word of the last block, 0xBFF, is nobody's: it stays 0. A
+; partial that points nowhere points at it, and is silent.
+        .equ   ZERO_SINK, 0xBFF

@@ -147,11 +147,19 @@ module partial_pipeline #(
     reg [35:0] pointer_block_0 [0:NUM_PARTIALS-1];
     reg [35:0] pointer_block_1 [0:NUM_PARTIALS-1];
     reg [35:0] pointer_block_2 [0:NUM_PARTIALS-1];
+    // Every pointer starts at the sink area's zero word, so that a partial
+    // nobody has pointed anywhere is silent.
+    logic [POINTER_RAM_W-1:0] unpointed_entry;
     initial begin
+        unpointed_entry = '0;
+        for (int position = 0; position < synth_pkg::POINTERS_PER_PARTIAL; position++) begin
+            unpointed_entry[position * synth_pkg::POINTER_W +: synth_pkg::POINTER_W]
+                = synth_pkg::POINTER_ZERO;
+        end
         for (int partial = 0; partial < NUM_PARTIALS; partial++) begin
-            pointer_block_0[partial] = '0;   // every pointer at sink word 0
-            pointer_block_1[partial] = '0;
-            pointer_block_2[partial] = '0;
+            pointer_block_0[partial] = unpointed_entry[35:0];
+            pointer_block_1[partial] = unpointed_entry[71:36];
+            pointer_block_2[partial] = unpointed_entry[107:72];
         end
     end
 

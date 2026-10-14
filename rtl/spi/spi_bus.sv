@@ -22,7 +22,7 @@
 //   0x0000–0x000F  system registers (read back): CTRL, scratch
 //   0x0010         PROGRAM_HIGH: bits 35:32 of the next instruction write
 //   0x2000 + 64 p  partial p's pointers, words 0..3 (the fourth commits)
-//   0x4000 + a     the CSP's write queue: register or sink word a
+//   0x6000 + a     the CSP's write queue: register or sink word a
 //   0x8000 + pc    the CSP's instruction memory (while the CSP is held)
 //
 // Why the read turnaround exists: a read is served in the sysclk domain,
@@ -220,6 +220,16 @@ module spi_bus #(
         end
     end
 
+    // The ranges must not overlap: a write would be taken for two things.
+    localparam [15:0] QUEUE_END   = synth_pkg::MAP_QUEUE_BASE + 16'(1 << csp_pkg::QUEUE_ADDRESS_W);
+    localparam [15:0] PROGRAM_END = synth_pkg::MAP_PROGRAM_BASE + 16'(csp_pkg::MAX_PROGRAM);
+    if (synth_pkg::MAP_PARTIAL_BASE + 16'(synth_pkg::NUM_PARTIALS * synth_pkg::MAP_PARTIAL_STRIDE)
+            > synth_pkg::MAP_QUEUE_BASE
+        || QUEUE_END > synth_pkg::MAP_PROGRAM_BASE
+        || PROGRAM_END < synth_pkg::MAP_PROGRAM_BASE) begin : g_ranges_overlap
+        $error("spi_bus: the pointer, queue and program ranges overlap");
+    end
+
     // ---- the CSP's instruction memory (0x8000 + pc) ----------------------
     wire in_instruction_range = word_addr >= synth_pkg::MAP_PROGRAM_BASE
                                 && word_addr < synth_pkg::MAP_PROGRAM_BASE + 16'(csp_pkg::MAX_PROGRAM);
@@ -227,7 +237,7 @@ module spi_bus #(
     assign imem_write_address = csp_pkg::PROGRAM_W'(word_addr - synth_pkg::MAP_PROGRAM_BASE);
     assign imem_write_data    = {program_high, word_data};
 
-    // ---- the CSP's write queue (0x4000 + register or sink address) -------
+    // ---- the CSP's write queue (0x6000 + register or sink address) -------
     wire in_queue_range = word_addr >= synth_pkg::MAP_QUEUE_BASE
                           && word_addr < synth_pkg::MAP_QUEUE_BASE + 16'(1 << csp_pkg::QUEUE_ADDRESS_W);
     assign queue_write_enable  = word_complete && in_queue_range;
