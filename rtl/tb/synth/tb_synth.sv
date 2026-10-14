@@ -101,9 +101,7 @@ module tb_synth (
 
     // the page the partials read
     function int synth_sink(input int offset);
-        return dut.u_sink_area.active_page
-            ? int'($signed(dut.u_sink_area.g_port[0].g_page[1].words[offset]))
-            : int'($signed(dut.u_sink_area.g_port[0].g_page[0].words[offset]));
+        return int'($signed(dut.u_sink_area.page_words[dut.u_sink_area.active_page][offset]));
     endfunction
 
     // pointer `position` of a partial

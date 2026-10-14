@@ -259,9 +259,7 @@ module tb_csp_cosim #(
     endfunction
 
     function int cosim_sink(input int offset);
-        return u_sink_area.active_page
-            ? int'($signed(u_sink_area.g_port[0].g_page[1].words[offset]))
-            : int'($signed(u_sink_area.g_port[0].g_page[0].words[offset]));
+        return int'($signed(u_sink_area.page_words[u_sink_area.active_page][offset]));
     endfunction
 
     function int cosim_index(input int which);
