@@ -13,6 +13,7 @@
 #include "processor.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <iterator>
 #include <string>
 
@@ -77,6 +78,61 @@ bool is_input(int address) {
 
 bool is_sink(int address) {
     return address >= sink_base && address < sink_base + sink_count;
+}
+
+// ---- what the pipeline's interlocks see (rtl/csp/csp_core.sv) ----
+
+// Whether an instruction reads R through its a field.
+bool uses_a(Opcode op, ASelect a) {
+    const bool reads_r = a == ASelect::result || a == ASelect::wide;
+    switch (op) {
+    case Opcode::mac:
+    case Opcode::macw:
+    case Opcode::interp:
+    case Opcode::add3:
+    case Opcode::andxor:
+    case Opcode::shift:
+        return reads_r;
+    default:
+        return false;
+    }
+}
+
+bool uses_x(Opcode op) {
+    return op != Opcode::nop && op != Opcode::skip && op != Opcode::shift;
+}
+
+bool uses_y(Opcode op) {
+    return op != Opcode::nop && op != Opcode::skip && op != Opcode::abs;
+}
+
+bool uses_accumulator(Opcode op, ASelect a) {
+    return a == ASelect::accumulator
+           && (uses_a(op, ASelect::result) || op == Opcode::acc);
+}
+
+bool writes_result(Opcode op) {
+    return op != Opcode::nop && op != Opcode::loop && op != Opcode::acc
+           && op != Opcode::skip && op != Opcode::idx;
+}
+
+bool sets_flags(Opcode op) {
+    return writes_result(op) && op != Opcode::sel;
+}
+
+// Whether an access names registers: inside the file, a pair at an even
+// address.
+bool in_registers(int address, bool wide) {
+    return address < register_count && !(wide && address % 2 != 0);
+}
+
+// The registers an access touches: none, one, or a pair.
+std::span<const int> touched(int address, bool wide, std::array<int, 2> &out) {
+    if (!in_registers(address, wide)) {
+        return {};
+    }
+    out = {address, address + 1};
+    return {out.data(), wide ? 2u : 1u};
 }
 
 
@@ -179,6 +235,7 @@ int32_t Processor::read_operand(uint16_t field, PassState &state) const {
                                       + ", outside the register file");
         return 0;
     }
+    note_access(address, false, state);
     return read(address);
 }
 
@@ -190,6 +247,8 @@ int64_t Processor::read_wide_operand(uint16_t field, PassState &state) const {
                                       + ", not an even register");
         return 0;
     }
+    note_access(address, false, state);
+    note_access(address + 1, false, state);
     return read_wide(address);
 }
 
@@ -204,9 +263,17 @@ void Processor::write_operand(uint16_t field, int32_t raw, PassState &state) {
         return;
     }
     if (address < register_count) {
+        note_access(address, true, state);
         registers_[address] = raw;
+        if (trace_) {
+            std::fprintf(stderr, "model write %d %d\n", address, raw);
+        }
     } else if (is_sink(address)) {
         sink_pages_[1 - active_page_][address - sink_base] = raw;
+        if (trace_) {
+            std::fprintf(stderr, "model sink %d %d\n", address - sink_base,
+                         raw);
+        }
         state.sinks_written.insert(address - sink_base);
     } else {
         state.report.errors.push_back("write to 0x" + std::to_string(address)
@@ -227,12 +294,221 @@ void Processor::write_wide_operand(uint16_t field, int64_t raw,
                                       + ", not an even, writable register");
         return;
     }
+    note_access(address, true, state);
+    note_access(address + 1, true, state);
     registers_[address]     = static_cast<int32_t>(raw >> word_bits);
     registers_[address + 1] = static_cast<int32_t>(sign_extend(raw, word_bits));
+    if (trace_) {
+        std::fprintf(stderr, "model write %d %d\nmodel write %d %d\n", address,
+                     registers_[address], address + 1, registers_[address + 1]);
+    }
 }
 
 void Processor::set_flags(int64_t result, bool overflow) {
     flags_ = {result < 0, result == 0, overflow};
+}
+
+// ---- the pipeline's timing ------------------------------------------------
+
+// The cycle the instruction issues in, after the one before and once
+// every value it reads has been written; then what it holds up. As in the
+// RTL, this is decided before a skip is known: a skipped instruction
+// waits and is waited for all the same.
+int64_t Processor::issue(const Instruction &instruction,
+                         PassState &state) const {
+    Scoreboard &board = state.scoreboard;
+    const Opcode op   = instruction.op;
+    const bool a_wide = instruction.a == ASelect::wide;
+    const bool r_wide = a_wide && has_wide_form(op);
+    const bool y_wide = r_wide && op != Opcode::shift;
+    const int r       = resolve(instruction.r);
+    std::array<int, 2> scratch{};
+
+    int64_t cycle = board.front_ready;
+    // In a vector loop, an operand indexed by an element's own copy of an
+    // index register waits for that element's IDX.
+    auto wait_for_index = [&](uint16_t field) {
+        const Operand operand = Operand::decode(field);
+        if (state.vector && operand.mode == Operand::Mode::indexed
+            && operand.index == state.vector->private_index) {
+            cycle = std::max(cycle, board.index_ready);
+        }
+    };
+    auto wait_for = [&](bool reads, int address, bool wide) {
+        if (reads) {
+            for (const int reg : touched(address, wide, scratch)) {
+                cycle = std::max(cycle, board.register_ready[reg]);
+            }
+        }
+    };
+    if (uses_a(op, instruction.a)) {
+        wait_for_index(instruction.r);
+    }
+    if (uses_x(op)) {
+        wait_for_index(instruction.x);
+    }
+    if (uses_y(op)) {
+        wait_for_index(instruction.y);
+    }
+    if (writes_result(op)) {
+        wait_for_index(instruction.r);
+    }
+    wait_for(uses_a(op, instruction.a), r, a_wide);
+    wait_for(uses_x(op), resolve(instruction.x), false);
+    wait_for(uses_y(op), resolve(instruction.y), y_wide);
+    if (uses_accumulator(op, instruction.a)) {
+        cycle = std::max(cycle, board.accumulator_ready);
+    }
+    if (op == Opcode::sel || op == Opcode::skip) {
+        cycle = std::max(cycle, board.flags_ready);
+    }
+
+    const int64_t ready = cycle + result_latency;
+    if (writes_result(op) && r != 0 && !is_input(r)) {
+        for (const int reg : touched(r, r_wide, scratch)) {
+            board.register_ready[reg] = ready;
+        }
+    }
+    if (op == Opcode::acc) {
+        board.accumulator_ready = ready;
+    }
+    if (sets_flags(op)) {
+        board.flags_ready = ready;
+    }
+    // LOOP and IDX hold the front end; in a vector loop, IDX only holds
+    // its own element's index register.
+    const bool barrier =
+            op == Opcode::loop || (op == Opcode::idx && !state.vector);
+    if (op == Opcode::idx && state.vector) {
+        board.index_ready = cycle + barrier_latency;
+    }
+    board.front_ready = cycle + (barrier ? barrier_latency : 1);
+    return cycle;
+}
+
+// Issue an instruction: its cycle, or the end of the pass at the limit.
+bool Processor::issue_or_stop(const Instruction &instruction, size_t pc,
+                              PassState &state) {
+    state.cycle = issue(instruction, state);
+    if (state.cycle >= pass_cycle_limit) {
+        state.report.errors.push_back("pass longer than "
+                                      + std::to_string(pass_cycle_limit)
+                                      + " cycles");
+        state.stopped = true;
+        return false;
+    }
+    if (trace_) {
+        std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n", pc,
+                     static_cast<long long>(state.cycle), index_[0], index_[1]);
+    }
+    state.report.cycles = static_cast<int>(state.cycle) + 1;
+    return true;
+}
+
+// Note a register access inside a vector loop: an iteration must not
+// read a register another iteration writes, since the order differs from
+// a LOOP's.
+void Processor::note_access(int address, bool write, PassState &state) const {
+    if (!state.vector || address <= 0 || address >= register_count) {
+        return;
+    }
+    VectorRun &run = *state.vector;
+    if (!write) {
+        run.readers[address].insert(run.element);
+        return;
+    }
+    const auto [entry, first] = run.writer.try_emplace(address, run.element);
+    if (!first && entry->second != run.element) {
+        entry->second = -1;
+    }
+}
+
+// A vector loop: the body instruction by instruction, each for every
+// element in turn (docs/csp_manual.md, LOOP). The loop's index register
+// steps per element; each element has its own copy of the other index
+// register and its own flags. Afterwards both index registers and the
+// flags are as the last element left them, as after a LOOP.
+void Processor::run_vector(const Instruction &loop, PassState &state) {
+    const auto own = (static_cast<uint8_t>(loop.a) & 1) ? IndexRegister::j
+                                                        : IndexRegister::i;
+    const auto other =
+            own == IndexRegister::i ? IndexRegister::j : IndexRegister::i;
+    const size_t start = state.pc;
+    const size_t end   = start + loop.r;
+    const int64_t count =
+            read_operand(loop.x, state) & ((int64_t{1} << word_bits) - 1);
+    const int stride = read_operand(loop.y, state);
+    if (count > max_vector_length || end > program_.size()) {
+        state.report.errors.push_back("vector loop over more than "
+                                      + std::to_string(max_vector_length)
+                                      + " elements, or past the program's end");
+        state.pc = end;
+        return;
+    }
+
+    struct Element {
+        int other_index;
+        Flags flags;
+        int64_t flags_ready;
+        int64_t index_ready;
+    };
+    Scoreboard &board = state.scoreboard;
+    int &own_index    = index_[static_cast<size_t>(own)];
+    int &other_index  = index_[static_cast<size_t>(other)];
+    const int base    = own_index;
+    std::vector<Element> elements(
+            static_cast<size_t>(count),
+            {other_index, flags_, board.flags_ready, board.index_ready});
+
+    state.vector = VectorRun{other, 0, {}, {}};
+    for (size_t at = start; at < end && !state.stopped; ++at) {
+        const Instruction instruction = Instruction::decode(program_[at]);
+        for (int element = 0; element < count; ++element) {
+            Element &mine = elements[static_cast<size_t>(element)];
+            own_index     = modulo_address(base + int64_t{element} * stride);
+            other_index   = mine.other_index;
+            flags_        = mine.flags;
+            board.flags_ready     = mine.flags_ready;
+            board.index_ready     = mine.index_ready;
+            state.vector->element = element;
+            if (!issue_or_stop(instruction, at, state)) {
+                break;
+            }
+            execute(instruction, state);
+            mine = {other_index, flags_, board.flags_ready, board.index_ready};
+        }
+    }
+
+    const VectorRun run = *state.vector;
+    state.vector.reset();
+    for (const auto &[address, writer] : run.writer) {
+        const auto readers = run.readers.find(address);
+        const bool shared  = readers != run.readers.end()
+                            && (writer < 0 || readers->second.size() > 1
+                                || *readers->second.begin() != writer);
+        if (shared) {
+            char hex[8];
+            std::snprintf(hex, sizeof hex, "0x%03x", address);
+            state.report.errors.push_back(
+                    std::string("vector loop iterations share register ")
+                    + hex);
+        }
+    }
+
+    own_index = modulo_address(base + count * int64_t{stride});
+    if (count > 0) {
+        const Element &last = elements.back();
+        other_index         = last.other_index;
+        flags_              = last.flags;
+        for (const Element &element : elements) {
+            board.flags_ready =
+                    std::max(board.flags_ready, element.flags_ready);
+        }
+        board.front_ready =
+                std::max(board.front_ready, state.cycle + barrier_latency);
+    }
+    board.index_ready = 0;
+    state.pc          = end;
 }
 
 // ---- one instruction ------------------------------------------------------
@@ -303,10 +579,14 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
         break;
     }
     case Opcode::interp: {
-        const Wide a     = a_value();
-        const int64_t x  = read_operand(instruction.x, state);
-        const Wide delta = y_value() - a;
-        store(a + ((delta * x) >> word_fraction_bits), false);
+        // Y - A in Q4.32, saturated to 36 bits: the multiplier's input
+        // (#220, decision 3a). Exact unless |Y - A| >= 8, or A comes from
+        // the accumulator with fraction bits below Q4.32.
+        const Wide a    = a_value();
+        const int64_t x = read_operand(instruction.x, state);
+        const Reduced delta =
+                saturate((y_value() - a) >> wide_to_accumulator, wide_bits);
+        store(a + Wide{delta.value} * x, false);
         break;
     }
     case Opcode::acc: {
@@ -400,11 +680,15 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
                             + read_operand(instruction.y, state);
         const auto which =
                 (instruction.r & 1) ? IndexRegister::j : IndexRegister::i;
-        state.pending.push_back(
-                {state.cycle + index_delay + 1, which, modulo_address(sum)});
+        index_[static_cast<size_t>(which)] =
+                modulo_address(sum); // visible at once
         break;
     }
     case Opcode::loop: {
+        if (static_cast<uint8_t>(instruction.a) & 2) {
+            run_vector(instruction, state);
+            break;
+        }
         const auto which    = (static_cast<uint8_t>(instruction.a) & 1)
                                       ? IndexRegister::j
                                       : IndexRegister::i;
@@ -440,6 +724,22 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
     }
 }
 
+// Loop ends at the current pc: step the index register; repeat the body
+// or leave the loop, then check the outer loop, which may end at the same
+// place.
+void Processor::end_loops(PassState &state) {
+    while (!state.loops.empty() && state.pc == state.loops.back().end) {
+        Loop &loop       = state.loops.back();
+        int &index_value = index_[static_cast<size_t>(loop.index)];
+        index_value      = modulo_address(int64_t{index_value} + loop.stride);
+        if (--loop.remaining > 0) {
+            state.pc = loop.start;
+            break;
+        }
+        state.loops.pop_back();
+    }
+}
+
 // ---- one pass -------------------------------------------------------------
 
 PassReport Processor::pass() {
@@ -449,51 +749,29 @@ PassReport Processor::pass() {
             static_cast<int32_t>(sign_extend(pass_count_, word_bits));
 
     if (held_) {
+        // No program, but the pass still ends: the window applies every
+        // committed write, and the sink pages flip as at every pass end.
         state.report.writes_applied = apply_window(cycles_per_pass);
+        active_page_                = 1 - active_page_;
         return state.report;
     }
 
-    while (state.pc < program_.size()) {
-        while (!state.pending.empty()
-               && state.pending.front().visible_from <= state.cycle) {
-            const PendingIndex &pending                = state.pending.front();
-            index_[static_cast<size_t>(pending.index)] = pending.value;
-            state.pending.pop_front();
-        }
-
+    // Each instruction runs to completion before the next, which sees
+    // everything it did; the cycle it issues in follows the RTL's
+    // interlocks. Instructions issue before cycle 1472.
+    while (state.pc < program_.size() && !state.stopped) {
         const Instruction instruction = Instruction::decode(program_[state.pc]);
+        if (!issue_or_stop(instruction, state.pc, state)) {
+            break;
+        }
         ++state.pc;
         if (state.skip > 0) {
             --state.skip;
         } else {
             execute(instruction, state);
         }
-        ++state.cycle;
-
-        // Loop ends: step the index register; repeat the body or leave the
-        // loop, then check the outer loop, which may end at the same place.
-        while (!state.loops.empty() && state.pc == state.loops.back().end) {
-            Loop &loop       = state.loops.back();
-            int &index_value = index_[static_cast<size_t>(loop.index)];
-            index_value = modulo_address(int64_t{index_value} + loop.stride);
-            if (--loop.remaining > 0) {
-                state.pc = loop.start;
-                break;
-            }
-            state.loops.pop_back();
-        }
-
-        if (state.cycle > max_program_length) {
-            state.report.errors.push_back("pass longer than "
-                                          + std::to_string(max_program_length)
-                                          + " instructions");
-            break;
-        }
+        end_loops(state);
     }
-    for (const PendingIndex &pending : state.pending) {
-        index_[static_cast<size_t>(pending.index)] = pending.value;
-    }
-    state.report.cycles = static_cast<int>(state.cycle);
 
     // Every sink word the program has ever written must be written every
     // pass, or the partials would see a stale page every other pass.

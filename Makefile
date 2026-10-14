@@ -59,9 +59,9 @@ BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 CSP_DIR     = tools/csp
-CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp
+CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp app/main/csp/envelope.cpp
 CSP_SRC     = $(CSP_SHARED) $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
-CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp $(CSP_DIR)/processor.hpp \
+CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp/envelope.hpp $(CSP_DIR)/processor.hpp \
               $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test

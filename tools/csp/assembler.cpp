@@ -654,12 +654,15 @@ void Assembler::instruction(const std::string &full_name,
             }
         }
     } else if (name == "LOOP") {
-        if (suffix != "I" && suffix != "J") {
-            error("LOOP needs .i or .j");
+        // LOOP.i, LOOP.j; LOOP.vi, LOOP.vj for a vector loop.
+        const bool vector = suffix == "VI" || suffix == "VJ";
+        const char which  = suffix.empty() ? '\0' : suffix.back();
+        if ((suffix.size() != 1 && !vector) || (which != 'I' && which != 'J')) {
+            error("LOOP needs .i, .j, .vi or .vj");
         } else if (need(3) && parse({1, 2}, parsed)) {
             const size_t at = builder_.open_loop(
-                    suffix == "J" ? IndexRegister::j : IndexRegister::i,
-                    parsed[0], parsed[1]);
+                    which == 'J' ? IndexRegister::j : IndexRegister::i,
+                    parsed[0], parsed[1], vector);
             close_at_end(at, operands[0], true);
         }
     } else {

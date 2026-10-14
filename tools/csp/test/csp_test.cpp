@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // Every instruction at its edges (formats, truncation, saturation, wrap,
-// flags), the rules a program can see (IDX delay slots, loops, SKIP, the
+// flags), the rules a program can see (IDX at once, loops, SKIP, the
 // write queue and swap, reset, pass limits, sink pages), the assembler's
 // checks, and the programs in docs/csp_manual.md section 8.
 //
@@ -12,12 +12,18 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "../assembler.hpp"
 #include "../processor.hpp"
+#include "csp/envelope.hpp"
+#include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
 
 namespace {
@@ -283,41 +289,140 @@ void test_skip() {
     const csp::PassReport report = m.run();
     check_equal(m.get("A_"), 0, "SKIP neg skips the next two");
     check_equal(m.get("D_"), q(3.0), "the instruction after them runs");
-    check_equal(report.cycles, 5,
+    // SKIP waits for CMP's flags; the rest issue one per cycle.
+    check_equal(report.cycles, csp::result_latency + 4,
                 "skipped instructions still take their cycles");
 }
 
-void test_index_delay() {
+// The pipeline's interlocks change the cycle count, never the result: a
+// dependent instruction waits result_latency cycles, the one after LOOP or
+// IDX barrier_latency, and independent ones issue every cycle.
+void test_interlocks() {
+    const auto cycles = [](std::string_view body) {
+        Machine m(std::string(registers) + std::string(body));
+        m.start();
+        return m.run().cycles;
+    };
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC B_, 0, =1.0, =1.0\n"), 2,
+                "independent instructions issue every cycle");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC B_, 0, A_, =1.0\n"),
+                csp::result_latency + 1, "a read of R waits for its write");
+    check_equal(cycles(".reg W_LOWER, 0x065\nMAC.w W_, =1.0, V_\n"
+                       "MAC B_, 0, W_LOWER, =1.0\n"),
+                csp::result_latency + 1,
+                "a read of a pair's lower word waits for the wide write");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC C_, 0, B_, =1.0\n"), 2,
+                "the other register of the pair does not wait");
+    check_equal(cycles("ACC 0, =1.0, =1.0\nMAC A_, acc, =1.0, =1.0\n"),
+                csp::result_latency + 1, "a read of acc waits for ACC");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, =2.0\n"),
+                csp::result_latency + 1, "SEL waits for the flags");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"),
+                csp::barrier_latency + 1, "the instruction after IDX waits");
+}
+
+// IDX takes effect for the very next instruction: each instruction
+// finishes before the next starts (#220).
+void test_index_immediate() {
     Machine m(std::string(registers) + R"(
         .equ BASE, 0x100
         IDX   i, =#BASE, 0
-        MAC   [i+1], 0, =1.0, =1.0   ; slot 1: old i (0) → register 1
-        MAC   [i+2], 0, =1.0, =1.0   ; slot 2
-        MAC   [i+3], 0, =1.0, =1.0   ; slot 3
-        MAC   [i+4], 0, =1.0, =1.0   ; fourth: new i → 0x104
+        MAC   [i+1], 0, =1.0, =1.0      ; the next instruction: the new i
+        IDX   i, =#0x180, 0
+        MAC   [i+2], 0, =2.0, =1.0
 )");
-    check(has_diagnostic(m.program, false, "delay slot"),
-          "the assembler warns about delay slots");
+    check(m.program.diagnostics.empty(), "IDX followed by a use: no warning");
     m.start().run();
-    check_equal(m.processor.read(0x104), q(1.0),
-                "the fourth instruction after IDX sees the new i");
-    check_equal(m.processor.read(0x101), 0, "the first three do not");
-    check_equal(m.processor.read(1), q(1.0), "they still used the old i (0)");
+    check_equal(m.processor.read(0x101), q(1.0),
+                "the instruction after IDX sees the new i");
+    check_equal(m.processor.read(0x182), q(2.0),
+                "and again after the second IDX");
+    check_equal(m.processor.read(1), 0x100,
+                "nothing used the old i (0): register 1, =#BASE, is untouched");
+}
+
+// LOOP.vi runs its body instruction by instruction across all elements:
+// the same results as LOOP.i when iterations are independent, without the
+// waits; per-element flags and j; shared registers reported.
+void test_vector_loops() {
+    const std::string body      = R"(
+        .block ITEM
+        .field X, 1
+        .field DOUBLE, 1
+        .field SIGN, 1
+        .field ROW, 1
+        .field PICK, 1
+        .end
+        .equ   ITEMS, 0x200
+        .equ   TABLE, 0x300
+        IDX    i, =#ITEMS, 0
+)";
+    const std::string loop_body = R"(
+        MAC    [i+DOUBLE], 0, [i+X], =2.0     ; each needs the one before
+        CMP    ZERO, [i+DOUBLE], ZERO         ;   flags, per element
+        SEL    [i+SIGN], =1.0, =-1.0
+        IDX    j, =#TABLE, [i+ROW]            ;   j, per element
+        MAC    [i+PICK], 0, [j+0], =1.0
+)";
+    auto make                   = [&](const char *loop) {
+        auto m = std::make_unique<Machine>(body + loop + loop_body);
+        for (int item = 0; item < 8; ++item) {
+            m->processor.write(0x200 + 8 * item, q(item % 2 ? 0.25 : -0.25));
+            m->processor.write(0x200 + 8 * item + 3, item);
+            m->processor.write(0x300 + item, q(0.125 * item));
+        }
+        m->start();
+        return m;
+    };
+    auto scalar                         = make("        LOOP.i  5, =#8, =#8\n");
+    auto vector                         = make("        LOOP.vi 5, =#8, =#8\n");
+    const csp::PassReport scalar_report = scalar->run();
+    const csp::PassReport vector_report = vector->run();
+    check(vector->program.diagnostics.empty() && vector_report.errors.empty(),
+          "a vector loop assembles and runs");
+    bool same = true;
+    for (int address = 0x200; address < 0x240; ++address) {
+        same = same
+               && scalar->processor.read(address)
+                          == vector->processor.read(address);
+    }
+    check(same, "LOOP.vi gives LOOP.i's results");
+    check_equal(vector->processor.read(0x200 + 2), q(-1.0),
+                "SEL sees its own element's flags (negative)");
+    check_equal(vector->processor.read(0x200 + 8 + 2), q(1.0),
+                "and the next element's (positive)");
+    check_equal(vector->processor.read(0x200 + 8 * 5 + 4), q(0.625),
+                "an element's [j+…] uses its own j");
+    check_equal(vector->processor.index(csp::IndexRegister::j), 0x307,
+                "after the loop, j is the last element's");
+    // IDX, LOOP.vi (3 cycles each), then 5 × 8 issues without a wait.
+    check_equal(vector_report.cycles, 2 * csp::barrier_latency + 40,
+                "a vector loop of 8 elements never waits");
+    check(scalar_report.cycles > vector_report.cycles,
+          "the scalar loop waits inside each iteration");
+
+    Machine shared(body
+                   + "        .reg T, 0x060\n"
+                     "        LOOP.vi 2, =#8, =#8\n"
+                     "        MAC T, 0, [i+X], =1.0\n"
+                     "        MAC [i+PICK], 0, T, =1.0\n");
+    shared.start();
+    check(!shared.run().errors.empty(),
+          "iterations sharing a register are reported");
+    check(has_diagnostic(csp::assemble(body
+                                       + "LOOP.vi 2, =#8, =#8\n"
+                                         "SKIP always, 1\nNOP\n"),
+                         true, "not allowed in a vector loop"),
+          "SKIP in a vector loop's body is rejected");
 }
 
 void test_loops() {
     Machine m(std::string(registers) + R"(
         .equ BASE, 0x200
         IDX    i, =#BASE, 0
-        NOP
-        NOP
-        NOP
         LOOP.i 1, =#4, =#16           ; 4 blocks of 16
         ADD3   [i+0], [i+0], =1.0, ZERO
         IDX    j, =#0x300, 0
-        NOP
-        NOP
-        NOP
         LOOP.i 3, =#2, =#1            ; outer: 2 passes over i
         NOP
         LOOP.j 1, =#3, =#1            ;   inner: 3 passes over j
@@ -344,6 +449,29 @@ void test_loops() {
     check_equal(m.get("A_"), 0, "a count of 0 skips the body");
     check_equal(m.get("B_"), q(1.0), "and the program continues after it");
     check(report.errors.empty(), "loops run without errors");
+}
+
+// A loop with a count of 0 whose body was the tail of its outer loop's
+// body: skipping it lands on the outer loop's end, which must still step
+// the outer index register and repeat the outer loop (found by the RTL
+// co-simulation, #220).
+void test_empty_inner_loop_at_outer_end() {
+    Machine m(std::string(registers) + R"(
+        LOOP.j outer_end, =#3, =#1      ; outer: 3 passes, j steps by 1
+        ADD3   A_, A_, =1.0, ZERO       ;   counts the outer passes
+        LOOP.i outer_end, ZERO, =#1     ;   inner: count 0, body ends with the outer's
+        ADD3   B_, B_, =1.0, ZERO       ;     never runs
+outer_end:
+        MAC    C_, 0, =1.0, =1.0        ; after both
+)");
+    m.start();
+    const csp::PassReport report = m.run();
+    check_equal(m.get("A_"), q(3.0), "the outer loop still runs three times");
+    check_equal(m.get("B_"), 0, "the empty inner loop's body never runs");
+    check_equal(m.get("C_"), q(1.0), "the program continues after both");
+    check_equal(m.processor.index(csp::IndexRegister::j), 3,
+                "the outer loop stepped j three times");
+    check(report.errors.empty(), "without errors");
 }
 
 void test_queue_and_swap() {
@@ -557,16 +685,15 @@ end:
     const size_t open = bad.open_loop(IndexRegister::i, Operand::direct(1),
                                       Operand::direct(1));
     (void) open;
-    bool delay = false, reach = false, unclosed = false;
+    bool reach = false, unclosed = false;
     for (const csp::BuildIssue &found : bad.check()) {
-        delay = delay || found.message.find("delay slot") != std::string::npos;
         reach = reach
                 || found.message.find("direct reach") != std::string::npos;
         unclosed = unclosed
                    || found.message.find("never closed") != std::string::npos;
     }
-    check(delay && reach && unclosed,
-          "the builder reports delay slots, reach, and a loop never closed");
+    check(reach && unclosed,
+          "the builder reports reach, and a loop never closed");
 }
 
 // ---- the manual's programs (docs/csp_manual.md section 8) ---------------------------
@@ -578,6 +705,7 @@ const char *envelope_program = R"(
         .field GATE, 1
         .field VELOCITY, 1
         .field OUT, 1
+        .field U, 1                         ; scratch
         .end
         .block SEGMENT                      ; a row of the envelope table
         .field TARGET, 2                    ; wide
@@ -587,20 +715,16 @@ const char *envelope_program = R"(
         .equ   VOICES, 0x600
         .const FULL, 1.0
         .reg   ENV_TABLE, 0x060             ; the table's address, raw
-        .reg   U, 0x061
 
         IDX     i, =#VOICES, 0              ; i → voice 0
-        NOP
-        NOP
-        NOP
-        LOOP.i  9, =#2, =#16                ; each voice
+        LOOP.vi 9, =#2, =#16                ; every voice
         IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
-        MAX     U, [i+STAGE], =#4           ;   attack → decay, if…
+        MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
         CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
-        SEL     [i+STAGE], U, [i+STAGE]     ;   (SEL reads the CMP's flags)
-        ANDXOR  U, 0, [i+STAGE], =#4        ;   release → attack: 0/4/8 → 0/4/0
+        SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
+        ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
         CMP     ZERO, [i+GATE], FULL        ;   gate held?
-        SEL     [i+STAGE], U, =#8           ;     else release
+        SEL     [i+STAGE], [i+U], =#8       ;     else release
         INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
         MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
 )";
@@ -685,7 +809,7 @@ void test_lfo() {
         MACW.w  PHASE, ONE, RATE            ; advance and wrap
         MAC     SAW, 0, PHASE, DEPTH_8      ; sawtooth, ±depth
         CMP     ZERO, PHASE, ZERO
-        SEL     SQUARE, DEPTH, NEG_DEPTH    ; square, ±depth
+        SEL     SQUARE, NEG_DEPTH, DEPTH    ; square, ±depth
         ABS     T, PHASE                    ; 0 … 8
         MAC     TRI, 0, T, DEPTH_4          ; 0 … 2 × depth
         ADD3    TRI, TRI, NEG_DEPTH, ZERO   ; triangle, ±depth
@@ -702,7 +826,7 @@ void test_lfo() {
         previous_saw = saw;
         lowest       = std::min(lowest, m.get("TRI"));
         highest      = std::max(highest, m.get("TRI"));
-        check(m.get("SQUARE") == (m.get("PHASE") < 0 ? q(-1.0) : q(1.0)),
+        check(m.get("SQUARE") == (m.get("PHASE") < 0 ? q(1.0) : q(-1.0)),
               "square follows the phase's sign");
     }
     check_equal(wraps, 2, "the saw wraps once per 8 passes");
@@ -710,6 +834,243 @@ void test_lfo() {
 }
 
 } // namespace
+
+// An envelope coefficient (adsr.sv's k, per 96 kHz sample) as a wide rate for a
+// 48 kHz pass: the same fraction of the distance in two samples.
+void test_envelope_rates() {
+    const uint32_t coefficients[] = {1,    7,     100,   250,    1000,
+                                     4096, 16384, 65535, 131071, 262143};
+    for (const uint32_t k : coefficients) {
+        const double sample = static_cast<double>(k) / (1 << 24);
+        const double want   = 1.0 - (1.0 - sample) * (1.0 - sample);
+        const double got    = static_cast<double>(csp::envelope_rate(k))
+                           / static_cast<double>(int64_t{1} << 32);
+        const std::string name = "k=" + std::to_string(k);
+        // within a unit of the rate's last place, 2^-32
+        check(std::fabs(got - want)
+                      <= 1.0 / static_cast<double>(int64_t{1} << 32),
+              name + ": fraction " + std::to_string(got) + ", want "
+                      + std::to_string(want));
+        check(csp::envelope_rate(k) < (int64_t{1} << 35),
+              name + ": a rate below 8");
+    }
+    check_equal(csp::envelope_rate(0), 0, "k=0: no movement");
+}
+
+// An LFO's old increment as a RATE: the same cycles a second.
+void test_lfo_rate() {
+    // 1000 per sample at 96 kHz is 1000 / 2^25 of a cycle: 2.861 Hz
+    const double old_hertz = 1000.0 * 96000.0 / (1 << 25);
+    for (const int passes : {1, 2}) {
+        const int64_t rate = csp::lfo_rate(1000, passes);
+        const double hertz = static_cast<double>(rate)
+                             / static_cast<double>(int64_t{1} << 36)
+                             * (48000.0 / passes);
+        check(std::fabs(hertz / old_hertz - 1.0) < 1e-12,
+              "lfo_rate: " + std::to_string(passes) + " pass(es) an update");
+    }
+    check_equal(csp::lfo_rate(0, 2), 0, "lfo_rate: a stopped LFO");
+    check(csp::lfo_rate(65535, 2) < (int64_t{1} << 35),
+          "lfo_rate: the fastest LFO is below half a cycle an update");
+}
+
+// ---- the control program ----------------------------------------------------
+
+// tools/csp/programs: the map and the parts, joined in order.
+std::string control_program() {
+    std::string source;
+    for (const char *part :
+         {"map.s", "lfo.s", "channel.s", "envelope.s", "voice.s"}) {
+        std::ifstream file(std::string("tools/csp/programs/") + part);
+        check(static_cast<bool>(file), std::string("reads ") + part);
+        std::stringstream text;
+        text << file.rdbuf();
+        source += text.str() + "\n";
+    }
+    return source;
+}
+
+// The whole program on 16 channels and 32 voices, every one different. The
+// envelopes' rates are 0, so their levels stay where they are set, and the
+// LFOs' outputs are set directly (with no LFO updating), so that every sink
+// has a value to check against the formulas in voice.s and channel.s.
+void test_control_program() {
+    Machine m(control_program());
+    csp::Processor &cpu    = m.processor;
+    const int channels     = m.address("CHANNELS");
+    const int voices       = m.address("VOICES");
+    const int sinks        = m.address("SINKS");
+    const int lfos         = m.address("LFOS");
+    const int channel_size = m.address("CHANNEL_SIZE");
+    const int voice_size   = m.address("VOICE_SIZE");
+    const int lfo_size     = m.address("LFO_SIZE");
+    auto at                = [&](int base, const char *field) {
+        return base + m.address(field);
+    };
+
+    // 32 LFOs with outputs between -1 and 1
+    std::vector<double> lfo_out(32);
+    for (int k = 0; k < 32; ++k) {
+        lfo_out[k] = std::sin(0.7 * k);
+        cpu.write(at(lfos + k * lfo_size, "OUT"), q(lfo_out[k]));
+    }
+    struct Channel {
+        double bend, p1, c1, p2, c2, base, track, amount, volume;
+        int lfo1, lfo2;
+    };
+    std::vector<Channel> channel(16);
+    for (int c = 0; c < 16; ++c) {
+        channel[c]     = {0.02 * (c - 8), 0.1 + 0.01 * c,  -0.2 + 0.03 * c,
+                          0.05 * (c % 4), 0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
+                          0.25 * (c % 5), 0.3 + 0.05 * c,  0.2 + 0.05 * c,
+                          (3 * c) % 32,   (7 * c + 5) % 32};
+        const int base = channels + c * channel_size;
+        cpu.write(at(base, "BEND"), q(channel[c].bend));
+        cpu.write(at(base, "LFO1_PITCH"), q(channel[c].p1));
+        cpu.write(at(base, "LFO1_CUTOFF"), q(channel[c].c1));
+        cpu.write(at(base, "LFO2_PITCH"), q(channel[c].p2));
+        cpu.write(at(base, "LFO2_CUTOFF"), q(channel[c].c2));
+        cpu.write(at(base, "CUTOFF_BASE"), q(channel[c].base));
+        cpu.write(at(base, "KEY_TRACK"), q(channel[c].track));
+        cpu.write(at(base, "MOD_AMOUNT"), q(channel[c].amount));
+        cpu.write(at(base, "VOLUME"), q(channel[c].volume));
+        cpu.write(at(base, "LFO1"), lfos + channel[c].lfo1 * lfo_size);
+        cpu.write(at(base, "LFO2"), lfos + channel[c].lfo2 * lfo_size);
+    }
+    struct Voice {
+        double note, level_a, level_m, velocity;
+        int channel;
+    };
+    std::vector<Voice> voice(32);
+    for (int v = 0; v < 32; ++v) {
+        voice[v]       = {-1.0 + 0.1 * v, 0.1 + 0.02 * v, 0.9 - 0.02 * v,
+                          0.3 + 0.02 * v, (5 * v + 1) % 16};
+        const int base = voices + v * voice_size;
+        cpu.write(at(base, "NOTE"), q(voice[v].note));
+        cpu.write_wide(at(base, "LEVEL_A"), q_wide(voice[v].level_a));
+        cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
+        cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
+        cpu.write(at(base, "GATE"), q(1.0));
+        cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
+        cpu.write(at(base, "STAGE_M"), 20);
+        cpu.write(at(base, "CHANNEL"),
+                  channels + voice[v].channel * channel_size);
+        cpu.write(at(base, "SINK"), sinks + v * 8);
+    }
+    m.start();
+    // two passes: the second sees the channel values the first computed
+    m.run();
+    if (std::getenv("CSP_TRACE")) {
+        cpu.trace(true);
+    }
+    const csp::PassReport report = m.run();
+    for (size_t error = 0; error < report.errors.size() && error < 5; ++error) {
+        std::printf("  model: %s\n", report.errors[error].c_str());
+    }
+    check(report.errors.empty(), "the control program runs without errors");
+    check(report.stale_sinks.empty(), "every sink is written every pass");
+    check(report.cycles <= csp::pass_cycle_limit,
+          "the control program fits a pass: " + std::to_string(report.cycles));
+    std::printf("control program (LFOs idle): %d cycles a pass\n",
+                report.cycles);
+
+    // the formulas; the program's sinks are those published at the pass's end
+    double worst = 0;
+    for (int v = 0; v < 32; ++v) {
+        const Voice &a   = voice[v];
+        const Channel &c = channel[a.channel];
+        const double ch_pitch =
+                c.bend + lfo_out[c.lfo1] * c.p1 + lfo_out[c.lfo2] * c.p2;
+        const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
+                                 + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
+        const double want[3]        = {a.note + ch_pitch,
+                                       a.level_m * c.amount + a.note * c.track
+                                               + ch_cutoff,
+                                       a.level_a * a.velocity * c.volume};
+        const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF",
+                                       "SINK_GAIN"};
+        for (int k = 0; k < 3; ++k) {
+            const int offset =
+                    (sinks - csp::sink_base) + v * 8 + m.address(fields[k]);
+            const double got = cpu.sink(offset) / 16384.0;
+            worst            = std::max(worst, std::fabs(got - want[k]));
+        }
+    }
+    // a few raw units of the words' rounding, through up to seven operations
+    check(worst <= 8.0 / 16384.0,
+          "the voices' sinks match their formulas: largest difference "
+                  + std::to_string(worst));
+}
+
+// The LFOs in their worst case, all sines, 16 in each half, with the rest of the
+// program as above: the program must fit a pass on both parities of the
+// pass counter, and each LFO updates once in two passes.
+void test_control_program_lfos() {
+    Machine m(control_program());
+    csp::Processor &cpu = m.processor;
+    const int lfos      = m.address("LFOS");
+    const int lfo_size  = m.address("LFO_SIZE");
+    const int set_size  = m.address("SET_SIZE");
+    const int sets      = m.address("LFO_SETS");
+    auto at             = [&](int base, const char *field) {
+        return base + m.address(field);
+    };
+    for (int half = 0; half < 2; ++half) {
+        const int set = sets + half * set_size;
+        cpu.write(at(set, "BASE"), lfos + half * 16 * lfo_size);
+        cpu.write(at(set, "N_SINE"), 16);
+    }
+    // the pointers, so that no two voices or channels share a register
+    const int channels     = m.address("CHANNELS");
+    const int voices       = m.address("VOICES");
+    const int sinks        = m.address("SINKS");
+    const int channel_size = m.address("CHANNEL_SIZE");
+    const int voice_size   = m.address("VOICE_SIZE");
+    for (int c = 0; c < 16; ++c) {
+        const int base = channels + c * channel_size;
+        cpu.write(at(base, "LFO1"), lfos + ((3 * c) % 32) * lfo_size);
+        cpu.write(at(base, "LFO2"), lfos + ((7 * c + 5) % 32) * lfo_size);
+    }
+    for (int v = 0; v < 32; ++v) {
+        const int base = voices + v * voice_size;
+        cpu.write(at(base, "CHANNEL"),
+                  channels + ((5 * v + 1) % 16) * channel_size);
+        cpu.write(at(base, "SINK"), sinks + v * 8);
+        cpu.write(at(base, "STAGE_A"), 4);
+        cpu.write(at(base, "STAGE_M"), 20);
+    }
+    const double step = 0.01; // of a cycle an update
+    for (int k = 0; k < 32; ++k) {
+        const int record = lfos + k * lfo_size;
+        cpu.write_wide(at(record, "PHASE_STEP"), q_wide(step * 16.0));
+        cpu.write(at(record, "DEPTH"), q(1.0));
+    }
+    m.start();
+    int worst = 0;
+    std::vector<int64_t> phase_after_four(32);
+    for (int pass = 1; pass <= 4; ++pass) {
+        const csp::PassReport report = m.run();
+        worst                        = std::max(worst, report.cycles);
+        for (size_t error = 0; error < report.errors.size() && error < 3;
+             ++error) {
+            std::printf("  model (pass %d): %s\n", pass,
+                        report.errors[error].c_str());
+        }
+        check(report.errors.empty(),
+              "the control program with LFOs runs without errors");
+    }
+    check(worst <= csp::pass_cycle_limit,
+          "the control program with 32 sine LFOs fits a pass: "
+                  + std::to_string(worst));
+    std::printf("control program (16 sine LFOs a pass): %d cycles a pass\n",
+                worst);
+    // every LFO has been updated twice in four passes
+    for (int k = 0; k < 32; ++k) {
+        const int64_t phase = cpu.read_wide(at(lfos + k * lfo_size, "PHASE"));
+        check_equal(phase, 2 * q_wide(step * 16.0),
+                    "LFO " + std::to_string(k) + " updated twice");
+    }
+}
 
 int main() {
     test_encoding();
@@ -720,8 +1081,11 @@ int main() {
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();
     test_skip();
-    test_index_delay();
+    test_interlocks();
+    test_index_immediate();
     test_loops();
+    test_vector_loops();
+    test_empty_inner_loop_at_outer_end();
     test_queue_and_swap();
     test_reset();
     test_pass_limit();
@@ -731,6 +1095,10 @@ int main() {
     test_builder();
     test_envelope();
     test_lfo();
+    test_envelope_rates();
+    test_lfo_rate();
+    test_control_program();
+    test_control_program_lfos();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;
