@@ -10,6 +10,10 @@
 
 - Agents write elegant and highly structured code at a senior developer level.
 
+- Agents use Mermaid.js for diagrams and Matplotlib for graphs.
+
+- Agents use Numpy, Scipy and Essentia for audio analysis.
+
 - Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
 
 - Code in C-like languages is formatted in the style of the Oracle Java API Documentation.
