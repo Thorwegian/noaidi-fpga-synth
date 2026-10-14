@@ -545,13 +545,32 @@ void case_vibrato(VerilatedContext &context) {
     std::printf("LFO 1 on the pitch\n");
     Rig rig(context);
     plain(rig.patch);
-    rig.patch.lfo[0].shape = 3;        // sine
-    rig.patch.lfo[0].rate  = 700;      // 2 Hz at 96 kHz
+    rig.patch.lfo[0].shape = 3;   // sine
+    rig.patch.lfo[0].rate  = 700; // 2 Hz at 96 kHz
+    if (const char *shape = std::getenv("SYNTH_LFO_SHAPE")) {
+        rig.patch.lfo[0].shape = static_cast<uint8_t>(std::atoi(shape));
+    }
     rig.patch.lfo[0].depth = 1024 / 6; // ±1 semitone
     rig.patch.lfo[0].dest  = LFO_DEST_PITCH;
+    const bool live        = std::getenv("SYNTH_VIBRATO_LIVE") != nullptr;
+    if (live) { // as the knobs do it: the LFO is brought to the pitch while a note sounds
+        rig.patch.lfo[0].dest  = LFO_DEST_DUTY;
+        rig.patch.lfo[0].depth = 0;
+    }
     rig.bring_up();
     rig.strike(60);
     rig.synth.run_ms(20);
+    if (live) {
+        rig.synth.run_ms(300);
+        rig.patch.lfo[0].depth = 1024 / 6;
+        render::Writes writes;
+        render::lfo(rig.patch, 0, writes);
+        rig.commit(writes);
+        rig.patch.lfo[0].dest = LFO_DEST_PITCH;
+        writes.clear();
+        render::lfo(rig.patch, 0, writes);
+        rig.commit(writes);
+    }
     // the frequency every 25 ms for a second
     double lowest = 1e9, highest = 0;
     for (int slice = 0; slice < 40; ++slice) {
@@ -759,6 +778,11 @@ int main(int argc, char **argv) {
                 csp::control::words.size(), csp::control::constants.size());
     if (std::getenv("SYNTH_ONLY_STRESS")) {
         case_stress(context);
+        std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
+    }
+    if (std::getenv("SYNTH_ONLY_VIBRATO")) {
+        case_vibrato(context);
         std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
         return failures == 0 ? 0 : 1;
     }
