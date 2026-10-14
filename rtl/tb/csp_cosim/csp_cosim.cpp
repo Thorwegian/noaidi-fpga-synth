@@ -392,6 +392,9 @@ int run_control_program(VerilatedContext &context) {
         }
     }
     // The channels: envelope tables, routing, depths
+    const int channel_sinks = symbol("CHANNEL_SINKS");
+    const int sink_size     = symbol("CHANNEL_SINK_SIZE");
+    setup.push_back({symbol("CHANNELS_IN_USE"), 16});
     for (int channel = 0; channel < 16; ++channel) {
         const int base = channels + channel * channel_size;
         auto table     = [&](int row, int64_t target22, uint32_t coefficient) {
@@ -419,6 +422,14 @@ int run_control_program(VerilatedContext &context) {
         field("KEY_TRACK", word_of(0.25 * pick(0, 6)));
         field("MOD_AMOUNT", word_of(0.1 * pick(-30, 30)));
         field("VOLUME", word_of(0.1 * pick(2, 10)));
+        field("LFO1_DUTY", word_of(0.01 * pick(0, 30)));
+        field("LFO2_DUTY", word_of(0.01 * pick(0, 30)));
+        field("LFO1_RESONANCE", word_of(0.1 * pick(0, 10)));
+        field("LFO2_RESONANCE", word_of(0.1 * pick(0, 10)));
+        field("DUTY_BASE_0", word_of(0.1 * pick(-5, 5)));
+        field("DUTY_BASE_1", word_of(0.1 * pick(-5, 5)));
+        field("RESONANCE_BASE", word_of(0.1 * pick(0, 40)));
+        field("SINK_BLOCK", channel_sinks + channel * sink_size);
     }
     // The voices: idle, in release
     for (int voice = 0; voice < 32; ++voice) {

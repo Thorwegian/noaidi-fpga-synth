@@ -935,14 +935,29 @@ void test_control_program() {
     struct Channel {
         double bend, p1, c1, p2, c2, base, track, amount, volume;
         int lfo1, lfo2;
+        double d1, d2, r1, r2, duty0, duty1, resonance; // the pulse width and Q
     };
+    const int channel_sinks = m.address("CHANNEL_SINKS");
+    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
+    cpu.write(m.address("CHANNELS_IN_USE"), 16);
     std::vector<Channel> channel(16);
     for (int c = 0; c < 16; ++c) {
         channel[c]     = {0.02 * (c - 8), 0.1 + 0.01 * c,  -0.2 + 0.03 * c,
                           0.05 * (c % 4), 0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
                           0.25 * (c % 5), 0.3 + 0.05 * c,  0.2 + 0.05 * c,
-                          (3 * c) % 32,   (7 * c + 5) % 32};
+                          (3 * c) % 32,   (7 * c + 5) % 32,
+                          0.03 * (c % 5), -0.02 * (c % 3), 0.1 * (c % 4),
+                          0.05 * (c % 6), 0.1 + 0.02 * c,  -0.3 + 0.03 * c,
+                          0.5 + 0.1 * (c % 7)};
         const int base = channels + c * channel_size;
+        cpu.write(at(base, "LFO1_DUTY"), q(channel[c].d1));
+        cpu.write(at(base, "LFO2_DUTY"), q(channel[c].d2));
+        cpu.write(at(base, "LFO1_RESONANCE"), q(channel[c].r1));
+        cpu.write(at(base, "LFO2_RESONANCE"), q(channel[c].r2));
+        cpu.write(at(base, "DUTY_BASE_0"), q(channel[c].duty0));
+        cpu.write(at(base, "DUTY_BASE_1"), q(channel[c].duty1));
+        cpu.write(at(base, "RESONANCE_BASE"), q(channel[c].resonance));
+        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
         cpu.write(at(base, "BEND"), q(channel[c].bend));
         cpu.write(at(base, "LFO1_PITCH"), q(channel[c].p1));
         cpu.write(at(base, "LFO1_CUTOFF"), q(channel[c].c1));
@@ -1018,6 +1033,26 @@ void test_control_program() {
     check(worst <= 8.0 / 16384.0,
           "the voices' sinks match their formulas: largest difference "
                   + std::to_string(worst));
+
+    // the channels' own sinks: the pulse widths and the resonance
+    double worst_channel = 0;
+    for (int c = 0; c < 16; ++c) {
+        const Channel &a = channel[c];
+        const double duty = lfo_out[a.lfo1] * a.d1 + lfo_out[a.lfo2] * a.d2;
+        const double reso = lfo_out[a.lfo1] * a.r1 + lfo_out[a.lfo2] * a.r2;
+        const double want[3] = {a.duty0 + duty, a.duty1 + duty,
+                                a.resonance + reso};
+        const char *const fields[3] = {"DUTY_0", "DUTY_1", "RESONANCE"};
+        for (int k = 0; k < 3; ++k) {
+            const int offset = (channel_sinks - csp::sink_base)
+                               + c * sink_size + m.address(fields[k]);
+            worst_channel = std::max(
+                    worst_channel, std::fabs(cpu.sink(offset) / 16384.0 - want[k]));
+        }
+    }
+    check(worst_channel <= 6.0 / 16384.0,
+          "the channels' duty and resonance sinks match their formulas: "
+          "largest difference " + std::to_string(worst_channel));
 }
 
 // The LFOs in their worst case, all sines, 16 in each half, with the rest of the
@@ -1044,10 +1079,14 @@ void test_control_program_lfos() {
     const int sinks        = m.address("SINKS");
     const int channel_size = m.address("CHANNEL_SIZE");
     const int voice_size   = m.address("VOICE_SIZE");
+    const int channel_sinks = m.address("CHANNEL_SINKS");
+    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
+    cpu.write(m.address("CHANNELS_IN_USE"), 16);
     for (int c = 0; c < 16; ++c) {
         const int base = channels + c * channel_size;
         cpu.write(at(base, "LFO1"), lfos + ((3 * c) % 32) * lfo_size);
         cpu.write(at(base, "LFO2"), lfos + ((7 * c + 5) % 32) * lfo_size);
+        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
     }
     for (int v = 0; v < 32; ++v) {
         const int base = voices + v * voice_size;

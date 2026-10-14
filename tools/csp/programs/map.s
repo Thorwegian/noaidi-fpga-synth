@@ -34,6 +34,7 @@
 ; ---- globals --------------------------------------------------------------
         .reg   PASS, 0x040          ; the pass counter
         .reg   PARITY, 0x060        ; scratch for the LFOs' half
+        .reg   CHANNELS_IN_USE, 0x061   ; how many channels the program works out (the firmware's)
         .equ   LFO_SETS, 0x070
 
 ; the LFOs update every other pass, half of them each time (24 kHz): a set
@@ -81,7 +82,17 @@
         .field CH_CUTOFF, 1         ; the cutoff, with the LFOs and the tracking of CH_PITCH
         .field TP, 1                ; scratch
         .field TC, 1
-        .field SPARE_CHANNEL, 21    ; a channel is 64 words
+        .field LFO1_DUTY, 1         ; LFO 1's depth on the pulse width, 1.0 being the rail
+        .field LFO2_DUTY, 1
+        .field LFO1_RESONANCE, 1    ;   and on the resonance, in octaves of Q
+        .field LFO2_RESONANCE, 1
+        .field DUTY_BASE_0, 1       ; each oscillator's pulse width, before the LFOs
+        .field DUTY_BASE_1, 1
+        .field RESONANCE_BASE, 1    ; the resonance knob, in octaves of Q
+        .field SINK_BLOCK, 1        ; the address of the channel's sinks (below)
+        .field TD, 1                ; scratch
+        .field TR, 1
+        .field SPARE_CHANNEL, 11    ; a channel is 64 words
         .end
 
 ; ---- the envelopes ----------------------------------------------------------------
@@ -118,22 +129,25 @@
         .field SINK_SPARE, 5
         .end
 
-; The channels' sinks are the firmware's: what only a MIDI message moves
-; (docs/memory_map.md). A partial points at its voice's sinks above and at
-; its channel's here: one word for each of its oscillator and unison
+; The channels' sinks are mostly the firmware's: what only a MIDI message
+; moves (docs/memory_map.md). A partial points at its voice's sinks above
+; and at its channel's here: one word for each of its oscillator and unison
 ; positions (eight, two oscillators of four) for the detune, the cutoff's
-; offset and the gain of each side, and one for each oscillator's duty and
-; mode and for the resonance. The firmware writes them through the queue
-; (to both pages of the sink area).
+; offset and the gain of each side, and one for each oscillator's mode. The
+; firmware writes them through the queue (to both pages of the sink area).
+; The duty and the resonance are the program's, since LFOs move them
+; (channel.s): the firmware sets their bases in the channel's registers.
         .equ   CHANNEL_SINKS, 0x900
         .block CHANNEL_SINK
         .field DETUNE, 8            ; pitch: the oscillator's tune and the unison spread, in octaves
         .field CUTOFF_OFFSET, 8     ; cutoff: the tracking of tune and spread, in octaves
         .field GAIN_LEFT, 8         ; the pan, the spread and the oscillator mix, linear
         .field GAIN_RIGHT, 8
-        .field DUTY, 2              ; per oscillator: 1.0 is the rail
-        .field MODE, 2              ; per oscillator: waveform [1:0], cascade [2], filter type [4:3]
-        .field RESONANCE, 1         ; octaves of Q above Butterworth
+        .field DUTY_0, 1            ; per oscillator: 1.0 is the rail (the program's: base and LFOs)
+        .field DUTY_1, 1
+        .field MODE_0, 1            ; per oscillator: waveform [1:0], cascade [2], filter type [4:3]
+        .field MODE_1, 1
+        .field RESONANCE, 1         ; octaves of Q above Butterworth (the program's, like the duty)
         .field SPARE_SINKS, 11      ; a channel's block is 48 words
         .end
 

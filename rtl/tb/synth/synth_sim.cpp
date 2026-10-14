@@ -389,6 +389,10 @@ std::vector<Write> setup_writes(const Layout &layout, const Patch &patch) {
     };
     field("LFO1", layout.lfos);
     field("LFO2", layout.lfos);
+    field("SINK_BLOCK", layout.channel_sinks);
+    field("DUTY_BASE_0", 0);
+    field("DUTY_BASE_1", 0);
+    field("RESONANCE_BASE", 0);
     field("CUTOFF_BASE", word_of(patch.cutoff_base));
     field("KEY_TRACK", word_of(0.0));
     field("VOLUME", word_of(patch.volume));
@@ -412,9 +416,8 @@ std::vector<Write> setup_writes(const Layout &layout, const Patch &patch) {
         writes.push_back({sinks.channel_sink(0, "GAIN_LEFT", partial), word_of(patch.left)});
         writes.push_back({sinks.channel_sink(0, "GAIN_RIGHT", partial), word_of(patch.right)});
     }
-    writes.push_back({sinks.channel_sink(0, "DUTY", 0), 0});
-    writes.push_back({sinks.channel_sink(0, "MODE", 0), patch.waveform});
-    writes.push_back({sinks.channel_sink(0, "RESONANCE", 0), 0});
+    writes.push_back({sinks.channel_sink(0, "MODE_0"), patch.waveform});
+    writes.push_back({layout.symbol("CHANNELS_IN_USE"), 1});
     return writes;
 }
 
@@ -431,9 +434,9 @@ void point_partial(Link &link, const Layout &layout, int partial, int voice,
         index(sinks.voice_sink(voice, "SINK_GAIN")),
         index(sinks.channel_sink(channel, "GAIN_LEFT", unison)),
         index(sinks.channel_sink(channel, "GAIN_RIGHT", unison)),
-        index(sinks.channel_sink(channel, "DUTY", oscillator)),
+        index(sinks.channel_sink(channel, oscillator ? "DUTY_1" : "DUTY_0")),
         index(sinks.channel_sink(channel, "RESONANCE")),
-        index(sinks.channel_sink(channel, "MODE", oscillator)),
+        index(sinks.channel_sink(channel, oscillator ? "MODE_1" : "MODE_0")),
     };
     link.point(partial, pointers);
 }
