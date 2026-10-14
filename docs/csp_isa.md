@@ -3,18 +3,18 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: design decided (#184): the instruction set in
-[csp_manual.md](csp_manual.md) is approved, and the decisions are
-listed in section 14. The core is built (#220) as the pipeline of
-section 3: it matches the reference model in co-simulation and meets
-timing, but is not wired into the synthesizer yet. Vector loops
-(section 3) are decided (#220) and built: they match the model in
-cycles as well as in results.** The
-current CSP is described in [dmem_architecture.md](dmem_architecture.md);
-this document proposes what it becomes and why. The instruction set
-itself, every instruction and the assembly language, is specified in
+**Status: built and wired in (#184, #222): the instruction set in
+[csp_manual.md](csp_manual.md) is approved, the decisions are listed in
+section 14, the core is built (#220) as the pipeline of section 3 and
+matches the reference model in co-simulation, and the synthesizer runs it
+(#222): the control program (#221) computes every control signal, the sink
+area and the pointer RAM replace the per-partial parameters, and
+`make sim-synth` plays the firmware's own writes on the Verilated chip.** The
+old CSP is described in [dmem_architecture.md](dmem_architecture.md) (retired);
+this document says what the CSP became and why. The instruction set itself,
+every instruction and the assembly language, is specified in
 [csp_manual.md](csp_manual.md). Cycle counts and resources here are
-measured (reference model, `make csp-fit`); counts of words and
+measured (reference model, `make csp-fit`, `make pack`); counts of words and
 instructions are worked out from the layouts.
 
 The Control Signal Processor (CSP) computes every control signal the
@@ -544,20 +544,23 @@ small program. The new CSP gets:
 
 ## 13. Steps
 
-Each its own PR, checked in sim and on the board:
+Each its own PR (the last two together, #222), checked in sim and on the
+board:
 
 1. Reference model, assembler and the instruction-level bench, against
-   a new CSP core beside the old one.
+   a new CSP core beside the old one. *Done (#219).*
 2. The new core: datapath, register file, write queue on the swap,
-   loading in reset, 48 kHz passes of up to 1472 cycles of instructions. Today's
-   programs ported to it.
-3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
-   `osc_core` retire.
-4. Sink area and DMEM + DMEM partial sinks, two cycles per partial; the
-   per-partial immediates retire; note-on becomes voice-register writes.
-5. SPI protocol on 18/36-bit words (#151), with the new address map;
-   `store_ram` retires.
-6. Linear gain (#176) on top.
+   loading in reset, 48 kHz passes of up to 1472 cycles of instructions.
+   *Done (#220).*
+3. Envelopes and LFOs as instruction sequences, and the rest of the control
+   program; `adsr.sv` and the LFO's `osc_core` retire. *Done (#221).*
+4. Sink area and the voice + channel partial sinks, two cycles per partial;
+   the per-partial immediates retire; note-on becomes voice-register writes;
+   the SPI map follows (`store_ram` retires); the firmware moves to the new
+   model. *Done in sim, place and route and the firmware build (#222);
+   the board is next.*
+5. Linear gain (#176) came with it: a partial's gain is voice word × channel
+   word.
 
 ## 14. Decisions and open questions
 
@@ -576,7 +579,7 @@ Decided on #184:
 | — | pipeline | in order, full interlocks, no forwarding (#220) |
 | 9 | rounding | truncate |
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
-| 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |
+| 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port, a partial's whole entry on one clock edge, so no hold of the PAP is needed; no second page |
 | — | nested loops | `LOOP.i` / `LOOP.j` (`a` bit 0), nesting one level |
 | — | vector loops | `LOOP.vi` / `LOOP.vj` (`a` bit 1), up to 64 elements; a larger count skips the loop (#220) |
 | 12 | LFOs | 2 per channel at 24 kHz |
@@ -584,6 +587,15 @@ Decided on #184:
 | — | firmware writes | queued, applied on the swap |
 | — | program loading | CSP held in reset |
 
-Still open:
+Decided on #222:
 
-- How the pointer RAM packs 12 pointers per partial (section 10).
+| # | Question | Decision |
+|---|---|---|
+| 13 | how the pointer RAM packs the pointers | ten pointers of ten bits (the voice's pitch, cutoff and gain; the channel's detune, offset, gain on each side, duty, resonance and mode), 100 bits in three BSRAM of 256 × 36 |
+| 14 | the sink words' formats | Q4.14; pitch and cutoff in octaves from middle C, resonance in octaves of Q, duty 1.0 the rail, gain linear and signed, mode `[1:0]` waveform, `[2]` cascade, `[4:3]` filter type |
+| 15 | the firmware's own sink words | written through the write queue (the address reaches the sinks), applied to both pages in the write window |
+| 16 | the sink area | six BSRAM, `DPX9B` instantiated by hand (yosys infers neither a block with two read ports nor a true dual-port RAM) |
+| 17 | channels | the program works out `CHANNELS_IN_USE` of them (the firmware says 1 today); a channel's pulse width and resonance are program-computed sinks (the LFOs move them) |
+| 18 | the memory map | pointers `0x2000 + 64 p`, the queue `0x6000`, the program `0x8000`, `CTRL` bits swap, hold, test tone (docs/memory_map.md) |
+
+Still open: nothing in the design; the board test.

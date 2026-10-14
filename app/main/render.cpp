@@ -127,10 +127,11 @@ int32_t note_word(uint8_t note) {
     return octaves(raw - middle_c);
 }
 
-// The envelope's rows: attack aims past full scale, decay at the sustain
-// level, release at zero; each with its rate.
-void envelope(const adsr_t &env, int attack, int decay, int release,
-              Writes &writes) {
+// An envelope's rows: attack aims past full scale, decay at the sustain level,
+// release at zero; each with its rate. `sustain` is the level the decay aims
+// at, in the 22-bit scale of the level (0x400000 is full scale).
+void envelope(const adsr_t &env, int sustain, int attack, int decay,
+              int release, Writes &writes) {
     auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
         const int base = channel_register(cp::envelopes + segment);
         wide(writes, base + cp::target, target22 << 10);
@@ -139,9 +140,7 @@ void envelope(const adsr_t &env, int attack, int decay, int release,
                      patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code))));
     };
     row(attack, attack_target, env.attack);
-    row(decay,
-        static_cast<int64_t>(std::min<uint16_t>(env.sustain, 0x3FF)) << 12,
-        env.decay);
+    row(decay, sustain, env.decay);
     row(release, 0, env.release);
 }
 
@@ -269,11 +268,27 @@ void setup(Writes &writes) {
 }
 
 void amp_envelope(const patch_t &patch, Writes &writes) {
-    envelope(patch.env[0], amp_attack, amp_decay, amp_release, writes);
+    // The patch's sustain is a fraction of the old gain's span of 60 dB, which
+    // the envelope walked in dB; the gain is linear now, so the same loudness
+    // is a power of ten.
+    constexpr double span_db = 60.0;
+    const double fraction =
+            std::min<uint16_t>(patch.env[0].sustain, 0x3FF) / 1024.0;
+    const int sustain =
+            patch.env[0].sustain >= 0x3FF
+                    ? level_22_one
+                    : static_cast<int>(
+                              level_22_one
+                              * std::pow(10.0,
+                                         -span_db / 20.0 * (1.0 - fraction)));
+    envelope(patch.env[0], sustain, amp_attack, amp_decay, amp_release, writes);
 }
 
 void mod_envelope(const patch_t &patch, Writes &writes) {
-    envelope(patch.env[1], mod_attack, mod_decay, mod_release, writes);
+    // linear in octaves of cutoff: the sustain is a fraction of the depth
+    envelope(patch.env[1],
+             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, mod_attack,
+             mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff
     put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth));
 }

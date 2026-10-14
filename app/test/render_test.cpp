@@ -93,8 +93,11 @@ void test_envelope() {
     const int base   = channel + cp::envelopes;
     check(wide_at(state, base + 0 + cp::target) == int64_t{0x533333} << 10,
           "attack aims at 1.3");
-    check(wide_at(state, base + 4 + cp::target) == int64_t{0x200} << 22,
-          "decay aims at the sustain level");
+    // half the old 60 dB span is 30 dB down
+    check(wide_at(state, base + 4 + cp::target)
+                  == (static_cast<int64_t>(0x400000 * std::pow(10.0, -1.5))
+                      << 10),
+          "decay aims at the sustain level, as many dB down as the old gain's");
     check(wide_at(state, base + 8 + cp::target) == 0, "release aims at zero");
     const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(0x80));
     check(wide_at(state, base + 0 + cp::rate) == csp::envelope_rate(k),
