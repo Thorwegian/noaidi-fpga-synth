@@ -553,6 +553,24 @@ void test_sinks() {
           "a sink word skipped in a pass is reported stale");
 }
 
+void test_firmware_sinks() {
+    Machine m(std::string(registers) + "NOP\n");
+    m.start();
+    m.processor.write(csp::sink_base + 7, q(0.25));
+    m.processor.write(csp::sink_base + csp::sink_count, q(1.0)); // beyond the sinks
+    m.run();
+    check_equal(m.processor.sink(7), 0, "a queued sink write waits for the swap");
+    m.processor.swap();
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25),
+                "the window applies it, and the pass publishes it");
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25),
+                "it is in both pages, so the next flip keeps it");
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25), "and the one after");
+}
+
 // ---- the assembler ----------------------------------------------------------------
 
 void test_assembler() {
@@ -1090,6 +1108,7 @@ int main() {
     test_reset();
     test_pass_limit();
     test_sinks();
+    test_firmware_sinks();
     test_assembler();
     test_labels_and_count();
     test_builder();

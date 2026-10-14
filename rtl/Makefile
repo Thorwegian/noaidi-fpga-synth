@@ -250,7 +250,7 @@ sim-csp: obj_dir/tb_csp/sim
 
 # ---- the new CSP (rtl/csp, #184): unit benches and the co-simulation ----
 CSP_NEW = csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
-          csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_core.sv
+          csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv
 
 obj_dir/tb_csp_register_file/sim: csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv Makefile
 	$(VERILATE) csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv

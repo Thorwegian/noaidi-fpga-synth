@@ -26,10 +26,10 @@ module tb_csp_write_queue;
         sclk_reset_n = 0;
     end
     logic write_enable = 0, swap = 0, pop = 0;
-    logic [csp_pkg::REGISTER_W-1:0] write_address = '0;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] write_address = '0;
     logic [csp_pkg::WORD_W-1:0]     write_data = '0;
     logic full, committed;
-    logic [csp_pkg::REGISTER_W-1:0] head_address;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] head_address;
     logic [csp_pkg::WORD_W-1:0]     head_data;
 
     csp_write_queue dut (.*);
@@ -41,7 +41,7 @@ module tb_csp_write_queue;
     task automatic sclk_cycle(input logic enable, input int address, input int value,
                               input logic do_swap);
         write_enable  = enable;
-        write_address = csp_pkg::REGISTER_W'(address);
+        write_address = csp_pkg::QUEUE_ADDRESS_W'(address);
         write_data    = csp_pkg::WORD_W'(value);
         swap          = do_swap;
         #50 sclk = 1;
@@ -57,7 +57,7 @@ module tb_csp_write_queue;
         repeat (20) @(posedge clk);    // let the toggle cross
         while (committed) begin
             @(negedge clk);
-            if (head_address !== csp_pkg::REGISTER_W'(first + count)
+            if (head_address !== csp_pkg::QUEUE_ADDRESS_W'(first + count)
                 || head_data !== csp_pkg::WORD_W'(1000 + first + count)) begin
                 $display("FAIL entry %0d: 0x%0h = %0d", count, head_address, head_data);
                 errors++;

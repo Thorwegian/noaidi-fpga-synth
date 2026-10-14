@@ -520,6 +520,10 @@ public:
             int address = pick(0x060, 0x0FF);
             if (burst && chance(8)) {
                 address = chance(2) ? 0 : pick(0x040, 0x05F);
+            } else if (chance(5)) {
+                address = pick(0x800, 0xBFF); // a sink word: the firmware's own
+            } else if (chance(40)) {
+                address = pick(0xC00, 0xFFF); // beyond the sinks: dropped
             }
             writes.push_back({address, word()});
         }

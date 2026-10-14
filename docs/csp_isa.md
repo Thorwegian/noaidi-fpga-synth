@@ -297,9 +297,11 @@ flip. Two rules keep the pages consistent:
    the partials would alternate between old and new values. Slower work
    writes ordinary registers, and one instruction per pass copies the
    result to its sink. The reference model checks this as it runs.
-2. **Firmware writes to the sink area**, if any remain, **go to both
-   pages**, by the write window, as today's DMEM mailbox commits to both
-   halves.
+2. **Firmware writes to the sink area** (the channel settings that only
+   a MIDI message moves) **go to both pages**, through the write queue
+   like a register write (a queued address reaches 0x000–0xBFF) and
+   applied by the write window, when the partial pipeline is idle
+   (`write_both` on `csp_sink_area`).
 
 ## 7. Opcodes
 

@@ -192,6 +192,11 @@ int Processor::apply_window(int limit) {
                               && !is_input(queued.address);
         if (writable) {
             registers_[queued.address] = queued.raw;
+        } else if (is_sink(queued.address)) {
+            // The firmware's own sink words (channel settings): both pages,
+            // so that they survive the flip.
+            sink_pages_[0][queued.address - sink_base] = queued.raw;
+            sink_pages_[1][queued.address - sink_base] = queued.raw;
         }
         ++applied;
     }

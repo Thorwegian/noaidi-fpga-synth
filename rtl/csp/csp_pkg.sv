@@ -23,6 +23,7 @@ package csp_pkg;
     parameter int MAX_PROGRAM    = 1472;          // instructions per pass
     parameter int PROGRAM_W      = 11;            // $clog2(MAX_PROGRAM)
     parameter int WRITE_WINDOW   = 48;            // queued writes per pass
+    parameter int QUEUE_ADDRESS_W = 12;           // a queued write reaches the registers and the sinks
     parameter int CYCLES_PER_PASS = 1536;         // two samples
     parameter int MAX_VECTOR_LENGTH = 64;         // elements of a vector loop
 

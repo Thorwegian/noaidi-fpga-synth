@@ -73,9 +73,10 @@ the partial pipeline reads. The CSP writes it but cannot read it back.
 | `0x600–0x7FF` | voices | 32 blocks of 16 words: each voice's note, gate, velocity, envelope levels and stages |
 | `0x800–0xBFF` | sinks | write-only: the values the partials read |
 
-The firmware can write any register over SPI. Its writes wait in a
-queue and are applied together between passes, never during one
-(section 5).
+The firmware can write any register, and any sink word, over SPI. Its
+writes wait in a queue and are applied together between passes, never
+during one (section 5). A sink word it writes goes to both of the sink
+area's pages.
 
 A **wide register** is an aligned pair of registers, `2n` and `2n + 1`,
 read and written together as one 36-bit value. The even address holds

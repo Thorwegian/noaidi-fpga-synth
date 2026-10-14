@@ -70,11 +70,12 @@ module csp_core (
     // write queue (csp_write_queue)
     output logic                                queue_pop,
     input  wire                                 queue_committed,
-    input  wire  [csp_pkg::REGISTER_W-1:0]      queue_address,
+    input  wire  [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_address,
     input  wire  [csp_pkg::WORD_W-1:0]          queue_data,
 
     // the sink area's shadow page
     output logic                                sink_write_enable,
+    output logic                                sink_write_both,    // a firmware write: both pages
     output logic [9:0]                          sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]          sink_write_data,
     output logic                                pass_done        // one clock: flip the sink pages
@@ -1011,7 +1012,12 @@ module csp_core (
     wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
     wire writes_result_now = writing && writeback_stage.writes_registers;
     assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
-    wire queue_writable = queue_address != '0 && !csp_pkg::is_input(AW'(queue_address));
+    // A queued write names a register, or a sink word: the firmware's own
+    // words in the sink area (channel settings that only a MIDI message
+    // moves) go to both pages, so that they survive the flip.
+    wire queue_to_sink  = queue_pop && csp_pkg::is_sink(AW'(queue_address));
+    wire queue_writable = queue_address != '0 && !csp_pkg::is_input(AW'(queue_address))
+                          && queue_address < csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::REGISTER_COUNT);
 
     always_comb begin
         rf_write_enable  = 1'b0;
@@ -1029,14 +1035,17 @@ module csp_core (
             rf_write_data    = w_result;
         end else if (queue_pop) begin
             rf_write_enable  = queue_writable;
-            rf_write_address = queue_address;
+            rf_write_address = csp_pkg::REGISTER_W'(queue_address);
             rf_write_data    = {18'd0, queue_data};
         end
     end
 
-    assign sink_write_enable  = writing && writeback_stage.writes_sink;
-    assign sink_write_address = 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
-    assign sink_write_data    = w_result[17:0];
+    assign sink_write_enable  = (writing && writeback_stage.writes_sink) || queue_to_sink;
+    assign sink_write_both    = queue_to_sink;
+    assign sink_write_address = queue_to_sink
+                                ? 10'(queue_address - csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::SINK_BASE))
+                                : 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
+    assign sink_write_data    = queue_to_sink ? queue_data : w_result[17:0];
 
 endmodule
 `default_nettype wire

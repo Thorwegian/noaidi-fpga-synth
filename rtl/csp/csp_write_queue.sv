@@ -33,7 +33,7 @@ module csp_write_queue (
     input  wire                                 sclk,
     input  wire                                 sclk_reset_n,
     input  wire                                 write_enable,
-    input  wire [csp_pkg::REGISTER_W-1:0]       write_address,
+    input  wire [csp_pkg::QUEUE_ADDRESS_W-1:0]       write_address,
     input  wire [csp_pkg::WORD_W-1:0]           write_data,
     input  wire                                 swap,          // one sclk cycle
     output logic                                full,
@@ -43,13 +43,13 @@ module csp_write_queue (
     input  wire                                 reset_n,
     input  wire                                 pop,           // take the head entry
     output logic                                committed,     // a committed entry waits
-    output logic [csp_pkg::REGISTER_W-1:0]      head_address,
+    output logic [csp_pkg::QUEUE_ADDRESS_W-1:0]      head_address,
     output logic [csp_pkg::WORD_W-1:0]          head_data
 );
 
     localparam int DEPTH     = 512;
     localparam int POINTER_W = 10;     // one more bit than the index, to tell full from empty
-    localparam int ENTRY_W   = csp_pkg::REGISTER_W + csp_pkg::WORD_W;
+    localparam int ENTRY_W   = csp_pkg::QUEUE_ADDRESS_W + csp_pkg::WORD_W;
 
     function automatic logic [POINTER_W-1:0] to_gray(input logic [POINTER_W-1:0] binary);
         to_gray = binary ^ (binary >> 1);
