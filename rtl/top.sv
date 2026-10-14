@@ -135,6 +135,11 @@ module top (
     // A pass is two samples: it starts with the 48 kHz sample, and ends
     // in the last cycle before the next one, when the sink pages flip.
     logic [17:0] csp_pass_counter;
+    logic [10:0] probe_address_sclk, probe_address_meta, probe_address_sync;
+    logic [35:0] probe_data;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) {probe_address_meta, probe_address_sync} <= '0;
+        else        {probe_address_meta, probe_address_sync} <= {probe_address_sclk, probe_address_meta};
     csp_core u_csp (
         .clk                (sysclk),
         .reset_n            (rst_n),
@@ -151,7 +156,9 @@ module top (
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data),
         .pass_done          (pass_done),
-        .pass_counter       (csp_pass_counter)
+        .pass_counter       (csp_pass_counter),
+        .probe_address      (probe_address_sync),
+        .probe_data         (probe_data)
     );
 
     logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address;
@@ -343,6 +350,12 @@ module top (
     wire [31:0] status_queue   = {21'd0, queue_full, pop_pointer_sync};   // read pointer, Gray-coded
     wire [31:0] status_limiter = {13'd0, gain_sync};
     wire [31:0] status_dropped = {16'd0, dropped_writes};
+    logic [35:0] probe_meta, probe_sync;
+    always_ff @(posedge sclk or negedge rst_n)
+        if (!rst_n) {probe_meta, probe_sync} <= '0;
+        else        {probe_meta, probe_sync} <= {probe_data, probe_meta};
+    wire [31:0] status_probe_high = {14'd0, probe_sync[35:18]};   // the even register of the pair
+    wire [31:0] status_probe_low  = {14'd0, probe_sync[17:0]};    // the odd one
 
     spi_bus u_spi (
         .sclk     (sclk),
@@ -364,7 +377,10 @@ module top (
         .status_0             (status_pass),
         .status_1             (status_queue),
         .status_2             (status_limiter),
-        .status_3             (status_dropped)
+        .status_3             (status_dropped),
+        .status_4             (status_probe_high),
+        .status_5             (status_probe_low),
+        .probe_address        (probe_address_sclk)
     );
 
     //----------------------------------------------------------------

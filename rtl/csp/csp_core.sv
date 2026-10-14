@@ -79,7 +79,12 @@ module csp_core (
     output logic [9:0]                          sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]          sink_write_data,
     output logic                                pass_done,       // one clock: flip the sink pages
-    output logic [17:0]                         pass_counter     // passes run since reset (diagnostics)
+    output logic [17:0]                         pass_counter,    // passes run since reset (diagnostics)
+
+    // register probe (diagnostics): the pair at probe_address, read near the
+    // end of every pass when no instruction issues
+    input  wire  [csp_pkg::REGISTER_W-1:0]      probe_address,
+    output logic [35:0]                         probe_data
 );
 
     // ---- constants --------------------------------------------------------------------
@@ -315,13 +320,30 @@ module csp_core (
     // only holds its own element's private index register.
     wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
+    // The probe takes the Y port once a pass, long after the last instruction
+    // has issued and drained (RUN_END + 8), and keeps the pair it reads.
+    localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 16;
+    wire probe_now = in_pass && pass_cycle == 11'(PROBE_CYCLE);
+    logic probe_read;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            probe_read <= 1'b0;
+            probe_data <= '0;
+        end else begin
+            probe_read <= probe_now;
+            if (probe_read) begin
+                probe_data <= read_data[2];
+            end
+        end
+    end
+
     always_comb begin
         read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
         read_wide[0]    = decode_a_wide;
         read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
         read_wide[1]    = 1'b0;
-        read_address[2] = csp_pkg::REGISTER_W'(decode_y_address);
-        read_wide[2]    = decode_y_wide;
+        read_address[2] = probe_now ? probe_address : csp_pkg::REGISTER_W'(decode_y_address);
+        read_wide[2]    = probe_now ? 1'b1 : decode_y_wide;
     end
 
     // The hazard check: an older instruction in R … W writes something

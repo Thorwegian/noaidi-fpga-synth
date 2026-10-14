@@ -19,7 +19,9 @@
 //
 // What the words address (docs/memory_map.md):
 //
-//   0x0000–0x000F  system registers (read back): CTRL, scratch
+//   0x0000–0x000F  system registers (read back): CTRL, scratch; 0x0008–0x000B and
+//                  0x000D–0x000E are read-only diagnostics, 0x000C picks the CSP
+//                  register pair the probe reads (0x000D, 0x000E)
 //   0x0010         PROGRAM_HIGH: bits 35:32 of the next instruction write
 //   0x2000 + 64 p  partial p's pointers, words 0..3 (the fourth commits)
 //   0x6000 + a     the CSP's write queue: register or sink word a
@@ -75,7 +77,10 @@ module spi_bus #(
     input  logic [31:0] status_0,
     input  logic [31:0] status_1,
     input  logic [31:0] status_2,
-    input  logic [31:0] status_3
+    input  logic [31:0] status_3,
+    input  logic [31:0] status_4,
+    input  logic [31:0] status_5,
+    output logic [10:0] probe_address        // system register 0x000C: which CSP register pair to probe
 );
 
     //--------------------------------------------------------------------
@@ -117,6 +122,8 @@ module spi_bus #(
             16'h0009: read_word = status_1;
             16'h000A: read_word = status_2;
             16'h000B: read_word = status_3;
+            16'h000D: read_word = status_4;
+            16'h000E: read_word = status_5;
             default:  read_word = address < 16'(SYSTEM_WORDS) ? system_register[address[3:0]] : 32'd0;
         endcase
     endfunction
@@ -211,6 +218,7 @@ module spi_bus #(
                                                ? word_data & ~32'd1 : word_data;
         end
     end
+    assign probe_address = system_register[12][10:0];
     // The held and test-tone levels follow CTRL as written, from the edge
     // after the word completes.
     initial begin

@@ -26,6 +26,7 @@
 
 #include "Vtb_synth.h"
 #include "csp/control_program.hpp"
+#include "csp/lfo.hpp"
 #include "engine_image.hpp"
 #include "fpga_map.hpp"
 #include "patch.h"
@@ -552,7 +553,16 @@ void case_vibrato(VerilatedContext &context) {
     }
     rig.patch.lfo[0].depth = 1024 / 6; // ±1 semitone
     rig.patch.lfo[0].dest  = LFO_DEST_PITCH;
-    const bool live        = std::getenv("SYNTH_VIBRATO_LIVE") != nullptr;
+    if (const char *which = std::getenv(
+                "SYNTH_LFO_WHICH")) { // LFO 2 instead: the same, moved
+        const int n = std::atoi(which);
+        if (n != 0) {
+            rig.patch.lfo[n]       = rig.patch.lfo[0];
+            rig.patch.lfo[0].depth = 0;
+            rig.patch.lfo[0].dest  = LFO_DEST_DUTY;
+        }
+    }
+    const bool live = std::getenv("SYNTH_VIBRATO_LIVE") != nullptr;
     if (live) { // as the knobs do it: the LFO is brought to the pitch while a note sounds
         rig.patch.lfo[0].dest  = LFO_DEST_DUTY;
         rig.patch.lfo[0].depth = 0;
@@ -586,6 +596,36 @@ void case_vibrato(VerilatedContext &context) {
     const double span = std::log2(highest / lowest) * 12.0;
     std::printf("  %.1f to %.1f Hz: %.2f semitones\n", lowest, highest, span);
     check(span > 1.6 && span < 2.4, "±1 semitone makes a span of 2");
+}
+
+// The register probe: the board's window into the CSP's registers.
+void case_probe(VerilatedContext &context) {
+    std::printf("the register probe\n");
+    Rig rig(context);
+    plain(rig.patch);
+    rig.patch.lfo[0].rate = 700;
+    rig.bring_up();
+    // the pass counter (0x040, the even register of its pair) moves
+    rig.synth.write(0x000C, 0x040);
+    rig.synth.run_passes(3);
+    const uint32_t first = rig.synth.read(0x000D);
+    rig.synth.run_passes(5);
+    const uint32_t second = rig.synth.read(0x000D);
+    std::printf("  pass counter %u, then %u\n", first, second);
+    check(second != first && second > 0,
+          "the probe reads the pass counter, and it moves");
+    // LFO 1's phase step, a wide register: the pair's even word is the high part
+    const int step = csp::control::lfos + csp::control::phase_step;
+    rig.synth.write(0x000C, static_cast<uint16_t>(step));
+    rig.synth.run_passes(3);
+    const int64_t want = csp::lfo_rate(700, 2);
+    const uint64_t got =
+            (uint64_t{rig.synth.read(0x000D)} << 18) | rig.synth.read(0x000E);
+    std::printf("  phase step %llu, want %lld\n",
+                static_cast<unsigned long long>(got),
+                static_cast<long long>(want));
+    check(static_cast<int64_t>(got) == want,
+          "the probe reads LFO 1's phase step, both words");
 }
 
 void case_velocity(VerilatedContext &context) {
@@ -781,6 +821,11 @@ int main(int argc, char **argv) {
         std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
         return failures == 0 ? 0 : 1;
     }
+    if (std::getenv("SYNTH_ONLY_PROBE")) {
+        case_probe(context);
+        std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
+    }
     if (std::getenv("SYNTH_ONLY_VIBRATO")) {
         case_vibrato(context);
         std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
@@ -796,6 +841,7 @@ int main(int argc, char **argv) {
     case_pan(context);
     case_filter(context);
     case_vibrato(context);
+    case_probe(context);
     case_velocity(context);
     case_unison(context);
     case_several(context);

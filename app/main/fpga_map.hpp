@@ -30,6 +30,12 @@ constexpr uint16_t diag_limiter = 0x000A;
 constexpr uint16_t diag_dropped = 0x000B;
 constexpr int diag_words        = 4;
 
+// The register probe: write the address of a CSP register pair to
+// probe_address, wait a pass or two, read the pair (even register, then odd).
+constexpr uint16_t probe_address = 0x000C;
+constexpr uint16_t probe_even    = 0x000D;
+constexpr uint16_t probe_odd     = 0x000E;
+
 // Bits 35:32 of the next instruction written to the program memory.
 constexpr uint16_t program_high = 0x0010;
 

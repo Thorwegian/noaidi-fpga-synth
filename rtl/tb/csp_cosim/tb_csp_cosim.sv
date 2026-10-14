@@ -84,7 +84,10 @@ module tb_csp_cosim #(
         .sink_write_both    (sink_write_both),
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data),
-        .pass_done          (pass_done)
+        .pass_done          (pass_done),
+        .pass_counter       (),
+        .probe_address      ('0),
+        .probe_data         ()
     );
 
     // The sink area. The harness reads the active page through the

@@ -111,6 +111,59 @@ void check_gateware_health() {
     }
 }
 
+// Read one CSP register pair through the probe: the even register is the
+// upper 18 bits of the result, the odd one the lower. The lock is not held
+// while the probe waits for its pass.
+uint64_t probe_pair(int register_address) {
+    xSemaphoreTake(lock, portMAX_DELAY);
+    fpga_word_write(fpga_map::probe_address,
+                    static_cast<uint32_t>(register_address));
+    xSemaphoreGive(lock);
+    vTaskDelay(pdMS_TO_TICKS(3)); // at least two passes
+    std::array<uint32_t, 2> pair{};
+    xSemaphoreTake(lock, portMAX_DELAY);
+    fpga_word_read_burst(fpga_map::probe_even, pair.data(), pair.size());
+    xSemaphoreGive(lock);
+    return (static_cast<uint64_t>(pair[0] & 0x3FFFF) << 18)
+           | (pair[1] & 0x3FFFF);
+}
+
+// Every few seconds, log what the CSP holds for the LFOs: the pass counter
+// and, for each LFO, its record (phase, step, depth and its negative, gain
+// and output) and its set (where it starts, how many of each shape). What the
+// simulator cannot show of a board that does not modulate.
+void probe_task(void *) {
+    namespace cp = csp::control;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        const unsigned long pass =
+                static_cast<unsigned long>(probe_pair(0x040) >> 18);
+        ESP_LOGI(tag, "probe: pass %lu", pass);
+        for (int lfo = 0; lfo < 2; ++lfo) {
+            const int record     = cp::lfos + lfo * 16 * cp::lfo_size;
+            const int set        = cp::lfo_sets + lfo * cp::set_size;
+            const uint64_t phase = probe_pair(record + cp::phase);
+            const uint64_t step  = probe_pair(record + cp::phase_step);
+            const uint64_t depth = probe_pair(record + cp::depth);
+            const uint64_t gain  = probe_pair(record + cp::gain);
+            const uint64_t set_a = probe_pair(set + cp::base);
+            const uint64_t set_b = probe_pair(set + cp::n_saw + 1);
+            const uint64_t set_c = probe_pair(set + cp::n_saw + 3);
+            ESP_LOGI(
+                    tag,
+                    "probe: LFO%d phase %09llx step %09llx depth/neg %09llx gain/out %09llx "
+                    "set %09llx %09llx %09llx",
+                    lfo + 1, static_cast<unsigned long long>(phase),
+                    static_cast<unsigned long long>(step),
+                    static_cast<unsigned long long>(depth),
+                    static_cast<unsigned long long>(gain),
+                    static_cast<unsigned long long>(set_a),
+                    static_cast<unsigned long long>(set_b),
+                    static_cast<unsigned long long>(set_c));
+        }
+    }
+}
+
 void engine_task(void *) {
     int ticks = 0;
     while (true) {
@@ -191,6 +244,7 @@ void engine_link_init(void) {
         ESP_LOGE(tag, "failed to create task");
         return;
     }
+    xTaskCreate(probe_task, "engine_probe", 3072, nullptr, 2, nullptr);
     esp_timer_create_args_t timer_args = {};
     timer_args.callback                = tick_timer_cb;
     timer_args.name                    = "engine_tick";

@@ -33,6 +33,7 @@ module tb_spi_bus;
     wire [csp_pkg::PROGRAM_W-1:0]       imem_write_address;
     wire [35:0] imem_write_data;
     wire        csp_held, test_tone_enable;
+    wire [10:0] probe_address;
 
     spi_bus #(.ID_BYTE(ID)) dut (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
@@ -48,7 +49,8 @@ module tb_spi_bus;
         .imem_write_data(imem_write_data),
         .csp_held(csp_held), .test_tone_enable(test_tone_enable),
         .status_0(32'hA0000001), .status_1(32'hA0000002),
-        .status_2(32'hA0000003), .status_3(32'hA0000004)
+        .status_2(32'hA0000003), .status_3(32'hA0000004),
+        .status_4(32'hA0000005), .status_5(32'hA0000006), .probe_address(probe_address)
     );
 
     integer errors = 0;
@@ -212,6 +214,12 @@ module tb_spi_bus;
         check32("status_1", rq[1], 32'hA0000002);
         check32("status_2", rq[2], 32'hA0000003);
         check32("status_3", rq[3], 32'hA0000004);
+        wq[0] = 32'h2A5;
+        wr_burst(16'h000C, 1);
+        checkn("probe address", probe_address, 11'h2A5);
+        rd_burst(16'h000D, 2, 1);
+        check32("status_4", rq[0], 32'hA0000005);
+        check32("status_5", rq[1], 32'hA0000006);
 
         $display("--- 5. out-of-window: write dropped, reads zero, no alias ---");
         wq[0] = 32'hBAD0BAD0;

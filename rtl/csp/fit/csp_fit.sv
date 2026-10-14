@@ -93,7 +93,8 @@ module csp_fit (
         .queue_address (head_address), .queue_data (head_data),
         .sink_write_enable (sink_write_enable), .sink_write_both (sink_write_both),
         .sink_write_address (sink_write_address),
-        .sink_write_data (sink_write_data), .pass_done (pass_done)
+        .sink_write_data (sink_write_data), .pass_done (pass_done),
+        .pass_counter (), .probe_address ('0), .probe_data ()
     );
 
     // ---- the sink area, read as the partial pipeline will: six words a cycle ----------
