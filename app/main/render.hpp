@@ -28,6 +28,9 @@ namespace render {
 struct Write {
     int address;
     int32_t raw;
+    // The CSP changes this register itself (an envelope's level and stage),
+    // so the write must go out even if the firmware last wrote the same.
+    bool force = false;
 };
 
 using Writes = std::vector<Write>;

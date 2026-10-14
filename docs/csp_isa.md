@@ -448,11 +448,11 @@ reference model with 16 channels and 32 voices, every one configured:
 | the LFOs (`lfo.s`), none running; 16 sine LFOs, the worst case at 24 kHz | 30; 191 |
 | the channels' pitch and cutoff (`channel.s`), 16 channels | 152 |
 | both envelopes of 32 voices (`envelope.s`) | 616 |
-| the voices' pitch, cutoff and gain, and their sinks (`voice.s`), 32 voices | 328 |
-| **the program, LFOs idle** | **1126** |
-| **the program, 16 sine LFOs a pass** | **1304** |
+| the voices' pitch, cutoff and gain, and their sinks (`voice.s`), 32 voices | 520 (the total less the other rows) |
+| **the program, LFOs idle** | **1318** |
+| **the program, 16 sine LFOs a pass** | **1420** |
 
-That leaves 168 of the 1472 cycles for what is not in it yet (drift #217,
+That leaves 52 of the 1472 cycles (the voice step now also scales the modulation depth by four with a `SHIFT`) for what is not in it yet (drift #217,
 noise #216, a second sink word or two). Other measurements: the manual's
 one-instruction envelope step for 32 voices, as `LOOP.vi` 294 and as
 `LOOP.i` 1126; the LFOs every pass, all 32 sines, 367.

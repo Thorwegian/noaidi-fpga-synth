@@ -26,8 +26,10 @@
 
 #include "Vtb_synth.h"
 #include "csp/control_program.hpp"
+#include "engine_image.hpp"
 #include "fpga_map.hpp"
 #include "patch.h"
+#include "patch_file.h"
 #include "render.hpp"
 #include "svdpi.h"
 #include "verilated.h"
@@ -124,6 +126,18 @@ public:
                static_cast<uint8_t>(value >> 8), static_cast<uint8_t>(value)});
     }
 
+    // Words to consecutive addresses in one frame.
+    void write_burst(uint16_t address, const uint32_t *words, int count) {
+        std::vector<uint8_t> out = {0x40, static_cast<uint8_t>(address >> 8),
+                                    static_cast<uint8_t>(address)};
+        for (int k = 0; k < count; ++k) {
+            for (int shift = 24; shift >= 0; shift -= 8) {
+                out.push_back(static_cast<uint8_t>(words[k] >> shift));
+            }
+        }
+        frame(out);
+    }
+
     uint32_t read(uint16_t address) {
         const std::vector<uint8_t> in =
                 frame({0xC0, static_cast<uint8_t>(address >> 8),
@@ -212,14 +226,34 @@ private:
 // ---- the firmware's side: a patch on a synthesizer ------------------------------------------
 
 // Everything the firmware does at start-up and per note, on one chip.
+// The engine link's SPI port, on the simulated chip.
+class SynthPort : public EnginePort {
+public:
+    explicit SynthPort(Synth &synth) : synth_(synth) {}
+    void queue_burst(uint16_t address, const uint32_t *words,
+                     int count) override {
+        synth_.write_burst(address, words, count);
+    }
+    void write_register(uint16_t address, uint32_t value) override {
+        synth_.write(address, value);
+    }
+
+private:
+    Synth &synth_;
+};
+
+// Everything the firmware does at start-up and per note, on one chip, with the
+// firmware's own register image and its 1 kHz tick.
 class Rig {
 public:
-    explicit Rig(VerilatedContext &context) : synth(context), link(synth) {
+    explicit Rig(VerilatedContext &context)
+        : synth(context), link(synth), port(synth) {
         patch_init(&patch);
     }
 
-    // Hold the CSP, load the program, write the constants and the whole patch,
-    // point the partials, release.
+    // As engine_link_init and voice_alloc_init do: hold the CSP, load the
+    // program, write the constants and the wiring, point the partials,
+    // release it, then the patch.
     void bring_up() {
         link.hold();
         link.load();
@@ -228,11 +262,15 @@ public:
             writes.push_back({constant.address, constant.raw});
         }
         render::setup(writes);
-        patch_writes(writes);
-        link.commit(writes, true);
+        send(writes);
+        while (image.pending()) {
+            image.send(port, fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
+            synth.run_passes(2);
+        }
         point_partials();
         link.release();
         synth.run_passes(4);
+        apply();
     }
 
     void patch_writes(render::Writes &writes) {
@@ -250,7 +288,7 @@ public:
     void apply() {
         render::Writes writes;
         patch_writes(writes);
-        link.commit(writes, false);
+        commit(writes);
         point_partials();
     }
 
@@ -265,23 +303,48 @@ public:
         }
     }
 
-    // Voice 0 sounding a note.
-    void strike(uint8_t note, uint8_t velocity = 100) {
+    // A note on a voice.
+    void strike(uint8_t note, uint8_t velocity = 100, int voice = 0) {
         render::Writes writes;
-        render::note_on(patch, 0, note, velocity, writes);
-        link.commit(writes, false);
+        render::note_on(patch, voice, note, velocity, writes);
+        commit(writes);
     }
 
-    void release_voice() {
+    void release_voice(int voice = 0) {
         render::Writes writes;
-        render::gate(0, false, writes);
-        link.commit(writes, false);
+        render::gate(voice, false, writes);
+        commit(writes);
+    }
+
+    void silence(int voice) {
+        render::Writes writes;
+        render::silence(voice, writes);
+        commit(writes);
+    }
+
+    // Writes into the image, and the 1 kHz tick until it has sent them all.
+    void commit(const render::Writes &writes) {
+        send(writes);
+        while (image.pending()) {
+            image.send(port, 480, 0);
+            synth.run_ms(1);
+        }
+        synth.run_ms(1);
     }
 
     Synth synth;
     Link link;
+    SynthPort port;
+    EngineImage image;
     patch_t patch;
     render::Controllers controllers;
+
+private:
+    void send(const render::Writes &writes) {
+        for (const render::Write &write : writes) {
+            image.set(write.address, write.raw, write.force);
+        }
+    }
 };
 
 // ---- measuring what comes out -------------------------------------------------------------------------
@@ -559,6 +622,134 @@ void case_unison(VerilatedContext &context) {
     check(highest > lowest * 1.05, "the unison beats");
 }
 
+// Several notes on several voices, struck and released: afterwards nothing
+// sounds. (A board test found a hum left behind after a few notes.)
+void case_several(VerilatedContext &context) {
+    std::printf("several notes, all released\n");
+    Rig rig(context);
+    rig.bring_up(); // the init patch: a saw through the open 24 dB filter
+    for (int round = 0; round < 3; ++round) {
+        for (int voice = 0; voice < 6; ++voice) {
+            rig.strike(static_cast<uint8_t>(48 + 4 * voice + round), 100,
+                       voice);
+            rig.synth.run_ms(15);
+        }
+        rig.synth.run_ms(60);
+        for (int voice = 0; voice < 6; ++voice) {
+            rig.release_voice(voice);
+            rig.synth.run_ms(7);
+        }
+        rig.synth.run_ms(60);
+    }
+    rig.synth.run_ms(500);
+    const size_t from = rig.synth.mark();
+    rig.synth.run_ms(30);
+    const Window left =
+            measure(rig.synth.samples(), from, rig.synth.mark(), true);
+    const Window right =
+            measure(rig.synth.samples(), from, rig.synth.mark(), false);
+    std::printf("  after the release: left peak %.6f, right peak %.6f\n",
+                left.peak, right.peak);
+    check(left.peak < 1e-3 && right.peak < 1e-3,
+          "silent after every note is released");
+}
+
+// The factory startup patch, a long release, several notes: the sound of the
+// board test (#222) in simulation.
+void case_startup_patch(VerilatedContext &context) {
+    std::printf("the startup patch: notes and their long releases\n");
+    Rig rig(context);
+    char error[160] = "";
+    if (!patch_file_read(STARTUP_PATCH, &rig.patch, error, sizeof error)) {
+        std::printf("  cannot read the patch: %s\n", error);
+        check(false, "the startup patch loads");
+        return;
+    }
+    if (std::getenv("SYNTH_FAST_RELEASE")) {
+        rig.patch.env[0].release = 0xB0; // a few hundred ms
+        rig.patch.env[1].release = 0xB0;
+    }
+    rig.bring_up();
+    for (int voice = 0; voice < 4; ++voice) {
+        rig.strike(static_cast<uint8_t>(48 + 5 * voice), 100, voice);
+        rig.synth.run_ms(40);
+    }
+    rig.synth.run_ms(200);
+    const size_t held_from = rig.synth.mark() - 4800;
+    const Window held =
+            measure(rig.synth.samples(), held_from, rig.synth.mark());
+    for (int voice = 0; voice < 4; ++voice) {
+        rig.release_voice(voice);
+    }
+    // The patch's release is 11 s. The gain it was written for fell by
+    // 60 dB × (1 − level): 30 dB down after a second, 51 after three. Follow
+    // the note for three seconds (a second takes a minute of simulation).
+    double previous = held.peak;
+    for (int second = 1; second <= 3; ++second) {
+        const size_t from = rig.synth.mark();
+        rig.synth.run_ms(1000);
+        const double peak =
+                measure(rig.synth.samples(), from, rig.synth.mark()).peak;
+        std::printf("  second %d after the release: peak %.5f (%.1f dB)\n",
+                    second, peak, 20.0 * std::log10(peak / held.peak));
+        previous = peak;
+    }
+    const double fallen_db = 20.0 * std::log10(previous / held.peak);
+    std::printf("  held peak %.4f; %.1f dB down after 3 s\n", held.peak,
+                fallen_db);
+    check(fallen_db < -40.0,
+          "three seconds after the release the note is 40 dB down at least");
+    check(fallen_db > -75.0, "and has not been cut off");
+}
+
+// Notes struck and released as fast as a controller sends them, across all
+// 32 voices, through the firmware's image and its 1 kHz tick: once they are
+// all released nothing sounds. A lost gate write would leave a voice
+// sustaining for good (a board test heard a release that never finished).
+void case_stress(VerilatedContext &context) {
+    std::printf("32 voices struck and released at random\n");
+    Rig rig(context);
+    rig.bring_up();
+    std::array<bool, render::voice_count> held{};
+    uint32_t seed = 12345;
+    auto random   = [&]() {
+        seed = seed * 1664525u + 1013904223u;
+        return seed >> 8;
+    };
+    for (int tick = 0; tick < 400; ++tick) {
+        render::Writes writes;
+        for (int event = 0; event < 3; ++event) {
+            const int voice = static_cast<int>(random() % render::voice_count);
+            if (held[voice]) {
+                render::gate(voice, false, writes);
+            } else {
+                render::note_on(rig.patch, voice,
+                                static_cast<uint8_t>(36 + random() % 48),
+                                static_cast<uint8_t>(40 + random() % 80),
+                                writes);
+            }
+            held[voice] = !held[voice];
+        }
+        for (const render::Write &write : writes) {
+            rig.image.set(write.address, write.raw, write.force);
+        }
+        rig.image.send(rig.port, 480, 0);
+        rig.synth.run_ms(1);
+    }
+    for (int voice = 0; voice < render::voice_count; ++voice) {
+        if (held[voice]) {
+            rig.release_voice(voice);
+        }
+    }
+    rig.synth.run_ms(800);
+    const size_t from = rig.synth.mark();
+    rig.synth.run_ms(30);
+    const Window left =
+            measure(rig.synth.samples(), from, rig.synth.mark(), true);
+    std::printf("  after the last release: peak %.6f\n", left.peak);
+    check(left.peak < 1e-3, "silent once every voice is released");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -566,6 +757,16 @@ int main(int argc, char **argv) {
     context.commandArgs(argc, argv);
     std::printf("control program: %zu instructions, %zu constants\n",
                 csp::control::words.size(), csp::control::constants.size());
+    if (std::getenv("SYNTH_ONLY_STRESS")) {
+        case_stress(context);
+        std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
+    }
+    if (std::getenv("SYNTH_ONLY_STARTUP")) {
+        case_startup_patch(context);
+        std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
+    }
     case_note(context);
     case_pitch(context);
     case_pan(context);
@@ -573,6 +774,9 @@ int main(int argc, char **argv) {
     case_vibrato(context);
     case_velocity(context);
     case_unison(context);
+    case_several(context);
+    case_stress(context);
+    case_startup_patch(context);
     std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
     return failures == 0 ? 0 : 1;
 }

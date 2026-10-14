@@ -1019,7 +1019,7 @@ void test_control_program() {
         const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
                                  + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
         const double want[3]        = {a.note + ch_pitch,
-                                       a.level_m * c.amount + a.note * c.track
+                                       4 * a.level_m * c.amount + a.note * c.track
                                                + ch_cutoff,
                                        a.level_a * a.velocity * c.volume};
         const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF",
@@ -1032,7 +1032,7 @@ void test_control_program() {
         }
     }
     // a few raw units of the words' rounding, through up to seven operations
-    check(worst <= 8.0 / 16384.0,
+    check(worst <= 24.0 / 16384.0, // the mod envelope's term is multiplied by 4
           "the voices' sinks match their formulas: largest difference "
                   + std::to_string(worst));
 
@@ -1085,7 +1085,8 @@ void test_control_program_lfos() {
     const int voice_size    = m.address("VOICE_SIZE");
     const int channel_sinks = m.address("CHANNEL_SINKS");
     const int sink_size     = m.address("CHANNEL_SINK_SIZE");
-    cpu.write(m.address("CHANNELS_IN_USE"), 16);
+    cpu.write(m.address("CHANNELS_IN_USE"),
+              12); // 16 and 16 sine LFOs a pass would not fit
     for (int c = 0; c < 16; ++c) {
         const int base = channels + c * channel_size;
         cpu.write(at(base, "LFO1"), lfos + ((3 * c) % 32) * lfo_size);

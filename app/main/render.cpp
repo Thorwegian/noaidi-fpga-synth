@@ -71,16 +71,19 @@ int32_t gain_of_code(int code) {
 }
 
 // A wide register's two words, the upper first.
-void wide(Writes &writes, int address, int64_t raw36) {
+void wide(Writes &writes, int address, int64_t raw36, bool force = false) {
+    writes.push_back({address,
+                      static_cast<int32_t>(csp::sign_extend(
+                              raw36 >> csp::word_bits, csp::word_bits)),
+                      force});
     writes.push_back(
-            {address, static_cast<int32_t>(csp::sign_extend(
-                              raw36 >> csp::word_bits, csp::word_bits))});
-    writes.push_back({address + 1, static_cast<int32_t>(csp::sign_extend(
-                                           raw36, csp::word_bits))});
+            {address + 1,
+             static_cast<int32_t>(csp::sign_extend(raw36, csp::word_bits)),
+             force});
 }
 
-void put(Writes &writes, int address, int32_t raw) {
-    writes.push_back({address, raw});
+void put(Writes &writes, int address, int32_t raw, bool force = false) {
+    writes.push_back({address, raw, force});
 }
 
 // ---- the channel and the voices ---------------------------------------------------------------
@@ -127,21 +130,35 @@ int32_t note_word(uint8_t note) {
     return octaves(raw - middle_c);
 }
 
+// How much faster the amp envelope falls than its patch's time says. The
+// patch's decay and release times are those of a fall in the old gain: its
+// level fell by an RC curve and the gain in dB followed it, 60 dB × (1 − level),
+// so a release of 11 s was 30 dB down in one second, 51 dB in three, and
+// silent by four. The gain is linear now, and the same RC curve in amplitude
+// reaches 20 dB in three seconds and 60 only after eleven. A rate three times
+// the patch's puts the new fall within a few dB of the old one at three
+// seconds and after (and 10 dB slower in the first). The mod envelope moves
+// the cutoff in octaves, as it always did, and keeps the patch's rates.
+constexpr uint32_t amp_fall_factor = 3;
+
 // An envelope's rows: attack aims past full scale, decay at the sustain level,
 // release at zero; each with its rate. `sustain` is the level the decay aims
-// at, in the 22-bit scale of the level (0x400000 is full scale).
-void envelope(const adsr_t &env, int sustain, int attack, int decay,
-              int release, Writes &writes) {
-    auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
+// at, in the 22-bit scale of the level (0x400000 is full scale); `fall_factor`
+// multiplies the decay's and the release's rates.
+void envelope(const adsr_t &env, int sustain, uint32_t fall_factor, int attack,
+              int decay, int release, Writes &writes) {
+    auto row = [&](int segment, int64_t target22, uint8_t rate_code,
+                   uint32_t factor) {
         const int base = channel_register(cp::envelopes + segment);
+        const uint32_t k =
+                patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code)) * factor;
         wide(writes, base + cp::target, target22 << 10);
         wide(writes, base + cp::rate,
-             csp::envelope_rate(
-                     patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code))));
+             csp::envelope_rate(std::min<uint32_t>(k, (1u << 18) - 1)));
     };
-    row(attack, attack_target, env.attack);
-    row(decay, sustain, env.decay);
-    row(release, 0, env.release);
+    row(attack, attack_target, env.attack, 1);
+    row(decay, sustain, env.decay, fall_factor);
+    row(release, 0, env.release, fall_factor);
 }
 
 // The voicing's gains for one partial, as UQ4.4 codes: the volume anchor and
@@ -281,14 +298,15 @@ void amp_envelope(const patch_t &patch, Writes &writes) {
                               level_22_one
                               * std::pow(10.0,
                                          -span_db / 20.0 * (1.0 - fraction)));
-    envelope(patch.env[0], sustain, amp_attack, amp_decay, amp_release, writes);
+    envelope(patch.env[0], sustain, amp_fall_factor, amp_attack, amp_decay,
+             amp_release, writes);
 }
 
 void mod_envelope(const patch_t &patch, Writes &writes) {
     // linear in octaves of cutoff: the sustain is a fraction of the depth
     envelope(patch.env[1],
-             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, mod_attack,
-             mod_decay, mod_release, writes);
+             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, 1,
+             mod_attack, mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff
     put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth));
 }
@@ -406,11 +424,13 @@ void gate(int voice, bool open, Writes &writes) {
 }
 
 void silence(int voice, Writes &writes) {
-    put(writes, voice_register(voice, cp::gate), 0);
-    wide(writes, voice_register(voice, cp::level_a), 0);
-    wide(writes, voice_register(voice, cp::level_m), 0);
-    put(writes, voice_register(voice, cp::stage_a), idle_amp);
-    put(writes, voice_register(voice, cp::stage_m), idle_mod);
+    // the levels and stages are the CSP's to change: send them whatever the
+    // image says
+    put(writes, voice_register(voice, cp::gate), 0, true);
+    wide(writes, voice_register(voice, cp::level_a), 0, true);
+    wide(writes, voice_register(voice, cp::level_m), 0, true);
+    put(writes, voice_register(voice, cp::stage_a), idle_amp, true);
+    put(writes, voice_register(voice, cp::stage_m), idle_mod, true);
 }
 
 int64_t release_tail_us(const patch_t &patch) {
@@ -419,7 +439,8 @@ int64_t release_tail_us(const patch_t &patch) {
     constexpr double decibels = 80.0;
     constexpr double latency  = 25000.0; // µs
     const uint32_t k =
-            patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release));
+            patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release))
+            * amp_fall_factor;
     const double per_sample = k / 16777216.0;
     const double samples =
             std::log(std::pow(10.0, decibels / 20.0)) / per_sample;

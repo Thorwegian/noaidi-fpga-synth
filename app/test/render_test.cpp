@@ -104,8 +104,10 @@ void test_envelope() {
           "attack rate is the coefficient, per pass");
     check(wide_at(state, base + 8 + cp::rate)
                   == csp::envelope_rate(
-                          patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
-          "release rate");
+                          3
+                          * patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
+          "release rate: three times the patch's, to sound as the old gain's "
+          "fall did");
     // faster codes are faster
     check(csp::envelope_rate(patch_adsr_rate_coeff(patch_adsr_rate_byte(0xF0)))
                   > csp::envelope_rate(

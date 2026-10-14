@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 
 #include "csp/control_program.hpp"
+#include "engine_image.hpp"
 #include "fpga_map.hpp"
 #include "render.hpp"
 #include "spi_regs.h"
@@ -36,20 +37,21 @@ constexpr int64_t tick_us = 1000;
 // in a tick, so a tick can send nearly the whole queue and it is empty again
 // by the next. A tick sends no more than this, the rest waits for the next.
 constexpr int writes_per_tick = 480;
-constexpr int burst_words = 8; // fpga_word_write_burst's per-transaction limit
 
-constexpr int word_mask = 0x3FFFF; // 18 bits on the wire
-
-// What the FPGA's registers and sinks hold, as far as this side knows, and
-// which of them still has to be sent. A write of the value already there is
-// dropped, so what a re-render costs is what changed.
-struct Image {
-    std::array<int32_t, fpga_map::address_count> value{};
-    std::bitset<fpga_map::address_count> known;   // the FPGA holds `value`
-    std::bitset<fpga_map::address_count> pending; // `value` still to send
+// The SPI link, as the image sends through it.
+class SpiPort : public EnginePort {
+public:
+    void queue_burst(uint16_t address, const uint32_t *words,
+                     int count) override {
+        fpga_word_write_burst(address, words, static_cast<size_t>(count));
+    }
+    void write_register(uint16_t address, uint32_t value) override {
+        fpga_word_write(address, value);
+    }
 };
 
-Image image;
+EngineImage image;
+SpiPort port;
 SemaphoreHandle_t lock = nullptr;
 TaskHandle_t task      = nullptr;
 bool test_tone         = false;
@@ -59,49 +61,9 @@ uint32_t ctrl_word(uint32_t bits) {
     return bits | (test_tone ? fpga_map::ctrl_test_tone : 0);
 }
 
-bool set(int address, int32_t raw) {
-    if (address < 0 || address >= fpga_map::address_count) {
-        return false;
-    }
-    raw &= word_mask;
-    if (image.known[address] && image.value[address] == raw) {
-        return true; // already there
-    }
-    image.value[address]   = raw;
-    image.known[address]   = false;
-    image.pending[address] = true;
-    return true;
-}
-
-// Send what is pending, at most `limit` words, in bursts of consecutive
-// addresses, and commit it with a swap. How many it sent.
+// Send what is pending, at most `limit` words, and commit it with a swap.
 int send(int limit, uint32_t ctrl_bits) {
-    int sent    = 0;
-    int address = 0;
-    while (address < fpga_map::address_count && sent < limit) {
-        if (!image.pending[address]) {
-            ++address;
-            continue;
-        }
-        std::array<uint32_t, burst_words> words;
-        int count       = 0;
-        const int start = address;
-        while (count < burst_words && address < fpga_map::address_count
-               && image.pending[address] && sent + count < limit) {
-            words[count++] = static_cast<uint32_t>(image.value[address]);
-            image.pending[address] = false;
-            image.known[address]   = true;
-            ++address;
-        }
-        fpga_word_write_burst(fpga_map::queue_base + start, words.data(),
-                              count);
-        sent += count;
-    }
-    if (sent > 0) {
-        fpga_word_write(fpga_map::ctrl,
-                        ctrl_word(ctrl_bits | fpga_map::ctrl_swap));
-    }
-    return sent;
+    return image.send(port, limit, ctrl_word(ctrl_bits));
 }
 
 void tick_timer_cb(void *) {
@@ -163,11 +125,11 @@ void engine_link_init(void) {
     }
     render::setup(writes);
     for (const render::Write &write : writes) {
-        set(write.address, write.raw);
+        image.set(write.address, write.raw);
     }
     // Held, the CSP applies every committed write in one pass; the queue holds
     // 512, so a chunk at a time, and a pass between.
-    while (image.pending.any()) {
+    while (image.pending()) {
         send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
         vTaskDelay(pdMS_TO_TICKS(2));
     }
@@ -197,7 +159,7 @@ bool engine_link_write(int address, int32_t raw) {
         return false;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    const bool ok = set(address, raw);
+    const bool ok = image.set(address, raw);
     xSemaphoreGive(lock);
     return ok;
 }
@@ -209,7 +171,7 @@ bool engine_link_write_all(const render::Writes &writes) {
     bool ok = true;
     xSemaphoreTake(lock, portMAX_DELAY);
     for (const render::Write &write : writes) {
-        ok &= set(write.address, write.raw);
+        ok &= image.set(write.address, write.raw, write.force);
     }
     xSemaphoreGive(lock);
     return ok;

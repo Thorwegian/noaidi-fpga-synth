@@ -22,7 +22,7 @@
 namespace csp::control {
 
 // The instructions, 36 bits each.
-inline constexpr std::array<uint64_t, 82> words{
+inline constexpr std::array<uint64_t, 83> words{
     0xa06010007ull, 0xb46000008ull, 0xf00102460ull, 0xf000c0000ull,
     0x1802c040aull, 0x2e0000602ull, 0xc20780206ull, 0x1803c080aull,
     0x2e0000602ull, 0x700080000ull, 0x620781604ull, 0x1804c0c0aull,
@@ -40,10 +40,10 @@ inline constexpr std::array<uint64_t, 82> words{
     0x620a81e0aull, 0xa20680810ull, 0xa20782811ull, 0x700080c01ull,
     0x620281812ull, 0x620a81c13ull, 0xf00181602ull, 0x720cc0200ull,
     0xce0083302ull, 0xc20b80204ull, 0xf0018160aull, 0x720cc0208ull,
-    0xce0883302ull, 0xc2078220dull, 0xf00003400ull, 0x180a0380full,
-    0xf00181400ull, 0x520683b27ull, 0xc20781f25ull, 0xc60783b24ull,
-    0x5607ca000ull, 0xc20c82f26ull, 0xf00183c00ull, 0xc30081801ull,
-    0xc30181c01ull, 0xc30283001ull,
+    0xce0883302ull, 0xc2078220dull, 0xf00003400ull, 0x180b0380full,
+    0xf00181400ull, 0x520683b27ull, 0xc20781f25ull, 0xb60700014ull,
+    0xc60783b24ull, 0x5607ca000ull, 0xc20c82f26ull, 0xf00183c00ull,
+    0xc30081801ull, 0xc30181c01ull, 0xc30283001ull,
 };
 
 // The constant registers the firmware writes once.
@@ -52,7 +52,7 @@ struct Constant {
     int32_t raw;
 };
 
-inline constexpr std::array<Constant, 19> constants{
+inline constexpr std::array<Constant, 20> constants{
     Constant{0x001, 16384},
     Constant{0x002, 2048},
     Constant{0x003, 65536},
@@ -72,6 +72,7 @@ inline constexpr std::array<Constant, 19> constants{
     Constant{0x011, 20},
     Constant{0x012, 8},
     Constant{0x013, 24},
+    Constant{0x014, 2},
 };
 
 // Registers, blocks and fields.

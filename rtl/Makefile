@@ -275,15 +275,23 @@ SYNTH_RTL = $(PKG) csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.
             csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv \
             dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/osc_core.sv \
             dsp/output_lpf.sv spdif/spdif_tx.sv i2s/i2s_tx.sv spi/spi_bus.sv top.sv
-SYNTH_CPP = tb/synth/synth_sim.cpp ../app/main/render.cpp ../app/main/patch.cpp \
+SYNTH_CPP = tb/synth/synth_sim.cpp ../app/main/render.cpp ../app/main/engine_image.cpp \
+            ../app/main/patch.cpp ../app/main/patch_file.cpp ../app/main/safe_file.cpp \
             ../app/main/csp/envelope.cpp
-obj_dir/synth_sim/sim: $(SYNTH_RTL) tb/synth/tb_synth.sv $(SYNTH_CPP) ../app/main/render.hpp \
+# the C sources of the patch loader, built by the host compiler
+SYNTH_C = ../app/main/patch_units.c ../app/lib/tomlc17/src/tomlc17.c
+SYNTH_C_OBJ = $(addprefix obj_dir/synth_c/,$(notdir $(SYNTH_C:.c=.o)))
+obj_dir/synth_c/%.o: Makefile
+	mkdir -p $(@D) && cc -O2 -c -I../app/main -I../app/lib/tomlc17/src -o $@ $(filter %/$(notdir $(@:.o=.c)),$(SYNTH_C))
+obj_dir/synth_sim/sim: $(SYNTH_RTL) tb/synth/tb_synth.sv $(SYNTH_CPP) $(SYNTH_C_OBJ) ../app/main/render.hpp \
+                       ../app/main/engine_image.hpp ../app/main/patch_file.h \
                        ../app/main/patch.h ../app/main/csp/control_program.hpp \
                        ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(LUTS) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
 	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
 	    --top-module tb_synth --Mdir $(@D) -o sim \
-	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../app/main)" \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../app/main) -I$(abspath ../app/lib/tomlc17/src) -DSTARTUP_PATCH='\"$(abspath ../app/storage/Patches/Factory/Pads/Supersaw.toml)\"'" \
+	    -LDFLAGS "$(abspath $(SYNTH_C_OBJ))" \
 	    $(SYNTH_RTL) tb/synth/tb_synth.sv $(VL_DSP) $(abspath $(SYNTH_CPP))
 
 sim-synth: obj_dir/synth_sim/sim

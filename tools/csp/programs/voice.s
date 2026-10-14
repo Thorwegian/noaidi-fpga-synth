@@ -8,7 +8,7 @@
 ; outputs (envelope.s):
 ;
 ;   pitch  = NOTE + CH_PITCH                        octaves
-;   cutoff = U_M × MOD_AMOUNT + NOTE × KEY_TRACK + CH_CUTOFF   octaves
+;   cutoff = 4 × U_M × MOD_AMOUNT + NOTE × KEY_TRACK + CH_CUTOFF   octaves
 ;   gain   = OUT_A × VOLUME                         linear (OUT_A is the
 ;                                                   amp envelope × velocity)
 ;
@@ -21,6 +21,8 @@
         IDX     j, [i+CHANNEL], 0                   ; j → the channel
         ADD3    [i+U_A], 0, [i+NOTE], [j+CH_PITCH]
         MAC     [i+U_M], 0, [i+U_M], [j+MOD_AMOUNT]     ; U_M: the mod envelope's output (envelope.s)
+        SHIFT   [i+U_M], [i+U_M], =#2                   ; × 4: MOD_AMOUNT is a quarter of the depth, which
+                                                        ;   reaches 32 octaves; a word holds 8
         MAC     [i+U_M], [i+U_M], [i+NOTE], [j+KEY_TRACK]
         ADD3    [i+U_M], [i+U_M], [j+CH_CUTOFF], 0
         MAC     [i+D], 0, [i+OUT_A], [j+VOLUME]
