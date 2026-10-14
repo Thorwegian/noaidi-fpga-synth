@@ -983,6 +983,7 @@ void test_control_program() {
         cpu.write_wide(at(base, "LEVEL_A"), q_wide(voice[v].level_a));
         cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
         cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
+        cpu.write(at(base, "VELOCITY_M"), q(1.0));
         cpu.write(at(base, "GATE"), q(1.0));
         cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
         cpu.write(at(base, "STAGE_M"), 20);

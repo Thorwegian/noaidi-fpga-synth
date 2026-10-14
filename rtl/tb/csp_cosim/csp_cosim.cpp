@@ -438,6 +438,8 @@ int run_control_program(VerilatedContext &context) {
         setup.push_back({base + symbol("STAGE_M"), 24});
         setup.push_back(
                 {base + symbol("VELOCITY"), word_of(0.1 * pick(3, 10))});
+        setup.push_back(
+                {base + symbol("VELOCITY_M"), word_of(0.1 * pick(3, 10))});
         setup.push_back({base + symbol("CHANNEL"),
                          channels + pick(0, 15) * channel_size});
         setup.push_back({base + symbol("NOTE"), word_of(0.1 * pick(-20, 20))});

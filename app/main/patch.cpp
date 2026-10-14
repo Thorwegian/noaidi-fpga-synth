@@ -11,7 +11,7 @@
 // (system.toml's startup_patch).
 
 #include "patch.h"
-#include <string.h>
+#include <cstring>
 
 patch_t g_patch;
 

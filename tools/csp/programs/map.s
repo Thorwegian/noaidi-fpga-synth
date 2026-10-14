@@ -107,7 +107,7 @@
         .field LEVEL_A, 2           ; 0: the amp envelope's level
         .field STAGE_A, 1           ; 2: its row's offset in the channel's table
         .field GATE, 1              ; 3
-        .field VELOCITY, 1          ; 4
+        .field VELOCITY, 1          ; 4: the amp envelope's amount (the firmware's)
         .field CHANNEL, 1           ; 5: the address of the voice's channel
         .field U_A, 1               ; 6: scratch; the voice's pitch
         .field U_M, 1               ; 7: scratch; the voice's cutoff
@@ -115,7 +115,7 @@
         .field STAGE_M, 1           ; 10
         .field OUT_A, 1             ; 11: level × velocity
         .field D, 1                 ; 12: scratch; the voice's gain
-        .field OUT_M, 1             ; 13
+        .field VELOCITY_M, 1        ; 13: the mod envelope's amount (the firmware's)
         .field NOTE, 1              ; 14: in octaves
         .field SINK, 1              ; 15: the address of the voice's sinks
         .end

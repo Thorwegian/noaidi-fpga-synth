@@ -4,59 +4,45 @@
 // License: CERN-OHL-S v2
 //
 // The real top level (Verilated, tb_synth.sv) as the board has it, driven the
-// way the firmware drives it: over SPI, with a CSP program loaded while the
-// CSP is held, its constants and settings written through the write queue,
-// and the partials' pointers set. What comes out is checked as a listener
-// would hear it: the pitch from the zero crossings, the level, the release,
-// the pan, and that a setting changed while a note sounds takes effect at once
-// and stays (the sink area's two pages must agree).
+// way the firmware drives it: over SPI, with the control program the firmware
+// carries (app/main/csp/control_program.hpp) loaded while the CSP is held, its
+// constants and the patch written through the write queue, and the partials'
+// pointers set. The writes are the firmware's own: app/main/render.cpp turns
+// a patch (patch.h) and a note into registers and sinks, and this bench
+// programs the chip with what it says. What comes out is checked as a
+// listener would hear it: the pitch from the zero crossings, the level, the
+// pan, the filter, the vibrato, the velocity, the release.
 //
 // Exit status 0: all pass.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <map>
-#include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "Vtb_synth.h"
-#include "assembler.hpp"
-#include "csp/csp.hpp"
-#include "csp/envelope.hpp"
+#include "csp/control_program.hpp"
+#include "patch.h"
+#include "render.hpp"
 #include "svdpi.h"
 #include "verilated.h"
-
-#ifndef CSP_PROGRAMS_DIR
-#define CSP_PROGRAMS_DIR "../tools/csp/programs"
-#endif
-
-extern "C" {
-int synth_register(int address);
-int synth_sink(int offset);
-int synth_pointer(int partial, int position);
-int synth_counters(int which);
-int synth_queue_counters(int which);
-}
 
 namespace {
 
 // ---- the clock, the SPI master and the audio tap ------------------------------------------
 
-constexpr int sample_cycles = 768;     // one 96 kHz sample, in system clocks
-constexpr int pass_cycles   = 1536;    // one CSP pass
-constexpr int spi_half      = 4;       // system clocks per SCLK half period: 9.2 MHz
+constexpr int pass_cycles = 1536;   // one CSP pass
+constexpr int ms_cycles   = 73728;  // a millisecond of system clocks
+constexpr int spi_half    = 4;      // system clocks per SCLK half period: 9.2 MHz
+constexpr int sample_rate = 96000;
 
 struct Sample {
     int left;      // what the listener hears
     int right;
-    int mix_left;  // the pipeline's mix
-    int mix_right;
 };
 
 // Verilator hands a 24-bit signed port over zero-extended.
@@ -89,11 +75,9 @@ public:
         top_.sysclk = 1;
         top_.eval();
         if (top_.sample_tick && !tick_seen_) {
-            samples_.push_back({signed24(top_.out_left), signed24(top_.out_right),
-                                signed24(top_.mix_left), signed24(top_.mix_right)});
+            samples_.push_back({signed24(top_.out_left), signed24(top_.out_right)});
         }
         tick_seen_ = top_.sample_tick;
-        ++cycles_;
     }
 
     void run(int64_t cycles) {
@@ -101,7 +85,9 @@ public:
             cycle();
         }
     }
-
+    void run_ms(double milliseconds) {
+        run(static_cast<int64_t>(milliseconds * ms_cycles));
+    }
     void run_passes(int passes) {
         run(int64_t{passes} * pass_cycles);
     }
@@ -150,21 +136,14 @@ public:
     size_t mark() const {
         return samples_.size();
     }
-    int64_t cycles() const {
-        return cycles_;
-    }
-    uint32_t passes() const {
-        return top_.passes;
-    }
 
 private:
     Vtb_synth top_;
     std::vector<Sample> samples_;
     bool tick_seen_ = false;
-    int64_t cycles_ = 0;
 };
 
-// ---- the control plane, as the firmware speaks it ------------------------------------------------
+// ---- the control plane, as the firmware speaks it ------------------------------------------
 
 constexpr uint16_t ctrl_address         = 0x0002;
 constexpr uint16_t program_high_address = 0x0010;
@@ -172,11 +151,6 @@ constexpr uint16_t partial_base         = 0x2000;
 constexpr uint16_t queue_base           = 0x6000;
 constexpr uint16_t program_base         = 0x8000;
 constexpr uint32_t ctrl_swap = 1, ctrl_hold = 2;
-
-struct Write {
-    int address;   // a register or a sink word (0x000–0xBFF)
-    int32_t raw;
-};
 
 // The firmware's link: queued writes, committed by a swap, applied by the
 // CSP's write window (48 a pass); the program loads while the CSP is held.
@@ -191,36 +165,32 @@ public:
         synth_.write(ctrl_address, 0);
     }
 
-    void load(const std::vector<uint64_t> &words) {
-        for (size_t pc = 0; pc < words.size(); ++pc) {
+    void load() {
+        for (size_t pc = 0; pc < csp::control::words.size(); ++pc) {
             synth_.write(program_high_address,
-                         static_cast<uint32_t>(words[pc] >> 32));
+                         static_cast<uint32_t>(csp::control::words[pc] >> 32));
             synth_.write(static_cast<uint16_t>(program_base + pc),
-                         static_cast<uint32_t>(words[pc]));
+                         static_cast<uint32_t>(csp::control::words[pc]));
         }
     }
 
-    // Queue the writes (the queue holds 512) and commit them. `held`: the
-    // CSP is held, and a pass applies them all; running, 48 a pass.
-    void commit(const std::vector<Write> &writes, bool held) {
+    // Queue the writes (the queue holds 512) and commit them. Held, a pass
+    // applies them all; running, 48 a pass.
+    void commit(const render::Writes &writes, bool held) {
         constexpr size_t chunk = 256;
-        if (std::getenv("SYNTH_DEBUG")) {
-            std::printf("  committing %zu writes\n", writes.size());
-        }
         for (size_t done = 0; done < writes.size();) {
             const size_t end = std::min(writes.size(), done + chunk);
             for (; done < end; ++done) {
-                synth_.write(static_cast<uint16_t>(queue_base
-                                                   + writes[done].address),
+                synth_.write(static_cast<uint16_t>(queue_base + writes[done].address),
                              static_cast<uint32_t>(writes[done].raw) & 0x3FFFF);
             }
             synth_.write(ctrl_address, ctrl_swap | (held ? ctrl_hold : 0));
-            synth_.run_passes(held ? 2 : 6);
+            synth_.run_passes(held ? 2 : 1 + static_cast<int>(chunk / 48));
         }
     }
 
     // A partial's ten pointers: three to a word, the fourth word commits.
-    void point(int partial, const int (&pointers)[10]) {
+    void point(int partial, const std::array<int, render::pointer_count> &pointers) {
         const uint16_t base = static_cast<uint16_t>(partial_base + 64 * partial);
         for (int word = 0; word < 3; ++word) {
             synth_.write(base + word,
@@ -235,34 +205,82 @@ private:
     Synth &synth_;
 };
 
-// ---- the control program ------------------------------------------------------------------------
+// ---- the firmware's side: a patch on a synthesizer ------------------------------------------
 
-std::string control_program_text() {
-    std::string source;
-    for (const char *part :
-         {"map.s", "lfo.s", "channel.s", "envelope.s", "voice.s"}) {
-        std::ifstream file(std::string(CSP_PROGRAMS_DIR) + "/" + part);
-        if (!file) {
-            std::printf("cannot read %s\n", part);
-            std::exit(2);
-        }
-        std::stringstream text;
-        text << file.rdbuf();
-        source += text.str() + "\n";
+// Everything the firmware does at start-up and per note, on one chip.
+class Rig {
+public:
+    explicit Rig(VerilatedContext &context) : synth(context), link(synth) {
+        patch_init(&patch);
     }
-    return source;
-}
 
-int word_of(double value) {
-    return static_cast<int>(std::lround(value * 16384.0));
-}
+    // Hold the CSP, load the program, write the constants and the whole patch,
+    // point the partials, release.
+    void bring_up() {
+        link.hold();
+        link.load();
+        render::Writes writes;
+        for (const csp::control::Constant &constant : csp::control::constants) {
+            writes.push_back({constant.address, constant.raw});
+        }
+        render::setup(writes);
+        patch_writes(writes);
+        link.commit(writes, true);
+        point_partials();
+        link.release();
+        synth.run_passes(4);
+    }
 
-void write_wide(std::vector<Write> &writes, int address, int64_t raw36) {
-    writes.push_back({address, static_cast<int32_t>((raw36 >> 18) & 0x3FFFF)});
-    writes.push_back({address + 1, static_cast<int32_t>(raw36 & 0x3FFFF)});
-}
+    void patch_writes(render::Writes &writes) {
+        render::amp_envelope(patch, writes);
+        render::mod_envelope(patch, writes);
+        render::cutoff(patch, controllers, writes);
+        render::volume(patch, writes);
+        render::pitch_bend(patch, controllers, writes);
+        render::lfo(patch, 0, writes);
+        render::lfo(patch, 1, writes);
+        render::channel_sound(patch, writes);
+    }
 
-// ---- measuring what comes out -----------------------------------------------------------------------
+    // The patch as it is now, sent to a running chip.
+    void apply() {
+        render::Writes writes;
+        patch_writes(writes);
+        link.commit(writes, false);
+        point_partials();
+    }
+
+    void point_partials() {
+        render::VoicePlan plan;
+        render::voicing(patch, plan);
+        for (int voice = 0; voice < render::voice_count; ++voice) {
+            for (int slot = 0; slot < render::partials_per_voice; ++slot) {
+                link.point(voice * render::partials_per_voice + slot,
+                           render::pointers_of(voice, slot, plan[slot]));
+            }
+        }
+    }
+
+    // Voice 0 sounding a note.
+    void strike(uint8_t note, uint8_t velocity = 100) {
+        render::Writes writes;
+        render::note_on(patch, 0, note, velocity, writes);
+        link.commit(writes, false);
+    }
+
+    void release_voice() {
+        render::Writes writes;
+        render::gate(0, false, writes);
+        link.commit(writes, false);
+    }
+
+    Synth synth;
+    Link link;
+    patch_t patch;
+    render::Controllers controllers;
+};
+
+// ---- measuring what comes out -------------------------------------------------------------------------
 
 struct Window {
     double rms;
@@ -270,15 +288,18 @@ struct Window {
     double frequency;   // from the rising zero crossings, Hz
 };
 
+double value_of(const Sample &sample, bool left) {
+    return (left ? sample.left : sample.right) / 8388608.0;
+}
+
 Window measure(const std::vector<Sample> &samples, size_t first, size_t last,
-               bool left) {
+               bool left = true) {
     double sum = 0, peak = 0;
     int crossings = 0;
     size_t first_crossing = 0, last_crossing = 0;
     double previous = 0;
     for (size_t n = first; n < last; ++n) {
-        const double value = (left ? samples[n].left : samples[n].right)
-                             / 8388608.0;
+        const double value = value_of(samples[n], left);
         sum += value * value;
         peak = std::max(peak, std::fabs(value));
         if (n > first && previous < 0 && value >= 0) {
@@ -292,313 +313,229 @@ Window measure(const std::vector<Sample> &samples, size_t first, size_t last,
     }
     Window window{std::sqrt(sum / double(last - first)), peak, 0};
     if (crossings > 2) {
-        window.frequency = 96000.0 * (crossings - 1)
+        window.frequency = sample_rate * (crossings - 1)
                            / double(last_crossing - first_crossing);
     }
     return window;
 }
 
+// The magnitude of one frequency in a window (Goertzel), as a share of a
+// full-scale sine's.
+double component(const std::vector<Sample> &samples, size_t first, size_t last,
+                 double frequency) {
+    const double omega = 2.0 * M_PI * frequency / sample_rate;
+    double real = 0, imag = 0;
+    for (size_t n = first; n < last; ++n) {
+        const double value = value_of(samples[n], true);
+        real += value * std::cos(omega * double(n - first));
+        imag += value * std::sin(omega * double(n - first));
+    }
+    return 2.0 * std::hypot(real, imag) / double(last - first);
+}
+
 int failures = 0;
 
-void check(bool condition, const char *what) {
-    std::printf("  %s: %s\n", condition ? "pass" : "FAIL", what);
+void check(bool condition, const std::string &what) {
+    std::printf("  %s: %s\n", condition ? "pass" : "FAIL", what.c_str());
     failures += !condition;
 }
 
-// ---- one voice on one channel -----------------------------------------------------------------------------
+constexpr double c4 = 261.6256;
 
-struct Layout {
-    csp::Program program;
-    int channels, channel_size, voices, voice_size, lfos, lfo_size, sinks, channel_sinks;
-    int zero_sink;
-
-    int symbol(const char *name) const {
-        return program.symbols.at(name);
-    }
-};
-
-Layout assemble_control_program() {
-    Layout layout;
-    layout.program = csp::assemble(control_program_text());
-    for (const csp::Diagnostic &d : layout.program.diagnostics) {
-        std::printf("control program, line %d: %s\n", d.line, d.message.c_str());
-        if (d.error) {
-            std::exit(1);
-        }
-    }
-    layout.channels      = layout.symbol("CHANNELS");
-    layout.channel_size  = layout.symbol("CHANNEL_SIZE");
-    layout.voices        = layout.symbol("VOICES");
-    layout.voice_size    = layout.symbol("VOICE_SIZE");
-    layout.lfos          = layout.symbol("LFOS");
-    layout.lfo_size      = layout.symbol("LFO_SIZE");
-    layout.sinks         = layout.symbol("SINKS");
-    layout.channel_sinks = layout.symbol("CHANNEL_SINKS");
-    layout.zero_sink     = layout.symbol("ZERO_SINK");
-    return layout;
+// A sine, one oscillator, centred, the envelope open: the plainest note.
+void plain(patch_t &patch) {
+    patch.voice_struct   = VOICE_2_PLAIN;
+    patch.osc[0].wave    = WAVE_SINE;
+    patch.osc_mix        = -63;     // osc 2 out of it
+    patch.filter.cascade = 0;
+    patch.filter.cutoff  = 0x2B20 - (5 * 1024 + 512); // wide open
 }
 
-// The sink words of a channel's block and a voice's, by name.
-struct SinkMap {
-    const Layout &layout;
-    int voice_sink(int voice, const char *field) const {
-        return layout.sinks + 8 * voice + layout.symbol(field);
-    }
-    int channel_sink(int channel, const char *field, int index = 0) const {
-        return layout.channel_sinks + channel * layout.symbol("CHANNEL_SINK_SIZE")
-               + layout.symbol(field) + index;
-    }
-};
-
-// Voice `voice` on channel `channel`, `partials` unison partials at
-// octaves `detune` apart: everything the firmware writes at setup.
-struct Patch {
-    double note        = 0.0;    // octaves from middle C
-    double volume      = 1.0;
-    double left        = 0.5;    // the channel's gain on each side
-    double right       = 0.5;
-    double cutoff_base = 3.0;    // octaves from middle C: wide open
-    int waveform       = 3;      // sine
-    int partials       = 1;
-};
-
-std::vector<Write> setup_writes(const Layout &layout, const Patch &patch) {
-    std::vector<Write> writes;
-    for (const csp::ConstantWrite &constant : layout.program.constants) {
-        writes.push_back({constant.address, constant.raw});
-    }
-    // no LFOs running: both sets empty
-    for (int half = 0; half < 2; ++half) {
-        const int set = layout.symbol("LFO_SETS") + half * layout.symbol("SET_SIZE");
-        writes.push_back({set + layout.symbol("BASE"),
-                          layout.lfos + half * 16 * layout.lfo_size});
-    }
-    const int channel = layout.channels;
-    auto table = [&](int row, int64_t target22, uint32_t coefficient) {
-        write_wide(writes, channel + row, target22 << 10);
-        write_wide(writes, channel + row + 2, csp::envelope_rate(coefficient));
-    };
-    for (int kind = 0; kind < 2; ++kind) {
-        const int row = 16 * kind;
-        table(row + 0, 0x533333, 40000);   // attack: a few ms
-        table(row + 4, 0x200000, 12000);   // decay to half
-        table(row + 8, 0, 8000);           // release: ~ 25 ms
-    }
-    auto field = [&](const char *name, int raw) {
-        writes.push_back({channel + layout.symbol(name), raw});
-    };
-    field("LFO1", layout.lfos);
-    field("LFO2", layout.lfos);
-    field("SINK_BLOCK", layout.channel_sinks);
-    field("DUTY_BASE_0", 0);
-    field("DUTY_BASE_1", 0);
-    field("RESONANCE_BASE", 0);
-    field("CUTOFF_BASE", word_of(patch.cutoff_base));
-    field("KEY_TRACK", word_of(0.0));
-    field("VOLUME", word_of(patch.volume));
-    // every voice: idle, in release, on the channel, with its own sinks (a
-    // voice with no sink pointer would write over the registers)
-    for (int voice = 0; voice < 32; ++voice) {
-        const int base = layout.voices + voice * layout.voice_size;
-        writes.push_back({base + layout.symbol("STAGE_A"), 8});
-        writes.push_back({base + layout.symbol("STAGE_M"), 24});
-        writes.push_back({base + layout.symbol("VELOCITY"), word_of(1.0)});
-        writes.push_back({base + layout.symbol("CHANNEL"), channel});
-        writes.push_back({base + layout.symbol("NOTE"), word_of(patch.note)});
-        writes.push_back({base + layout.symbol("SINK"), layout.sinks + 8 * voice});
-    }
-
-    // the channel's own sink words: what only a MIDI message moves
-    const SinkMap sinks{layout};
-    for (int partial = 0; partial < patch.partials; ++partial) {
-        writes.push_back({sinks.channel_sink(0, "DETUNE", partial), 0});
-        writes.push_back({sinks.channel_sink(0, "CUTOFF_OFFSET", partial), 0});
-        writes.push_back({sinks.channel_sink(0, "GAIN_LEFT", partial), word_of(patch.left)});
-        writes.push_back({sinks.channel_sink(0, "GAIN_RIGHT", partial), word_of(patch.right)});
-    }
-    writes.push_back({sinks.channel_sink(0, "MODE_0"), patch.waveform});
-    writes.push_back({layout.symbol("CHANNELS_IN_USE"), 1});
-    return writes;
+// Let a note settle (attack and decay are a few milliseconds) and measure 50 ms.
+Window sustained(Rig &rig, bool left = true) {
+    rig.synth.run_ms(40);
+    const size_t from = rig.synth.mark();
+    rig.synth.run_ms(50);
+    return measure(rig.synth.samples(), from, rig.synth.mark(), left);
 }
 
-// The ten pointers of a voice's partial, as the firmware sets them.
-void point_partial(Link &link, const Layout &layout, int partial, int voice,
-                   int channel, int unison, int oscillator) {
-    const SinkMap sinks{layout};
-    auto index = [&](int address) { return address - csp::sink_base; };
-    const int pointers[10] = {
-        index(sinks.voice_sink(voice, "SINK_PITCH")),
-        index(sinks.channel_sink(channel, "DETUNE", unison)),
-        index(sinks.voice_sink(voice, "SINK_CUTOFF")),
-        index(sinks.channel_sink(channel, "CUTOFF_OFFSET", unison)),
-        index(sinks.voice_sink(voice, "SINK_GAIN")),
-        index(sinks.channel_sink(channel, "GAIN_LEFT", unison)),
-        index(sinks.channel_sink(channel, "GAIN_RIGHT", unison)),
-        index(sinks.channel_sink(channel, oscillator ? "DUTY_1" : "DUTY_0")),
-        index(sinks.channel_sink(channel, "RESONANCE")),
-        index(sinks.channel_sink(channel, oscillator ? "MODE_1" : "MODE_0")),
-    };
-    link.point(partial, pointers);
-}
+// ---- the cases -------------------------------------------------------------------------------------------------
 
-// Bring the synthesizer up the way the firmware does: hold the CSP, load the
-// program, write the constants and settings, point the partials, release.
-void bring_up(Synth &synth, Link &link, const Layout &layout, const Patch &patch) {
-    link.hold();
-    link.load(layout.program.words);
-    link.commit(setup_writes(layout, patch), true);
-    for (int partial = 0; partial < patch.partials; ++partial) {
-        point_partial(link, layout, partial, 0, 0, partial, 0);
-    }
-    link.release();
-    synth.run_passes(4);
-}
-
-void strike(Synth &synth, Link &link, const Layout &layout, bool on) {
-    std::vector<Write> writes;
-    const int voice = layout.voices;
-    if (on) {
-        write_wide(writes, voice + layout.symbol("LEVEL_A"), 0);
-        write_wide(writes, voice + layout.symbol("LEVEL_M"), 0);
-    }
-    writes.push_back({voice + layout.symbol("GATE"), on ? 16384 : 0});
-    link.commit(writes, false);
-}
-
-// ---- the cases ---------------------------------------------------------------------------------------------------------
-
-void case_tone(VerilatedContext &context, const Layout &layout) {
-    std::printf("a note: pitch, level, pan, release, and a setting changed live\n");
-    Synth synth(context);
-    Link link(synth);
-    Patch patch;
-    patch.left  = 0.25;
-    patch.right = 0.0;     // hard left
-    bring_up(synth, link, layout, patch);
-
-    check(synth.read(ctrl_address) == 0, "CTRL reads back what was written (released)");
-    const size_t silent_from = synth.mark();
-    synth.run(4 * pass_cycles);
-    const Window silent = measure(synth.samples(), silent_from, synth.mark(), true);
-    check(silent.peak < 1e-4, "silent before a note");
-
-    strike(synth, link, layout, true);
-    synth.run(int64_t{40} * sample_cycles * 96);    // 40 ms of attack and decay
-    if (std::getenv("SYNTH_DEBUG")) {
-        const int voice = layout.voices;
-        std::printf("  voice: gate %d level_a %d stage_a %d note %d channel %d sink %d\n",
-                    synth_register(voice + layout.symbol("GATE")),
-                    synth_register(voice + layout.symbol("LEVEL_A")),
-                    synth_register(voice + layout.symbol("STAGE_A")),
-                    synth_register(voice + layout.symbol("NOTE")),
-                    synth_register(voice + layout.symbol("CHANNEL")),
-                    synth_register(voice + layout.symbol("SINK")));
-        std::printf("  channel: cutoff_base %d volume %d ch_pitch %d ch_cutoff %d\n",
-                    synth_register(layout.channels + layout.symbol("CUTOFF_BASE")),
-                    synth_register(layout.channels + layout.symbol("VOLUME")),
-                    synth_register(layout.channels + layout.symbol("CH_PITCH")),
-                    synth_register(layout.channels + layout.symbol("CH_CUTOFF")));
-        std::printf("  voice: out_a %d d %d u_m %d\n",
-                    synth_register(voice + layout.symbol("OUT_A")),
-                    synth_register(voice + layout.symbol("D")),
-                    synth_register(voice + layout.symbol("U_M")));
-        std::printf("  queue: %d written, %d while full, %d popped\n", synth_queue_counters(0),
-                    synth_queue_counters(1), synth_queue_counters(2));
-        for (int v = 0; v < 32; ++v) {
-            const int base = layout.voices + v * layout.voice_size;
-            const int sink = synth_register(base + layout.symbol("SINK"));
-            if (sink != layout.sinks + 8 * v) {
-                std::printf("  voice %d: SINK %d (want %d), CHANNEL %d, STAGE_A %d NOTE %d\n", v, sink,
-                            layout.sinks + 8 * v, synth_register(base + layout.symbol("CHANNEL")),
-                            synth_register(base + layout.symbol("STAGE_A")), synth_register(base + layout.symbol("NOTE")));
-            }
-        }
-        for (const csp::ConstantWrite &c : layout.program.constants) {
-            std::printf("  constant at %d = %d, register holds %d\n", c.address, c.raw, synth_register(c.address));
-        }
-        std::printf("  gain sinks: %d %d\n", synth_sink(0x110), synth_sink(0x118));
-        std::printf("  csp sink writes %d, firmware sink writes %d, last csp sink address %d, flips %d\n",
-                    synth_counters(0), synth_counters(1), synth_counters(2), synth_counters(3));
-        std::printf("  last csp sink data %d, active page %d\n", synth_counters(4), synth_counters(5));
-        std::printf("  voice sinks: pitch %d cutoff %d gain %d\n", synth_sink(0), synth_sink(1), synth_sink(2));
-        std::printf("  pointers:");
-        for (int k = 0; k < 10; ++k) std::printf(" %d", synth_pointer(0, k));
-        std::printf("\n  channel sinks:");
-        for (int k = 0; k < 12; ++k) std::printf(" %d", synth_sink(0x100 + k));
-        std::printf("\n  passes %u\n", synth.passes());
-    }
-    const size_t from = synth.mark();
-    synth.run(int64_t{50} * sample_cycles * 96);    // 50 ms to measure
-    const Window left  = measure(synth.samples(), from, synth.mark(), true);
-    const Window right = measure(synth.samples(), from, synth.mark(), false);
-    const double c4 = 261.6256;
-    std::printf("  left: %.2f Hz, peak %.4f, rms %.4f; right: peak %.6f\n",
-                left.frequency, left.peak, left.rms, right.peak);
-    check(std::fabs(left.frequency / c4 - 1.0) < 0.01, "middle C: 261.6 Hz within 1 %");
-    check(left.peak > 0.02, "audible");
-    check(right.peak < left.peak * 0.01, "hard left: the right side is silent");
-
-    // a gain written while the note sounds: both pages must take it
+void case_note(VerilatedContext &context) {
+    std::printf("a note: pitch, level, release\n");
+    Rig rig(context);
+    plain(rig.patch);
+    rig.bring_up();
+    check(rig.synth.read(ctrl_address) == 0, "CTRL reads back what was written (released)");
     {
-        std::vector<Write> writes;
-        const SinkMap sinks{layout};
-        writes.push_back({sinks.channel_sink(0, "GAIN_LEFT", 0), word_of(0.125)});
-        link.commit(writes, false);
-        synth.run(int64_t{5} * sample_cycles * 96);
-        const size_t during = synth.mark();
-        synth.run(int64_t{30} * sample_cycles * 96);
-        const Window half = measure(synth.samples(), during, synth.mark(), true);
-        std::printf("  after halving the gain: peak %.4f (was %.4f)\n", half.peak, left.peak);
-        check(std::fabs(half.peak / left.peak - 0.5) < 0.08,
-              "halving the channel's gain halves the level, and keeps it halved");
+        const size_t from = rig.synth.mark();
+        rig.synth.run_ms(5);
+        check(measure(rig.synth.samples(), from, rig.synth.mark()).peak < 1e-4,
+              "silent before a note");
     }
+    rig.strike(60);
+    const Window note = sustained(rig);
+    std::printf("  %.2f Hz, peak %.4f, rms %.4f\n", note.frequency, note.peak, note.rms);
+    check(std::fabs(note.frequency / c4 - 1.0) < 0.01, "middle C: 261.6 Hz within 1 %");
+    // the level the firmware's gain staging says: the partial at volume code
+    // 0xD7 (the anchor and the make-up for two partials), the envelope at
+    // sustain (full), the sine's amplitude 1.09 of the mix scale (measured)
+    const double expected = 1.09 * std::exp2((0xD7 - 255) / 16.0);
+    check(std::fabs(note.peak / expected - 1.0) < 0.15,
+          "the level follows the volume codes: peak " + std::to_string(note.peak)
+                  + " against " + std::to_string(expected));
+    const Window right = measure(rig.synth.samples(), rig.synth.mark() - 4800,
+                                 rig.synth.mark(), false);
+    check(right.peak > 0.5 * note.peak, "centred: the right side sounds as the left does");
 
-    // release
-    strike(synth, link, layout, false);
-    synth.run(int64_t{300} * sample_cycles * 96);       // 300 ms
-    const size_t tail_from = synth.mark();
-    synth.run(int64_t{20} * sample_cycles * 96);
-    const Window tail = measure(synth.samples(), tail_from, synth.mark(), true);
-    std::printf("  after the release: peak %.6f\n", tail.peak);
-    check(tail.peak < left.peak * 0.02, "released: the note has died away");
+    rig.release_voice();
+    const double tail_ms = render::release_tail_us(rig.patch) / 1000.0;
+    rig.synth.run_ms(tail_ms);
+    const size_t from = rig.synth.mark();
+    rig.synth.run_ms(20);
+    const Window tail = measure(rig.synth.samples(), from, rig.synth.mark());
+    std::printf("  %.1f ms after the release: peak %.6f\n", tail_ms, tail.peak);
+    check(tail.peak < note.peak * 0.01, "released: the note has died away within its tail");
 }
 
-void case_pitch(VerilatedContext &context, const Layout &layout) {
-    std::printf("pitch: an octave up is twice the frequency, a fifth is 3/2\n");
-    for (const double note : {0.0, 0.1, 0.25, 0.5, 1.0, 7.0 / 12.0}) {
-        Synth synth(context);
-        Link link(synth);
-        Patch patch;
-        patch.note  = note;
-        patch.left  = 0.25;    // under the limiter's threshold: a sine stays a sine
-        patch.right = 0.0;
-        patch.cutoff_base = 5.0;    // far above the notes: the filter stays out of it
-        bring_up(synth, link, layout, patch);
-        strike(synth, link, layout, true);
-        synth.run(int64_t{40} * sample_cycles * 96);
-        const size_t from = synth.mark();
-        synth.run(int64_t{50} * sample_cycles * 96);
-        const Window left = measure(synth.samples(), from, synth.mark(), true);
-        const double want = 261.6256 * std::pow(2.0, note);
-        std::printf("  %.3f octaves: %.2f Hz (want %.2f), peak %.4f\n", note, left.frequency, want, left.peak);
-        if (std::getenv("SYNTH_DEBUG")) {
-            double mix_peak = 0;
-            for (size_t n = from; n < synth.mark(); ++n) {
-                mix_peak = std::max(mix_peak, std::fabs(synth.samples()[n].mix_left / 8388608.0));
-            }
-            std::printf("  mix peak %.4f; partial 5 points at:", mix_peak);
-            for (int k = 0; k < 10; ++k) std::printf(" %d", synth_pointer(5, k));
-            std::printf("; sink[1023] = %d\n", synth_sink(1023));
-            std::printf("  voice sinks: pitch %d cutoff %d gain %d; channel: detune %d gain left %d right %d mode %d\n",
-                        synth_sink(0), synth_sink(1), synth_sink(2), synth_sink(0x100), synth_sink(0x110),
-                        synth_sink(0x118), synth_sink(0x122));
-        }
-        if (const char *path = std::getenv("SYNTH_DUMP")) {
-            std::ofstream out(std::string(path) + std::to_string(int(note * 1000)) + ".txt");
-            for (size_t n = from; n < synth.mark(); ++n) out << synth.samples()[n].left << "\n";
-        }
-        check(std::fabs(left.frequency / want - 1.0) < 0.01, "within 1 %");
+void case_pitch(VerilatedContext &context) {
+    std::printf("pitch: notes across the keyboard\n");
+    for (const int note : {36, 48, 69, 72, 84}) {
+        Rig rig(context);
+        plain(rig.patch);
+        rig.bring_up();
+        rig.strike(static_cast<uint8_t>(note));
+        const Window window = sustained(rig);
+        const double want = 440.0 * std::pow(2.0, (note - 69) / 12.0);
+        std::printf("  note %d: %.2f Hz (want %.2f)\n", note, window.frequency, want);
+        check(std::fabs(window.frequency / want - 1.0) < 0.01, "within 1 %");
     }
+}
+
+void case_pan(VerilatedContext &context) {
+    std::printf("pan\n");
+    Rig rig(context);
+    plain(rig.patch);
+    rig.patch.pan = -63; // hard left (the right side is muted at -63)
+    rig.bring_up();
+    rig.strike(60);
+    const Window left = sustained(rig, true);
+    const Window right = measure(rig.synth.samples(), rig.synth.mark() - 4800,
+                                 rig.synth.mark(), false);
+    std::printf("  left peak %.4f, right peak %.6f\n", left.peak, right.peak);
+    check(left.peak > 0.02 && right.peak < left.peak * 0.01, "hard left: the right side is silent");
+
+    // changed while the note sounds: both sink pages must take it
+    rig.patch.pan = 63;
+    rig.apply();
+    rig.synth.run_ms(5);
+    const size_t after = rig.synth.mark();
+    rig.synth.run_ms(40);
+    const Window now_left = measure(rig.synth.samples(), after, rig.synth.mark(), true);
+    const Window now_right = measure(rig.synth.samples(), after, rig.synth.mark(), false);
+    check(now_right.peak > 0.02 && now_left.peak < now_right.peak * 0.01,
+          "pan thrown to the right while the note sounds: it stays there");
+}
+
+void case_filter(VerilatedContext &context) {
+    std::printf("filter: the cutoff\n");
+    double open_3rd = 0, closed_3rd = 0;
+    for (const bool closed : {false, true}) {
+        Rig rig(context);
+        rig.patch.voice_struct   = VOICE_2_PLAIN;
+        rig.patch.osc[0].wave    = WAVE_SAW;
+        rig.patch.osc_mix        = -63;
+        rig.patch.filter.cascade = 1;   // 24 dB
+        // closed: the cutoff at middle C itself (the knob's half octave is
+        // added), a note and a half under the third harmonic
+        rig.patch.filter.cutoff  = closed ? -512 : 0x2B20 - (5 * 1024 + 512);
+        rig.bring_up();
+        rig.strike(60);
+        rig.synth.run_ms(40);
+        const size_t from = rig.synth.mark();
+        rig.synth.run_ms(50);
+        const double third = component(rig.synth.samples(), from, rig.synth.mark(), 3 * c4);
+        (closed ? closed_3rd : open_3rd) = third;
+    }
+    std::printf("  third harmonic: open %.5f, closed %.5f\n", open_3rd, closed_3rd);
+    check(closed_3rd < open_3rd * 0.1, "a cutoff at the note takes the third harmonic down by 20 dB at least");
+}
+
+void case_vibrato(VerilatedContext &context) {
+    std::printf("LFO 1 on the pitch\n");
+    Rig rig(context);
+    plain(rig.patch);
+    rig.patch.lfo[0].shape = 3;                       // sine
+    rig.patch.lfo[0].rate  = 700;                     // 2 Hz at 96 kHz
+    rig.patch.lfo[0].depth = 1024 / 6;                // ±1 semitone
+    rig.patch.lfo[0].dest  = LFO_DEST_PITCH;
+    rig.bring_up();
+    rig.strike(60);
+    rig.synth.run_ms(20);
+    // the frequency every 25 ms for a second
+    double lowest = 1e9, highest = 0;
+    for (int slice = 0; slice < 40; ++slice) {
+        const size_t from = rig.synth.mark();
+        rig.synth.run_ms(25);
+        const Window window = measure(rig.synth.samples(), from, rig.synth.mark());
+        if (window.frequency > 0) {
+            lowest  = std::min(lowest, window.frequency);
+            highest = std::max(highest, window.frequency);
+        }
+    }
+    const double span = std::log2(highest / lowest) * 12.0;
+    std::printf("  %.1f to %.1f Hz: %.2f semitones\n", lowest, highest, span);
+    check(span > 1.6 && span < 2.4, "±1 semitone makes a span of 2");
+}
+
+void case_velocity(VerilatedContext &context) {
+    std::printf("velocity scales the amp envelope\n");
+    double loud = 0, soft = 0;
+    for (const uint8_t velocity : {127, 64}) {
+        Rig rig(context);
+        plain(rig.patch);
+        rig.patch.vel_amp_amt = 127;
+        rig.bring_up();
+        rig.strike(60, velocity);
+        (velocity == 127 ? loud : soft) = sustained(rig).peak;
+    }
+    // g(64) = 64/127; the peak in dB is 60 dB × (1 − g) down
+    const double want = std::pow(10.0, -3.0 * (1.0 - 64.0 / 127.0));
+    std::printf("  soft / loud = %.4f (want %.4f)\n", soft / loud, want);
+    check(std::fabs(soft / loud / want - 1.0) < 0.15,
+          "a soft note is as many dB down as the patch says");
+}
+
+void case_unison(VerilatedContext &context) {
+    std::printf("the voice structure: seven and one, detuned and spread\n");
+    Rig rig(context);
+    rig.patch.voice_struct   = VOICE_7_PLUS_1;
+    rig.patch.osc[0].wave    = WAVE_SAW;
+    rig.patch.osc[1].wave    = WAVE_SAW;
+    rig.patch.osc_mix        = 0;
+    rig.patch.unison_detune  = 6;
+    rig.patch.unison_stereo  = 100;
+    rig.patch.filter.cutoff  = 0x2B20 - (5 * 1024 + 512);
+    rig.bring_up();
+    rig.strike(60);
+    rig.synth.run_ms(40);
+    const size_t from = rig.synth.mark();
+    rig.synth.run_ms(100);
+    const Window left  = measure(rig.synth.samples(), from, rig.synth.mark(), true);
+    const Window right = measure(rig.synth.samples(), from, rig.synth.mark(), false);
+    std::printf("  left rms %.4f peak %.4f, right rms %.4f peak %.4f\n",
+                left.rms, left.peak, right.rms, right.peak);
+    check(left.rms > 0.01 && right.rms > 0.01, "eight partials sound on both sides");
+    check(left.peak < 0.99 && right.peak < 0.99, "and do not rail the output");
+    // seven saws a few steps apart beat: the level moves over the 100 ms
+    double lowest = 1e9, highest = 0;
+    for (int slice = 0; slice < 20; ++slice) {
+        const Window window = measure(rig.synth.samples(), from + 480 * slice,
+                                      from + 480 * (slice + 1), true);
+        lowest  = std::min(lowest, window.rms);
+        highest = std::max(highest, window.rms);
+    }
+    check(highest > lowest * 1.05, "the unison beats");
 }
 
 } // namespace
@@ -606,10 +543,15 @@ void case_pitch(VerilatedContext &context, const Layout &layout) {
 int main(int argc, char **argv) {
     VerilatedContext context;
     context.commandArgs(argc, argv);
-    const Layout layout = assemble_control_program();
-    std::printf("control program: %zu instructions\n", layout.program.words.size());
-    case_tone(context, layout);
-    case_pitch(context, layout);
+    std::printf("control program: %zu instructions, %zu constants\n",
+                csp::control::words.size(), csp::control::constants.size());
+    case_note(context);
+    case_pitch(context);
+    case_pan(context);
+    case_filter(context);
+    case_vibrato(context);
+    case_velocity(context);
+    case_unison(context);
     std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
     return failures == 0 ? 0 : 1;
 }

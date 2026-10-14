@@ -52,41 +52,6 @@ module tb_synth (
     assign mix_right   = dut.sample_right;
     assign passes      = dut.u_csp.pass_count;
 
-    int last_csp_sink_data = 0;
-    int csp_sink_writes = 0, firmware_sink_writes = 0, last_csp_sink_address = -1, flips = 0;
-    always_ff @(posedge sysclk) begin
-        if (dut.sink_write_enable && !dut.sink_write_both) begin
-            csp_sink_writes <= csp_sink_writes + 1;
-            last_csp_sink_address <= int'(dut.sink_write_address);
-            last_csp_sink_data <= int'($signed(dut.sink_write_data));
-        end
-        if (dut.sink_write_enable && dut.sink_write_both) firmware_sink_writes <= firmware_sink_writes + 1;
-        if (dut.pass_done) flips <= flips + 1;
-    end
-    int queued = 0, dropped_full = 0, popped = 0;
-    always @(posedge sclk) begin
-        if (dut.queue_write_enable) begin
-            queued <= queued + 1;
-            if (dut.u_write_queue.full) dropped_full <= dropped_full + 1;
-        end
-    end
-    always_ff @(posedge sysclk) if (dut.queue_pop) popped <= popped + 1;
-    export "DPI-C" function synth_queue_counters;
-    function int synth_queue_counters(input int which);
-        return which == 0 ? queued : which == 1 ? dropped_full : popped;
-    endfunction
-    export "DPI-C" function synth_counters;
-    function int synth_counters(input int which);
-        case (which)
-            0: return csp_sink_writes;
-            1: return firmware_sink_writes;
-            2: return last_csp_sink_address;
-            4: return last_csp_sink_data;
-            5: return dut.u_sink_area.active_page ? 1 : 0;
-            default: return flips;
-        endcase
-    endfunction
-
     // ---- the harness's view of the CSP and the pipeline's pointers ------------
     export "DPI-C" function synth_register;
     export "DPI-C" function synth_sink;

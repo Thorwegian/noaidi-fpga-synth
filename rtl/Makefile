@@ -275,14 +275,15 @@ SYNTH_RTL = $(PKG) csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.
             csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv \
             dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/osc_core.sv \
             dsp/output_lpf.sv spdif/spdif_tx.sv i2s/i2s_tx.sv spi/spi_bus.sv top.sv
-SYNTH_CPP = tb/synth/synth_sim.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.cpp \
-            ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
-obj_dir/synth_sim/sim: $(SYNTH_RTL) tb/synth/tb_synth.sv $(SYNTH_CPP) $(CSP_COSIM_HPP) \
-                       ../app/main/csp/envelope.hpp $(wildcard ../tools/csp/programs/*.s) $(LUTS) Makefile
+SYNTH_CPP = tb/synth/synth_sim.cpp ../app/main/render.cpp ../app/main/patch.cpp \
+            ../app/main/csp/envelope.cpp
+obj_dir/synth_sim/sim: $(SYNTH_RTL) tb/synth/tb_synth.sv $(SYNTH_CPP) ../app/main/render.hpp \
+                       ../app/main/patch.h ../app/main/csp/control_program.hpp \
+                       ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(LUTS) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
 	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
 	    --top-module tb_synth --Mdir $(@D) -o sim \
-	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../app/main)" \
 	    $(SYNTH_RTL) tb/synth/tb_synth.sv $(VL_DSP) $(abspath $(SYNTH_CPP))
 
 sim-synth: obj_dir/synth_sim/sim

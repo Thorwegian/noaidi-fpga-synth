@@ -21,7 +21,10 @@
 #                   failure, where only their formatting differs)
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim program.s)
-#   make csp-test   host tests of the CSP reference model and assembler
+#   make csp-test   host tests of the CSP reference model and assembler, and
+#                   that the firmware's control_program.hpp is current
+#   make csp-header regenerate app/main/csp/control_program.hpp from
+#                   tools/csp/programs (the firmware's copy of the program)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  list the sources that are not formatted — a
@@ -53,8 +56,8 @@ HOST_CC  ?= cc
 HOST_CXX ?= c++
 HOST_DIR  = app/build/host
 FW_TEST   = $(HOST_DIR)/patch_units_test
-FW_TEST_C   = app/main/patch_units.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
-FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+FW_TEST_C   = app/main/patch_units.c app/lib/tomlc17/src/tomlc17.c
+FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
@@ -135,10 +138,20 @@ $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
 
 csp: $(CSP_TOOL)
 
-csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp
+# The control program, in the order its parts are joined (map.s first).
+CSP_PROGRAM_FILES = $(addprefix $(CSP_DIR)/programs/,map.s lfo.s channel.s envelope.s voice.s)
+CSP_CONTROL_HEADER = app/main/csp/control_program.hpp
+
+csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
+
+csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
+	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
+	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
+	@echo "$(CSP_CONTROL_HEADER) is current"
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
@@ -154,4 +167,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-header csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
