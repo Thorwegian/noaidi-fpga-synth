@@ -488,18 +488,24 @@ gain sinks between passes.
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y), 2048 words each: **6**. |
 | CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **3 replicas** × 2 pages (one BSRAM per page): **6**. The active page's BSRAM serves the PAP on both ports while the CSP writes the other page, so 3 replicas give the 6 reads per cycle (#184). |
 | partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone: everything a partial reads is a sink: **0**. |
-| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | 12 pointers per partial, one page: **2–4** depending on packing. |
+| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | ten pointers per partial (100 bits), one page, written whole: **3** (256 × 36, three wide). |
 | partial SVF state `ic*eq*_ram` | 4 | filter state | Needed. |
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 27 to 29 blocks, against 33 today, before #217. The
-new CSP alone measures 10 (register file 6, instruction memory 3, write
-queue 1), as planned. The CSP
-grows to a 2048-word register file, a 1024-word sink area and 1472
-instructions on fewer BSRAM than today, paid for by `store_ram`, the
-second instruction page, the partials' immediates and their second
-page, and the sink area's two read ports per page.
+**Measured** (`make pack`, the whole synthesizer, seed 7): **28 of 46
+blocks** — the register file 6, the program memory 3, the write queue 1, the
+sink area 6, the pointer RAM 3, the partials' state 5, the lookup tables 4 —
+against 33 before the switch-over and the projected 27 to 29. LUT4 49 %,
+DFF 66 %. The CSP grew to a 2048-word register file, a 1024-word sink area
+and 1472 instructions on fewer BSRAM than before, paid for by `store_ram`,
+the second instruction page, the partials' immediates and their second
+page, and the sink area's two read ports per block. (The sink area's six
+blocks are `DPX9B` instantiated by hand: yosys copies a memory that has two
+read ports, which made it twelve; docs/memory_map.md has the findings.)
+
+**Timing** (same run): the system clock closes at 92.8 MHz against the 73.728
+MHz it runs at; the SPI clock domain at 116 MHz.
 
 ## 11. DSP blocks
 
