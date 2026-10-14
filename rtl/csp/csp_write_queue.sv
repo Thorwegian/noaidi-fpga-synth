@@ -18,8 +18,8 @@
 //    `commit_pointer` and toggles `commit_toggle`. The system clock sees
 //    the toggle two flip-flops later and only then reads
 //    `commit_pointer`, which has been stable since before the toggle:
-//    the same payload-behind-a-toggle crossing as the DMEM mailbox in
-//    dsp/csp.sv. Swaps are microseconds apart, far longer than the
+//    the payload-behind-a-toggle crossing the first CSP's DMEM mailbox
+//    used. Swaps are microseconds apart, far longer than the
 //    synchroniser.
 //  - The read pointer, back to the SPI side for the full test, crosses
 //    Gray-coded through two flip-flops: it only ever steps by one, so one

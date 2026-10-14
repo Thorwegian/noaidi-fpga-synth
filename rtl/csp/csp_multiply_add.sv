@@ -4,8 +4,9 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// One MULTALU36X18 DSP block, the same primitive dsp/adsr.sv uses for
-// its RC step: an 18-bit × 36-bit signed product plus a 54-bit addend.
+// One MULTALU36X18 DSP block, the primitive the fixed-function envelope
+// (tb/csp_cosim/adsr_reference.sv) used for its RC step: an 18-bit × 36-bit
+// signed product plus a 54-bit addend.
 // Combinational, with none of the block's registers: the CSP executes an
 // instruction within one clock, from register file read to result
 // register (rtl/csp/csp_core.sv).
@@ -17,7 +18,8 @@
 // write-back stage detects that from the operands' signs.
 //
 // The block is instantiated by hand because yosys only maps bare
-// multiplies to DSPs (see dsp/adsr.sv): every parameter is spelled out,
+// multiplies to DSPs (see tb/csp_cosim/adsr_reference.sv): every parameter is
+// spelled out,
 // for the same reason given there.
 //------------------------------------------------------------------------
 `default_nettype none
@@ -31,7 +33,7 @@ module csp_multiply_add (
 );
 
     // Gowin's behavioural model needs a GSR instance somewhere up the
-    // hierarchy; it lives here, as in dsp/adsr.sv, so no testbench has to
+    // hierarchy; it lives here, as it did in the envelope unit, so no testbench has to
     // know. Simulation only: in silicon the global set/reset network is
     // device infrastructure.
 `ifdef SIM_GOWIN_PRIM

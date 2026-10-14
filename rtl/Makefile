@@ -28,7 +28,7 @@ MOD = \
 
 SRC = $(PKG) $(MOD) constraints.cst
 
-# Generated LUTs / boot image
+# Generated LUTs
 LUTS = \
 	dsp/phase_lut.hex \
 	dsp/svf_fc_lut.hex \
@@ -76,7 +76,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
 
 # Placement seed is PINNED: nextpnr's router is seed-sensitive. Some
-# placements cannot route the ADSR's DSP output fabric ("Found two arcs
+# placements cannot route a DSP's output fabric ("Found two arcs
 # with same sink wire"), others fail with "Failed to find a route".
 # Bump SEED when a netlist change hits either — it is placement luck,
 # not (necessarily) real congestion. `make timing-sweep` compares seeds.

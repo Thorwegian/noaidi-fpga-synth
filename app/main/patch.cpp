@@ -49,28 +49,6 @@ uint32_t patch_adsr_rate_coeff(uint8_t rate_byte) {
     return k ? k : 1u; // a zero coefficient would freeze the envelope
 }
 
-// Sustain as a plain level. Firmware knows the destination, so it
-// decodes here rather than costing the gateware a second barrel
-// shift. Only the linear form is used -- OP[26] is never set.
-// The patch already holds the gateware's 10 bits; adsr.sv shifts them
-// up by ADSR_SUSTAIN_SHIFT into the 22-bit level.
-static uint32_t adsr_sustain(const adsr_t *e) {
-    return e->sustain > 0x3FFu ? 0x3FFu : e->sustain;
-}
-
-uint32_t patch_adsr_rate_ad(const adsr_t *e) {
-    uint32_t ka = patch_adsr_rate_coeff(patch_adsr_rate_byte(e->attack));
-    uint32_t kd = patch_adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
-    return (ka & 0x3FFFFu) | ((kd & 0x3FFFu) << 18);
-}
-
-uint32_t patch_adsr_rate_dsr(const adsr_t *e) {
-    uint32_t kd = patch_adsr_rate_coeff(patch_adsr_rate_byte(e->decay));
-    uint32_t kr = patch_adsr_rate_coeff(patch_adsr_rate_byte(e->release));
-    return ((kd >> 14) & 0xFu) | ((kr & 0x3FFFFu) << 4)
-           | ((adsr_sustain(e) & 0x3FFu) << 22);
-}
-
 void patch_init(patch_t *p) {
     memset(p, 0, sizeof(*p));
 
