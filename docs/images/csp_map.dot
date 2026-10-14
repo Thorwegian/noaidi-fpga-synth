@@ -51,7 +51,7 @@ digraph csp_map {
         fillcolor="#fdf0e6"; color="#d29a6a";
         pc       [label="PC + loop counters\nLOOP.i / LOOP.j"];
         decode   [label="decode\noperand = direct, or\ni / j + offset"];
-        index    [label="index registers\ni, j (12-bit)\nIDX: 3 delay slots"];
+        index    [label="index registers\ni, j (12-bit)\nIDX: visible to the next instruction"];
         regfile  [label="register file\n2048 × 18, wide pairs\n3 read copies A, X, Y [6]\nZERO hard-wired"];
         alu      [label="multiply-add unit\nALU54D: Y − A\nMULTALU36X18: X × (…) + A"];
         accflags [label="accumulator (54-bit)\nflags N Z V"];

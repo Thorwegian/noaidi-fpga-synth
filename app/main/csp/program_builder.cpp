@@ -11,38 +11,6 @@ namespace {
 
 constexpr size_t max_length = 1023; // a LOOP's or SKIP's 10-bit count
 
-// Which of an instruction's fields are register operands.
-struct OperandFields {
-    bool r, x, y;
-};
-
-OperandFields operand_fields(Opcode op) {
-    switch (op) {
-    case Opcode::nop:
-    case Opcode::skip:
-        return {false, false, false};
-    case Opcode::loop:
-    case Opcode::idx:
-    case Opcode::acc:
-        return {false, true, true};
-    case Opcode::abs:
-        return {true, true, false};
-    case Opcode::shift:
-        return {true, false, true};
-    default:
-        return {true, true, true};
-    }
-}
-
-bool uses_index(uint16_t field, IndexRegister index) {
-    const Operand operand = Operand::decode(field);
-    return operand.mode == Operand::Mode::indexed && operand.index == index;
-}
-
-char name_of(IndexRegister index) {
-    return index == IndexRegister::j ? 'j' : 'i';
-}
-
 } // namespace
 
 // ---- emitting -----------------------------------------------------------------
@@ -167,18 +135,19 @@ size_t ProgramBuilder::idx(IndexRegister which, Operand x, Operand y) {
 // ---- loops and skips ------------------------------------------------------------
 
 size_t ProgramBuilder::open_loop(IndexRegister which, Operand count,
-                                 Operand stride) {
-    // a bit 0 selects the index register; the length is set on closing
-    const ASelect a =
-            which == IndexRegister::j ? ASelect::result : ASelect::zero;
+                                 Operand stride, bool vector) {
+    // a bit 0 selects the index register, bit 1 a vector loop; the length
+    // is set on closing
+    const auto a    = static_cast<ASelect>((vector ? 2 : 0)
+                                           | (which == IndexRegister::j ? 1 : 0));
     const size_t at = emit({Opcode::loop, a, 0, field(count), field(stride)});
-    loops_.push_back({at, 0, which});
+    loops_.push_back({at, 0, which, vector});
     return at;
 }
 
 size_t ProgramBuilder::loop(IndexRegister which, size_t length, Operand count,
-                            Operand stride) {
-    const size_t at = open_loop(which, count, stride);
+                            Operand stride, bool vector) {
+    const size_t at = open_loop(which, count, stride, vector);
     close_loop(at, at + 1 + length);
     return at;
 }
@@ -250,6 +219,34 @@ void ProgramBuilder::pad_to(size_t position) {
 
 // ---- whole-program checks ---------------------------------------------------------
 
+// What a vector loop's body may not hold: what has one copy for all
+// iterations (a loop, the skip counter, the accumulator) or would move the
+// loop's own index register.
+void ProgramBuilder::check_vector_body(const LoopRecord &loop,
+                                       std::vector<BuildIssue> &issues) const {
+    for (size_t at = loop.at + 1; at < loop.end; ++at) {
+        const Instruction instruction = Instruction::decode(words_[at]);
+        const Opcode op               = instruction.op;
+        const bool reads_accumulator =
+                instruction.a == ASelect::accumulator
+                && (op == Opcode::mac || op == Opcode::macw
+                    || op == Opcode::interp || op == Opcode::add3
+                    || op == Opcode::andxor || op == Opcode::shift);
+        const bool moves_loop_index =
+                op == Opcode::idx
+                && (instruction.r & 1) == static_cast<uint16_t>(loop.index);
+        if (op == Opcode::loop || op == Opcode::skip || op == Opcode::acc
+            || reads_accumulator) {
+            issues.push_back({at, true,
+                              "LOOP, SKIP, ACC and acc are not allowed in a "
+                              "vector loop's body"});
+        } else if (moves_loop_index) {
+            issues.push_back(
+                    {at, true, "IDX on a vector loop's own index register"});
+        }
+    }
+}
+
 std::vector<BuildIssue> ProgramBuilder::check() const {
     std::vector<BuildIssue> issues = issues_;
 
@@ -258,30 +255,6 @@ std::vector<BuildIssue> ProgramBuilder::check() const {
                           "program is " + std::to_string(words_.size())
                                   + " instructions; a pass holds "
                                   + std::to_string(max_program_length)});
-    }
-
-    // IDX delay slots: the next three instructions still see the old value.
-    for (size_t at = 0; at < words_.size(); ++at) {
-        const Instruction instruction = Instruction::decode(words_[at]);
-        if (instruction.op != Opcode::idx) {
-            continue;
-        }
-        const auto target =
-                (instruction.r & 1) ? IndexRegister::j : IndexRegister::i;
-        for (size_t later = at + 1;
-             later <= at + index_delay && later < words_.size(); ++later) {
-            const Instruction next     = Instruction::decode(words_[later]);
-            const OperandFields fields = operand_fields(next.op);
-            if ((fields.r && uses_index(next.r, target))
-                || (fields.x && uses_index(next.x, target))
-                || (fields.y && uses_index(next.y, target))) {
-                issues.push_back({later, false,
-                                  std::string("uses ") + name_of(target)
-                                          + " in a delay slot of the IDX at "
-                                          + std::to_string(at)
-                                          + ": it still sees the old value"});
-            }
-        }
     }
 
     // Loops: closed, inside the program, nested at most one level, on
@@ -315,6 +288,9 @@ std::vector<BuildIssue> ProgramBuilder::check() const {
         if (depth > 1) {
             issues.push_back(
                     {loop.at, true, "LOOP nested more than one level deep"});
+        }
+        if (loop.vector && loop.end <= words_.size()) {
+            check_vector_body(loop, issues);
         }
     }
 

@@ -5,7 +5,7 @@ idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        "midi_parser.c" "spi_regs.c" "engine_link.c"
                        "voice_alloc.c" "ble_midi.c" "patch.c" "console.c" "cli.cpp" "cli_banks.cpp" "cli_system.c"
                        "stress_test.c" "storage.c" "patch_units.c" "patch_file.cpp" "safe_file.cpp" "banks.cpp"
-                       "csp/csp.cpp" "csp/program_builder.cpp"
+                       "csp/csp.cpp" "csp/program_builder.cpp" "csp/envelope.cpp"
                        "../lib/tomlc17/src/tomlc17.c"
                        PRIV_REQUIRES spi_flash esp_app_format esp_driver_spi esp_driver_gpio esp_driver_uart esp_timer
                                      nvs_flash esp_driver_usb_serial_jtag bt esp_ringbuf

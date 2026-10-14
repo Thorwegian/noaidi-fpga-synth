@@ -7,15 +7,20 @@
 // yardstick the RTL is checked against (#220) and the host simulator for
 // CSP programs. It models what a program and the firmware can observe:
 // registers, the published sink page, the index registers, the
-// accumulator and flags, the write queue, reset and the pass limits. It
-// does not model the pipeline's cycle-by-cycle internals, except the one
-// a program can see: the IDX delay slots.
+// accumulator and flags, the write queue, reset and the pass's limit.
+// Instructions run one after the other, each seeing everything the one
+// before did. The cycle count follows the RTL's pipeline
+// (rtl/csp/csp_core.sv): an instruction that needs a value still in the
+// pipeline waits for it, so the pass limit is checked as the RTL meets
+// it.
 
 #pragma once
 
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -34,8 +39,8 @@ struct Flags {
 
 // What one pass did.
 struct PassReport {
-    int cycles         = 0;       // instructions issued, skipped ones included
-    int writes_applied = 0;       // firmware writes the window applied
+    int cycles         = 0; // the cycle after the last issue, stalls included
+    int writes_applied = 0; // firmware writes the window applied
     std::vector<int> stale_sinks; // owned sink words this pass did not write
     std::vector<std::string> errors;
 };
@@ -92,6 +97,11 @@ public:
         return queue_.size();
     }
 
+    // Print each instruction as it issues (pc, cycle, i, j) to stderr.
+    void trace(bool on) {
+        trace_ = on;
+    }
+
 private:
     struct QueuedWrite {
         int address;
@@ -107,20 +117,37 @@ private:
         int stride;
     };
 
-    struct PendingIndex {
-        int64_t visible_from; // the issue cycle from which it is seen
-        IndexRegister index;
-        int value;
+    // The pipeline's timing: the cycle from which an instruction that
+    // reads each register, the accumulator or the flags may issue, and from
+    // which the front end may issue at all.
+    struct Scoreboard {
+        std::array<int64_t, register_count> register_ready{};
+        int64_t accumulator_ready = 0;
+        int64_t flags_ready       = 0;
+        int64_t front_ready       = 0;
+        int64_t index_ready       = 0; // a vector element's own index register
+    };
+
+    // A vector loop in progress: which element is issuing, the index
+    // register every element has its own copy of, and who wrote and read
+    // which register, to catch iterations that depend on each other.
+    struct VectorRun {
+        IndexRegister private_index;
+        int element = 0;
+        std::map<int, int> writer; // register → element, -1 if several
+        std::map<int, std::set<int>> readers; // register → elements
     };
 
     // Execution state for one pass.
     struct PassState {
         size_t pc     = 0;
-        int64_t cycle = 0;
+        int64_t cycle = 0; // the cycle the current instruction issues in
+        Scoreboard scoreboard;
         std::vector<Loop> loops;
-        std::deque<PendingIndex> pending;
         int skip = 0;
         std::set<int> sinks_written;
+        std::optional<VectorRun> vector;
+        bool stopped = false; // the pass limit was reached
         PassReport report;
     };
 
@@ -129,7 +156,13 @@ private:
     int64_t read_wide_operand(uint16_t field, PassState &state) const;
     void write_operand(uint16_t field, int32_t raw, PassState &state);
     void write_wide_operand(uint16_t field, int64_t raw, PassState &state);
+    int64_t issue(const Instruction &instruction, PassState &state) const;
     void execute(const Instruction &instruction, PassState &state);
+    void run_vector(const Instruction &loop, PassState &state);
+    void note_access(int address, bool write, PassState &state) const;
+    bool issue_or_stop(const Instruction &instruction, size_t pc,
+                       PassState &state);
+    void end_loops(PassState &state);
     void set_flags(int64_t result, bool overflow);
     int apply_window(int limit);
 
@@ -143,6 +176,7 @@ private:
     std::vector<uint64_t> program_;
     std::deque<QueuedWrite> queue_;
     bool held_          = true;
+    bool trace_         = false;
     int64_t pass_count_ = 0;
 };
 
