@@ -19,12 +19,12 @@ namespace render {
 
 namespace {
 
-constexpr int32_t word_one = csp::word_one;                // 1.0
-constexpr int32_t word_max = (1 << 17) - 1;                // the largest word
-constexpr int32_t word_min = -(1 << 17);                   // and the smallest
-constexpr int raw_octave   = 1024;                         // the patch's octave
-constexpr int word_per_raw = word_one / raw_octave;        // 16
-constexpr int32_t middle_c = 5 * raw_octave;               // MIDI note 60, UQ4.10
+constexpr int32_t word_one = csp::word_one;         // 1.0
+constexpr int32_t word_max = (1 << 17) - 1;         // the largest word
+constexpr int32_t word_min = -(1 << 17);            // and the smallest
+constexpr int raw_octave   = 1024;                  // the patch's octave
+constexpr int word_per_raw = word_one / raw_octave; // 16
+constexpr int32_t middle_c = 5 * raw_octave;        // MIDI note 60, UQ4.10
 
 // UQ4.4 volume codes: 0xFF is loudest; the unity anchor of the old log gain.
 constexpr int volume_reference = 0xCF;
@@ -39,8 +39,9 @@ constexpr int mod_decay    = 20;
 constexpr int mod_release  = 24;
 constexpr int idle_amp     = amp_release; // a voice with no gate is in release
 constexpr int idle_mod     = mod_release;
-constexpr int level_22_one = 0x400000;    // full scale of the 22-bit level
-constexpr int attack_target = 0x533333;   // 1.3 of full scale: the RC charge's aim
+constexpr int level_22_one = 0x400000; // full scale of the 22-bit level
+constexpr int attack_target =
+        0x533333; // 1.3 of full scale: the RC charge's aim
 
 // Unison offsets (symmetric, in steps of the patch's unison detune).
 constexpr std::array<int8_t, 7> unison_7 = {-3, -2, -1, 0, 1, 2, 3};
@@ -71,8 +72,9 @@ int32_t gain_of_code(int code) {
 
 // A wide register's two words, the upper first.
 void wide(Writes &writes, int address, int64_t raw36) {
-    writes.push_back({address, static_cast<int32_t>(csp::sign_extend(
-                                       raw36 >> csp::word_bits, csp::word_bits))});
+    writes.push_back(
+            {address, static_cast<int32_t>(csp::sign_extend(
+                              raw36 >> csp::word_bits, csp::word_bits))});
     writes.push_back({address + 1, static_cast<int32_t>(csp::sign_extend(
                                            raw36, csp::word_bits))});
 }
@@ -133,12 +135,12 @@ void envelope(const adsr_t &env, int attack, int decay, int release,
         const int base = channel_register(cp::envelopes + segment);
         wide(writes, base + cp::target, target22 << 10);
         wide(writes, base + cp::rate,
-             csp::envelope_rate(patch_adsr_rate_coeff(
-                     patch_adsr_rate_byte(rate_code))));
+             csp::envelope_rate(
+                     patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code))));
     };
     row(attack, attack_target, env.attack);
-    row(decay, static_cast<int64_t>(std::min<uint16_t>(env.sustain, 0x3FF))
-                       << 12,
+    row(decay,
+        static_cast<int64_t>(std::min<uint16_t>(env.sustain, 0x3FF)) << 12,
         env.decay);
     row(release, 0, env.release);
 }
@@ -189,27 +191,27 @@ Codes gain_codes(const patch_t &patch, const Voicing &partial, int sounding) {
 } // namespace
 
 int voicing(const patch_t &patch, VoicePlan &plan) {
-    plan = VoicePlan{};
+    plan             = VoicePlan{};
     const int spread = patch.unison_detune; // raw octave steps a step
     int sounding     = 0;
     switch (patch.voice_struct) {
     case VOICE_2_PLAIN:
-        plan[0] = {0, 0, true, true, true};
-        plan[1] = {1, 0, true, true, true};
+        plan[0]  = {0, 0, true, true, true};
+        plan[1]  = {1, 0, true, true, true};
         sounding = 2;
         break;
     case VOICE_7_PLUS_1:
         for (size_t i = 0; i < unison_7.size(); ++i) {
-            plan[i] = {0, static_cast<int16_t>(unison_7[i] * spread),
-                       !(i & 1), (i & 1) != 0, true};
+            plan[i] = {0, static_cast<int16_t>(unison_7[i] * spread), !(i & 1),
+                       (i & 1) != 0, true};
         }
         plan[7]  = {1, 0, true, true, true};
         sounding = 8;
         break;
     case VOICE_4_PLUS_4:
         for (size_t i = 0; i < unison_4.size(); ++i) {
-            plan[i] = {0, static_cast<int16_t>(unison_4[i] * spread),
-                       !(i & 1), (i & 1) != 0, true};
+            plan[i] = {0, static_cast<int16_t>(unison_4[i] * spread), !(i & 1),
+                       (i & 1) != 0, true};
             plan[i + 4] = {1, static_cast<int16_t>(unison_4[i] * spread),
                            !(i & 1), (i & 1) != 0, true};
         }
@@ -221,7 +223,9 @@ int voicing(const patch_t &patch, VoicePlan &plan) {
 
 std::array<int, pointer_count> pointers_of(int voice, int slot,
                                            const Voicing &partial) {
-    auto index = [](int address) { return address - csp::sink_base; };
+    auto index = [](int address) {
+        return address - csp::sink_base;
+    };
     const int voice_sinks = cp::sinks + voice * cp::voice_sinks_size;
     const int channel     = cp::channel_sinks;
     const bool second     = partial.oscillator != 0;
@@ -271,8 +275,7 @@ void amp_envelope(const patch_t &patch, Writes &writes) {
 void mod_envelope(const patch_t &patch, Writes &writes) {
     envelope(patch.env[1], mod_attack, mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff
-    put(writes, channel_register(cp::mod_amount),
-        octaves(patch.mod_env_depth));
+    put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth));
 }
 
 void cutoff(const patch_t &patch, const Controllers &controllers,
@@ -301,11 +304,11 @@ void pitch_bend(const patch_t &patch, const Controllers &controllers,
 }
 
 void lfo(const patch_t &patch, int i, Writes &writes) {
-    const lfo_t &l      = patch.lfo[i];
-    const int record    = cp::lfos + i * 16 * cp::lfo_size;
-    const int set       = cp::lfo_sets + i * cp::set_size;
-    const int shape     = l.shape & 3;
-    constexpr int saw   = 0;
+    const lfo_t &l         = patch.lfo[i];
+    const int record       = cp::lfos + i * 16 * cp::lfo_size;
+    const int set          = cp::lfo_sets + i * cp::set_size;
+    const int shape        = l.shape & 3;
+    constexpr int saw      = 0;
     constexpr int triangle = 2;
 
     // the record: one LFO of the half's pool, of this shape; the program's
@@ -314,7 +317,9 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
     put(writes, record + cp::depth, word_one);
     put(writes, record + cp::neg_depth, -word_one);
     put(writes, record + cp::gain,
-        shape == saw ? word_one / 8 : shape == triangle ? word_one / 4 : 0);
+        shape == saw        ? word_one / 8
+        : shape == triangle ? word_one / 4
+                            : 0);
     put(writes, set + cp::base, record);
     for (int kind = 0; kind < 4; ++kind) {
         put(writes, set + cp::n_saw + kind, kind == shape ? 1 : 0);
@@ -350,8 +355,9 @@ void channel_sound(const patch_t &patch, Writes &writes) {
         put(writes, channel + cp::cutoff_offset + slot,
             clamp_word(int64_t{pitch} * patch.filter.key_track * word_per_raw
                        / 64));
-        const Codes codes = partial.active ? gain_codes(patch, partial, sounding)
-                                           : Codes{volume_mute, volume_mute};
+        const Codes codes = partial.active
+                                    ? gain_codes(patch, partial, sounding)
+                                    : Codes{volume_mute, volume_mute};
         put(writes, channel + cp::gain_left + slot, gain_of_code(codes.left));
         put(writes, channel + cp::gain_right + slot, gain_of_code(codes.right));
     }

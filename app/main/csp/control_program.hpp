@@ -15,6 +15,7 @@
 
 #pragma once
 
+// clang-format off
 #include <array>
 #include <cstdint>
 
@@ -174,3 +175,4 @@ inline constexpr int zero = 0;
 inline constexpr int zero_sink = 3071;
 
 } // namespace csp::control
+// clang-format on

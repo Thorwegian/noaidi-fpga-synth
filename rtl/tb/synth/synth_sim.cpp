@@ -36,13 +36,13 @@ namespace {
 
 // ---- the clock, the SPI master and the audio tap ------------------------------------------
 
-constexpr int pass_cycles = 1536;   // one CSP pass
-constexpr int ms_cycles   = 73728;  // a millisecond of system clocks
-constexpr int spi_half    = 4;      // system clocks per SCLK half period: 9.2 MHz
+constexpr int pass_cycles = 1536;  // one CSP pass
+constexpr int ms_cycles   = 73728; // a millisecond of system clocks
+constexpr int spi_half    = 4; // system clocks per SCLK half period: 9.2 MHz
 constexpr int sample_rate = 96000;
 
 struct Sample {
-    int left;      // what the listener hears
+    int left; // what the listener hears
     int right;
 };
 
@@ -76,7 +76,8 @@ public:
         top_.sysclk = 1;
         top_.eval();
         if (top_.sample_tick && !tick_seen_) {
-            samples_.push_back({signed24(top_.out_left), signed24(top_.out_right)});
+            samples_.push_back(
+                    {signed24(top_.out_left), signed24(top_.out_right)});
         }
         tick_seen_ = top_.sample_tick;
     }
@@ -103,7 +104,7 @@ public:
             for (int bit = 7; bit >= 0; --bit) {
                 top_.mosi = (byte >> bit) & 1;
                 run(spi_half);
-                got = static_cast<uint8_t>((got << 1) | top_.miso);
+                got       = static_cast<uint8_t>((got << 1) | top_.miso);
                 top_.sclk = 1;
                 run(spi_half);
                 top_.sclk = 0;
@@ -124,9 +125,9 @@ public:
     }
 
     uint32_t read(uint16_t address) {
-        const std::vector<uint8_t> in = frame(
-                {0xC0, static_cast<uint8_t>(address >> 8),
-                 static_cast<uint8_t>(address), 0, 0, 0, 0, 0, 0});
+        const std::vector<uint8_t> in =
+                frame({0xC0, static_cast<uint8_t>(address >> 8),
+                       static_cast<uint8_t>(address), 0, 0, 0, 0, 0, 0});
         return (uint32_t{in[5]} << 24) | (uint32_t{in[6]} << 16)
                | (uint32_t{in[7]} << 8) | in[8];
     }
@@ -179,7 +180,8 @@ public:
         for (size_t done = 0; done < writes.size();) {
             const size_t end = std::min(writes.size(), done + chunk);
             for (; done < end; ++done) {
-                synth_.write(static_cast<uint16_t>(fpga_map::queue_base + writes[done].address),
+                synth_.write(static_cast<uint16_t>(fpga_map::queue_base
+                                                   + writes[done].address),
                              static_cast<uint32_t>(writes[done].raw) & 0x3FFFF);
             }
             synth_.write(ctrl_address, ctrl_swap | (held ? ctrl_hold : 0));
@@ -188,14 +190,17 @@ public:
     }
 
     // A partial's ten pointers: three to a word, the fourth word commits.
-    void point(int partial, const std::array<int, render::pointer_count> &pointers) {
-        const uint16_t base = static_cast<uint16_t>(fpga_map::partial_base
-                                                    + fpga_map::partial_stride * partial);
+    void point(int partial,
+               const std::array<int, render::pointer_count> &pointers) {
+        const uint16_t base = static_cast<uint16_t>(
+                fpga_map::partial_base + fpga_map::partial_stride * partial);
         for (int word = 0; word < 3; ++word) {
             synth_.write(base + word,
                          static_cast<uint32_t>(pointers[3 * word])
-                                 | static_cast<uint32_t>(pointers[3 * word + 1]) << 10
-                                 | static_cast<uint32_t>(pointers[3 * word + 2]) << 20);
+                                 | static_cast<uint32_t>(pointers[3 * word + 1])
+                                           << 10
+                                 | static_cast<uint32_t>(pointers[3 * word + 2])
+                                           << 20);
         }
         synth_.write(base + 3, static_cast<uint32_t>(pointers[9]));
     }
@@ -284,7 +289,7 @@ public:
 struct Window {
     double rms;
     double peak;
-    double frequency;   // from the rising zero crossings, Hz
+    double frequency; // from the rising zero crossings, Hz
 };
 
 double value_of(const Sample &sample, bool left) {
@@ -294,7 +299,7 @@ double value_of(const Sample &sample, bool left) {
 Window measure(const std::vector<Sample> &samples, size_t first, size_t last,
                bool left = true) {
     double sum = 0, peak = 0;
-    int crossings = 0;
+    int crossings         = 0;
     size_t first_crossing = 0, last_crossing = 0;
     double previous = 0;
     for (size_t n = first; n < last; ++n) {
@@ -345,7 +350,7 @@ constexpr double c4 = 261.6256;
 void plain(patch_t &patch) {
     patch.voice_struct   = VOICE_2_PLAIN;
     patch.osc[0].wave    = WAVE_SINE;
-    patch.osc_mix        = -63;     // osc 2 out of it
+    patch.osc_mix        = -63; // osc 2 out of it
     patch.filter.cascade = 0;
     patch.filter.cutoff  = 0x2B20 - (5 * 1024 + 512); // wide open
 }
@@ -365,7 +370,8 @@ void case_note(VerilatedContext &context) {
     Rig rig(context);
     plain(rig.patch);
     rig.bring_up();
-    check(rig.synth.read(ctrl_address) == 0, "CTRL reads back what was written (released)");
+    check(rig.synth.read(ctrl_address) == 0,
+          "CTRL reads back what was written (released)");
     {
         const size_t from = rig.synth.mark();
         rig.synth.run_ms(5);
@@ -374,18 +380,22 @@ void case_note(VerilatedContext &context) {
     }
     rig.strike(60);
     const Window note = sustained(rig);
-    std::printf("  %.2f Hz, peak %.4f, rms %.4f\n", note.frequency, note.peak, note.rms);
-    check(std::fabs(note.frequency / c4 - 1.0) < 0.01, "middle C: 261.6 Hz within 1 %");
+    std::printf("  %.2f Hz, peak %.4f, rms %.4f\n", note.frequency, note.peak,
+                note.rms);
+    check(std::fabs(note.frequency / c4 - 1.0) < 0.01,
+          "middle C: 261.6 Hz within 1 %");
     // the level the firmware's gain staging says: the partial at volume code
     // 0xD7 (the anchor and the make-up for two partials), the envelope at
     // sustain (full), the sine's amplitude 1.09 of the mix scale (measured)
     const double expected = 1.09 * std::exp2((0xD7 - 255) / 16.0);
     check(std::fabs(note.peak / expected - 1.0) < 0.15,
-          "the level follows the volume codes: peak " + std::to_string(note.peak)
-                  + " against " + std::to_string(expected));
+          "the level follows the volume codes: peak "
+                  + std::to_string(note.peak) + " against "
+                  + std::to_string(expected));
     const Window right = measure(rig.synth.samples(), rig.synth.mark() - 4800,
                                  rig.synth.mark(), false);
-    check(right.peak > 0.5 * note.peak, "centred: the right side sounds as the left does");
+    check(right.peak > 0.5 * note.peak,
+          "centred: the right side sounds as the left does");
 
     rig.release_voice();
     const double tail_ms = render::release_tail_us(rig.patch) / 1000.0;
@@ -394,7 +404,8 @@ void case_note(VerilatedContext &context) {
     rig.synth.run_ms(20);
     const Window tail = measure(rig.synth.samples(), from, rig.synth.mark());
     std::printf("  %.1f ms after the release: peak %.6f\n", tail_ms, tail.peak);
-    check(tail.peak < note.peak * 0.01, "released: the note has died away within its tail");
+    check(tail.peak < note.peak * 0.01,
+          "released: the note has died away within its tail");
 }
 
 void case_pitch(VerilatedContext &context) {
@@ -405,8 +416,9 @@ void case_pitch(VerilatedContext &context) {
         rig.bring_up();
         rig.strike(static_cast<uint8_t>(note));
         const Window window = sustained(rig);
-        const double want = 440.0 * std::pow(2.0, (note - 69) / 12.0);
-        std::printf("  note %d: %.2f Hz (want %.2f)\n", note, window.frequency, want);
+        const double want   = 440.0 * std::pow(2.0, (note - 69) / 12.0);
+        std::printf("  note %d: %.2f Hz (want %.2f)\n", note, window.frequency,
+                    want);
         check(std::fabs(window.frequency / want - 1.0) < 0.01, "within 1 %");
     }
 }
@@ -418,11 +430,12 @@ void case_pan(VerilatedContext &context) {
     rig.patch.pan = -63; // hard left (the right side is muted at -63)
     rig.bring_up();
     rig.strike(60);
-    const Window left = sustained(rig, true);
+    const Window left  = sustained(rig, true);
     const Window right = measure(rig.synth.samples(), rig.synth.mark() - 4800,
                                  rig.synth.mark(), false);
     std::printf("  left peak %.4f, right peak %.6f\n", left.peak, right.peak);
-    check(left.peak > 0.02 && right.peak < left.peak * 0.01, "hard left: the right side is silent");
+    check(left.peak > 0.02 && right.peak < left.peak * 0.01,
+          "hard left: the right side is silent");
 
     // changed while the note sounds: both sink pages must take it
     rig.patch.pan = 63;
@@ -430,8 +443,10 @@ void case_pan(VerilatedContext &context) {
     rig.synth.run_ms(5);
     const size_t after = rig.synth.mark();
     rig.synth.run_ms(40);
-    const Window now_left = measure(rig.synth.samples(), after, rig.synth.mark(), true);
-    const Window now_right = measure(rig.synth.samples(), after, rig.synth.mark(), false);
+    const Window now_left =
+            measure(rig.synth.samples(), after, rig.synth.mark(), true);
+    const Window now_right =
+            measure(rig.synth.samples(), after, rig.synth.mark(), false);
     check(now_right.peak > 0.02 && now_left.peak < now_right.peak * 0.01,
           "pan thrown to the right while the note sounds: it stays there");
 }
@@ -444,29 +459,32 @@ void case_filter(VerilatedContext &context) {
         rig.patch.voice_struct   = VOICE_2_PLAIN;
         rig.patch.osc[0].wave    = WAVE_SAW;
         rig.patch.osc_mix        = -63;
-        rig.patch.filter.cascade = 1;   // 24 dB
+        rig.patch.filter.cascade = 1; // 24 dB
         // closed: the cutoff at middle C itself (the knob's half octave is
         // added), a note and a half under the third harmonic
-        rig.patch.filter.cutoff  = closed ? -512 : 0x2B20 - (5 * 1024 + 512);
+        rig.patch.filter.cutoff = closed ? -512 : 0x2B20 - (5 * 1024 + 512);
         rig.bring_up();
         rig.strike(60);
         rig.synth.run_ms(40);
         const size_t from = rig.synth.mark();
         rig.synth.run_ms(50);
-        const double third = component(rig.synth.samples(), from, rig.synth.mark(), 3 * c4);
+        const double third =
+                component(rig.synth.samples(), from, rig.synth.mark(), 3 * c4);
         (closed ? closed_3rd : open_3rd) = third;
     }
-    std::printf("  third harmonic: open %.5f, closed %.5f\n", open_3rd, closed_3rd);
-    check(closed_3rd < open_3rd * 0.1, "a cutoff at the note takes the third harmonic down by 20 dB at least");
+    std::printf("  third harmonic: open %.5f, closed %.5f\n", open_3rd,
+                closed_3rd);
+    check(closed_3rd < open_3rd * 0.1,
+          "a cutoff at the note takes the third harmonic down by 20 dB at least");
 }
 
 void case_vibrato(VerilatedContext &context) {
     std::printf("LFO 1 on the pitch\n");
     Rig rig(context);
     plain(rig.patch);
-    rig.patch.lfo[0].shape = 3;                       // sine
-    rig.patch.lfo[0].rate  = 700;                     // 2 Hz at 96 kHz
-    rig.patch.lfo[0].depth = 1024 / 6;                // ±1 semitone
+    rig.patch.lfo[0].shape = 3;        // sine
+    rig.patch.lfo[0].rate  = 700;      // 2 Hz at 96 kHz
+    rig.patch.lfo[0].depth = 1024 / 6; // ±1 semitone
     rig.patch.lfo[0].dest  = LFO_DEST_PITCH;
     rig.bring_up();
     rig.strike(60);
@@ -476,7 +494,8 @@ void case_vibrato(VerilatedContext &context) {
     for (int slice = 0; slice < 40; ++slice) {
         const size_t from = rig.synth.mark();
         rig.synth.run_ms(25);
-        const Window window = measure(rig.synth.samples(), from, rig.synth.mark());
+        const Window window =
+                measure(rig.synth.samples(), from, rig.synth.mark());
         if (window.frequency > 0) {
             lowest  = std::min(lowest, window.frequency);
             highest = std::max(highest, window.frequency);
@@ -508,31 +527,34 @@ void case_velocity(VerilatedContext &context) {
 void case_unison(VerilatedContext &context) {
     std::printf("the voice structure: seven and one, detuned and spread\n");
     Rig rig(context);
-    rig.patch.voice_struct   = VOICE_7_PLUS_1;
-    rig.patch.osc[0].wave    = WAVE_SAW;
-    rig.patch.osc[1].wave    = WAVE_SAW;
-    rig.patch.osc_mix        = 0;
-    rig.patch.unison_detune  = 6;
-    rig.patch.unison_stereo  = 100;
-    rig.patch.filter.cutoff  = 0x2B20 - (5 * 1024 + 512);
+    rig.patch.voice_struct  = VOICE_7_PLUS_1;
+    rig.patch.osc[0].wave   = WAVE_SAW;
+    rig.patch.osc[1].wave   = WAVE_SAW;
+    rig.patch.osc_mix       = 0;
+    rig.patch.unison_detune = 6;
+    rig.patch.unison_stereo = 100;
+    rig.patch.filter.cutoff = 0x2B20 - (5 * 1024 + 512);
     rig.bring_up();
     rig.strike(60);
     rig.synth.run_ms(40);
     const size_t from = rig.synth.mark();
     rig.synth.run_ms(100);
-    const Window left  = measure(rig.synth.samples(), from, rig.synth.mark(), true);
-    const Window right = measure(rig.synth.samples(), from, rig.synth.mark(), false);
+    const Window left =
+            measure(rig.synth.samples(), from, rig.synth.mark(), true);
+    const Window right =
+            measure(rig.synth.samples(), from, rig.synth.mark(), false);
     std::printf("  left rms %.4f peak %.4f, right rms %.4f peak %.4f\n",
                 left.rms, left.peak, right.rms, right.peak);
-    check(left.rms > 0.01 && right.rms > 0.01, "eight partials sound on both sides");
+    check(left.rms > 0.01 && right.rms > 0.01,
+          "eight partials sound on both sides");
     check(left.peak < 0.99 && right.peak < 0.99, "and do not rail the output");
     // seven saws a few steps apart beat: the level moves over the 100 ms
     double lowest = 1e9, highest = 0;
     for (int slice = 0; slice < 20; ++slice) {
         const Window window = measure(rig.synth.samples(), from + 480 * slice,
                                       from + 480 * (slice + 1), true);
-        lowest  = std::min(lowest, window.rms);
-        highest = std::max(highest, window.rms);
+        lowest              = std::min(lowest, window.rms);
+        highest             = std::max(highest, window.rms);
     }
     check(highest > lowest * 1.05, "the unison beats");
 }

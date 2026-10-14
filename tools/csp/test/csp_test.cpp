@@ -557,9 +557,11 @@ void test_firmware_sinks() {
     Machine m(std::string(registers) + "NOP\n");
     m.start();
     m.processor.write(csp::sink_base + 7, q(0.25));
-    m.processor.write(csp::sink_base + csp::sink_count, q(1.0)); // beyond the sinks
+    m.processor.write(csp::sink_base + csp::sink_count,
+                      q(1.0)); // beyond the sinks
     m.run();
-    check_equal(m.processor.sink(7), 0, "a queued sink write waits for the swap");
+    check_equal(m.processor.sink(7), 0,
+                "a queued sink write waits for the swap");
     m.processor.swap();
     m.run();
     check_equal(m.processor.sink(7), q(0.25),
@@ -942,13 +944,12 @@ void test_control_program() {
     cpu.write(m.address("CHANNELS_IN_USE"), 16);
     std::vector<Channel> channel(16);
     for (int c = 0; c < 16; ++c) {
-        channel[c]     = {0.02 * (c - 8), 0.1 + 0.01 * c,  -0.2 + 0.03 * c,
-                          0.05 * (c % 4), 0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
-                          0.25 * (c % 5), 0.3 + 0.05 * c,  0.2 + 0.05 * c,
-                          (3 * c) % 32,   (7 * c + 5) % 32,
-                          0.03 * (c % 5), -0.02 * (c % 3), 0.1 * (c % 4),
-                          0.05 * (c % 6), 0.1 + 0.02 * c,  -0.3 + 0.03 * c,
-                          0.5 + 0.1 * (c % 7)};
+        channel[c]     = {0.02 * (c - 8),  0.1 + 0.01 * c,   -0.2 + 0.03 * c,
+                          0.05 * (c % 4),  0.4 - 0.02 * c,   0.5 + 0.1 * (c % 5),
+                          0.25 * (c % 5),  0.3 + 0.05 * c,   0.2 + 0.05 * c,
+                          (3 * c) % 32,    (7 * c + 5) % 32, 0.03 * (c % 5),
+                          -0.02 * (c % 3), 0.1 * (c % 4),    0.05 * (c % 6),
+                          0.1 + 0.02 * c,  -0.3 + 0.03 * c,  0.5 + 0.1 * (c % 7)};
         const int base = channels + c * channel_size;
         cpu.write(at(base, "LFO1_DUTY"), q(channel[c].d1));
         cpu.write(at(base, "LFO2_DUTY"), q(channel[c].d2));
@@ -1038,22 +1039,24 @@ void test_control_program() {
     // the channels' own sinks: the pulse widths and the resonance
     double worst_channel = 0;
     for (int c = 0; c < 16; ++c) {
-        const Channel &a = channel[c];
-        const double duty = lfo_out[a.lfo1] * a.d1 + lfo_out[a.lfo2] * a.d2;
-        const double reso = lfo_out[a.lfo1] * a.r1 + lfo_out[a.lfo2] * a.r2;
+        const Channel &a     = channel[c];
+        const double duty    = lfo_out[a.lfo1] * a.d1 + lfo_out[a.lfo2] * a.d2;
+        const double reso    = lfo_out[a.lfo1] * a.r1 + lfo_out[a.lfo2] * a.r2;
         const double want[3] = {a.duty0 + duty, a.duty1 + duty,
                                 a.resonance + reso};
         const char *const fields[3] = {"DUTY_0", "DUTY_1", "RESONANCE"};
         for (int k = 0; k < 3; ++k) {
-            const int offset = (channel_sinks - csp::sink_base)
-                               + c * sink_size + m.address(fields[k]);
-            worst_channel = std::max(
-                    worst_channel, std::fabs(cpu.sink(offset) / 16384.0 - want[k]));
+            const int offset = (channel_sinks - csp::sink_base) + c * sink_size
+                               + m.address(fields[k]);
+            worst_channel =
+                    std::max(worst_channel,
+                             std::fabs(cpu.sink(offset) / 16384.0 - want[k]));
         }
     }
     check(worst_channel <= 6.0 / 16384.0,
           "the channels' duty and resonance sinks match their formulas: "
-          "largest difference " + std::to_string(worst_channel));
+          "largest difference "
+                  + std::to_string(worst_channel));
 }
 
 // The LFOs in their worst case, all sines, 16 in each half, with the rest of the
@@ -1075,11 +1078,11 @@ void test_control_program_lfos() {
         cpu.write(at(set, "N_SINE"), 16);
     }
     // the pointers, so that no two voices or channels share a register
-    const int channels     = m.address("CHANNELS");
-    const int voices       = m.address("VOICES");
-    const int sinks        = m.address("SINKS");
-    const int channel_size = m.address("CHANNEL_SIZE");
-    const int voice_size   = m.address("VOICE_SIZE");
+    const int channels      = m.address("CHANNELS");
+    const int voices        = m.address("VOICES");
+    const int sinks         = m.address("SINKS");
+    const int channel_size  = m.address("CHANNEL_SIZE");
+    const int voice_size    = m.address("VOICE_SIZE");
     const int channel_sinks = m.address("CHANNEL_SINKS");
     const int sink_size     = m.address("CHANNEL_SINK_SIZE");
     cpu.write(m.address("CHANNELS_IN_USE"), 16);

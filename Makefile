@@ -16,9 +16,10 @@
 #                   everything is logged to app/build/console.log,
 #                   overwritten on every run
 #   make fw-test    host test: every patch-file value loads back exactly,
-#                   banks.toml reads and writes back, and the factory
-#                   patches and banks read back exactly (a warning, not a
-#                   failure, where only their formatting differs)
+#                   banks.toml reads and writes back, the factory patches
+#                   and banks read back exactly (a warning, not a failure,
+#                   where only their formatting differs), and the writes a
+#                   patch renders to the CSP are the arithmetic they should be
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim program.s)
 #   make csp-test   host tests of the CSP reference model and assembler, and
@@ -58,6 +59,8 @@ HOST_DIR  = app/build/host
 FW_TEST   = $(HOST_DIR)/patch_units_test
 FW_TEST_C   = app/main/patch_units.c app/lib/tomlc17/src/tomlc17.c
 FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+RENDER_TEST = $(HOST_DIR)/render_test
+RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/patch.cpp app/main/csp/envelope.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
@@ -109,6 +112,8 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
 	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(RENDER_TEST) $(RENDER_TEST_CXX)
+	$(RENDER_TEST)
 
 # Our own C and C++ sources; the libraries in app/lib keep their style.
 # .clang-format is written for clang-format 21.1.8 (pip install

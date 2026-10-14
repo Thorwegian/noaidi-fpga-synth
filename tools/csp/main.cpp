@@ -122,14 +122,14 @@ int header_command(const csp::Program &program,
     for (const std::string &file : files) {
         std::printf("//   %s\n", file.c_str());
     }
-    std::printf(
-            "// Do not edit: make csp-test checks that it is current.\n"
-            "// The names are those of tools/csp/programs/map.s, in lower "
-            "case;\n// the labels of the code are left out.\n\n"
-            "#pragma once\n\n"
-            "#include <array>\n"
-            "#include <cstdint>\n\n"
-            "namespace csp::control {\n\n");
+    std::printf("// Do not edit: make csp-test checks that it is current.\n"
+                "// The names are those of tools/csp/programs/map.s, in lower "
+                "case;\n// the labels of the code are left out.\n\n"
+                "#pragma once\n\n"
+                "// clang-format off\n"
+                "#include <array>\n"
+                "#include <cstdint>\n\n"
+                "namespace csp::control {\n\n");
     std::printf("// The instructions, 36 bits each.\n"
                 "inline constexpr std::array<uint64_t, %zu> words{\n",
                 program.words.size());
@@ -157,16 +157,17 @@ int header_command(const csp::Program &program,
     // (voices:, done:) are not constants anybody needs.
     std::printf("};\n\n// Registers, blocks and fields.\n");
     for (const auto &[name, value] : program.symbols) {
-        const bool label = std::any_of(name.begin(), name.end(),
-                                       [](unsigned char c) {
-                                           return std::islower(c);
-                                       });
+        const bool label =
+                std::any_of(name.begin(), name.end(), [](unsigned char c) {
+                    return std::islower(c);
+                });
         if (!label) {
             std::printf("inline constexpr int %s = %d;\n",
                         constant_name(name).c_str(), value);
         }
     }
-    std::printf("\n} // namespace csp::control\n");
+    std::printf("\n} // namespace csp::control\n"
+                "// clang-format on\n");
     return 0;
 }
 

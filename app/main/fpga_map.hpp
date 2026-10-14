@@ -34,10 +34,10 @@ constexpr int pointer_words       = 4;
 // The CSP's write queue: a register or sink word (0x000–0xBFF) at
 // queue_base + its address; the CTRL swap commits what is queued, and the
 // CSP applies at most 48 a pass (a pass is 20.8 µs). The queue holds 512.
-constexpr uint16_t queue_base  = 0x6000;
-constexpr int queue_depth      = 512;
-constexpr int address_count    = 0xC00;
-constexpr int writes_per_pass  = 48;
+constexpr uint16_t queue_base = 0x6000;
+constexpr int queue_depth     = 512;
+constexpr int address_count   = 0xC00;
+constexpr int writes_per_pass = 48;
 
 // The CSP's program, one instruction a word, the high bits through
 // program_high first.

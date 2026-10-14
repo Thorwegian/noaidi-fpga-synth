@@ -36,7 +36,7 @@ constexpr int64_t tick_us = 1000;
 // in a tick, so a tick can send nearly the whole queue and it is empty again
 // by the next. A tick sends no more than this, the rest waits for the next.
 constexpr int writes_per_tick = 480;
-constexpr int burst_words     = 8; // fpga_word_write_burst's per-transaction limit
+constexpr int burst_words = 8; // fpga_word_write_burst's per-transaction limit
 
 constexpr int word_mask = 0x3FFFF; // 18 bits on the wire
 
@@ -67,8 +67,8 @@ bool set(int address, int32_t raw) {
     if (image.known[address] && image.value[address] == raw) {
         return true; // already there
     }
-    image.value[address] = raw;
-    image.known[address] = false;
+    image.value[address]   = raw;
+    image.known[address]   = false;
     image.pending[address] = true;
     return true;
 }
@@ -76,7 +76,7 @@ bool set(int address, int32_t raw) {
 // Send what is pending, at most `limit` words, in bursts of consecutive
 // addresses, and commit it with a swap. How many it sent.
 int send(int limit, uint32_t ctrl_bits) {
-    int sent = 0;
+    int sent    = 0;
     int address = 0;
     while (address < fpga_map::address_count && sent < limit) {
         if (!image.pending[address]) {
@@ -84,20 +84,22 @@ int send(int limit, uint32_t ctrl_bits) {
             continue;
         }
         std::array<uint32_t, burst_words> words;
-        int count = 0;
+        int count       = 0;
         const int start = address;
         while (count < burst_words && address < fpga_map::address_count
                && image.pending[address] && sent + count < limit) {
             words[count++] = static_cast<uint32_t>(image.value[address]);
-            image.pending[address]  = false;
-            image.known[address]    = true;
+            image.pending[address] = false;
+            image.known[address]   = true;
             ++address;
         }
-        fpga_word_write_burst(fpga_map::queue_base + start, words.data(), count);
+        fpga_word_write_burst(fpga_map::queue_base + start, words.data(),
+                              count);
         sent += count;
     }
     if (sent > 0) {
-        fpga_word_write(fpga_map::ctrl, ctrl_word(ctrl_bits | fpga_map::ctrl_swap));
+        fpga_word_write(fpga_map::ctrl,
+                        ctrl_word(ctrl_bits | fpga_map::ctrl_swap));
     }
     return sent;
 }
@@ -220,10 +222,12 @@ bool engine_link_point(int partial, const int *pointers) {
     // Three pointers of ten bits to a word, the fourth word commits.
     std::array<uint32_t, fpga_map::pointer_words> words{};
     for (int k = 0; k < render::pointer_count; ++k) {
-        words[k / 3] |= (static_cast<uint32_t>(pointers[k]) & 0x3FF) << (10 * (k % 3));
+        words[k / 3] |= (static_cast<uint32_t>(pointers[k]) & 0x3FF)
+                        << (10 * (k % 3));
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_write_burst(fpga_map::partial_base + partial * fpga_map::partial_stride,
+    fpga_word_write_burst(fpga_map::partial_base
+                                  + partial * fpga_map::partial_stride,
                           words.data(), fpga_map::pointer_words);
     xSemaphoreGive(lock);
     return true;

@@ -37,7 +37,8 @@ namespace {
 constexpr const char *tag = "voice_alloc";
 
 constexpr int queue_length = 64;
-constexpr int task_stack   = 6144; // Program Change reads banks.toml and a patch file here
+constexpr int task_stack =
+        6144; // Program Change reads banks.toml and a patch file here
 constexpr int task_priority = 5;
 
 constexpr int voice_count        = render::voice_count;
@@ -69,25 +70,27 @@ int32_t raw_to_semis(int32_t raw) {
 enum VoiceState { V_IDLE = 0, V_HELD, V_RELEASING };
 
 struct Voice {
-    VoiceState state = V_IDLE;
-    uint8_t note     = 0;
-    uint8_t vel      = 0;       // stored so a live CC edit can re-render
-    uint8_t channel  = 0;       // stored for later multi-timbrality; omni
-    uint32_t alloc_seq = 0;     // allocation order, for oldest-steal
-    int64_t release_until = 0;  // esp_timer µs when the release tail is done
-    bool sustained = false;     // key up, held by the sustain pedal
+    VoiceState state      = V_IDLE;
+    uint8_t note          = 0;
+    uint8_t vel           = 0;     // stored so a live CC edit can re-render
+    uint8_t channel       = 0;     // stored for later multi-timbrality; omni
+    uint32_t alloc_seq    = 0;     // allocation order, for oldest-steal
+    int64_t release_until = 0;     // esp_timer µs when the release tail is done
+    bool sustained        = false; // key up, held by the sustain pedal
 };
 
 std::array<Voice, voice_count> s_voices;
 uint32_t s_alloc_seq;
-bool s_sustain_pedal;               // CC 64 down, omni for now
-render::Controllers s_controllers;  // the wheel and the bend
-voice_struct_t s_pointed_struct;    // the voice structure the pointers were set for
+bool s_sustain_pedal;              // CC 64 down, omni for now
+render::Controllers s_controllers; // the wheel and the bend
+voice_struct_t
+        s_pointed_struct; // the voice structure the pointers were set for
 
 // Live CC edits COALESCE: a CC just marks what changed; flush_pending_edits()
 // does the heavy work at a bounded rate, so a controller sweep does not flood
 // the engine link and starve the CPU (task watchdog).
-constexpr uint32_t dirty_voices  = 1u;  // the partials: voicing, gains, modes, tracking
+constexpr uint32_t dirty_voices =
+        1u; // the partials: voicing, gains, modes, tracking
 constexpr uint32_t dirty_amp_env = 2u;  // push the amp envelope
 constexpr uint32_t dirty_cutoff  = 4u;  // the cutoff knob and the wheel
 constexpr uint32_t dirty_lfo1    = 8u;  // push LFO 1
@@ -96,7 +99,8 @@ constexpr uint32_t dirty_mod_env = 32u; // push the mod envelope
 constexpr uint32_t dirty_lfo2    = 64u; // push LFO 2
 uint32_t s_pending;
 int64_t s_last_flush;
-constexpr int64_t flush_min_us = 15000; // ≤66 Hz apply rate, whatever the CC rate
+constexpr int64_t flush_min_us =
+        15000; // ≤66 Hz apply rate, whatever the CC rate
 
 QueueHandle_t s_queue;
 int s_sub_id = -1;
@@ -117,7 +121,8 @@ void point_partials() {
     for (int voice = 0; voice < voice_count; ++voice) {
         for (int slot = 0; slot < partials_per_voice; ++slot) {
             const auto pointers = render::pointers_of(voice, slot, plan[slot]);
-            engine_link_point(voice * partials_per_voice + slot, pointers.data());
+            engine_link_point(voice * partials_per_voice + slot,
+                              pointers.data());
         }
     }
     s_pointed_struct = g_patch.voice_struct;
@@ -140,7 +145,8 @@ void refresh_velocities() {
     render::Writes writes;
     for (int v = 0; v < voice_count; ++v) {
         if (s_voices[v].state == V_HELD) {
-            render::note_on(g_patch, v, s_voices[v].note, s_voices[v].vel, writes);
+            render::note_on(g_patch, v, s_voices[v].note, s_voices[v].vel,
+                            writes);
         }
     }
     send(writes);
@@ -208,7 +214,8 @@ constexpr float sample_rate_hz  = 96000.0f;
 constexpr float lfo_phase_cycle = 33554432.0f; // 2^25
 uint16_t lfo_rate_from_cc(uint8_t val) {
     const float freq = 0.03f * powf(1000.0f, static_cast<float>(val) / 127.0f);
-    const float inc  = std::clamp(freq * (lfo_phase_cycle / sample_rate_hz), 1.0f, 65535.0f);
+    const float inc  = std::clamp(freq * (lfo_phase_cycle / sample_rate_hz),
+                                  1.0f, 65535.0f);
     return static_cast<uint16_t>(inc + 0.5f);
 }
 
@@ -237,7 +244,8 @@ std::array<LfoDepthKnobs, PATCH_NUM_LFO> s_lfo_depth_knobs;
 int16_t lfo_depth_from_knobs(uint8_t dest, const LfoDepthKnobs &k) {
     if (dest == LFO_DEST_PITCH) {
         const int32_t fine_steps =
-                (k.coarse >> lfo_pitch_coarse_shift) * lfo_pitch_fine_steps + k.fine;
+                (k.coarse >> lfo_pitch_coarse_shift) * lfo_pitch_fine_steps
+                + k.fine;
         return static_cast<int16_t>(
                 (fine_steps * 1024 + 12 * lfo_pitch_fine_steps / 2)
                 / (12 * lfo_pitch_fine_steps));
@@ -252,14 +260,16 @@ LfoDepthKnobs lfo_knobs_from_depth(uint8_t dest, int16_t depth) {
     LfoDepthKnobs k;
     k.known = true;
     if (dest == LFO_DEST_PITCH) {
-        const int32_t fine_steps = (size * 12 * lfo_pitch_fine_steps + 512) / 1024;
-        const int32_t semitones  = fine_steps / lfo_pitch_fine_steps;
+        const int32_t fine_steps =
+                (size * 12 * lfo_pitch_fine_steps + 512) / 1024;
+        const int32_t semitones = fine_steps / lfo_pitch_fine_steps;
         if (semitones > (127 >> lfo_pitch_coarse_shift)) {
             k.coarse = 127;
             k.fine   = lfo_pitch_fine_steps - 1;
         } else {
-            k.coarse = static_cast<uint8_t>(semitones << lfo_pitch_coarse_shift);
-            k.fine   = static_cast<uint8_t>(fine_steps % lfo_pitch_fine_steps);
+            k.coarse =
+                    static_cast<uint8_t>(semitones << lfo_pitch_coarse_shift);
+            k.fine = static_cast<uint8_t>(fine_steps % lfo_pitch_fine_steps);
         }
     } else {
         k.coarse = static_cast<uint8_t>(size >> 2 < 127 ? size >> 2 : 127);
@@ -269,13 +279,13 @@ LfoDepthKnobs lfo_knobs_from_depth(uint8_t dest, int16_t depth) {
 }
 
 void set_lfo_depth_cc(int i, uint8_t val, bool fine) {
-    lfo_t &lfo         = g_patch.lfo[i];
-    LfoDepthKnobs &k   = s_lfo_depth_knobs[i];
+    lfo_t &lfo       = g_patch.lfo[i];
+    LfoDepthKnobs &k = s_lfo_depth_knobs[i];
     if (!k.known) {
         k = lfo_knobs_from_depth(lfo.dest, lfo.depth);
     }
     (fine ? k.fine : k.coarse) = val;
-    lfo.depth = lfo_depth_from_knobs(lfo.dest, k);
+    lfo.depth                  = lfo_depth_from_knobs(lfo.dest, k);
 }
 
 // Destination knob (CC 114, CC 112): four equal bands, see handle_cc.
@@ -328,13 +338,13 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
         }
     }
 
-    Voice &voice       = s_voices[pick];
-    voice              = Voice{};
-    voice.state        = V_HELD;
-    voice.note         = note;
-    voice.vel          = vel;
-    voice.channel      = channel;
-    voice.alloc_seq    = ++s_alloc_seq;
+    Voice &voice    = s_voices[pick];
+    voice           = Voice{};
+    voice.state     = V_HELD;
+    voice.note      = note;
+    voice.vel       = vel;
+    voice.channel   = channel;
+    voice.alloc_seq = ++s_alloc_seq;
 
     // The pitch and the velocity's amounts go in with the gate, in one swap,
     // so the first pass that sees the gate already has them.
@@ -346,8 +356,9 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
 // Pitch wheel: ±bend_range semitones (RPN 0; default ±2). The wheel's 14 bits
 // are ±8192; the raw octave steps are 1024 to the octave.
 void pitch_bend_update(uint16_t bend14) {
-    const int16_t raw = static_cast<int16_t>(
-            (static_cast<int32_t>(bend14) - 8192) * g_patch.bend_range * 1024 / 12 / 8192);
+    const int16_t raw =
+            static_cast<int16_t>((static_cast<int32_t>(bend14) - 8192)
+                                 * g_patch.bend_range * 1024 / 12 / 8192);
     if (raw == s_controllers.bend) {
         return;
     }
@@ -359,9 +370,10 @@ void pitch_bend_update(uint16_t bend14) {
 
 // Release one voice: the gate closes, the envelope sees it and releases.
 void release_voice(int v) {
-    s_voices[v].state         = V_RELEASING;
-    s_voices[v].sustained     = false;
-    s_voices[v].release_until = esp_timer_get_time() + render::release_tail_us(g_patch);
+    s_voices[v].state     = V_RELEASING;
+    s_voices[v].sustained = false;
+    s_voices[v].release_until =
+            esp_timer_get_time() + render::release_tail_us(g_patch);
     render::Writes writes;
     render::gate(v, false, writes);
     send(writes);
@@ -419,7 +431,8 @@ uint8_t s_cutoff_msb, s_cutoff_lsb; // CC74 / CC106
 // Set the CC 74/106 pair from the patch's cutoff, so a lone CC 106 after a
 // patch load moves the fine part of that cutoff.
 void sync_cutoff_cc() {
-    const int32_t v14 = std::clamp<int32_t>(g_patch.filter.cutoff + 8192, 0, 16383);
+    const int32_t v14 =
+            std::clamp<int32_t>(g_patch.filter.cutoff + 8192, 0, 16383);
     s_cutoff_msb = static_cast<uint8_t>(v14 >> 7);
     s_cutoff_lsb = static_cast<uint8_t>(v14 & 0x7F);
 }
@@ -427,10 +440,12 @@ void sync_cutoff_cc() {
 void apply_cutoff() {
     // 14-bit brightness centred at coarse 64: (val-8192) scaled so coarse
     // spans a few octaves, fine interpolates.
-    const int32_t v14 = (static_cast<int32_t>(s_cutoff_msb) << 7) | s_cutoff_lsb;
-    g_patch.filter.cutoff = static_cast<int16_t>(v14 - 8192); // ±8 octaves — authority
-                                                              // rule: full deflection
-                                                              // must reach the rails
+    const int32_t v14 =
+            (static_cast<int32_t>(s_cutoff_msb) << 7) | s_cutoff_lsb;
+    g_patch.filter.cutoff =
+            static_cast<int16_t>(v14 - 8192); // ±8 octaves — authority
+                                              // rule: full deflection
+                                              // must reach the rails
     s_pending |= dirty_cutoff;
 }
 
@@ -456,7 +471,8 @@ void handle_cc(uint8_t num, uint8_t val) {
     // hair-trigger into the undamped zone; this is a sharp but stable peak,
     // linear in log2(Q) so each step is an equal Q ratio.
     case 71:
-        g_patch.filter.resonance = static_cast<uint16_t>((static_cast<int32_t>(val) * 5632) / 127);
+        g_patch.filter.resonance =
+                static_cast<uint16_t>((static_cast<int32_t>(val) * 5632) / 127);
         s_pending |= dirty_voices;
         break;
     case 74:
@@ -481,7 +497,8 @@ void handle_cc(uint8_t num, uint8_t val) {
         break; // NRPN deselects
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
-            g_patch.bend_range = std::clamp<uint8_t>(val, 1, 12); // takes effect on the next bend
+            g_patch.bend_range = std::clamp<uint8_t>(
+                    val, 1, 12); // takes effect on the next bend
         }
         break;
     case 38:
@@ -599,7 +616,8 @@ void handle_cc(uint8_t num, uint8_t val) {
         s_pending |= dirty_voices;
     } break;
     case 24:
-        g_patch.osc_mix = static_cast<int8_t>(static_cast<int>(val) - 64); // osc balance
+        g_patch.osc_mix =
+                static_cast<int8_t>(static_cast<int>(val) - 64); // osc balance
         s_pending |= dirty_voices;
         break;
     // Pulse width: UNIPOLAR, because duty d and 1−d are the same spectrum
@@ -625,12 +643,13 @@ void handle_cc(uint8_t num, uint8_t val) {
         s_pending |= dirty_mod_env;
         break;
     case 26: {
-        const uint8_t m      = static_cast<uint8_t>((val * 3) >> 7); // 3 voice modes
+        const uint8_t m = static_cast<uint8_t>((val * 3) >> 7); // 3 voice modes
         g_patch.voice_struct = static_cast<voice_struct_t>(m > 2 ? 2 : m);
         s_pending |= dirty_voices;
     } break;
     case 27:
-        g_patch.unison_detune = static_cast<int16_t>(val >> 2); // 0..31 raw per step
+        g_patch.unison_detune =
+                static_cast<int16_t>(val >> 2); // 0..31 raw per step
         s_pending |= dirty_voices;
         break;
     case 28:
@@ -701,12 +720,14 @@ void handle_cc(uint8_t num, uint8_t val) {
     // oct at a quarter turn, ±4 oct at half, ±16 oct at the rails — fine near
     // centre, full authority at the ends (the CSP's word holds ±8).
     case 107: {
-        const int d           = static_cast<int>(val) - 64;
-        g_patch.mod_env_depth = static_cast<int16_t>((d * (d < 0 ? -d : d)) << 2);
+        const int d = static_cast<int>(val) - 64;
+        g_patch.mod_env_depth =
+                static_cast<int16_t>((d * (d < 0 ? -d : d)) << 2);
         s_pending |= dirty_mod_env;
     } break;
     case 108:
-        g_patch.mod_env_dest = static_cast<uint8_t>(val >> 5); // stored; cutoff live
+        g_patch.mod_env_dest =
+                static_cast<uint8_t>(val >> 5); // stored; cutoff live
         break;
 
     default:
@@ -714,7 +735,8 @@ void handle_cc(uint8_t num, uint8_t val) {
     }
 }
 
-uint8_t s_bank_msb[16], s_bank_lsb[16]; // each channel's bank (see program_change)
+uint8_t s_bank_msb[16],
+        s_bank_lsb[16]; // each channel's bank (see program_change)
 void program_change(uint8_t channel, uint8_t program);
 
 void handle_midi(const midi_message_t *m) {
@@ -741,7 +763,8 @@ void handle_midi(const midi_message_t *m) {
         program_change(ch, m->data[0]);
         break;
     case 0xE0: // pitch wheel, 14-bit
-        pitch_bend_update(static_cast<uint16_t>((static_cast<uint16_t>(m->data[1]) << 7) | m->data[0]));
+        pitch_bend_update(static_cast<uint16_t>(
+                (static_cast<uint16_t>(m->data[1]) << 7) | m->data[0]));
         break;
     default:
         break;
@@ -814,7 +837,8 @@ void (*s_patch_listener)(const char *name);
 void program_change(uint8_t channel, uint8_t program) {
     const int bank = s_bank_msb[channel] * 128 + s_bank_lsb[channel];
     char rel[256], path[320], err[160];
-    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel, sizeof rel)) {
+    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel,
+                            sizeof rel)) {
         ESP_LOGW(tag, "bank %d program %d: no such program", bank, program);
         return;
     }

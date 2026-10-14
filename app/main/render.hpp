@@ -39,7 +39,8 @@ constexpr int pointer_count      = 10; // a partial's sink pointers
 // The controllers the patch does not hold.
 struct Controllers {
     uint8_t wheel = 0; // CC 1
-    int16_t bend  = 0; // the pitch wheel, in raw octave steps (1024 to the octave)
+    int16_t bend =
+            0; // the pitch wheel, in raw octave steps (1024 to the octave)
 };
 
 // How the 8 partials of a voice sit on the two oscillators.
