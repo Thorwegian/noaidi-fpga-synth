@@ -97,13 +97,13 @@ void app_main(void) {
            v == 0xDEADBEEF ? "OK" : "FAIL");
     fails += (v != 0xDEADBEEF);
 
-    printf("=== 2. burst auto-increment (LFO region) ===\n");
+    printf("=== 2. burst auto-increment (system registers) ===\n");
     uint32_t wq[4] = {0x11111111, 0x22222222, 0x33333333, 0x44444444};
     uint32_t rq[4] = {0};
-    fpga_word_write_burst(0x0100, wq, 4);
-    bool id_ok = fpga_word_read_burst(0x0100, rq, 4);
+    fpga_word_write_burst(0x0006, wq, 4);
+    bool id_ok = fpga_word_read_burst(0x0006, rq, 4);
     for (int i = 0; i < 4; i++) {
-        printf("word[0x%04X] = %08lX %s\n", 0x0100 + i, (unsigned long) rq[i],
+        printf("word[0x%04X] = %08lX %s\n", 0x0006 + i, (unsigned long) rq[i],
                rq[i] == wq[i] ? "OK" : "FAIL");
         fails += (rq[i] != wq[i]);
     }
@@ -111,12 +111,11 @@ void app_main(void) {
     fails += !id_ok;
 
     printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
-    // 0x1005 aliases 0x0005 under the 11-bit backed mask AND decodes
-    // to nothing else. Probe addresses must miss EVERY decode window
-    // (an address inside DMEM would fire the DMEM mailbox and move a
-    // live value at every boot):
-    // backed 0x0000-0x07FF, DMEM 0x0800-0x0BFF, partials 0x2000-0x5FFF.
-    fpga_word_write(0x1005, 0xBAD0BAD0); // would alias 0x0005 if broken
+    // 0x1005 decodes to nothing. Probe addresses must miss EVERY decode
+    // window (an address inside the queue would move a live register at
+    // every boot): system 0x0000-0x0010, pointers 0x2000-0x5FFF, the
+    // CSP's queue 0x6000-0x6FFF, its program 0x8000-0x85BF.
+    fpga_word_write(0x1005, 0xBAD0BAD0);
     uint32_t z    = fpga_word_read(0x1005);
     uint32_t keep = fpga_word_read(0x0005);
     printf("word[0x1005] = %08lX %s, word[0x0005] = %08lX %s\n",
@@ -128,8 +127,8 @@ void app_main(void) {
 
     // ── The synth proper ────────────────────────────────────────────
     // engine_link takes sole ownership of the SPI link from here on
-    // (mutes both pages at init — the boot organ goes silent), then
-    // voice_alloc turns MIDI into voices of 8 partials.
+    // (it loads the CSP's control program), then voice_alloc turns MIDI into
+    // voices of 8 partials.
     printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();

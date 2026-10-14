@@ -26,6 +26,7 @@
 
 #include "Vtb_synth.h"
 #include "csp/control_program.hpp"
+#include "fpga_map.hpp"
 #include "patch.h"
 #include "render.hpp"
 #include "svdpi.h"
@@ -145,12 +146,9 @@ private:
 
 // ---- the control plane, as the firmware speaks it ------------------------------------------
 
-constexpr uint16_t ctrl_address         = 0x0002;
-constexpr uint16_t program_high_address = 0x0010;
-constexpr uint16_t partial_base         = 0x2000;
-constexpr uint16_t queue_base           = 0x6000;
-constexpr uint16_t program_base         = 0x8000;
-constexpr uint32_t ctrl_swap = 1, ctrl_hold = 2;
+constexpr uint16_t ctrl_address = fpga_map::ctrl;
+constexpr uint32_t ctrl_swap    = fpga_map::ctrl_swap;
+constexpr uint32_t ctrl_hold    = fpga_map::ctrl_hold;
 
 // The firmware's link: queued writes, committed by a swap, applied by the
 // CSP's write window (48 a pass); the program loads while the CSP is held.
@@ -167,9 +165,9 @@ public:
 
     void load() {
         for (size_t pc = 0; pc < csp::control::words.size(); ++pc) {
-            synth_.write(program_high_address,
+            synth_.write(fpga_map::program_high,
                          static_cast<uint32_t>(csp::control::words[pc] >> 32));
-            synth_.write(static_cast<uint16_t>(program_base + pc),
+            synth_.write(static_cast<uint16_t>(fpga_map::program_base + pc),
                          static_cast<uint32_t>(csp::control::words[pc]));
         }
     }
@@ -181,7 +179,7 @@ public:
         for (size_t done = 0; done < writes.size();) {
             const size_t end = std::min(writes.size(), done + chunk);
             for (; done < end; ++done) {
-                synth_.write(static_cast<uint16_t>(queue_base + writes[done].address),
+                synth_.write(static_cast<uint16_t>(fpga_map::queue_base + writes[done].address),
                              static_cast<uint32_t>(writes[done].raw) & 0x3FFFF);
             }
             synth_.write(ctrl_address, ctrl_swap | (held ? ctrl_hold : 0));
@@ -191,7 +189,8 @@ public:
 
     // A partial's ten pointers: three to a word, the fourth word commits.
     void point(int partial, const std::array<int, render::pointer_count> &pointers) {
-        const uint16_t base = static_cast<uint16_t>(partial_base + 64 * partial);
+        const uint16_t base = static_cast<uint16_t>(fpga_map::partial_base
+                                                    + fpga_map::partial_stride * partial);
         for (int word = 0; word < 3; ++word) {
             synth_.write(base + word,
                          static_cast<uint32_t>(pointers[3 * word])
