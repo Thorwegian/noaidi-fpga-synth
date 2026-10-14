@@ -142,29 +142,33 @@ module partial_pipeline #(
     // when the voice layout does.
     //----------------------------------------------------------------
     localparam int POINTER_RAM_W = 108;
-    reg [35:0] pointer_ram [3][0:NUM_PARTIALS-1];
+    // One array a block: a memory with one write port is what maps to a
+    // BSRAM, where a three-block array would be one memory with three.
+    reg [35:0] pointer_block_0 [0:NUM_PARTIALS-1];
+    reg [35:0] pointer_block_1 [0:NUM_PARTIALS-1];
+    reg [35:0] pointer_block_2 [0:NUM_PARTIALS-1];
     initial begin
-        for (int block = 0; block < 3; block++) begin
-            for (int partial = 0; partial < NUM_PARTIALS; partial++) begin
-                pointer_ram[block][partial] = '0;   // every pointer at sink word 0
-            end
+        for (int partial = 0; partial < NUM_PARTIALS; partial++) begin
+            pointer_block_0[partial] = '0;   // every pointer at sink word 0
+            pointer_block_1[partial] = '0;
+            pointer_block_2[partial] = '0;
         end
     end
 
     wire [POINTER_RAM_W-1:0] pointer_write_word = POINTER_RAM_W'(pointer_write_data);
     always_ff @(posedge sclk) begin
         if (pointer_write_enable) begin
-            pointer_ram[0][pointer_write_index] <= pointer_write_word[35:0];
+            pointer_block_0[pointer_write_index] <= pointer_write_word[35:0];
         end
     end
     always_ff @(posedge sclk) begin
         if (pointer_write_enable) begin
-            pointer_ram[1][pointer_write_index] <= pointer_write_word[71:36];
+            pointer_block_1[pointer_write_index] <= pointer_write_word[71:36];
         end
     end
     always_ff @(posedge sclk) begin
         if (pointer_write_enable) begin
-            pointer_ram[2][pointer_write_index] <= pointer_write_word[107:72];
+            pointer_block_2[pointer_write_index] <= pointer_write_word[107:72];
         end
     end
 
@@ -176,9 +180,9 @@ module partial_pipeline #(
 
     logic [POINTER_RAM_W-1:0] f1_entry;
     always_ff @(posedge clk) begin
-        f1_entry[35:0]   <= pointer_ram[0][partial_index];
-        f1_entry[71:36]  <= pointer_ram[1][partial_index];
-        f1_entry[107:72] <= pointer_ram[2][partial_index];
+        f1_entry[35:0]   <= pointer_block_0[partial_index];
+        f1_entry[71:36]  <= pointer_block_1[partial_index];
+        f1_entry[107:72] <= pointer_block_2[partial_index];
     end
 
     function automatic logic [synth_pkg::POINTER_W-1:0] pointer_of(

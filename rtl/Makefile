@@ -11,11 +11,15 @@ SHELL := /bin/bash
 TOP = top
 PKG = synth_pkg.sv
 MOD = \
+	csp/csp_pkg.sv \
 	$(TOP).sv \
 	dsp/timebase.sv \
 	dsp/output_lpf.sv \
 	dsp/limiter.sv \
-	dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv \
+	dsp/partial_pipeline.sv \
+	csp/csp_register_file.sv csp/csp_multiply_add.sv \
+	csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv \
+	csp/csp_core.sv \
 	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
@@ -341,8 +345,8 @@ sim-prog-soak: obj_dir/tb_prog_soak/sim
 	$(call run_sim,$<,/dev/stdout)
 
 TB_BUS = tb/tb_spi_bus.sv
-obj_dir/tb_spi_bus/sim: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
-	$(VERILATE) $(PKG) spi/spi_bus.sv $(TB_BUS)
+obj_dir/tb_spi_bus/sim: $(PKG) csp/csp_pkg.sv spi/spi_bus.sv $(TB_BUS) Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv spi/spi_bus.sv $(TB_BUS)
 
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
