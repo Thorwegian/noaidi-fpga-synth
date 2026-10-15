@@ -2,7 +2,7 @@
 
 - Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop.
 
-- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on.
+- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Questions are directed to GitHub - not the chat.
 
 - GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child). Agents *must* actively use it.
 
