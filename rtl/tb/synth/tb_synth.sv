@@ -45,6 +45,22 @@ module tb_synth (
         .spdif48_out (spdif48_out)
     );
 
+`ifdef GATE
+    GSR GSR (.GSRI(1'b1));
+    // the synthesized netlist has no hierarchy to look into: the SPI side only
+    assign sample_tick = 1'b0;
+    assign out_left    = '0;
+    assign out_right   = '0;
+    assign mix_left    = '0;
+    assign mix_right   = '0;
+    assign passes      = '0;
+    export "DPI-C" function synth_register;
+    export "DPI-C" function synth_sink;
+    export "DPI-C" function synth_pointer;
+    function int synth_register(input int address); return 0; endfunction
+    function int synth_sink(input int offset); return 0; endfunction
+    function int synth_pointer(input int partial, input int position); return 0; endfunction
+`else
     assign sample_tick = dut.sample_tick;
     assign out_left    = dut.out_left;
     assign out_right   = dut.out_right;
@@ -78,5 +94,6 @@ module tb_synth (
         return int'(entry[position * 10 +: 10]);
     endfunction
 
+`endif
 endmodule
 `default_nettype wire

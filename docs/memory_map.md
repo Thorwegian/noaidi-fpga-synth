@@ -101,7 +101,7 @@ Everything else is reserved.
 | `0x00C` | `PROBE_ADDRESS` | `[10:0]` the CSP register (an aligned pair) the probe reads once a pass |
 | `0x00D` | `DIAG_PROBE_EVEN` | read-only. `[17:0]` the even register of the probed pair, as of the last pass |
 | `0x00E` | `DIAG_PROBE_ODD` | read-only. `[17:0]` the odd register of the probed pair |
-| `0x00F` | scratch | read back what was written |
+| `0x00F` | — | reads zero |
 
 The diagnostic words cross from the system clock through two flip-flops and are not coherent across bits; read twice.
 

@@ -112,19 +112,22 @@ add", and the per-partial immediates.
 
 An in-order pipeline with full interlocks and no forwarding (#220). A
 program behaves as on a linear machine; an instruction that needs a
-value still in the pipeline waits in decode until it has been written.
+value still in the pipeline waits until it has been written (in R, which reads
+its operands again every cycle it waits, so what it takes is what the register
+file held the cycle before).
 
 | Stage | Work |
 |---|---|
-| D | decode: operand addresses from `i`/`j`, the hazard check; the register-file read addresses go in as the instruction issues |
-| R | register read (three ports) → operands in the accumulator's format; `SKIP` decides |
+| D | decode: operand addresses from `i`/`j`; the register-file read addresses go in as the instruction issues |
+| R | the hazard check (on registered values: the three operand addresses against those of E1 … W, and of W a cycle ago); register read (three ports) → operands in the accumulator's format; `SKIP` decides |
 | E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
 | E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; `SHIFT` saturates |
 | E3 | MULTALU36X18: `a × b + c` |
 | E4 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
 | W | write R (register file or sink area); the accumulator and the flags |
 
-A dependent instruction issues 7 cycles after the one it depends on; the
+A dependent instruction issues 7 cycles after the one it depends on (the RTL
+leaves R a cycle after the model's issue; the cycle counts are the same); the
 instruction after `LOOP` or `IDX` issues 3 cycles after it
 (`csp::result_latency`, `csp::barrier_latency`; the model counts both).
 Independent instructions issue every cycle. There is no forwarding: it
@@ -547,6 +550,20 @@ small program. The new CSP gets:
   far the envelope (`adsr.sv`) and the LFOs (`osc_core`); the voice and
   channel arithmetic has no old unit, and `tools/csp/test/csp_test.cpp`
   checks its sinks against the formulas in double precision.
+- **The netlist, not only the RTL** (`rtl/tb/lock`, `make sim-lockstep`; `make
+  sim-gate-selftest`). The board runs what yosys made of the RTL, and that is
+  not always what the RTL says. The hazard check was written as a loop over
+  `control_t [5:0] in_flight` indexed by the loop variable; yosys made logic
+  of it that never stalled, so on the board every instruction that read what
+  the one before it wrote read the old value (the LFO's triangle, the choice
+  of the LFOs' half), while every RTL bench passed. It was found by a boot
+  self-test on the board (`selftest.s`, `engine_selftest.cpp`, read back
+  through the register probe, docs/memory_map.md), reproduced by simulating
+  the netlist with Gowin's cell models, and located by running `csp_core`
+  and its netlist side by side on the same inputs and comparing every output
+  every clock. That comparison is now a regression bench. The rule it
+  leaves: in `rtl/csp`, no variable index into a packed array of structs, no
+  `return`, no `$bits` of a type name; one function call for each element.
 
 ## 13. Steps
 

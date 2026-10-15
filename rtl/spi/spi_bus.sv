@@ -113,8 +113,13 @@ module spi_bus #(
     // swap request, which is an event and not a state.
     //--------------------------------------------------------------------
     localparam int SYSTEM_WORDS = 16;
-    logic [31:0] system_register [SYSTEM_WORDS];
-    initial for (int word = 0; word < SYSTEM_WORDS; word++) system_register[word] = '0;
+    localparam int STORED_WORDS = 8;            // 0x0000-0x0007; 0x000C is the probe address
+    logic [31:0] system_register [STORED_WORDS];
+    logic [10:0] probe_register;
+    initial begin
+        for (int word = 0; word < STORED_WORDS; word++) system_register[word] = '0;
+        probe_register = '0;
+    end
 
     function automatic logic [31:0] read_word(input logic [15:0] address);
         case (address)
@@ -124,7 +129,8 @@ module spi_bus #(
             16'h000B: read_word = status_3;
             16'h000D: read_word = status_4;
             16'h000E: read_word = status_5;
-            default:  read_word = address < 16'(SYSTEM_WORDS) ? system_register[address[3:0]] : 32'd0;
+            16'h000C: read_word = 32'(probe_register);
+            default:  read_word = address < 16'(STORED_WORDS) ? system_register[address[2:0]] : 32'd0;
         endcase
     endfunction
 
@@ -151,6 +157,12 @@ module spi_bus #(
         stream_word      = '0;
     end
 
+    // The word read next, from the address just completed (the address low
+    // byte is on the wire) or from the next word of a burst. One read_word:
+    // two calls made two copies of its multiplexers.
+    wire [15:0] next_read_address = frame_phase == 3'd2 ? {word_addr[15:8], rx_byte}
+                                                        : (auto_increment ? word_addr + 16'd1 : word_addr);
+
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
             frame_phase      <= '0;
@@ -169,7 +181,7 @@ module spi_bus #(
                 end
                 3'd2: begin                       // address low
                     word_addr[7:0]  <= rx_byte;
-                    stream_word     <= read_word({word_addr[15:8], rx_byte});
+                    stream_word     <= read_word(next_read_address);
                     data_byte_index <= '0;
                     first_dummy_done <= 1'b0;
                     frame_phase     <= is_read ? 3'd3 : 3'd4;
@@ -185,7 +197,7 @@ module spi_bus #(
                     data_byte_index <= data_byte_index + 2'd1;
                     if (data_byte_index == 2'd3) begin
                         // the next word of a burst
-                        stream_word <= read_word(auto_increment ? word_addr + 16'd1 : word_addr);
+                        stream_word <= read_word(next_read_address);
                         if (auto_increment)
                             word_addr <= word_addr + 16'd1;
                     end
@@ -213,12 +225,15 @@ module spi_bus #(
     assign swap = in_system && word_addr == CTRL_ADDRESS && word_data[0];
 
     always_ff @(posedge sclk) begin
-        if (in_system) begin
-            system_register[word_addr[3:0]] <= word_addr == CTRL_ADDRESS
+        if (in_system && word_addr[3] == 1'b0) begin
+            system_register[word_addr[2:0]] <= word_addr == CTRL_ADDRESS
                                                ? word_data & ~32'd1 : word_data;
         end
+        if (in_system && word_addr == 16'h000C) begin
+            probe_register <= word_data[10:0];
+        end
     end
-    assign probe_address = system_register[12][10:0];
+    assign probe_address = probe_register;
     // The held and test-tone levels follow CTRL as written, from the edge
     // after the word completes.
     initial begin

@@ -97,12 +97,18 @@ TIMING_MIN_MHZ  ?= 2.0
 TIMING_WARN_MHZ ?= 8.0
 
 
+# The placer's maximum density: at the default (0.9) the legaliser gave up on
+# the flip-flops ("Unable to find legal placement ... utilisation limit") once
+# the design had its hazard check; 0.75 places, and closes timing well.
+PLACER_BETA ?= 0.75
+
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
+		--placer-heap-beta $(PLACER_BETA) \
 		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
@@ -126,7 +132,7 @@ timing-sweep: yosys.json
 	@for s in $(SEEDS); do \
 		nextpnr-himbaechel --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
-			--vopt cst=constraints.cst --freq 73.728 --seed $$s \
+			--vopt cst=constraints.cst --placer-heap-beta $(PLACER_BETA) --freq 73.728 --seed $$s \
 			> /tmp/tsweep/$$s.log 2>&1 & \
 	done; wait
 	@for s in $(SEEDS); do \
@@ -373,3 +379,53 @@ sim: sim-pulse-dc sim-csp-register-file sim-csp-write-queue sim-csp-cosim sim-cs
 
 clean:
 	rm -rf *.log *.json *.fs dsp/svf_fc_lut.hex obj_dir
+
+#----------------------------------------------------------------------
+# The system bench on the synthesized netlist (what yosys made of top.sv,
+# the netlist nextpnr places), with Gowin's primitive models: the boot
+# self-test on it finds what the RTL bench cannot, differences between
+# the RTL and what the synthesis made of it. Slow.
+#----------------------------------------------------------------------
+GATE_RTL = $(PKG) csp/csp_pkg.sv tb/synth/top_csp.sv dsp/timebase.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
+           csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv spi/spi_bus.sv
+obj_dir/gate/netlist.v: $(GATE_RTL) Makefile
+	mkdir -p $(@D) && yosys -q -p 'read_verilog -sv $(GATE_RTL); synth_gowin -family gw2a -top top; write_verilog -noattr $@'
+obj_dir/gate/library.v: obj_dir/gate/netlist.v ../scripts/gate_library.py
+	python3 ../scripts/gate_library.py $< $(GOWIN_SIM) $@
+
+obj_dir/synth_gate/sim: obj_dir/gate/netlist.v obj_dir/gate/library.v tb/synth/tb_synth.sv $(SYNTH_CPP) $(SYNTH_C_OBJ) \
+                        ../app/main/csp/selftest_program.hpp ../app/main/engine_selftest.hpp Makefile
+	mkdir -p $(@D) && verilator --cc --exe --build -j 2 -O0 --x-assign unique --x-initial unique -I. \
+	    --output-split 20000 --output-split-cfuncs 2000 \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-fatal \
+	    -DGATE --top-module tb_synth --Mdir $(@D) -o sim \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../app/main) -I$(abspath ../app/lib/tomlc17/src) -DSTARTUP_PATCH='\"$(abspath ../app/storage/Patches/Factory/Pads/Supersaw.toml)\"'" \
+	    -LDFLAGS "$(abspath $(SYNTH_C_OBJ))" \
+	    obj_dir/gate/netlist.v obj_dir/gate/library.v tb/synth/tb_synth.sv $(abspath $(SYNTH_CPP))
+
+sim-gate-selftest: obj_dir/synth_gate/sim
+	SYNTH_ONLY_SELFTEST=1 $<
+
+#----------------------------------------------------------------------
+# csp_core and its netlist in lockstep (tb/lock/tb_lock.sv): every output of
+# both, every clock, on the boot self-test. Slow (about half an hour, most of
+# it building the netlist bench); not part of `make sim`.
+#----------------------------------------------------------------------
+LOCK_DIR = obj_dir/lock
+LOCK_RTL = $(PKG) csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv csp/csp_core.sv
+$(LOCK_DIR)/selftest.svh: ../scripts/gen_lockstep_selftest.py ../app/main/csp/selftest_program.hpp
+	mkdir -p $(@D) && python3 $< ../app/main/csp/selftest_program.hpp $@
+$(LOCK_DIR)/core_net.v: $(LOCK_RTL) Makefile
+	mkdir -p $(@D) && yosys -q -p 'read_verilog -sv $(LOCK_RTL); synth_gowin -family gw2a -top csp_core; write_verilog -noattr $@'
+	sed -i 's/^module csp_core(/module csp_core_gate(/; s/^module csp_core (/module csp_core_gate (/' $@
+$(LOCK_DIR)/library.v: $(LOCK_DIR)/core_net.v ../scripts/gate_library.py
+	python3 ../scripts/gate_library.py $< $(GOWIN_SIM) $@
+$(LOCK_DIR)/v/Vtb_lock: $(LOCK_DIR)/core_net.v $(LOCK_DIR)/library.v $(LOCK_DIR)/selftest.svh tb/lock/tb_lock.sv \
+                        csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_RTL) Makefile
+	verilator --binary --timing -O0 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -DSIM_GOWIN_PRIM \
+	    --top-module tb_lock -I$(LOCK_DIR) --Mdir $(@D) tb/lock/tb_lock.sv $(LOCK_RTL) \
+	    csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_DIR)/core_net.v $(LOCK_DIR)/library.v
+
+sim-lockstep: $(LOCK_DIR)/v/Vtb_lock
+	$< | tee tb/sim-lockstep.out
+	@grep -q "done: 0 mismatching cycles" tb/sim-lockstep.out || { echo "*** lockstep: the netlist differs from the RTL ***"; exit 1; }

@@ -112,8 +112,11 @@ module tb_csp_cosim #(
     always_ff @(posedge clk) begin
         if (pass_start) begin
             issue_end <= 0;
-        end else if (u_core.issue && int'(u_core.decode_pc) < program_length) begin
-            issue_end <= int'(u_core.pass_cycle) + 1;
+        end else if (u_core.read_stage.valid && !u_core.r_hold
+                     && int'(u_core.read_stage.pc) < program_length) begin
+            // an instruction leaves R in the cycle after the one the model
+            // calls its issue (decode no longer waits for the hazards: R does)
+            issue_end <= int'(u_core.pass_cycle);
         end
     end
 
@@ -137,10 +140,10 @@ module tb_csp_cosim #(
             $display("rtl sink %0d %0d", int'(u_core.sink_write_address),
                      $signed(u_core.sink_write_data));
         end
-        if (trace_issues && u_core.issue && int'(u_core.decode_pc) < program_length) begin
-            $display("rtl pc %0d cycle %0d i %0d j %0d", int'(u_core.decode_pc),
-                     int'(u_core.pass_cycle), int'(u_core.decode_index_i),
-                     int'(u_core.decode_index_j));
+        if (trace_issues && u_core.read_stage.valid && !u_core.r_hold
+                && int'(u_core.read_stage.pc) < program_length) begin
+            $display("rtl pc %0d cycle %0d", int'(u_core.read_stage.pc),
+                     int'(u_core.pass_cycle) - 1);
         end
     end
 
