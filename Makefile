@@ -147,8 +147,12 @@ csp: $(CSP_TOOL)
 CSP_PROGRAM_FILES = $(addprefix $(CSP_DIR)/programs/,map.s lfo.s channel.s envelope.s voice.s)
 CSP_CONTROL_HEADER = app/main/csp/control_program.hpp
 
-csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+CSP_SELFTEST_FILES = $(addprefix $(CSP_DIR)/programs/,map.s lfo.s selftest.s)
+CSP_SELFTEST_HEADER = app/main/csp/selftest_program.hpp
+
+csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
 	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
+	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
 
 csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
@@ -156,6 +160,8 @@ csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_P
 	$(CSP_TEST)
 	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
 	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
+	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
+	    || { echo "FAIL $(CSP_SELFTEST_HEADER) is stale: make csp-header"; exit 1; }
 	@echo "$(CSP_CONTROL_HEADER) is current"
 
 fw-storage-flash:

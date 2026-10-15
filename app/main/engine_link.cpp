@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <string>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -17,6 +18,7 @@
 
 #include "csp/control_program.hpp"
 #include "engine_image.hpp"
+#include "engine_selftest.hpp"
 #include "fpga_map.hpp"
 #include "render.hpp"
 #include "spi_regs.h"
@@ -128,6 +130,20 @@ uint64_t probe_pair(int register_address) {
            | (pair[1] & 0x3FFFF);
 }
 
+// The boot self-test's way to the chip: the SPI link, and the probe.
+class SpiSelfTestPort : public SelfTestPort {
+public:
+    void write_word(uint16_t address, uint32_t value) override {
+        fpga_word_write(address, value);
+    }
+    void wait_ms(int milliseconds) override {
+        vTaskDelay(pdMS_TO_TICKS(milliseconds));
+    }
+    uint64_t probe(int register_address) override {
+        return probe_pair(register_address);
+    }
+};
+
 // Every few seconds, log what the CSP holds for the LFOs: the pass counter
 // and, for each LFO, its record (phase, step, depth and its negative, gain
 // and output) and its set (where it starts, how many of each shape). What the
@@ -139,27 +155,49 @@ void probe_task(void *) {
         const unsigned long pass =
                 static_cast<unsigned long>(probe_pair(0x040) >> 18);
         ESP_LOGI(tag, "probe: pass %lu", pass);
+        // PARITY (which half of the LFOs this pass works) and the pass
+        // counter's low bit, sampled eight times: each should show both.
+        std::array<unsigned, 8> parity{};
+        std::array<unsigned, 8> pass_low_bit{};
+        for (size_t sample = 0; sample < parity.size(); ++sample) {
+            parity[sample] = static_cast<unsigned>(
+                    (probe_pair(cp::parity) >> 18) & 0x3FFFF);
+            pass_low_bit[sample] =
+                    static_cast<unsigned>((probe_pair(0x040) >> 18) & 1);
+        }
+        ESP_LOGI(
+                tag,
+                "probe: PARITY %u %u %u %u %u %u %u %u, PASS bit 0 %u %u %u %u %u %u %u %u",
+                parity[0], parity[1], parity[2], parity[3], parity[4],
+                parity[5], parity[6], parity[7], pass_low_bit[0],
+                pass_low_bit[1], pass_low_bit[2], pass_low_bit[3],
+                pass_low_bit[4], pass_low_bit[5], pass_low_bit[6],
+                pass_low_bit[7]);
         for (int lfo = 0; lfo < 2; ++lfo) {
-            const int record     = cp::lfos + lfo * 16 * cp::lfo_size;
-            const int set        = cp::lfo_sets + lfo * cp::set_size;
-            const uint64_t phase = probe_pair(record + cp::phase);
-            const uint64_t step  = probe_pair(record + cp::phase_step);
-            const uint64_t depth = probe_pair(record + cp::depth);
-            const uint64_t gain  = probe_pair(record + cp::gain);
-            const uint64_t set_a = probe_pair(set + cp::base);
-            const uint64_t set_b = probe_pair(set + cp::n_saw + 1);
-            const uint64_t set_c = probe_pair(set + cp::n_saw + 3);
+            const int record           = cp::lfos + lfo * 16 * cp::lfo_size;
+            const int set              = cp::lfo_sets + lfo * cp::set_size;
+            const uint64_t phase       = probe_pair(record + cp::phase);
+            const uint64_t step        = probe_pair(record + cp::phase_step);
+            const uint64_t depth       = probe_pair(record + cp::depth);
+            const uint64_t gain        = probe_pair(record + cp::gain);
+            const uint64_t set_a       = probe_pair(set + cp::base);
+            const uint64_t set_b       = probe_pair(set + cp::n_saw + 1);
+            const uint64_t set_c       = probe_pair(set + cp::n_saw + 3);
+            const uint64_t scratch_p_t = probe_pair(record + cp::p);
+            const uint64_t scratch_z   = probe_pair(record + cp::z);
             ESP_LOGI(
                     tag,
                     "probe: LFO%d phase %09llx step %09llx depth/neg %09llx gain/out %09llx "
-                    "set %09llx %09llx %09llx",
+                    "set %09llx %09llx %09llx P/T %09llx Z %09llx",
                     lfo + 1, static_cast<unsigned long long>(phase),
                     static_cast<unsigned long long>(step),
                     static_cast<unsigned long long>(depth),
                     static_cast<unsigned long long>(gain),
                     static_cast<unsigned long long>(set_a),
                     static_cast<unsigned long long>(set_b),
-                    static_cast<unsigned long long>(set_c));
+                    static_cast<unsigned long long>(set_c),
+                    static_cast<unsigned long long>(scratch_p_t),
+                    static_cast<unsigned long long>(scratch_z));
         }
     }
 }
@@ -217,6 +255,23 @@ void engine_link_init(void) {
     // The CSP starts held; make sure of it, whatever the last run left, then
     // give it the program, the constants and the wiring.
     fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+
+    // Does the chip do what the model says? Say so before the sound depends
+    // on it; the control program loads over the test either way.
+    {
+        SpiSelfTestPort self_test_port;
+        const SelfTestResult self_test = run_selftest(self_test_port);
+        for (const std::string &line : self_test.lines) {
+            ESP_LOGI(tag, "self-test: %s", line.c_str());
+        }
+        if (self_test.passed) {
+            ESP_LOGI(tag, "self-test: the chip does what the model says");
+        } else {
+            ESP_LOGE(tag,
+                     "self-test: THE CHIP DOES NOT DO WHAT THE MODEL SAYS");
+        }
+    }
+
     load_program();
 
     render::Writes writes;

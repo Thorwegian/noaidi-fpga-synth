@@ -28,6 +28,7 @@
 #include "csp/control_program.hpp"
 #include "csp/lfo.hpp"
 #include "engine_image.hpp"
+#include "engine_selftest.hpp"
 #include "fpga_map.hpp"
 #include "patch.h"
 #include "patch_file.h"
@@ -237,6 +238,28 @@ public:
     }
     void write_register(uint16_t address, uint32_t value) override {
         synth_.write(address, value);
+    }
+
+private:
+    Synth &synth_;
+};
+
+// The boot self-test's way to the chip.
+class SelfTestBench : public SelfTestPort {
+public:
+    explicit SelfTestBench(Synth &synth) : synth_(synth) {}
+    void write_word(uint16_t address, uint32_t value) override {
+        synth_.write(address, value);
+    }
+    void wait_ms(int milliseconds) override {
+        synth_.run_ms(milliseconds);
+    }
+    uint64_t probe(int register_address) override {
+        synth_.write(fpga_map::probe_address,
+                     static_cast<uint32_t>(register_address));
+        synth_.run_passes(3);
+        return (uint64_t{synth_.read(fpga_map::probe_even) & 0x3FFFF} << 18)
+               | (synth_.read(fpga_map::probe_odd) & 0x3FFFF);
     }
 
 private:
@@ -599,6 +622,17 @@ void case_vibrato(VerilatedContext &context) {
 }
 
 // The register probe: the board's window into the CSP's registers.
+void case_selftest(VerilatedContext &context) {
+    std::printf("the boot self-test\n");
+    Synth synth(context);
+    SelfTestBench bench(synth);
+    const SelfTestResult result = run_selftest(bench);
+    for (const std::string &line : result.lines) {
+        std::printf("  %s\n", line.c_str());
+    }
+    check(result.passed, "the chip does what the model says");
+}
+
 void case_probe(VerilatedContext &context) {
     std::printf("the register probe\n");
     Rig rig(context);
@@ -821,6 +855,11 @@ int main(int argc, char **argv) {
         std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
         return failures == 0 ? 0 : 1;
     }
+    if (std::getenv("SYNTH_ONLY_SELFTEST")) {
+        case_selftest(context);
+        std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
+        return failures == 0 ? 0 : 1;
+    }
     if (std::getenv("SYNTH_ONLY_PROBE")) {
         case_probe(context);
         std::printf(failures == 0 ? "ALL PASS\n" : "%d FAILURE(S)\n", failures);
@@ -842,6 +881,7 @@ int main(int argc, char **argv) {
     case_filter(context);
     case_vibrato(context);
     case_probe(context);
+    case_selftest(context);
     case_velocity(context);
     case_unison(context);
     case_several(context);
