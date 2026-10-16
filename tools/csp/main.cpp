@@ -11,6 +11,9 @@
 //       constant registers, and every name (registers, blocks, fields) as a
 //       constant, for the firmware (app/main/csp/control_program.hpp); the
 //       names are in namespace csp::name (default control)
+//   csp replay program.s... -a before.txt -b after.txt
+//       a chip's registers before and after some passes (tools/lab/
+//       snapshot.py), against the model run from the first on the program
 //   csp sim program.s [-n passes] [-w name]... [-s name=value@pass]...
 //       assemble and run on the reference model: load the constants and
 //       the program with the CSP held, release it, run `passes` passes
@@ -177,6 +180,80 @@ int header_command(const csp::Program &program,
     return 0;
 }
 
+// `csp replay`: a chip's registers before and after some passes (tools/lab/
+// snapshot.py), against the model run on the same program from the first.
+// Lines are "R <address> <even word> <odd word>", hex, 18-bit words.
+bool read_snapshot(const std::string &path, std::vector<int32_t> &registers) {
+    std::ifstream in(path);
+    if (!in) {
+        return false;
+    }
+    registers.assign(2048, 0);
+    std::string tag;
+    while (in >> tag) {
+        if (tag != "R") {
+            std::string rest;
+            std::getline(in, rest);
+            continue;
+        }
+        int address = 0, even = 0, odd = 0;
+        in >> std::hex >> address >> even >> odd;
+        if (address >= 0 && address + 1 < 2048) {
+            registers[address]     = csp::sign_extend(even, csp::word_bits);
+            registers[address + 1] = csp::sign_extend(odd, csp::word_bits);
+        }
+    }
+    return true;
+}
+
+int replay_command(const csp::Program &program, const std::string &path_a,
+                   const std::string &path_b) {
+    std::vector<int32_t> a, b;
+    if (!read_snapshot(path_a, a) || !read_snapshot(path_b, b)) {
+        std::fprintf(stderr, "cannot read the snapshots\n");
+        return 2;
+    }
+    constexpr int io_first = 0x40, io_last = 0x5F;
+    const int passes = (b[io_first] - a[io_first]) & 0x3FFFF;
+    std::printf("the chip ran %d passes between the snapshots\n", passes);
+    if (passes > 20000) {
+        std::fprintf(stderr, "too many passes to replay\n");
+        return 2;
+    }
+    csp::Processor model;
+    for (int address = 1; address < 2048; ++address) {
+        if (address < io_first || address > io_last) {
+            model.write(address, a[address]);
+        }
+    }
+    model.swap();
+    model.pass(); // held: applies the writes
+    model.load(program.words);
+    model.set_pass_count(a[io_first]);
+    model.release();
+    for (int pass = 0; pass < passes; ++pass) {
+        model.pass();
+    }
+    int differences = 0;
+    for (int address = 1; address < 2048; ++address) {
+        if (address >= io_first && address <= io_last) {
+            continue;
+        }
+        const int32_t chip = b[address], expected = model.read(address);
+        if (chip != expected) {
+            if (differences < 60) {
+                std::printf(
+                        "  %03x: chip %d (%05x), model %d (%05x)  [was %d]\n",
+                        address, chip, chip & 0x3FFFF, expected,
+                        expected & 0x3FFFF, a[address]);
+            }
+            ++differences;
+        }
+    }
+    std::printf("%d registers differ\n", differences);
+    return differences == 0 ? 0 : 1;
+}
+
 struct ScriptedWrite {
     int address;
     int32_t raw;
@@ -275,6 +352,17 @@ int main(int argc, char **argv) {
             }
         }
         return header_command(program, files, name_space);
+    }
+    if (command == "replay") {
+        std::string path_a, path_b;
+        for (; arg + 1 < argc; arg += 2) {
+            if (std::string(argv[arg]) == "-a") {
+                path_a = argv[arg + 1];
+            } else if (std::string(argv[arg]) == "-b") {
+                path_b = argv[arg + 1];
+            }
+        }
+        return replay_command(program, path_a, path_b);
     }
     if (command != "sim") {
         return usage();

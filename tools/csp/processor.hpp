@@ -74,6 +74,12 @@ public:
     // The CTRL swap: commit every write queued so far.
     void swap();
 
+    // The pass counter, as the next pass will count on from (for replaying a
+    // chip's state).
+    void set_pass_count(int64_t count) {
+        pass_count_ = count;
+    }
+
     // An input register's value (the I/O region, 0x040–0x05F).
     void set_input(int address, int32_t raw);
 

@@ -192,7 +192,66 @@ int cmd_spitest(int argc, char **argv) {
     return 0;
 }
 
+// A snapshot of the CSP's registers: csp-freeze (stop the tick, hold the CSP:
+// the program stays), csp-dump (every register, one pair a line), csp-thaw.
+// tools/lab/snapshot.py takes two snapshots a few passes apart for
+// `csp replay` to check the model against.
+int cmd_freeze(int, char **) {
+    engine_link_pause(true);
+    engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+    vTaskDelay(pdMS_TO_TICKS(10)); // a pass in flight finishes
+    std::printf("  frozen\n");
+    return 0;
+}
+
+int cmd_thaw(int, char **) {
+    engine_link_raw_write(fpga_map::ctrl, 0);
+    std::printf("  thawed\n");
+    return 0;
+}
+
+int cmd_step(int argc, char **argv) {
+    const int milliseconds =
+            argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) : 1;
+    engine_link_raw_write(fpga_map::ctrl, 0);
+    vTaskDelay(pdMS_TO_TICKS(milliseconds));
+    engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    std::printf("  stepped %d ms\n", milliseconds);
+    return 0;
+}
+
+int cmd_dump(int argc, char **argv) {
+    const int first =
+            argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1
+                     : 0;
+    const int count =
+            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0))
+                     : 0x800;
+    for (int at = first; at < first + count && at < 0x800; at += 2) {
+        uint64_t pair = 0;
+        if (!engine_link_peek(at, &pair)) {
+            std::printf("  the link is not running\n");
+            return 1;
+        }
+        std::printf("R %03x %05x %05x\n", at,
+                    static_cast<unsigned>(pair >> 18) & 0x3FFFF,
+                    static_cast<unsigned>(pair) & 0x3FFFF);
+    }
+    std::printf("  dumped\n");
+    return 0;
+}
+
 const console_cmd_t commands[] = {
+        {"csp-freeze", "",
+         "hold the CSP (its program stays) and pause the tick", cmd_freeze,
+         nullptr},
+        {"csp-thaw", "", "release the CSP", cmd_thaw, nullptr},
+        {"csp-step", "[ms]",
+         "release the CSP for some milliseconds, then hold it", cmd_step,
+         nullptr},
+        {"csp-dump", "[first [count]]", "every register, a pair a line",
+         cmd_dump, nullptr},
         {"csp-spitest", "[rounds]", "write and read back scratch registers",
          cmd_spitest, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
