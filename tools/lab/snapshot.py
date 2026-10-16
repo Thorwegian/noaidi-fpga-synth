@@ -8,8 +8,9 @@
 #
 # Freezes the CSP (csp-freeze: its program stays, the engine's tick stops),
 # dumps every register (csp-dump), lets the CSP run for a few milliseconds
-# (csp-step), freezes it again and dumps again. The second file starts with "P <pass>": the pass counter when the CSP was
-# released (the counter runs while it is held, too). `csp replay` runs the model
+# (csp-step), freezes it again and dumps again. The second file starts with "P <first> <last>": the pass counter when the CSP
+# was released and when it was held again (the counter runs while it is held,
+# too, and so does register 0x040). `csp replay` runs the model
 # from the first snapshot and compares it with the second.
 import re
 import sys
@@ -31,14 +32,14 @@ def command(port, text, until, timeout):
     return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "\n", raw.decode("utf8", "replace"))
 
 
-def dump(port, path, first_pass=None):
+def dump(port, path, passes=None):
     text = command(port, "csp-dump", "dumped", 40)
     lines = {}
     for match in re.finditer(r"R ([0-9a-f]{3}) ([0-9a-f]{5}) ([0-9a-f]{5})", text):
         lines[int(match.group(1), 16)] = match.group(0)
     with open(path, "w") as out:
-        if first_pass is not None:
-            out.write("P %d\n" % first_pass)
+        if passes is not None:
+            out.write("P %d %d\n" % passes)
         for address in sorted(lines):
             out.write(lines[address] + "\n")
     print("%s: %d register pairs" % (path, len(lines)))
@@ -50,5 +51,5 @@ milliseconds = sys.argv[3] if len(sys.argv) > 3 else "2"
 command(port, "csp-freeze", "frozen", 5)
 dump(port, before)
 stepped = command(port, "csp-step " + milliseconds, "stepped", 5)
-first_pass = int(re.search(r"from pass (\d+)", stepped).group(1))
-dump(port, after, first_pass)
+passes = re.search(r"from pass (\d+) to (\d+)", stepped)
+dump(port, after, (int(passes.group(1)), int(passes.group(2))))
