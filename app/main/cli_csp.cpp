@@ -11,6 +11,7 @@
 #include "cli.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -149,6 +150,32 @@ int cmd_const(int argc, char **argv) {
     return 0;
 }
 
+// csp-burst <first register> <count> <seed>: queue the registers' test values
+// (register × 37 + seed) as the engine does, in bursts of up to 8 consecutive
+// words (applies on csp-go).
+int cmd_burst(int argc, char **argv) {
+    if (argc != 4) {
+        std::printf("usage: csp-burst <first register> <count> <seed>\n");
+        return 1;
+    }
+    const unsigned first = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const unsigned count = static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0));
+    const unsigned seed  = static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
+    constexpr unsigned burst_words = 8;
+    for (unsigned at = 0; at < count; at += burst_words) {
+        uint32_t words[burst_words];
+        const unsigned n = std::min(burst_words, count - at);
+        for (unsigned k = 0; k < n; ++k) {
+            words[k] = ((first + at + k) * 37u + seed) & 0x1FFFFu;
+        }
+        engine_link_raw_write_burst(
+                static_cast<uint16_t>(fpga_map::queue_base + first + at), words,
+                static_cast<int>(n));
+    }
+    std::printf("  queued %u words in bursts\n", count);
+    return 0;
+}
+
 int cmd_go(int, char **) {
     engine_link_raw_write(fpga_map::ctrl,
                           fpga_map::ctrl_hold | fpga_map::ctrl_swap);
@@ -266,6 +293,9 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-const", "<register> <raw>",
          "lab: write a register (applies on csp-go)", cmd_const, nullptr},
+        {"csp-burst", "<register> <count> <seed>",
+         "lab: queue test values in bursts of 8, as the engine does", cmd_burst,
+         nullptr},
         {"csp-go", "", "lab: commit the writes and release the CSP", cmd_go,
          nullptr},
         {"csp-selftest", "[run]",

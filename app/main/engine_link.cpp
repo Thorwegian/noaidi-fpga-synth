@@ -310,7 +310,21 @@ void engine_link_init(void) {
         send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
         vTaskDelay(pdMS_TO_TICKS(2));
     }
+    {
+        // Did the image land? (the registers the firmware alone writes)
+        const uint64_t before_release = probe_pair(0x220);
+        ESP_LOGI(tag, "image check, held: 0x220/0x221 = %05llx %05llx",
+                 static_cast<unsigned long long>(before_release >> 18),
+                 static_cast<unsigned long long>(before_release & 0x3FFFF));
+    }
     fpga_word_write(fpga_map::ctrl, ctrl_word(0)); // release
+    vTaskDelay(pdMS_TO_TICKS(50));
+    {
+        const uint64_t after_release = probe_pair(0x220);
+        ESP_LOGI(tag, "image check, 50 ms running: 0x220/0x221 = %05llx %05llx",
+                 static_cast<unsigned long long>(after_release >> 18),
+                 static_cast<unsigned long long>(after_release & 0x3FFFF));
+    }
     ESP_LOGI(tag, "control program loaded: %u instructions, %u constants",
              static_cast<unsigned>(csp::control::words.size()),
              static_cast<unsigned>(csp::control::constants.size()));
@@ -388,6 +402,9 @@ bool engine_link_write(int address, int32_t raw) {
         return false;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
+    if (address == 0x221) {
+        ESP_LOGW(tag, "TRACE write 0x221 <- %ld (single)", static_cast<long>(raw));
+    }
     const bool ok = image.set(address, raw);
     xSemaphoreGive(lock);
     return ok;
@@ -400,6 +417,11 @@ bool engine_link_write_all(const render::Writes &writes) {
     bool ok = true;
     xSemaphoreTake(lock, portMAX_DELAY);
     for (const render::Write &write : writes) {
+        if (write.address == 0x221) {
+            ESP_LOGW(tag, "TRACE write 0x221 <- %ld (batch of %u)",
+                     static_cast<long>(write.raw),
+                     static_cast<unsigned>(writes.size()));
+        }
         ok &= image.set(write.address, write.raw, write.force);
     }
     xSemaphoreGive(lock);

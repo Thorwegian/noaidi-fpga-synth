@@ -245,7 +245,7 @@ int replay_command(const csp::Program &program, const std::string &path_a,
     // The model, from the first snapshot, run for some passes.
     // `counted_from`: the pass counter the first pass counts on from (the LFOs
     // run on its parity).
-    const auto run_model = [&](int passes, int counted_from) {
+    const auto run_model = [&](int passes, int counted_from, bool trace = false) {
         csp::Processor model;
         for (int address = 1; address < 2048; ++address) {
             if (address < io_first || address > io_last) {
@@ -257,6 +257,7 @@ int replay_command(const csp::Program &program, const std::string &path_a,
         model.load(program.words);
         model.set_pass_count(counted_from);
         model.release();
+        model.trace(trace);
         for (int pass = 0; pass < passes; ++pass) {
             model.pass();
         }
@@ -286,7 +287,8 @@ int replay_command(const csp::Program &program, const std::string &path_a,
     }
     std::printf("best match after %d passes, counting on from %d\n",
                 best_passes, best_counter);
-    const csp::Processor model = run_model(best_passes, best_counter);
+    const csp::Processor model = run_model(
+            best_passes, best_counter, std::getenv("CSP_TRACE") != nullptr);
     int differences = 0;
     for (int address = 1; address < 2048; ++address) {
         if (address >= io_first && address <= io_last) {
@@ -294,7 +296,7 @@ int replay_command(const csp::Program &program, const std::string &path_a,
         }
         const int32_t chip = b[address], expected = model.read(address);
         if (chip != expected) {
-            if (differences < 60) {
+            if (differences < 400) {
                 std::printf(
                         "  %03x: chip %d (%05x), model %d (%05x)  [was %d]\n",
                         address, chip, chip & 0x3FFFF, expected,
