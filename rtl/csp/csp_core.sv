@@ -646,32 +646,20 @@ module csp_core (
 
     loop_t           next_outer, next_inner;
     logic [PC_W-1:0] next_pc;
+    logic            step_i, step_j;
+    logic [AW-1:0]   stride_i, stride_j;
 
     // The last pc this resolution consumes: the loops whose last pc it is
     // end here. (Comparing last pcs instead of the pc after them keeps the
     // increment out of the comparison.)
     wire skips_loop = is_loop && e1_skips_body;
+    wire [PC_W-1:0] position = vector_done ? vector_last_pc
+                             : (skips_loop ? e1_body_last : sequence_pc);
     wire [PC_W-1:0] following = skips_loop ? e1_body_end
                               : (vector_done ? vector_end
                                              : (resolving ? e1_pc_plus_one : decode_pc + 1'b1));
-    // Whether the position this resolution consumes (the last pc of a vector
-    // loop, of a skipped body, of the instruction in E1, or of decode) is the
-    // last pc of a loop: the comparison is made for each place the position
-    // may come from, and the place is chosen late.
-    wire inner_at_vector = loop_inner.active && vector_last_pc == loop_inner.last_pc;
-    wire inner_at_body   = loop_inner.active && e1_body_last == loop_inner.last_pc;
-    wire inner_at_e1     = loop_inner.active && execute1_stage.pc == loop_inner.last_pc;
-    wire inner_at_decode = loop_inner.active && decode_pc == loop_inner.last_pc;
-    wire outer_at_vector = loop_outer.active && vector_last_pc == loop_outer.last_pc;
-    wire outer_at_body   = loop_outer.active && e1_body_last == loop_outer.last_pc;
-    wire outer_at_e1     = loop_outer.active && execute1_stage.pc == loop_outer.last_pc;
-    wire outer_at_decode = loop_outer.active && decode_pc == loop_outer.last_pc;
-    wire inner_ends = vector_done ? inner_at_vector
-                    : (skips_loop ? inner_at_body : (resolving ? inner_at_e1 : inner_at_decode));
-    wire outer_ends = vector_done ? outer_at_vector
-                    : (skips_loop ? outer_at_body : (resolving ? outer_at_e1 : outer_at_decode));
-    wire inner_more = |loop_inner.remaining[17:1];   // remaining > 1
-    wire outer_more = |loop_outer.remaining[17:1];
+    wire inner_ends = loop_inner.active && position == loop_inner.last_pc;
+    wire outer_ends = loop_outer.active && position == loop_outer.last_pc;
 
     always_comb begin
         logic   inner_repeats;
@@ -679,6 +667,10 @@ module csp_core (
         next_outer    = loop_outer;
         next_inner    = loop_inner;
         next_pc       = following;
+        step_i        = 1'b0;
+        step_j        = 1'b0;
+        stride_i      = '0;
+        stride_j      = '0;
         inner_repeats = 1'b0;
 
         opened.active    = 1'b1;
@@ -700,7 +692,14 @@ module csp_core (
         end
 
         if (inner_ends) begin
-            if (inner_more) begin
+            if (loop_inner.on_j) begin
+                step_j = 1'b1;
+                stride_j = loop_inner.stride;
+            end else begin
+                step_i = 1'b1;
+                stride_i = loop_inner.stride;
+            end
+            if (loop_inner.remaining > 18'd1) begin
                 next_inner.remaining = loop_inner.remaining - 1'b1;
                 next_pc = loop_inner.start;
                 inner_repeats = 1'b1;
@@ -709,7 +708,14 @@ module csp_core (
             end
         end
         if (!inner_repeats && outer_ends) begin
-            if (outer_more) begin
+            if (loop_outer.on_j) begin
+                step_j = 1'b1;
+                stride_j = loop_outer.stride;
+            end else begin
+                step_i = 1'b1;
+                stride_i = loop_outer.stride;
+            end
+            if (loop_outer.remaining > 18'd1) begin
                 next_outer.remaining = loop_outer.remaining - 1'b1;
                 next_pc = loop_outer.start;
             end else begin
@@ -733,18 +739,8 @@ module csp_core (
                                              : ((writes_index && !index_on_j) ? index_value : index_i);
     wire [AW-1:0] base_index_j = vector_done ? (vector_on_j ? vector_own : vector_final_private)
                                              : ((writes_index && index_on_j) ? index_value : index_j);
-    // The loops that end here step an index register by their stride; when
-    // both do, the outer's stride is the one applied. The sums are made in
-    // parallel and the one that applies is chosen after.
-    wire use_outer  = !(inner_ends && inner_more) && outer_ends;
-    wire inner_on_i = inner_ends && !loop_inner.on_j;
-    wire inner_on_j = inner_ends &&  loop_inner.on_j;
-    wire outer_on_i = use_outer  && !loop_outer.on_j;
-    wire outer_on_j = use_outer  &&  loop_outer.on_j;
-    wire [AW-1:0] next_index_i = outer_on_i ? base_index_i + loop_outer.stride
-                               : (inner_on_i ? base_index_i + loop_inner.stride : base_index_i);
-    wire [AW-1:0] next_index_j = outer_on_j ? base_index_j + loop_outer.stride
-                               : (inner_on_j ? base_index_j + loop_inner.stride : base_index_j);
+    wire [AW-1:0] next_index_i = base_index_i + (step_i ? stride_i : AW'(0));
+    wire [AW-1:0] next_index_j = base_index_j + (step_j ? stride_j : AW'(0));
 
     // Issuing a vector loop's body: the next element, or when the last
     // element has issued, the next instruction; after the last instruction's
