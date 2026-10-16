@@ -25,8 +25,8 @@
 //       here
 //   E2  saturate Y − A to 36 bits and A + Y to 54; the multiply-add
 //       unit's operands; the SHIFT barrel shift
-//   E3  the multiply-add unit (MULTALU36X18): a × b + c, its product
-//       registered inside the block; the SHIFT result saturated
+//   E3  the multiply-add unit (MULTALU36X18): a × b + c; the SHIFT result
+//       saturated
 //   E4  overflow of the 54-bit sum, saturation or wrap to the
 //       destination, the flags
 //   W   write the register file or a sink, the accumulator, the flags
@@ -986,17 +986,14 @@ module csp_core (
         if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    // The product comes out of the block registered (OUT_REG): it is E4's
-    // register, inside the DSP, where the tool's timing cannot see past
-    // anyway (a DSP output must go straight into a register).
-    logic signed [53:0] e4_product;
+    logic signed [53:0] product;
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
         .a       (e3_multiply_a),
         .b       (e3_multiply_b),
         .c       (e3_multiply_c),
-        .product (e4_product)
+        .product (product)
     );
 
     // What E4 needs to see whether the 54-bit sum wrapped inside the block:
@@ -1005,6 +1002,7 @@ module csp_core (
     wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
 
     // ---- E4: reduce to the destination; the flags ----------------------------------------------------
+    logic signed [53:0] e4_product;
     logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
     logic [17:0]        e4_logic_result;
     logic [35:0]        e4_shift_result;
@@ -1295,6 +1293,7 @@ module csp_core (
         e3_shift_forced    <= shift_forced;
         e3_a_negative      <= e2_a_value[53];
 
+        e4_product         <= product;
         e4_product_nonzero <= e3_product_nonzero;
         e4_signs_agree     <= e3_signs_agree;
         e4_c_negative      <= e3_multiply_c[53];

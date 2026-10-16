@@ -24,7 +24,7 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_multiply_add (
-    input  wire               clk,      // the block's output register (OUT_REG)
+    input  wire               clk,      // unused: the block is combinational
     input  wire               reset_n,
     input  wire signed [17:0] a,
     input  wire signed [35:0] b,
@@ -50,7 +50,7 @@ module csp_multiply_add (
         .BSIGN_REG         (1'b0),
         .ACCLOAD_REG0      (1'b0),
         .ACCLOAD_REG1      (1'b0),
-        .OUT_REG           (1'b1),   // the product is registered inside the block (E4's register)
+        .OUT_REG           (1'b0),   // combinational: the core registers the result
         .PIPE_REG          (1'b0),
         .C_ADD_SUB         (1'b0),   // add c
         .MULTALU36X18_MODE (0),      // a × b ± c
