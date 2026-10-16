@@ -618,9 +618,13 @@ module csp_core (
     logic [PC_W-1:0]   e1_body_end;        // LOOP: one past its body
     logic [PC_W-1:0]   e1_body_last;       // LOOP: its last instruction
     logic [PC_W-1:0]   e1_pc_plus_one;     // the pc after this instruction
-    // LOOP: a count of 0, or a vector loop over too many
-    wire e1_skips_body = x_operand == '0
-                         || (execute1_stage.instruction.a[1] && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
+    // LOOP: a count of 0, or a vector loop over too many. Decided on the
+    // raw halves beside the operand mux, not after it: this starts the
+    // loop-end chain, the longest path of the fabric.
+    wire e1_x_zero = !e1_reads_x || (e1_x_odd_half ? e1_x_odd == '0 : e1_x_even == '0);
+    wire e1_x_over = e1_reads_x && (e1_x_odd_half ? e1_x_odd > 18'(csp_pkg::MAX_VECTOR_LENGTH)
+                                                  : e1_x_even > 18'(csp_pkg::MAX_VECTOR_LENGTH));
+    wire e1_skips_body = e1_x_zero || (execute1_stage.instruction.a[1] && e1_x_over);
 
     wire [3:0] e1_op = execute1_stage.instruction.op;
 
@@ -687,13 +691,21 @@ module csp_core (
     // end here. (Comparing last pcs instead of the pc after them keeps the
     // increment out of the comparison.)
     wire skips_loop = is_loop && e1_skips_body;
-    wire [PC_W-1:0] position = vector_done ? vector_last_pc
-                             : (skips_loop ? e1_body_last : sequence_pc);
     wire [PC_W-1:0] following = skips_loop ? e1_body_end
                               : (vector_done ? vector_end
                                              : (resolving ? e1_pc_plus_one : decode_pc + 1'b1));
-    wire inner_ends = loop_inner.active && position == loop_inner.last_pc;
-    wire outer_ends = loop_outer.active && position == loop_outer.last_pc;
+    // The position is one of three; each is compared with the loops' last
+    // pcs on its own (registers against registers) and the result chosen,
+    // so that skips_loop, late from E1's operand, selects a bit and not an
+    // 11-bit operand of a comparator.
+    wire inner_ends_vector = loop_inner.active && vector_last_pc == loop_inner.last_pc;
+    wire inner_ends_skip   = loop_inner.active && e1_body_last   == loop_inner.last_pc;
+    wire inner_ends_seq    = loop_inner.active && sequence_pc    == loop_inner.last_pc;
+    wire outer_ends_vector = loop_outer.active && vector_last_pc == loop_outer.last_pc;
+    wire outer_ends_skip   = loop_outer.active && e1_body_last   == loop_outer.last_pc;
+    wire outer_ends_seq    = loop_outer.active && sequence_pc    == loop_outer.last_pc;
+    wire inner_ends = vector_done ? inner_ends_vector : (skips_loop ? inner_ends_skip : inner_ends_seq);
+    wire outer_ends = vector_done ? outer_ends_vector : (skips_loop ? outer_ends_skip : outer_ends_seq);
 
     // For the fetch: whether next_pc is a loop's start (a repeat), and
     // whether that is the pc being consumed, so that decode stays where it
