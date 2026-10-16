@@ -26,15 +26,22 @@ module tb_csp_register_file;
     logic                  write_wide = 0;
     logic [WIDE_W-1:0]     write_data = '0;
 
+    logic reset_n = 0;
+    initial begin
+        #30 reset_n = 1;
+    end
     csp_register_file dut (
         .clk           (clk),
+        .reset_n       (reset_n),
         .read_address  (read_address),
         .read_even     (read_even),
         .read_odd      (read_odd),
         .write_enable  (write_enable),
         .write_address (write_address),
         .write_wide    (write_wide),
-        .write_data    (write_data)
+        .write_data    (write_data),
+        .counter_write (1'b0),
+        .counter_data  ('0)
     );
 
     // The pair, or the half the address names, from the banks' words: what
@@ -56,6 +63,7 @@ module tb_csp_register_file;
         write_data    = WIDE_W'(WORD_W'(value));
         @(negedge clk);
         write_enable = 0;
+        @(negedge clk);     // the write lands in the banks a clock after it is taken
     endtask
 
     task automatic write_pair(input int address, input longint value);
@@ -66,6 +74,7 @@ module tb_csp_register_file;
         write_data    = WIDE_W'(value);
         @(negedge clk);
         write_enable = 0;
+        @(negedge clk);     // the write lands in the banks a clock after it is taken
     endtask
 
     // Read on one port: address in, data one clock later.

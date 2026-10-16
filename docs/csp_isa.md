@@ -594,9 +594,17 @@ small program. The new CSP gets:
   there, not in R), the MAC's operands into the DSP's own input registers
   (`AREG`/`BREG`/`CREG`, E3), its product into its output register
   (`OUT_REG`, E4) and from there into E5's register, the write queue's
-  popped entry into fabric registers before the decode that drives the
-  register file's write pins — so that every path the report cannot see
-  is a register fed by nothing but a register. No reported path in any
+  popped entry into fabric registers before any decode, and the register
+  file's write taken into a register of each copy's own next to its banks
+  (the decode before it, the banks' pins after it; the result's write goes
+  in from E5 so that it lands at W's edge as before) — so that every path
+  the report cannot see is a register fed by nothing but a register. The
+  last of these was found with the lab tools: at 73.728 the self-test
+  program's stores, on consecutive cycles with changing addresses, landed
+  with address bits 5–6 dropped (0x062 at 0x002, 0x068 at 0x008 …), over
+  the program's constants, with W's address register fanning out to six
+  blocks' pins across the chip; one store a pass, and the queue's writes,
+  survived, which is why every small probe passed. No reported path in any
   log has a block RAM's or a DSP's pin as source *or* sink: inputs are
   as invisible as outputs (the combinational multiply from fabric flops
   failed on the board from 69 MHz while the report said 80; the write

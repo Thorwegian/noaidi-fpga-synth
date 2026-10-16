@@ -198,13 +198,13 @@ module csp_core (
         end
     end
 
-    // A held pass applies writes from its second cycle on, until three cycles
-    // before its end: a write is staged for two cycles after it is taken from
-    // the queue (the block's output, then the fabric's register), and must be
-    // in the register file before the next pass's first cycle (the pass
-    // counter's write).
+    // A held pass applies writes from its second cycle on, until four cycles
+    // before its end: a write is staged for three cycles after it is taken
+    // from the queue (the block's output, the fabric's register, the register
+    // file's own), and must be in the register file before the next pass's
+    // first cycle (the pass counter's write).
     wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
-                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 3))
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 4))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
@@ -302,12 +302,15 @@ module csp_core (
     csp_register_file u_register_file (
         .clk           (clk),
         .read_address  (read_address),
+        .reset_n       (reset_n),
         .read_even     (read_even),
         .read_odd      (read_odd),
         .write_enable  (rf_write_enable),
         .write_address (rf_write_address),
         .write_wide    (rf_write_wide),
-        .write_data    (rf_write_data)
+        .write_data    (rf_write_data),
+        .counter_write (write_counter),
+        .counter_data  (pass_count + 1'b1)
     );
 
     // ---- F: fetch ------------------------------------------------------------------------------
@@ -1387,20 +1390,23 @@ module csp_core (
     wire queue_writable = staged_address != '0 && !csp_pkg::is_input(AW'(staged_address))
                           && staged_address < csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::REGISTER_COUNT);
 
+    // The register file takes a write into its own registers (one set a
+    // copy, next to the banks) and lands it the clock after, so the result's
+    // write goes in from E5, a clock before W, and lands at W's edge as it
+    // always did; the queue's write goes in from the staged registers and
+    // lands a clock later than it did (the window allows for it). The pass
+    // counter goes in directly (csp_register_file.sv).
+    wire writes_result_next = execute5_stage.valid && execute5_stage.live && execute5_stage.writes_registers;
     always_comb begin
         rf_write_enable  = 1'b0;
         rf_write_address = '0;
         rf_write_wide    = 1'b0;
         rf_write_data    = '0;
-        if (write_counter) begin
+        if (writes_result_next) begin
             rf_write_enable  = 1'b1;
-            rf_write_address = csp_pkg::REGISTER_W'(csp_pkg::IO_BASE);
-            rf_write_data    = {18'd0, pass_count + 1'b1};
-        end else if (writes_result_now) begin
-            rf_write_enable  = 1'b1;
-            rf_write_address = csp_pkg::REGISTER_W'(writeback_stage.r_address);
-            rf_write_wide    = writeback_stage.r_wide;
-            rf_write_data    = w_result;
+            rf_write_address = csp_pkg::REGISTER_W'(execute5_stage.r_address);
+            rf_write_wide    = execute5_stage.r_wide;
+            rf_write_data    = result;
         end else if (staged_valid) begin
             rf_write_enable  = queue_writable;
             rf_write_address = csp_pkg::REGISTER_W'(staged_address);
