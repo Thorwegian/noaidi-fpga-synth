@@ -329,6 +329,7 @@ module csp_core (
     logic [35:0]     buffer_word;
     logic            buffer_valid;
     logic [1:0]      buffer_place;      // PLACE_OWN or PLACE_NEXT
+    logic            fetch_primed;      // word 0 was fetched at a pass's end (not before the first pass)
     logic [35:0]     held_instruction;  // decode's word, once taken from the buffer
     logic            held_valid;
     assign fetch_address = fetch_pc;
@@ -812,8 +813,10 @@ module csp_core (
                                   && inflight_valid && inflight_place == PLACE_NEXT;
     wire            move_miss   = move_next && !hit_buffer && !hit_flight;
     // Word 0 for the next pass: fetched at this pass's end (the pass start
-    // moves decode there).
-    wire            fetch_restart_pass = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 4);
+    // moves decode there); the first pass after a reset fetches it as it
+    // starts, after the program is loaded, not at the reset.
+    wire            fetch_restart_pass = (in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 4))
+                                       || (pass_start && !fetch_primed);
     wire            fetch_restart = fetch_restart_pass || move_jump || move_miss;
     wire [PC_W-1:0] fetch_restart_pc = fetch_restart_pass ? '0
                                      : (move_jump ? next_pc : decode_pc + 1'b1);
@@ -829,13 +832,13 @@ module csp_core (
     // The fetch runs ahead; it restarts at a jump, a miss and a pass's end,
     // and fetches a word again when the buffer could not take it. Decode's
     // copy of its word is taken from the buffer at a move that hits it, or
-    // the cycle the buffer brings decode's word (from a reset, that is the
-    // first pass's word 0).
+    // the cycle the buffer brings decode's word.
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             fetch_pc        <= '0;
-            fetch_valid     <= 1'b1;
+            fetch_valid     <= 1'b0;
             fetch_place     <= PLACE_OWN;
+            fetch_primed    <= 1'b0;
             inflight_valid  <= 1'b0;
             inflight_place  <= PLACE_OWN;
             buffer_valid    <= 1'b0;
@@ -846,6 +849,7 @@ module csp_core (
                 fetch_pc       <= fetch_restart_pc;
                 fetch_valid    <= 1'b1;
                 fetch_place    <= PLACE_OWN;
+                fetch_primed   <= 1'b1;
                 inflight_valid <= 1'b0;
                 buffer_valid   <= 1'b0;
             end else if (buffer_load || !inflight_valid) begin

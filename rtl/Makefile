@@ -78,7 +78,11 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	# identical Fmax. yosys writes errors to
 	# stderr, which tee never received, so yosys.log looked clean too --
 	# hence 2>&1.
-	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
+	# -nowidelut: no MUX2_LUT5..8 cells. They are clusters of two to sixteen
+	# LUTs that nextpnr's heap placer has to legalise together, and with them
+	# the placer hangs in legalisation on most netlists (docs/csp_isa.md 12);
+	# as LUT4 trees the same muxes place in minutes, at the same Fmax.
+	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -nowidelut -json $@' 2>&1 | tee yosys.log
 
 # Placement seed is PINNED: nextpnr's router is seed-sensitive. Some
 # placements cannot route a DSP's output fabric ("Found two arcs

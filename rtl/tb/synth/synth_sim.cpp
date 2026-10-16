@@ -65,9 +65,13 @@ public:
         top_.mosi = 0;
         // A real falling edge of the reset, for the flip-flops that have only
         // an asynchronous one: Verilator does not see a level that starts low.
+        // Made without a clock edge: a clock before the reset would run the
+        // randomised (+verilator+rand+reset) state through the design for one
+        // cycle, and the RTL's assertions on it.
         top_.rst = 0;
-        cycle();
+        top_.eval();
         top_.rst = 1;
+        top_.eval();
         for (int n = 0; n < 8; ++n) {
             cycle();
         }

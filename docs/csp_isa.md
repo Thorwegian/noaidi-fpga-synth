@@ -587,12 +587,17 @@ small program. The new CSP gets:
   into a register before any logic (the queue's head is staged; the MAC's
   product is registered inside the DSP, `OUT_REG`); the report's figure is
   the fabric's and nothing else; a bitstream's real limit is measured with
-  the clock sweep (`tools/lab`). And for the placer: a flop added without
-  the global reset, or with one when its neighbours have none, is a control
-  set of its own, and nextpnr's heap placer legalises flops slice by slice
-  with a shared control set; the design sat at that cliff until the SVF's
-  pipeline payload (6 000 of 11 000 reset flops, none of them needing it)
-  lost its reset.
+  the clock sweep (`tools/lab`). And for the placer, which hangs in the
+  heap placer's legalisation (some 10^8 placement attempts a cell) on most
+  netlists of this design: the wide-LUT cells (`MUX2_LUT5` … `MUX2_LUT8`,
+  clusters of two to sixteen LUTs that have to be legalised together) are
+  what it cannot place — synthesised with `-nowidelut` (the Makefile) the
+  same design places in minutes on every seed, at the same Fmax. A flop
+  added without the global reset, or with one when its neighbours have
+  none, is also a control set of its own, legalised slice by slice; the
+  SVF's pipeline payload (6 000 of 11 000 reset flops, none of them needing
+  it) keeps its reset on this branch, to be dropped on a branch of its own
+  with the S/PDIF output compared.
 
 ## 13. Steps
 
