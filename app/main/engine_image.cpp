@@ -29,6 +29,20 @@ bool EngineImage::set(int address, int32_t raw, bool force) {
 int EngineImage::send(EnginePort &port, int limit, uint32_t ctrl_bits) {
     int sent    = 0;
     int address = 0;
+    // The queue's memory is read continuously at the oldest slot not yet
+    // consumed, which, with the queue empty, is the slot the first word of
+    // this batch is written to; a read and a write of one word on the two ports
+    // can corrupt it. A decoy goes in first (a write to register 0, which the
+    // CSP discards), so that the reader sits on the decoy's slot and the words
+    // behind it are written where it does not read.
+    bool any_pending = false;
+    for (int probe = 0; probe < words && !any_pending; ++probe) {
+        any_pending = pending_[probe];
+    }
+    if (any_pending && limit > 0) {
+        const uint32_t decoy = 0;
+        port.queue_burst(fpga_map::queue_base + 0, &decoy, 1);
+    }
     while (address < words && sent < limit) {
         if (!pending_[address]) {
             ++address;
