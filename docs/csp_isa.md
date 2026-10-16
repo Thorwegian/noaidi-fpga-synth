@@ -124,16 +124,20 @@ file held the cycle before).
 | E1 | the words arrive in E1's registers straight from the banks' output registers (nothing but a register on a memory's output, section 12); the half or the pair chosen, the operands in the accumulator's format, the `SHIFT` count clamped; `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; `LOOP` and `IDX` resolve |
 | E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; the `SHIFT` barrel shift |
 | E3 | MULTALU36X18: `a × b + c`; `SHIFT` saturates |
-| E4 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
+| E4 | the product settles in the DSP's own output register (`OUT_REG`) and goes from there into E5's register and nowhere else (section 12: a DSP's output, like a block RAM's, is untimed); the other results wait a cycle |
+| E5 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
 | W | write R (register file or sink area); the accumulator and the flags |
 
-A dependent instruction issues 7 cycles after the one it depends on (the RTL
+A dependent instruction issues 8 cycles after the one it depends on (the RTL
 leaves R a cycle after the model's issue; the cycle counts are the same); the
 instruction after `LOOP` or `IDX` issues 3 cycles after it
 (`csp::result_latency`, `csp::barrier_latency`; the model counts both).
 Independent instructions issue every cycle. There is no forwarding: it
-would shorten the 7 cycles but lengthen the paths, and vector loops
-(below) hide the wait instead.
+would shorten the 8 cycles but lengthen the paths, and vector loops
+(below) hide the wait instead. (The eighth cycle is E4, the DSP's own
+output register with nothing after it but E5's: it costs the control
+program 17 cycles, 1452 → 1469, three short of the 1472 window — the
+vector loops hide most of it, the scalar chains not.)
 
 **Measured** (`make csp-fit`, the CSP alone on the GW2A, seed 1): 98.15
 MHz against the 73.728 MHz system clock; LUT4 5319, DFF 1697, BSRAM 10,
@@ -145,7 +149,7 @@ first try, a two-cycle machine without a pipeline (each instruction
 finished before the next), closed at 32.48 MHz.
 
 **Vector loops** (decided on #220, built). A chain of
-dependent instructions costs 7 cycles a link, but the same chain for
+dependent instructions costs 8 cycles a link, but the same chain for
 many voices need not wait at all: run each instruction for every voice
 before the next, and voice k's input was written long before voice k
 needs it. That is a vector processor in the Cray sense, one element
@@ -587,9 +591,13 @@ small program. The new CSP gets:
   into a register before any logic — the instruction word into the fetch
   buffer, the queue's head out of its block's pipeline register, the
   register file's words into E1's registers (the half or the pair chosen
-  there, not in R), the MAC's product registered inside the DSP
-  (`OUT_REG`) — so that every path the report cannot see is a register
-  fed by nothing but a register; the report's figure is then the fabric's
+  there, not in R), the MAC's operands into the DSP's own input registers
+  (`AREG`/`BREG`/`CREG`, E3), its product into its output register
+  (`OUT_REG`, E4) and from there into E5's register — so that every path
+  the report cannot see is a register fed by nothing but a register (a
+  DSP's input side is as invisible as its output: the combinational
+  multiply from fabric flops failed on the board from 69 MHz while the
+  report said 80); the report's figure is then the fabric's
   and the fabric is all there is; a bitstream's real limit is still
   measured with the clock sweep (`tools/lab`), and the boot self-test's two
   checks whose operands change every pass (`SHIFT`, `IDX`) are the ones

@@ -24,7 +24,7 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_multiply_add (
-    input  wire               clk,      // unused: the block is combinational
+    input  wire               clk,      // the block's input and output registers
     input  wire               reset_n,
     input  wire signed [17:0] a,
     input  wire signed [35:0] b,
@@ -43,14 +43,14 @@ module csp_multiply_add (
     wire [54:0] cascade_unused;
 
     MULTALU36X18 #(
-        .AREG              (1'b0),
-        .BREG              (1'b0),
-        .CREG              (1'b0),
+        .AREG              (1'b1),   // the operands registered inside the block (the core's E3)
+        .BREG              (1'b1),
+        .CREG              (1'b1),
         .ASIGN_REG         (1'b0),
         .BSIGN_REG         (1'b0),
         .ACCLOAD_REG0      (1'b0),
         .ACCLOAD_REG1      (1'b0),
-        .OUT_REG           (1'b0),   // combinational: the core registers the result
+        .OUT_REG           (1'b1),   // the product registered inside the block (the core's E4)
         .PIPE_REG          (1'b0),
         .C_ADD_SUB         (1'b0),   // add c
         .MULTALU36X18_MODE (0),      // a × b ± c

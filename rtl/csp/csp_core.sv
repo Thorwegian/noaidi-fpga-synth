@@ -27,7 +27,10 @@
 //       unit's operands; the SHIFT barrel shift
 //   E3  the multiply-add unit (MULTALU36X18): a × b + c; the SHIFT result
 //       saturated
-//   E4  overflow of the 54-bit sum, saturation or wrap to the
+//   E4  the product settles in the block's own output register (OUT_REG):
+//       a DSP's output goes into a register and nowhere else, as a block
+//       RAM's does (the tool times neither); the other results wait
+//   E5  overflow of the 54-bit sum, saturation or wrap to the
 //       destination, the flags
 //   W   write the register file or a sink, the accumulator, the flags
 //
@@ -40,7 +43,7 @@
 //   SKIP). The register file returns old data in the cycle of a write,
 //   so it leaves R the cycle after that instruction leaves W (it reads
 //   again in the cycle after the write): an issue at cycle c lets a
-//   dependent instruction issue at c + 7 at the earliest.
+//   dependent instruction issue at c + 8 at the earliest.
 //   Skipped instructions are no-ops, but they wait and are waited for
 //   all the same: a skip is decided after decode.
 // - LOOP and IDX hold the front end until they are resolved in E1: the
@@ -59,7 +62,7 @@
 //
 // The pass (1536 clocks, 48 kHz): the pass start writes the pass counter
 // to register 0x040 and fetches instruction 0. Instructions issue before
-// cycle 1472, so the pipeline has drained by cycle 1478 (the window waits
+// cycle 1472, so the pipeline has drained by cycle 1479 (the window waits
 // for it to be empty, should a program have been cut off). The window from
 // cycle 1480 then applies up to 48 committed firmware writes from the
 // write queue (docs/csp_isa.md section 2). A pass that starts while the
@@ -277,7 +280,7 @@ module csp_core (
     } control_t;
 
     control_t read_stage, execute1_stage, execute2_stage, execute3_stage, execute4_stage,
-              writeback_stage, writeback_done;   // done: W's instruction a cycle ago
+              execute5_stage, writeback_stage, writeback_done;   // done: W's instruction a cycle ago
 
     // What R holds besides the control word: the operands it names (R reads
     // them again for as long as it waits), and what it reads.
@@ -374,7 +377,7 @@ module csp_core (
     wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
     // The probe takes the Y port once a pass, long after the last instruction
-    // has issued and drained (RUN_END + 8), and keeps the pair it reads.
+    // has issued and drained (RUN_END + 9), and keeps the pair it reads.
     localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 16;
     wire probe_now = in_pass && pass_cycle == 11'(PROBE_CYCLE);
     logic probe_read;
@@ -401,7 +404,7 @@ module csp_core (
     end
 
     // The hazard check, in R, on registered values only: an older instruction in
-    // E1 … W (or in W a cycle ago, which wrote while R's operands were read)
+    // E1 … E5, W (or in W a cycle ago, which wrote while R's operands were read)
     // writes something R's instruction reads. Decode makes no check: it hands
     // R the operand addresses and R holds, reading them again, until nothing
     // older is going to write them; the cycle R leaves is the cycle the
@@ -451,8 +454,8 @@ module csp_core (
 
     // The same comparison, made a cycle early: in decode, for the instruction
     // that is about to enter R, against the stages as they will stand when it
-    // is there (today's R, E1, E2, E3, E4 and W, one stage on). The result is
-    // kept as one bit for each stage it concerns, hazard_pos[0] for E1 … [5]
+    // is there (today's R, E1, E2, E3, E4, E5 and W, one stage on). The result
+    // is kept as one bit for each stage it concerns, hazard_pos[0] for E1 … [6]
     // for W a cycle ago, and the bits move on with the pipeline while R waits
     // (E1 is a bubble then, the others advance), so that r_hold is an OR of
     // registered bits and not of the comparators: the long path to the clock
@@ -490,7 +493,7 @@ module csp_core (
         incoming_hazard = found;
     endfunction
 
-    logic [5:0] hazard_pos;   // R's instruction waits for the stage at this position
+    logic [6:0] hazard_pos;   // R's instruction waits for the stage at this position
     wire hazard = |hazard_pos;
     assign r_hold = read_stage.valid && hazard;
 
@@ -498,7 +501,7 @@ module csp_core (
     // Simulation only: the registered bits must say what the comparison of R's
     // registered operands against the stages says.
     wire hazard_compared = stage_hazard(execute1_stage) | stage_hazard(execute2_stage)
-                         | stage_hazard(execute3_stage) | stage_hazard(execute4_stage)
+                         | stage_hazard(execute3_stage) | stage_hazard(execute4_stage) | stage_hazard(execute5_stage)
                          | stage_hazard(writeback_stage) | stage_hazard(writeback_done);
     always @(posedge clk) begin
         if (reset_n && read_stage.valid && hazard !== hazard_compared) begin
@@ -986,13 +989,17 @@ module csp_core (
         if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    logic signed [53:0] product;
+    // The block takes E2's operands into its own input registers (its E3
+    // copy of e3_multiply_*; the fabric's copy feeds the flags below) and
+    // multiplies register to register inside: the product is in its output
+    // register in E4, from where only E5's register takes it.
+    logic signed [53:0] product;        // registered inside the block (OUT_REG): E4's
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
-        .a       (e3_multiply_a),
-        .b       (e3_multiply_b),
-        .c       (e3_multiply_c),
+        .a       (multiply_a),
+        .b       (multiply_b),
+        .c       (multiply_c),
         .product (product)
     );
 
@@ -1001,32 +1008,41 @@ module csp_core (
     wire e3_product_nonzero = e3_multiply_a != '0 && e3_multiply_b != '0;
     wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
 
-    // ---- E4: reduce to the destination; the flags ----------------------------------------------------
-    logic signed [53:0] e4_product;
+    // ---- E4: the product settles in the block's own register (OUT_REG); the rest waits ----------
+    // The DSP's registered product goes into E5's register and nowhere
+    // else (section 12: the tool does not time what follows a DSP's output);
+    // E4 is where it is a register's output and nothing more.
     logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
     logic [17:0]        e4_logic_result;
     logic [35:0]        e4_shift_result;
     logic               e4_shift_saturated;
 
-    wire [3:0] e4_op = execute4_stage.instruction.op;
-    wire       wraps = e4_op == csp_pkg::OP_MACW;
+    // ---- E5: reduce to the destination; the flags ----------------------------------------------------
+    logic signed [53:0] e5_product;
+    logic               e5_product_nonzero, e5_signs_agree, e5_c_negative;
+    logic [17:0]        e5_logic_result;
+    logic [35:0]        e5_shift_result;
+    logic               e5_shift_saturated;
+
+    wire [3:0] e5_op = execute5_stage.instruction.op;
+    wire       wraps = e5_op == csp_pkg::OP_MACW;
 
     // The sum wraps inside the block when the product and c share a sign
     // the sum does not have; then it saturates (or, for MACW, wraps).
-    wire sum_wrapped = e4_product_nonzero && e4_signs_agree && e4_product[53] != e4_c_negative;
-    wire signed [53:0] product_saturated = sum_wrapped ? (e4_c_negative ? ACC_MIN : ACC_MAX)
-                                                       : e4_product;
+    wire sum_wrapped = e5_product_nonzero && e5_signs_agree && e5_product[53] != e5_c_negative;
+    wire signed [53:0] product_saturated = sum_wrapped ? (e5_c_negative ? ACC_MIN : ACC_MAX)
+                                                       : e5_product;
 
     logic [35:0] arithmetic_result;
     logic        arithmetic_saturated;
     always_comb begin
         logic signed [21:0] word_part;
         logic signed [39:0] wide_part;
-        word_part = 22'((wraps ? e4_product : product_saturated) >>> 32);
-        wide_part = 40'((wraps ? e4_product : product_saturated) >>> 14);
+        word_part = 22'((wraps ? e5_product : product_saturated) >>> 32);
+        wide_part = 40'((wraps ? e5_product : product_saturated) >>> 14);
         arithmetic_result = '0;
         arithmetic_saturated = sum_wrapped && !wraps;
-        if (execute4_stage.r_wide) begin
+        if (execute5_stage.r_wide) begin
             if (wraps) begin
                 arithmetic_result = wide_part[35:0];
             end else if (wide_part > 40'sd34359738367) begin
@@ -1059,21 +1075,21 @@ module csp_core (
     always_comb begin
         result          = arithmetic_result;
         result_overflow = arithmetic_saturated;
-        case (e4_op)
+        case (e5_op)
             csp_pkg::OP_MIN, csp_pkg::OP_MAX, csp_pkg::OP_SEL, csp_pkg::OP_ANDXOR: begin
-                result          = {18'd0, e4_logic_result};
+                result          = {18'd0, e5_logic_result};
                 result_overflow = 1'b0;
             end
             csp_pkg::OP_SHIFT: begin
-                result          = e4_shift_result;
-                result_overflow = e4_shift_saturated;
+                result          = e5_shift_result;
+                result_overflow = e5_shift_saturated;
             end
             default: ;
         endcase
     end
 
-    wire result_negative = execute4_stage.r_wide ? result[35] : result[17];
-    wire result_zero     = execute4_stage.r_wide ? result == '0 : result[17:0] == '0;
+    wire result_negative = execute5_stage.r_wide ? result[35] : result[17];
+    wire result_zero     = execute5_stage.r_wide ? result == '0 : result[17:0] == '0;
 
     // ---- W -------------------------------------------------------------------------------------
     logic [35:0]        w_result;
@@ -1082,7 +1098,8 @@ module csp_core (
 
     wire writing = writeback_stage.valid && writeback_stage.live;
     assign pipeline_busy = read_stage.valid || execute1_stage.valid || execute2_stage.valid
-                           || execute3_stage.valid || execute4_stage.valid || writeback_stage.valid;
+                           || execute3_stage.valid || execute4_stage.valid || execute5_stage.valid
+                           || writeback_stage.valid;
     wire element_flags_write = writing && writeback_stage.sets_flags && writeback_stage.vector;
 
     // ---- the stage registers -------------------------------------------------------------------
@@ -1097,6 +1114,7 @@ module csp_core (
             execute2_stage  <= BUBBLE;
             execute3_stage  <= BUBBLE;
             execute4_stage  <= BUBBLE;
+            execute5_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
             writeback_done  <= BUBBLE;
             hazard_pos      <= '0;
@@ -1118,6 +1136,7 @@ module csp_core (
             execute2_stage  <= BUBBLE;
             execute3_stage  <= BUBBLE;
             execute4_stage  <= BUBBLE;
+            execute5_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
             writeback_done  <= BUBBLE;
             hazard_pos      <= '0;
@@ -1203,11 +1222,12 @@ module csp_core (
             // The hazard bits: made for an instruction as it enters R, then
             // carried along while it waits.
             if (issue) begin
-                hazard_pos <= {incoming_hazard(writeback_stage), incoming_hazard(execute4_stage),
-                               incoming_hazard(execute3_stage), incoming_hazard(execute2_stage),
-                               incoming_hazard(execute1_stage), incoming_hazard(read_stage)};
+                hazard_pos <= {incoming_hazard(writeback_stage), incoming_hazard(execute5_stage),
+                               incoming_hazard(execute4_stage), incoming_hazard(execute3_stage),
+                               incoming_hazard(execute2_stage), incoming_hazard(execute1_stage),
+                               incoming_hazard(read_stage)};
             end else if (r_hold) begin
-                hazard_pos <= {hazard_pos[4:0], 1'b0};
+                hazard_pos <= {hazard_pos[5:0], 1'b0};
             end else begin
                 hazard_pos <= '0;
             end
@@ -1215,7 +1235,8 @@ module csp_core (
             execute2_stage  <= execute1_stage;
             execute3_stage  <= execute2_stage;
             execute4_stage  <= execute3_stage;
-            writeback_stage <= execute4_stage;
+            execute5_stage  <= execute4_stage;
+            writeback_stage <= execute5_stage;
             writeback_done  <= writeback_stage;
 
             // W
@@ -1293,13 +1314,20 @@ module csp_core (
         e3_shift_forced    <= shift_forced;
         e3_a_negative      <= e2_a_value[53];
 
-        e4_product         <= product;
         e4_product_nonzero <= e3_product_nonzero;
         e4_signs_agree     <= e3_signs_agree;
         e4_c_negative      <= e3_multiply_c[53];
         e4_logic_result    <= e3_logic_result;
         e4_shift_result    <= shift_result;
         e4_shift_saturated <= shift_saturated;
+
+        e5_product         <= product;          // the block's register (OUT_REG), nothing between
+        e5_product_nonzero <= e4_product_nonzero;
+        e5_signs_agree     <= e4_signs_agree;
+        e5_c_negative      <= e4_c_negative;
+        e5_logic_result    <= e4_logic_result;
+        e5_shift_result    <= e4_shift_result;
+        e5_shift_saturated <= e4_shift_saturated;
 
         w_result      <= result;
         w_negative    <= result_negative;

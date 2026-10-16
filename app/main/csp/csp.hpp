@@ -41,7 +41,7 @@ constexpr int max_vector_length  = 64;   // iterations of a vector loop
 // LOOP or IDX issues barrier_latency cycles after it at the earliest.
 // Program semantics do not depend on this: only the cycle count does.
 
-constexpr int result_latency  = 7;
+constexpr int result_latency  = 8;
 constexpr int barrier_latency = 3;
 // A jump (a loop's repeat, a skipped body) costs this many cycles more than
 // moving on to the next instruction: the fetch runs ahead on the next pc

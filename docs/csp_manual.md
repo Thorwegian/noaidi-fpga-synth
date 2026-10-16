@@ -241,7 +241,7 @@ instruction itself. The instruction's description says so.
   above is kept. An instruction's result is written 6 cycles after it
   issues. An instruction that reads a register, the accumulator or the
   flags that an instruction shortly before it writes therefore waits
-  until the value is written: it issues 7 cycles after that instruction
+  until the value is written: it issues 8 cycles after that instruction
   at the earliest. The instruction after a `LOOP` or `IDX` issues 3
   cycles after it at the earliest. Independent instructions issue one
   per cycle, so work placed between a result and its use costs nothing.
@@ -256,7 +256,7 @@ instruction itself. The instruction's description says so.
 
   | instruction | needs the result of | earliest issue |
   |---|---|---|
-  | any, in a register | an instruction that writes that register | 7 cycles after it |
+  | any, in a register | an instruction that writes that register | 8 cycles after it |
   | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
   | the first of a body, as its loop repeats | the last of the body | 3 cycles after it (1 if the body is one instruction) |
   | the first after a `LOOP` whose count is 0 | the `LOOP` | 5 cycles after it |
@@ -311,7 +311,7 @@ instruction itself. The instruction's description says so.
 
 A scalar loop (`LOOP.i`) runs the whole body for voice 0, then the whole
 body for voice 1. Inside the body most instructions depend on the one
-before, so many of them wait 7 cycles for it. Measured, the envelope's
+before, so many of them wait 8 cycles for it. Measured, the envelope's
 9-instruction body costs about 35 cycles a voice, and 32 voices take
 1126 cycles, of which only 26 % issue an instruction.
 
