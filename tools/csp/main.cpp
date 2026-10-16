@@ -324,6 +324,7 @@ int simulate_command(const csp::Program &program, int passes,
     processor.pass(); // held: applies the constants
     processor.load(program.words);
     processor.release();
+    processor.trace(std::getenv("CSP_TRACE") != nullptr);
 
     int status = 0;
     for (int pass = 1; pass <= passes; ++pass) {

@@ -981,6 +981,30 @@ int main(int argc, char **argv) {
     }
 
     {
+        // A program as long as the pass allows: an IDX every 32 words, and a
+        // store through [i+k] after each, a marker per instruction (tools/lab,
+        // the board's test of the whole program memory).
+        std::string source = ".const ONE, 1.0\n.const EIGHTH, 0.125\n";
+        for (int words = 0, group = 0; words < 1470; ++group) {
+            source += "IDX i, =#" + std::to_string(0x100 + 32 * group) + ", 0\n";
+            ++words;
+            for (int k = 0; k < 32 && words < 1470; ++k, ++words) {
+                source += "MAC [i+" + std::to_string(k) + "], 0, ONE, EIGHTH\n";
+            }
+        }
+        const csp::Program markers       = csp::assemble(source);
+        std::vector<FirmwareWrite> setup = constants_of(markers);
+        CoSim cosim(context);
+        cosim.start(markers.words, setup);
+        int differences = 0;
+        for (int pass = 0; pass < 4 && differences == 0; ++pass) {
+            differences = cosim.pass({}, "markers pass " + std::to_string(pass));
+        }
+        std::printf("markers (1470 words): %s\n", differences ? "FAIL" : "match");
+        failures += differences != 0;
+    }
+
+    {
         const int differences = run_control_program(context);
         std::printf("control program: %s\n", differences ? "FAIL" : "match");
         failures += differences != 0;
