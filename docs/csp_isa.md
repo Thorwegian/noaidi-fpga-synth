@@ -573,6 +573,25 @@ small program. The new CSP gets:
   `tools/lab/programs` has the small programs that found what the benches
   could not. The boot self-test (`selftest.s`) runs on every start and logs
   `self-test:` lines.
+- **Timing on the silicon, not in the report.** nextpnr-himbaechel (gowin,
+  the pinned suite) does not time any path that starts at a block RAM's
+  or a DSP block's output: a BSRAM read feeding an eight-deep adder chain
+  into a flop is reported at 600 MHz, a MULT18X18 product feeding a six-deep
+  chain at 337 MHz (`tools/timing_probes`). The CSP's instruction word, its
+  register operands and the write queue's head all come out of block RAMs,
+  so every path from them was invisible, and the report's 102 MHz stood
+  against a measured 72 (the board, the same bitstream, the clock lowered
+  with the BL616's volatile `pll_clk` until the register-stepping and boot
+  tests ran clean). The rules it leaves: a memory's or a DSP's output goes
+  into a register before any logic (the queue's head is staged; the MAC's
+  product is registered inside the DSP, `OUT_REG`); the report's figure is
+  the fabric's and nothing else; a bitstream's real limit is measured with
+  the clock sweep (`tools/lab`). And for the placer: a flop added without
+  the global reset, or with one when its neighbours have none, is a control
+  set of its own, and nextpnr's heap placer legalises flops slice by slice
+  with a shared control set; the design sat at that cliff until the SVF's
+  pipeline payload (6 000 of 11 000 reset flops, none of them needing it)
+  lost its reset.
 
 ## 13. Steps
 

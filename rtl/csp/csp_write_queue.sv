@@ -11,7 +11,14 @@
 // group of writes (a note-on) lands together.
 //
 // A dual-clock FIFO in one BSRAM (512 entries of address + value): the
-// SPI clock writes, the system clock reads.
+// SPI clock writes, the system clock reads. The block is instantiated by
+// hand (an SDPB, as the sink area's DPX9B is) in pipeline mode: the entry
+// comes out of the block's own output register, two clocks after its
+// address, so that nothing but a register sits on the memory's output (the
+// place-and-route tool does not time paths that start at a block RAM's
+// output; docs/csp_isa.md, 12). The head is therefore one clock behind the
+// pointer, which the core allows for: it takes the entry the clock after it
+// pops.
 //
 // Crossing the clocks:
 //  - The commit point. A swap copies the write pointer into
@@ -65,7 +72,6 @@ module csp_write_queue (
         from_gray = binary;
     endfunction
 
-    logic [ENTRY_W-1:0] entries [DEPTH];
 
     // ---- SPI side ---------------------------------------------------------------
     logic [POINTER_W-1:0] write_pointer;
@@ -76,11 +82,8 @@ module csp_write_queue (
 
     assign full = (write_pointer - read_pointer_seen) == POINTER_W'(DEPTH);
 
-    always_ff @(posedge sclk) begin
-        if (write_enable && !full) begin
-            entries[write_pointer[POINTER_W-2:0]] <= {write_address, write_data};
-        end
-    end
+    wire                  entry_write = write_enable && !full;
+    wire [POINTER_W-2:0]  entry_index = write_pointer[POINTER_W-2:0];
 
     always_ff @(posedge sclk or negedge sclk_reset_n) begin
         if (!sclk_reset_n) begin
@@ -134,14 +137,58 @@ module csp_write_queue (
     assign committed = read_pointer != committed_pointer;
     assign read_pointer_gray = read_gray;
 
-    // The head entry: a registered BSRAM read that reads ahead to the next
-    // entry when popping, so `head` always holds the entry at the read
-    // pointer, one clock after the pointer moves.
-    logic [ENTRY_W-1:0] head;
-    always_ff @(posedge clk) begin
-        head <= entries[(pop && committed) ? read_pointer[POINTER_W-2:0] + 1'b1
-                                           : read_pointer[POINTER_W-2:0]];
+    // The head entry: the block reads ahead to the next entry when popping,
+    // and its pipeline register hands the entry out a clock later, so `head`
+    // holds the entry at the read pointer two clocks after the pointer
+    // moves: one behind the pop.
+    wire [POINTER_W-2:0] head_index = (pop && committed) ? read_pointer[POINTER_W-2:0] + 1'b1
+                                                         : read_pointer[POINTER_W-2:0];
+    logic [31:0] head;   // the block's word is 32 bits; the entry is the low 30
+
+`ifdef SYNTHESIS
+    `define CSP_QUEUE_PRIMITIVE
+`elsif SIM_GOWIN_PRIM
+    `define CSP_QUEUE_PRIMITIVE
+`endif
+`ifdef CSP_QUEUE_PRIMITIVE
+    // 512 × 32: one block. The address of a 32-bit word is bits [13:5]; on
+    // the write side bits [3:0] are the byte-write enables (all four).
+    SDPB #(
+        .READ_MODE   (1'b1),         // pipeline: the output register, then one more
+        .BIT_WIDTH_0 (32),
+        .BIT_WIDTH_1 (32),
+        .BLK_SEL_0   (3'b000),
+        .BLK_SEL_1   (3'b000),
+        .RESET_MODE  ("SYNC")
+    ) u_entries (
+        .CLKA    (sclk),
+        .CEA     (entry_write),
+        .RESETA  (1'b0),
+        .ADA     ({entry_index, 1'b0, 4'b1111}),
+        .DI      ({{(32 - ENTRY_W){1'b0}}, write_address, write_data}),
+        .BLKSELA (3'b000),
+        .CLKB    (clk),
+        .CEB     (1'b1),
+        .RESETB  (1'b0),
+        .OCE     (1'b1),
+        .ADB     ({head_index, 5'b00000}),
+        .BLKSELB (3'b000),
+        .DO      (head)
+    );
+`else
+    // The block as the benches without the vendor's models see it.
+    logic [ENTRY_W-1:0] entries [DEPTH];
+    logic [ENTRY_W-1:0] head_read;
+    always_ff @(posedge sclk) begin
+        if (entry_write) begin
+            entries[entry_index] <= {write_address, write_data};
+        end
     end
+    always_ff @(posedge clk) begin
+        head_read <= entries[head_index];
+        head      <= {{(32 - ENTRY_W){1'b0}}, head_read};
+    end
+`endif
     assign head_address = head[ENTRY_W-1:csp_pkg::WORD_W];
     assign head_data    = head[csp_pkg::WORD_W-1:0];
 

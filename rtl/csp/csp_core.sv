@@ -191,7 +191,12 @@ module csp_core (
         end
     end
 
-    wire window_open = in_pass && !pipeline_busy && (pass_held ? pass_cycle >= 11'd1
+    // A held pass applies writes from its second cycle on, until two cycles
+    // before its end: a write is staged for a cycle after it is taken from the
+    // queue, and must be in the register file before the next pass's first cycle
+    // (the pass counter's write).
+    wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 2))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
@@ -1168,12 +1173,28 @@ module csp_core (
     wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
     wire writes_result_now = writing && writeback_stage.writes_registers;
     assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
+    // The queue hands out the entry the clock after it is popped (its block's
+    // pipeline register, csp_write_queue.sv), so the write is applied then:
+    // the decoding and the memories' write enables work from a register's
+    // output. (Nothing else writes in the window: the pipeline is empty and
+    // the pass counter is written at the pass start, after the window.)
+    logic staged_valid;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            staged_valid <= 1'b0;
+        end else begin
+            staged_valid <= queue_pop;
+        end
+    end
+    wire [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address = queue_address;
+    wire [csp_pkg::WORD_W-1:0]          staged_data    = queue_data;
+
     // A queued write names a register, or a sink word: the firmware's own
     // words in the sink area (channel settings that only a MIDI message
     // moves) go to both pages, so that they survive the flip.
-    wire queue_to_sink  = queue_pop && csp_pkg::is_sink(AW'(queue_address));
-    wire queue_writable = queue_address != '0 && !csp_pkg::is_input(AW'(queue_address))
-                          && queue_address < csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::REGISTER_COUNT);
+    wire queue_to_sink  = staged_valid && csp_pkg::is_sink(AW'(staged_address));
+    wire queue_writable = staged_address != '0 && !csp_pkg::is_input(AW'(staged_address))
+                          && staged_address < csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::REGISTER_COUNT);
 
     always_comb begin
         rf_write_enable  = 1'b0;
@@ -1189,19 +1210,19 @@ module csp_core (
             rf_write_address = csp_pkg::REGISTER_W'(writeback_stage.r_address);
             rf_write_wide    = writeback_stage.r_wide;
             rf_write_data    = w_result;
-        end else if (queue_pop) begin
+        end else if (staged_valid) begin
             rf_write_enable  = queue_writable;
-            rf_write_address = csp_pkg::REGISTER_W'(queue_address);
-            rf_write_data    = {18'd0, queue_data};
+            rf_write_address = csp_pkg::REGISTER_W'(staged_address);
+            rf_write_data    = {18'd0, staged_data};
         end
     end
 
     assign sink_write_enable  = (writing && writeback_stage.writes_sink) || queue_to_sink;
     assign sink_write_both    = queue_to_sink;
     assign sink_write_address = queue_to_sink
-                                ? 10'(queue_address - csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::SINK_BASE))
+                                ? 10'(staged_address - csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::SINK_BASE))
                                 : 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
-    assign sink_write_data    = queue_to_sink ? queue_data : w_result[17:0];
+    assign sink_write_data    = queue_to_sink ? staged_data : w_result[17:0];
 
 endmodule
 `default_nettype wire
