@@ -119,7 +119,7 @@ file held the cycle before).
 | Stage | Work |
 |---|---|
 | D | decode: operand addresses from `i`/`j`; the register-file read addresses go in as the instruction issues |
-| R | the hazard check (on registered values: the three operand addresses against those of E1 … W, and of W a cycle ago); register read (three ports) → operands in the accumulator's format; `SKIP` decides |
+| R | the hazard check (the three operand addresses against those of E1 … W, and of W a cycle ago; made in D, one stage early, and carried in six registered bits while R waits, so that the stall decision is an OR of registers); register read (three ports) → operands in the accumulator's format; `SKIP` decides |
 | E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
 | E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; `SHIFT` saturates |
 | E3 | MULTALU36X18: `a × b + c` |

@@ -423,9 +423,64 @@ module csp_core (
         stage_hazard = found;
     endfunction
 
-    wire hazard = stage_hazard(execute1_stage) | stage_hazard(execute2_stage) | stage_hazard(execute3_stage)
-                | stage_hazard(execute4_stage) | stage_hazard(writeback_stage) | stage_hazard(writeback_done);
+    // The same comparison, made a cycle early: in decode, for the instruction
+    // that is about to enter R, against the stages as they will stand when it
+    // is there (today's R, E1, E2, E3, E4 and W, one stage on). The result is
+    // kept as one bit for each stage it concerns, hazard_pos[0] for E1 … [5]
+    // for W a cycle ago, and the bits move on with the pipeline while R waits
+    // (E1 is a bubble then, the others advance), so that r_hold is an OR of
+    // registered bits and not of the comparators: the long path to the clock
+    // enables of the whole data path. The behaviour is that of stage_hazard.
+    function automatic logic incoming_hazard(input logic [CONTROL_W-1:0] older_bits);
+        control_t   older;
+        logic [1:0] written;
+        logic       found;
+        older   = older_bits;
+        found   = 1'b0;
+        written = pair_mask(older.r_address, older.r_wide);
+        if (older.valid) begin
+            if (older.writes_registers) begin
+                if (reads_a && older.r_address[AW-1:1] == decode_r_address[AW-1:1]
+                        && (written & pair_mask(decode_r_address, decode_a_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (reads_x && older.r_address[AW-1:1] == decode_x_address[AW-1:1]
+                        && (written & pair_mask(decode_x_address, 1'b0)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (reads_y && older.r_address[AW-1:1] == decode_y_address[AW-1:1]
+                        && (written & pair_mask(decode_y_address, decode_y_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+            end
+            if (older.writes_accumulator && reads_accumulator) found = 1'b1;
+            if (older.sets_flags && reads_flags
+                    && (!issued.vector || !older.vector
+                        || older.run != issued.run
+                        || older.element == issued.element)) begin
+                found = 1'b1;
+            end
+        end
+        incoming_hazard = found;
+    endfunction
+
+    logic [5:0] hazard_pos;   // R's instruction waits for the stage at this position
+    wire hazard = |hazard_pos;
     assign r_hold = read_stage.valid && hazard;
+
+`ifndef SYNTHESIS
+    // Simulation only: the registered bits must say what the comparison of R's
+    // registered operands against the stages says.
+    wire hazard_compared = stage_hazard(execute1_stage) | stage_hazard(execute2_stage)
+                         | stage_hazard(execute3_stage) | stage_hazard(execute4_stage)
+                         | stage_hazard(writeback_stage) | stage_hazard(writeback_done);
+    always @(posedge clk) begin
+        if (reset_n && read_stage.valid && hazard !== hazard_compared) begin
+            $error("csp_core: hazard bits %b differ from the comparison (%b) at pc %0d",
+                   hazard_pos, hazard_compared, read_stage.pc);
+        end
+    end
+`endif
 
     // An operand indexed by the element's private index register waits while
     // that element's IDX is in R or E1: the register is written at the end
@@ -903,6 +958,7 @@ module csp_core (
             execute4_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
             writeback_done  <= BUBBLE;
+            hazard_pos      <= '0;
             index_i <= '0; index_j <= '0;
             accumulator <= '0;
             flag_negative <= 1'b0; flag_zero <= 1'b0; flag_overflow <= 1'b0;
@@ -924,6 +980,7 @@ module csp_core (
             execute4_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
             writeback_done  <= BUBBLE;
+            hazard_pos      <= '0;
             skip_remaining  <= '0;
             loop_outer      <= '0;
             loop_inner      <= '0;
@@ -1004,6 +1061,17 @@ module csp_core (
                 end
             end
             execute1_stage <= r_hold ? BUBBLE : read_leaving;
+            // The hazard bits: made for an instruction as it enters R, then
+            // carried along while it waits.
+            if (issue) begin
+                hazard_pos <= {incoming_hazard(writeback_stage), incoming_hazard(execute4_stage),
+                               incoming_hazard(execute3_stage), incoming_hazard(execute2_stage),
+                               incoming_hazard(execute1_stage), incoming_hazard(read_stage)};
+            end else if (r_hold) begin
+                hazard_pos <= {hazard_pos[4:0], 1'b0};
+            end else begin
+                hazard_pos <= '0;
+            end
 
             execute2_stage  <= execute1_stage;
             execute3_stage  <= execute2_stage;
