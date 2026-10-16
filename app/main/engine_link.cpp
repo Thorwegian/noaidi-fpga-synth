@@ -45,11 +45,6 @@ class SpiPort : public EnginePort {
 public:
     void queue_burst(uint16_t address, const uint32_t *words,
                      int count) override {
-        const int reg = address - fpga_map::queue_base;
-        if (reg >= 0x600 && reg < 0x800) { // TRACE (temporary)
-            ESP_LOGW(tag, "TRACE burst reg %03x x%d first %05lx", reg, count,
-                     static_cast<unsigned long>(words[0]));
-        }
         fpga_word_write_burst(address, words, static_cast<size_t>(count));
     }
     void write_register(uint16_t address, uint32_t value) override {
