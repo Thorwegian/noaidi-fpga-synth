@@ -39,6 +39,12 @@
 # image generator loses the case of file names), which finds ESP-IDF
 # through the firmware build: run "make fw" once first. ESPPORT picks the
 # serial port.
+#   make tools      fetch the OSS CAD Suite release pinned in
+#                   tools/oss-cad-suite.version into .tools/ (the gateware
+#                   targets use it when it is there)
+#   make tools-check   is there a newer release?
+#   make tools-upgrade pin the newest release; then make tools, make
+#                   sim-lockstep, and re-check SEED in rtl/Makefile
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -85,6 +91,15 @@ sram:
 
 flash:
 	$(MAKE) -C rtl flash
+
+tools:
+	scripts/tools.sh install
+
+tools-check:
+	scripts/tools.sh check
+
+tools-upgrade:
+	scripts/tools.sh upgrade
 
 fw:
 	cd app && $(IDF) build
@@ -178,4 +193,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-header csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all tools tools-check tools-upgrade sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-header csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean

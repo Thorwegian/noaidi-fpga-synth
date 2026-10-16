@@ -1,0 +1,9 @@
+# The OSS CAD Suite release the gateware is built with (scripts/tools.sh).
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+# The place-and-route result (rtl/Makefile: PLACER_BETA, SEED) belongs to
+# this release: change it with `make tools-upgrade`, not by hand.
+tag=2026-07-30
+sha256_linux_x64=eb25f159b98bd3dbe5970419bdb7b4f5966cc5d5e5f81a2c00de2f68356aa785
+sha256_linux_arm64=1e3b0586c650f68c715b9fa7c5723a5fb523e5cb93f6fda0c4541dac6fb15d09

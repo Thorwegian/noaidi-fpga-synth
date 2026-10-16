@@ -10,11 +10,12 @@
 # be read whole (the same cells, twice).
 #
 #   gate_library.py netlist.v prim_sim.v library.v
+import os
 import re
 import sys
 
 netlist, prim_sim, out = sys.argv[1:4]
-YOSYS = '/opt/oss-cad-suite/share/yosys/gowin/cells_sim.v'
+YOSYS = os.path.join(os.environ.get('CAD_SUITE', '/opt/oss-cad-suite'), 'share/yosys/gowin/cells_sim.v')
 
 
 def modules(path):

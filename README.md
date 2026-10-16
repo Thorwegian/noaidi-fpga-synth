@@ -104,7 +104,13 @@ pll_clk O0=73728K -s
 
 - **[OSS CAD Suite](https://github.com/yosyshq/oss-cad-suite-build)**
   — yosys / nextpnr-himbaechel / gowin_pack / openFPGALoader /
-  Verilator (expected at `/opt/oss-cad-suite`). The simulations need
+  Verilator, pinned in `tools/oss-cad-suite.version` so every machine
+  builds with the same tools: `make tools` fetches that release into
+  `.tools/` (gitignored, checksum verified; the gateware targets prefer it
+  and fall back to `/opt/oss-cad-suite`, or set `CAD_SUITE`).
+  `make tools-check` looks for a newer release, `make tools-upgrade` pins
+  it (then re-run `make sim-lockstep` and re-check `SEED` in `rtl/Makefile`:
+  the place-and-route result belongs to the tool version). The simulations need
   Verilator 5 with `--timing` and a C++20 compiler (clang, or gcc 10+);
   tested with Verilator 5.053
 - **Gowin's simulation models** for `make sim`: only

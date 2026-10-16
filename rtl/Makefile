@@ -1,7 +1,12 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 
-export PATH := /opt/oss-cad-suite/bin:$(PATH)
+# The OSS CAD Suite pinned by tools/oss-cad-suite.version, fetched by `make
+# tools` into .tools/; a machine without it falls back to /opt/oss-cad-suite
+# (override with CAD_SUITE=...).
+CAD_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite)) /opt/oss-cad-suite)
+export CAD_SUITE
+export PATH := $(CAD_SUITE)/bin:$(PATH)
 
 # bash, because the yosys recipe needs `set -o pipefail` to notice a
 # failed synthesis instead of silently routing a stale netlist.
