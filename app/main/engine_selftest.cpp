@@ -31,8 +31,13 @@ public:
         load();
         port_.wait_ms(30);
         check_instructions();
-        check_halves();
-        check_lfos();
+        const Counts first     = counts();
+        const uint64_t phase_1 = port_.probe(st::lfos + st::phase);
+        const uint64_t phase_2 =
+                port_.probe(st::lfos + 16 * st::lfo_size + st::phase);
+        port_.wait_ms(100);
+        check_halves(first, counts());
+        check_lfos(phase_1, phase_2);
         return result_;
     }
 
@@ -61,14 +66,27 @@ private:
             port_.write_word(static_cast<uint16_t>(fpga_map::program_base + pc),
                              static_cast<uint32_t>(word));
         }
+        // What an earlier program left past the end of this one would run
+        // after it, on a chip that has not been reset.
+        port_.write_word(fpga_map::program_high, 0);
+        for (size_t pc = st::words.size(); pc < fpga_map::program_words; ++pc) {
+            port_.write_word(static_cast<uint16_t>(fpga_map::program_base + pc),
+                             0);
+        }
         for (const st::Constant &constant : st::constants) {
             queue(constant.address, constant.raw);
+        }
+        // The counters start at zero, whatever was there.
+        for (const int counter_register :
+             {st::count_total, st::count_odd, st::count_half_odd,
+              st::count_chain_odd}) {
+            queue(counter_register, 0);
         }
         constexpr int one = 0x4000; // 1.0 in Q4.14
         for (int half = 0; half < 2; ++half) {
             const int record = st::lfos + half * 16 * st::lfo_size;
             const int set    = st::lfo_sets + half * st::set_size;
-            queue_wide(record + st::phase_step, csp::lfo_rate(350, 2));
+            queue_wide(record + st::phase_step, int64_t{1} << 22);
             queue(record + st::depth, one);
             queue(record + st::neg_depth, -one);
             queue(record + st::gain, half == 0 ? one / 4 : one / 8);
@@ -108,35 +126,51 @@ private:
         note(sel == 2048, "SEL after a CMP", sel, 2048);
     }
 
-    // The half the LFOs work: it must follow the pass counter's low bit, and
-    // the chain from it to the set must follow in step.
-    void check_halves() {
-        std::array<int, 2> bit_seen{};
-        std::array<int, 2> half_seen{};
-        bool chain_ok = true;
-        for (int sample = 0; sample < 8; ++sample) {
-            ++bit_seen[(port_.probe(st::res_pass_bit) >> 18) & 1];
-            ++half_seen[(signed_word(port_.probe(st::res_half) >> 18) == 8)
-                                ? 1
-                                : 0];
-            const long chain = signed_word(port_.probe(st::res_chain) >> 18);
-            chain_ok         = chain_ok && (chain == 16384 || chain == 2056);
-        }
-        note(bit_seen[0] > 0 && bit_seen[1] > 0,
-             "the pass counter's low bit changes");
-        note(half_seen[0] > 0 && half_seen[1] > 0,
-             "the half's choice alternates (ANDXOR, SHIFT)");
-        note(chain_ok, "the table read through IDX follows the half");
+    // A counter of the self-test program (an even register, an 18-bit word).
+    long counter(int address) {
+        return static_cast<long>(port_.probe(address) >> 18) & word_mask;
     }
 
-    // The LFOs themselves: the triangle's scratch word and output, the saw's
-    // phase.
-    void check_lfos() {
+    struct Counts {
+        long total, odd, half_odd, chain_odd;
+    };
+
+    Counts counts() {
+        return {counter(st::count_total), counter(st::count_odd),
+                counter(st::count_half_odd), counter(st::count_chain_odd)};
+    }
+
+    // The half the LFOs work follows the pass counter's low bit: over a stretch
+    // of passes, as many odd as even (the program counts them itself, so that
+    // when the firmware looks does not matter), and the half's choice and the
+    // table read, which come from that bit through ANDXOR, SHIFT and IDX, agree
+    // with it.
+    void check_halves(const Counts &first, const Counts &second) {
+        const long total     = (second.total - first.total) & word_mask;
+        const long odd       = (second.odd - first.odd) & word_mask;
+        const long half_odd  = (second.half_odd - first.half_odd) & word_mask;
+        const long chain_odd = (second.chain_odd - first.chain_odd) & word_mask;
+        char line[96];
+        std::snprintf(line, sizeof line,
+                      "%ld passes, %ld with the pass counter's low bit set",
+                      total, odd);
+        note(total > 1000 && odd * 100 > total * 45 && odd * 100 < total * 55,
+             "the pass counter's low bit is set in half of the passes (ANDXOR)");
+        result_.lines.emplace_back(line);
+        note(half_odd >= odd - 2 && half_odd <= odd + 2,
+             "the half's choice follows it (SHIFT)", half_odd, odd);
+        note(chain_odd >= odd - 2 && chain_odd <= odd + 2,
+             "the table read follows it (IDX)", chain_odd, odd);
+    }
+
+    // The LFOs themselves: the triangle's scratch word and output move, and the
+    // two halves' phases advance at the same rate.
+    void check_lfos(uint64_t phase_1, uint64_t phase_2) {
         const int triangle  = st::lfos;
         const int saw       = st::lfos + 16 * st::lfo_size;
         bool triangle_moves = false;
         long out_first      = 0;
-        for (int sample = 0; sample < 8; ++sample) {
+        for (int sample = 0; sample < 4; ++sample) {
             const long t = signed_word(port_.probe(triangle + st::p));
             const long out =
                     signed_word(port_.probe(triangle + st::gain) & word_mask);
@@ -144,19 +178,21 @@ private:
                 out_first = out;
             }
             triangle_moves = triangle_moves || t != 0 || out != out_first;
+            port_.wait_ms(20);
         }
         note(triangle_moves,
              "LFO 1 (triangle) has a scratch word and an output that move");
-        const uint64_t first = port_.probe(saw + st::phase);
-        port_.wait_ms(5);
-        const uint64_t second = port_.probe(saw + st::phase);
-        note(first != second,
-             "LFO 2 (saw, the second half) has a phase that advances");
-        const uint64_t first_1 = port_.probe(triangle + st::phase);
-        port_.wait_ms(5);
-        const uint64_t second_1 = port_.probe(triangle + st::phase);
-        note(first_1 != second_1,
-             "LFO 1 (the first half) has a phase that advances");
+        constexpr uint64_t wide_mask = (uint64_t{1} << 36) - 1;
+        const uint64_t after_1       = port_.probe(triangle + st::phase);
+        const uint64_t after_2       = port_.probe(saw + st::phase);
+        const long moved_1 =
+                static_cast<long>(((after_1 - phase_1) & wide_mask) >> 20);
+        const long moved_2 =
+                static_cast<long>(((after_2 - phase_2) & wide_mask) >> 20);
+        note(moved_1 > 100 && moved_2 > 100 && moved_1 * 10 < moved_2 * 11
+                     && moved_2 * 10 < moved_1 * 11,
+             "the two LFO halves' phases advance at the same rate", moved_1,
+             moved_2);
     }
 
     SelfTestPort &port_;
@@ -165,8 +201,10 @@ private:
 
 } // namespace
 
-SelfTestResult run_selftest(SelfTestPort &port) {
+SelfTestResult run_selftest(SelfTestPort &port, bool leave_running) {
     SelfTestResult result = Run(port).run();
-    port.write_word(fpga_map::ctrl, fpga_map::ctrl_hold);
+    if (!leave_running) {
+        port.write_word(fpga_map::ctrl, fpga_map::ctrl_hold);
+    }
     return result;
 }

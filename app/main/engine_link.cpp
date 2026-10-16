@@ -58,6 +58,7 @@ SemaphoreHandle_t lock = nullptr;
 TaskHandle_t task      = nullptr;
 bool test_tone         = false;
 bool running           = false;
+bool paused = false; // the tick sends nothing (the self-test has the chip)
 
 uint32_t ctrl_word(uint32_t bits) {
     return bits | (test_tone ? fpga_map::ctrl_test_tone : 0);
@@ -209,7 +210,9 @@ void engine_task(void *) {
         const int64_t woke = esp_timer_get_time();
 
         xSemaphoreTake(lock, portMAX_DELAY);
-        send(writes_per_tick, 0);
+        if (!paused) {
+            send(writes_per_tick, 0);
+        }
         xSemaphoreGive(lock);
 
         if (++ticks == 1000) {
@@ -241,6 +244,13 @@ void load_program() {
         fpga_word_write(static_cast<uint16_t>(fpga_map::program_base + pc),
                         static_cast<uint32_t>(word));
     }
+    // What an earlier program left past the end of this one would run after
+    // it, on a chip that has not been reset.
+    fpga_word_write(fpga_map::program_high, 0);
+    for (size_t pc = csp::control::words.size(); pc < fpga_map::program_words;
+         ++pc) {
+        fpga_word_write(static_cast<uint16_t>(fpga_map::program_base + pc), 0);
+    }
 }
 
 } // namespace
@@ -255,6 +265,13 @@ void engine_link_init(void) {
     // The CSP starts held; make sure of it, whatever the last run left, then
     // give it the program, the constants and the wiring.
     fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+
+    // The write queue outlives a reset of this chip: what the last run left in
+    // it (committed or not) would be applied during the self-test and the first
+    // passes of the control program, over what they compute. Commit it and let
+    // the held CSP apply it all now (up to 512 writes, in one pass when held).
+    fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     // Does the chip do what the model says? Say so before the sound depends
     // on it; the control program loads over the test either way.
@@ -308,6 +325,55 @@ void engine_link_init(void) {
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, tick_us));
     running = true;
     ESP_LOGI(tag, "1 kHz tick running");
+}
+
+void engine_link_pause(bool pause) {
+    paused = pause;
+}
+
+bool engine_link_raw_write(uint16_t address, uint32_t value) {
+    if (!running) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    fpga_word_write(address, value);
+    xSemaphoreGive(lock);
+    return true;
+}
+
+bool engine_link_raw_write_burst(uint16_t address, const uint32_t *words,
+                                 int count) {
+    if (!running) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    fpga_word_write_burst(address, words, static_cast<size_t>(count));
+    xSemaphoreGive(lock);
+    return true;
+}
+
+bool engine_link_selftest(bool leave_running) {
+    if (!running) {
+        return false;
+    }
+    SpiSelfTestPort self_test_port;
+    xSemaphoreTake(lock, portMAX_DELAY);
+    paused = true;
+    fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+    xSemaphoreGive(lock);
+    const SelfTestResult result = run_selftest(self_test_port, leave_running);
+    for (const std::string &line : result.lines) {
+        ESP_LOGI(tag, "self-test: %s", line.c_str());
+    }
+    return result.passed;
+}
+
+bool engine_link_peek(int address, uint64_t *pair) {
+    if (!running || pair == nullptr || address < 0 || address >= 0x800) {
+        return false;
+    }
+    *pair = probe_pair(address & ~1);
+    return true;
 }
 
 bool engine_link_write(int address, int32_t raw) {

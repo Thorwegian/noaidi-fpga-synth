@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace fpga_map {
@@ -57,5 +58,6 @@ constexpr int writes_per_pass = 48;
 // The CSP's program, one instruction a word, the high bits through
 // program_high first.
 constexpr uint16_t program_base = 0x8000;
+constexpr size_t program_words = 1472; // the instruction memory holds this many
 
 } // namespace fpga_map

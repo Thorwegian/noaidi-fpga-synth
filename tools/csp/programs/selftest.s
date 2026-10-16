@@ -36,3 +36,28 @@
         ADD3    RES_ADD3, 0, RES_MAC, MINUS_FOUR
         CMP     ZERO, MINUS_FOUR, ZERO
         SEL     RES_SEL, ONE, EIGHTH
+
+; Counts that do not depend on when the firmware looks: over every pass the
+; test runs, how many passes there were, how many had the pass counter's low
+; bit set, and in how many of those the half's choice and the table read
+; (which come from that bit through ANDXOR, SHIFT and IDX) said "second". The
+; firmware reads them twice, some milliseconds apart, and compares the
+; differences: the second two must equal the first.
+        .const RAW_ONE, 0.00006103515625
+        .reg   COUNT_TOTAL,      0x100
+        .reg   COUNT_ODD,        0x102
+        .reg   COUNT_HALF_ODD,   0x104
+        .reg   COUNT_CHAIN_ODD,  0x106
+        .reg   TEST_BIT,         0x108
+        .reg   TEST_HALF,        0x10A
+        .reg   TEST_CHAIN,       0x10C
+
+        ADD3    COUNT_TOTAL, COUNT_TOTAL, RAW_ONE, ZERO
+        ANDXOR  TEST_BIT, 0, PASS, =#1
+        ADD3    COUNT_ODD, COUNT_ODD, TEST_BIT, ZERO
+        ADD3    TEST_HALF, 0, RES_HALF, ZERO
+        SHIFT   TEST_HALF, TEST_HALF, =#-3
+        ADD3    COUNT_HALF_ODD, COUNT_HALF_ODD, TEST_HALF, ZERO
+        ANDXOR  TEST_CHAIN, 0, RES_CHAIN, =#8
+        SHIFT   TEST_CHAIN, TEST_CHAIN, =#-3
+        ADD3    COUNT_CHAIN_ODD, COUNT_CHAIN_ODD, TEST_CHAIN, ZERO

@@ -34,5 +34,6 @@ struct SelfTestResult {
 };
 
 // Leaves the CSP held, with the self-test's program in its memory; the caller
-// loads the control program over it.
-SelfTestResult run_selftest(SelfTestPort &port);
+// loads the control program over it. With `leave_running`, the CSP is left
+// running the self-test's program instead (to look at its registers).
+SelfTestResult run_selftest(SelfTestPort &port, bool leave_running = false);

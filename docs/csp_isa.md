@@ -564,6 +564,15 @@ small program. The new CSP gets:
   every clock. That comparison is now a regression bench. The rule it
   leaves: in `rtl/csp`, no variable index into a packed array of structs, no
   `return`, no `$bits` of a type name; one function call for each element.
+- **The board** (`tools/lab`). The firmware's console has commands to look
+  at the real chip: `csp-peek` (a register pair, through the gateware's
+  register probe), `csp-poke`, `csp-diag`, `csp-spitest` (the SPI link), and a
+  lab (`csp-hold`, `csp-word`, `csp-const`, `csp-go`) that loads a program
+  assembled by `tools/csp` and runs it with the engine's tick paused.
+  `tools/lab/lab.sh` drives it from the machine the board is attached to;
+  `tools/lab/programs` has the small programs that found what the benches
+  could not. The boot self-test (`selftest.s`) runs on every start and logs
+  `self-test:` lines.
 
 ## 13. Steps
 

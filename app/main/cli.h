@@ -24,6 +24,9 @@ void cli_init(void);
 // The system commands (cli_system.c); cli_init() calls it.
 void cli_system_init(void);
 
+// The CSP's commands (cli_csp.cpp): peek and poke at its registers.
+void cli_csp_init(void);
+
 #ifdef __cplusplus
 }
 #endif

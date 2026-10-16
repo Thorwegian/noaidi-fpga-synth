@@ -34,6 +34,24 @@ bool engine_link_write(int address, int32_t raw);
 // each) at once: the FPGA takes the whole entry atomically.
 bool engine_link_point(int partial, const int *pointers);
 
+// A CSP register pair as the probe reads it (docs/memory_map.md): `address`
+// (even) is the even register, in bits 35:18 of the result; the odd one is in
+// 17:0. Waits a few milliseconds. False if the link is not running.
+bool engine_link_peek(int address, uint64_t *pair);
+
+// Run the boot self-test again (the CSP's program is replaced by the test's;
+// reboot to get the control program back). With `leave_running` the test's
+// program keeps running, for looking at it with engine_link_peek. Returns
+// whether it passed.
+bool engine_link_selftest(bool leave_running);
+
+// For experiments on a board (cli_csp.cpp): stop the 1 kHz tick sending the
+// register image, and write a word of the FPGA's SPI map directly.
+void engine_link_pause(bool paused);
+bool engine_link_raw_write(uint16_t address, uint32_t value);
+bool engine_link_raw_write_burst(uint16_t address, const uint32_t *words,
+                                 int count);
+
 // The gateware's test tone: a full-scale 1500 Hz sine on both outputs.
 void engine_link_test_tone(bool on);
 

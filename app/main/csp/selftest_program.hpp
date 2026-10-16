@@ -20,7 +20,7 @@
 namespace csp::selftest {
 
 // The instructions, 36 bits each.
-inline constexpr std::array<uint64_t, 41> words{
+inline constexpr std::array<uint64_t, 50> words{
     0xa06010007ull, 0xb46000008ull, 0xf00102460ull, 0xf000c0000ull,
     0x1802c040aull, 0x2e0000602ull, 0xc20780206ull, 0x1803c080aull,
     0x2e0000602ull, 0x700080000ull, 0x620781604ull, 0x1804c0c0aull,
@@ -31,7 +31,9 @@ inline constexpr std::array<uint64_t, 41> words{
     0xa06210007ull, 0xa06410007ull, 0xb46400008ull, 0xc06300401ull,
     0xc06b00801ull, 0xf00102c64ull, 0xc065c0001ull, 0x506619065ull,
     0xd06801000ull, 0xc06a1a002ull, 0x506c1a804ull, 0x700001000ull,
-    0x606e00402ull,
+    0x606e00402ull, 0x550001c00ull, 0xa10810007ull, 0x550242000ull,
+    0x510a19000ull, 0xb50a0000cull, 0x550442800ull, 0xa10c1980dull,
+    0xb50c0000cull, 0x550643000ull,
 };
 
 // The constant registers the firmware writes once.
@@ -40,7 +42,7 @@ struct Constant {
     int32_t raw;
 };
 
-inline constexpr std::array<Constant, 11> constants{
+inline constexpr std::array<Constant, 13> constants{
     Constant{0x001, 16384},
     Constant{0x002, 2048},
     Constant{0x003, 65536},
@@ -52,6 +54,8 @@ inline constexpr std::array<Constant, 11> constants{
     Constant{0x009, 112},
     Constant{0x00a, 12},
     Constant{0x00b, 99},
+    Constant{0x00c, -3},
+    Constant{0x00d, 8},
 };
 
 // Registers, blocks and fields.
@@ -66,6 +70,10 @@ inline constexpr int channel_size = 64;
 inline constexpr int ch_cutoff = 40;
 inline constexpr int ch_pitch = 39;
 inline constexpr int correction = 5;
+inline constexpr int count_chain_odd = 262;
+inline constexpr int count_half_odd = 260;
+inline constexpr int count_odd = 258;
+inline constexpr int count_total = 256;
 inline constexpr int cutoff_base = 35;
 inline constexpr int cutoff_offset = 8;
 inline constexpr int d = 12;
@@ -120,6 +128,7 @@ inline constexpr int pass = 64;
 inline constexpr int phase = 0;
 inline constexpr int phase_step = 2;
 inline constexpr int rate = 2;
+inline constexpr int raw_one = 7;
 inline constexpr int resonance = 36;
 inline constexpr int resonance_base = 49;
 inline constexpr int res_abs = 104;
@@ -151,6 +160,9 @@ inline constexpr int table_read = 101;
 inline constexpr int target = 0;
 inline constexpr int tc = 42;
 inline constexpr int td = 51;
+inline constexpr int test_bit = 264;
+inline constexpr int test_chain = 268;
+inline constexpr int test_half = 266;
 inline constexpr int tp = 41;
 inline constexpr int tr = 52;
 inline constexpr int u_a = 6;
