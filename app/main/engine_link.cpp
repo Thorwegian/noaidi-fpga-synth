@@ -150,6 +150,10 @@ public:
 // them each time the probe fired).
 constexpr bool log_lfo_probe = false;
 
+// Diagnostic: leave the CSP held and the tick paused after the boot image is
+// in, to snapshot the chip before its program has run (tools/lab/snapshot.py).
+constexpr bool hold_after_boot = true;
+
 // Every few seconds, log what the CSP holds for the LFOs: the pass counter
 // and, for each LFO, its record (phase, step, depth and its negative, gain
 // and output) and its set (where it starts, how many of each shape). What the
@@ -317,7 +321,12 @@ void engine_link_init(void) {
                  static_cast<unsigned long long>(before_release >> 18),
                  static_cast<unsigned long long>(before_release & 0x3FFFF));
     }
-    fpga_word_write(fpga_map::ctrl, ctrl_word(0)); // release
+    if (hold_after_boot) {
+        paused = true;
+        ESP_LOGW(tag, "hold_after_boot: the CSP stays held, the tick is paused");
+    } else {
+        fpga_word_write(fpga_map::ctrl, ctrl_word(0)); // release
+    }
     vTaskDelay(pdMS_TO_TICKS(50));
     {
         const uint64_t after_release = probe_pair(0x220);

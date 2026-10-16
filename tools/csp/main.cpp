@@ -253,7 +253,9 @@ int replay_command(const csp::Program &program, const std::string &path_a,
             }
         }
         model.swap();
-        model.pass(); // held: applies the writes
+        while (model.queued_writes() > 0) {
+            model.pass(); // held: a pass applies up to 1536 writes
+        }
         model.load(program.words);
         model.set_pass_count(counted_from);
         model.release();
