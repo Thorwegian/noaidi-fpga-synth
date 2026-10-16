@@ -2,13 +2,17 @@
 
 - Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop.
 
-- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on.
+- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Questions are directed to GitHub - not the chat. Demanding tasks such as simulations and PNR are done with `run_in_background=true`.
 
 - GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child). Agents *must* actively use it.
 
 - Agents provide unique hashes to reply to when asking for input from the user.
 
 - Agents write elegant and highly structured code at a senior developer level.
+
+- Agents use Mermaid.js for diagrams and Matplotlib for graphs.
+
+- Agents use Numpy, Scipy and Essentia for audio analysis.
 
 - Canonical C++ with STL is *always* preferred over janky C hacks. Agents *will* port C modules to C++ at every chance (dependencies excepted).
 
