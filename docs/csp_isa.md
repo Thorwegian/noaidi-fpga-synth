@@ -120,10 +120,10 @@ file held the cycle before).
 |---|---|
 | F | fetch: the instruction memory's word goes into a one-entry buffer register, and nowhere else (nothing but a register on a memory's output, section 12); the fetch runs one word ahead of decode, so moving on to the next instruction costs nothing; a jump (a loop's repeat, a skipped body) restarts it and costs two cycles, which the reference model counts. The buffered word and the word on the memory are known by their place relative to decode's pc (own, next), shifted down at a move, and a move is told apart (next, onto itself, a jump) from the loop control signals: no pc is compared with `next_pc`, which keeps the loop-end logic off the fetch's enables (section 12) |
 | D | decode, from the buffer's word: operand addresses from `i`/`j`; the register-file read addresses go in as the instruction issues |
-| R | the hazard check (the three operand addresses against those of E1 … W, and of W a cycle ago; made in D, one stage early, and carried in six registered bits while R waits, so that the stall decision is an OR of registers); register read (three ports) → operands in the accumulator's format; `SKIP` decides |
-| E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
-| E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; `SHIFT` saturates |
-| E3 | MULTALU36X18: `a × b + c` |
+| R | the hazard check (the three operand addresses against those of E1 … W, and of W a cycle ago; made in D, one stage early, and carried in six registered bits while R waits, so that the stall decision is an OR of registers); the register file's banks read (three ports, the even and the odd word of each pair); `SKIP` decides |
+| E1 | the words arrive in E1's registers straight from the banks' output registers (nothing but a register on a memory's output, section 12); the half or the pair chosen, the operands in the accumulator's format, the `SHIFT` count clamped; `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; `LOOP` and `IDX` resolve |
+| E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; the `SHIFT` barrel shift |
+| E3 | MULTALU36X18: `a × b + c`; `SHIFT` saturates |
 | E4 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
 | W | write R (register file or sink area); the accumulator and the flags |
 
@@ -584,10 +584,16 @@ small program. The new CSP gets:
   against a measured 72 (the board, the same bitstream, the clock lowered
   with the BL616's volatile `pll_clk` until the register-stepping and boot
   tests ran clean). The rules it leaves: a memory's or a DSP's output goes
-  into a register before any logic (the queue's head is staged; the MAC's
-  product is registered inside the DSP, `OUT_REG`); the report's figure is
-  the fabric's and nothing else; a bitstream's real limit is measured with
-  the clock sweep (`tools/lab`). And for the placer, which hangs in the
+  into a register before any logic — the instruction word into the fetch
+  buffer, the queue's head out of its block's pipeline register, the
+  register file's words into E1's registers (the half or the pair chosen
+  there, not in R), the MAC's product registered inside the DSP
+  (`OUT_REG`) — so that every path the report cannot see is a register
+  fed by nothing but a register; the report's figure is then the fabric's
+  and the fabric is all there is; a bitstream's real limit is still
+  measured with the clock sweep (`tools/lab`), and the boot self-test's two
+  checks whose operands change every pass (`SHIFT`, `IDX`) are the ones
+  that catch a stale operand. And for the placer, which hangs in the
   heap placer's legalisation (some 10^8 placement attempts a cell) on most
   netlists of this design: the wide-LUT cells (`MUX2_LUT5` … `MUX2_LUT8`,
   clusters of two to sixteen LUTs that have to be legalised together) are

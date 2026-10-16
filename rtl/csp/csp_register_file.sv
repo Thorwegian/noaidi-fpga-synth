@@ -16,11 +16,15 @@
 // touches one bank and a wide access touches both at the same index:
 // one BSRAM per bank, six in all.
 //
-// Reads are synchronous: the address goes in on one clock, the data
-// comes out on the next (the pipeline's D → R step). A read of the
-// register being written in the same cycle returns the old value; the
-// core's forwarding covers that case. Register 0 is never written, so it
-// always reads zero, and a wide write to the pair at 0 is discarded.
+// Reads are synchronous: the address goes in on one clock, the words
+// come out on the next, straight from the banks' output registers: the
+// even and the odd word of the pair, which the core takes into a register
+// of its own before choosing a half or taking the pair (nothing but a
+// register on a block RAM's output, docs/csp_isa.md section 12: the tool
+// does not time what follows one). A read of the register being written
+// in the same cycle returns the old value; the core's hazard check covers
+// that case. Register 0 is never written, so it always reads zero, and a
+// wide write to the pair at 0 is discarded.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_register_file (
@@ -28,8 +32,8 @@ module csp_register_file (
 
     // three read ports: A, X, Y
     input  wire [2:0][csp_pkg::REGISTER_W-1:0] read_address,
-    input  wire [2:0]                          read_wide,    // an aligned pair
-    output logic [2:0][csp_pkg::WIDE_W-1:0]    read_data,    // word: low 18 bits
+    output logic [2:0][csp_pkg::WORD_W-1:0]    read_even,    // the pair's upper word
+    output logic [2:0][csp_pkg::WORD_W-1:0]    read_odd,     // and its lower
 
     // one write port
     input  wire                                write_enable,
@@ -72,25 +76,9 @@ module csp_register_file (
         end
 
         wire [BANK_W-1:0] read_index = read_address[port][csp_pkg::REGISTER_W-1:1];
-        logic [csp_pkg::WORD_W-1:0] even_word, odd_word;
         always_ff @(posedge clk) begin
-            even_word <= even_bank[read_index];
-            odd_word  <= odd_bank[read_index];
-        end
-
-        // Which half a word read wanted, aligned with the data.
-        logic read_odd_q, read_wide_q;
-        always_ff @(posedge clk) begin
-            read_odd_q  <= read_address[port][0];
-            read_wide_q <= read_wide[port];
-        end
-
-        always_comb begin
-            if (read_wide_q) begin
-                read_data[port] = {even_word, odd_word};
-            end else begin
-                read_data[port] = {{(csp_pkg::WIDE_W - csp_pkg::WORD_W){1'b0}}, read_odd_q ? odd_word : even_word};
-            end
+            read_even[port] <= even_bank[read_index];
+            read_odd[port]  <= odd_bank[read_index];
         end
     end
 

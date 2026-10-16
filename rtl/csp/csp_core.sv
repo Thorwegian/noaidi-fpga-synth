@@ -12,17 +12,21 @@
 //
 //   D   decode: operand addresses from i and j; the register file's read
 //       addresses go in as the instruction issues
-//   R   the hazard check, on registered values; the register file's
-//       outputs → operands in the accumulator's format; SKIP decides; the
-//       SHIFT count, and LOOP's body end and whether its count is 0, are
-//       prepared. An instruction that has to wait stays in R and reads
-//       its operands again every cycle, so that what it takes on leaving is
-//       what the register file held the cycle before
-//   E1  INTERP's Y − A and ADD3's A + Y (55 bits); MIN, MAX, SEL, ANDXOR;
-//       the SHIFT barrel shift; LOOP and IDX are resolved here
+//   R   the hazard check, on registered values; the register file's banks
+//       read; SKIP decides; LOOP's body end is prepared. An instruction
+//       that has to wait stays in R and reads its operands again every
+//       cycle, so that what it takes on leaving is what the register file
+//       held the cycle before
+//   E1  the banks' words, in E1's own registers (nothing but a register on
+//       a block RAM's output: the tool does not time what follows one) →
+//       the half or the pair, the operands in the accumulator's format, the
+//       SHIFT count, whether LOOP's count is 0; INTERP's Y − A and ADD3's
+//       A + Y (55 bits); MIN, MAX, SEL, ANDXOR; LOOP and IDX are resolved
+//       here
 //   E2  saturate Y − A to 36 bits and A + Y to 54; the multiply-add
-//       unit's operands; the SHIFT result saturated
-//   E3  the multiply-add unit (MULTALU36X18): a × b + c
+//       unit's operands; the SHIFT barrel shift
+//   E3  the multiply-add unit (MULTALU36X18): a × b + c, its product
+//       registered inside the block; the SHIFT result saturated
 //   E4  overflow of the 54-bit sum, saturation or wrap to the
 //       destination, the flags
 //   W   write the register file or a sink, the accumulator, the flags
@@ -285,8 +289,7 @@ module csp_core (
 
     // ---- register file ---------------------------------------------------------------------
     logic [2:0][csp_pkg::REGISTER_W-1:0] read_address;
-    logic [2:0]                          read_wide;
-    logic [2:0][35:0]                    read_data;
+    logic [2:0][17:0]                    read_even, read_odd;   // the banks' output registers
     logic                                rf_write_enable;
     logic [csp_pkg::REGISTER_W-1:0]      rf_write_address;
     logic                                rf_write_wide;
@@ -295,8 +298,8 @@ module csp_core (
     csp_register_file u_register_file (
         .clk           (clk),
         .read_address  (read_address),
-        .read_wide     (read_wide),
-        .read_data     (read_data),
+        .read_even     (read_even),
+        .read_odd      (read_odd),
         .write_enable  (rf_write_enable),
         .write_address (rf_write_address),
         .write_wide    (rf_write_wide),
@@ -382,7 +385,7 @@ module csp_core (
         end else begin
             probe_read <= probe_now;
             if (probe_read) begin
-                probe_data <= read_data[2];
+                probe_data <= {read_even[2], read_odd[2]};
             end
         end
     end
@@ -392,12 +395,9 @@ module csp_core (
     // on leaving are those of the cycle before.
     always_comb begin
         read_address[0] = csp_pkg::REGISTER_W'(r_hold ? read_stage.r_address : decode_r_address);
-        read_wide[0]    = r_hold ? read_a_wide : decode_a_wide;
         read_address[1] = csp_pkg::REGISTER_W'(r_hold ? read_x_address : decode_x_address);
-        read_wide[1]    = 1'b0;
         read_address[2] = probe_now ? probe_address
                                     : csp_pkg::REGISTER_W'(r_hold ? read_y_address : decode_y_address);
-        read_wide[2]    = probe_now ? 1'b1 : (r_hold ? read_y_wide : decode_y_wide);
     end
 
     // The hazard check, in R, on registered values only: an older instruction in
@@ -548,23 +548,37 @@ module csp_core (
         issued.entry_flags        = !flags_written;
     end
 
-    // ---- R: operands ---------------------------------------------------------------------------
+    // ---- R: the hazard check and SKIP; the banks read -------------------------------------------
     wire [3:0]  read_op       = read_stage.instruction.op;
     wire        read_live     = read_stage.valid && skip_remaining == '0;
-    wire [35:0] a_operand     = read_reads_a ? read_data[0] : '0;
-    wire [17:0] x_operand     = read_reads_x ? read_data[1][17:0] : '0;
-    wire [35:0] y_operand     = read_reads_y ? read_data[2] : '0;
+
+    // ---- E1: the operands, from the words in E1's registers -------------------------------------
+    // The banks' output registers feed nothing but E1's registers (section
+    // 12: the tool does not time what follows a block RAM's output); the half
+    // or the pair is chosen here, in E1, and the operands formatted. The
+    // accumulator is read here too: an older instruction writing it has left
+    // W a cycle before this one left R (the hazard check), so it is the same
+    // value R would have read.
+    logic [17:0] e1_a_even, e1_a_odd, e1_x_even, e1_x_odd, e1_y_even, e1_y_odd;
+    logic        e1_reads_a, e1_reads_x, e1_reads_y;
+    logic        e1_a_wide, e1_y_wide;                        // the pair
+    logic        e1_a_odd_half, e1_x_odd_half, e1_y_odd_half; // else which word
+    wire [35:0] a_operand = !e1_reads_a ? '0
+                          : (e1_a_wide ? {e1_a_even, e1_a_odd} : {18'b0, e1_a_odd_half ? e1_a_odd : e1_a_even});
+    wire [17:0] x_operand = e1_reads_x ? (e1_x_odd_half ? e1_x_odd : e1_x_even) : '0;
+    wire [35:0] y_operand = !e1_reads_y ? '0
+                          : (e1_y_wide ? {e1_y_even, e1_y_odd} : {18'b0, e1_y_odd_half ? e1_y_odd : e1_y_even});
 
     // A in the accumulator's format, from the a field; Y likewise.
     logic signed [53:0] a_value, y_value;
     always_comb begin
-        case (read_stage.instruction.a)
+        case (execute1_stage.instruction.a)
             csp_pkg::A_RESULT:      a_value = word_to_accumulator(a_operand[17:0]);
             csp_pkg::A_ACCUMULATOR: a_value = accumulator;
             csp_pkg::A_WIDE:        a_value = wide_to_accumulator(a_operand);
             default:                a_value = '0;
         endcase
-        y_value = read_y_wide ? wide_to_accumulator(y_operand) : word_to_accumulator(y_operand[17:0]);
+        y_value = e1_y_wide ? wide_to_accumulator(y_operand) : word_to_accumulator(y_operand[17:0]);
     end
 
     // What R hands to E1: the instruction, now known to be skipped or not.
@@ -585,22 +599,25 @@ module csp_core (
          || (condition == csp_pkg::COND_OVERFLOW && flag_overflow));
 
     // SHIFT: the shift relative to the destination's format, count − 32
-    // for a word and count − 14 for a wide value, the count clamped to ±63.
+    // for a word and count − 14 for a wide value, the count clamped to ±63
+    // (in E1; the barrel shift is E2's).
     wire signed [17:0] shift_count = y_operand[17:0];
     wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63
                                      : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
-    wire signed [18:0] shift_total = 19'(shift_clamped) - (read_stage.r_wide ? 19'sd14 : 19'sd32);
+    wire signed [18:0] shift_total = 19'(shift_clamped) - (execute1_stage.r_wide ? 19'sd14 : 19'sd32);
 
     // ---- E1 ------------------------------------------------------------------------------------
-    logic signed [53:0] e1_a_value, e1_y_value;
-    logic signed [17:0] e1_x_word, e1_y_word;
-    logic [35:0]        e1_y_operand;
-    logic               e1_y_wide;
-    logic signed [18:0] e1_shift_total;
-    logic [PC_W-1:0]    e1_body_end;        // LOOP: one past its body
-    logic [PC_W-1:0]    e1_body_last;       // LOOP: its last instruction
-    logic [PC_W-1:0]    e1_pc_plus_one;     // the pc after this instruction
-    logic               e1_skips_body;      // LOOP: a count of 0, or a vector loop over too many
+    wire signed [53:0] e1_a_value   = a_value;
+    wire signed [53:0] e1_y_value   = y_value;
+    wire signed [17:0] e1_x_word    = x_operand;
+    wire signed [17:0] e1_y_word    = y_operand[17:0];
+    wire [35:0]        e1_y_operand = y_operand;
+    logic [PC_W-1:0]   e1_body_end;        // LOOP: one past its body
+    logic [PC_W-1:0]   e1_body_last;       // LOOP: its last instruction
+    logic [PC_W-1:0]   e1_pc_plus_one;     // the pc after this instruction
+    // LOOP: a count of 0, or a vector loop over too many
+    wire e1_skips_body = x_operand == '0
+                         || (execute1_stage.instruction.a[1] && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
 
     wire [3:0] e1_op = execute1_stage.instruction.op;
 
@@ -629,19 +646,6 @@ module csp_core (
             csp_pkg::OP_SEL: logic_result = select_negative ? e1_y_word : e1_x_word;
             default:         logic_result = (e1_x_word & e1_y_word) ^ a_bits;     // ANDXOR
         endcase
-    end
-
-    // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
-    // saturates (E2).
-    logic signed [89:0] shifted;
-    logic               shift_forced;
-    always_comb begin
-        if (e1_shift_total >= 0) begin
-            shifted = 90'(e1_a_value) <<< (e1_shift_total > 19'sd36 ? 36 : int'(e1_shift_total));
-        end else begin
-            shifted = 90'(e1_a_value) >>> (-e1_shift_total > 19'sd54 ? 54 : int'(-e1_shift_total));
-        end
-        shift_forced = e1_shift_total > 19'sd36 && e1_a_value != 0;
     end
 
     // ---- E1: LOOP and IDX resolve; the front end's next pc ----------------------------------------
@@ -897,8 +901,7 @@ module csp_core (
     logic [35:0]        e2_y_operand;
     logic               e2_y_wide;
     logic [17:0]        e2_logic_result;
-    logic signed [89:0] e2_shifted;
-    logic               e2_shift_forced;
+    logic signed [18:0] e2_shift_total;
 
     wire [3:0] e2_op = execute2_stage.instruction.op;
 
@@ -935,12 +938,34 @@ module csp_core (
         endcase
     end
 
+    // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
+    // saturates (E3).
+    logic signed [89:0] shifted;
+    logic               shift_forced;
+    always_comb begin
+        if (e2_shift_total >= 0) begin
+            shifted = 90'(e2_a_value) <<< (e2_shift_total > 19'sd36 ? 36 : int'(e2_shift_total));
+        end else begin
+            shifted = 90'(e2_a_value) >>> (-e2_shift_total > 19'sd54 ? 54 : int'(-e2_shift_total));
+        end
+        shift_forced = e2_shift_total > 19'sd36 && e2_a_value != 0;
+    end
+
+    // ---- E3: the multiply-add unit; SHIFT saturates ---------------------------------------------
+    logic signed [17:0] e3_multiply_a;
+    logic signed [35:0] e3_multiply_b;
+    logic signed [53:0] e3_multiply_c;
+    logic [17:0]        e3_logic_result;
+    logic signed [89:0] e3_shifted;
+    logic               e3_shift_forced;
+    logic               e3_a_negative;
+
     // SHIFT: saturate to the destination.
     logic [35:0] shift_result;
     logic        shift_saturated;
     always_comb begin
         logic signed [89:0] limit_high, limit_low;
-        if (execute2_stage.r_wide) begin
+        if (execute3_stage.r_wide) begin
             limit_high = (90'sd1 <<< 35) - 1;
             limit_low  = -(90'sd1 <<< 35);
         end else begin
@@ -948,35 +973,30 @@ module csp_core (
             limit_low  = -(90'sd1 <<< 17);
         end
         shift_saturated = 1'b1;
-        if (e2_shift_forced) begin
-            shift_result = e2_a_value < 0 ? 36'(limit_low) : 36'(limit_high);
-        end else if (e2_shifted > limit_high) begin
+        if (e3_shift_forced) begin
+            shift_result = e3_a_negative ? 36'(limit_low) : 36'(limit_high);
+        end else if (e3_shifted > limit_high) begin
             shift_result = 36'(limit_high);
-        end else if (e2_shifted < limit_low) begin
+        end else if (e3_shifted < limit_low) begin
             shift_result = 36'(limit_low);
         end else begin
-            shift_result = 36'(e2_shifted);
+            shift_result = 36'(e3_shifted);
             shift_saturated = 1'b0;
         end
-        if (!execute2_stage.r_wide) shift_result[35:18] = '0;
+        if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    // ---- E3: the multiply-add unit ---------------------------------------------------------------
-    logic signed [17:0] e3_multiply_a;
-    logic signed [35:0] e3_multiply_b;
-    logic signed [53:0] e3_multiply_c;
-    logic [17:0]        e3_logic_result;
-    logic [35:0]        e3_shift_result;
-    logic               e3_shift_saturated;
-
-    logic signed [53:0] product;
+    // The product comes out of the block registered (OUT_REG): it is E4's
+    // register, inside the DSP, where the tool's timing cannot see past
+    // anyway (a DSP output must go straight into a register).
+    logic signed [53:0] e4_product;
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
         .a       (e3_multiply_a),
         .b       (e3_multiply_b),
         .c       (e3_multiply_c),
-        .product (product)
+        .product (e4_product)
     );
 
     // What E4 needs to see whether the 54-bit sum wrapped inside the block:
@@ -985,7 +1005,6 @@ module csp_core (
     wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
 
     // ---- E4: reduce to the destination; the flags ----------------------------------------------------
-    logic signed [53:0] e4_product;
     logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
     logic [17:0]        e4_logic_result;
     logic [35:0]        e4_shift_result;
@@ -1238,19 +1257,25 @@ module csp_core (
             read_reads_flags       <= reads_flags;
         end
 
-        e1_a_value     <= a_value;
-        e1_y_value     <= y_value;
-        e1_x_word      <= x_operand;
-        e1_y_word      <= y_operand[17:0];
-        e1_y_operand   <= y_operand;
+        // E1 takes the banks' words every cycle: while R holds they are read
+        // again and E1 is a bubble; the cycle R leaves, they are its.
+        e1_a_even      <= read_even[0];
+        e1_a_odd       <= read_odd[0];
+        e1_x_even      <= read_even[1];
+        e1_x_odd       <= read_odd[1];
+        e1_y_even      <= read_even[2];
+        e1_y_odd       <= read_odd[2];
+        e1_reads_a     <= read_reads_a;
+        e1_reads_x     <= read_reads_x;
+        e1_reads_y     <= read_reads_y;
+        e1_a_wide      <= read_a_wide;
         e1_y_wide      <= read_y_wide;
-        e1_shift_total <= shift_total;
+        e1_a_odd_half  <= read_stage.r_address[0];
+        e1_x_odd_half  <= read_x_address[0];
+        e1_y_odd_half  <= read_y_address[0];
         e1_body_end    <= read_stage.pc + PC_W'(read_stage.instruction.r) + 1'b1;
         e1_body_last   <= read_stage.pc + PC_W'(read_stage.instruction.r);
         e1_pc_plus_one <= read_stage.pc + 1'b1;
-        e1_skips_body  <= x_operand == '0
-                          || (read_stage.instruction.a[1]
-                              && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
 
         e2_difference_full <= difference_full;
         e2_sum_full        <= sum_full;
@@ -1260,23 +1285,22 @@ module csp_core (
         e2_y_operand       <= e1_y_operand;
         e2_y_wide          <= e1_y_wide;
         e2_logic_result    <= logic_result;
-        e2_shifted         <= shifted;
-        e2_shift_forced    <= shift_forced;
+        e2_shift_total     <= shift_total;
 
         e3_multiply_a      <= multiply_a;
         e3_multiply_b      <= multiply_b;
         e3_multiply_c      <= multiply_c;
         e3_logic_result    <= e2_logic_result;
-        e3_shift_result    <= shift_result;
-        e3_shift_saturated <= shift_saturated;
+        e3_shifted         <= shifted;
+        e3_shift_forced    <= shift_forced;
+        e3_a_negative      <= e2_a_value[53];
 
-        e4_product         <= product;
         e4_product_nonzero <= e3_product_nonzero;
         e4_signs_agree     <= e3_signs_agree;
         e4_c_negative      <= e3_multiply_c[53];
         e4_logic_result    <= e3_logic_result;
-        e4_shift_result    <= e3_shift_result;
-        e4_shift_saturated <= e3_shift_saturated;
+        e4_shift_result    <= shift_result;
+        e4_shift_saturated <= shift_saturated;
 
         w_result      <= result;
         w_negative    <= result_negative;

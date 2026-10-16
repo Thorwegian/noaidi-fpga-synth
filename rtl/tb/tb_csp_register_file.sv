@@ -19,13 +19,32 @@ module tb_csp_register_file;
 
     logic [2:0][REGISTER_W-1:0] read_address;
     logic [2:0]                 read_wide;
+    logic [2:0][WORD_W-1:0]     read_even, read_odd;
     logic [2:0][WIDE_W-1:0]     read_data;
     logic                  write_enable = 0;
     logic [REGISTER_W-1:0] write_address = '0;
     logic                  write_wide = 0;
     logic [WIDE_W-1:0]     write_data = '0;
 
-    csp_register_file dut (.*);
+    csp_register_file dut (
+        .clk           (clk),
+        .read_address  (read_address),
+        .read_even     (read_even),
+        .read_odd      (read_odd),
+        .write_enable  (write_enable),
+        .write_address (write_address),
+        .write_wide    (write_wide),
+        .write_data    (write_data)
+    );
+
+    // The pair, or the half the address names, from the banks' words: what
+    // the core does in E1, with the address and the width it still holds.
+    always_comb begin
+        for (int port = 0; port < 3; port++) begin
+            read_data[port] = read_wide[port] ? {read_even[port], read_odd[port]}
+                            : {{(WIDE_W - WORD_W){1'b0}}, read_address[port][0] ? read_odd[port] : read_even[port]};
+        end
+    end
 
     int errors = 0;
 
