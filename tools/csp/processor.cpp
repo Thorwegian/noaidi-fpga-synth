@@ -396,7 +396,8 @@ int64_t Processor::issue(const Instruction &instruction,
 // Issue an instruction: its cycle, or the end of the pass at the limit.
 bool Processor::issue_or_stop(const Instruction &instruction, size_t pc,
                               PassState &state) {
-    state.cycle = issue(instruction, state);
+    state.last_pc = pc;
+    state.cycle   = issue(instruction, state);
     if (state.cycle >= pass_cycle_limit) {
         state.report.errors.push_back("pass longer than "
                                       + std::to_string(pass_cycle_limit)
@@ -450,8 +451,7 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
         state.report.errors.push_back("vector loop over more than "
                                       + std::to_string(max_vector_length)
                                       + " elements, or past the program's end");
-        state.pc = end; // a jump past the body
-        state.scoreboard.front_ready += jump_penalty;
+        state.pc = end;
         return;
     }
 
@@ -505,9 +505,6 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
     }
 
     own_index = modulo_address(base + count * int64_t{stride});
-    if (count == 0) {
-        state.scoreboard.front_ready += jump_penalty; // a jump past the body
-    }
     if (count > 0) {
         const Element &last = elements.back();
         other_index         = last.other_index;
@@ -718,8 +715,7 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
             break;
         }
         if (count <= 0) {
-            state.pc = end; // the body runs no times: a jump past it
-            state.scoreboard.front_ready += jump_penalty;
+            state.pc = end; // the body runs no times
             break;
         }
         if (!state.loops.empty()) {
@@ -747,19 +743,7 @@ void Processor::end_loops(PassState &state) {
         int &index_value = index_[static_cast<size_t>(loop.index)];
         index_value      = modulo_address(int64_t{index_value} + loop.stride);
         if (--loop.remaining > 0) {
-            // A jump: the fetch restarts when the front end moves on past the
-            // body's last instruction: when that instruction entered the
-            // pipeline (a wait for its operands, in R, overlaps the fetch), or
-            // at its resolution; the start arrives jump_penalty cycles after
-            // the next word would have. A body of one instruction keeps its
-            // word, and pays nothing.
             state.pc = loop.start;
-            if (loop.end - loop.start > 1) {
-                state.scoreboard.front_ready = state.resolved
-                        ? state.scoreboard.front_ready + jump_penalty
-                        : std::max(state.scoreboard.front_ready,
-                                   state.entry + 1 + jump_penalty);
-            }
             break;
         }
         state.loops.pop_back();
@@ -797,6 +781,21 @@ PassReport Processor::pass() {
             execute(instruction, state);
         }
         end_loops(state);
+        // Where the pc ends up decides the front end's one move for this
+        // instruction: on to the next word, which the fetch has ready; back
+        // to the instruction itself (a body of one, repeating), whose word
+        // decode keeps; or anywhere else, a jump, where the fetch restarts.
+        // The restart is made when the front end moves on: when the
+        // instruction entered the pipeline (a wait for its operands, in R,
+        // overlaps the fetch), or at its resolution for a LOOP, an IDX or a
+        // vector loop's end; the word arrives jump_penalty cycles after the
+        // next one would have.
+        if (state.pc != state.last_pc + 1 && state.pc != state.last_pc) {
+            Scoreboard &board = state.scoreboard;
+            board.front_ready = state.resolved
+                    ? board.front_ready + jump_penalty
+                    : std::max(board.front_ready, state.entry + 1 + jump_penalty);
+        }
     }
 
     // Every sink word the program has ever written must be written every

@@ -26,6 +26,7 @@
 
 #include "Vtb_synth.h"
 #include "csp/control_program.hpp"
+#include "csp/envelope.hpp"
 #include "csp/lfo.hpp"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
@@ -771,6 +772,24 @@ void case_startup_patch(VerilatedContext &context) {
     const size_t held_from = rig.synth.mark() - 4800;
     const Window held =
             measure(rig.synth.samples(), held_from, rig.synth.mark());
+    {
+        // The amp envelope's release row as the chip holds it, against what
+        // the firmware means by it (render.cpp: the rate is the patch's
+        // coefficient times the fall factor).
+        namespace cp = csp::control;
+        const int row = cp::channels + cp::envelopes + 8; // amp release
+        SelfTestBench probe_port(rig.synth);
+        const uint64_t target = probe_port.probe(row + cp::target);
+        const uint64_t rate   = probe_port.probe(row + cp::rate);
+        const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(rig.patch.env[0].release));
+        const int64_t rate_1 = csp::envelope_rate(k), rate_3 = csp::envelope_rate(3 * k);
+        std::printf("  amp release: patch code %u, k %u; rate on the chip %09llx; "
+                    "envelope_rate(k) %09llx, envelope_rate(3k) %09llx\n",
+                    rig.patch.env[0].release, k, static_cast<unsigned long long>(rate),
+                    static_cast<unsigned long long>(rate_1 & 0xFFFFFFFFFULL),
+                    static_cast<unsigned long long>(rate_3 & 0xFFFFFFFFFULL));
+        std::printf("  amp release target on the chip %09llx\n", static_cast<unsigned long long>(target));
+    }
     for (int voice = 0; voice < 4; ++voice) {
         rig.release_voice(voice);
     }

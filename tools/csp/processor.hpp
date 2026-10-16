@@ -150,6 +150,7 @@ private:
         int64_t cycle = 0; // the cycle the current instruction issues in
         int64_t entry = 0; // the cycle the front end moved on to it (its operands' wait not counted)
         bool resolved = false; // the front end moves on at its resolution (a LOOP, an IDX, a vector loop's end)
+        size_t last_pc = 0;  // the pc of the last instruction issued (a vector loop's last element's)
         Scoreboard scoreboard;
         std::vector<Loop> loops;
         int skip = 0;
