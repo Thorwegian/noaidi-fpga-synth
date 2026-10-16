@@ -102,7 +102,7 @@ module csp_core (
 
     // ---- constants --------------------------------------------------------------------
     localparam int RUN_END    = 1472;                          // instructions issue before this
-    localparam int DRAIN_END  = RUN_END + 8;
+    localparam int DRAIN_END  = RUN_END + 9;                   // the pipeline's depth past D
     localparam int WINDOW_END = DRAIN_END + csp_pkg::WRITE_WINDOW;
     localparam int PC_W       = csp_pkg::PROGRAM_W;
     localparam int AW         = csp_pkg::ADDRESS_W;
@@ -198,12 +198,13 @@ module csp_core (
         end
     end
 
-    // A held pass applies writes from its second cycle on, until two cycles
-    // before its end: a write is staged for a cycle after it is taken from the
-    // queue, and must be in the register file before the next pass's first cycle
-    // (the pass counter's write).
+    // A held pass applies writes from its second cycle on, until three cycles
+    // before its end: a write is staged for two cycles after it is taken from
+    // the queue (the block's output, then the fabric's register), and must be
+    // in the register file before the next pass's first cycle (the pass
+    // counter's write).
     wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
-                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 2))
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 3))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
@@ -1353,20 +1354,31 @@ module csp_core (
     wire writes_result_now = writing && writeback_stage.writes_registers;
     assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
     // The queue hands out the entry the clock after it is popped (its block's
-    // pipeline register, csp_write_queue.sv), so the write is applied then:
-    // the decoding and the memories' write enables work from a register's
-    // output. (Nothing else writes in the window: the pipeline is empty and
-    // the pass counter is written at the pass start, after the window.)
-    logic staged_valid;
+    // pipeline register, csp_write_queue.sv); it is taken into registers of
+    // the fabric then, and applied the clock after that: the decoding and
+    // the memories' write enables work from a fabric register's output, and
+    // the block's output register feeds nothing but a register (section 12:
+    // the tool times neither a block RAM's output nor its write pins; on the
+    // board, with the decode straight on the block's output, a boot at
+    // 73.728 MHz dropped writes and landed others two addresses off).
+    // (Nothing else writes in the window: the pipeline is empty and the pass
+    // counter is written at the pass start, after the window.)
+    logic                               popped_valid, staged_valid;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address;
+    logic [csp_pkg::WORD_W-1:0]          staged_data;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
+            popped_valid <= 1'b0;
             staged_valid <= 1'b0;
         end else begin
-            staged_valid <= queue_pop;
+            popped_valid <= queue_pop;
+            staged_valid <= popped_valid;
         end
     end
-    wire [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address = queue_address;
-    wire [csp_pkg::WORD_W-1:0]          staged_data    = queue_data;
+    always_ff @(posedge clk) begin
+        staged_address <= queue_address;
+        staged_data    <= queue_data;
+    end
 
     // A queued write names a register, or a sink word: the firmware's own
     // words in the sink area (channel settings that only a MIDI message

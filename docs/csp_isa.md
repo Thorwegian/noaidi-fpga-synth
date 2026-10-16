@@ -593,11 +593,16 @@ small program. The new CSP gets:
   register file's words into E1's registers (the half or the pair chosen
   there, not in R), the MAC's operands into the DSP's own input registers
   (`AREG`/`BREG`/`CREG`, E3), its product into its output register
-  (`OUT_REG`, E4) and from there into E5's register — so that every path
-  the report cannot see is a register fed by nothing but a register (a
-  DSP's input side is as invisible as its output: the combinational
-  multiply from fabric flops failed on the board from 69 MHz while the
-  report said 80); the report's figure is then the fabric's
+  (`OUT_REG`, E4) and from there into E5's register, the write queue's
+  popped entry into fabric registers before the decode that drives the
+  register file's write pins — so that every path the report cannot see
+  is a register fed by nothing but a register. No reported path in any
+  log has a block RAM's or a DSP's pin as source *or* sink: inputs are
+  as invisible as outputs (the combinational multiply from fabric flops
+  failed on the board from 69 MHz while the report said 80; the write
+  decode straight on the queue block's output dropped and mis-addressed
+  a boot's writes at 73.728 while the report said 122). The report's
+  figure is then the fabric's
   and the fabric is all there is; a bitstream's real limit is still
   measured with the clock sweep (`tools/lab`), and the boot self-test's two
   checks whose operands change every pass (`SHIFT`, `IDX`) are the ones
