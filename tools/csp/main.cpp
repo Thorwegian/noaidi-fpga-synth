@@ -187,7 +187,7 @@ int header_command(const csp::Program &program,
 // and when it was held again: the counter runs while the CSP is held, so
 // register 0x040 does not tell how many passes ran the program.
 bool read_snapshot(const std::string &path, std::vector<int32_t> &registers,
-                   int *passes_run = nullptr) {
+                   int *passes_run = nullptr, int *first_pass = nullptr) {
     std::ifstream in(path);
     if (!in) {
         return false;
@@ -200,6 +200,9 @@ bool read_snapshot(const std::string &path, std::vector<int32_t> &registers,
             in >> first >> last;
             if (passes_run != nullptr) {
                 *passes_run = (last - first) & 0x3FFFF;
+            }
+            if (first_pass != nullptr) {
+                *first_pass = first;
             }
             continue;
         }
@@ -221,8 +224,8 @@ bool read_snapshot(const std::string &path, std::vector<int32_t> &registers,
 int replay_command(const csp::Program &program, const std::string &path_a,
                    const std::string &path_b) {
     std::vector<int32_t> a, b;
-    int passes_run = -1;
-    if (!read_snapshot(path_a, a) || !read_snapshot(path_b, b, &passes_run)) {
+    int passes_run = -1, first_pass = 0;
+    if (!read_snapshot(path_a, a) || !read_snapshot(path_b, b, &passes_run, &first_pass)) {
         std::fprintf(stderr, "cannot read the snapshots\n");
         return 2;
     }
@@ -240,7 +243,9 @@ int replay_command(const csp::Program &program, const std::string &path_a,
         return 2;
     }
     // The model, from the first snapshot, run for some passes.
-    const auto run_model = [&](int passes) {
+    // `counted_from`: the pass counter the first pass counts on from (the LFOs
+    // run on its parity).
+    const auto run_model = [&](int passes, int counted_from) {
         csp::Processor model;
         for (int address = 1; address < 2048; ++address) {
             if (address < io_first || address > io_last) {
@@ -250,7 +255,7 @@ int replay_command(const csp::Program &program, const std::string &path_a,
         model.swap();
         model.pass(); // held: applies the writes
         model.load(program.words);
-        model.set_pass_count(0);
+        model.set_pass_count(counted_from);
         model.release();
         for (int pass = 0; pass < passes; ++pass) {
             model.pass();
@@ -266,17 +271,22 @@ int replay_command(const csp::Program &program, const std::string &path_a,
         }
         return differences;
     };
-    int best_passes = -1, best_differences = 1 << 30;
-    for (int passes = std::max(estimate - 6, 0); passes <= estimate + 6;
-         ++passes) {
-        const int differences = count_differences(run_model(passes));
-        if (differences < best_differences) {
-            best_differences = differences;
-            best_passes      = passes;
+    int best_passes = -1, best_counter = 0, best_differences = 1 << 30;
+    for (int offset = -3; offset <= 3; ++offset) {
+        for (int passes = std::max(estimate - 3, 0); passes <= estimate + 3;
+             ++passes) {
+            const int differences = count_differences(
+                    run_model(passes, (first_pass + offset) & 0x3FFFF));
+            if (differences < best_differences) {
+                best_differences = differences;
+                best_passes      = passes;
+                best_counter     = (first_pass + offset) & 0x3FFFF;
+            }
         }
     }
-    std::printf("best match after %d passes\n", best_passes);
-    const csp::Processor model = run_model(best_passes);
+    std::printf("best match after %d passes, counting on from %d\n",
+                best_passes, best_counter);
+    const csp::Processor model = run_model(best_passes, best_counter);
     int differences = 0;
     for (int address = 1; address < 2048; ++address) {
         if (address >= io_first && address <= io_last) {
