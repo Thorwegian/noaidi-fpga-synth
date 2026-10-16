@@ -183,7 +183,11 @@ int header_command(const csp::Program &program,
 // `csp replay`: a chip's registers before and after some passes (tools/lab/
 // snapshot.py), against the model run on the same program from the first.
 // Lines are "R <address> <even word> <odd word>", hex, 18-bit words.
-bool read_snapshot(const std::string &path, std::vector<int32_t> &registers) {
+// A "P <pass>" line gives the chip's pass counter when it was released: the
+// counter runs while the CSP is held, so it alone does not tell how many
+// passes ran the program.
+bool read_snapshot(const std::string &path, std::vector<int32_t> &registers,
+                   int *released_at = nullptr) {
     std::ifstream in(path);
     if (!in) {
         return false;
@@ -191,6 +195,14 @@ bool read_snapshot(const std::string &path, std::vector<int32_t> &registers) {
     registers.assign(2048, 0);
     std::string tag;
     while (in >> tag) {
+        if (tag == "P") {
+            int pass = 0;
+            in >> pass;
+            if (released_at != nullptr) {
+                *released_at = pass;
+            }
+            continue;
+        }
         if (tag != "R") {
             std::string rest;
             std::getline(in, rest);
@@ -209,31 +221,62 @@ bool read_snapshot(const std::string &path, std::vector<int32_t> &registers) {
 int replay_command(const csp::Program &program, const std::string &path_a,
                    const std::string &path_b) {
     std::vector<int32_t> a, b;
-    if (!read_snapshot(path_a, a) || !read_snapshot(path_b, b)) {
+    int released_at = -1;
+    if (!read_snapshot(path_a, a) || !read_snapshot(path_b, b, &released_at)) {
         std::fprintf(stderr, "cannot read the snapshots\n");
         return 2;
     }
     constexpr int io_first = 0x40, io_last = 0x5F;
-    const int passes = (b[io_first] - a[io_first]) & 0x3FFFF;
-    std::printf("the chip ran %d passes between the snapshots\n", passes);
-    if (passes > 20000) {
+    // The last pass that ran the program wrote its number to 0x040; the
+    // first came right after the release, give or take a pass.
+    const int last_pass = b[io_first] & 0x3FFFF;
+    const int estimate  = released_at < 0
+                                  ? (b[io_first] - a[io_first]) & 0x3FFFF
+                                  : (last_pass - released_at) & 0x3FFFF;
+    std::printf("the chip ran about %d passes between the snapshots\n",
+                estimate);
+    if (estimate > 20000) {
         std::fprintf(stderr, "too many passes to replay\n");
         return 2;
     }
-    csp::Processor model;
-    for (int address = 1; address < 2048; ++address) {
-        if (address < io_first || address > io_last) {
-            model.write(address, a[address]);
+    // The model, from the first snapshot, run for some passes.
+    const auto run_model = [&](int passes) {
+        csp::Processor model;
+        for (int address = 1; address < 2048; ++address) {
+            if (address < io_first || address > io_last) {
+                model.write(address, a[address]);
+            }
+        }
+        model.swap();
+        model.pass(); // held: applies the writes
+        model.load(program.words);
+        model.set_pass_count((last_pass - passes) & 0x3FFFF);
+        model.release();
+        for (int pass = 0; pass < passes; ++pass) {
+            model.pass();
+        }
+        return model;
+    };
+    const auto count_differences = [&](const csp::Processor &model) {
+        int differences = 0;
+        for (int address = 1; address < 2048; ++address) {
+            if (address < io_first || address > io_last) {
+                differences += b[address] != model.read(address);
+            }
+        }
+        return differences;
+    };
+    int best_passes = -1, best_differences = 1 << 30;
+    for (int passes = std::max(estimate - 2, 0); passes <= estimate + 2;
+         ++passes) {
+        const int differences = count_differences(run_model(passes));
+        if (differences < best_differences) {
+            best_differences = differences;
+            best_passes      = passes;
         }
     }
-    model.swap();
-    model.pass(); // held: applies the writes
-    model.load(program.words);
-    model.set_pass_count(a[io_first]);
-    model.release();
-    for (int pass = 0; pass < passes; ++pass) {
-        model.pass();
-    }
+    std::printf("best match after %d passes\n", best_passes);
+    const csp::Processor model = run_model(best_passes);
     int differences = 0;
     for (int address = 1; address < 2048; ++address) {
         if (address >= io_first && address <= io_last) {

@@ -213,11 +213,15 @@ int cmd_thaw(int, char **) {
 int cmd_step(int argc, char **argv) {
     const int milliseconds =
             argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) : 1;
+    // The pass counter counts held passes too: note where the run began so
+    // `csp replay` can tell how many passes ran the program.
+    const uint32_t first = fpga_word_read(fpga_map::diag_pass);
     engine_link_raw_write(fpga_map::ctrl, 0);
     vTaskDelay(pdMS_TO_TICKS(milliseconds));
     engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
     vTaskDelay(pdMS_TO_TICKS(10));
-    std::printf("  stepped %d ms\n", milliseconds);
+    std::printf("  stepped %d ms from pass %lu\n", milliseconds,
+                static_cast<unsigned long>(first & 0x3FFFF));
     return 0;
 }
 
