@@ -141,9 +141,10 @@ module tb_csp_cosim #(
                      $signed(u_core.sink_write_data));
         end
         if (trace_issues && u_core.move) begin
-            $display("rtl move cycle %0d target %0d hit_buffer %0d hit_flight %0d buffer %0d/%0d inflight %0d/%0d held_valid %0d decode_pc %0d restart %0d",
-                     int'(u_core.pass_cycle), int'(u_core.move_target), u_core.hit_buffer, u_core.hit_flight,
-                     u_core.buffer_valid, int'(u_core.buffer_pc), u_core.inflight_valid, int'(u_core.inflight_pc),
+            $display("rtl move cycle %0d next_pc %0d self %0d jump %0d hit_buffer %0d hit_flight %0d buffer %0d/%0d inflight %0d/%0d held_valid %0d decode_pc %0d restart %0d",
+                     int'(u_core.pass_cycle), int'(u_core.next_pc), u_core.move_self, u_core.move_jump,
+                     u_core.hit_buffer, u_core.hit_flight,
+                     u_core.buffer_valid, int'(u_core.buffer_place), u_core.inflight_valid, int'(u_core.inflight_place),
                      u_core.held_valid, int'(u_core.decode_pc), u_core.fetch_restart);
         end
         if (trace_issues && u_core.read_stage.valid && !u_core.r_hold

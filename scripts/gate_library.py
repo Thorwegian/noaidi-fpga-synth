@@ -31,6 +31,7 @@ chosen = {}
 for cell in sorted(used):
     chosen[cell] = yosys[cell] if cell in yosys and cell not in ('GSR',) else vendor[cell]
 chosen['GSR'] = vendor['GSR']  # the vendor models look at GSR.GSRO
+chosen['SDPB'] = vendor['SDPB']  # the write queue's block (rtl/csp/csp_write_queue.sv), in the bench's RTL
 for name in sorted(chosen):
     for dep in re.findall(r'^\s*([A-Z][A-Z0-9_]+)\s+(?:#\s*\(|\w+\s*\()', chosen[name], re.M):
         if dep not in chosen and (dep in yosys or dep in vendor):

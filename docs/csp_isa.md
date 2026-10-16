@@ -118,7 +118,7 @@ file held the cycle before).
 
 | Stage | Work |
 |---|---|
-| F | fetch: the instruction memory's word goes into a one-entry buffer register, and nowhere else (nothing but a register on a memory's output, section 12); the fetch runs one word ahead of decode, so moving on to the next instruction costs nothing; a jump (a loop's repeat, a skipped body) restarts it and costs two cycles, which the reference model counts |
+| F | fetch: the instruction memory's word goes into a one-entry buffer register, and nowhere else (nothing but a register on a memory's output, section 12); the fetch runs one word ahead of decode, so moving on to the next instruction costs nothing; a jump (a loop's repeat, a skipped body) restarts it and costs two cycles, which the reference model counts. The buffered word and the word on the memory are known by their place relative to decode's pc (own, next), shifted down at a move, and a move is told apart (next, onto itself, a jump) from the loop control signals: no pc is compared with `next_pc`, which keeps the loop-end logic off the fetch's enables (section 12) |
 | D | decode, from the buffer's word: operand addresses from `i`/`j`; the register-file read addresses go in as the instruction issues |
 | R | the hazard check (the three operand addresses against those of E1 … W, and of W a cycle ago; made in D, one stage early, and carried in six registered bits while R waits, so that the stall decision is an OR of registers); register read (three ports) → operands in the accumulator's format; `SKIP` decides |
 | E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
