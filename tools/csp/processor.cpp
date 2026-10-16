@@ -330,6 +330,7 @@ int64_t Processor::issue(const Instruction &instruction,
     std::array<int, 2> scratch{};
 
     int64_t cycle = board.front_ready;
+    state.entry   = cycle;
     // In a vector loop, an operand indexed by an element's own copy of an
     // index register waits for that element's IDX.
     auto wait_for_index = [&](uint16_t field) {
@@ -388,6 +389,7 @@ int64_t Processor::issue(const Instruction &instruction,
         board.index_ready = cycle + barrier_latency;
     }
     board.front_ready = cycle + (barrier ? barrier_latency : 1);
+    state.resolved    = barrier;
     return cycle;
 }
 
@@ -403,8 +405,9 @@ bool Processor::issue_or_stop(const Instruction &instruction, size_t pc,
         return false;
     }
     if (trace_) {
-        std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n", pc,
-                     static_cast<long long>(state.cycle), index_[0], index_[1]);
+        std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d word %09llx\n", pc,
+                     static_cast<long long>(state.cycle), index_[0], index_[1],
+                     static_cast<unsigned long long>(program_[pc]));
     }
     state.report.cycles = static_cast<int>(state.cycle) + 1;
     return true;
@@ -447,7 +450,8 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
         state.report.errors.push_back("vector loop over more than "
                                       + std::to_string(max_vector_length)
                                       + " elements, or past the program's end");
-        state.pc = end;
+        state.pc = end; // a jump past the body
+        state.scoreboard.front_ready += jump_penalty;
         return;
     }
 
@@ -501,6 +505,9 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
     }
 
     own_index = modulo_address(base + count * int64_t{stride});
+    if (count == 0) {
+        state.scoreboard.front_ready += jump_penalty; // a jump past the body
+    }
     if (count > 0) {
         const Element &last = elements.back();
         other_index         = last.other_index;
@@ -512,6 +519,7 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
         board.front_ready =
                 std::max(board.front_ready, state.cycle + barrier_latency);
     }
+    state.resolved    = true; // the front end moves on at the loop's end
     board.index_ready = 0;
     state.pc          = end;
 }
@@ -710,7 +718,8 @@ void Processor::execute(const Instruction &instruction, PassState &state) {
             break;
         }
         if (count <= 0) {
-            state.pc = end; // the body runs no times
+            state.pc = end; // the body runs no times: a jump past it
+            state.scoreboard.front_ready += jump_penalty;
             break;
         }
         if (!state.loops.empty()) {
@@ -738,7 +747,19 @@ void Processor::end_loops(PassState &state) {
         int &index_value = index_[static_cast<size_t>(loop.index)];
         index_value      = modulo_address(int64_t{index_value} + loop.stride);
         if (--loop.remaining > 0) {
+            // A jump: the fetch restarts when the front end moves on past the
+            // body's last instruction: when that instruction entered the
+            // pipeline (a wait for its operands, in R, overlaps the fetch), or
+            // at its resolution; the start arrives jump_penalty cycles after
+            // the next word would have. A body of one instruction keeps its
+            // word, and pays nothing.
             state.pc = loop.start;
+            if (loop.end - loop.start > 1) {
+                state.scoreboard.front_ready = state.resolved
+                        ? state.scoreboard.front_ready + jump_penalty
+                        : std::max(state.scoreboard.front_ready,
+                                   state.entry + 1 + jump_penalty);
+            }
             break;
         }
         state.loops.pop_back();

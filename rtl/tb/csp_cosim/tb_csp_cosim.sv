@@ -140,10 +140,17 @@ module tb_csp_cosim #(
             $display("rtl sink %0d %0d", int'(u_core.sink_write_address),
                      $signed(u_core.sink_write_data));
         end
+        if (trace_issues && u_core.move) begin
+            $display("rtl move cycle %0d target %0d hit_buffer %0d hit_flight %0d buffer %0d/%0d inflight %0d/%0d held_valid %0d decode_pc %0d restart %0d",
+                     int'(u_core.pass_cycle), int'(u_core.move_target), u_core.hit_buffer, u_core.hit_flight,
+                     u_core.buffer_valid, int'(u_core.buffer_pc), u_core.inflight_valid, int'(u_core.inflight_pc),
+                     u_core.held_valid, int'(u_core.decode_pc), u_core.fetch_restart);
+        end
         if (trace_issues && u_core.read_stage.valid && !u_core.r_hold
                 && int'(u_core.read_stage.pc) < program_length) begin
-            $display("rtl pc %0d cycle %0d", int'(u_core.read_stage.pc),
-                     int'(u_core.pass_cycle) - 1);
+            $display("rtl pc %0d cycle %0d i %0d j %0d word %09h", int'(u_core.read_stage.pc),
+                     int'(u_core.pass_cycle) - 1, int'(u_core.index_i), int'(u_core.index_j),
+                     u_core.read_stage.instruction);
         end
     end
 

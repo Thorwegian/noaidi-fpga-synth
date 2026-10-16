@@ -43,6 +43,10 @@ constexpr int max_vector_length  = 64;   // iterations of a vector loop
 
 constexpr int result_latency  = 7;
 constexpr int barrier_latency = 3;
+// A jump (a loop's repeat, a skipped body) costs this many cycles more than
+// moving on to the next instruction: the fetch runs ahead on the next pc
+// only (rtl/csp/csp_core.sv, F).
+constexpr int jump_penalty    = 2;
 
 // ---- number formats -------------------------------------------------------
 //

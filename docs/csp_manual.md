@@ -258,7 +258,13 @@ instruction itself. The instruction's description says so.
   |---|---|---|
   | any, in a register | an instruction that writes that register | 7 cycles after it |
   | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
+  | the first of a body, as its loop repeats | the last of the body | 3 cycles after it (1 if the body is one instruction) |
+  | the first after a `LOOP` whose count is 0 | the `LOOP` | 5 cycles after it |
   | any, independent | nothing before it | 1 cycle after the one before |
+
+  A jump costs the two cycles because the instruction fetch runs ahead on
+  the next instruction only: it restarts at the loop's start, or past the
+  skipped body. A vector loop's end is no jump.
 
   Example: `MAC r1, 0, a, b` followed by `MAC r2, 0, r1, c` waits, since
   the second reads `r1`. `MAC r1, 0, a, b` followed by `MAC r2, 0, d, c`

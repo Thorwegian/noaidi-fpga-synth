@@ -303,22 +303,35 @@ module csp_core (
         .write_data    (rf_write_data)
     );
 
-    // ---- D: decode -----------------------------------------------------------------------------
-    // The instruction at decode_pc is on the instruction memory's output
-    // while decode_valid. Without an issue the fetch address stays on
-    // decode_pc, so it stays there.
-    logic            decode_valid;
-    logic [PC_W-1:0] decode_pc;
+    // ---- F: fetch ------------------------------------------------------------------------------
+    // The memory is given fetch_pc, a register, and answers a clock later; the
+    // word goes into the buffer, a register, and nowhere else: nothing but a
+    // register on the memory's output (docs/csp_isa.md, 12). Decode takes its
+    // word from the buffer when the buffer holds decode's pc, and keeps a copy
+    // (held_instruction) so that the buffer can move on. The fetch runs ahead:
+    // the word after decode's is in the buffer, the one after that on the
+    // memory, so decode moving on to the next pc costs nothing; a move to any
+    // other pc (a loop's repeat, a skipped body) restarts the fetch there, and
+    // the word arrives two clocks later than the memory's output would: a
+    // jump costs two cycles, which the reference model counts too. Word 0 is
+    // fetched at the end of a pass, for the next pass's first cycle.
+    logic [PC_W-1:0] fetch_pc;          // on the memory this cycle
+    logic            fetch_valid;       // and wanted
+    logic [PC_W-1:0] inflight_pc;       // the pc of the word on the memory's output
+    logic            inflight_valid;
+    logic [35:0]     buffer_word;
+    logic [PC_W-1:0] buffer_pc;
+    logic            buffer_valid;
+    logic [35:0]     held_instruction;  // decode's word, once taken from the buffer
+    logic            held_valid;
+    assign fetch_address = fetch_pc;
 
-    // The instruction in decode: the memory's output when the front end moved
-    // on last cycle (the address it was given then was the one decode needs
-    // now), else the one decode held. The memory is addressed without waiting
-    // for this cycle's issue (fetch_address below), which keeps the hazard
-    // check, the long path, out of the memory's address; a stall costs the
-    // held copy, not a second read.
-    logic                  fetch_fresh;
-    logic [35:0]           held_instruction;
-    wire  [35:0]           decode_bits = fetch_fresh ? fetch_data : held_instruction;
+    // ---- D: decode -----------------------------------------------------------------------------
+    logic            decode_valid;      // decode_pc is an instruction to issue, once its word is here
+    logic [PC_W-1:0] decode_pc;
+    wire             buffer_is_decode = buffer_valid && buffer_pc == decode_pc;
+    wire             decode_has_word  = held_valid || buffer_is_decode;
+    wire  [35:0]     decode_bits      = held_valid ? held_instruction : buffer_word;
     csp_pkg::instruction_t decoded;
     assign decoded = csp_pkg::instruction_t'(decode_bits);
 
@@ -502,7 +515,8 @@ module csp_core (
                 && execute1_stage.element == vector_element
                 && execute1_stage.instruction.op == csp_pkg::OP_IDX);
 
-    wire issue = decode_valid && run_open && !r_hold && !(private_used && private_pending);
+    wire issue = decode_valid && decode_has_word && run_open && !r_hold
+                 && !(private_used && private_pending);
 
     control_t issued;
     always_comb begin
@@ -759,16 +773,32 @@ module csp_core (
     // finished vector loop, or past an issued instruction that is neither.
     wire advance = resolving || vector_done || (issue && !is_barrier && !vector_issuing);
 
-    // The memory's address, as if decode issues this cycle unless the front
-    // end moves on anyway (a resolved LOOP or IDX, a finished vector loop,
-    // the start of a pass). When decode does not issue, what the memory returns
-    // is not used: decode keeps the instruction it holds (fetch_fresh).
-    wire [PC_W-1:0] fetch_if_issued = vector_issuing
-            ? ((vector_last_element && !vector_last_instruction) ? decode_pc + 1'b1 : decode_pc)
-            : (is_barrier ? decode_pc : next_pc);
-    assign fetch_address = pass_start ? '0
-                         : ((resolving || vector_done) ? next_pc : fetch_if_issued);
-    wire fetch_moves_on = advance || vector_next_instruction;
+    // Where decode moves to when the front end moves on: the next
+    // instruction of a vector loop's body, else next_pc (after a resolution,
+    // a finished vector loop or an issue). The move hits when the word is in
+    // the buffer, or on the memory's output this cycle (it goes into the
+    // buffer at this edge); else the fetch restarts at the target.
+    wire            move        = advance || vector_next_instruction;
+    wire [PC_W-1:0] move_target = vector_next_instruction ? decode_pc + 1'b1 : next_pc;
+    wire            hit_self    = move_target == decode_pc;   // a one-instruction body repeating: the word stays
+    wire            hit_buffer  = buffer_valid && buffer_pc == move_target;
+    // (the buffer may still hold decode's own word, given up at the move)
+    wire            hit_flight  = (!buffer_valid || buffer_is_decode) && inflight_valid
+                                  && inflight_pc == move_target;
+    wire            move_hit    = hit_self || hit_buffer || hit_flight;
+    // Word 0 for the next pass: fetched at this pass's end; at a pass's start
+    // it is there, or (the first pass after a reset) fetched then.
+    wire            holds_zero  = (buffer_valid && buffer_pc == '0) || (inflight_valid && inflight_pc == '0);
+    wire            fetch_restart_pass = (in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 4))
+                                       || (pass_start && !holds_zero);
+    wire            fetch_restart = fetch_restart_pass || (move && !move_hit);
+    wire [PC_W-1:0] fetch_restart_pc = fetch_restart_pass ? '0 : move_target;
+    // The buffer takes the memory's word when its slot is free: empty, or its
+    // word taken into decode's copy at this edge.
+    wire            buffer_take = (move && !hit_self && (hit_buffer || buffer_is_decode))
+                                  || (!move && !held_valid && buffer_is_decode);
+    wire            buffer_free = !buffer_valid || buffer_take;
+    wire            buffer_load = buffer_free && inflight_valid;
 
     // ---- E2 ------------------------------------------------------------------------------------
     logic signed [54:0] e2_difference_full, e2_sum_full;
@@ -955,7 +985,11 @@ module csp_core (
         if (!reset_n) begin
             decode_valid    <= 1'b0;
             decode_pc       <= '0;
-            fetch_fresh     <= 1'b0;
+            fetch_pc        <= '0;
+            fetch_valid     <= 1'b1;
+            inflight_valid  <= 1'b0;
+            buffer_valid    <= 1'b0;
+            held_valid      <= 1'b0;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
@@ -977,7 +1011,7 @@ module csp_core (
         end else if (pass_start) begin
             decode_valid    <= !held;
             decode_pc       <= '0;
-            fetch_fresh     <= 1'b1;
+            held_valid      <= 1'b0;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
@@ -991,8 +1025,62 @@ module csp_core (
             loop_inner      <= '0;
             vector_issuing  <= 1'b0;
             vector_finish   <= '0;
+            // F: word 0, if it is not already here
+            if (fetch_restart) begin
+                fetch_pc       <= '0;
+                fetch_valid    <= 1'b1;
+                inflight_valid <= 1'b0;
+                buffer_valid   <= 1'b0;
+            end else if (buffer_load || !inflight_valid) begin
+                inflight_pc    <= fetch_pc;
+                inflight_valid <= fetch_valid;
+                fetch_pc       <= fetch_pc + 1'b1;
+                if (buffer_load) begin
+                    buffer_word  <= fetch_data;
+                    buffer_pc    <= inflight_pc;
+                    buffer_valid <= 1'b1;
+                end
+            end else begin
+                inflight_valid <= 1'b0;
+                fetch_pc       <= inflight_pc;
+            end
         end else begin
-            fetch_fresh <= fetch_moves_on;
+            // F: the fetch runs ahead, restarts on a jump, and fetches a word
+            // again when the buffer could not take it.
+            if (fetch_restart) begin
+                fetch_pc       <= fetch_restart_pc;
+                fetch_valid    <= 1'b1;
+                inflight_valid <= 1'b0;
+                buffer_valid   <= 1'b0;
+            end else if (buffer_load || !inflight_valid) begin
+                inflight_pc    <= fetch_pc;
+                inflight_valid <= fetch_valid;
+                fetch_pc       <= fetch_pc + 1'b1;
+                if (buffer_load) begin
+                    buffer_word  <= fetch_data;
+                    buffer_pc    <= inflight_pc;
+                    buffer_valid <= 1'b1;
+                end else if (buffer_take) begin
+                    buffer_valid <= 1'b0;
+                end
+            end else begin
+                inflight_valid <= 1'b0;             // the word on the memory is not wanted:
+                fetch_pc       <= inflight_pc;      // the one the buffer could not take comes again
+                if (buffer_take) begin
+                    buffer_valid <= 1'b0;
+                end
+            end
+            // Decode's copy of its word: taken from the buffer at a move that
+            // hits it, or the cycle the buffer brings decode's word.
+            if (move && !hit_self) begin
+                held_valid <= hit_buffer;
+                if (hit_buffer) begin
+                    held_instruction <= buffer_word;
+                end
+            end else if (!held_valid && buffer_is_decode) begin
+                held_instruction <= buffer_word;
+                held_valid       <= 1'b1;
+            end
             // D: issue, or wait; a LOOP or IDX empties decode until it resolves.
             if (advance) begin
                 decode_valid <= 1'b1;
@@ -1109,7 +1197,6 @@ module csp_core (
 
     // The data path's registers: no reset, a bubble's values are never used.
     always_ff @(posedge clk) begin
-        held_instruction <= decode_bits;
         if (!r_hold) begin
             read_reads_a           <= reads_a;
             read_reads_x           <= reads_x;

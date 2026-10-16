@@ -148,6 +148,8 @@ private:
     struct PassState {
         size_t pc     = 0;
         int64_t cycle = 0; // the cycle the current instruction issues in
+        int64_t entry = 0; // the cycle the front end moved on to it (its operands' wait not counted)
+        bool resolved = false; // the front end moves on at its resolution (a LOOP, an IDX, a vector loop's end)
         Scoreboard scoreboard;
         std::vector<Loop> loops;
         int skip = 0;
