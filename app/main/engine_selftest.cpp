@@ -86,6 +86,11 @@ private:
         for (int half = 0; half < 2; ++half) {
             const int record = st::lfos + half * 16 * st::lfo_size;
             const int set    = st::lfo_sets + half * st::set_size;
+            // a loop runs over as many records of each shape as the set says:
+            // every count must be written, not only the one that is used
+            for (int word = 0; word < st::set_size; ++word) {
+                queue(set + word, 0);
+            }
             queue_wide(record + st::phase_step, int64_t{1} << 22);
             queue(record + st::depth, one);
             queue(record + st::neg_depth, -one);
