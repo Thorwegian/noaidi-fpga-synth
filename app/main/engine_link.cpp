@@ -145,6 +145,11 @@ public:
     }
 };
 
+// The LFO probe log below is a diagnostic: its SPI traffic every few seconds
+// is off unless this is set (a lab run of 480 queued writes lost a run of
+// them each time the probe fired).
+constexpr bool log_lfo_probe = false;
+
 // Every few seconds, log what the CSP holds for the LFOs: the pass counter
 // and, for each LFO, its record (phase, step, depth and its negative, gain
 // and output) and its set (where it starts, how many of each shape). What the
@@ -316,7 +321,9 @@ void engine_link_init(void) {
         ESP_LOGE(tag, "failed to create task");
         return;
     }
-    xTaskCreate(probe_task, "engine_probe", 3072, nullptr, 2, nullptr);
+    if (log_lfo_probe) {
+        xTaskCreate(probe_task, "engine_probe", 3072, nullptr, 2, nullptr);
+    }
     esp_timer_create_args_t timer_args = {};
     timer_args.callback                = tick_timer_cb;
     timer_args.name                    = "engine_tick";
