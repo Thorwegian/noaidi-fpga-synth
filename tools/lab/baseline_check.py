@@ -48,7 +48,10 @@ def main():
     parser = argparse.ArgumentParser(description="check a baseline recording with Essentia")
     parser.add_argument("wav")
     parser.add_argument("--tail", type=float, default=24.0)
+    parser.add_argument("--envelope", help="write the level envelope (time, dBFS every 50 ms) as CSV here")
+    parser.add_argument("--json", help="write the per-segment results here")
     args = parser.parse_args()
+    results = []
 
     audio = es.MonoLoader(filename=args.wav, sampleRate=48000)()
     sr = 48000
@@ -93,6 +96,7 @@ def main():
         share = sum(int(part.split()[1].rstrip("%")) for part in shares.split("  ") if part and NAMES[want % 12] == part.split()[0].rstrip("0123456789")) if shares else 0
         ok = share >= 33
         failures += 0 if ok else 1
+        results.append({"segment": name, "level_dbfs": round(level, 2), "median_midi": None if math.isnan(median) else round(median, 2), "want": note_name(want), "clusters": shares, "ok": ok})
         print("%-28s %6.1f dB %7.2f (%s) %8s  %s   clusters: %s" % (name, level, median, note_name(round(median)) if not math.isnan(median) else "-", note_name(want), "ok" if ok else "FAIL", shares))
 
     t = BEAT                                      # the lead-in beat
@@ -135,6 +139,19 @@ def main():
     ok = level_r6 < level_triad - 20 and level_r2 < level_triad
     failures += 0 if ok else 1
     print("%-28s %6.1f dB %10s %8s  %s" % ("release +2 s / +6 s", level_r2, "%.1f dB" % level_r6, "< triad-20", "ok" if ok else "FAIL"))
+    results.append({"segment": "bar of silence", "level_dbfs": round(level_silence, 2), "ok": bool(level_silence < level_c6 - 12)})
+    results.append({"segment": "triad", "level_dbfs": round(level_triad, 2), "peaks_db": {note_name(n): round(rel, 1) for n, rel in present}, "ok": bool(all(rel > -24 for _, rel in present))})
+    results.append({"segment": "release", "level_2s_dbfs": round(level_r2, 2), "level_6s_dbfs": round(level_r6, 2), "ok": bool(level_r6 < level_triad - 20 and level_r2 < level_triad)})
+    if args.envelope:
+        step = int(0.05 * sr)
+        with open(args.envelope, "w") as out:
+            out.write("time_s,level_dbfs\n")
+            for k in range(0, len(audio) - step, step):
+                out.write("%.2f,%.2f\n" % (k / sr, level_db(audio[k:k + step])))
+    if args.json:
+        import json
+        with open(args.json, "w") as out:
+            json.dump({"file": args.wav, "failures": failures, "segments": results}, out, indent=1)
     print("%d failure(s)" % failures)
     return 1 if failures else 0
 
