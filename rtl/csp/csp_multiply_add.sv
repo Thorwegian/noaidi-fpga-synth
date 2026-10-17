@@ -22,8 +22,13 @@
 // registers sat 13–19 tiles from the pins; a combinational multiply from
 // fabric flops failed on the board from 69 MHz while the report said 80.
 // SITE_X, SITE_Y name the DSP macro the registers go beside (19, 36:
-// "X19Y36"); negative leaves them to the placer. The block itself is not
-// constrained (below); the registers draw it to the site.
+// "X19Y36"); negative leaves them to the placer, and PLACE_OPERANDS and
+// PLACE_PRODUCT choose which of the two registers is placed (the 108
+// operand flip-flops on the rows beside the DSP took the decode logic's
+// room, issue #222; the 54 of the product are what the board's results
+// line up with: the bitstreams that played had the sum's registers near
+// the block). The block itself is not constrained (below); the placed
+// registers draw it to the site.
 //
 // In the CSP's formats (docs/csp_manual.md section 3): a is a word
 // (Q4.14), b a wide value (Q4.32) and c the accumulator's format
@@ -38,8 +43,10 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_multiply_add #(
-    parameter int SITE_X = -1,            // the DSP macro's column, or negative
-    parameter int SITE_Y = -1             // and row
+    parameter int SITE_X         = -1,    // the DSP macro's column, or negative
+    parameter int SITE_Y         = -1,    // and row
+    parameter bit PLACE_OPERANDS = 1'b1,  // the operand registers on the rows beside it
+    parameter bit PLACE_PRODUCT  = 1'b1   // the product register likewise
 ) (
     input  wire                clk,
     input  wire                reset_n,
@@ -95,8 +102,9 @@ module csp_multiply_add #(
 `endif
 `ifdef CSP_MAC_PRIMITIVE
     for (genvar n = 0; n < FLOPS; n++) begin : g_flop
-        localparam int X = tile_x(n / 6);
-        localparam int Y = tile_y(n / 6);
+        localparam bit PLACE = n < PRODUCT_LOW ? PLACE_OPERANDS : PLACE_PRODUCT;
+        localparam int X = PLACE ? tile_x(n / 6) : -1;
+        localparam int Y = PLACE ? tile_y(n / 6) : -1;
         if (n < PRODUCT_LOW) begin : g_operand
             csp_placed_dff #(.TILE_X(X), .TILE_Y(Y), .SLOT(n % 6)) u_flop (
                 .clk          (clk),

@@ -1080,15 +1080,15 @@ module csp_core (
     // flags below) and multiplies register to register inside: the sum is
     // in its output register in E4, and in the unit's product register,
     // on the output pins, in E5 — E5's register, placed beside the block.
-    // The unit's registers are left to the placer (SITE_X, SITE_Y negative):
-    // placed on the rows beside the DSP, in the middle of the chip, their
-    // 162 flip-flops pushed the core's logic out of its place and the
-    // report fell from 104–107 MHz to 85–93 on every seed, which on the
-    // board is a fault on every pass at 73.728; left alone, the paths into
-    // and out of the DSP's pins are the one untimed route left (17 tiles),
-    // and the seed decides whether a bitstream plays (docs/gowin_oss_notes.md).
+    // The unit's product register is placed beside the DSP at X19Y36, its
+    // operand registers are not: placed together, their 162 flip-flops
+    // pushed the core's logic out of its place and the report fell from
+    // 104–107 MHz to 85–93 on every seed (a fault on every pass on the
+    // board); left alone, the sum's path out of the block decided whether
+    // a bitstream played — the ones that did had the DSP at X19Y36 with
+    // the product's registers nearest to it (docs/gowin_oss_notes.md).
     wire signed [53:0] product;         // the unit's product register: E5's
-    csp_multiply_add #(.SITE_X(-1), .SITE_Y(-1)) u_multiply_add (
+    csp_multiply_add #(.SITE_X(19), .SITE_Y(36), .PLACE_OPERANDS(1'b0), .PLACE_PRODUCT(1'b1)) u_multiply_add (
         .clk       (clk),
         .reset_n   (reset_n),
         .a         (multiply_a_next),

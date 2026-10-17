@@ -156,7 +156,13 @@ and the DSP. Issue #230 carries the patch work (fork
   constrained) the report fell from 104–107 MHz to 85–93 on eight seeds
   and the board failed every pass at 73.728, where the same netlist with
   the memories' 1 641 placed and the DSP's left alone booted and played
-  4 of 4 (seed 5). The DSP's registers are therefore left to the placer.
+  4 of 4 (seed 5). The DSP's operand registers are therefore left to the
+  placer; its **product register alone** placed beside the DSP (54 flops,
+  `PLACE_PRODUCT`) is the branch's configuration: across ten bitstreams
+  the only variable that lined up with sound was how near the sum's
+  registers sat to the block, and with the product placed one seed of
+  two played three boots of four (the other none) where every seed of
+  the unplaced netlist was silent — better odds, not a fix.
 - **Placing the block alone is not enough: the registers on its pins
   have to be placed too.** With the register file's six blocks on the
   middle row and nothing else constrained, the write registers stayed
