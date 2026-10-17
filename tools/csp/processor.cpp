@@ -386,7 +386,7 @@ int64_t Processor::issue(const Instruction &instruction,
     const bool barrier =
             op == Opcode::loop || (op == Opcode::idx && !state.vector);
     if (op == Opcode::idx && state.vector) {
-        board.index_ready = cycle + barrier_latency;
+        board.index_ready = cycle + private_index_latency;
     }
     board.front_ready = cycle + (barrier ? barrier_latency : 1);
     state.resolved    = barrier;

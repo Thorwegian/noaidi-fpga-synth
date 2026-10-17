@@ -353,10 +353,23 @@ module csp_core (
     csp_pkg::instruction_t decoded;
     assign decoded = csp_pkg::instruction_t'(decode_bits);
 
-    // The index registers decode sees: in a vector loop, the element's.
+    // The index registers decode sees: in a vector loop, the element's. The
+    // element's private index comes out of a register of its own
+    // (private_current), loaded every clock for the element decode works on
+    // next: the private array's read feeds nothing but that register, not
+    // the address adder and the banks' pins within the clock of the IDX's
+    // write (on the board at 73.728 MHz, an instruction that had waited for
+    // its element's IDX and was followed by another read a garbage operand
+    // through that index; docs/csp_isa.md section 12). The IDX's write is
+    // seen a clock later for it: private_pending covers E2 as well.
     wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
-    wire [AW-1:0] private_current = private_written ? private_value[vector_element]
-                                                    : entry_private;
+    logic [AW-1:0] private_current;
+    wire  [5:0]    next_element   = (vector_issue && !vector_last_element) ? vector_element + 1'b1
+                                  : (vector_issue && !vector_last_instruction) ? 6'd0
+                                  : vector_element;
+    wire           private_written_next = private_written
+                                          || (vector_issue && vector_last_element && decoded_op == csp_pkg::OP_IDX);
+    wire [AW-1:0]  private_next   = private_written_next ? private_value[next_element] : entry_private;
     wire [AW-1:0] decode_index_i  = vector_issuing ? (vector_on_j ? private_current : vector_own)
                                                    : index_i;
     wire [AW-1:0] decode_index_j  = vector_issuing ? (vector_on_j ? vector_own : private_current)
@@ -516,8 +529,9 @@ module csp_core (
 `endif
 
     // An operand indexed by the element's private index register waits while
-    // that element's IDX is in R or E1: the register is written at the end
-    // of E1, three cycles after the IDX issues.
+    // that element's IDX is in R, E1 or E2: the array is written at the end
+    // of E1, the element's copy of it (private_current) at the end of E2,
+    // four cycles after the IDX issues.
     wire private_used = vector_issuing
             && (((uses_a(decoded_op, decoded.a) || writes_result(decoded_op))
                  && decoded.r[9] && decoded.r[8] == !vector_on_j)
@@ -528,7 +542,10 @@ module csp_core (
              && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
             || (execute1_stage.valid && execute1_stage.vector && execute1_stage.run == vector_run
                 && execute1_stage.element == vector_element
-                && execute1_stage.instruction.op == csp_pkg::OP_IDX);
+                && execute1_stage.instruction.op == csp_pkg::OP_IDX)
+            || (execute2_stage.valid && execute2_stage.vector && execute2_stage.run == vector_run
+                && execute2_stage.element == vector_element
+                && execute2_stage.instruction.op == csp_pkg::OP_IDX);
 
     wire issue = decode_valid && decode_has_word && run_open && !r_hold
                  && !(private_used && private_pending);
@@ -1292,6 +1309,10 @@ module csp_core (
             read_reads_flags       <= reads_flags;
         end
 
+        // The element's private index, for the element decode works on next
+        // (at a vector loop's open: the entry's, for element 0).
+        private_current <= opens_vector ? (execute1_stage.instruction.a[0] ? index_i : index_j)
+                                        : private_next;
         // E1 takes the banks' words every cycle: while R holds they are read
         // again and E1 is a bubble; the cycle R leaves, they are its.
         e1_a_even      <= read_even[0];

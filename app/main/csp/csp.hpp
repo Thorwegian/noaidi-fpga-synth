@@ -43,6 +43,10 @@ constexpr int max_vector_length  = 64;   // iterations of a vector loop
 
 constexpr int result_latency  = 8;
 constexpr int barrier_latency = 3;
+// In a vector loop, an operand indexed by an element's own copy of an index
+// register issues this many cycles after that element's IDX at the earliest:
+// the copy is a register loaded a cycle after the IDX writes (csp_core.sv).
+constexpr int private_index_latency = 4;
 // A jump (a loop's repeat, a skipped body) costs this many cycles more than
 // moving on to the next instruction: the fetch runs ahead on the next pc
 // only (rtl/csp/csp_core.sv, F).
