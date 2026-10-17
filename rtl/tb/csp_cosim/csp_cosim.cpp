@@ -392,6 +392,9 @@ int run_control_program(VerilatedContext &context) {
         }
     }
     // The channels: envelope tables, routing, depths
+    const int channel_sinks = symbol("CHANNEL_SINKS");
+    const int sink_size     = symbol("CHANNEL_SINK_SIZE");
+    setup.push_back({symbol("CHANNELS_IN_USE"), 16});
     for (int channel = 0; channel < 16; ++channel) {
         const int base = channels + channel * channel_size;
         auto table     = [&](int row, int64_t target22, uint32_t coefficient) {
@@ -419,6 +422,14 @@ int run_control_program(VerilatedContext &context) {
         field("KEY_TRACK", word_of(0.25 * pick(0, 6)));
         field("MOD_AMOUNT", word_of(0.1 * pick(-30, 30)));
         field("VOLUME", word_of(0.1 * pick(2, 10)));
+        field("LFO1_DUTY", word_of(0.01 * pick(0, 30)));
+        field("LFO2_DUTY", word_of(0.01 * pick(0, 30)));
+        field("LFO1_RESONANCE", word_of(0.1 * pick(0, 10)));
+        field("LFO2_RESONANCE", word_of(0.1 * pick(0, 10)));
+        field("DUTY_BASE_0", word_of(0.1 * pick(-5, 5)));
+        field("DUTY_BASE_1", word_of(0.1 * pick(-5, 5)));
+        field("RESONANCE_BASE", word_of(0.1 * pick(0, 40)));
+        field("SINK_BLOCK", channel_sinks + channel * sink_size);
     }
     // The voices: idle, in release
     for (int voice = 0; voice < 32; ++voice) {
@@ -427,6 +438,8 @@ int run_control_program(VerilatedContext &context) {
         setup.push_back({base + symbol("STAGE_M"), 24});
         setup.push_back(
                 {base + symbol("VELOCITY"), word_of(0.1 * pick(3, 10))});
+        setup.push_back(
+                {base + symbol("VELOCITY_M"), word_of(0.1 * pick(3, 10))});
         setup.push_back({base + symbol("CHANNEL"),
                          channels + pick(0, 15) * channel_size});
         setup.push_back({base + symbol("NOTE"), word_of(0.1 * pick(-20, 20))});
@@ -520,6 +533,10 @@ public:
             int address = pick(0x060, 0x0FF);
             if (burst && chance(8)) {
                 address = chance(2) ? 0 : pick(0x040, 0x05F);
+            } else if (chance(5)) {
+                address = pick(0x800, 0xBFF); // a sink word: the firmware's own
+            } else if (chance(40)) {
+                address = pick(0xC00, 0xFFF); // beyond the sinks: dropped
             }
             writes.push_back({address, word()});
         }
@@ -960,6 +977,30 @@ int main(int argc, char **argv) {
             differences = cosim.pass({}, "lfo pass " + std::to_string(pass));
         }
         std::printf("lfo: %s\n", differences ? "FAIL" : "match");
+        failures += differences != 0;
+    }
+
+    {
+        // A program as long as the pass allows: an IDX every 32 words, and a
+        // store through [i+k] after each, a marker per instruction (tools/lab,
+        // the board's test of the whole program memory).
+        std::string source = ".const ONE, 1.0\n.const EIGHTH, 0.125\n";
+        for (int words = 0, group = 0; words < 1470; ++group) {
+            source += "IDX i, =#" + std::to_string(0x100 + 32 * group) + ", 0\n";
+            ++words;
+            for (int k = 0; k < 32 && words < 1470; ++k, ++words) {
+                source += "MAC [i+" + std::to_string(k) + "], 0, ONE, EIGHTH\n";
+            }
+        }
+        const csp::Program markers       = csp::assemble(source);
+        std::vector<FirmwareWrite> setup = constants_of(markers);
+        CoSim cosim(context);
+        cosim.start(markers.words, setup);
+        int differences = 0;
+        for (int pass = 0; pass < 4 && differences == 0; ++pass) {
+            differences = cosim.pass({}, "markers pass " + std::to_string(pass));
+        }
+        std::printf("markers (1470 words): %s\n", differences ? "FAIL" : "match");
         failures += differences != 0;
     }
 

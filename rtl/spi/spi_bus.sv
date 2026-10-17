@@ -17,28 +17,35 @@
 //   MISO: byte 0 = ID_BYTE (link check on every frame); address and
 //   dummy slots = 0x00; read data slots = the addressed words.
 //
-// Why the read turnaround exists: the store's read port is in the
-// sysclk domain (dual-clock semi dual-port BSRAM — true dual-port does
-// not map on this toolchain, measured), so a fetch costs ~60 ns of
-// synchronizer + BSRAM read. The first data byte's shift register loads
-// HALF a bit period after the address completes — 12.5 ns at the
-// measured 40 MHz SPI ceiling — so without turnaround the first word
-// could never be fresh. Two dummy bytes give 400 ns. Burst words
-// prefetch two byte-slots early for the same margin. (The very first
-// firmware header specified "cmd + 2 dummy + N data"; it was right.)
+// What the words address (docs/memory_map.md):
 //
-// Wire format ≠ storage geometry: 16-bit addresses / 32-bit words on
-// the wire; BACKED_WORDS × 36-bit BSRAM behind it (11-bit space today).
-// Beyond the backed window: writes are dropped, reads return zero — no
+//   0x0000–0x000F  system registers (read back): CTRL, scratch; 0x0008–0x000B and
+//                  0x000D–0x000E are read-only diagnostics, 0x000C picks the CSP
+//                  register pair the probe reads (0x000D, 0x000E)
+//   0x0010         PROGRAM_HIGH: bits 35:32 of the next instruction write
+//   0x2000 + 64 p  partial p's pointers, words 0..3 (the fourth commits)
+//   0x6000 + a     the CSP's write queue: register or sink word a
+//   0x8000 + pc    the CSP's instruction memory (while the CSP is held)
+//
+// Why the read turnaround exists: a read is served in the sysclk domain,
+// so a fetch costs ~60 ns of synchronizer. The first data byte's shift
+// register loads HALF a bit period after the address completes — 12.5 ns
+// at the measured 40 MHz SPI ceiling — so without turnaround the first
+// word could never be fresh. Two dummy bytes give 400 ns. Burst words
+// prefetch two byte-slots early for the same margin.
+//
+// Writes outside the ranges above are dropped, reads return zero — no
 // aliasing.
 //
-// Edge discipline as proven in spi_slave_regs.sv: MOSI sampled and
-// decoded on the RISING edge, MISO loaded on the FALLING edge,
+// Every write strobe is a combinational decode, valid exactly on the sclk
+// edge that completes a data word — the consumer takes it on that same
+// edge (there may be no further edges: a master stops clocking after the
+// last bit). Edge discipline as proven in spi_slave_regs.sv: MOSI sampled
+// and decoded on the RISING edge, MISO loaded on the FALLING edge,
 // posedge-CS async framing, power-up state declared.
 //------------------------------------------------------------------------
 `default_nettype none
 module spi_bus #(
-    parameter int   AW_BACKED = synth_pkg::MAP_AW_BACKED,  // 2048 words backed
     parameter [7:0] ID_BYTE   = synth_pkg::SPI_ID_BYTE
 ) (
     // ---- SPI side (master's clock) ----
@@ -47,46 +54,34 @@ module spi_bus #(
     input  logic        mosi,
     output logic        miso,
 
-    // ---- fabric side ----
-    input  logic        sysclk,
-    input  logic        rst_n,
+    // ---- partial pointers (sclk domain) -----------------------------------
+    // Partial p's ten pointers, written whole when its fourth word arrives.
+    output logic        pointer_write_enable,
+    output logic [7:0]  pointer_write_index,
+    output logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data,
 
-    // ---- per-partial parameter writes (sclk domain) ----------------
-    // The memory map's 0x2000 + v*64 range, offsets 0..6 (OSC, DUTY,
-    // FILTER, GAIN, GATE, PTRS0, PTRS1). Combinational decode, valid
-    // exactly on the sclk edge that completes a data word — the
-    // consumer writes its RAM on that same edge (there may be no
-    // further edges: a master stops clocking after the last bit).
-    // Offsets 7..63 are dropped for now; per-partial read-back is TBD
-    // (reads in this range return zero).
-    output logic        partial_write_enable,
-    output logic [2:0]  partial_write_word,   // 0..6 = OSC..PTRS1 param RAM
-
-    // ---- DMEM base writes (sclk domain, mailbox toward sysclk) -----
-    // The write crosses clock domains through this 1-deep toggle
-    // mailbox; csp.sv syncs dmem_wr_toggle and commits each write into
-    // both DMEM pages (see its mailbox notes for the rate margin).
-    output logic [9:0]  dmem_wr_addr,
-    output logic [17:0] dmem_wr_data,
-    output logic        dmem_wr_toggle,  // toggles once per DMEM write
-
-    // ---- instruction table writes (sclk domain, paged like params) ---
-    // Instruction config is wiring: it rides the ping-pong pages and
-    // takes effect at the swap, same as the per-partial words.
+    // ---- the CSP (sclk domain) ---------------------------------------------
+    // A register or sink write waits in the write queue until `swap`
+    // commits it; the program loads while the CSP is held.
+    output logic        queue_write_enable,
+    output logic [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_write_address,
+    output logic [csp_pkg::WORD_W-1:0]          queue_write_data,
+    output logic        swap,                 // one sclk cycle: commit the queue
     output logic        imem_write_enable,
-    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
-    output logic [31:0] imem_write_data,
-    output logic [7:0]  partial_write_index,
-    output logic [31:0] partial_write_data,
+    output logic [csp_pkg::PROGRAM_W-1:0]       imem_write_address,
+    output logic [35:0] imem_write_data,
+    output logic        csp_held,             // CTRL[1]: the CSP is held in reset
+    output logic        test_tone_enable,     // CTRL[2]
 
-    // CTRL@0x0002 bit 0: page swap request. Toggle semantics
-    // (sclk domain); the consumer syncs the toggle and flips its
-    // active page at the next time slot 512. The write also lands in
-    // the plain window RAM, so reading CTRL back shows the last value.
-    output logic        swap_toggle
+    // ---- diagnostics (sclk domain, read-only words 0x0008-0x000B) ----------
+    input  logic [31:0] status_0,
+    input  logic [31:0] status_1,
+    input  logic [31:0] status_2,
+    input  logic [31:0] status_3,
+    input  logic [31:0] status_4,
+    input  logic [31:0] status_5,
+    output logic [10:0] probe_address        // system register 0x000C: which CSP register pair to probe
 );
-
-    localparam int NWORDS = 1 << AW_BACKED;
 
     //--------------------------------------------------------------------
     // Receive — rising edge; a byte completes AT RE8
@@ -113,6 +108,33 @@ module spi_bus #(
     end
 
     //--------------------------------------------------------------------
+    // The system registers: read back from the sclk domain, so a read needs
+    // no clock crossing. CTRL (0x0002) keeps what was written, less the
+    // swap request, which is an event and not a state.
+    //--------------------------------------------------------------------
+    localparam int SYSTEM_WORDS = 16;
+    localparam int STORED_WORDS = 8;            // 0x0000-0x0007; 0x000C is the probe address
+    logic [31:0] system_register [STORED_WORDS];
+    logic [10:0] probe_register;
+    initial begin
+        for (int word = 0; word < STORED_WORDS; word++) system_register[word] = '0;
+        probe_register = '0;
+    end
+
+    function automatic logic [31:0] read_word(input logic [15:0] address);
+        case (address)
+            16'h0008: read_word = status_0;
+            16'h0009: read_word = status_1;
+            16'h000A: read_word = status_2;
+            16'h000B: read_word = status_3;
+            16'h000D: read_word = status_4;
+            16'h000E: read_word = status_5;
+            16'h000C: read_word = 32'(probe_register);
+            default:  read_word = address < 16'(STORED_WORDS) ? system_register[address[2:0]] : 32'd0;
+        endcase
+    endfunction
+
+    //--------------------------------------------------------------------
     // Frame decode (sclk domain)
     //   phase 0 cmd · 1 addr-hi · 2 addr-lo · 3 read turnaround · 4 data
     //--------------------------------------------------------------------
@@ -122,17 +144,7 @@ module spi_bus #(
     logic        first_dummy_done;  // second turnaround byte pending
     logic [1:0]  data_byte_index;   // byte index within the current word
     logic [23:0] partial_word;      // first three data bytes of a word
-
-    wire addr_in_backed = (word_addr[15:AW_BACKED] == '0);
-
-    // fetch request: toggle + quasi-static address (settle-time CDC,
-    // same pattern as spi_slave_regs' hardware-proven STATUS capture)
-    logic        fetch_toggle;
-    logic [15:0] fetch_addr;
-    logic [31:0] fetch_result;  // fetched word (sysclk domain, see below)
-    logic [31:0] stream_word;   // the word streaming out NOW — latched at
-                                // each word boundary so prefetches into
-                                // fetch_result cannot clip the tail bytes
+    logic [31:0] stream_word;       // the word streaming out NOW
 
     initial begin
         frame_phase      = '0;
@@ -142,10 +154,14 @@ module spi_bus #(
         first_dummy_done = 1'b0;
         data_byte_index  = '0;
         partial_word     = '0;
-        fetch_toggle     = 1'b0;
-        fetch_addr       = '0;
         stream_word      = '0;
     end
+
+    // The word read next, from the address just completed (the address low
+    // byte is on the wire) or from the next word of a burst. One read_word:
+    // two calls made two copies of its multiplexers.
+    wire [15:0] next_read_address = frame_phase == 3'd2 ? {word_addr[15:8], rx_byte}
+                                                        : (auto_increment ? word_addr + 16'd1 : word_addr);
 
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
@@ -165,8 +181,7 @@ module spi_bus #(
                 end
                 3'd2: begin                       // address low
                     word_addr[7:0]  <= rx_byte;
-                    fetch_addr      <= {word_addr[15:8], rx_byte};
-                    fetch_toggle    <= ~fetch_toggle;   // fetch word 0
+                    stream_word     <= read_word(next_read_address);
                     data_byte_index <= '0;
                     first_dummy_done <= 1'b0;
                     frame_phase     <= is_read ? 3'd3 : 3'd4;
@@ -175,27 +190,14 @@ module spi_bus #(
                     first_dummy_done <= 1'b1;
                     if (first_dummy_done) begin
                         frame_phase <= 3'd4;
-                        stream_word <= fetch_result;  // word 0, fetched
-                                                      // >=2 byte-slots ago
                     end
                 end
                 3'd4: begin                       // data words
                     partial_word    <= {partial_word[15:0], rx_byte};
                     data_byte_index <= data_byte_index + 2'd1;
-                    // prefetch the NEXT word two byte-slots before it
-                    // streams (~400 ns at 40 MHz against ~60 ns needed)
-                    if (data_byte_index == 2'd1) begin
-                        fetch_addr   <= auto_increment ? word_addr + 16'd1
-                                                       : word_addr;
-                        fetch_toggle <= ~fetch_toggle;
-                    end
                     if (data_byte_index == 2'd3) begin
-                        stream_word <= fetch_result;  // latch the
-                                                      // prefetched next
-                                                      // word; fetch_result
-                                                      // is free to change
-                                                      // under later
-                                                      // prefetches
+                        // the next word of a burst
+                        stream_word <= read_word(next_read_address);
                         if (auto_increment)
                             word_addr <= word_addr + 16'd1;
                     end
@@ -206,111 +208,99 @@ module spi_bus #(
     end
 
     //--------------------------------------------------------------------
-    // Store — dual-clock semi dual-port BSRAM (write sclk, read sysclk).
-    // Sync-only, reset-free processes so yosys infers DPX9B (an async
-    // reset in a memory-write process blocks BSRAM inference).
+    // Write decode. A word completes at the edge that receives its last
+    // byte; every strobe below is valid on that edge, and its data are the
+    // word on the wire: {partial_word, rx_byte}.
     //--------------------------------------------------------------------
-    logic [35:0] store_ram [0:NWORDS-1];
+    wire        word_complete = byte_end && (frame_phase == 3'd4)
+                                && (data_byte_index == 2'd3) && !is_read;
+    wire [31:0] word_data     = {partial_word, rx_byte};
 
-    integer i0;
-    initial for (i0 = 0; i0 < NWORDS; i0 = i0 + 1) store_ram[i0] = '0;
+    // ---- the system registers (0x0000–0x000F) and PROGRAM_HIGH (0x0010) ----
+    localparam [15:0] CTRL_ADDRESS = synth_pkg::MAP_CTRL_ADDR;
+    localparam [15:0] PROGRAM_HIGH_ADDRESS = synth_pkg::MAP_PROGRAM_HIGH_ADDR;
+    wire in_system = word_complete && word_addr < 16'(SYSTEM_WORDS);
 
-    wire store_write_enable = byte_end && (frame_phase == 3'd4)
-                              && (data_byte_index == 2'd3)
-                              && !is_read && addr_in_backed;
+    // CTRL: [0] swap request (an event), [1] hold the CSP, [2] test tone
+    assign swap = in_system && word_addr == CTRL_ADDRESS && word_data[0];
 
-    // ---- per-partial write decode (MAP_PARTIAL_BASE + 256×64 words,
-    //      offsets 0..6) -------------------------------------------
+    always_ff @(posedge sclk) begin
+        if (in_system && word_addr[3] == 1'b0) begin
+            system_register[word_addr[2:0]] <= word_addr == CTRL_ADDRESS
+                                               ? word_data & ~32'd1 : word_data;
+        end
+        if (in_system && word_addr == 16'h000C) begin
+            probe_register <= word_data[10:0];
+        end
+    end
+    assign probe_address = probe_register;
+    // The held and test-tone levels follow CTRL as written, from the edge
+    // after the word completes.
+    initial begin
+        csp_held         = 1'b1;     // the CSP starts held: nothing runs until a program is loaded
+        test_tone_enable = 1'b0;
+    end
+    always_ff @(posedge sclk) begin
+        if (in_system && word_addr == CTRL_ADDRESS) begin
+            csp_held         <= word_data[1];
+            test_tone_enable <= word_data[2];
+        end
+    end
+
+    logic [3:0] program_high;
+    initial program_high = '0;
+    always_ff @(posedge sclk) begin
+        if (word_complete && word_addr == PROGRAM_HIGH_ADDRESS) begin
+            program_high <= word_data[3:0];
+        end
+    end
+
+    // The ranges must not overlap: a write would be taken for two things.
+    localparam [15:0] QUEUE_END   = synth_pkg::MAP_QUEUE_BASE + 16'(1 << csp_pkg::QUEUE_ADDRESS_W);
+    localparam [15:0] PROGRAM_END = synth_pkg::MAP_PROGRAM_BASE + 16'(csp_pkg::MAX_PROGRAM);
+    if (synth_pkg::MAP_PARTIAL_BASE + 16'(synth_pkg::NUM_PARTIALS * synth_pkg::MAP_PARTIAL_STRIDE)
+            > synth_pkg::MAP_QUEUE_BASE
+        || QUEUE_END > synth_pkg::MAP_PROGRAM_BASE
+        || PROGRAM_END < synth_pkg::MAP_PROGRAM_BASE) begin : g_ranges_overlap
+        $error("spi_bus: the pointer, queue and program ranges overlap");
+    end
+
+    // ---- the CSP's instruction memory (0x8000 + pc) ----------------------
+    wire in_instruction_range = word_addr >= synth_pkg::MAP_PROGRAM_BASE
+                                && word_addr < synth_pkg::MAP_PROGRAM_BASE + 16'(csp_pkg::MAX_PROGRAM);
+    assign imem_write_enable  = word_complete && in_instruction_range;
+    assign imem_write_address = csp_pkg::PROGRAM_W'(word_addr - synth_pkg::MAP_PROGRAM_BASE);
+    assign imem_write_data    = {program_high, word_data};
+
+    // ---- the CSP's write queue (0x6000 + register or sink address) -------
+    wire in_queue_range = word_addr >= synth_pkg::MAP_QUEUE_BASE
+                          && word_addr < synth_pkg::MAP_QUEUE_BASE + 16'(1 << csp_pkg::QUEUE_ADDRESS_W);
+    assign queue_write_enable  = word_complete && in_queue_range;
+    assign queue_write_address = csp_pkg::QUEUE_ADDRESS_W'(word_addr - synth_pkg::MAP_QUEUE_BASE);
+    assign queue_write_data    = word_data[csp_pkg::WORD_W-1:0];
+
+    // ---- partial pointers (0x2000 + 64 p, words 0..3) --------------------
+    // A partial's ten pointers are 10 bits each, three to a word; the fourth
+    // word commits the entry, whole.
     localparam [15:0] PARTIAL_BASE = synth_pkg::MAP_PARTIAL_BASE;
     localparam [15:0] PARTIAL_END  = synth_pkg::MAP_PARTIAL_BASE
                                 + 16'(synth_pkg::NUM_PARTIALS
                                       * synth_pkg::MAP_PARTIAL_STRIDE);
-    wire        in_partial_range = (word_addr >= PARTIAL_BASE)
-                             && (word_addr <  PARTIAL_END);
-    wire [15:0] partial_rel_addr = word_addr - PARTIAL_BASE; // 0..0x3FFF in range
-    wire [13:0] partial_offset   = partial_rel_addr[13:0];
-    assign partial_write_enable = byte_end && (frame_phase == 3'd4)
-                               && (data_byte_index == 2'd3)
-                               && !is_read && in_partial_range
-                               && (partial_offset[5:3] == 3'd0)
-                               && (partial_offset[2:0] < 3'd7);
-    assign partial_write_word   = partial_offset[2:0];
+    wire        in_partial_range = word_addr >= PARTIAL_BASE && word_addr < PARTIAL_END;
+    wire [13:0] partial_offset   = (word_addr - PARTIAL_BASE) & 16'h3FFF;
+    wire [5:0]  pointer_word     = partial_offset[5:0];
 
-    // ---- instruction table write decode (0x0100..0x04FF) -------------
-    localparam [15:0] IMEM_BASE = synth_pkg::MAP_IMEM_BASE;
-    localparam [15:0] IMEM_END  = synth_pkg::MAP_IMEM_BASE
-                                + 16'(4 * synth_pkg::NUM_INSTR);
-    // All FOUR words per entry are writable. Word 3 carries the second ADSR
-    // rate word (kD's high bits, kR and sustain); excluding it here while the
-    // address map reserves the slot drops writes to it silently, which shows
-    // up as an envelope that will not release, because kR stays zero.
-    wire in_instruction_range = (word_addr >= IMEM_BASE)
-                          && (word_addr <  IMEM_END);
-    assign imem_write_enable = byte_end && (frame_phase == 3'd4)
-                                   && (data_byte_index == 2'd3)
-                                   && !is_read && in_instruction_range;
-    // Region-relative offset — word_addr[8:0] alone is WRONG here: the
-    // region starts at 0x0100, whose bit 8 is set, so a raw slice
-    // lands writes 64 entries off.
-    assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
-    assign imem_write_data = {partial_word, rx_byte};
-
-    // ---- DMEM base write capture (see mailbox note at the ports) ---
-    wire in_dmem_range = (word_addr >= synth_pkg::MAP_DMEM_BASE)
-                     && (word_addr <  synth_pkg::MAP_DMEM_BASE
-                                      + 16'(synth_pkg::DMEM_WORDS));
-    initial dmem_wr_toggle = 1'b0;
+    logic [29:0] pointer_stage [3];
+    initial for (int word = 0; word < 3; word++) pointer_stage[word] = '0;
     always_ff @(posedge sclk) begin
-        if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
-            && !is_read && in_dmem_range) begin
-            dmem_wr_addr   <= word_addr[9:0];
-            dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
-            dmem_wr_toggle <= ~dmem_wr_toggle;
+        if (word_complete && in_partial_range && pointer_word < 6'd3) begin
+            pointer_stage[pointer_word[1:0]] <= word_data[29:0];
         end
     end
-    assign partial_write_index = partial_offset[13:6];
-    assign partial_write_data  = {partial_word, rx_byte};
-
-    always_ff @(posedge sclk) begin
-        if (store_write_enable)
-            store_ram[word_addr[AW_BACKED-1:0]] <= {4'b0, partial_word, rx_byte};
-    end
-
-    // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_toggle.
-    // Registered on the committing edge itself — no later edge is
-    // guaranteed (framing rule).
-    initial swap_toggle = 1'b0;
-    always_ff @(posedge sclk) begin
-        if (store_write_enable && (word_addr == synth_pkg::MAP_CTRL_ADDR)
-            && rx_byte[0])
-            swap_toggle <= ~swap_toggle;
-    end
-
-    //--------------------------------------------------------------------
-    // Fetch service (sysclk domain)
-    //--------------------------------------------------------------------
-    logic fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev;
-    logic        fetch_pending;
-    logic [35:0] store_read_data;
-
-    initial begin
-        {fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev} = '0;
-        fetch_pending   = 1'b0;
-        store_read_data = '0;
-        fetch_result    = '0;
-    end
-
-    always_ff @(posedge sysclk) begin
-        fetch_toggle_meta <= fetch_toggle;
-        fetch_toggle_sync <= fetch_toggle_meta;
-        fetch_toggle_prev <= fetch_toggle_sync;
-
-        store_read_data <= store_ram[fetch_addr[AW_BACKED-1:0]]; // BSRAM sync read
-        fetch_pending   <= (fetch_toggle_sync != fetch_toggle_prev);
-        if (fetch_pending)
-            fetch_result <= (fetch_addr[15:AW_BACKED] == '0)
-                          ? store_read_data[31:0] : 32'd0;
-    end
+    assign pointer_write_enable = word_complete && in_partial_range && pointer_word == 6'd3;
+    assign pointer_write_index  = partial_offset[13:6];
+    assign pointer_write_data   = {word_data[synth_pkg::POINTER_W-1:0], pointer_stage[2],
+                                   pointer_stage[1], pointer_stage[0]};
 
     //--------------------------------------------------------------------
     // Transmit — falling edge.  frame_phase/data_byte_index have already

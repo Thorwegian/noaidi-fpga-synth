@@ -8,35 +8,51 @@
 // interlocks and no forwarding (#220). A program means what it means on a
 // linear machine: every instruction sees everything the one before it
 // did. There are no delay slots. When an instruction needs a value that
-// is still in the pipeline, it waits in decode until that value has been
-// written.
+// is still in the pipeline, it waits until that value has been written.
 //
-//   D   decode: operand addresses from i and j, the hazard check; the
-//       register file's read addresses go in as the instruction issues
-//   R   the register file's outputs → operands in the accumulator's
-//       format; SKIP decides; the SHIFT count, and LOOP's body end and
-//       whether its count is 0, are prepared
-//   E1  INTERP's Y − A and ADD3's A + Y (55 bits); MIN, MAX, SEL, ANDXOR;
-//       the SHIFT barrel shift; LOOP and IDX are resolved here
-//   E2  saturate Y − A to 36 bits and A + Y to 54; the multiply-add
-//       unit's operands; the SHIFT result saturated
-//   E3  the multiply-add unit (MULTALU36X18): a × b + c
-//   E4  overflow of the 54-bit sum, saturation or wrap to the
+//   D   decode: operand addresses from i and j, into A's registers as the
+//       instruction issues
+//   A   the hazard check, on registered values; the operand addresses sit
+//       in A's registers, which are the banks' address pins (nothing but a
+//       register on a block RAM's pin, section 12: decode's adders on the
+//       pins read another register on the board at 73.728 MHz). An
+//       instruction that has to wait stays in A, and the banks read its
+//       operands every cycle, so that what it takes on leaving is what the
+//       register file held the cycle before
+//   R   the banks' words in their output registers; SKIP decides; LOOP's
+//       body end is prepared
+//   E1  the banks' words, in E1's own registers (nothing but a register on
+//       a block RAM's output: the tool does not time what follows one) →
+//       the half or the pair, the operands in the accumulator's format, the
+//       SHIFT count, whether LOOP's count is 0; INTERP's Y − A and ADD3's
+//       A + Y (55 bits), saturated to 36 and 54; the multiply-add unit's
+//       operands chosen; MIN, MAX, SEL, ANDXOR; LOOP and IDX are resolved
+//       here
+//   E2  the multiply-add unit's operands in registers that feed the DSP's
+//       pins and nothing else; the SHIFT barrel shift
+//   E3  the multiply-add unit (MULTALU36X18): a × b + c; the SHIFT result
+//       saturated
+//   E4  the product settles in the block's own output register (OUT_REG):
+//       a DSP's output goes into a register and nowhere else, as a block
+//       RAM's does (the tool times neither); the other results wait
+//   E5  overflow of the 54-bit sum, saturation or wrap to the
 //       destination, the flags
 //   W   write the register file or a sink, the accumulator, the flags
 //
 // Timing rules (the reference model, tools/csp, counts them exactly):
 //
-// - An instruction issues from D at most once per cycle.
+// - An instruction issues from D at most once per cycle. (Where the model
+//   says an instruction issues, the RTL moves it on from A: a cycle later.)
 // - It waits while an older instruction in R … W will write a register it
 //   reads, the accumulator it reads (ACC), or the flags it reads (SEL,
 //   SKIP). The register file returns old data in the cycle of a write,
-//   so it issues the cycle after that instruction leaves W: an issue at
-//   cycle c lets a dependent instruction issue at c + 7 at the earliest.
+//   so it leaves A the cycle after that instruction leaves W (it reads
+//   again in the cycle after the write): an issue at cycle c lets a
+//   dependent instruction issue at c + 9 at the earliest.
 //   Skipped instructions are no-ops, but they wait and are waited for
 //   all the same: a skip is decided after decode.
 // - LOOP and IDX hold the front end until they are resolved in E1: the
-//   next instruction issues three cycles after them at the earliest.
+//   next instruction issues four cycles after them at the earliest.
 //   The loop records and i/j then hold their new values for decode.
 //
 // Vector loops (LOOP.vi, LOOP.vj; docs/csp_manual.md): once LOOP has
@@ -46,11 +62,13 @@
 // flags, in small arrays; what is in flight carries its run and element, so
 // the hazard check lets a flag reader wait for its own element only, and an
 // operand indexed by the element's index register wait for its IDX. The
-// loop ends three cycles after the last issue, as a LOOP's resolution does.
+// loop ends four cycles after the last issue (counting the cycles A waits
+// not), as a LOOP's resolution does.
 //
 // The pass (1536 clocks, 48 kHz): the pass start writes the pass counter
 // to register 0x040 and fetches instruction 0. Instructions issue before
-// cycle 1472, so the pipeline has drained by cycle 1478. The window from
+// cycle 1472, so the pipeline has drained by cycle 1479 (the window waits
+// for it to be empty, should a program have been cut off). The window from
 // cycle 1480 then applies up to 48 committed firmware writes from the
 // write queue (docs/csp_isa.md section 2). A pass that starts while the
 // CSP is held runs no program, and its window applies every committed
@@ -65,24 +83,32 @@ module csp_core (
 
     // instruction memory (csp_instruction_memory)
     output logic [csp_pkg::PROGRAM_W-1:0]       fetch_address,
-    input  wire  [35:0]                         fetch_data,
+    input  wire  [35:0]                         fetch_data,    // the fetch buffer, in the memory's registers
+    output logic                                buffer_load,   // the buffer takes the memory's word
 
     // write queue (csp_write_queue)
     output logic                                queue_pop,
     input  wire                                 queue_committed,
-    input  wire  [csp_pkg::REGISTER_W-1:0]      queue_address,
+    input  wire  [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_address,
     input  wire  [csp_pkg::WORD_W-1:0]          queue_data,
 
     // the sink area's shadow page
     output logic                                sink_write_enable,
+    output logic                                sink_write_both,    // a firmware write: both pages
     output logic [9:0]                          sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]          sink_write_data,
-    output logic                                pass_done        // one clock: flip the sink pages
+    output logic                                pass_done,       // one clock: flip the sink pages
+    output logic [17:0]                         pass_counter,    // passes run since reset (diagnostics)
+
+    // register probe (diagnostics): the pair at probe_address, read near the
+    // end of every pass when no instruction issues
+    input  wire  [csp_pkg::REGISTER_W-1:0]      probe_address,
+    output logic [35:0]                         probe_data
 );
 
     // ---- constants --------------------------------------------------------------------
     localparam int RUN_END    = 1472;                          // instructions issue before this
-    localparam int DRAIN_END  = RUN_END + 8;
+    localparam int DRAIN_END  = RUN_END + 10;                  // the pipeline's depth past D: A, R, E1 … E5, W, done
     localparam int WINDOW_END = DRAIN_END + csp_pkg::WRITE_WINDOW;
     localparam int PC_W       = csp_pkg::PROGRAM_W;
     localparam int AW         = csp_pkg::ADDRESS_W;
@@ -151,6 +177,7 @@ module csp_core (
     logic [17:0] pass_count;
     logic        in_pass;
     logic        run_open;           // instructions may issue: pass_cycle < RUN_END
+    logic        pipeline_busy;      // an instruction is in A … W (assigned below)
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -177,10 +204,19 @@ module csp_core (
         end
     end
 
-    wire window_open = in_pass && (pass_held ? pass_cycle >= 11'd1
+    // A held pass applies writes from its second cycle on, until nine cycles
+    // before its end: a write is staged for four cycles after it is taken
+    // from the queue (the block's read, its output register, the fabric's
+    // register, the register file's own), and must be in the blocks before
+    // the probe reads on the last cycle (PROBE_CYCLE: no row read while
+    // written) and before the pass counter's write, which takes the last
+    // cycle.
+    wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 9))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
+    assign pass_counter = pass_count;
 
     // ---- architectural state -------------------------------------------------------------
     logic [AW-1:0]      index_i, index_j;
@@ -226,8 +262,10 @@ module csp_core (
     logic [csp_pkg::ADDRESS_W-1:0] last_private;   // the last element's private register
     logic [csp_pkg::ADDRESS_W-1:0] vector_stride, vector_own;   // own: this element's index
 
-    logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
-    logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
+    // Flip-flops, not LUT-RAM (`ram_style`): the tool times every path
+    // through them, which it does not for a RAM16's pins (section 12).
+    (* ram_style = "logic" *) logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
+    (* ram_style = "logic" *) logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
     logic                          private_written;
     logic                          flags_written;
 
@@ -252,43 +290,104 @@ module csp_core (
         logic                  entry_flags;         // vector: the flags are the loop's entry flags
     } control_t;
 
-    control_t read_stage, execute1_stage, execute2_stage, execute3_stage, execute4_stage,
-              writeback_stage;
+    control_t address_stage, read_stage, execute1_stage, execute2_stage, execute3_stage,
+              execute4_stage, execute5_stage, writeback_stage, writeback_done;   // done: W's instruction a cycle ago
+
+    // What A holds besides the control word: the operands it names (the
+    // same values as the banks' own address registers, which read them
+    // every cycle A waits), and what it reads; R takes them on from A.
+    logic [csp_pkg::ADDRESS_W-1:0] a_x_address, a_y_address;
+    logic a_reads_a, a_reads_x, a_reads_y;
+    logic a_a_wide, a_y_wide;
+    logic a_reads_accumulator, a_reads_flags;
+    logic [csp_pkg::ADDRESS_W-1:0] read_x_address, read_y_address;
+    logic read_reads_a, read_reads_x, read_reads_y;
+    logic read_a_wide, read_y_wide;
+    logic a_hold;      // A's instruction waits for a value in the pipeline
 
     // ---- register file ---------------------------------------------------------------------
     logic [2:0][csp_pkg::REGISTER_W-1:0] read_address;
-    logic [2:0]                          read_wide;
-    logic [2:0][35:0]                    read_data;
+    logic [2:0][17:0]                    read_even, read_odd;   // the banks' output registers
     logic                                rf_write_enable;
     logic [csp_pkg::REGISTER_W-1:0]      rf_write_address;
     logic                                rf_write_wide;
     logic [35:0]                         rf_write_data;
 
+    logic [2:0]                          read_park;             // per port: no instruction reads
     csp_register_file u_register_file (
         .clk           (clk),
         .read_address  (read_address),
-        .read_wide     (read_wide),
-        .read_data     (read_data),
+        .read_hold     (a_hold),
+        .read_park     (read_park),
+        .reset_n       (reset_n),
+        .read_even     (read_even),
+        .read_odd      (read_odd),
         .write_enable  (rf_write_enable),
         .write_address (rf_write_address),
         .write_wide    (rf_write_wide),
         .write_data    (rf_write_data)
     );
 
+    // ---- F: fetch ------------------------------------------------------------------------------
+    // The memory is given fetch_pc, a register, and answers a clock later; the
+    // word goes into the buffer, a register, and nowhere else: nothing but a
+    // register on the memory's output (docs/csp_isa.md, 12). Decode takes its
+    // word from the buffer when the buffer holds decode's pc, and keeps a copy
+    // (held_instruction) so that the buffer can move on. The fetch runs ahead:
+    // the word after decode's is in the buffer, the one after that on the
+    // memory, so decode moving on to the next pc costs nothing; a move to any
+    // other pc (a loop's repeat, a skipped body) restarts the fetch there, and
+    // the word arrives two clocks later than the memory's output would: a
+    // jump costs two cycles, which the reference model counts too. Word 0 is
+    // fetched at the end of a pass, for the next pass's first cycle.
+    // The fetch's words are known by their place relative to decode's pc,
+    // not by pc: the stream is sequential from a restart, so the buffer
+    // holds decode's own word (0) or the next (1), the word on the memory's
+    // output the one after, and a move on to the next word shifts every place
+    // down by one. Nothing compares pcs.
+    localparam logic [1:0] PLACE_OWN = 2'd0, PLACE_NEXT = 2'd1;
+    logic [PC_W-1:0] fetch_pc;          // on the memory this cycle
+    logic            fetch_valid;       // and wanted
+    logic [1:0]      fetch_place;       // its place relative to decode's pc
+    logic            inflight_valid;    // the word on the memory's output is wanted
+    logic [1:0]      inflight_place;
+    // The buffer's word is the memory's fetch_data: the register sits in
+    // the memory's slices, beside their blocks, taken while buffer_load.
+    wire  [35:0]     buffer_word = fetch_data;
+    logic            buffer_valid;
+    logic [1:0]      buffer_place;      // PLACE_OWN or PLACE_NEXT
+    logic            fetch_primed;      // word 0 was fetched at a pass's end (not before the first pass)
+    logic [35:0]     held_instruction;  // decode's word, once taken from the buffer
+    logic            held_valid;
+    // The memory's address registers (one a slice, beside its block) take
+    // what fetch_pc takes this clock: the memory reads fetch_pc's value
+    // the clock after it lands, as it did from fetch_pc itself.
+    logic [PC_W-1:0] fetch_pc_next;
+    assign fetch_address = fetch_pc_next;
+
     // ---- D: decode -----------------------------------------------------------------------------
-    // The instruction at decode_pc is on the instruction memory's output
-    // while decode_valid. Without an issue the fetch address stays on
-    // decode_pc, so it stays there.
-    logic            decode_valid;
+    logic            decode_valid;      // decode_pc is an instruction to issue, once its word is here
     logic [PC_W-1:0] decode_pc;
-
+    wire             buffer_is_decode = buffer_valid && buffer_place == PLACE_OWN;
+    wire             decode_has_word  = held_valid || buffer_is_decode;
+    wire  [35:0]     decode_bits      = held_valid ? held_instruction : buffer_word;
     csp_pkg::instruction_t decoded;
-    assign decoded = csp_pkg::instruction_t'(fetch_data);
+    assign decoded = csp_pkg::instruction_t'(decode_bits);
 
-    // The index registers decode sees: in a vector loop, the element's.
+    // The index registers decode sees: in a vector loop, the element's. The
+    // element's private index comes out of a register of its own
+    // (private_current), loaded every clock for the element decode works on
+    // next, so that the address adders work from registers alone. The
+    // IDX's write is seen a clock later for it: private_pending covers E2
+    // as well.
     wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
-    wire [AW-1:0] private_current = private_written ? private_value[vector_element]
-                                                    : entry_private;
+    logic [AW-1:0] private_current;
+    wire  [5:0]    next_element   = (vector_issue && !vector_last_element) ? vector_element + 1'b1
+                                  : (vector_issue && !vector_last_instruction) ? 6'd0
+                                  : vector_element;
+    wire           private_written_next = private_written
+                                          || (vector_issue && vector_last_element && decoded_op == csp_pkg::OP_IDX);
+    wire [AW-1:0]  private_next   = private_written_next ? private_value[next_element] : entry_private;
     wire [AW-1:0] decode_index_i  = vector_issuing ? (vector_on_j ? private_current : vector_own)
                                                    : index_i;
     wire [AW-1:0] decode_index_j  = vector_issuing ? (vector_on_j ? vector_own : private_current)
@@ -312,71 +411,208 @@ module csp_core (
     // only holds its own element's private index register.
     wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
-    always_comb begin
-        read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
-        read_wide[0]    = decode_a_wide;
-        read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
-        read_wide[1]    = 1'b0;
-        read_address[2] = csp_pkg::REGISTER_W'(decode_y_address);
-        read_wide[2]    = decode_y_wide;
-    end
-
-    // The hazard check: an older instruction in R … W writes something
-    // this one reads.
-    control_t [5:0] in_flight;
-    assign in_flight = {read_stage, execute1_stage, execute2_stage, execute3_stage,
-                        execute4_stage, writeback_stage};
-
-    logic hazard;
-    always_comb begin
-        logic [1:0] written;
-        hazard = 1'b0;
-        for (int stage = 0; stage < 6; stage++) begin
-            written = pair_mask(in_flight[stage].r_address, in_flight[stage].r_wide);
-            if (in_flight[stage].valid) begin
-                if (in_flight[stage].writes_registers) begin
-                    if (reads_a && in_flight[stage].r_address[AW-1:1] == decode_r_address[AW-1:1]
-                            && (written & pair_mask(decode_r_address, decode_a_wide)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                    if (reads_x && in_flight[stage].r_address[AW-1:1] == decode_x_address[AW-1:1]
-                            && (written & pair_mask(decode_x_address, 1'b0)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                    if (reads_y && in_flight[stage].r_address[AW-1:1] == decode_y_address[AW-1:1]
-                            && (written & pair_mask(decode_y_address, decode_y_wide)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                end
-                if (in_flight[stage].writes_accumulator && reads_accumulator) hazard = 1'b1;
-                // A flag reader in a vector loop waits for its own element's
-                // flag setter, and for any that is not of this loop.
-                if (in_flight[stage].sets_flags && reads_flags
-                        && (!vector_issuing || !in_flight[stage].vector
-                            || in_flight[stage].run != vector_run
-                            || in_flight[stage].element == vector_element)) begin
-                    hazard = 1'b1;
-                end
+    // The probe takes the Y port once a pass, on the pass's last cycle:
+    // after the write window's last entry has landed in the blocks (a pop
+    // at WINDOW_END - 1 lands four clocks later) and before the pass
+    // counter's write does (taken into the banks' registers on the last
+    // cycle, in the blocks on the next pass's first), so that the row it
+    // reads is never the row being written (the collision above). Its
+    // address goes into the Y bank's address register (and A's) the cycle
+    // before, is on the pin at PROBE_CYCLE, the pair is in the block's
+    // output register the cycle after (the next pass's first) and in the
+    // bank's the cycle after that, where probe_take takes it; the next
+    // pass's first instruction reads the Y bank a cycle later still.
+    localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 1;
+    wire probe_load = in_pass && pass_cycle == 11'(PROBE_CYCLE - 1);
+    wire probe_now  = in_pass && pass_cycle == 11'(PROBE_CYCLE);
+    logic probe_read, probe_take;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            probe_read <= 1'b0;
+            probe_take <= 1'b0;
+            probe_data <= '0;
+        end else begin
+            probe_read <= probe_now;
+            probe_take <= probe_read;
+            if (probe_take) begin
+                probe_data <= {read_even[2], read_odd[2]};
             end
         end
     end
 
+    // The banks' address pins are registers of the banks' own, beside the
+    // blocks (csp_bank.sv), loaded with what A takes this clock and held
+    // while A waits (read_hold): the banks read A's operands every cycle,
+    // for as long as A waits, so that the values the instruction takes on
+    // leaving A are those of the cycle before. A's own address registers
+    // are the same values, for the hazard check. (Decode's adders on the
+    // pins, and a mux choosing between them and a waiting instruction's
+    // registers, are paths the tool does not time; on the board at
+    // 73.728 MHz a j-indexed read right after the IDX that set j read
+    // another register, address bits dropped, once in ~48 passes — and
+    // with A's registers on the pins, 13–33 tiles from the blocks, a read
+    // after idle cycles returned register 0's word, the bubble's address
+    // still on the pins when the block sampled them.)
+    always_comb begin
+        read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
+        read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
+        read_address[2] = csp_pkg::REGISTER_W'(probe_load ? AW'(probe_address) : decode_y_address);
+    end
+
+    // The banks' address registers are parked on a row nothing writes
+    // (csp_pkg::PARK_REGISTER's pair) whenever decode has no instruction
+    // for A: the drain, the write window, a held pass. A block reads the
+    // row on its pins on every clock, idle or not, and a row read on one
+    // port in the clock the other port writes it lost the write on the
+    // board (issue #222: with every register in place, the boot image
+    // lost the rows the ports had been left on after the last
+    // instruction, the constant ONE among them — the probe's row after a
+    // reset — and nothing with the ports parked). The park goes into the
+    // placed address flip-flops' own LUT, under the hold (an instruction
+    // waiting in A keeps its operands on the pins, decode empty or not),
+    // so the path from decode to the pins gains no logic; the Y port is
+    // unparked for the probe's cycle. Both terms are registers.
+    wire parked = !(decode_valid && run_open);
+    assign read_park = {parked && !probe_load, parked, parked};
+
+    // The hazard check, in A, on registered values only: an older instruction in
+    // R, E1 … E5, W (or in W a cycle ago, which wrote while A's operands were read)
+    // writes something A's instruction reads. Decode makes no check: it hands
+    // A the operand addresses and A holds, the banks reading them again, until
+    // nothing older is going to write them; the cycle A leaves is the cycle the
+    // instruction would have issued, had decode waited (the reference model
+    // counts that). One call of stage_hazard for each stage, and no loop over
+    // an array of the stages: yosys (the synthesis) turned that loop, with
+    // `control_t [5:0]` indexed by its variable, into logic that never
+    // stalled, and every instruction that read what the one before it wrote
+    // read the old value on the board (and in the netlist bench, rtl/Makefile
+    // sim-gate-selftest), while the RTL simulation was right.
+    localparam int CONTROL_W = $bits(read_stage);
+
+    function automatic logic stage_hazard(input logic [CONTROL_W-1:0] older_bits);
+        control_t   older;
+        logic [1:0] written;
+        logic       found;
+        older   = older_bits;
+        found   = 1'b0;
+        written = pair_mask(older.r_address, older.r_wide);
+        if (older.valid) begin
+            if (older.writes_registers) begin
+                if (a_reads_a && older.r_address[AW-1:1] == address_stage.r_address[AW-1:1]
+                        && (written & pair_mask(address_stage.r_address, a_a_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (a_reads_x && older.r_address[AW-1:1] == a_x_address[AW-1:1]
+                        && (written & pair_mask(a_x_address, 1'b0)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (a_reads_y && older.r_address[AW-1:1] == a_y_address[AW-1:1]
+                        && (written & pair_mask(a_y_address, a_y_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+            end
+            if (older.writes_accumulator && a_reads_accumulator) found = 1'b1;
+            // A flag reader in a vector loop waits for its own element's
+            // flag setter, and for any that is not of this loop.
+            if (older.sets_flags && a_reads_flags
+                    && (!address_stage.vector || !older.vector
+                        || older.run != address_stage.run
+                        || older.element == address_stage.element)) begin
+                found = 1'b1;
+            end
+        end
+        stage_hazard = found;
+    endfunction
+
+    // The same comparison, made a cycle early: in decode, for the instruction
+    // that is about to enter A, against the stages as they will stand when it
+    // is there (today's A, R, E1, E2, E3, E4, E5 and W, one stage on). The
+    // result is kept as one bit for each stage it concerns, hazard_pos[0] for
+    // R … [7] for W a cycle ago, and the bits move on with the pipeline while
+    // A waits (R is a bubble then, the others advance), so that a_hold is an
+    // OR of registered bits and not of the comparators: the long path to the
+    // clock enables of the whole data path. The behaviour is that of
+    // stage_hazard.
+    function automatic logic incoming_hazard(input logic [CONTROL_W-1:0] older_bits);
+        control_t   older;
+        logic [1:0] written;
+        logic       found;
+        older   = older_bits;
+        found   = 1'b0;
+        written = pair_mask(older.r_address, older.r_wide);
+        if (older.valid) begin
+            if (older.writes_registers) begin
+                if (reads_a && older.r_address[AW-1:1] == decode_r_address[AW-1:1]
+                        && (written & pair_mask(decode_r_address, decode_a_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (reads_x && older.r_address[AW-1:1] == decode_x_address[AW-1:1]
+                        && (written & pair_mask(decode_x_address, 1'b0)) != 2'b00) begin
+                    found = 1'b1;
+                end
+                if (reads_y && older.r_address[AW-1:1] == decode_y_address[AW-1:1]
+                        && (written & pair_mask(decode_y_address, decode_y_wide)) != 2'b00) begin
+                    found = 1'b1;
+                end
+            end
+            if (older.writes_accumulator && reads_accumulator) found = 1'b1;
+            if (older.sets_flags && reads_flags
+                    && (!issued.vector || !older.vector
+                        || older.run != issued.run
+                        || older.element == issued.element)) begin
+                found = 1'b1;
+            end
+        end
+        incoming_hazard = found;
+    endfunction
+
+    logic [7:0] hazard_pos;   // A's instruction waits for the stage at this position
+    wire hazard = |hazard_pos;
+    assign a_hold = address_stage.valid && hazard;
+
+`ifndef SYNTHESIS
+    // Simulation only: the registered bits must say what the comparison of A's
+    // registered operands against the stages says.
+    wire hazard_compared = stage_hazard(read_stage) | stage_hazard(execute1_stage) | stage_hazard(execute2_stage)
+                         | stage_hazard(execute3_stage) | stage_hazard(execute4_stage) | stage_hazard(execute5_stage)
+                         | stage_hazard(writeback_stage) | stage_hazard(writeback_done);
+    always @(posedge clk) begin
+        if (reset_n && address_stage.valid && hazard !== hazard_compared) begin
+            $error("csp_core: hazard bits %b differ from the comparison (%b) at pc %0d",
+                   hazard_pos, hazard_compared, address_stage.pc);
+        end
+    end
+`endif
+
     // An operand indexed by the element's private index register waits while
-    // that element's IDX is in R or E1: the register is written at the end
-    // of E1, three cycles after the IDX issues.
+    // that element's IDX is in A, R, E1 or E2: the array is written at the end
+    // of E1, the element's copy of it (private_current) at the end of E2,
+    // five cycles after the IDX issues.
     wire private_used = vector_issuing
             && (((uses_a(decoded_op, decoded.a) || writes_result(decoded_op))
                  && decoded.r[9] && decoded.r[8] == !vector_on_j)
                 || (uses_x(decoded_op) && decoded.x[9] && decoded.x[8] == !vector_on_j)
                 || (uses_y(decoded_op) && decoded.y[9] && decoded.y[8] == !vector_on_j));
     wire private_pending =
-            (read_stage.valid && read_stage.vector && read_stage.run == vector_run
-             && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
+            (address_stage.valid && address_stage.vector && address_stage.run == vector_run
+             && address_stage.element == vector_element && address_stage.instruction.op == csp_pkg::OP_IDX)
+            || (read_stage.valid && read_stage.vector && read_stage.run == vector_run
+                && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
             || (execute1_stage.valid && execute1_stage.vector && execute1_stage.run == vector_run
                 && execute1_stage.element == vector_element
-                && execute1_stage.instruction.op == csp_pkg::OP_IDX);
+                && execute1_stage.instruction.op == csp_pkg::OP_IDX)
+            || (execute2_stage.valid && execute2_stage.vector && execute2_stage.run == vector_run
+                && execute2_stage.element == vector_element
+                && execute2_stage.instruction.op == csp_pkg::OP_IDX);
 
-    wire issue = decode_valid && run_open && !hazard && !(private_used && private_pending);
+    wire issue = decode_valid && decode_has_word && run_open && !a_hold
+                 && !(private_used && private_pending);
+    // An instruction still waiting in A at RUN_END would leave it past the
+    // pass's issue limit; the model does not issue it (the pass stops
+    // there), so neither does the RTL: it is dropped, and the pipeline has
+    // drained by DRAIN_END whatever waited. (An instruction that leaves A
+    // at RUN_END issued, in the model's count, the cycle before: in time.)
+    wire limit_drop = in_pass && pass_cycle == 11'(RUN_END) && a_hold;
 
     control_t issued;
     always_comb begin
@@ -400,25 +636,42 @@ module csp_core (
         issued.entry_flags        = !flags_written;
     end
 
-    // ---- R: operands ---------------------------------------------------------------------------
-    logic read_reads_a, read_reads_x, read_reads_y, read_y_wide;   // as issued
-
+    // ---- R: the banks' words arrive; SKIP ----------------------------------------------------------
     wire [3:0]  read_op       = read_stage.instruction.op;
     wire        read_live     = read_stage.valid && skip_remaining == '0;
-    wire [35:0] a_operand     = read_reads_a ? read_data[0] : '0;
-    wire [17:0] x_operand     = read_reads_x ? read_data[1][17:0] : '0;
-    wire [35:0] y_operand     = read_reads_y ? read_data[2] : '0;
+
+    // ---- E1: the operands, from the words in E1's registers -------------------------------------
+    // The banks' output registers feed nothing but E1's registers (section
+    // 12: the tool does not time what follows a block RAM's output); the half
+    // or the pair is chosen here, in E1, and the operands formatted. The
+    // accumulator is read here too: an older instruction writing it has left
+    // W a cycle before this one left R (the hazard check), so it is the same
+    // value R would have read.
+    // The banks' words, in the banks' output registers (csp_bank.sv): E1's
+    // operands, taken every cycle (while A holds they are read again and
+    // E1 is a bubble; the cycle R leaves, they are its).
+    wire [17:0] e1_a_even = read_even[0], e1_a_odd = read_odd[0];
+    wire [17:0] e1_x_even = read_even[1], e1_x_odd = read_odd[1];
+    wire [17:0] e1_y_even = read_even[2], e1_y_odd = read_odd[2];
+    logic        e1_reads_a, e1_reads_x, e1_reads_y;
+    logic        e1_a_wide, e1_y_wide;                        // the pair
+    logic        e1_a_odd_half, e1_x_odd_half, e1_y_odd_half; // else which word
+    wire [35:0] a_operand = !e1_reads_a ? '0
+                          : (e1_a_wide ? {e1_a_even, e1_a_odd} : {18'b0, e1_a_odd_half ? e1_a_odd : e1_a_even});
+    wire [17:0] x_operand = e1_reads_x ? (e1_x_odd_half ? e1_x_odd : e1_x_even) : '0;
+    wire [35:0] y_operand = !e1_reads_y ? '0
+                          : (e1_y_wide ? {e1_y_even, e1_y_odd} : {18'b0, e1_y_odd_half ? e1_y_odd : e1_y_even});
 
     // A in the accumulator's format, from the a field; Y likewise.
     logic signed [53:0] a_value, y_value;
     always_comb begin
-        case (read_stage.instruction.a)
+        case (execute1_stage.instruction.a)
             csp_pkg::A_RESULT:      a_value = word_to_accumulator(a_operand[17:0]);
             csp_pkg::A_ACCUMULATOR: a_value = accumulator;
             csp_pkg::A_WIDE:        a_value = wide_to_accumulator(a_operand);
             default:                a_value = '0;
         endcase
-        y_value = read_y_wide ? wide_to_accumulator(y_operand) : word_to_accumulator(y_operand[17:0]);
+        y_value = e1_y_wide ? wide_to_accumulator(y_operand) : word_to_accumulator(y_operand[17:0]);
     end
 
     // What R hands to E1: the instruction, now known to be skipped or not.
@@ -439,22 +692,29 @@ module csp_core (
          || (condition == csp_pkg::COND_OVERFLOW && flag_overflow));
 
     // SHIFT: the shift relative to the destination's format, count − 32
-    // for a word and count − 14 for a wide value, the count clamped to ±63.
+    // for a word and count − 14 for a wide value, the count clamped to ±63
+    // (in E1; the barrel shift is E2's).
     wire signed [17:0] shift_count = y_operand[17:0];
     wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63
                                      : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
-    wire signed [18:0] shift_total = 19'(shift_clamped) - (read_stage.r_wide ? 19'sd14 : 19'sd32);
+    wire signed [18:0] shift_total = 19'(shift_clamped) - (execute1_stage.r_wide ? 19'sd14 : 19'sd32);
 
     // ---- E1 ------------------------------------------------------------------------------------
-    logic signed [53:0] e1_a_value, e1_y_value;
-    logic signed [17:0] e1_x_word, e1_y_word;
-    logic [35:0]        e1_y_operand;
-    logic               e1_y_wide;
-    logic signed [18:0] e1_shift_total;
-    logic [PC_W-1:0]    e1_body_end;        // LOOP: one past its body
-    logic [PC_W-1:0]    e1_body_last;       // LOOP: its last instruction
-    logic [PC_W-1:0]    e1_pc_plus_one;     // the pc after this instruction
-    logic               e1_skips_body;      // LOOP: a count of 0, or a vector loop over too many
+    wire signed [53:0] e1_a_value   = a_value;
+    wire signed [53:0] e1_y_value   = y_value;
+    wire signed [17:0] e1_x_word    = x_operand;
+    wire signed [17:0] e1_y_word    = y_operand[17:0];
+    wire [35:0]        e1_y_operand = y_operand;
+    logic [PC_W-1:0]   e1_body_end;        // LOOP: one past its body
+    logic [PC_W-1:0]   e1_body_last;       // LOOP: its last instruction
+    logic [PC_W-1:0]   e1_pc_plus_one;     // the pc after this instruction
+    // LOOP: a count of 0, or a vector loop over too many. Decided on the
+    // raw halves beside the operand mux, not after it: this starts the
+    // loop-end chain, the longest path of the fabric.
+    wire e1_x_zero = !e1_reads_x || (e1_x_odd_half ? e1_x_odd == '0 : e1_x_even == '0);
+    wire e1_x_over = e1_reads_x && (e1_x_odd_half ? e1_x_odd > 18'(csp_pkg::MAX_VECTOR_LENGTH)
+                                                  : e1_x_even > 18'(csp_pkg::MAX_VECTOR_LENGTH));
+    wire e1_skips_body = e1_x_zero || (execute1_stage.instruction.a[1] && e1_x_over);
 
     wire [3:0] e1_op = execute1_stage.instruction.op;
 
@@ -464,9 +724,44 @@ module csp_core (
     wire select_negative = (execute1_stage.vector && !execute1_stage.entry_flags)
                            ? element_flags[execute1_stage.element][0] : flag_negative;
 
-    // INTERP: Y − A in Q4.32 (saturated in E2, decision 3a). ADD3: A + Y.
+    // INTERP: Y − A in Q4.32 (saturated, decision 3a). ADD3: A + Y.
     wire signed [54:0] difference_full = 55'(e1_y_value) - 55'(e1_a_value);
     wire signed [54:0] sum_full        = 55'(e1_a_value) + 55'(e1_y_value);
+    wire signed [40:0] difference_q432 = 41'(difference_full >>> 14);
+    wire signed [35:0] difference =
+            difference_q432 > 41'sd34359738367  ? 36'sd34359738367 :
+            difference_q432 < -41'sd34359738368 ? -36'sd34359738368 : difference_q432[35:0];
+    wire signed [53:0] sum = sum_full > 55'(ACC_MAX) ? ACC_MAX
+                           : sum_full < 55'(ACC_MIN) ? ACC_MIN : sum_full[53:0];
+
+    // The multiply-add unit's operands, a × b + c, chosen here so that E2's
+    // registers feed the DSP's pins with nothing between (section 12: the
+    // tool times no path into a DSP's pins; chosen in E2, the muxes sat on
+    // the pins).
+    logic signed [17:0] multiply_a_next;
+    logic signed [35:0] multiply_b_next;
+    logic signed [53:0] multiply_c_next;
+    always_comb begin
+        multiply_a_next = e1_x_word;
+        multiply_b_next = e1_y_wide ? $signed(e1_y_operand) : 36'(e1_y_word) <<< 18;
+        multiply_c_next = e1_a_value;
+        case (e1_op)
+            csp_pkg::OP_INTERP: multiply_b_next = difference;
+            csp_pkg::OP_ADD3: begin
+                multiply_b_next = ONE_Q432;
+                multiply_c_next = sum;
+            end
+            csp_pkg::OP_CMP: begin
+                multiply_b_next = ONE_Q432;
+                multiply_c_next = -word_to_accumulator(e1_y_word);
+            end
+            csp_pkg::OP_ABS: begin
+                multiply_b_next = e1_x_word < 0 ? -ONE_Q432 : ONE_Q432;
+                multiply_c_next = '0;
+            end
+            default: ;
+        endcase
+    end
 
     // MIN, MAX, SEL, ANDXOR: one word, no overflow.
     logic [17:0] logic_result;
@@ -483,19 +778,6 @@ module csp_core (
             csp_pkg::OP_SEL: logic_result = select_negative ? e1_y_word : e1_x_word;
             default:         logic_result = (e1_x_word & e1_y_word) ^ a_bits;     // ANDXOR
         endcase
-    end
-
-    // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
-    // saturates (E2).
-    logic signed [89:0] shifted;
-    logic               shift_forced;
-    always_comb begin
-        if (e1_shift_total >= 0) begin
-            shifted = 90'(e1_a_value) <<< (e1_shift_total > 19'sd36 ? 36 : int'(e1_shift_total));
-        end else begin
-            shifted = 90'(e1_a_value) >>> (-e1_shift_total > 19'sd54 ? 54 : int'(-e1_shift_total));
-        end
-        shift_forced = e1_shift_total > 19'sd36 && e1_a_value != 0;
     end
 
     // ---- E1: LOOP and IDX resolve; the front end's next pc ----------------------------------------
@@ -534,14 +816,30 @@ module csp_core (
     // end here. (Comparing last pcs instead of the pc after them keeps the
     // increment out of the comparison.)
     wire skips_loop = is_loop && e1_skips_body;
-    wire [PC_W-1:0] position = vector_done ? vector_last_pc
-                             : (skips_loop ? e1_body_last : sequence_pc);
     wire [PC_W-1:0] following = skips_loop ? e1_body_end
                               : (vector_done ? vector_end
                                              : (resolving ? e1_pc_plus_one : decode_pc + 1'b1));
-    wire inner_ends = loop_inner.active && position == loop_inner.last_pc;
-    wire outer_ends = loop_outer.active && position == loop_outer.last_pc;
+    // The position is one of three; each is compared with the loops' last
+    // pcs on its own (registers against registers) and the result chosen,
+    // so that skips_loop, late from E1's operand, selects a bit and not an
+    // 11-bit operand of a comparator.
+    wire inner_ends_vector = loop_inner.active && vector_last_pc == loop_inner.last_pc;
+    wire inner_ends_skip   = loop_inner.active && e1_body_last   == loop_inner.last_pc;
+    wire inner_ends_seq    = loop_inner.active && sequence_pc    == loop_inner.last_pc;
+    wire outer_ends_vector = loop_outer.active && vector_last_pc == loop_outer.last_pc;
+    wire outer_ends_skip   = loop_outer.active && e1_body_last   == loop_outer.last_pc;
+    wire outer_ends_seq    = loop_outer.active && sequence_pc    == loop_outer.last_pc;
+    wire inner_ends = vector_done ? inner_ends_vector : (skips_loop ? inner_ends_skip : inner_ends_seq);
+    wire outer_ends = vector_done ? outer_ends_vector : (skips_loop ? outer_ends_skip : outer_ends_seq);
 
+    // For the fetch: whether next_pc is a loop's start (a repeat), and
+    // whether that is the pc being consumed, so that decode stays where it
+    // is (a body of one instruction; a skipped LOOP that opens the body and
+    // whose own body ends it). Registers compared with registers: the fetch
+    // does not wait for next_pc.
+    logic loop_repeats, loop_repeats_self;
+    wire  inner_repeats_self = loop_inner.start == sequence_pc;
+    wire  outer_repeats_self = loop_outer.start == sequence_pc;
     always_comb begin
         logic   inner_repeats;
         loop_t  opened;
@@ -553,6 +851,8 @@ module csp_core (
         stride_i      = '0;
         stride_j      = '0;
         inner_repeats = 1'b0;
+        loop_repeats      = 1'b0;
+        loop_repeats_self = 1'b0;
 
         opened.active    = 1'b1;
         opened.on_j      = execute1_stage.instruction.a[0];
@@ -584,6 +884,8 @@ module csp_core (
                 next_inner.remaining = loop_inner.remaining - 1'b1;
                 next_pc = loop_inner.start;
                 inner_repeats = 1'b1;
+                loop_repeats      = 1'b1;
+                loop_repeats_self = inner_repeats_self;
             end else begin
                 next_inner.active = 1'b0;
             end
@@ -599,6 +901,8 @@ module csp_core (
             if (loop_outer.remaining > 18'd1) begin
                 next_outer.remaining = loop_outer.remaining - 1'b1;
                 next_pc = loop_outer.start;
+                loop_repeats      = 1'b1;
+                loop_repeats_self = outer_repeats_self;
             end else begin
                 next_outer.active = 1'b0;
             end
@@ -635,61 +939,145 @@ module csp_core (
     // finished vector loop, or past an issued instruction that is neither.
     wire advance = resolving || vector_done || (issue && !is_barrier && !vector_issuing);
 
-    assign fetch_address = pass_start ? '0
-                         : (advance ? next_pc
-                                    : (vector_next_instruction ? decode_pc + 1'b1 : decode_pc));
+    // The front end's move, told apart by the loop control rather than by
+    // comparing next_pc: onto itself (a body of one instruction repeating:
+    // the word stays), a jump (a repeat, a skipped body: the fetch restarts
+    // at next_pc), else on to the next word (the next instruction of a
+    // vector loop's body, a resolution, a finished vector loop, an issue).
+    // The next word hits when it is in the buffer, or on the memory's output
+    // this cycle (it goes into the buffer at this edge); a miss restarts the
+    // fetch at decode_pc + 1.
+    wire            move        = advance || vector_next_instruction;
+    wire            move_self   = advance && loop_repeats && loop_repeats_self;
+    wire            move_jump   = advance && !move_self && (skips_loop || loop_repeats);
+    wire            move_next   = move && !move_self && !move_jump;
+    wire            hit_buffer  = move_next && buffer_valid && buffer_place == PLACE_NEXT;
+    // (the buffer may still hold decode's own word, given up at the move)
+    wire            hit_flight  = move_next && (!buffer_valid || buffer_is_decode)
+                                  && inflight_valid && inflight_place == PLACE_NEXT;
+    wire            move_miss   = move_next && !hit_buffer && !hit_flight;
+    // Word 0 for the next pass: fetched at this pass's end (the pass start
+    // moves decode there); the first pass after a reset fetches it as it
+    // starts, after the program is loaded, not at the reset.
+    wire            fetch_restart_pass = (in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 4))
+                                       || (pass_start && !fetch_primed);
+    wire            fetch_restart = fetch_restart_pass || move_jump || move_miss;
+    wire [PC_W-1:0] fetch_restart_pc = fetch_restart_pass ? '0
+                                     : (move_jump ? next_pc : decode_pc + 1'b1);
+    // The buffer takes the memory's word when its slot is free: empty, or its
+    // word taken into decode's copy at this edge.
+    wire            buffer_take = (move_next && (hit_buffer || buffer_is_decode))
+                                  || (!move && !held_valid && buffer_is_decode);
+    wire            buffer_free = !buffer_valid || buffer_take;
+    assign          buffer_load = buffer_free && inflight_valid;
+    wire [1:0]      place_shift = {1'b0, move_next};   // places come down by one at a move on
+
+    // ---- F: the fetch registers ----------------------------------------------------------------
+    // The fetch runs ahead; it restarts at a jump, a miss and a pass's end,
+    // and fetches a word again when the buffer could not take it. Decode's
+    // copy of its word is taken from the buffer at a move that hits it, or
+    // the cycle the buffer brings decode's word.
+    // fetch_pc moves every clock: to a restart's pc, on by one, or back by
+    // one when the word on the memory was not wanted (the one the buffer
+    // could not take comes again); the memory's own address registers
+    // take the same value (fetch_address).
+    assign fetch_pc_next = fetch_restart                   ? fetch_restart_pc
+                         : (buffer_load || !inflight_valid) ? fetch_pc + 1'b1
+                         :                                    fetch_pc - 1'b1;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            fetch_pc        <= '0;
+            fetch_valid     <= 1'b0;
+            fetch_place     <= PLACE_OWN;
+            fetch_primed    <= 1'b0;
+            inflight_valid  <= 1'b0;
+            inflight_place  <= PLACE_OWN;
+            buffer_valid    <= 1'b0;
+            buffer_place    <= PLACE_OWN;
+            held_valid      <= 1'b0;
+        end else begin
+            fetch_pc <= fetch_pc_next;
+            if (fetch_restart) begin
+                fetch_valid    <= 1'b1;
+                fetch_place    <= PLACE_OWN;
+                fetch_primed   <= 1'b1;
+                inflight_valid <= 1'b0;
+                buffer_valid   <= 1'b0;
+            end else if (buffer_load || !inflight_valid) begin
+                inflight_valid <= fetch_valid;
+                inflight_place <= fetch_place - place_shift;
+                fetch_place    <= fetch_place + 2'd1 - place_shift;
+                if (buffer_load) begin                  // the memory's buffer register takes the word
+                    buffer_place <= inflight_place - place_shift;
+                    buffer_valid <= 1'b1;
+                end else if (buffer_take) begin
+                    buffer_valid <= 1'b0;
+                end else begin
+                    buffer_place <= buffer_place - place_shift;
+                end
+            end else begin
+                inflight_valid <= 1'b0;             // the word on the memory is not wanted
+                fetch_place    <= fetch_place - 2'd1 - place_shift;
+                if (buffer_take) begin
+                    buffer_valid <= 1'b0;
+                end else begin
+                    buffer_place <= buffer_place - place_shift;
+                end
+            end
+            if (fetch_restart_pass || move_jump || move_miss) begin
+                held_valid <= 1'b0;
+            end else if (move_next) begin
+                held_valid <= hit_buffer;
+                if (hit_buffer) begin
+                    held_instruction <= buffer_word;
+                end
+            end else if (!held_valid && buffer_is_decode) begin
+                held_instruction <= buffer_word;
+                held_valid       <= 1'b1;
+            end
+        end
+    end
 
     // ---- E2 ------------------------------------------------------------------------------------
-    logic signed [54:0] e2_difference_full, e2_sum_full;
     logic signed [53:0] e2_a_value;
-    logic signed [17:0] e2_x_word, e2_y_word;
-    logic [35:0]        e2_y_operand;
-    logic               e2_y_wide;
     logic [17:0]        e2_logic_result;
-    logic signed [89:0] e2_shifted;
-    logic               e2_shift_forced;
+    logic signed [18:0] e2_shift_total;
 
-    wire [3:0] e2_op = execute2_stage.instruction.op;
+    // The multiply-add unit's operands, from E1: the unit's own operand
+    // registers, placed on the DSP's pins (csp_multiply_add.sv); E3's
+    // copies for the flags are taken from them.
+    wire signed [17:0] e2_multiply_a;
+    wire signed [35:0] e2_multiply_b;
+    wire signed [53:0] e2_multiply_c;
 
-    wire signed [40:0] difference_q432 = 41'(e2_difference_full >>> 14);
-    wire signed [35:0] difference =
-            difference_q432 > 41'sd34359738367  ? 36'sd34359738367 :
-            difference_q432 < -41'sd34359738368 ? -36'sd34359738368 : difference_q432[35:0];
-    wire signed [53:0] sum = e2_sum_full > 55'(ACC_MAX) ? ACC_MAX
-                           : e2_sum_full < 55'(ACC_MIN) ? ACC_MIN : e2_sum_full[53:0];
-
-    // The multiply-add unit's operands: a × b + c.
-    logic signed [17:0] multiply_a;
-    logic signed [35:0] multiply_b;
-    logic signed [53:0] multiply_c;
+    // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
+    // saturates (E3).
+    logic signed [89:0] shifted;
+    logic               shift_forced;
     always_comb begin
-        multiply_a = e2_x_word;
-        multiply_b = e2_y_wide ? $signed(e2_y_operand) : 36'(e2_y_word) <<< 18;
-        multiply_c = e2_a_value;
-        case (e2_op)
-            csp_pkg::OP_INTERP: multiply_b = difference;
-            csp_pkg::OP_ADD3: begin
-                multiply_b = ONE_Q432;
-                multiply_c = sum;
-            end
-            csp_pkg::OP_CMP: begin
-                multiply_b = ONE_Q432;
-                multiply_c = -word_to_accumulator(e2_y_word);
-            end
-            csp_pkg::OP_ABS: begin
-                multiply_b = e2_x_word < 0 ? -ONE_Q432 : ONE_Q432;
-                multiply_c = '0;
-            end
-            default: ;
-        endcase
+        if (e2_shift_total >= 0) begin
+            shifted = 90'(e2_a_value) <<< (e2_shift_total > 19'sd36 ? 36 : int'(e2_shift_total));
+        end else begin
+            shifted = 90'(e2_a_value) >>> (-e2_shift_total > 19'sd54 ? 54 : int'(-e2_shift_total));
+        end
+        shift_forced = e2_shift_total > 19'sd36 && e2_a_value != 0;
     end
+
+    // ---- E3: the multiply-add unit; SHIFT saturates ---------------------------------------------
+    logic signed [17:0] e3_multiply_a;
+    logic signed [35:0] e3_multiply_b;
+    logic signed [53:0] e3_multiply_c;
+    logic [17:0]        e3_logic_result;
+    logic signed [89:0] e3_shifted;
+    logic               e3_shift_forced;
+    logic               e3_a_negative;
 
     // SHIFT: saturate to the destination.
     logic [35:0] shift_result;
     logic        shift_saturated;
     always_comb begin
         logic signed [89:0] limit_high, limit_low;
-        if (execute2_stage.r_wide) begin
+        if (execute3_stage.r_wide) begin
             limit_high = (90'sd1 <<< 35) - 1;
             limit_low  = -(90'sd1 <<< 35);
         end else begin
@@ -697,35 +1085,43 @@ module csp_core (
             limit_low  = -(90'sd1 <<< 17);
         end
         shift_saturated = 1'b1;
-        if (e2_shift_forced) begin
-            shift_result = e2_a_value < 0 ? 36'(limit_low) : 36'(limit_high);
-        end else if (e2_shifted > limit_high) begin
+        if (e3_shift_forced) begin
+            shift_result = e3_a_negative ? 36'(limit_low) : 36'(limit_high);
+        end else if (e3_shifted > limit_high) begin
             shift_result = 36'(limit_high);
-        end else if (e2_shifted < limit_low) begin
+        end else if (e3_shifted < limit_low) begin
             shift_result = 36'(limit_low);
         end else begin
-            shift_result = 36'(e2_shifted);
+            shift_result = 36'(e3_shifted);
             shift_saturated = 1'b0;
         end
-        if (!execute2_stage.r_wide) shift_result[35:18] = '0;
+        if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    // ---- E3: the multiply-add unit ---------------------------------------------------------------
-    logic signed [17:0] e3_multiply_a;
-    logic signed [35:0] e3_multiply_b;
-    logic signed [53:0] e3_multiply_c;
-    logic [17:0]        e3_logic_result;
-    logic [35:0]        e3_shift_result;
-    logic               e3_shift_saturated;
-
-    logic signed [53:0] product;
-    csp_multiply_add u_multiply_add (
-        .clk     (clk),
-        .reset_n (reset_n),
-        .a       (e3_multiply_a),
-        .b       (e3_multiply_b),
-        .c       (e3_multiply_c),
-        .product (product)
+    // The unit takes E1's choice into its operand registers (E2, on the
+    // block's input pins), the block takes those into its own input
+    // registers (its E3 copy of e3_multiply_*; the fabric's copy feeds the
+    // flags below) and multiplies register to register inside: the sum is
+    // in its output register in E4, and in the unit's product register,
+    // on the output pins, in E5 — E5's register, placed beside the block.
+    // The unit's product register is placed beside the DSP at X19Y36, its
+    // operand registers are not: placed together, their 162 flip-flops
+    // pushed the core's logic out of its place and the report fell from
+    // 104–107 MHz to 85–93 on every seed (a fault on every pass on the
+    // board); left alone, the sum's path out of the block decided whether
+    // a bitstream played — the ones that did had the DSP at X19Y36 with
+    // the product's registers nearest to it (docs/gowin_oss_notes.md).
+    wire signed [53:0] product;         // the unit's product register: E5's
+    csp_multiply_add #(.SITE_X(19), .SITE_Y(36), .PLACE_OPERANDS(1'b0), .PLACE_PRODUCT(1'b1)) u_multiply_add (
+        .clk       (clk),
+        .reset_n   (reset_n),
+        .a         (multiply_a_next),
+        .b         (multiply_b_next),
+        .c         (multiply_c_next),
+        .operand_a (e2_multiply_a),
+        .operand_b (e2_multiply_b),
+        .operand_c (e2_multiply_c),
+        .product   (product)
     );
 
     // What E4 needs to see whether the 54-bit sum wrapped inside the block:
@@ -733,32 +1129,41 @@ module csp_core (
     wire e3_product_nonzero = e3_multiply_a != '0 && e3_multiply_b != '0;
     wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
 
-    // ---- E4: reduce to the destination; the flags ----------------------------------------------------
-    logic signed [53:0] e4_product;
+    // ---- E4: the product settles in the block's own register (OUT_REG); the rest waits ----------
+    // The DSP's registered product goes into the unit's product register
+    // and nowhere else (section 12: the tool does not time what follows a
+    // DSP's output); E4 is where it is a register's output and nothing more.
     logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
     logic [17:0]        e4_logic_result;
     logic [35:0]        e4_shift_result;
     logic               e4_shift_saturated;
 
-    wire [3:0] e4_op = execute4_stage.instruction.op;
-    wire       wraps = e4_op == csp_pkg::OP_MACW;
+    // ---- E5: reduce to the destination; the flags ----------------------------------------------------
+    wire signed [53:0]  e5_product = product;   // the unit's product register (csp_multiply_add.sv)
+    logic               e5_product_nonzero, e5_signs_agree, e5_c_negative;
+    logic [17:0]        e5_logic_result;
+    logic [35:0]        e5_shift_result;
+    logic               e5_shift_saturated;
+
+    wire [3:0] e5_op = execute5_stage.instruction.op;
+    wire       wraps = e5_op == csp_pkg::OP_MACW;
 
     // The sum wraps inside the block when the product and c share a sign
     // the sum does not have; then it saturates (or, for MACW, wraps).
-    wire sum_wrapped = e4_product_nonzero && e4_signs_agree && e4_product[53] != e4_c_negative;
-    wire signed [53:0] product_saturated = sum_wrapped ? (e4_c_negative ? ACC_MIN : ACC_MAX)
-                                                       : e4_product;
+    wire sum_wrapped = e5_product_nonzero && e5_signs_agree && e5_product[53] != e5_c_negative;
+    wire signed [53:0] product_saturated = sum_wrapped ? (e5_c_negative ? ACC_MIN : ACC_MAX)
+                                                       : e5_product;
 
     logic [35:0] arithmetic_result;
     logic        arithmetic_saturated;
     always_comb begin
         logic signed [21:0] word_part;
         logic signed [39:0] wide_part;
-        word_part = 22'((wraps ? e4_product : product_saturated) >>> 32);
-        wide_part = 40'((wraps ? e4_product : product_saturated) >>> 14);
+        word_part = 22'((wraps ? e5_product : product_saturated) >>> 32);
+        wide_part = 40'((wraps ? e5_product : product_saturated) >>> 14);
         arithmetic_result = '0;
         arithmetic_saturated = sum_wrapped && !wraps;
-        if (execute4_stage.r_wide) begin
+        if (execute5_stage.r_wide) begin
             if (wraps) begin
                 arithmetic_result = wide_part[35:0];
             end else if (wide_part > 40'sd34359738367) begin
@@ -791,21 +1196,21 @@ module csp_core (
     always_comb begin
         result          = arithmetic_result;
         result_overflow = arithmetic_saturated;
-        case (e4_op)
+        case (e5_op)
             csp_pkg::OP_MIN, csp_pkg::OP_MAX, csp_pkg::OP_SEL, csp_pkg::OP_ANDXOR: begin
-                result          = {18'd0, e4_logic_result};
+                result          = {18'd0, e5_logic_result};
                 result_overflow = 1'b0;
             end
             csp_pkg::OP_SHIFT: begin
-                result          = e4_shift_result;
-                result_overflow = e4_shift_saturated;
+                result          = e5_shift_result;
+                result_overflow = e5_shift_saturated;
             end
             default: ;
         endcase
     end
 
-    wire result_negative = execute4_stage.r_wide ? result[35] : result[17];
-    wire result_zero     = execute4_stage.r_wide ? result == '0 : result[17:0] == '0;
+    wire result_negative = execute5_stage.r_wide ? result[35] : result[17];
+    wire result_zero     = execute5_stage.r_wide ? result == '0 : result[17:0] == '0;
 
     // ---- W -------------------------------------------------------------------------------------
     logic [35:0]        w_result;
@@ -813,6 +1218,9 @@ module csp_core (
     logic signed [53:0] w_accumulator;
 
     wire writing = writeback_stage.valid && writeback_stage.live;
+    assign pipeline_busy = address_stage.valid || read_stage.valid || execute1_stage.valid || execute2_stage.valid
+                           || execute3_stage.valid || execute4_stage.valid || execute5_stage.valid
+                           || writeback_stage.valid;
     wire element_flags_write = writing && writeback_stage.sets_flags && writeback_stage.vector;
 
     // ---- the stage registers -------------------------------------------------------------------
@@ -822,12 +1230,16 @@ module csp_core (
         if (!reset_n) begin
             decode_valid    <= 1'b0;
             decode_pc       <= '0;
+            address_stage   <= BUBBLE;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
             execute3_stage  <= BUBBLE;
             execute4_stage  <= BUBBLE;
+            execute5_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
+            writeback_done  <= BUBBLE;
+            hazard_pos      <= '0;
             index_i <= '0; index_j <= '0;
             accumulator <= '0;
             flag_negative <= 1'b0; flag_zero <= 1'b0; flag_overflow <= 1'b0;
@@ -841,12 +1253,16 @@ module csp_core (
         end else if (pass_start) begin
             decode_valid    <= !held;
             decode_pc       <= '0;
+            address_stage   <= BUBBLE;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
             execute3_stage  <= BUBBLE;
             execute4_stage  <= BUBBLE;
+            execute5_stage  <= BUBBLE;
             writeback_stage <= BUBBLE;
+            writeback_done  <= BUBBLE;
+            hazard_pos      <= '0;
             skip_remaining  <= '0;
             loop_outer      <= '0;
             loop_inner      <= '0;
@@ -872,7 +1288,8 @@ module csp_core (
             end
 
             // Vector loops: open at LOOP.vi's resolution, step through the
-            // elements as the body issues, end three cycles after the last.
+            // elements as the body issues, end four cycles after the last
+            // (when it is in E1, as a LOOP is when it resolves).
             if (opens_vector) begin
                 vector_issuing       <= 1'b1;
                 vector_on_j          <= execute1_stage.instruction.a[0];
@@ -902,10 +1319,10 @@ module csp_core (
                 end else begin
                     vector_issuing <= 1'b0;
                     vector_own     <= vector_own + vector_stride;
-                    vector_finish  <= 2'd2;
+                    vector_finish  <= 2'd3;
                 end
             end
-            if (vector_finish != 2'd0 && !vector_issue) begin
+            if (vector_finish != 2'd0 && !vector_issue && !a_hold) begin
                 vector_finish <= vector_finish - 1'b1;
             end
             if (e1_vector_idx && execute1_stage.live
@@ -913,7 +1330,17 @@ module csp_core (
                 last_private <= index_value;
             end
 
-            read_stage <= issue ? issued : BUBBLE;
+            // A: the issued instruction, or a bubble; R takes A's on when A
+            // does not wait (R never waits itself).
+            if (!a_hold) begin
+                address_stage <= issue ? issued : BUBBLE;
+                read_stage    <= address_stage;
+            end else begin
+                read_stage    <= BUBBLE;
+                if (limit_drop) begin
+                    address_stage <= BUBBLE;
+                end
+            end
 
             // R: SKIP counts instructions as they leave R.
             if (read_stage.valid) begin
@@ -924,11 +1351,25 @@ module csp_core (
                 end
             end
             execute1_stage <= read_leaving;
+            // The hazard bits: made for an instruction as it enters A, then
+            // carried along while it waits.
+            if (issue) begin
+                hazard_pos <= {incoming_hazard(writeback_stage), incoming_hazard(execute5_stage),
+                               incoming_hazard(execute4_stage), incoming_hazard(execute3_stage),
+                               incoming_hazard(execute2_stage), incoming_hazard(execute1_stage),
+                               incoming_hazard(read_stage), incoming_hazard(address_stage)};
+            end else if (a_hold && !limit_drop) begin
+                hazard_pos <= {hazard_pos[6:0], 1'b0};
+            end else begin
+                hazard_pos <= '0;
+            end
 
             execute2_stage  <= execute1_stage;
             execute3_stage  <= execute2_stage;
             execute4_stage  <= execute3_stage;
-            writeback_stage <= execute4_stage;
+            execute5_stage  <= execute4_stage;
+            writeback_stage <= execute5_stage;
+            writeback_done  <= writeback_stage;
 
             // W
             if (writing && writeback_stage.writes_accumulator) begin
@@ -955,50 +1396,70 @@ module csp_core (
 
     // The data path's registers: no reset, a bubble's values are never used.
     always_ff @(posedge clk) begin
-        read_reads_a <= reads_a;
-        read_reads_x <= reads_x;
-        read_reads_y <= reads_y;
-        read_y_wide  <= decode_y_wide;
+        if (!a_hold) begin
+            a_reads_a           <= reads_a;
+            a_reads_x           <= reads_x;
+            a_reads_y           <= reads_y;
+            a_x_address         <= decode_x_address;
+            a_y_address         <= decode_y_address;
+            a_a_wide            <= decode_a_wide;
+            a_y_wide            <= decode_y_wide;
+            a_reads_accumulator <= reads_accumulator;
+            a_reads_flags       <= reads_flags;
+            read_reads_a        <= a_reads_a;
+            read_reads_x        <= a_reads_x;
+            read_reads_y        <= a_reads_y;
+            read_x_address      <= a_x_address;
+            read_y_address      <= a_y_address;
+            read_a_wide         <= a_a_wide;
+            read_y_wide         <= a_y_wide;
+        end
+        if (probe_load) begin
+            a_y_address <= AW'(probe_address);   // the pipeline is empty: A is a bubble
+        end
 
-        e1_a_value     <= a_value;
-        e1_y_value     <= y_value;
-        e1_x_word      <= x_operand;
-        e1_y_word      <= y_operand[17:0];
-        e1_y_operand   <= y_operand;
+        // The element's private index, for the element decode works on next
+        // (at a vector loop's open: the entry's, for element 0).
+        private_current <= opens_vector ? (execute1_stage.instruction.a[0] ? index_i : index_j)
+                                        : private_next;
+        // The banks' words are E1's by the banks' own output registers.
+        e1_reads_a     <= read_reads_a;
+        e1_reads_x     <= read_reads_x;
+        e1_reads_y     <= read_reads_y;
+        e1_a_wide      <= read_a_wide;
         e1_y_wide      <= read_y_wide;
-        e1_shift_total <= shift_total;
+        e1_a_odd_half  <= read_stage.r_address[0];
+        e1_x_odd_half  <= read_x_address[0];
+        e1_y_odd_half  <= read_y_address[0];
         e1_body_end    <= read_stage.pc + PC_W'(read_stage.instruction.r) + 1'b1;
         e1_body_last   <= read_stage.pc + PC_W'(read_stage.instruction.r);
         e1_pc_plus_one <= read_stage.pc + 1'b1;
-        e1_skips_body  <= x_operand == '0
-                          || (read_stage.instruction.a[1]
-                              && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
 
-        e2_difference_full <= difference_full;
-        e2_sum_full        <= sum_full;
         e2_a_value         <= e1_a_value;
-        e2_x_word          <= e1_x_word;
-        e2_y_word          <= e1_y_word;
-        e2_y_operand       <= e1_y_operand;
-        e2_y_wide          <= e1_y_wide;
         e2_logic_result    <= logic_result;
-        e2_shifted         <= shifted;
-        e2_shift_forced    <= shift_forced;
+        e2_shift_total     <= shift_total;
 
-        e3_multiply_a      <= multiply_a;
-        e3_multiply_b      <= multiply_b;
-        e3_multiply_c      <= multiply_c;
+        e3_multiply_a      <= e2_multiply_a;
+        e3_multiply_b      <= e2_multiply_b;
+        e3_multiply_c      <= e2_multiply_c;
         e3_logic_result    <= e2_logic_result;
-        e3_shift_result    <= shift_result;
-        e3_shift_saturated <= shift_saturated;
+        e3_shifted         <= shifted;
+        e3_shift_forced    <= shift_forced;
+        e3_a_negative      <= e2_a_value[53];
 
-        e4_product         <= product;
         e4_product_nonzero <= e3_product_nonzero;
         e4_signs_agree     <= e3_signs_agree;
         e4_c_negative      <= e3_multiply_c[53];
         e4_logic_result    <= e3_logic_result;
-        e4_shift_result    <= e3_shift_result;
-        e4_shift_saturated <= e3_shift_saturated;
+        e4_shift_result    <= shift_result;
+        e4_shift_saturated <= shift_saturated;
+
+        e5_product_nonzero <= e4_product_nonzero;
+        e5_signs_agree     <= e4_signs_agree;
+        e5_c_negative      <= e4_c_negative;
+        e5_logic_result    <= e4_logic_result;
+        e5_shift_result    <= e4_shift_result;
+        e5_shift_saturated <= e4_shift_saturated;
 
         w_result      <= result;
         w_negative    <= result_negative;
@@ -1008,35 +1469,86 @@ module csp_core (
     end
 
     // ---- the register file's write port and the sinks ----------------------------------------------------
-    wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
-    wire writes_result_now = writing && writeback_stage.writes_registers;
-    assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
-    wire queue_writable = queue_address != '0 && !csp_pkg::is_input(AW'(queue_address));
+    // The pass counter: the next pass's count goes in on this pass's last
+    // cycle, through the copies' write registers like every other write,
+    // and lands at the first cycle of the next pass, before any instruction
+    // reads it (it went in directly on the pass's first cycle before, by a
+    // mux on the banks' pins). The windows close early enough that nothing
+    // else is given to the register file on that cycle.
+    wire writes_counter_now = pass_done;
+    wire writes_result_now  = writing && writeback_stage.writes_registers;
+    assign queue_pop    = window_open && queue_committed && !writes_counter_now && !writes_result_now;
+    // The queue hands out the entry three clocks after it is popped (the
+    // block's read at the pointer's register, its pipeline register, then
+    // the queue's own output register beside the block, csp_write_queue.sv),
+    // and it is applied then: the decoding and the memories' write
+    // enables work from a fabric register's output, and the block's output
+    // register feeds nothing but a register (section 12: the tool times no
+    // path into or out of a block RAM's pins; on the board, with the decode
+    // straight on the block's output, a boot at 73.728 MHz dropped writes and
+    // landed others two addresses off, and with a mux on the block's address
+    // pin each batch lost its first words).
+    // (Nothing else writes in the window: the pipeline is empty and the pass
+    // counter is written on the pass's last cycle, after the window.)
+    logic                               popped_valid, arrived_valid, staged_valid;
+    // The staged entry is the queue's own output register, placed beside
+    // its block (csp_write_queue.sv): the block's pipeline register feeds
+    // nothing but that register, and it holds the entry at staged_valid.
+    wire [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address = queue_address;
+    wire [csp_pkg::WORD_W-1:0]          staged_data    = queue_data;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            popped_valid  <= 1'b0;
+            arrived_valid <= 1'b0;
+            staged_valid  <= 1'b0;
+        end else begin
+            popped_valid  <= queue_pop;
+            arrived_valid <= popped_valid;
+            staged_valid  <= arrived_valid;
+        end
+    end
 
+    // A queued write names a register, or a sink word: the firmware's own
+    // words in the sink area (channel settings that only a MIDI message
+    // moves) go to both pages, so that they survive the flip.
+    wire queue_to_sink  = staged_valid && csp_pkg::is_sink(AW'(staged_address));
+    wire queue_writable = staged_address != '0 && !csp_pkg::is_input(AW'(staged_address))
+                          && staged_address < csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::REGISTER_COUNT);
+
+    // The register file takes a write into its own registers (one set a
+    // copy, next to the banks) and lands it the clock after, so the result's
+    // write goes in from E5, a clock before W, and lands at W's edge as it
+    // always did; the queue's write goes in from the staged registers and
+    // lands a clock later than it did (the window allows for it); the pass
+    // counter goes in on the pass's last cycle (csp_register_file.sv).
+    wire writes_result_next = execute5_stage.valid && execute5_stage.live && execute5_stage.writes_registers;
     always_comb begin
         rf_write_enable  = 1'b0;
         rf_write_address = '0;
         rf_write_wide    = 1'b0;
         rf_write_data    = '0;
-        if (write_counter) begin
+        if (writes_result_next) begin
+            rf_write_enable  = 1'b1;
+            rf_write_address = csp_pkg::REGISTER_W'(execute5_stage.r_address);
+            rf_write_wide    = execute5_stage.r_wide;
+            rf_write_data    = result;
+        end else if (staged_valid) begin
+            rf_write_enable  = queue_writable;
+            rf_write_address = csp_pkg::REGISTER_W'(staged_address);
+            rf_write_data    = {18'd0, staged_data};
+        end else if (writes_counter_now) begin
             rf_write_enable  = 1'b1;
             rf_write_address = csp_pkg::REGISTER_W'(csp_pkg::IO_BASE);
             rf_write_data    = {18'd0, pass_count + 1'b1};
-        end else if (writes_result_now) begin
-            rf_write_enable  = 1'b1;
-            rf_write_address = csp_pkg::REGISTER_W'(writeback_stage.r_address);
-            rf_write_wide    = writeback_stage.r_wide;
-            rf_write_data    = w_result;
-        end else if (queue_pop) begin
-            rf_write_enable  = queue_writable;
-            rf_write_address = queue_address;
-            rf_write_data    = {18'd0, queue_data};
         end
     end
 
-    assign sink_write_enable  = writing && writeback_stage.writes_sink;
-    assign sink_write_address = 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
-    assign sink_write_data    = w_result[17:0];
+    assign sink_write_enable  = (writing && writeback_stage.writes_sink) || queue_to_sink;
+    assign sink_write_both    = queue_to_sink;
+    assign sink_write_address = queue_to_sink
+                                ? 10'(staged_address - csp_pkg::QUEUE_ADDRESS_W'(csp_pkg::SINK_BASE))
+                                : 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
+    assign sink_write_data    = queue_to_sink ? staged_data : w_result[17:0];
 
 endmodule
 `default_nettype wire

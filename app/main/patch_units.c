@@ -332,7 +332,7 @@ static int32_t raw_lfo_rate(const patch_t *p, int i, double v) {
     return nearest_by_ratio(v, SAMPLE_RATE / LFO_PHASE_CYCLE, 1, 65535);
 }
 
-// lfo depth: the destination's unit, peak. The LFO swings its DMEM word
+// lfo depth: the destination's unit, peak. The LFO swings its destination
 // by ±depth/2, hence the 2.
 static double lfo_depth_scale(uint8_t dest, int32_t *lim) {
     switch (dest) {

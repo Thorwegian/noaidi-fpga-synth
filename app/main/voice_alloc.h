@@ -26,7 +26,7 @@ extern "C" {
 void voice_alloc_init(void);
 
 // Make *p the active patch, as a full set of CC edits would: every
-// instruction, DMEM word and sounding voice follows it. Runs in the
+// register, sink word and sounding voice follows it. Runs in the
 // allocator task, in order with MIDI; waits until it is applied. False
 // if the allocator does not answer.
 bool voice_alloc_set_patch(const patch_t *p);

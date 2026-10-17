@@ -4,21 +4,22 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 The single reference for the synth's architecture. The SPI/BSRAM
-control plane and per-partial words are detailed in
-[memory_map.md](memory_map.md), the modulation model in
-[dmem_architecture.md](dmem_architecture.md). For numeric constants the
-code is the source of truth: `rtl/synth_pkg.sv` and the generators in
-`scripts/`.
+control plane and the sink words are detailed in
+[memory_map.md](memory_map.md), the modulation model (the CSP) in
+[csp_isa.md](csp_isa.md) and [csp_manual.md](csp_manual.md); the first CSP's
+DMEM model is kept as history in [dmem_architecture.md](dmem_architecture.md).
+For numeric constants the code is the source of truth: `rtl/synth_pkg.sv` and
+the generators in `scripts/`.
 
 ## Terminology
 
 - **Partial** — what the FPGA *generates*: one oscillator→filter→gain
   sound unit. The FPGA has 256 of them and no opinion about how they
   are used.
-- **Issue slot** — how it generates them, technically: one of the 256
-  time slots per sample period in which a partial enters the partial
-  pipeline (`slot_issue`). One issue slot computes one partial; "issue
-  slot" speaks about hardware, "partial" about sound.
+- **Issue slot** — how it generates them, technically: one of the 256 pairs
+  of time slots per sample period in which a partial enters the partial
+  pipeline (`slot_issue`). One issue computes one partial; "issue slot"
+  speaks about hardware, "partial" about sound.
 - **Voice** — a firmware-side *grouping* of partials (e.g. 8 detuned
   partials sounding one keystroke). Grouping is entirely the ESP32's
   business; a voice is one possible grouping, not the only one.
@@ -30,36 +31,19 @@ code is the source of truth: `rtl/synth_pkg.sv` and the generators in
   - **Voice** — fans out to all partials on one voice.
 
   Each channel is its own little synth; channels just happen to share
-  certain resources. NOTHING in DMEM is Global by intent:
-  every DMEM word named "global" (the resonance word, the duty word,
-  the bend word, ...) is a CHANNEL word that coincides with global scope while
-  exactly one channel exists.
-- **Source / sink is the couple**: things that write DMEM words are
-  SOURCES; the parameters that read DMEM words are SINKS. Code
-  identifiers name the writers by their place in instruction memory
-  (`ENGINE_NUM_INSTR`, `engine_link_imem_write`, ...); docs use
-  source/sink for the signal roles and quote code names only as code.
-- **The full terminal triad — source / sink (drain) / gate**:
-  source/sink is FET source/drain, and
-  the analogy completes with the GATE — a control input that steers
-  a source's output without its signal entering the sum. The ADSR's
-  gate-DMEM-word read is a gate terminal, making the ADSR a *gated
-  generator*, not a processor.
-- **Generators vs processors**:
-  GENERATORS output signal without signal inputs (LFO: no inputs;
-  ADSR: one gate input only). PROCESSORS take signal in and put
-  signal out. The first processor is the **MAC** instruction (opcode `0xD`)
-  — multiply-accumulate, like a mixing-console aux send: it taps a
-  DMEM word's signal, multiplies it by a coefficient (COEF; sign =
-  polarity flip), and accumulates it into another DMEM word's sum.
-  C = A·x + B·y is two MAC instructions sharing a target DMEM word.
-- **The fabric IS a node graph**: a DMEM word
-  is a processor with many sinks summed to one source; the instruction
-  table is a topological sort (the allocator owns the order), one
-  evaluation pass per sample; "no cycles, ever" keeps it a DAG. The
-  hardware DMEM/processor distinction is an optimization of the
-  common node shape. The DMEM-sum RAM makes the graph's edges real:
-  MAC instructions read true DMEM sums, not firmware bases.
+  certain resources. NOTHING in the CSP is Global by intent: every register
+  the firmware calls "global" (the bend, the wheel's cutoff, the volume) is a
+  CHANNEL register that coincides with global scope while exactly one channel
+  exists.
+- **Source / sink is the couple**: the CSP's results are SOURCES (the
+  envelopes, the LFOs, a voice's pitch, cutoff and gain); the words the
+  partial pipeline reads from the sink area are SINKS. The control program
+  (`tools/csp/programs`) is the wiring between them.
+- **Generators vs processors**: the envelope and LFO parts of the program are
+  GENERATORS (an LFO has no inputs; an envelope has its gate); the rest takes
+  signal in and puts signal out. They are all instructions of one processor,
+  [csp_manual.md](csp_manual.md), and which is which is only a way to read
+  the program.
 - "Patch" means the active sound (`patch_t` in firmware); it is not
   used for FPGA parameter words, which are all live. "Patch panel"
   survives only as the CV-routing metaphor.
@@ -196,8 +180,8 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed cutoff-coefficient LUT `svf_fc_lut`), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | UQ4.4 log volume | 0x00 = silence (exact mute), 0xFF = loudest; 6 dB per integer step, 0.375 dB per fraction step via 16-entry LUT + barrel shift (the 0.375 dB grid is the ear-proven resolution) |
-| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the patch/CC; decoded in firmware (`patch.c`) to an 18-bit linear RC coefficient k that the gateware multiplies by (`adsr.sv`) |
+| Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the patch's UQ4.4 volume codes (6 dB per 16 steps) are turned into linear words in firmware (`render.cpp`) |
+| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the patch/CC; decoded in firmware (`patch.cpp`) to an 18-bit coefficient k, and `csp::envelope_rate` makes the program's wide rate of it |
 
 ## The partial pipeline
 
@@ -208,6 +192,18 @@ period; a partial enters the pipeline on each of time slots 0–255.
 **Partial budget**: 32 voices of polyphony × up to 8 partials per
 keystroke = 256. The pipeline knows nothing of that grouping — 256
 interchangeable partials; unison is a firmware convention.
+
+**Why it looks like this**: the pipeline is a general sound engine, not
+a polysynth's voice card. Every partial is one oscillator → filter →
+gain unit that takes all its parameters from the sink area, and what
+instrument 256 of them make is decided by the control program (the
+CSP) and the sink layout, not by the gateware. An entirely different
+instrument — a drawbar organ, an additive engine, a drum machine, a
+bank of resonators — is a different control program on the same
+bitstream. The same machinery also synthesises what a fixed polysynth
+cannot: any partial can be any waveform through any filter at any
+pitch, retuned and regrouped every pass. On paper the compute is far
+beyond a polysynth's needs; spending it is the control program's job.
 
 **Per-partial chain** (26 stages): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
@@ -220,10 +216,10 @@ accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
 written at pipeline end, a fixed number of cycles later, so the
 addresses never collide.
 
-**Parameter smoothing**: articulation comes from gateware envelope
-instructions writing DMEM words, updating every sample with no SPI timing in the
-loop, so nothing audible needs a smoother. Firmware-written DMEM bases
-(wheel, bend) are not smoothed.
+**Parameter smoothing**: articulation comes from the control program's
+envelopes, updating every pass (48 kHz) with no SPI timing in the loop, so
+nothing audible needs a smoother. Firmware-written registers (wheel, bend)
+are not smoothed; they reach the CSP together, between two passes.
 
 ## Control plane — SPI + BSRAM
 
@@ -237,13 +233,12 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
   address bytes + 4-byte data words, streaming while CS stays low.
 - CDC: solved structurally, once — dual-clock semi dual-port BSRAM
   (write sclk, read sysclk; true dual-port does not infer on this
-  toolchain) for paged parameters, a toggle mailbox for live DMEM
-  writes. With everything register-like ping-pong buffered or
-  mailboxed, CDC is not a running design concern.
-- Parameter data is paged (ping-pong: active page and shadow page
-  in the same blocks), swapped at a sample boundary on request. There
-  is no "patch" vs "live" class distinction: swaps are cheap (thousands
-  per second) and **every change is effected through a swap**.
+  toolchain) for the write queue, the program and the pointers. The
+  CSP's registers are written by the CSP, in the system clock.
+- The CSP's results are paged (ping-pong: active page and shadow page
+  of the sink area), flipped at the end of every pass. The firmware's
+  writes are queued and committed by one swap, which the CSP applies at
+  the end of its next pass: **every change is effected through a swap**.
   Atomicity is the swap's job — BSRAM does not give read-during-write
   coherency.
 - A/B reference (in the tree, not built): a
@@ -252,31 +247,21 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 ## Modulation
 
-**Codified as [dmem_architecture.md](dmem_architecture.md)** — the spec
-with justifications, rejected alternatives, sizing and build
-milestones B0–B6. Built: B1–B5 (DMEM, all
-sinks, firmware routes, LFO instructions, per-voice ADSRs), plus
-log-domain Q.
-
-As built, in brief: partials are dumb sinks — waveform, filter type,
-static detune, and per-parameter DMEM pointers. Every dynamic value
-is a DMEM word: `effective = base word + dmem[pointer]`, a saturating
-add, zero extra pipeline stages. Instructions (LFOs, ADSRs, MACs) live
-in a 256-entry instruction table (IMEM), run by the CSP independently
-of the partial pipeline's issue slots (every instruction every
-sample), and write `DMEM base + contribution` to the DMEM replicas.
-One DMEM format
-(signed Q8.10 log₂ — integer step = octave / 6 dB / octave-of-Q
-depending on sink). Instructions execute in table order once per sample;
-ordered chains are zero-lag, and **cyclic DMEM graphs are simply not
-a thing — ever** (firmware never builds one, the hardware defines no
-semantics for one). Velocity and other per-note values are firmware
-writes to per-voice DMEM bases. Still open: the shared per-partial
-configuration table for one-to-many wiring changes. The combiner is
-the MAC instruction (opcode `0xD`, dmem_architecture.md), which reads
-a DMEM word as its source operand — a DMEM word is already a combiner
-of instructions. Its first use is the channel cutoff DMEM word fanning
-out to the per-voice cutoff DMEM words.
+**Codified as [csp_isa.md](csp_isa.md)** (the design) and
+[csp_manual.md](csp_manual.md) (the instruction set). As built, in brief:
+partials are dumb sinks — a waveform, a filter type and ten pointers into the
+sink area. Every dynamic value is computed by the CSP, a processor with 2048
+registers running a fixed program once per pass (1536 cycles, 48 kHz): the
+envelopes (RC, one step a pass), the LFOs (four shapes), and each voice's
+pitch (note + bend + pitch LFOs + tune), cutoff (envelope + key tracking +
+cutoff knob) and gain (envelope × velocity × volume). A partial's effective
+pitch is its voice's word plus its channel's (detune), its cutoff likewise,
+its gain the product of its voice's and its channel's, each saturating into
+the parameter's legal range; the extremes clamp, nothing wraps. One format
+(signed Q4.14 words; octaves for pitch, cutoff and resonance, linear for
+gain). Velocity and other per-note values are firmware writes to a voice's
+registers. The firmware's side is `app/main/render.cpp`; the system bench
+(`make sim-synth`) plays its writes on the Verilated synthesizer.
 
 ### Modulation authority rule
 
@@ -287,7 +272,8 @@ wrong by definition — "if the CC for MOD→CUTOFF is the only input,
 it has to span the full range." Over-authority is safe: base + modulation
 saturates at the 0..0x3FFF clamp, like an env-amount knob pinning.
 CC 107 has full authority (square-law taper, ±16 octaves at the
-rails); the same rule applies to
+rails; the CSP's word holds ±8, and with the cutoff knob's ±8 the sum still
+pins both rails); the same rule applies to
 every future pitch/cutoff amount. 7-bit resolution at full span is
 0.25 oct/step — acceptable for depths; the MIDI fine-pair convention
 (as CC 74/106) is the fix if stepping ever becomes audible.

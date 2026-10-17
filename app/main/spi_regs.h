@@ -28,17 +28,6 @@ void fpga_word_write_burst(uint16_t addr, const uint32_t *words, size_t n);
 uint32_t fpga_word_read(uint16_t addr);
 bool fpga_word_read_burst(uint16_t addr, uint32_t *words, size_t n);
 
-// ── Page swap (ping-pong) ───────────────────────────────────────────
-// Per-partial writes land in the SHADOW page; this requests the swap
-// (CTRL@0x0002 bit 0) and busy-waits two sample periods so the swap
-// (executed at time slot 512) has taken effect on return. Every
-// parameter change is effected through a swap — swaps are cheap
-// (thousands per second), there is no "live" write path around them.
-// Discipline: a swap flips the WHOLE page — keep both halves
-// populated. After a swap the new shadow holds the previous
-// page; rewrite what you change before the next swap.
-void fpga_swap(void);
-
 #ifdef __cplusplus
 }
 #endif

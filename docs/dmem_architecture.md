@@ -3,10 +3,15 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
  
-The modulation half of the design; [memory_map.md](memory_map.md)
-holds the wire protocol, addresses and per-partial parameter ABI.
-[csp_isa.md](csp_isa.md) proposes what the CSP becomes: a general
-instruction set in the spirit of the EMU10K1 (#184).
+**Status: retired (#222).** This describes the first CSP: a fixed pool of 512
+DMEM words and a table of 256 LFO, ADSR and MAC instructions, with the
+per-partial immediates and pointers into DMEM. The synth runs the CSP of
+[csp_isa.md](csp_isa.md) now (a general instruction set in the spirit of the
+EMU10K1, #184), whose registers, sinks and control program replace all of
+it; [memory_map.md](memory_map.md) holds the wire protocol and the map. What
+follows is kept as the record of how the design got there and why: the laws
+below explain choices (saturating sums, the ping-pong pages) the new design
+inherits.
 
 ## What this actually is
 

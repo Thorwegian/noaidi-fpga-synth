@@ -55,8 +55,8 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down (or held by the sustain pedal), gate DMEM word 1, envelope gated on |
-| `V_RELEASING` | key up, gate DMEM word 0, release tail still audible |
+| `V_HELD` | key down (or held by the sustain pedal), the voice's gate register open, envelope gated on |
+| `V_RELEASING` | key up, gate register closed, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
@@ -120,4 +120,4 @@ stays a dumb, fast executor. No special path.
   (`engine_link.h`); the engine link translates partial and word to
   addresses.
 - The command queue holds 1024 entries; on overflow
-  `engine_link_param_write()` drops the command.
+  `engine_link_write()` drops the command.

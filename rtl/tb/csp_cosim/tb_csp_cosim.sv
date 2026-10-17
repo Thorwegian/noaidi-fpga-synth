@@ -26,7 +26,7 @@ module tb_csp_cosim #(
     input  wire [csp_pkg::PROGRAM_W-1:0]        imem_write_address,
     input  wire [35:0]                          imem_write_data,
     input  wire                                 queue_write_enable,
-    input  wire [csp_pkg::REGISTER_W-1:0]       queue_write_address,
+    input  wire [csp_pkg::QUEUE_ADDRESS_W-1:0]  queue_write_address,
     input  wire [csp_pkg::WORD_W-1:0]           queue_write_data,
     input  wire                                 swap,
 
@@ -35,10 +35,11 @@ module tb_csp_cosim #(
 
     logic [csp_pkg::PROGRAM_W-1:0] fetch_address;
     logic [35:0]                   fetch_data;
+    logic                          buffer_load;
     logic                          queue_pop, queue_committed, queue_full;
-    logic [csp_pkg::REGISTER_W-1:0] queue_address;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_address;
     logic [csp_pkg::WORD_W-1:0]    queue_data;
-    logic                          sink_write_enable;
+    logic                          sink_write_enable, sink_write_both;
     logic [9:0]                    sink_write_address;
     logic [csp_pkg::WORD_W-1:0]    sink_write_data;
 
@@ -50,6 +51,7 @@ module tb_csp_cosim #(
         .write_data    (imem_write_data),
         .clk           (clk),
         .fetch_address (fetch_address),
+        .buffer_load   (buffer_load),
         .fetch_data    (fetch_data)
     );
 
@@ -76,36 +78,34 @@ module tb_csp_cosim #(
         .held               (held),
         .fetch_address      (fetch_address),
         .fetch_data         (fetch_data),
+        .buffer_load        (buffer_load),
         .queue_pop          (queue_pop),
         .queue_committed    (queue_committed),
         .queue_address      (queue_address),
         .queue_data         (queue_data),
         .sink_write_enable  (sink_write_enable),
+        .sink_write_both    (sink_write_both),
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data),
-        .pass_done          (pass_done)
+        .pass_done          (pass_done),
+        .pass_counter       (),
+        .probe_address      ('0),
+        .probe_data         ()
     );
 
-    // The sink area's two pages: the CSP writes the shadow page, the
-    // partials (here, the harness) read the other; they flip at the end
-    // of a pass.
-    logic [csp_pkg::WORD_W-1:0] sink_page [2][csp_pkg::SINK_COUNT];
-    logic                       active_page;
-    initial begin
-        active_page = 1'b0;
-        for (int offset = 0; offset < csp_pkg::SINK_COUNT; offset++) begin
-            sink_page[0][offset] = '0;
-            sink_page[1][offset] = '0;
-        end
-    end
-    always_ff @(posedge clk) begin
-        if (sink_write_enable) begin
-            sink_page[!active_page][sink_write_address] <= sink_write_data;
-        end
-        if (pass_done) begin
-            active_page <= !active_page;
-        end
-    end
+    // The sink area. The harness reads the active page through the
+    // hierarchy (cosim_sink); the partial pipeline's ports are idle here.
+    csp_sink_area #(.READ_PORTS(1)) u_sink_area (
+        .clk           (clk),
+        .reset_n       (reset_n),
+        .write_enable  (sink_write_enable),
+        .write_both    (sink_write_both),
+        .write_address (sink_write_address),
+        .write_data    (sink_write_data),
+        .pass_done     (pass_done),
+        .read_address  ('0),
+        .read_data     ()
+    );
 
     // The cycle after the last instruction of the program issued this pass
     // (the NOPs in memory past it run on): what the reference model reports
@@ -115,8 +115,11 @@ module tb_csp_cosim #(
     always_ff @(posedge clk) begin
         if (pass_start) begin
             issue_end <= 0;
-        end else if (u_core.issue && int'(u_core.decode_pc) < program_length) begin
-            issue_end <= int'(u_core.pass_cycle) + 1;
+        end else if (u_core.address_stage.valid && !u_core.a_hold
+                     && int'(u_core.address_stage.pc) < program_length) begin
+            // an instruction leaves A in the cycle after the one the model
+            // calls its issue (decode no longer waits for the hazards: A does)
+            issue_end <= int'(u_core.pass_cycle);
         end
     end
 
@@ -140,10 +143,23 @@ module tb_csp_cosim #(
             $display("rtl sink %0d %0d", int'(u_core.sink_write_address),
                      $signed(u_core.sink_write_data));
         end
-        if (trace_issues && u_core.issue && int'(u_core.decode_pc) < program_length) begin
-            $display("rtl pc %0d cycle %0d i %0d j %0d", int'(u_core.decode_pc),
-                     int'(u_core.pass_cycle), int'(u_core.decode_index_i),
-                     int'(u_core.decode_index_j));
+        if (trace_issues && u_core.move) begin
+            $display("rtl move cycle %0d next_pc %0d self %0d jump %0d hit_buffer %0d hit_flight %0d buffer %0d/%0d inflight %0d/%0d held_valid %0d decode_pc %0d restart %0d",
+                     int'(u_core.pass_cycle), int'(u_core.next_pc), u_core.move_self, u_core.move_jump,
+                     u_core.hit_buffer, u_core.hit_flight,
+                     u_core.buffer_valid, int'(u_core.buffer_place), u_core.inflight_valid, int'(u_core.inflight_place),
+                     u_core.held_valid, int'(u_core.decode_pc), u_core.fetch_restart);
+        end
+        if (trace_issues && u_core.is_loop) begin
+            $display("rtl loop pc %0d cycle %0d count %0d skip %0d x_word %0d reads_x %0d", int'(u_core.execute1_stage.pc),
+                     int'(u_core.pass_cycle), int'(u_core.loop_count), u_core.e1_skips_body,
+                     int'(u_core.e1_x_word), u_core.e1_reads_x);
+        end
+        if (trace_issues && u_core.address_stage.valid && !u_core.a_hold
+                && int'(u_core.address_stage.pc) < program_length) begin
+            $display("rtl pc %0d cycle %0d i %0d j %0d word %09h", int'(u_core.address_stage.pc),
+                     int'(u_core.pass_cycle) - 1, int'(u_core.index_i), int'(u_core.index_j),
+                     u_core.address_stage.instruction);
         end
     end
 
@@ -259,13 +275,13 @@ module tb_csp_cosim #(
         logic [csp_pkg::WORD_W-1:0] word;
         int index;
         index = address >>> 1;
-        word = address[0] ? u_core.u_register_file.g_copy[0].odd_bank[index]
-                          : u_core.u_register_file.g_copy[0].even_bank[index];
+        word = address[0] ? u_core.u_register_file.g_copy[0].u_odd.words[index]
+                          : u_core.u_register_file.g_copy[0].u_even.words[index];
         return int'($signed(word));
     endfunction
 
     function int cosim_sink(input int offset);
-        return int'($signed(sink_page[active_page][offset]));
+        return int'($signed(u_sink_area.page_words[u_sink_area.active_page][offset]));
     endfunction
 
     function int cosim_index(input int which);

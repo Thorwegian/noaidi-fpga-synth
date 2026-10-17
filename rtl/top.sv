@@ -62,24 +62,127 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 256-partial pipeline
+    // The CSP (rtl/csp): control signals, one pass per two samples. It
+    // computes everything the partials read and publishes it in the sink
+    // area, which the partial pipeline reads through its pointers.
     //----------------------------------------------------------------
     logic signed [23:0] sample_left, sample_right;   // Q0.24
 
-    logic        partial_write_enable;
-    logic [2:0]  partial_write_word;
-    logic [7:0]  partial_write_index;
-    logic [31:0] partial_write_data;
-    logic        swap_toggle;
-    logic [9:0]  dmem_wr_addr;
-    logic [17:0] dmem_wr_data;
-    logic        dmem_wr_toggle;
+    // from the SPI bus (sclk domain)
+    logic        pointer_write_enable;
+    logic [7:0]  pointer_write_index;
+    logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
+    logic        queue_write_enable, queue_swap;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_write_address;
+    logic [csp_pkg::WORD_W-1:0] queue_write_data;
     logic        imem_write_enable;
-    logic [9:0]  imem_write_addr;   // {entry[7:0], word[1:0]} — 10 bits
-                            // wide: a too-narrow wire here silently
-                            // truncates entries, so size it from the pool
-    logic [31:0] imem_write_data;
+    logic [csp_pkg::PROGRAM_W-1:0] imem_write_address;
+    logic [35:0] imem_write_data;
+    logic        csp_held_sclk, test_tone_sclk;
 
+    // CTRL's levels, into the system clock
+    logic csp_held_meta, csp_held_sync, test_tone_meta, test_tone_sync;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) begin
+            {csp_held_meta, csp_held_sync} <= 2'b11;     // held until released
+            {test_tone_meta, test_tone_sync} <= 2'b00;
+        end else begin
+            csp_held_meta  <= csp_held_sclk;
+            csp_held_sync  <= csp_held_meta;
+            test_tone_meta <= test_tone_sclk;
+            test_tone_sync <= test_tone_meta;
+        end
+    wire test_tone_en = test_tone_sync;
+
+    logic [csp_pkg::PROGRAM_W-1:0] fetch_address;
+    logic [35:0]                   fetch_data;
+    logic                          buffer_load;
+    logic                          queue_pop, queue_committed, queue_full;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_address;
+    logic [csp_pkg::WORD_W-1:0]    queue_data;
+    logic                          sink_write_enable, sink_write_both, pass_done;
+    logic [9:0]                    sink_write_address;
+    logic [csp_pkg::WORD_W-1:0]    sink_write_data;
+
+    csp_instruction_memory u_instruction_memory (
+        .sclk          (sclk),
+        .held          (csp_held_sclk),
+        .write_enable  (imem_write_enable),
+        .write_address (imem_write_address),
+        .write_data    (imem_write_data),
+        .clk           (sysclk),
+        .fetch_address (fetch_address),
+        .buffer_load   (buffer_load),
+        .fetch_data    (fetch_data)
+    );
+
+    logic [9:0] queue_read_gray;
+    csp_write_queue u_write_queue (
+        .sclk          (sclk),
+        .sclk_reset_n  (rst_n),
+        .write_enable  (queue_write_enable),
+        .write_address (queue_write_address),
+        .write_data    (queue_write_data),
+        .swap          (queue_swap),
+        .full          (queue_full),
+        .clk           (sysclk),
+        .reset_n       (rst_n),
+        .pop           (queue_pop),
+        .committed     (queue_committed),
+        .head_address  (queue_address),
+        .head_data     (queue_data),
+        .read_pointer_gray (queue_read_gray)
+    );
+
+    // A pass is two samples: it starts with the 48 kHz sample, and ends
+    // in the last cycle before the next one, when the sink pages flip.
+    logic [17:0] csp_pass_counter;
+    logic [10:0] probe_address_sclk, probe_address_meta, probe_address_sync;
+    logic [35:0] probe_data;
+    always_ff @(posedge sysclk or negedge rst_n)
+        if (!rst_n) {probe_address_meta, probe_address_sync} <= '0;
+        else        {probe_address_meta, probe_address_sync} <= {probe_address_sclk, probe_address_meta};
+    csp_core u_csp (
+        .clk                (sysclk),
+        .reset_n            (rst_n),
+        .pass_start         (sample_tick48),
+        .held               (csp_held_sync),
+        .fetch_address      (fetch_address),
+        .fetch_data         (fetch_data),
+        .buffer_load        (buffer_load),
+        .queue_pop          (queue_pop),
+        .queue_committed    (queue_committed),
+        .queue_address      (queue_address),
+        .queue_data         (queue_data),
+        .sink_write_enable  (sink_write_enable),
+        .sink_write_both    (sink_write_both),
+        .sink_write_address (sink_write_address),
+        .sink_write_data    (sink_write_data),
+        .pass_done          (pass_done),
+        .pass_counter       (csp_pass_counter),
+        .probe_address      (probe_address_sync),
+        .probe_data         (probe_data)
+    );
+
+    logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address;
+    logic [synth_pkg::SINK_READ_PORTS-1:0][17:0] sink_read_data;
+
+    csp_sink_area u_sink_area (
+        .clk           (sysclk),
+        .reset_n       (rst_n),
+        .write_enable  (sink_write_enable),
+        .write_both    (sink_write_both),
+        .write_address (sink_write_address),
+        .write_data    (sink_write_data),
+        .pass_done     (pass_done),
+        .read_address  (sink_read_address),
+        .read_data     (sink_read_data)
+    );
+
+    //----------------------------------------------------------------
+    // 256-partial pipeline
+    //----------------------------------------------------------------
+    logic [18:0] master_gain_q;
     partial_pipeline u_partial_pipeline (
         .clk         (sysclk),
         .rst_n       (rst_n),
@@ -87,20 +190,14 @@ module top (
         .slot_issue  (slot_issue),
         .sample_tick (sample_tick),
         .sclk        (sclk),
-        .partial_write_enable       (partial_write_enable),
-        .partial_write_word     (partial_write_word),
-        .partial_write_index     (partial_write_index),
-        .partial_write_data    (partial_write_data),
-        .dmem_wr_addr     (dmem_wr_addr),
-        .dmem_wr_data     (dmem_wr_data),
-        .dmem_wr_toggle      (dmem_wr_toggle),
-        .imem_write_enable       (imem_write_enable),
-        .imem_write_addr     (imem_write_addr),
-        .imem_write_data     (imem_write_data),
-        .swap_toggle    (swap_toggle),
+        .pointer_write_enable (pointer_write_enable),
+        .pointer_write_index  (pointer_write_index),
+        .pointer_write_data   (pointer_write_data),
+        .sink_read_address    (sink_read_address),
+        .sink_read_data       (sink_read_data),
         .mix_left    (sample_left),
         .mix_right   (sample_right),
-        .test_tone_en (test_tone_en)
+        .master_gain_q (master_gain_q)
     );
 
     //----------------------------------------------------------------
@@ -109,13 +206,12 @@ module top (
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
     // Midband deliberately: coupling caps in an analog chain
     // attenuate low tones, and 1500 Hz measures flat. Enabled by
-    // DMEM-address-511 writes (firmware maps CC 119); replaces the mix
+    // CTRL bit 2 (firmware maps CC 119); replaces the mix
     // at BOTH outputs. At 48 kHz capture the tone lands exactly on
     // bin 32 of a 1024-point FFT — coherent, no window, harmonics on
     // exact bins (64, 96, ...). The purity criterion: any harmonic
     // above 1/4096 of the fundamental (−72.2 dBc) rings alarms.
     //----------------------------------------------------------------
-    logic        test_tone_en;
     logic [23:0] tone_phase;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n)           tone_phase <= '0;
@@ -227,28 +323,67 @@ module top (
 
     //----------------------------------------------------------------
     // SPI control plane — the docs/memory_map.md wire protocol:
-    // 16-bit word addresses, 32-bit data, 11-bit backed global window.
+    // 16-bit word addresses, 32-bit data.
     // (The byte-protocol bring-up slave spi_slave_regs.sv remains in
     // the tree as reference; this is its successor.)
     //----------------------------------------------------------------
+    // Diagnostics for the firmware to read back (memory_map.md, 0x0008-0x000B):
+    // is the CSP still running passes, where the write queue stands, what the
+    // master limiter has settled at, and how many queue writes were dropped.
+    // Sysclk values cross to the SPI clock through two flip-flops. They are
+    // not coherent across bits; a reader takes two reads and compares.
+    logic [17:0] pass_meta, pass_sync;
+    logic [18:0] gain_meta, gain_sync;
+    logic [9:0]  pop_pointer_meta, pop_pointer_sync;
+    logic [15:0] dropped_writes;
+    always_ff @(posedge sclk or negedge rst_n)
+        if (!rst_n) begin
+            pass_meta <= '0; pass_sync <= '0;
+            gain_meta <= '0; gain_sync <= '0;
+            pop_pointer_meta <= '0; pop_pointer_sync <= '0;
+            dropped_writes <= '0;
+        end else begin
+            pass_meta <= csp_pass_counter;  pass_sync <= pass_meta;
+            gain_meta <= master_gain_q;     gain_sync <= gain_meta;
+            pop_pointer_meta <= queue_read_gray; pop_pointer_sync <= pop_pointer_meta;
+            if (queue_write_enable && queue_full && dropped_writes != '1)
+                dropped_writes <= dropped_writes + 1'b1;
+        end
+    wire [31:0] status_pass    = {14'd0, pass_sync};
+    wire [31:0] status_queue   = {21'd0, queue_full, pop_pointer_sync};   // read pointer, Gray-coded
+    wire [31:0] status_limiter = {13'd0, gain_sync};
+    wire [31:0] status_dropped = {16'd0, dropped_writes};
+    logic [35:0] probe_meta, probe_sync;
+    always_ff @(posedge sclk or negedge rst_n)
+        if (!rst_n) {probe_meta, probe_sync} <= '0;
+        else        {probe_meta, probe_sync} <= {probe_data, probe_meta};
+    wire [31:0] status_probe_high = {14'd0, probe_sync[35:18]};   // the even register of the pair
+    wire [31:0] status_probe_low  = {14'd0, probe_sync[17:0]};    // the odd one
+
     spi_bus u_spi (
         .sclk     (sclk),
         .cs       (cs),
         .mosi     (mosi),
         .miso     (miso),
-        .sysclk   (sysclk),
-        .rst_n    (rst_n),
-        .partial_write_enable    (partial_write_enable),
-        .partial_write_word  (partial_write_word),
-        .partial_write_index  (partial_write_index),
-        .partial_write_data (partial_write_data),
-        .dmem_wr_addr  (dmem_wr_addr),
-        .dmem_wr_data  (dmem_wr_data),
-        .dmem_wr_toggle   (dmem_wr_toggle),
+        .pointer_write_enable (pointer_write_enable),
+        .pointer_write_index  (pointer_write_index),
+        .pointer_write_data   (pointer_write_data),
+        .queue_write_enable   (queue_write_enable),
+        .queue_write_address  (queue_write_address),
+        .queue_write_data     (queue_write_data),
+        .swap                 (queue_swap),
         .imem_write_enable    (imem_write_enable),
-        .imem_write_addr  (imem_write_addr),
-        .imem_write_data  (imem_write_data),
-        .swap_toggle (swap_toggle)
+        .imem_write_address   (imem_write_address),
+        .imem_write_data      (imem_write_data),
+        .csp_held             (csp_held_sclk),
+        .test_tone_enable     (test_tone_sclk),
+        .status_0             (status_pass),
+        .status_1             (status_queue),
+        .status_2             (status_limiter),
+        .status_3             (status_dropped),
+        .status_4             (status_probe_high),
+        .status_5             (status_probe_low),
+        .probe_address        (probe_address_sclk)
     );
 
     //----------------------------------------------------------------

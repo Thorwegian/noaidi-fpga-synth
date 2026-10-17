@@ -8,6 +8,9 @@ app/build
 obj_dir/
 *.vcd
 !rtl/tb/ref_boot_*.hex
+!tools/lab/benchmark/*.json
 rtl/tb/sim-*.out
 __pycache__/
 sdkconfig.old
+.tools/
+.tools.*/

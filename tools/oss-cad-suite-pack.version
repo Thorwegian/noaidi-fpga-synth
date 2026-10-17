@@ -1,0 +1,12 @@
+# The OSS CAD Suite release whose gowin_pack writes the bitstream
+# (scripts/tools.sh, the second pin). The generator from a newer release
+# than the rest of the flow: Apicula e9431eb (2026-10-13) ties off the
+# unused wires of used logic tiles on the GW2A, which moved the same
+# routed netlist's limit on the board from 68-70 MHz to above 73.728
+# (docs/gowin_oss_notes.md), while the nextpnr of those releases (0.11)
+# cannot legalise the placed design that the pinned 0.10 routes.
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+tag=2026-10-17
+sha256_linux_x64=ec1a6c3344504ddb101c3e08647526f6ba8756e6b107d7449192c42dae2c5b3e
+sha256_linux_arm64=f349e33dfec38cec895c7416adea60b011b694c3c7cad0a94eed26335778b133

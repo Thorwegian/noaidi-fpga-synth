@@ -74,6 +74,12 @@ public:
     // The CTRL swap: commit every write queued so far.
     void swap();
 
+    // The pass counter, as the next pass will count on from (for replaying a
+    // chip's state).
+    void set_pass_count(int64_t count) {
+        pass_count_ = count;
+    }
+
     // An input register's value (the I/O region, 0x040–0x05F).
     void set_input(int address, int32_t raw);
 
@@ -142,6 +148,9 @@ private:
     struct PassState {
         size_t pc     = 0;
         int64_t cycle = 0; // the cycle the current instruction issues in
+        int64_t entry = 0; // the cycle the front end moved on to it (its operands' wait not counted)
+        bool resolved = false; // the front end moves on at its resolution (a LOOP, an IDX, a vector loop's end)
+        size_t last_pc = 0;  // the pc of the last instruction issued (a vector loop's last element's)
         Scoreboard scoreboard;
         std::vector<Loop> loops;
         int skip = 0;

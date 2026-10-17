@@ -3,18 +3,18 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-**Status: design decided (#184): the instruction set in
-[csp_manual.md](csp_manual.md) is approved, and the decisions are
-listed in section 14. The core is built (#220) as the pipeline of
-section 3: it matches the reference model in co-simulation and meets
-timing, but is not wired into the synthesizer yet. Vector loops
-(section 3) are decided (#220) and built: they match the model in
-cycles as well as in results.** The
-current CSP is described in [dmem_architecture.md](dmem_architecture.md);
-this document proposes what it becomes and why. The instruction set
-itself, every instruction and the assembly language, is specified in
+**Status: built and wired in (#184, #222): the instruction set in
+[csp_manual.md](csp_manual.md) is approved, the decisions are listed in
+section 14, the core is built (#220) as the pipeline of section 3 and
+matches the reference model in co-simulation, and the synthesizer runs it
+(#222): the control program (#221) computes every control signal, the sink
+area and the pointer RAM replace the per-partial parameters, and
+`make sim-synth` plays the firmware's own writes on the Verilated chip.** The
+old CSP is described in [dmem_architecture.md](dmem_architecture.md) (retired);
+this document says what the CSP became and why. The instruction set itself,
+every instruction and the assembly language, is specified in
 [csp_manual.md](csp_manual.md). Cycle counts and resources here are
-measured (reference model, `make csp-fit`); counts of words and
+measured (reference model, `make csp-fit`, `make pack`); counts of words and
 instructions are worked out from the layouts.
 
 The Control Signal Processor (CSP) computes every control signal the
@@ -112,24 +112,33 @@ add", and the per-partial immediates.
 
 An in-order pipeline with full interlocks and no forwarding (#220). A
 program behaves as on a linear machine; an instruction that needs a
-value still in the pipeline waits in decode until it has been written.
+value still in the pipeline waits until it has been written (in R, which reads
+its operands again every cycle it waits, so what it takes is what the register
+file held the cycle before).
 
 | Stage | Work |
 |---|---|
-| D | decode: operand addresses from `i`/`j`, the hazard check; the register-file read addresses go in as the instruction issues |
-| R | register read (three ports) → operands in the accumulator's format; `SKIP` decides |
-| E1 | `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; the `SHIFT` barrel shift; `LOOP` and `IDX` resolve |
-| E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; `SHIFT` saturates |
-| E3 | MULTALU36X18: `a × b + c` |
-| E4 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
+| F | fetch: the instruction memory's word goes into a one-entry buffer register, and nowhere else (nothing but a register on a memory's output, section 12); the fetch runs one word ahead of decode, so moving on to the next instruction costs nothing; a jump (a loop's repeat, a skipped body) restarts it and costs two cycles, which the reference model counts. The buffered word and the word on the memory are known by their place relative to decode's pc (own, next), shifted down at a move, and a move is told apart (next, onto itself, a jump) from the loop control signals: no pc is compared with `next_pc`, which keeps the loop-end logic off the fetch's enables (section 12) |
+| D | decode, from the buffer's word: operand addresses from `i`/`j`, into A's registers as the instruction issues |
+| A | the hazard check (the three operand addresses against those of R … W, and of W a cycle ago; made in D, one stage early, and carried in eight registered bits while A waits, so that the stall decision is an OR of registers); the operand addresses sit in A's registers, which are the banks' address pins and nothing else (section 12: decode's adders on the pins read another register on the board), and the banks read them every cycle A waits, so that what the instruction takes on leaving is what the register file held the cycle before |
+| R | the banks' words in their output registers; `SKIP` decides; `LOOP`'s body end is prepared |
+| E1 | the words arrive in E1's registers straight from the banks' output registers (nothing but a register on a memory's output, section 12); the half or the pair chosen, the operands in the accumulator's format, the `SHIFT` count clamped; `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; `LOOP` and `IDX` resolve |
+| E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; the `SHIFT` barrel shift |
+| E3 | MULTALU36X18: `a × b + c`; `SHIFT` saturates |
+| E4 | the product settles in the DSP's own output register (`OUT_REG`) and goes from there into E5's register and nowhere else (section 12: a DSP's output, like a block RAM's, is untimed); the other results wait a cycle |
+| E5 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
 | W | write R (register file or sink area); the accumulator and the flags |
 
-A dependent instruction issues 7 cycles after the one it depends on; the
-instruction after `LOOP` or `IDX` issues 3 cycles after it
+A dependent instruction issues 9 cycles after the one it depends on (the RTL
+leaves A a cycle after the model's issue; the cycle counts are the same); the
+instruction after `LOOP` or `IDX` issues 4 cycles after it
 (`csp::result_latency`, `csp::barrier_latency`; the model counts both).
 Independent instructions issue every cycle. There is no forwarding: it
-would shorten the 7 cycles but lengthen the paths, and vector loops
-(below) hide the wait instead.
+would shorten the 9 cycles but lengthen the paths, and vector loops
+(below) hide the wait instead. (The eighth cycle is E4, the DSP's own
+output register with nothing after it but E5's: it costs the control
+program 17 cycles, 1452 → 1469, three short of the 1472 window — the
+vector loops hide most of it, the scalar chains not.)
 
 **Measured** (`make csp-fit`, the CSP alone on the GW2A, seed 1): 98.15
 MHz against the 73.728 MHz system clock; LUT4 5319, DFF 1697, BSRAM 10,
@@ -141,7 +150,7 @@ first try, a two-cycle machine without a pipeline (each instruction
 finished before the next), closed at 32.48 MHz.
 
 **Vector loops** (decided on #220, built). A chain of
-dependent instructions costs 7 cycles a link, but the same chain for
+dependent instructions costs 9 cycles a link, but the same chain for
 many voices need not wait at all: run each instruction for every voice
 before the next, and voice k's input was written long before voice k
 needs it. That is a vector processor in the Cray sense, one element
@@ -297,9 +306,11 @@ flip. Two rules keep the pages consistent:
    the partials would alternate between old and new values. Slower work
    writes ordinary registers, and one instruction per pass copies the
    result to its sink. The reference model checks this as it runs.
-2. **Firmware writes to the sink area**, if any remain, **go to both
-   pages**, by the write window, as today's DMEM mailbox commits to both
-   halves.
+2. **Firmware writes to the sink area** (the channel settings that only
+   a MIDI message moves) **go to both pages**, through the write queue
+   like a register write (a queued address reaches 0x000–0xBFF) and
+   applied by the write window, when the partial pipeline is idle
+   (`write_both` on `csp_sink_area`).
 
 ## 7. Opcodes
 
@@ -446,11 +457,11 @@ reference model with 16 channels and 32 voices, every one configured:
 | the LFOs (`lfo.s`), none running; 16 sine LFOs, the worst case at 24 kHz | 30; 191 |
 | the channels' pitch and cutoff (`channel.s`), 16 channels | 152 |
 | both envelopes of 32 voices (`envelope.s`) | 616 |
-| the voices' pitch, cutoff and gain, and their sinks (`voice.s`), 32 voices | 328 |
-| **the program, LFOs idle** | **1126** |
-| **the program, 16 sine LFOs a pass** | **1304** |
+| the voices' pitch, cutoff and gain, and their sinks (`voice.s`), 32 voices | 520 (the total less the other rows) |
+| **the program, LFOs idle** | **1318** |
+| **the program, 16 sine LFOs a pass** | **1420** |
 
-That leaves 168 of the 1472 cycles for what is not in it yet (drift #217,
+That leaves 52 of the 1472 cycles (the voice step now also scales the modulation depth by four with a `SHIFT`) for what is not in it yet (drift #217,
 noise #216, a second sink word or two). Other measurements: the manual's
 one-instruction envelope step for 32 voices, as `LOOP.vi` 294 and as
 `LOOP.i` 1126; the LFOs every pass, all 32 sines, 367.
@@ -484,20 +495,26 @@ gain sinks between passes.
 | (new) write queue | — | firmware register writes waiting for the swap (section 2) | **1** (512 × 36: address + data). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y), 2048 words each: **6**. |
-| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **3 replicas** × 2 pages (one BSRAM per page): **6**. The active page's BSRAM serves the PAP on both ports while the CSP writes the other page, so 3 replicas give the 6 reads per cycle (#184). |
+| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **6 replicas** × 2 pages (one BSRAM per page): **12**. Port B of the active page's BSRAM serves the PAP while port A takes the CSP's write from a register, so a replica gives one read per cycle (#184; first built as 3 replicas with port A shared between a read and the write, which put a mux on the pin — section 12). |
 | partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone: everything a partial reads is a sink: **0**. |
-| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | 12 pointers per partial, one page: **2–4** depending on packing. |
+| partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | ten pointers per partial (100 bits), one page, written whole: **3** (256 × 36, three wide). |
 | partial SVF state `ic*eq*_ram` | 4 | filter state | Needed. |
 | partial `phase_ram` | 1 | oscillator phases | Needed (#217's drift adds per-oscillator state). |
 | `phase_lut`, `svf_fc_lut`, `recip_lut` | 4 | lookup tables | Needed. |
 
-**Projected:** 27 to 29 blocks, against 33 today, before #217. The
-new CSP alone measures 10 (register file 6, instruction memory 3, write
-queue 1), as planned. The CSP
-grows to a 2048-word register file, a 1024-word sink area and 1472
-instructions on fewer BSRAM than today, paid for by `store_ram`, the
-second instruction page, the partials' immediates and their second
-page, and the sink area's two read ports per page.
+**Measured** (`make pack`, the whole synthesizer, seed 7): **28 of 46
+blocks** — the register file 6, the program memory 3, the write queue 1, the
+sink area 6, the pointer RAM 3, the partials' state 5, the lookup tables 4 —
+against 33 before the switch-over and the projected 27 to 29. LUT4 49 %,
+DFF 66 %. The CSP grew to a 2048-word register file, a 1024-word sink area
+and 1472 instructions on fewer BSRAM than before, paid for by `store_ram`,
+the second instruction page, the partials' immediates and their second
+page. (The sink area's twelve blocks are `DPX9B` instantiated by hand:
+yosys copies a memory that has two read ports, and gives a true dual-port
+one to flip-flops; docs/memory_map.md has the findings.)
+
+**Timing** (same run): the system clock closes at 92.8 MHz against the 73.728
+MHz it runs at; the SPI clock domain at 116 MHz.
 
 ## 11. DSP blocks
 
@@ -539,23 +556,156 @@ small program. The new CSP gets:
   far the envelope (`adsr.sv`) and the LFOs (`osc_core`); the voice and
   channel arithmetic has no old unit, and `tools/csp/test/csp_test.cpp`
   checks its sinks against the formulas in double precision.
+- **The netlist, not only the RTL** (`rtl/tb/lock`, `make sim-lockstep`; `make
+  sim-gate-selftest`). The board runs what yosys made of the RTL, and that is
+  not always what the RTL says. The hazard check was written as a loop over
+  `control_t [5:0] in_flight` indexed by the loop variable; yosys made logic
+  of it that never stalled, so on the board every instruction that read what
+  the one before it wrote read the old value (the LFO's triangle, the choice
+  of the LFOs' half), while every RTL bench passed. It was found by a boot
+  self-test on the board (`selftest.s`, `engine_selftest.cpp`, read back
+  through the register probe, docs/memory_map.md), reproduced by simulating
+  the netlist with Gowin's cell models, and located by running `csp_core`
+  and its netlist side by side on the same inputs and comparing every output
+  every clock. That comparison is now a regression bench. The rule it
+  leaves: in `rtl/csp`, no variable index into a packed array of structs, no
+  `return`, no `$bits` of a type name; one function call for each element.
+- **The board** (`tools/lab`). The firmware's console has commands to look
+  at the real chip: `csp-peek` (a register pair, through the gateware's
+  register probe), `csp-poke`, `csp-diag`, `csp-spitest` (the SPI link), and a
+  lab (`csp-hold`, `csp-word`, `csp-const`, `csp-go`) that loads a program
+  assembled by `tools/csp` and runs it with the engine's tick paused.
+  `tools/lab/lab.sh` drives it from the machine the board is attached to;
+  `tools/lab/programs` has the small programs that found what the benches
+  could not. The boot self-test (`selftest.s`) runs on every start and logs
+  `self-test:` lines.
+- **Timing on the silicon, not in the report.** nextpnr-himbaechel (gowin,
+  the pinned suite) does not time any path that starts at a block RAM's
+  or a DSP block's output: a BSRAM read feeding an eight-deep adder chain
+  into a flop is reported at 600 MHz, a MULT18X18 product feeding a six-deep
+  chain at 337 MHz (`tools/timing_probes`). The CSP's instruction word, its
+  register operands and the write queue's head all come out of block RAMs,
+  so every path from them was invisible, and the report's 102 MHz stood
+  against a measured 72 (the board, the same bitstream, the clock lowered
+  with the BL616's volatile `pll_clk` until the register-stepping and boot
+  tests ran clean). The rules it leaves: a memory's or a DSP's output goes
+  into a register before any logic — the instruction word into the fetch
+  buffer, the queue's head out of its block's pipeline register, the
+  register file's words into E1's registers (the half or the pair chosen
+  there, not in R), the MAC's operands into the DSP's own input registers
+  (`AREG`/`BREG`/`CREG`, E3), its product into its output register
+  (`OUT_REG`, E4) and from there into E5's register, the write queue's
+  popped entry into fabric registers before any decode, the queue block's
+  address pin fed by the read pointer's register itself (the entry two
+  clocks after its pop, not one: with a mux and an incrementer reading
+  ahead on the pin, a boot at 73.728 lost each batch's first words after
+  the decoy — the control program's ONE and EIGHTH — and was silent), and
+  the register file's write taken into a register of each bank's own next
+  to its block (the decode before it, the block's pins after it; the
+  result's write goes in from E5 so that it lands at W's edge as before),
+  the read's address into a register of the bank's own on the pin (what
+  the address stage takes, held while it waits) and the pair out of the
+  block's output register into a register of the bank's, which is what
+  E1 holds — and all three of a bank's registers *placed*, flip-flop by
+  flip-flop, on the fabric tiles beside its block (`csp_bank.sv`,
+  `csp_placed_dff.sv`: a `BEL` attribute each; the placer alone put them
+  with the logic that feeds them, 13–44 tiles away, and on the board a
+  store after idle cycles landed with an address bit still at its old
+  value, then with the write register placed, a read after idle cycles
+  returned register 0's word, the bubble's address still on the pins),
+  the MAC's operands chosen in E1 so that E2's registers feed the DSP's
+  pins (chosen in E2, the muxes sat on the pins), the sink area's write
+  pins from a write register per replica with port A for the write alone
+  and port B for the read (shared, a mux of the two addresses sat on the
+  pin), and the elements' private indices and flags as flip-flops rather
+  than LUT-RAM (`ram_style = "logic"`: a `RAM16SDP4`'s pins are as
+  untimed as a block's, and the index adder's carry chain fed one) — so
+  that every path the report cannot see is a register fed by nothing but
+  a register, on the input side of a block as on the output side, and
+  every such register placed beside its block where the tool would
+  otherwise put it far from the pin: the register file's three a bank,
+  the instruction memory's address and buffer registers a slice
+  (`csp_program_slice.sv`), the write queue's pointer and entry
+  registers (`csp_write_queue.sv`: the entry three clocks after its pop),
+  the sink area's write registers (its reads, the partial pipeline's,
+  are still the tool's to place). The multiply-add unit's operand
+  registers (E2) and product register (E5) are the unit's own too
+  (`csp_multiply_add.sv`) and *can* be placed on the rows beside the DSP,
+  but are not: placed, their 162 flip-flops in the middle of the chip
+  cost the core's logic its place (the report fell from 104–107 MHz to
+  85–93 on every seed, a fault on every pass on the board), so the DSP's
+  pins are the one untimed route left and the seed decides.
+  `tools/lab/placement_check.py` confirms on a routed netlist that every
+  constrained cell sits where it was told. (Correction, 2026-10-17: the
+  tool does carry block RAM arcs, from Apicula's tables, with a 0.03 ns
+  setup and a 2.26 ns clock-to-out that never make such a path the
+  worst; the dual-port port-B address and every DSP pin have none at
+  all. The measurements above stand; "untimed" is exact only for those
+  two. `docs/gowin_oss_notes.md` section 1, issue #230.)
+  `tools/lab/pin_audit.py` lists every block RAM's and DSP's pin with
+  what drives or follows it in a routed netlist; run it on every build. The
+  last of these was found with the lab tools: at 73.728 the self-test
+  program's stores, on consecutive cycles with changing addresses, landed
+  with address bits 5–6 dropped (0x062 at 0x002, 0x068 at 0x008 …), over
+  the program's constants, with W's address register fanning out to six
+  blocks' pins across the chip; one store a pass, and the queue's writes,
+  survived, which is why every small probe passed. No reported path in any
+  log has a block RAM's or a DSP's pin as source *or* sink: inputs are
+  as invisible as outputs (the combinational multiply from fabric flops
+  failed on the board from 69 MHz while the report said 80; the write
+  decode straight on the queue block's output dropped and mis-addressed
+  a boot's writes at 73.728 while the report said 122). The report's
+  figure is then the fabric's
+  and the fabric is all there is; a bitstream's real limit is still
+  measured with the clock sweep (`tools/lab`), and the boot self-test's two
+  checks whose operands change every pass (`SHIFT`, `IDX`) are the ones
+  that catch a stale operand. And for the placer, which hangs in the
+  heap placer's legalisation (some 10^8 placement attempts a cell) on most
+  netlists of this design: the wide-LUT cells (`MUX2_LUT5` … `MUX2_LUT8`,
+  clusters of two to sixteen LUTs that have to be legalised together) are
+  what it cannot place — synthesised with `-nowidelut` (the Makefile) the
+  same design places in minutes on every seed, at the same Fmax. A flop
+  added without the global reset, or with one when its neighbours have
+  none, is also a control set of its own, legalised slice by slice; the
+  SVF's pipeline payload (6 000 of 11 000 reset flops, none of them needing
+  it) keeps its reset on this branch, to be dropped on a branch of its own
+  with the S/PDIF output compared.
+- **No row read while written.** A block reads the row on its address
+  pins on every clock, idle or not, and on the board a row read on port B
+  in the clock port A wrote it lost the write — on a placement with every
+  register in place (2026-10-17, issue #222): the boot image lost the
+  rows the register file's read ports had been left on after the last
+  instruction, the constant ONE among them (the probe's row after a
+  reset), the synth silent for it with every self-test passing, and the
+  firmware's `csp-verify` (the image read back through the probe) was
+  what found it. So the read ports are parked on `csp_pkg::PARK_REGISTER`'s
+  row, which nothing writes, whenever decode has no instruction for A
+  (`read_park`, into the placed address flip-flops' own LUT so the
+  decode-to-pin path gains no logic), the probe reads on the pass's last
+  cycle, after the write window's last entry has landed and before the
+  pass counter's write, and a held pass's window ends nine cycles before
+  the pass does. The firmware parks the probe too and verifies its boot
+  image, as belt and braces that report.
 
 ## 13. Steps
 
-Each its own PR, checked in sim and on the board:
+Each its own PR (the last two together, #222), checked in sim and on the
+board:
 
 1. Reference model, assembler and the instruction-level bench, against
-   a new CSP core beside the old one.
+   a new CSP core beside the old one. *Done (#219).*
 2. The new core: datapath, register file, write queue on the swap,
-   loading in reset, 48 kHz passes of up to 1472 cycles of instructions. Today's
-   programs ported to it.
-3. Envelopes and LFOs as instruction sequences; `adsr.sv` and the LFO's
-   `osc_core` retire.
-4. Sink area and DMEM + DMEM partial sinks, two cycles per partial; the
-   per-partial immediates retire; note-on becomes voice-register writes.
-5. SPI protocol on 18/36-bit words (#151), with the new address map;
-   `store_ram` retires.
-6. Linear gain (#176) on top.
+   loading in reset, 48 kHz passes of up to 1472 cycles of instructions.
+   *Done (#220).*
+3. Envelopes and LFOs as instruction sequences, and the rest of the control
+   program; `adsr.sv` and the LFO's `osc_core` retire. *Done (#221).*
+4. Sink area and the voice + channel partial sinks, two cycles per partial;
+   the per-partial immediates retire; note-on becomes voice-register writes;
+   the SPI map follows (`store_ram` retires); the firmware moves to the new
+   model. *Done in sim, place and route and the firmware build (#222);
+   the board is next.*
+5. Linear gain (#176) came with it: a partial's gain is voice word × channel
+   word.
 
 ## 14. Decisions and open questions
 
@@ -574,7 +724,7 @@ Decided on #184:
 | — | pipeline | in order, full interlocks, no forwarding (#220) |
 | 9 | rounding | truncate |
 | 10 | `EXP2` | dropped; opcode 0 is `NOP`, `MAC` moves to 12 |
-| 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port; the PAP is held if a re-layout must not tear; no second page |
+| 11 | partial pointer writes | direct, through the pointer RAM's SPI-clock port, a partial's whole entry on one clock edge, so no hold of the PAP is needed; no second page |
 | — | nested loops | `LOOP.i` / `LOOP.j` (`a` bit 0), nesting one level |
 | — | vector loops | `LOOP.vi` / `LOOP.vj` (`a` bit 1), up to 64 elements; a larger count skips the loop (#220) |
 | 12 | LFOs | 2 per channel at 24 kHz |
@@ -582,6 +732,15 @@ Decided on #184:
 | — | firmware writes | queued, applied on the swap |
 | — | program loading | CSP held in reset |
 
-Still open:
+Decided on #222:
 
-- How the pointer RAM packs 12 pointers per partial (section 10).
+| # | Question | Decision |
+|---|---|---|
+| 13 | how the pointer RAM packs the pointers | ten pointers of ten bits (the voice's pitch, cutoff and gain; the channel's detune, offset, gain on each side, duty, resonance and mode), 100 bits in three BSRAM of 256 × 36 |
+| 14 | the sink words' formats | Q4.14; pitch and cutoff in octaves from middle C, resonance in octaves of Q, duty 1.0 the rail, gain linear and signed, mode `[1:0]` waveform, `[2]` cascade, `[4:3]` filter type |
+| 15 | the firmware's own sink words | written through the write queue (the address reaches the sinks), applied to both pages in the write window |
+| 16 | the sink area | twelve BSRAM, `DPX9B` instantiated by hand (yosys infers neither a block with two read ports nor a true dual-port RAM); port A writes from a register, port B reads |
+| 17 | channels | the program works out `CHANNELS_IN_USE` of them (the firmware says 1 today); a channel's pulse width and resonance are program-computed sinks (the LFOs move them) |
+| 18 | the memory map | pointers `0x2000 + 64 p`, the queue `0x6000`, the program `0x8000`, `CTRL` bits swap, hold, test tone (docs/memory_map.md) |
+
+Still open: nothing in the design; the board test.

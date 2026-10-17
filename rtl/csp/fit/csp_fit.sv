@@ -39,7 +39,7 @@ module csp_fit (
     wire                                 swap          = word_done && shift[60];
     wire [csp_pkg::PROGRAM_W-1:0]        imem_address  = shift[58:48];
     wire [35:0]                          imem_data     = shift[35:0];
-    wire [csp_pkg::REGISTER_W-1:0]       queue_address = shift[46:36];
+    wire [csp_pkg::QUEUE_ADDRESS_W-1:0]  queue_address = shift[47:36];
     wire [csp_pkg::WORD_W-1:0]           queue_data    = shift[17:0];
 
     // ---- reset and the pass tick (every 1536 system clocks) ----------------------
@@ -67,9 +67,9 @@ module csp_fit (
     logic [csp_pkg::PROGRAM_W-1:0]  fetch_address;
     logic [35:0]                    fetch_data;
     logic                           queue_pop, queue_committed, queue_full;
-    logic [csp_pkg::REGISTER_W-1:0] head_address;
+    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] head_address;
     logic [csp_pkg::WORD_W-1:0]     head_data;
-    logic                           sink_write_enable, pass_done;
+    logic                           sink_write_enable, sink_write_both, pass_done;
     logic [9:0]                     sink_write_address;
     logic [csp_pkg::WORD_W-1:0]     sink_write_data;
 
@@ -91,14 +91,31 @@ module csp_fit (
         .fetch_address (fetch_address), .fetch_data (fetch_data),
         .queue_pop (queue_pop), .queue_committed (queue_committed),
         .queue_address (head_address), .queue_data (head_data),
-        .sink_write_enable (sink_write_enable), .sink_write_address (sink_write_address),
-        .sink_write_data (sink_write_data), .pass_done (pass_done)
+        .sink_write_enable (sink_write_enable), .sink_write_both (sink_write_both),
+        .sink_write_address (sink_write_address),
+        .sink_write_data (sink_write_data), .pass_done (pass_done),
+        .pass_counter (), .probe_address ('0), .probe_data ()
+    );
+
+    // ---- the sink area, read as the partial pipeline will: six words a cycle ----------
+    logic [5:0][9:0]                    sink_read_address;
+    logic [5:0][csp_pkg::WORD_W-1:0]    sink_read_data;
+    always_ff @(posedge clk) begin
+        for (int port = 0; port < 6; port++) begin
+            sink_read_address[port] <= 10'(pass_counter) + 10'(port * 171);
+        end
+    end
+    csp_sink_area u_sink_area (
+        .clk (clk), .reset_n (reset_n), .write_enable (sink_write_enable),
+        .write_both (sink_write_both), .write_address (sink_write_address),
+        .write_data (sink_write_data), .pass_done (pass_done),
+        .read_address (sink_read_address), .read_data (sink_read_data)
     );
 
     // ---- every sink write, folded into one pin -----------------------------------------
     always_ff @(posedge clk) begin
         if (sink_write_enable) begin
-            folded <= ^{folded, sink_write_address, sink_write_data, pass_done, queue_full};
+            folded <= ^{folded, sink_write_address, sink_write_data, pass_done, queue_full, sink_read_data};
         end
     end
 

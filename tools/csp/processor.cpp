@@ -192,6 +192,11 @@ int Processor::apply_window(int limit) {
                               && !is_input(queued.address);
         if (writable) {
             registers_[queued.address] = queued.raw;
+        } else if (is_sink(queued.address)) {
+            // The firmware's own sink words (channel settings): both pages,
+            // so that they survive the flip.
+            sink_pages_[0][queued.address - sink_base] = queued.raw;
+            sink_pages_[1][queued.address - sink_base] = queued.raw;
         }
         ++applied;
     }
@@ -325,13 +330,17 @@ int64_t Processor::issue(const Instruction &instruction,
     std::array<int, 2> scratch{};
 
     int64_t cycle = board.front_ready;
+    state.entry   = cycle;
     // In a vector loop, an operand indexed by an element's own copy of an
     // index register waits for that element's IDX.
     auto wait_for_index = [&](uint16_t field) {
         const Operand operand = Operand::decode(field);
         if (state.vector && operand.mode == Operand::Mode::indexed
-            && operand.index == state.vector->private_index) {
-            cycle = std::max(cycle, board.index_ready);
+            && operand.index == state.vector->private_index && cycle < board.index_ready) {
+            // The element's copy of the index lands at index_ready
+            // (csp_core.sv: private_current, which the address adders read
+            // into A's registers, the banks' address pins).
+            cycle = board.index_ready;
         }
     };
     auto wait_for = [&](bool reads, int address, bool wide) {
@@ -380,16 +389,18 @@ int64_t Processor::issue(const Instruction &instruction,
     const bool barrier =
             op == Opcode::loop || (op == Opcode::idx && !state.vector);
     if (op == Opcode::idx && state.vector) {
-        board.index_ready = cycle + barrier_latency;
+        board.index_ready = cycle + private_index_latency;
     }
     board.front_ready = cycle + (barrier ? barrier_latency : 1);
+    state.resolved    = barrier;
     return cycle;
 }
 
 // Issue an instruction: its cycle, or the end of the pass at the limit.
 bool Processor::issue_or_stop(const Instruction &instruction, size_t pc,
                               PassState &state) {
-    state.cycle = issue(instruction, state);
+    state.last_pc = pc;
+    state.cycle   = issue(instruction, state);
     if (state.cycle >= pass_cycle_limit) {
         state.report.errors.push_back("pass longer than "
                                       + std::to_string(pass_cycle_limit)
@@ -398,8 +409,9 @@ bool Processor::issue_or_stop(const Instruction &instruction, size_t pc,
         return false;
     }
     if (trace_) {
-        std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n", pc,
-                     static_cast<long long>(state.cycle), index_[0], index_[1]);
+        std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d word %09llx\n", pc,
+                     static_cast<long long>(state.cycle), index_[0], index_[1],
+                     static_cast<unsigned long long>(program_[pc]));
     }
     state.report.cycles = static_cast<int>(state.cycle) + 1;
     return true;
@@ -507,6 +519,7 @@ void Processor::run_vector(const Instruction &loop, PassState &state) {
         board.front_ready =
                 std::max(board.front_ready, state.cycle + barrier_latency);
     }
+    state.resolved    = true; // the front end moves on at the loop's end
     board.index_ready = 0;
     state.pc          = end;
 }
@@ -771,6 +784,21 @@ PassReport Processor::pass() {
             execute(instruction, state);
         }
         end_loops(state);
+        // Where the pc ends up decides the front end's one move for this
+        // instruction: on to the next word, which the fetch has ready; back
+        // to the instruction itself (a body of one, repeating), whose word
+        // decode keeps; or anywhere else, a jump, where the fetch restarts.
+        // The restart is made when the front end moves on: when the
+        // instruction entered the pipeline (a wait for its operands, in R,
+        // overlaps the fetch), or at its resolution for a LOOP, an IDX or a
+        // vector loop's end; the word arrives jump_penalty cycles after the
+        // next one would have.
+        if (state.pc != state.last_pc + 1 && state.pc != state.last_pc) {
+            Scoreboard &board = state.scoreboard;
+            board.front_ready = state.resolved
+                    ? board.front_ready + jump_penalty
+                    : std::max(board.front_ready, state.entry + 1 + jump_penalty);
+        }
     }
 
     // Every sink word the program has ever written must be written every

@@ -73,9 +73,10 @@ the partial pipeline reads. The CSP writes it but cannot read it back.
 | `0x600–0x7FF` | voices | 32 blocks of 16 words: each voice's note, gate, velocity, envelope levels and stages |
 | `0x800–0xBFF` | sinks | write-only: the values the partials read |
 
-The firmware can write any register over SPI. Its writes wait in a
-queue and are applied together between passes, never during one
-(section 5).
+The firmware can write any register, and any sink word, over SPI. Its
+writes wait in a queue and are applied together between passes, never
+during one (section 5). A sink word it writes goes to both of the sink
+area's pages.
 
 A **wide register** is an aligned pair of registers, `2n` and `2n + 1`,
 read and written together as one 36-bit value. The even address holds
@@ -237,11 +238,11 @@ instruction itself. The instruction's description says so.
   costs in time.
 - **Cost: waits.** The pipeline cannot deliver that at once, so it
   makes the later instruction wait, and the waiting is how the meaning
-  above is kept. An instruction's result is written 6 cycles after it
+  above is kept. An instruction's result is written 7 cycles after it
   issues. An instruction that reads a register, the accumulator or the
   flags that an instruction shortly before it writes therefore waits
-  until the value is written: it issues 7 cycles after that instruction
-  at the earliest. The instruction after a `LOOP` or `IDX` issues 3
+  until the value is written: it issues 9 cycles after that instruction
+  at the earliest. The instruction after a `LOOP` or `IDX` issues 4
   cycles after it at the earliest. Independent instructions issue one
   per cycle, so work placed between a result and its use costs nothing.
   A skipped instruction waits and is waited for like any other. Waits
@@ -255,9 +256,16 @@ instruction itself. The instruction's description says so.
 
   | instruction | needs the result of | earliest issue |
   |---|---|---|
-  | any, in a register | an instruction that writes that register | 7 cycles after it |
-  | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
+  | any, in a register | an instruction that writes that register | 9 cycles after it |
+  | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 4 cycles after it |
+  | in a vector loop, an element's operand through its own `IDX`'s index | that element's `IDX` | 5 cycles after it (the other elements fill them); none if it arrives later |
+  | the first of a body, as its loop repeats | the last of the body | 3 cycles after it (1 if the body is one instruction) |
+  | the first after a `LOOP` whose count is 0 | the `LOOP` | 6 cycles after it |
   | any, independent | nothing before it | 1 cycle after the one before |
+
+  A jump costs the two cycles because the instruction fetch runs ahead on
+  the next instruction only: it restarts at the loop's start, or past the
+  skipped body. A vector loop's end is no jump.
 
   Example: `MAC r1, 0, a, b` followed by `MAC r2, 0, r1, c` waits, since
   the second reads `r1`. `MAC r1, 0, a, b` followed by `MAC r2, 0, d, c`
@@ -304,7 +312,7 @@ instruction itself. The instruction's description says so.
 
 A scalar loop (`LOOP.i`) runs the whole body for voice 0, then the whole
 body for voice 1. Inside the body most instructions depend on the one
-before, so many of them wait 7 cycles for it. Measured, the envelope's
+before, so many of them wait 9 cycles for it. Measured, the envelope's
 9-instruction body costs about 35 cycles a voice, and 32 voices take
 1126 cycles, of which only 26 % issue an instruction.
 
@@ -523,7 +531,7 @@ register that iterations share. A vector body may not contain `LOOP`,
 register; a vector loop can be the inner loop of a `LOOP`. `count` is at
 most 64: a larger count is an error (the model reports it), and the loop
 is skipped, as a count of 0 is, in the model and in the hardware alike.
-After the last element issues, the next instruction issues 3 cycles
+After the last element issues, the next instruction issues 4 cycles
 later at the earliest, as after `LOOP`.
 
 Section 8's envelope is a vector loop: 294 cycles per pass for 32
@@ -864,7 +872,7 @@ SKIP   nonzero, 2            ; on odd samples, skip the next two
 a `LOOP`, or point `j` at a table row computed from data, such as
 an envelope's segment row from its stage.
 
-The next instruction sees the new value; it issues 3 cycles after `IDX`
+The next instruction sees the new value; it issues 4 cycles after `IDX`
 at the earliest (section 5). In a vector loop, `IDX` on the other index
 register sets that element's own copy and holds up nothing else.
 

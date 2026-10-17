@@ -553,6 +553,26 @@ void test_sinks() {
           "a sink word skipped in a pass is reported stale");
 }
 
+void test_firmware_sinks() {
+    Machine m(std::string(registers) + "NOP\n");
+    m.start();
+    m.processor.write(csp::sink_base + 7, q(0.25));
+    m.processor.write(csp::sink_base + csp::sink_count,
+                      q(1.0)); // beyond the sinks
+    m.run();
+    check_equal(m.processor.sink(7), 0,
+                "a queued sink write waits for the swap");
+    m.processor.swap();
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25),
+                "the window applies it, and the pass publishes it");
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25),
+                "it is in both pages, so the next flip keeps it");
+    m.run();
+    check_equal(m.processor.sink(7), q(0.25), "and the one after");
+}
+
 // ---- the assembler ----------------------------------------------------------------
 
 void test_assembler() {
@@ -917,14 +937,28 @@ void test_control_program() {
     struct Channel {
         double bend, p1, c1, p2, c2, base, track, amount, volume;
         int lfo1, lfo2;
+        double d1, d2, r1, r2, duty0, duty1, resonance; // the pulse width and Q
     };
+    const int channel_sinks = m.address("CHANNEL_SINKS");
+    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
+    cpu.write(m.address("CHANNELS_IN_USE"), 16);
     std::vector<Channel> channel(16);
     for (int c = 0; c < 16; ++c) {
-        channel[c]     = {0.02 * (c - 8), 0.1 + 0.01 * c,  -0.2 + 0.03 * c,
-                          0.05 * (c % 4), 0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
-                          0.25 * (c % 5), 0.3 + 0.05 * c,  0.2 + 0.05 * c,
-                          (3 * c) % 32,   (7 * c + 5) % 32};
+        channel[c]     = {0.02 * (c - 8),  0.1 + 0.01 * c,   -0.2 + 0.03 * c,
+                          0.05 * (c % 4),  0.4 - 0.02 * c,   0.5 + 0.1 * (c % 5),
+                          0.25 * (c % 5),  0.3 + 0.05 * c,   0.2 + 0.05 * c,
+                          (3 * c) % 32,    (7 * c + 5) % 32, 0.03 * (c % 5),
+                          -0.02 * (c % 3), 0.1 * (c % 4),    0.05 * (c % 6),
+                          0.1 + 0.02 * c,  -0.3 + 0.03 * c,  0.5 + 0.1 * (c % 7)};
         const int base = channels + c * channel_size;
+        cpu.write(at(base, "LFO1_DUTY"), q(channel[c].d1));
+        cpu.write(at(base, "LFO2_DUTY"), q(channel[c].d2));
+        cpu.write(at(base, "LFO1_RESONANCE"), q(channel[c].r1));
+        cpu.write(at(base, "LFO2_RESONANCE"), q(channel[c].r2));
+        cpu.write(at(base, "DUTY_BASE_0"), q(channel[c].duty0));
+        cpu.write(at(base, "DUTY_BASE_1"), q(channel[c].duty1));
+        cpu.write(at(base, "RESONANCE_BASE"), q(channel[c].resonance));
+        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
         cpu.write(at(base, "BEND"), q(channel[c].bend));
         cpu.write(at(base, "LFO1_PITCH"), q(channel[c].p1));
         cpu.write(at(base, "LFO1_CUTOFF"), q(channel[c].c1));
@@ -950,6 +984,7 @@ void test_control_program() {
         cpu.write_wide(at(base, "LEVEL_A"), q_wide(voice[v].level_a));
         cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
         cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
+        cpu.write(at(base, "VELOCITY_M"), q(1.0));
         cpu.write(at(base, "GATE"), q(1.0));
         cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
         cpu.write(at(base, "STAGE_M"), 20);
@@ -984,7 +1019,7 @@ void test_control_program() {
         const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
                                  + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
         const double want[3]        = {a.note + ch_pitch,
-                                       a.level_m * c.amount + a.note * c.track
+                                       4 * a.level_m * c.amount + a.note * c.track
                                                + ch_cutoff,
                                        a.level_a * a.velocity * c.volume};
         const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF",
@@ -997,9 +1032,31 @@ void test_control_program() {
         }
     }
     // a few raw units of the words' rounding, through up to seven operations
-    check(worst <= 8.0 / 16384.0,
+    check(worst <= 24.0 / 16384.0, // the mod envelope's term is multiplied by 4
           "the voices' sinks match their formulas: largest difference "
                   + std::to_string(worst));
+
+    // the channels' own sinks: the pulse widths and the resonance
+    double worst_channel = 0;
+    for (int c = 0; c < 16; ++c) {
+        const Channel &a     = channel[c];
+        const double duty    = lfo_out[a.lfo1] * a.d1 + lfo_out[a.lfo2] * a.d2;
+        const double reso    = lfo_out[a.lfo1] * a.r1 + lfo_out[a.lfo2] * a.r2;
+        const double want[3] = {a.duty0 + duty, a.duty1 + duty,
+                                a.resonance + reso};
+        const char *const fields[3] = {"DUTY_0", "DUTY_1", "RESONANCE"};
+        for (int k = 0; k < 3; ++k) {
+            const int offset = (channel_sinks - csp::sink_base) + c * sink_size
+                               + m.address(fields[k]);
+            worst_channel =
+                    std::max(worst_channel,
+                             std::fabs(cpu.sink(offset) / 16384.0 - want[k]));
+        }
+    }
+    check(worst_channel <= 6.0 / 16384.0,
+          "the channels' duty and resonance sinks match their formulas: "
+          "largest difference "
+                  + std::to_string(worst_channel));
 }
 
 // The LFOs in their worst case, all sines, 16 in each half, with the rest of the
@@ -1021,15 +1078,20 @@ void test_control_program_lfos() {
         cpu.write(at(set, "N_SINE"), 16);
     }
     // the pointers, so that no two voices or channels share a register
-    const int channels     = m.address("CHANNELS");
-    const int voices       = m.address("VOICES");
-    const int sinks        = m.address("SINKS");
-    const int channel_size = m.address("CHANNEL_SIZE");
-    const int voice_size   = m.address("VOICE_SIZE");
+    const int channels      = m.address("CHANNELS");
+    const int voices        = m.address("VOICES");
+    const int sinks         = m.address("SINKS");
+    const int channel_size  = m.address("CHANNEL_SIZE");
+    const int voice_size    = m.address("VOICE_SIZE");
+    const int channel_sinks = m.address("CHANNEL_SINKS");
+    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
+    cpu.write(m.address("CHANNELS_IN_USE"),
+              12); // 16 and 16 sine LFOs a pass would not fit
     for (int c = 0; c < 16; ++c) {
         const int base = channels + c * channel_size;
         cpu.write(at(base, "LFO1"), lfos + ((3 * c) % 32) * lfo_size);
         cpu.write(at(base, "LFO2"), lfos + ((7 * c + 5) % 32) * lfo_size);
+        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
     }
     for (int v = 0; v < 32; ++v) {
         const int base = voices + v * voice_size;
@@ -1090,6 +1152,7 @@ int main() {
     test_reset();
     test_pass_limit();
     test_sinks();
+    test_firmware_sinks();
     test_assembler();
     test_labels_and_count();
     test_builder();

@@ -16,32 +16,74 @@
 // touches one bank and a wide access touches both at the same index:
 // one BSRAM per bank, six in all.
 //
-// Reads are synchronous: the address goes in on one clock, the data
-// comes out on the next (the pipeline's D → R step). A read of the
-// register being written in the same cycle returns the old value; the
-// core's forwarding covers that case. Register 0 is never written, so it
-// always reads zero, and a wide write to the pair at 0 is discarded.
+// Every register on the banks' pins is the bank's own, placed beside its
+// block (csp_bank.sv): the tool does not time a path into or out of a
+// block RAM's pin, and a register it placed with the logic that feeds it,
+// tens of tiles away, is a path of the order of the clock period at
+// 73.728 MHz (docs/csp_isa.md section 12, docs/gowin_oss_notes.md).
+//
+//   - A write is taken into each bank's register (the bank enables, the
+//     index and the words, decoded before it) and lands in the block the
+//     clock after. The pass counter's write comes the same way, on a
+//     pass's last cycle, and lands before the next pass's first
+//     instruction reads it.
+//   - A read's address goes into the bank's register (read_address: what
+//     the core's address stage takes this clock; held while read_hold, so
+//     that an instruction waiting in A keeps its operands on the pins),
+//     the block reads it the clock after, and its output register holds
+//     the even and the odd word of the pair the clock after that. While
+//     read_park (no instruction reads: the drain, the write window, a
+//     held pass) every port's register holds csp_pkg::PARK_REGISTER's
+//     row, which nothing writes: a block reads the row on its pins on
+//     every clock, and on the board a row read while the other port
+//     wrote it lost the write (csp_bank.sv).
+//   - The pair is taken into the bank's output register, and that is what
+//     read_even / read_odd are: the core's E1 operands, three clocks
+//     after the address was given, with the core choosing a half or
+//     taking the pair from them.
+//
+// A read of the register being written in the same cycle returns the old
+// value; the core's hazard check covers that case. Register 0 is never
+// written, so it always reads zero, and a wide write to the pair at 0 is
+// discarded. The sites are the middle row of the chip's block RAMs, by
+// the core's logic, and the banks' flip-flops the fabric rows beside it.
 //------------------------------------------------------------------------
 `default_nettype none
-module csp_register_file (
+module csp_register_file #(
+    // the banks' BSRAM sites, even and odd of each copy (csp_bank.sv: the
+    // columns on the middle row, whose three columns and the rows beside
+    // it hold the bank's flip-flops; negative leaves a bank to the placer)
+    parameter int SITE_Y      = 27,
+    parameter int SITE_EVEN_0 = 13,
+    parameter int SITE_ODD_0  = 16,
+    parameter int SITE_EVEN_1 = 19,
+    parameter int SITE_ODD_1  = 22,
+    parameter int SITE_EVEN_2 = 31,           // the middle row has no sites at X25 and X28
+    parameter int SITE_ODD_2  = 34
+) (
     input  wire clk,
+    input  wire reset_n,      // unused: the banks' registers start clear and keep their contents
 
-    // three read ports: A, X, Y
+    // three read ports: A, X, Y. The address as the core's address stage
+    // takes it; the pair three clocks later
     input  wire [2:0][csp_pkg::REGISTER_W-1:0] read_address,
-    input  wire [2:0]                          read_wide,    // an aligned pair
-    output logic [2:0][csp_pkg::WIDE_W-1:0]    read_data,    // word: low 18 bits
+    input  wire                                read_hold,    // the address stage waits: addresses held
+    input  wire [2:0]                          read_park,    // per port: no instruction reads, the port on PARK_REGISTER's row
+    output logic [2:0][csp_pkg::WORD_W-1:0]    read_even,    // the pair's upper word
+    output logic [2:0][csp_pkg::WORD_W-1:0]    read_odd,     // and its lower
 
-    // one write port
+    // one write port: taken into each bank's register now, in the blocks
+    // the clock after
     input  wire                                write_enable,
     input  wire [csp_pkg::REGISTER_W-1:0]      write_address,
     input  wire                                write_wide,
     input  wire [csp_pkg::WIDE_W-1:0]          write_data    // word: low 18 bits
 );
-    localparam int BANK_DEPTH = csp_pkg::REGISTER_COUNT / 2;
     localparam int BANK_W     = csp_pkg::REGISTER_W - 1;
 
     // A write: which banks, at which index, with what.
     wire [BANK_W-1:0] write_index = write_address[csp_pkg::REGISTER_W-1:1];
+    localparam logic [BANK_W-1:0] PARK_INDEX = BANK_W'(csp_pkg::PARK_REGISTER >> 1);   // the parked pair's row
     wire              write_odd   = write_address[0];
     wire              discard     = write_address == '0;  // ZERO, or the pair at 0
     wire              write_even_bank = write_enable && !discard && (write_wide || !write_odd);
@@ -50,48 +92,36 @@ module csp_register_file (
     wire [csp_pkg::WORD_W-1:0] odd_data  = write_data[csp_pkg::WORD_W-1:0];
 
     for (genvar port = 0; port < 3; port++) begin : g_copy
-        logic [csp_pkg::WORD_W-1:0] even_bank [BANK_DEPTH];
-        logic [csp_pkg::WORD_W-1:0] odd_bank  [BANK_DEPTH];
-        initial begin
-            for (int index = 0; index < BANK_DEPTH; index++) begin
-                even_bank[index] = '0;
-                odd_bank[index]  = '0;
-            end
-        end
-
-        // Sync-only processes, so yosys infers a BSRAM per bank.
-        always_ff @(posedge clk) begin
-            if (write_even_bank) begin
-                even_bank[write_index] <= even_data;
-            end
-        end
-        always_ff @(posedge clk) begin
-            if (write_odd_bank) begin
-                odd_bank[write_index] <= odd_data;
-            end
-        end
+        localparam int SITE_EVEN = port == 0 ? SITE_EVEN_0 : port == 1 ? SITE_EVEN_1 : SITE_EVEN_2;
+        localparam int SITE_ODD  = port == 0 ? SITE_ODD_0  : port == 1 ? SITE_ODD_1  : SITE_ODD_2;
 
         wire [BANK_W-1:0] read_index = read_address[port][csp_pkg::REGISTER_W-1:1];
-        logic [csp_pkg::WORD_W-1:0] even_word, odd_word;
-        always_ff @(posedge clk) begin
-            even_word <= even_bank[read_index];
-            odd_word  <= odd_bank[read_index];
-        end
-
-        // Which half a word read wanted, aligned with the data.
-        logic read_odd_q, read_wide_q;
-        always_ff @(posedge clk) begin
-            read_odd_q  <= read_address[port][0];
-            read_wide_q <= read_wide[port];
-        end
-
-        always_comb begin
-            if (read_wide_q) begin
-                read_data[port] = {even_word, odd_word};
-            end else begin
-                read_data[port] = {{(csp_pkg::WIDE_W - csp_pkg::WORD_W){1'b0}}, read_odd_q ? odd_word : even_word};
-            end
-        end
+        csp_bank #(
+            .SITE_X(SITE_EVEN), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1),
+            .PARK_INDEX(PARK_INDEX)
+        ) u_even (
+            .clk          (clk),
+            .write_enable (write_even_bank),
+            .write_index  (write_index),
+            .write_data   (even_data),
+            .read_index   (read_index),
+            .read_hold    (read_hold),
+            .read_park    (read_park[port]),
+            .read_data    (read_even[port])
+        );
+        csp_bank #(
+            .SITE_X(SITE_ODD), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1),
+            .PARK_INDEX(PARK_INDEX)
+        ) u_odd (
+            .clk          (clk),
+            .write_enable (write_odd_bank),
+            .write_index  (write_index),
+            .write_data   (odd_data),
+            .read_index   (read_index),
+            .read_hold    (read_hold),
+            .read_park    (read_park[port]),
+            .read_data    (read_odd[port])
+        );
     end
 
 endmodule

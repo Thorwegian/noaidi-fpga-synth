@@ -17,25 +17,29 @@ unison partials per voice, per-voice ADSR amp envelopes in gateware,
 MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
             (MIDI parse, voice        └─ 256 time-multiplexed
              allocation, CC/SysEx        partials: osc → 2× SVF →
-             mapping — "firmware")       stereo gain, modulation
-                                         DMEM + instruction table
+             mapping — "firmware")       stereo gain, behind the CSP:
+                                         a processor that computes
+                                         every control signal
                                          ("gateware")
                                          ──► SPDIF @ 48 kHz + I2S @ 96 kHz
 ```
 
 - **Gateware** (SystemVerilog, `rtl/`): a time-division-multiplexed
   partial pipeline on a 768-slot timebase at 73.728 MHz
-  (= 768 × 96 kHz) computes 256 partials per sample —
-  oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. Parameters live in paged (ping-pong) BSRAM written over
-  SPI; dynamic values ride **DMEM words** written by a
-  256-entry **instruction table** (LFOs, ADSRs, MAC instructions), run
-  by the CSP independently of the partial pipeline's issue slots, every
-  instruction every sample.
-  See [docs/dmem_architecture.md](docs/dmem_architecture.md).
-- **Firmware** (ESP-IDF C, `app/`): MIDI in on UART1, an event bus,
+  (= 768 × 96 kHz) computes 256 partials per sample, two cycles each —
+  oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. A
+  partial is ten pointers into the **sink area**, which the **CSP** (the
+  Control Signal Processor, `rtl/csp`) publishes: a pipelined processor
+  that runs a fixed program every 1536 cycles (48 kHz) and computes
+  envelopes, LFOs, pitch, cutoff and gain from the registers the firmware
+  writes. The program is `tools/csp/programs`.
+  See [docs/csp_isa.md](docs/csp_isa.md) and
+  [docs/csp_manual.md](docs/csp_manual.md).
+- **Firmware** (ESP-IDF, `app/`): MIDI in on UART1, an event bus,
   a voice allocator (a voice = 8 detuned partials, keystroke-instance
-  lifecycle), and the engine link — sole owner of the SPI bus and the
-  page-swap discipline. See
+  lifecycle), `render.cpp` (a patch as register and sink writes), and the
+  engine link — sole owner of the SPI bus: it loads the control program and
+  sends what changed, committed by one swap. See
   [docs/firmware_architecture.md](docs/firmware_architecture.md).
 - The FPGA has no concept of notes, MIDI or CCs. Every musical
   decision is firmware. Control plane ABI:
@@ -100,7 +104,19 @@ pll_clk O0=73728K -s
 
 - **[OSS CAD Suite](https://github.com/yosyshq/oss-cad-suite-build)**
   — yosys / nextpnr-himbaechel / gowin_pack / openFPGALoader /
-  Verilator (expected at `/opt/oss-cad-suite`). The simulations need
+  Verilator, pinned in `tools/oss-cad-suite.version` so every machine
+  builds with the same tools: `make tools` fetches that release into
+  `.tools/` (gitignored, checksum verified; the gateware targets prefer it
+  and fall back to `/opt/oss-cad-suite`, or set `CAD_SUITE`).
+  `make tools-check` looks for a newer release, `make tools-upgrade` pins
+  it (then re-run `make sim-lockstep` and re-check `SEED` in `rtl/Makefile`:
+  the place-and-route result belongs to the tool version). The bitstream
+  itself is written by the `gowin_pack` of a second, newer release pinned
+  in `tools/oss-cad-suite-pack.version` (fetched by the same `make tools`
+  into `.tools/oss-cad-suite-pack`, or set `PACK_SUITE`): its Apicula
+  ties off unused wires in the logic tiles, which the board needs at
+  73.728 MHz, while its nextpnr cannot place the design
+  (`docs/gowin_oss_notes.md`). The simulations need
   Verilator 5 with `--timing` and a C++20 compiler (clang, or gcc 10+);
   tested with Verilator 5.053
 - **Gowin's simulation models** for `make sim`: only
