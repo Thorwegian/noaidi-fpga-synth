@@ -19,9 +19,13 @@ segment of it (segments()) the checker takes the middle 60 % and measures:
     a monophonic tracker splits between two or three clusters;
   - the averaged magnitude spectrum: its centroid, for each expected note
     the strongest peak within 3 % of its fundamental or the octave below or
-    above (relative to the spectrum's strongest peak), and for a single
+    above (relative to the spectrum's strongest peak), for a single
     note the partials at multiples of half its fundamental (the octave-
-    below oscillator's harmonic series, which holds both oscillators').
+    below oscillator's harmonic series, which holds both oscillators'),
+    and the valley floor — the 20th percentile of the spectrum over
+    300–8000 Hz in dB below its strongest line, the level between the
+    harmonics: noise fills it, a clean tone leaves it deep (a gritty take
+    shows as a valley floor tens of dB above the benchmark's).
 
 The verdicts are deliberately tolerant of the patch (a pad with a slow
 attack, a long release and free-running LFOs): a note passes when its pitch
@@ -129,11 +133,21 @@ class Analyser:
             clusters[name] = clusters.get(name, 0) + 1
         clusters = {name: 100 * count // len(pitches) for name, count in clusters.items()}
         strongest = float(spectrum.max()) or 1e-12
+        # The valley floor: the level of the valleys between the harmonics,
+        # the 20th percentile of the averaged spectrum over 300–8000 Hz in dB
+        # below its strongest line. Noise fills the valleys, a clean tone
+        # leaves them deep: the measure of a gritty sound (Thor, #222: a
+        # take with pitch and gain words stale on a sixth of the passes had
+        # its valleys 25–34 dB fuller than the benchmark's, and sounded like
+        # white noise under the tone).
+        band = (self.bins > 300) & (self.bins < 8000)
+        valley_db = float(np.percentile(20 * np.log10(spectrum[band] / strongest + 1e-12), 20))
         result = {
             "level_dbfs": round(level_db(piece), 2),
             "median_midi": None if not pitches else round(float(np.median(pitches)), 2),
             "clusters": dict(sorted(clusters.items(), key=lambda kv: -kv[1])[:3]),
             "centroid_hz": round(float(self.centroid(spectrum)), 1),
+            "valley_db": round(valley_db, 1),
             "peaks_db": {},
             "partials_db": [],
         }

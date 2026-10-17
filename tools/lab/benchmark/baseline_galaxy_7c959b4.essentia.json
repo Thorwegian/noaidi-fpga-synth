@@ -11,6 +11,7 @@
    "median_midi": null,
    "clusters": {},
    "centroid_hz": 0.0,
+   "valley_db": -240.0,
    "peaks_db": {},
    "partials_db": [],
    "ok": true,
@@ -31,6 +32,7 @@
     "C6": 7
    },
    "centroid_hz": 1561.0,
+   "valley_db": -64.0,
    "peaks_db": {
     "C5": 0.0
    },
@@ -70,6 +72,7 @@
     "G3": 7
    },
    "centroid_hz": 1701.8,
+   "valley_db": -60.0,
    "peaks_db": {
     "D5": 0.0
    },
@@ -109,6 +112,7 @@
     "A3": 15
    },
    "centroid_hz": 1973.5,
+   "valley_db": -51.4,
    "peaks_db": {
     "E5": 0.0
    },
@@ -148,6 +152,7 @@
     "F6": 11
    },
    "centroid_hz": 2139.1,
+   "valley_db": -48.3,
    "peaks_db": {
     "F5": 0.0
    },
@@ -187,6 +192,7 @@
     "C4": 11
    },
    "centroid_hz": 2313.6,
+   "valley_db": -48.4,
    "peaks_db": {
     "G5": 0.0
    },
@@ -226,6 +232,7 @@
     "A6": 15
    },
    "centroid_hz": 2407.9,
+   "valley_db": -46.2,
    "peaks_db": {
     "A5": 0.0
    },
@@ -265,6 +272,7 @@
     "E4": 11
    },
    "centroid_hz": 2742.5,
+   "valley_db": -43.4,
    "peaks_db": {
     "B5": 0.0
    },
@@ -304,6 +312,7 @@
     "C7": 2
    },
    "centroid_hz": 3037.9,
+   "valley_db": -42.6,
    "peaks_db": {
     "C6": 0.0
    },
@@ -341,6 +350,7 @@
     "C7": 3
    },
    "centroid_hz": 1781.7,
+   "valley_db": -69.1,
    "peaks_db": {},
    "partials_db": [],
    "ok": true,
@@ -363,6 +373,7 @@
     "G4": 7
    },
    "centroid_hz": 1200.6,
+   "valley_db": -68.1,
    "peaks_db": {
     "C4": -4.1,
     "E4": -3.8,
@@ -385,6 +396,7 @@
     "G4": 15
    },
    "centroid_hz": 664.7,
+   "valley_db": -73.5,
    "peaks_db": {},
    "partials_db": [],
    "ok": true,
@@ -403,6 +415,7 @@
     "F4": 14
    },
    "centroid_hz": 880.0,
+   "valley_db": -68.5,
    "peaks_db": {},
    "partials_db": [],
    "ok": true,

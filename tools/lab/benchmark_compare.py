@@ -20,6 +20,9 @@ folder keeps as JSON and CSV so that the benchmark WAV is not needed:
     digital silence floored at -80 dBFS;
   - each note's pitch class: a third of the confident frames, as the check;
   - the spectral centroid of each sounding segment: within half an octave;
+  - the valley floor of each sounding segment (the level between the
+    harmonics, baseline_check.py): not more than 6 dB fuller than the
+    benchmark's — the test for a gritty sound (Thor, #222);
   - the partials of each single note (multiples of half the fundamental,
     the octave-below oscillator's series): a mean difference of at most
     6 dB over the partials the benchmark has within 40 dB of its strongest;
@@ -49,6 +52,7 @@ LEVEL_TOLERANCE_QUIET = 6.0                       # dB, the lead-in, the silence
 CENTROID_TOLERANCE = 6.0                          # semitones
 PARTIAL_TOLERANCE = 6.0                           # dB, mean over the benchmark's partials within
 PARTIAL_WINDOW = 40.0                             # ... this many dB of its strongest
+VALLEY_TOLERANCE = 6.0                            # dB, the valley floor between the harmonics, fuller than the benchmark's
 ENVELOPE_CORRELATION = 0.9
 
 
@@ -89,6 +93,10 @@ def compare_segment(reference, candidate):
     semitones = 12 * math.log2(max(1.0, candidate["centroid_hz"]) / max(1.0, reference["centroid_hz"]))
     rows.append(("centroid", "%.0f Hz" % reference["centroid_hz"], "%.0f Hz" % candidate["centroid_hz"],
                  "%+.1f st" % semitones, "±%.0f st" % CENTROID_TOLERANCE, abs(semitones) <= CENTROID_TOLERANCE))
+    if "valley_db" in reference and "valley_db" in candidate:
+        fuller = candidate["valley_db"] - reference["valley_db"]
+        rows.append(("valley floor", "%.1f dB" % reference["valley_db"], "%.1f dB" % candidate["valley_db"],
+                     "%+.1f dB" % fuller, "≤ +%.0f dB" % VALLEY_TOLERANCE, fuller <= VALLEY_TOLERANCE))
     if reference["partials_db"]:
         kept = [(r, c) for r, c in zip(reference["partials_db"], candidate["partials_db"]) if r > -PARTIAL_WINDOW]
         mean = float(np.mean([abs(c - r) for r, c in kept])) if kept else 0.0

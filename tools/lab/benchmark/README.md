@@ -21,9 +21,11 @@ its end — from the S/PDIF output, 48 kHz, 16-bit, stereo.
   the triad's peaks, the release;
 - `baseline_galaxy_7c959b4.essentia.json` — every measurement behind it:
   per segment the level, the pitch clusters, the spectral centroid, the
-  expected notes' peaks and a single note's first sixteen partials (an
-  exception in `.gitignore` keeps it in the tree, where `*.json` is
-  otherwise the flow's output);
+  valley floor (the level between the harmonics, 300–8000 Hz, the test
+  for a gritty sound: −43 to −68 dB below the strongest line on this
+  take), the expected notes' peaks and a single note's first sixteen
+  partials (an exception in `.gitignore` keeps it in the tree, where
+  `*.json` is otherwise the flow's output);
 - `baseline_galaxy_7c959b4.envelope.csv` — the level envelope, dBFS every
   50 ms, 45 s.
 

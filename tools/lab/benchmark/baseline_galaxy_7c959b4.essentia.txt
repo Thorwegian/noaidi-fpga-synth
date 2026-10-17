@@ -1,3 +1,4 @@
+[   INFO   ] MusicExtractorSVM: no classifier models were configured by default
 segment                      level      pitch       want  verdict
 lead-in                  -120.0 dB                     silence  ok    
 note 1 of the scale       -20.7 dB 71.99 (C5)               C5  ok    C5 57%  C4 34%  C6 7%
