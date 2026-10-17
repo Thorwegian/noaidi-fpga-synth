@@ -193,6 +193,7 @@ module csp_write_queue #(
                 .clk          (clk),
                 .clock_enable (pointer_step),
                 .clear        (!reset_n),
+                .park         (1'b0),
                 .d            (head_index_next[n]),
                 .q            (head_index[n])
             );
@@ -201,6 +202,7 @@ module csp_write_queue #(
                 .clk          (clk),
                 .clock_enable (1'b1),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (pipeline_out[n - HEAD_LOW]),
                 .q            (head[n - HEAD_LOW])
             );

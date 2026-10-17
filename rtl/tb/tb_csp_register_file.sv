@@ -34,6 +34,7 @@ module tb_csp_register_file;
         .clk           (clk),
         .reset_n       (reset_n),
         .read_address  (read_address),
+        .read_park     ('0),
         .read_even     (read_even),
         .read_odd      (read_odd),
         .write_enable  (write_enable),

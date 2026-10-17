@@ -670,6 +670,22 @@ small program. The new CSP gets:
   SVF's pipeline payload (6 000 of 11 000 reset flops, none of them needing
   it) keeps its reset on this branch, to be dropped on a branch of its own
   with the S/PDIF output compared.
+- **No row read while written.** A block reads the row on its address
+  pins on every clock, idle or not, and on the board a row read on port B
+  in the clock port A wrote it lost the write — on a placement with every
+  register in place (2026-10-17, issue #222): the boot image lost the
+  rows the register file's read ports had been left on after the last
+  instruction, the constant ONE among them (the probe's row after a
+  reset), the synth silent for it with every self-test passing, and the
+  firmware's `csp-verify` (the image read back through the probe) was
+  what found it. So the read ports are parked on `csp_pkg::PARK_REGISTER`'s
+  row, which nothing writes, whenever decode has no instruction for A
+  (`read_park`, into the placed address flip-flops' own LUT so the
+  decode-to-pin path gains no logic), the probe reads on the pass's last
+  cycle, after the write window's last entry has landed and before the
+  pass counter's write, and a held pass's window ends nine cycles before
+  the pass does. The firmware parks the probe too and verifies its boot
+  image, as belt and braces that report.
 
 ## 13. Steps
 

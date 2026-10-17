@@ -31,7 +31,12 @@
 //     the core's address stage takes this clock; held while read_hold, so
 //     that an instruction waiting in A keeps its operands on the pins),
 //     the block reads it the clock after, and its output register holds
-//     the even and the odd word of the pair the clock after that.
+//     the even and the odd word of the pair the clock after that. While
+//     read_park (no instruction reads: the drain, the write window, a
+//     held pass) every port's register holds csp_pkg::PARK_REGISTER's
+//     row, which nothing writes: a block reads the row on its pins on
+//     every clock, and on the board a row read while the other port
+//     wrote it lost the write (csp_bank.sv).
 //   - The pair is taken into the bank's output register, and that is what
 //     read_even / read_odd are: the core's E1 operands, three clocks
 //     after the address was given, with the core choosing a half or
@@ -63,6 +68,7 @@ module csp_register_file #(
     // takes it; the pair three clocks later
     input  wire [2:0][csp_pkg::REGISTER_W-1:0] read_address,
     input  wire                                read_hold,    // the address stage waits: addresses held
+    input  wire [2:0]                          read_park,    // per port: no instruction reads, the port on PARK_REGISTER's row
     output logic [2:0][csp_pkg::WORD_W-1:0]    read_even,    // the pair's upper word
     output logic [2:0][csp_pkg::WORD_W-1:0]    read_odd,     // and its lower
 
@@ -77,6 +83,7 @@ module csp_register_file #(
 
     // A write: which banks, at which index, with what.
     wire [BANK_W-1:0] write_index = write_address[csp_pkg::REGISTER_W-1:1];
+    localparam logic [BANK_W-1:0] PARK_INDEX = BANK_W'(csp_pkg::PARK_REGISTER >> 1);   // the parked pair's row
     wire              write_odd   = write_address[0];
     wire              discard     = write_address == '0;  // ZERO, or the pair at 0
     wire              write_even_bank = write_enable && !discard && (write_wide || !write_odd);
@@ -90,7 +97,8 @@ module csp_register_file #(
 
         wire [BANK_W-1:0] read_index = read_address[port][csp_pkg::REGISTER_W-1:1];
         csp_bank #(
-            .SITE_X(SITE_EVEN), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1)
+            .SITE_X(SITE_EVEN), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1),
+            .PARK_INDEX(PARK_INDEX)
         ) u_even (
             .clk          (clk),
             .write_enable (write_even_bank),
@@ -98,10 +106,12 @@ module csp_register_file #(
             .write_data   (even_data),
             .read_index   (read_index),
             .read_hold    (read_hold),
+            .read_park    (read_park[port]),
             .read_data    (read_even[port])
         );
         csp_bank #(
-            .SITE_X(SITE_ODD), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1)
+            .SITE_X(SITE_ODD), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1),
+            .PARK_INDEX(PARK_INDEX)
         ) u_odd (
             .clk          (clk),
             .write_enable (write_odd_bank),
@@ -109,6 +119,7 @@ module csp_register_file #(
             .write_data   (odd_data),
             .read_index   (read_index),
             .read_hold    (read_hold),
+            .read_park    (read_park[port]),
             .read_data    (read_odd[port])
         );
     end

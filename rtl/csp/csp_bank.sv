@@ -33,7 +33,13 @@
 //     after (10 flip-flops). With the core's own address register 13–33
 //     tiles away, a read right after idle cycles returned register 0's
 //     word: the pins still showed the bubble's address when the block
-//     sampled them;
+//     sampled them. While read_park the register holds PARK_INDEX, a row
+//     nothing writes: a block reads the row on its address pins on every
+//     clock, idle or not, and on the board a row read on port B in the
+//     clock port A wrote it lost the write (issue #222: the rows the ports
+//     were left on after the last instruction were the boot image's lost
+//     words, the constant ONE among them, on a placement that had every
+//     register in place — and no such loss with the ports parked);
 //   - the output (OUTPUT_REGISTER): the block's output register is taken
 //     into a register of the bank's, which is what the core's E1 holds
 //     (18 flip-flops); the mirror image of the address path.
@@ -47,7 +53,8 @@ module csp_bank #(
     parameter int SITE_X           = -1,             // the BSRAM site's column, or negative
     parameter int SITE_Y           = -1,             // and row
     parameter bit ADDRESS_REGISTER = 1'b0,           // the read index through a register of the bank's
-    parameter bit OUTPUT_REGISTER  = 1'b0            // the word through a register of the bank's
+    parameter bit OUTPUT_REGISTER  = 1'b0,           // the word through a register of the bank's
+    parameter logic [9:0] PARK_INDEX = 10'd0         // the row the address register holds while read_park
 ) (
     input  wire                        clk,
     // the write, as decoded (which bank, the index, the word); taken into
@@ -60,6 +67,7 @@ module csp_bank #(
     // clock after that from the bank's register
     input  wire [9:0]                  read_index,
     input  wire                        read_hold,
+    input  wire                        read_park,    // no instruction reads: the register takes PARK_INDEX (unless read_hold)
     output logic [csp_pkg::WORD_W-1:0] read_data
 );
 
@@ -107,15 +115,18 @@ module csp_bank #(
                 .clk          (clk),
                 .clock_enable (1'b1),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (write_in[n]),
                 .q            (write_q[n])
             );
         end else if (n < OUTPUT_LOW) begin : g_address
             if (ADDRESS_REGISTER) begin : g_placed
-                csp_placed_dff #(.TILE_X(X), .TILE_Y(Y), .SLOT(n % 6), .HOLDS(1'b1)) u_flop (
+                csp_placed_dff #(.TILE_X(X), .TILE_Y(Y), .SLOT(n % 6), .HOLDS(1'b1),
+                                 .PARKS(1'b1), .PARK_VALUE(PARK_INDEX[n - ADDRESS_LOW])) u_flop (
                     .clk          (clk),
                     .clock_enable (!read_hold),
                     .clear        (1'b0),
+                    .park         (read_park),
                     .d            (read_index[n - ADDRESS_LOW]),
                     .q            (address_q[n - ADDRESS_LOW])
                 );
@@ -126,6 +137,7 @@ module csp_bank #(
                     .clk          (clk),
                     .clock_enable (1'b1),
                     .clear        (1'b0),
+                    .park         (1'b0),
                     .d            (block_out[n - OUTPUT_LOW]),
                     .q            (output_q[n - OUTPUT_LOW])
                 );
@@ -214,7 +226,7 @@ module csp_bank #(
     always_ff @(posedge clk) begin
         write_q <= write_in;
         if (!read_hold) begin
-            address_q <= read_index;
+            address_q <= read_park ? PARK_INDEX : read_index;
         end
         output_q <= block_out;
     end

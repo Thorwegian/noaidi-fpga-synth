@@ -69,6 +69,7 @@ module csp_program_slice #(
                 .clk          (clk),
                 .clock_enable (1'b1),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (fetch_address[n]),
                 .q            (address_q[n])
             );
@@ -77,6 +78,7 @@ module csp_program_slice #(
                 .clk          (clk),
                 .clock_enable (buffer_load),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (block_out[n - BUFFER_LOW]),
                 .q            (fetch_data[n - BUFFER_LOW])
             );

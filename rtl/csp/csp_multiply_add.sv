@@ -110,6 +110,7 @@ module csp_multiply_add #(
                 .clk          (clk),
                 .clock_enable (1'b1),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (operands_in[n]),
                 .q            (operands_q[n])
             );
@@ -118,6 +119,7 @@ module csp_multiply_add #(
                 .clk          (clk),
                 .clock_enable (1'b1),
                 .clear        (1'b0),
+                .park         (1'b0),
                 .d            (block_out[n - PRODUCT_LOW]),
                 .q            (product[n - PRODUCT_LOW])
             );

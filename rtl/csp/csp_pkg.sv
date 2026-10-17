@@ -19,6 +19,11 @@ package csp_pkg;
     parameter int ADDRESS_W      = 12;            // what i and j can address
     parameter int IO_BASE        = 'h040;         // read-only inputs
     parameter int IO_COUNT       = 32;
+    // The pair the register file's read ports hold while no instruction
+    // reads (csp_register_file.sv): the inputs' last pair, which nothing
+    // writes (a write to an input is dropped; the pass counter goes to
+    // IO_BASE itself).
+    parameter int PARK_REGISTER  = IO_BASE + IO_COUNT - 2;
     parameter int DIRECT_REACH   = 512;           // direct operands: 0–511
     parameter int MAX_PROGRAM    = 1472;          // instructions per pass
     parameter int PROGRAM_W      = 11;            // $clog2(MAX_PROGRAM)

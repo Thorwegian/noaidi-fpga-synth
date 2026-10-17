@@ -22,21 +22,29 @@
 // with placed flip-flops). The LUT is a passthrough, or with HOLDS the
 // mux that holds the flip-flop while the clock enable is low (a waiting
 // instruction's address), or with CLEARS as well the mux with a
-// synchronous clear before it (a pointer that a reset returns to zero) —
-// nextpnr takes no DFFE, DFFR or DFFC on a slot it calls a DFF.
-// Initialised to 0, as the fabric's flip-flops are at configuration.
+// synchronous clear before it, over the enable (a pointer that a reset
+// returns to zero), or with PARKS the mux with the park under the enable:
+// while the enable is high and park is, the flip-flop takes PARK_VALUE
+// instead of d (a bank's address register parked on a row nothing writes
+// while no instruction reads, csp_bank.sv; the hold wins, so that an
+// instruction waiting in A keeps its operands on the pins) — nextpnr
+// takes no DFFE, DFFR or DFFC on a slot it calls a DFF. Initialised to 0,
+// as the fabric's flip-flops are at configuration.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_placed_dff #(
-    parameter int TILE_X = -1,                        // the tile's column, or negative
-    parameter int TILE_Y = -1,                        // and row
-    parameter int SLOT   = 0,                         // 0 … 5: the tile's flip-flops
-    parameter bit HOLDS  = 1'b0,                      // the clock enable is used
-    parameter bit CLEARS = 1'b0                       // the clear is used (with HOLDS)
+    parameter int TILE_X     = -1,                    // the tile's column, or negative
+    parameter int TILE_Y     = -1,                    // and row
+    parameter int SLOT       = 0,                     // 0 … 5: the tile's flip-flops
+    parameter bit HOLDS      = 1'b0,                  // the clock enable is used
+    parameter bit CLEARS     = 1'b0,                  // the clear is used (with HOLDS)
+    parameter bit PARKS      = 1'b0,                  // the park is used (with HOLDS, not CLEARS)
+    parameter bit PARK_VALUE = 1'b0                   // what the park loads
 ) (
     input  wire  clk,
     input  wire  clock_enable,
     input  wire  clear,                               // synchronous, over the enable
+    input  wire  park,                                // synchronous, under the enable
     input  wire  d,
     output logic q
 );
@@ -59,15 +67,22 @@ module csp_placed_dff #(
     localparam     LUT_BEL  = $sformatf("X%0dY%0d/LUT%0d", TILE_X, TILE_Y, SLOT);
     // The LUTs, by their input index {I3, I2, I1, I0}: the passthrough
     // F = I0; the mux F = I2 ? I0 : I1 (the enable on I2); the clearing mux
-    // F = I3 ? 0 : (I2 ? I0 : I1) (the clear on I3).
+    // F = I3 ? 0 : (I2 ? I0 : I1) (the clear on I3); the parking mux
+    // F = I2 ? (I3 ? PARK_VALUE : I0) : I1 (the park on I3, under the
+    // enable: the upper byte's upper nibble is the parked value, its lower
+    // nibble the hold).
     localparam logic [1:0]  PASS_INIT  = 2'b10;
     localparam logic [7:0]  MUX_INIT   = 8'hAC;
     localparam logic [15:0] CLEAR_INIT = 16'h00AC;
+    localparam logic [15:0] PARK_INIT  = {{4{PARK_VALUE}}, 4'hC, MUX_INIT};
     wire next;
     if (PLACED) begin : g_placed
         if (CLEARS) begin : g_clear
             (* BEL = LUT_BEL, keep *)
             LUT4 #(.INIT(CLEAR_INIT)) u_lut (.F(next), .I0(d), .I1(q), .I2(clock_enable), .I3(clear));
+        end else if (PARKS) begin : g_park
+            (* BEL = LUT_BEL, keep *)
+            LUT4 #(.INIT(PARK_INIT)) u_lut (.F(next), .I0(d), .I1(q), .I2(clock_enable), .I3(park));
         end else if (HOLDS) begin : g_mux
             (* BEL = LUT_BEL, keep *)
             LUT3 #(.INIT(MUX_INIT)) u_lut (.F(next), .I0(d), .I1(q), .I2(clock_enable));
@@ -90,7 +105,7 @@ module csp_placed_dff #(
             if (CLEARS && clear) begin
                 q <= 1'b0;
             end else if (!HOLDS || clock_enable) begin
-                q <= d;
+                q <= (PARKS && park) ? PARK_VALUE : d;
             end
         end
     end
@@ -100,7 +115,7 @@ module csp_placed_dff #(
         if (CLEARS && clear) begin
             q <= 1'b0;
         end else if (!HOLDS || clock_enable) begin
-            q <= d;
+            q <= (PARKS && park) ? PARK_VALUE : d;
         end
     end
 `endif

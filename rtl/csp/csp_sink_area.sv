@@ -132,6 +132,7 @@ module csp_sink_area #(
                 .write_data   (data_q),
                 .read_index   (read_address[replica]),
                 .read_hold    (1'b0),
+                .read_park    (1'b0),          // the partial engine reads on every clock, by design
                 .read_data    (block_data[page * csp_pkg::WORD_W +: csp_pkg::WORD_W])
             );
         end

@@ -204,14 +204,15 @@ module csp_core (
         end
     end
 
-    // A held pass applies writes from its second cycle on, until five cycles
+    // A held pass applies writes from its second cycle on, until nine cycles
     // before its end: a write is staged for four cycles after it is taken
     // from the queue (the block's read, its output register, the fabric's
-    // register, the register file's own), and must be in the register file
-    // before the next pass's first cycle; the pass counter's write takes
-    // the last cycle.
+    // register, the register file's own), and must be in the blocks before
+    // the probe reads on the last cycle (PROBE_CYCLE: no row read while
+    // written) and before the pass counter's write, which takes the last
+    // cycle.
     wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
-                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 5))
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 9))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
@@ -312,10 +313,12 @@ module csp_core (
     logic                                rf_write_wide;
     logic [35:0]                         rf_write_data;
 
+    logic [2:0]                          read_park;             // per port: no instruction reads
     csp_register_file u_register_file (
         .clk           (clk),
         .read_address  (read_address),
         .read_hold     (a_hold),
+        .read_park     (read_park),
         .reset_n       (reset_n),
         .read_even     (read_even),
         .read_odd      (read_odd),
@@ -408,13 +411,18 @@ module csp_core (
     // only holds its own element's private index register.
     wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
-    // The probe takes the Y port once a pass, long after the last instruction
-    // has issued and drained (DRAIN_END), and keeps the pair it reads: its
+    // The probe takes the Y port once a pass, on the pass's last cycle:
+    // after the write window's last entry has landed in the blocks (a pop
+    // at WINDOW_END - 1 lands four clocks later) and before the pass
+    // counter's write does (taken into the banks' registers on the last
+    // cycle, in the blocks on the next pass's first), so that the row it
+    // reads is never the row being written (the collision above). Its
     // address goes into the Y bank's address register (and A's) the cycle
     // before, is on the pin at PROBE_CYCLE, the pair is in the block's
-    // output register the cycle after and in the bank's the cycle after
-    // that.
-    localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 16;
+    // output register the cycle after (the next pass's first) and in the
+    // bank's the cycle after that, where probe_take takes it; the next
+    // pass's first instruction reads the Y bank a cycle later still.
+    localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 1;
     wire probe_load = in_pass && pass_cycle == 11'(PROBE_CYCLE - 1);
     wire probe_now  = in_pass && pass_cycle == 11'(PROBE_CYCLE);
     logic probe_read, probe_take;
@@ -450,6 +458,22 @@ module csp_core (
         read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
         read_address[2] = csp_pkg::REGISTER_W'(probe_load ? AW'(probe_address) : decode_y_address);
     end
+
+    // The banks' address registers are parked on a row nothing writes
+    // (csp_pkg::PARK_REGISTER's pair) whenever decode has no instruction
+    // for A: the drain, the write window, a held pass. A block reads the
+    // row on its pins on every clock, idle or not, and a row read on one
+    // port in the clock the other port writes it lost the write on the
+    // board (issue #222: with every register in place, the boot image
+    // lost the rows the ports had been left on after the last
+    // instruction, the constant ONE among them — the probe's row after a
+    // reset — and nothing with the ports parked). The park goes into the
+    // placed address flip-flops' own LUT, under the hold (an instruction
+    // waiting in A keeps its operands on the pins, decode empty or not),
+    // so the path from decode to the pins gains no logic; the Y port is
+    // unparked for the probe's cycle. Both terms are registers.
+    wire parked = !(decode_valid && run_open);
+    assign read_park = {parked && !probe_load, parked, parked};
 
     // The hazard check, in A, on registered values only: an older instruction in
     // R, E1 … E5, W (or in W a cycle ago, which wrote while A's operands were read)
