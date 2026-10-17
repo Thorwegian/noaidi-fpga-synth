@@ -325,6 +325,18 @@ and the DSP. Issue #230 carries the patch work (fork
   a third lost none; the first two sounded the same, silent. The
   firmware verifies and resends its boot image itself now, and logs the
   count — a report, not a fix.
+- **Three acceptances, none of which implies another** (2026-10-17, late):
+  verify says what the firmware wrote, the boot self-test says what the
+  CSP computes, the baseline take says what it sounds like. A bitstream
+  that passed verify on every boot and played the baseline with the
+  right envelope still failed the self-test's two changing-operand checks
+  (`SHIFT`, `IDX`: 2415 and 2412 of 2832 passes right — a stale operand
+  through the index register on 15 % of the passes), and that was the
+  pitch LFO's swing coming out 11 % short; every bitstream since the
+  A-stage commit failed them at 73.728 MHz and passed at 64. The verdict
+  line (*the chip does what the model says*) is in every boot log; read
+  it, and print the two counts with every seed. A path's margin shows up
+  as a *fraction* of passes wrong, not as a dead chip.
 
 ## 4. How the last two were found
 
