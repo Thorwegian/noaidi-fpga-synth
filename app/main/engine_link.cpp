@@ -340,6 +340,12 @@ void engine_link_init(void) {
     // give it the program, the constants and the wiring.
     fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
 
+    // The probe reads a register pair once a pass; after a reset it reads
+    // pair 0, the row the constant ONE is in, and a read of a block RAM row
+    // on one port while the other writes it is a collision (issue #222: ONE
+    // lost at boot). Park it on a pair nothing writes until it is asked for.
+    fpga_word_write(fpga_map::probe_address, 0x5FE);
+
     // The write queue outlives a reset of this chip: what the last run left in
     // it (committed or not) would be applied during the self-test and the first
     // passes of the control program, over what they compute. Commit it and let
