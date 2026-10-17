@@ -13,6 +13,23 @@ section 12; this file keeps the why and the how.
 
 ## 1. What nextpnr does not time
 
+Correction (2026-10-17): the Gowin arch *does* carry block RAM timing
+arcs, since nextpnr `ccdc2f6f` (2023-10-05), built from Apicula's
+`bram` group for the speed grade (GW2A-18C C8/I7: address/data setup
+0.03 ns, clock-to-out 2.26 ns in bypass mode, 0.31 ns from the output
+register) — values so small that a block RAM path is never the worst
+one, which is why no report ever showed one. Two real gaps: the
+dual-port cells' port-B address (`ADB`, the register file's read
+address) is attached to the wrong cell in `gowin_arch_gen.py` and so
+has no arcs, and the DSP has no timing group at all. Gowin's data sheet
+(DS226 v1.5, 2019, the public Chinese edition, section 4.4.1 p. 52)
+gives tCOAD_BSRAM 2.55 ns, tCOOR_BSRAM 0.28 ns, tCOOR_DSP 0.42 ns,
+tCOIR_DSP 2.40 ns, tCO_CFU 0.38 ns, and no setup, hold or clock-network
+skew. These magnitudes cannot explain the failures measured below; the
+observations stand, the explanation "untimed" is only right for `ADB`
+and the DSP. Issue #230 carries the patch work (fork
+`Thorwegian/nextpnr`).
+
 - **No path that starts or ends at a block RAM's or a DSP's pin is
   timed.** In no routed log does a reported path have a `DPX9B`, `SDPX9B`,
   `SDPB`, `SPX9` or `MULT*` pin as source *or* sink. Probes

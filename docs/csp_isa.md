@@ -636,7 +636,12 @@ small program. The new CSP gets:
   85–93 on every seed, a fault on every pass on the board), so the DSP's
   pins are the one untimed route left and the seed decides.
   `tools/lab/placement_check.py` confirms on a routed netlist that every
-  constrained cell sits where it was told.
+  constrained cell sits where it was told. (Correction, 2026-10-17: the
+  tool does carry block RAM arcs, from Apicula's tables, with a 0.03 ns
+  setup and a 2.26 ns clock-to-out that never make such a path the
+  worst; the dual-port port-B address and every DSP pin have none at
+  all. The measurements above stand; "untimed" is exact only for those
+  two. `docs/gowin_oss_notes.md` section 1, issue #230.)
   `tools/lab/pin_audit.py` lists every block RAM's and DSP's pin with
   what drives or follows it in a routed netlist; run it on every build. The
   last of these was found with the lab tools: at 73.728 the self-test
