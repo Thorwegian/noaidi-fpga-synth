@@ -14,11 +14,11 @@
 // SPI clock writes, the system clock reads. The block is instantiated by
 // hand (an SDPB, as the sink area's DPX9B is) in pipeline mode: the entry
 // comes out of the block's own output register, two clocks after its
-// address, so that nothing but a register sits on the memory's output (the
-// place-and-route tool does not time paths that start at a block RAM's
-// output; docs/csp_isa.md, 12). The head is therefore one clock behind the
-// pointer, which the core allows for: it takes the entry the clock after it
-// pops.
+// address, so that nothing but a register sits on the memory's output; and
+// its address pin is the read pointer's register itself, nothing between
+// (the place-and-route tool times no path into or out of a block RAM's
+// pins; docs/csp_isa.md, 12). The entry for a pop is therefore in `head`
+// two clocks after the pop, which the core allows for.
 //
 // Crossing the clocks:
 //  - The commit point. A swap copies the write pointer into
@@ -137,12 +137,16 @@ module csp_write_queue (
     assign committed = read_pointer != committed_pointer;
     assign read_pointer_gray = read_gray;
 
-    // The head entry: the block reads ahead to the next entry when popping,
-    // and its pipeline register hands the entry out a clock later, so `head`
-    // holds the entry at the read pointer two clocks after the pointer
-    // moves: one behind the pop.
-    wire [POINTER_W-2:0] head_index = (pop && committed) ? read_pointer[POINTER_W-2:0] + 1'b1
-                                                         : read_pointer[POINTER_W-2:0];
+    // The head entry: the block reads at the read pointer, from the pointer's
+    // register straight into its address pin, and its pipeline register
+    // hands the entry out a clock later, so `head` holds the entry at the
+    // read pointer two clocks after the pointer moves: two behind the pop,
+    // for a lone pop and for pops on consecutive clocks alike. (With a mux
+    // and an incrementer reading ahead on the pin, the entry came a clock
+    // sooner, and on the board at 73.728 MHz the block sampled the old
+    // address on the clock the pop rose: a batch lost its first words after
+    // the decoy, the control program's ONE and EIGHTH among them.)
+    wire [POINTER_W-2:0] head_index = read_pointer[POINTER_W-2:0];
     logic [31:0] head;   // the block's word is 32 bits; the entry is the low 30
 
 `ifdef SYNTHESIS

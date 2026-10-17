@@ -66,8 +66,36 @@ module tb_csp_write_queue;
             pop = 1;
             @(negedge clk);
             pop = 0;
+            @(negedge clk);            // the next entry arrives two clocks after the pop
             count++;
         end
+    endtask
+
+    // Pop on every clock an entry waits, as a held pass does, and check that
+    // the entries arrive in order, each two clocks after its pop.
+    task automatic drain_back_to_back(input int first, output int count);
+        int   taken        = 0;
+        logic pop_previous = 0;   // a pop two clocks before the clock checked
+        logic pop_current;
+        count = 0;
+        repeat (20) @(posedge clk);    // let the toggle cross
+        @(negedge clk);
+        while (committed || taken < count) begin
+            pop_current = committed;
+            pop         = pop_current;
+            if (pop_current) count++;
+            @(negedge clk);
+            if (pop_previous) begin
+                if (head_address !== csp_pkg::QUEUE_ADDRESS_W'(first + taken)
+                    || head_data !== csp_pkg::WORD_W'(1000 + first + taken)) begin
+                    $display("FAIL back-to-back entry %0d: 0x%0h = %0d", taken, head_address, head_data);
+                    errors++;
+                end
+                taken++;
+            end
+            pop_previous = pop_current;
+        end
+        pop = 0;
     endtask
 
     initial begin
@@ -112,6 +140,20 @@ module tb_csp_write_queue;
         drain(7, count);
         if (count != 512) begin
             $display("FAIL a full queue gave %0d writes, want 512 (the rest dropped)", count);
+            errors++;
+        end
+
+        // The SPI side's copy of the read pointer is two SPI clocks behind
+        // (csp_write_queue.sv): just drained from full, it still says full.
+        sclk_cycle(0, 0, 0, 0);
+        sclk_cycle(0, 0, 0, 0);
+        for (int n = 0; n < 40; n++) begin
+            sclk_cycle(1, 600 + n, 1600 + n, 0);
+        end
+        sclk_cycle(0, 0, 0, 1);
+        drain_back_to_back(600, count);
+        if (count != 40) begin
+            $display("FAIL back-to-back pops took %0d writes, want 40", count);
             errors++;
         end
 

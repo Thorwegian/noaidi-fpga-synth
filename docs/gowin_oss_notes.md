@@ -43,7 +43,24 @@ section 12; this file keeps the why and the how.
     among them → words mixed from two neighbours in the fetch buffer (a
     `MAC` with its r and x fields partly zeroed stored a 0 over a
     constant); fixed by four 2048 × 9 blocks, bit-split, nothing between a
-    block and the buffer's register.
+    block and the buffer's register;
+  - a `j`-indexed operand read by an instruction that had waited in decode
+    for its element's `IDX`, with another instruction after it: the
+    private index's register fed an address adder and the banks' pins in
+    the clock the index landed → another register read (address bits
+    dropped, different ones each run; threshold ~68 MHz); fixed by a
+    settle clock after the wait, the banks addressed from R's own
+    registers, the path a hazard hold uses;
+  - the write queue's block addressed through a mux and an incrementer
+    (`pop ? pointer + 1 : pointer`, `pop` the end of a chain of decisions)
+    → on the clock the pop rose the block sampled the old address and each
+    batch lost its first words after the decoy, the control program's
+    constants ONE and EIGHTH among them, so every boot at 73.728 was
+    silent while the running program replayed exactly; fixed by the
+    pointer's register on the pin, the entry two clocks after its pop.
+  The input side of a block is as invisible as its output side: a
+  memory's address and data pins, a DSP's operands, must come from a
+  register with nothing between.
 - **Bypass mode is the slow kind.** A block inferred from
   `q <= mem[addr]` reads asynchronously after the registered address; its
   clock-to-out plus any logic eats most of a 13.5 ns cycle. The pipeline
@@ -106,14 +123,16 @@ section 12; this file keeps the why and the how.
   0x000B are read-only diagnostics, so it fails on 8 and 9 at any clock
   (a test/map mismatch, not a link fault).
 
-## 4. Open at the time of writing
+## 4. How the last two were found
 
-A `j`-indexed operand read by an instruction that waited two or more
-cycles in decode for its element's `IDX`, when another instruction
-follows it in the body, reads another register (bits of the address
-dropped, different ones each run). Threshold ~68 MHz; cosim-exact;
-netlist cone `private_current` (flop) → one LUT → a 13-cell carry chain
-→ one LUT → the bank's address pin. Only a vector loop with one or two
-elements can wait that long (with more, the other elements fill the
-wait); the control program's channel loop is one. Five-word
-reproducer and scripts: issue #222, 2026-10-17.
+The private-index fault: a five-word reproducer (a `MAC` through `j`
+after a wait, then any instruction) run as a micro-program at 50 and
+73.728 MHz, the netlist cone read out of the routed JSON
+(`private_current` → one LUT → a 13-cell carry chain → one LUT → the
+bank's address pin). The queue fault: the running program replayed
+exactly from the chip's state, so the state was wrong, not the
+program; a freeze right after a boot showed the first two constants
+zero at 73.728 and intact at 50, and the first two words of a batch are
+what sits behind the engine's decoy. The grep that would have found both
+in a minute: every block RAM's and DSP's pin in the routed netlist, and
+what feeds it; anything but a flop is a fault waiting for a seed.

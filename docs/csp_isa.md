@@ -594,11 +594,16 @@ small program. The new CSP gets:
   there, not in R), the MAC's operands into the DSP's own input registers
   (`AREG`/`BREG`/`CREG`, E3), its product into its output register
   (`OUT_REG`, E4) and from there into E5's register, the write queue's
-  popped entry into fabric registers before any decode, and the register
-  file's write taken into a register of each copy's own next to its banks
-  (the decode before it, the banks' pins after it; the result's write goes
-  in from E5 so that it lands at W's edge as before) — so that every path
-  the report cannot see is a register fed by nothing but a register. The
+  popped entry into fabric registers before any decode, the queue block's
+  address pin fed by the read pointer's register itself (the entry two
+  clocks after its pop, not one: with a mux and an incrementer reading
+  ahead on the pin, a boot at 73.728 lost each batch's first words after
+  the decoy — the control program's ONE and EIGHTH — and was silent), and
+  the register file's write taken into a register of each copy's own next
+  to its banks (the decode before it, the banks' pins after it; the
+  result's write goes in from E5 so that it lands at W's edge as before)
+  — so that every path the report cannot see is a register fed by nothing
+  but a register, on the input side of a block as on the output side. The
   last of these was found with the lab tools: at 73.728 the self-test
   program's stores, on consecutive cycles with changing addresses, landed
   with address bits 5–6 dropped (0x062 at 0x002, 0x068 at 0x008 …), over

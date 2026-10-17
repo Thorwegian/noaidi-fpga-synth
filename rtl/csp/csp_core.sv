@@ -198,13 +198,13 @@ module csp_core (
         end
     end
 
-    // A held pass applies writes from its second cycle on, until four cycles
-    // before its end: a write is staged for three cycles after it is taken
-    // from the queue (the block's output, the fabric's register, the register
-    // file's own), and must be in the register file before the next pass's
-    // first cycle (the pass counter's write).
+    // A held pass applies writes from its second cycle on, until five cycles
+    // before its end: a write is staged for four cycles after it is taken
+    // from the queue (the block's read, its output register, the fabric's
+    // register, the register file's own), and must be in the register file
+    // before the next pass's first cycle (the pass counter's write).
     wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
-                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 4))
+                                                                 && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 5))
                                              : (pass_cycle >= 11'(DRAIN_END)
                                                 && pass_cycle < 11'(WINDOW_END)));
     assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
@@ -1393,26 +1393,30 @@ module csp_core (
     wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
     wire writes_result_now = writing && writeback_stage.writes_registers;
     assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
-    // The queue hands out the entry the clock after it is popped (its block's
-    // pipeline register, csp_write_queue.sv); it is taken into registers of
-    // the fabric then, and applied the clock after that: the decoding and
-    // the memories' write enables work from a fabric register's output, and
-    // the block's output register feeds nothing but a register (section 12:
-    // the tool times neither a block RAM's output nor its write pins; on the
-    // board, with the decode straight on the block's output, a boot at
-    // 73.728 MHz dropped writes and landed others two addresses off).
+    // The queue hands out the entry two clocks after it is popped (the
+    // block's read at the pointer's register, then its pipeline register,
+    // csp_write_queue.sv); it is taken into registers of the fabric then,
+    // and applied the clock after that: the decoding and the memories' write
+    // enables work from a fabric register's output, and the block's output
+    // register feeds nothing but a register (section 12: the tool times no
+    // path into or out of a block RAM's pins; on the board, with the decode
+    // straight on the block's output, a boot at 73.728 MHz dropped writes and
+    // landed others two addresses off, and with a mux on the block's address
+    // pin each batch lost its first words).
     // (Nothing else writes in the window: the pipeline is empty and the pass
     // counter is written at the pass start, after the window.)
-    logic                               popped_valid, staged_valid;
+    logic                               popped_valid, arrived_valid, staged_valid;
     logic [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address;
     logic [csp_pkg::WORD_W-1:0]          staged_data;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            popped_valid <= 1'b0;
-            staged_valid <= 1'b0;
+            popped_valid  <= 1'b0;
+            arrived_valid <= 1'b0;
+            staged_valid  <= 1'b0;
         end else begin
-            popped_valid <= queue_pop;
-            staged_valid <= popped_valid;
+            popped_valid  <= queue_pop;
+            arrived_valid <= popped_valid;
+            staged_valid  <= arrived_valid;
         end
     end
     always_ff @(posedge clk) begin
