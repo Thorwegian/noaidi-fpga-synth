@@ -53,17 +53,51 @@ int cmd_peek(int argc, char **argv) {
 }
 
 int cmd_poke(int argc, char **argv) {
-    if (argc != 3) {
-        std::printf("usage: csp-poke <register> <raw>\n");
+    if (argc < 3 || argc > 4) {
+        std::printf("usage: csp-poke <register> <raw> [force]\n");
         return 1;
     }
     const int address = static_cast<int>(std::strtol(argv[1], nullptr, 0));
     const int raw     = static_cast<int>(std::strtol(argv[2], nullptr, 0));
-    if (!engine_link_write(address, raw)) {
+    // The image drops a write of the value it believes the chip holds;
+    // `force` sends it anyway, for a chip whose copy is in doubt.
+    const bool force = argc == 4;
+    if (!(force ? engine_link_write_forced(address, raw)
+                : engine_link_write(address, raw))) {
         std::printf("  refused\n");
         return 1;
     }
-    std::printf("  queued %03x <- %d\n", address, raw);
+    std::printf("  queued %03x <- %d%s\n", address, raw, force ? " (forced)" : "");
+    return 0;
+}
+
+// Every register the image knows, read back through the probe: how many
+// differ from the image, and the first of them. A sounding voice's levels
+// and stages differ legitimately (the CSP writes them); verify a silent synth.
+int cmd_verify(int, char **) {
+    constexpr int limit = 24;
+    int registers[limit];
+    int32_t wanted[limit], held[limit];
+    const int differing = engine_link_verify(registers, wanted, held, limit);
+    if (differing < 0) {
+        std::printf("  the link is not running\n");
+        return 1;
+    }
+    for (int i = 0; i < differing && i < limit; ++i) {
+        std::printf("  %03x: image %05lx (%ld), chip %05lx (%ld)\n",
+                    registers[i], static_cast<unsigned long>(wanted[i]),
+                    static_cast<long>(signed_word(wanted[i])),
+                    static_cast<unsigned long>(held[i]),
+                    static_cast<long>(signed_word(held[i])));
+    }
+    std::printf("  verified: %d register(s) differ from the image\n", differing);
+    return differing ? 1 : 0;
+}
+
+// The whole image sent again, over the next ticks.
+int cmd_resend(int, char **) {
+    engine_link_resend();
+    std::printf("  every known word queued again\n");
     return 0;
 }
 
@@ -303,8 +337,14 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-peek", "<register> [count]",
          "read CSP registers (even-aligned pairs)", cmd_peek, nullptr},
-        {"csp-poke", "<register> <raw>", "queue a write to a CSP register",
+        {"csp-poke", "<register> <raw> [force]",
+         "queue a write to a CSP register ('force': even if the image says it is there)",
          cmd_poke, nullptr},
+        {"csp-verify", "",
+         "read every register the image knows back and count the differences",
+         cmd_verify, nullptr},
+        {"csp-resend", "", "send the whole register image again", cmd_resend,
+         nullptr},
         {"csp-diag", "", "the gateware's diagnostic words", cmd_diag, nullptr},
 };
 

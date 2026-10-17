@@ -39,6 +39,14 @@ public:
         return pending_.any();
     }
 
+    // What the FPGA should hold at `address`, if a write of it has been
+    // sent and none is waiting: false otherwise (never written, or pending).
+    bool known(int address, int32_t *raw) const;
+
+    // Queue every known word again, so that the FPGA's copy is rebuilt
+    // from the image: for a chip whose registers are in doubt.
+    void resend_all();
+
     // Send at most `limit` pending words and commit them with a swap, the
     // CTRL word carrying `ctrl_bits` (hold, test tone). How many it sent.
     int send(EnginePort &port, int limit, uint32_t ctrl_bits);

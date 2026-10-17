@@ -402,6 +402,58 @@ bool engine_link_write(int address, int32_t raw) {
     return ok;
 }
 
+bool engine_link_write_forced(int address, int32_t raw) {
+    if (!running) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const bool ok = image.set(address, raw, true);
+    xSemaphoreGive(lock);
+    return ok;
+}
+
+int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
+                       int limit) {
+    if (!running) {
+        return -1;
+    }
+    int differing = 0;
+    // The probe reads the register file (0x000–0x7FF) a pair at a time; the
+    // sinks beyond it cannot be read back.
+    for (int even = 0; even < 0x800; even += 2) {
+        int32_t expected[2];
+        const bool known[2] = {image.known(even, &expected[0]),
+                               image.known(even + 1, &expected[1])};
+        if (!known[0] && !known[1]) {
+            continue;
+        }
+        const uint64_t pair = probe_pair(even);
+        const int32_t actual[2] = {
+                static_cast<int32_t>((pair >> 18) & 0x3FFFF),
+                static_cast<int32_t>(pair & 0x3FFFF)};
+        for (int half = 0; half < 2; ++half) {
+            if (known[half] && actual[half] != (expected[half] & 0x3FFFF)) {
+                if (differing < limit) {
+                    registers[differing] = even + half;
+                    wanted[differing]    = expected[half] & 0x3FFFF;
+                    held[differing]      = actual[half];
+                }
+                ++differing;
+            }
+        }
+    }
+    return differing;
+}
+
+void engine_link_resend(void) {
+    if (!running) {
+        return;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    image.resend_all();
+    xSemaphoreGive(lock);
+}
+
 bool engine_link_write_all(const render::Writes &writes) {
     if (!running) {
         return false;

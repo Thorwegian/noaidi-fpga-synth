@@ -30,6 +30,23 @@ void engine_link_init(void);
 // the link is not running.
 bool engine_link_write(int address, int32_t raw);
 
+// The same write, sent even when the image says the value is there already:
+// for a chip whose copy of a register is in doubt.
+bool engine_link_write_forced(int address, int32_t raw);
+
+// Read every register the image knows back through the probe and compare:
+// returns how many differ, and fills up to `limit` of them (register,
+// what the image says, what the chip holds). Takes a few seconds; the
+// registers the CSP writes itself (a sounding voice's levels and stages)
+// differ legitimately, so verify a silent synth. -1 if the link is not
+// running.
+int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
+                       int limit);
+
+// Queue every known word of the image again, so that the chip's registers
+// are rebuilt from it over the next ticks.
+void engine_link_resend(void);
+
 // Point a partial's ten sink pointers (indices into the sink area, 10 bits
 // each) at once: the FPGA takes the whole entry atomically.
 bool engine_link_point(int partial, const int *pointers);

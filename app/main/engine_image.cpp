@@ -26,6 +26,24 @@ bool EngineImage::set(int address, int32_t raw, bool force) {
     return true;
 }
 
+bool EngineImage::known(int address, int32_t *raw) const {
+    if (address < 0 || address >= words || !known_[address]
+        || pending_[address]) {
+        return false;
+    }
+    *raw = value_[address];
+    return true;
+}
+
+void EngineImage::resend_all() {
+    for (int address = 0; address < words; ++address) {
+        if (known_[address]) {
+            known_[address]   = false;
+            pending_[address] = true;
+        }
+    }
+}
+
 int EngineImage::send(EnginePort &port, int limit, uint32_t ctrl_bits) {
     int sent    = 0;
     int address = 0;
