@@ -1,14 +1,15 @@
-segment                         level      pitch     want  verdict
-lead-in                      -240.0 dB             silence  ok
-note 1 of the scale           -20.7 dB   71.99 (C5)       C5  ok   clusters: C5 57%  C4 34%  C6 7%
-note 2 of the scale           -20.8 dB   64.51 (F4)       D5  ok   clusters: D5 38%  D4 38%  G3 7%
-note 3 of the scale           -22.3 dB   75.91 (E5)       E5  ok   clusters: E5 46%  E4 26%  A3 15%
-note 4 of the scale           -24.2 dB   76.77 (F5)       F5  ok   clusters: F5 53%  F4 30%  F6 11%
-note 5 of the scale           -21.7 dB   67.02 (G4)       G5  ok   clusters: G4 46%  G5 42%  C4 11%
-note 6 of the scale           -23.1 dB   74.91 (D#5)       A5  ok   clusters: A4 42%  A5 34%  A6 15%
-note 7 of the scale           -24.6 dB   82.58 (B5)       B5  ok   clusters: B5 50%  B4 26%  E4 11%
-C6 held, one bar              -25.5 dB   83.85 (C6)       C6  ok   clusters: C6 50%  C5 47%  C7 2%
-bar of silence (release)      -40.4 dB             < C6-12  ok
-triad, each note's peak       -19.6 dB            C4 E4 G4  ok   C4 -4 dB  E4 -4 dB  G4 0 dB
-release +2 s / +6 s           -39.6 dB   -54.5 dB < triad-20  ok
+segment                      level      pitch       want  verdict
+lead-in                  -120.0 dB                     silence  ok    
+note 1 of the scale       -20.7 dB 71.99 (C5)               C5  ok    C5 57%  C4 34%  C6 7%
+note 2 of the scale       -20.8 dB 64.51 (F4)               D5  ok    D5 38%  D4 38%  G3 7%
+note 3 of the scale       -22.3 dB 75.91 (E5)               E5  ok    E5 46%  E4 26%  A3 15%
+note 4 of the scale       -24.2 dB 76.77 (F5)               F5  ok    F5 53%  F4 30%  F6 11%
+note 5 of the scale       -21.7 dB 67.02 (G4)               G5  ok    G4 46%  G5 42%  C4 11%
+note 6 of the scale       -23.1 dB 74.91 (D#5)              A5  ok    A4 42%  A5 34%  A6 15%
+note 7 of the scale       -24.6 dB 82.58 (B5)               B5  ok    B5 50%  B4 26%  E4 11%
+C6 held, one bar          -25.5 dB 83.85 (C6)               C6  ok    C6 50%  C5 47%  C7 2%
+bar of silence            -40.4 dB                     < C6-12  ok    
+triad                     -19.6 dB 48.07 (C3)         C4 E4 G4  ok    C4 -4 dB  E4 -4 dB  G4 0 dB
+release +2 s              -39.6 dB                     < triad  ok    
+release +6 s              -54.5 dB                  < triad-20  ok    
 0 failure(s)
