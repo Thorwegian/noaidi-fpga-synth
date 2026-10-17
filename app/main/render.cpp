@@ -307,8 +307,14 @@ void mod_envelope(const patch_t &patch, Writes &writes) {
     envelope(patch.env[1],
              std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, 1,
              mod_attack, mod_decay, mod_release, writes);
-    // the depth: the envelope runs from 0 to 1, in octaves of cutoff
-    put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth));
+    // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
+    // program takes MOD_AMOUNT as a quarter of the depth and multiplies by
+    // four after the envelope (voice.s: a depth reaches 32 octaves, a word
+    // holds 8). Written whole, Galaxy's 2.85 octaves became eleven, the
+    // cutoff pinned at the top and the pad an octave brighter than the old
+    // engine's (issue #222: the centroid 3960 Hz against the benchmark's
+    // 1561 on a C5, 729 with the word zeroed).
+    put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth / 4));
 }
 
 void cutoff(const patch_t &patch, const Controllers &controllers,

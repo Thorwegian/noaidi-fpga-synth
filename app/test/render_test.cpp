@@ -120,9 +120,12 @@ void test_envelope() {
     const auto mod_state = state_of(mod);
     check(mod_state.count(channel + cp::envelopes + 16 + cp::target) == 1,
           "the mod rows");
-    check(std::fabs(octaves_at(mod_state, channel + cp::mod_amount) - 2.0)
+    // MOD_AMOUNT is a quarter of the depth: the voice program multiplies by
+    // four after the envelope (voice.s), so that a depth of up to 32 octaves
+    // fits a word that holds 8.
+    check(std::fabs(octaves_at(mod_state, channel + cp::mod_amount) - 0.5)
                   < 1e-9,
-          "the mod depth is in octaves");
+          "the mod depth is in octaves, a quarter of it in the word");
 }
 
 void test_notes() {
