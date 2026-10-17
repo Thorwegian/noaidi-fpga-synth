@@ -3,8 +3,14 @@
 
 # The OSS CAD Suite pinned by tools/oss-cad-suite.version, fetched by `make
 # tools` into .tools/; a machine without it falls back to /opt/oss-cad-suite
-# (override with CAD_SUITE=...).
+# (override with CAD_SUITE=...). The bitstream is written by the gowin_pack
+# of a second, newer release, pinned by tools/oss-cad-suite-pack.version
+# (PACK_SUITE=...; without it, the flow's own): its Apicula ties off the
+# unused wires of used logic tiles, which on the board is the difference
+# between a bitstream that fails at 70 MHz and one that runs at 73.728
+# (docs/gowin_oss_notes.md), while its nextpnr cannot place this design.
 CAD_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite)) /opt/oss-cad-suite)
+PACK_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite-pack)) $(CAD_SUITE))
 export CAD_SUITE
 export PATH := $(CAD_SUITE)/bin:$(PATH)
 
@@ -121,7 +127,7 @@ pnr.json: yosys.json
 		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
-	gowin_pack -d GW2A-18C -o $@ $<
+	$(PACK_SUITE)/bin/gowin_pack -d GW2A-18C -o $@ $<
 	@python3 ../scripts/check_timing.py pnr.log \
 		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
 		{ echo "*** timing gate FAILED -- bitstream discarded ***"; \

@@ -111,6 +111,12 @@ section 12; this file keeps the why and the how.
   each with fabric on both sides, a macro spanning nine columns (X1, X10,
   X19 …); its units are named with an index, "X19Y36/MULTALU36X181",
   "X19Y36/MULT18X1800", as the routed JSON's `NEXTPNR_BEL` shows them.
+  A `BEL` on a DSP primitive is refused in effect: the packer builds the
+  macro from the primitive and auxiliary cells, and with the primitive
+  constrained those are left unbound ("Found unbound cell
+  '…_aux$1' of type 'DUMMY_CELL'"). The registers on its pins can be
+  placed on the rows beside the macro (`csp_multiply_add.sv`), and the
+  block follows them.
 - **Placing the block alone is not enough: the registers on its pins
   have to be placed too.** With the register file's six blocks on the
   middle row and nothing else constrained, the write registers stayed

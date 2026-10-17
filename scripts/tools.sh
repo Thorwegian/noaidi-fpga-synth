@@ -4,21 +4,30 @@
 #
 # The project's copy of the OSS CAD Suite (Yosys, nextpnr, Verilator,
 # openFPGALoader), pinned by tools/oss-cad-suite.version so every machine
-# builds the gateware with the same tools.
+# builds the gateware with the same tools; and a second copy, pinned by
+# tools/oss-cad-suite-pack.version, whose gowin_pack alone is used, to
+# write the bitstream with a newer Apicula than the rest of the flow
+# (docs/gowin_oss_notes.md).
 #
-#   tools.sh install   fetch the pinned release into .tools/ (a no-op when
-#                      it is there already); the checksum is verified
-#   tools.sh check     say whether a newer release exists
-#   tools.sh upgrade   pin the newest release (version file and checksums);
-#                      then `make tools` fetches it. Check the gateware
-#                      afterwards: make sim-lockstep, and the seed in
-#                      rtl/Makefile.
-#   tools.sh path      print the directory holding bin/
+#   tools.sh install [pack]   fetch the pinned release into .tools/ (a no-op
+#                             when it is there already); the checksum is
+#                             verified
+#   tools.sh check [pack]     say whether a newer release exists
+#   tools.sh upgrade [pack]   pin the newest release (version file and
+#                             checksums); then `make tools` fetches it.
+#                             Check the gateware afterwards: make
+#                             sim-lockstep, and the seed in rtl/Makefile
+#   tools.sh path [pack]      print the directory holding bin/
+#
+# The second word names the pin: the suite (default) or the pack suite.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-version_file=$root/tools/oss-cad-suite.version
-install_dir=$root/.tools/oss-cad-suite
+case ${2:-suite} in
+    suite) version_file=$root/tools/oss-cad-suite.version;      install_dir=$root/.tools/oss-cad-suite ;;
+    pack)  version_file=$root/tools/oss-cad-suite-pack.version; install_dir=$root/.tools/oss-cad-suite-pack ;;
+    *) echo "tools.sh: the second word is suite or pack, not $2" >&2; exit 1 ;;
+esac
 repository=YosysHQ/oss-cad-suite-build
 
 case $(uname -m) in
@@ -99,7 +108,7 @@ for asset in json.load(sys.stdin)["assets"]:
         echo "pinned $newest (was $tag). Now: make tools, make sim-lockstep, and re-check SEED/PLACER_BETA in rtl/Makefile."
         ;;
     *)
-        echo "usage: tools.sh install|check|upgrade|path" >&2
+        echo "usage: tools.sh install|check|upgrade|path [suite|pack]" >&2
         exit 1
         ;;
 esac

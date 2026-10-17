@@ -39,12 +39,16 @@
 # image generator loses the case of file names), which finds ESP-IDF
 # through the firmware build: run "make fw" once first. ESPPORT picks the
 # serial port.
-#   make tools      fetch the OSS CAD Suite release pinned in
-#                   tools/oss-cad-suite.version into .tools/ (the gateware
-#                   targets use it when it is there)
-#   make tools-check   is there a newer release?
-#   make tools-upgrade pin the newest release; then make tools, make
-#                   sim-lockstep, and re-check SEED in rtl/Makefile
+#   make tools      fetch the OSS CAD Suite releases pinned in
+#                   tools/oss-cad-suite.version (the flow) and
+#                   tools/oss-cad-suite-pack.version (its gowin_pack alone
+#                   writes the bitstream) into .tools/ (the gateware
+#                   targets use them when they are there)
+#   make tools-check   is there a newer release of either?
+#   make tools-upgrade pin the newest release for the flow; then make
+#                   tools, make sim-lockstep, and re-check SEED in
+#                   rtl/Makefile. tools-upgrade-pack does the same for the
+#                   bitstream generator; then the clock sweep on the board
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -94,12 +98,17 @@ flash:
 
 tools:
 	scripts/tools.sh install
+	scripts/tools.sh install pack
 
 tools-check:
 	scripts/tools.sh check
+	scripts/tools.sh check pack
 
 tools-upgrade:
 	scripts/tools.sh upgrade
+
+tools-upgrade-pack:
+	scripts/tools.sh upgrade pack
 
 fw:
 	cd app && $(IDF) build

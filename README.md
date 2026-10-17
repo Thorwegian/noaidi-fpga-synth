@@ -110,7 +110,13 @@ pll_clk O0=73728K -s
   and fall back to `/opt/oss-cad-suite`, or set `CAD_SUITE`).
   `make tools-check` looks for a newer release, `make tools-upgrade` pins
   it (then re-run `make sim-lockstep` and re-check `SEED` in `rtl/Makefile`:
-  the place-and-route result belongs to the tool version). The simulations need
+  the place-and-route result belongs to the tool version). The bitstream
+  itself is written by the `gowin_pack` of a second, newer release pinned
+  in `tools/oss-cad-suite-pack.version` (fetched by the same `make tools`
+  into `.tools/oss-cad-suite-pack`, or set `PACK_SUITE`): its Apicula
+  ties off unused wires in the logic tiles, which the board needs at
+  73.728 MHz, while its nextpnr cannot place the design
+  (`docs/gowin_oss_notes.md`). The simulations need
   Verilator 5 with `--timing` and a C++20 compiler (clang, or gcc 10+);
   tested with Verilator 5.053
 - **Gowin's simulation models** for `make sim`: only
