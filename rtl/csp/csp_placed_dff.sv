@@ -12,8 +12,8 @@
 // feeds it (csp_bank.sv, docs/gowin_oss_notes.md). The attribute has to
 // be a constant of the module holding the instance, hence a module of one
 // flip-flop, with the tile's coordinates as numbers (TILE_X, TILE_Y: a
-// negative one leaves the flip-flop to the placer; an empty attribute is
-// not "unplaced" to the tool but an assertion, so none goes on then).
+// negative one leaves the flip-flop to the placer as a plain register; an
+// empty attribute is not "unplaced" to the tool but an assertion).
 //
 // The LUT is the flip-flop's anchor: nextpnr pairs every flip-flop with
 // the LUT that feeds it (a passthrough LUT inserted where there is none)
@@ -82,22 +82,17 @@ module csp_placed_dff #(
             .Q   (q)
         );
     end else begin : g_free
-        if (CLEARS) begin : g_clear
-            (* keep *)
-            LUT4 #(.INIT(CLEAR_INIT)) u_lut (.F(next), .I0(d), .I1(q), .I2(clock_enable), .I3(clear));
-        end else if (HOLDS) begin : g_mux
-            (* keep *)
-            LUT3 #(.INIT(MUX_INIT)) u_lut (.F(next), .I0(d), .I1(q), .I2(clock_enable));
-        end else begin : g_pass
-            (* keep *)
-            LUT1 #(.INIT(PASS_INIT)) u_lut (.F(next), .I0(d));
+        // Unplaced: a plain register, the synthesiser's to merge, enable
+        // and place as it likes (a kept LUT and DFF would cost a LUT's
+        // delay on a path the tool does time).
+        initial q = 1'b0;
+        always_ff @(posedge clk) begin
+            if (CLEARS && clear) begin
+                q <= 1'b0;
+            end else if (!HOLDS || clock_enable) begin
+                q <= d;
+            end
         end
-        (* keep *)
-        DFF u_flop (
-            .CLK (clk),
-            .D   (next),
-            .Q   (q)
-        );
     end
 `else
     initial q = 1'b0;

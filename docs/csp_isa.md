@@ -628,10 +628,15 @@ small program. The new CSP gets:
   (`csp_program_slice.sv`), the write queue's pointer and entry
   registers (`csp_write_queue.sv`: the entry three clocks after its pop),
   the sink area's write registers (its reads, the partial pipeline's,
-  are still the tool's to place), and the multiply-add unit's operand
-  registers (E2) and product register (E5) on the rows beside the DSP
-  (`csp_multiply_add.sv`). `tools/lab/placement_check.py` confirms on a
-  routed netlist that every constrained cell sits where it was told.
+  are still the tool's to place). The multiply-add unit's operand
+  registers (E2) and product register (E5) are the unit's own too
+  (`csp_multiply_add.sv`) and *can* be placed on the rows beside the DSP,
+  but are not: placed, their 162 flip-flops in the middle of the chip
+  cost the core's logic its place (the report fell from 104–107 MHz to
+  85–93 on every seed, a fault on every pass on the board), so the DSP's
+  pins are the one untimed route left and the seed decides.
+  `tools/lab/placement_check.py` confirms on a routed netlist that every
+  constrained cell sits where it was told.
   `tools/lab/pin_audit.py` lists every block RAM's and DSP's pin with
   what drives or follows it in a routed netlist; run it on every build. The
   last of these was found with the lab tools: at 73.728 the self-test

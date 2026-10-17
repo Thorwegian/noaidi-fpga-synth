@@ -21,8 +21,9 @@
 // DSP's pins (docs/csp_isa.md section 12), and placed by it alone those
 // registers sat 13–19 tiles from the pins; a combinational multiply from
 // fabric flops failed on the board from 69 MHz while the report said 80.
-// SITE_X, SITE_Y, UNIT name the block ("X19Y36/MULTALU36X181"); negative
-// leaves it and its registers to the placer.
+// SITE_X, SITE_Y name the DSP macro the registers go beside (19, 36:
+// "X19Y36"); negative leaves them to the placer. The block itself is not
+// constrained (below); the registers draw it to the site.
 //
 // In the CSP's formats (docs/csp_manual.md section 3): a is a word
 // (Q4.14), b a wide value (Q4.32) and c the accumulator's format
@@ -38,8 +39,7 @@
 `default_nettype none
 module csp_multiply_add #(
     parameter int SITE_X = -1,            // the DSP macro's column, or negative
-    parameter int SITE_Y = -1,            // and row
-    parameter int UNIT   = 1              // the MULTALU36X18 of the macro
+    parameter int SITE_Y = -1             // and row
 ) (
     input  wire                clk,
     input  wire                reset_n,
@@ -71,7 +71,6 @@ module csp_multiply_add #(
     localparam int PRODUCT_LOW  = OPERAND_BITS;
     localparam int FLOPS        = OPERAND_BITS + 54;
     localparam bit PLACED       = SITE_X >= 0 && SITE_Y >= 0;
-    localparam     SITE         = $sformatf("X%0dY%0d/MULTALU36X18%0d", SITE_X, SITE_Y, UNIT);
 
     function automatic int tile_x(input int t);
         tile_x = PLACED ? SITE_X + t % 9 : -1;
@@ -127,66 +126,39 @@ module csp_multiply_add #(
     end
 `endif
 
-    // Instantiated twice over, with the site attribute and without (the
-    // placer refuses one naming no site).
-    if (PLACED) begin : g_site
-        (* BEL = SITE *)
-        MULTALU36X18 #(
-            .AREG              (1'b1),   // the operands registered inside the block (the core's E3)
-            .BREG              (1'b1),
-            .CREG              (1'b1),
-            .ASIGN_REG         (1'b0),
-            .BSIGN_REG         (1'b0),
-            .ACCLOAD_REG0      (1'b0),
-            .ACCLOAD_REG1      (1'b0),
-            .OUT_REG           (1'b1),   // the sum registered inside the block (the core's E4)
-            .PIPE_REG          (1'b0),
-            .C_ADD_SUB         (1'b0),   // add c
-            .MULTALU36X18_MODE (0),      // a × b ± c
-            .MULT_RESET_MODE   ("SYNC")
-        ) u_multiply_add (
-            .A       (operand_a),
-            .B       (operand_b),
-            .C       (operand_c),
-            .ASIGN   (1'b1),
-            .BSIGN   (1'b1),
-            .ACCLOAD (1'b0),
-            .CASI    (55'd0),
-            .CLK     (clk),
-            .CE      (1'b1),
-            .RESET   (~reset_n),
-            .DOUT    (block_out),
-            .CASO    (cascade_unused)
-        );
-    end else begin : g_free
-        MULTALU36X18 #(
-            .AREG              (1'b1),
-            .BREG              (1'b1),
-            .CREG              (1'b1),
-            .ASIGN_REG         (1'b0),
-            .BSIGN_REG         (1'b0),
-            .ACCLOAD_REG0      (1'b0),
-            .ACCLOAD_REG1      (1'b0),
-            .OUT_REG           (1'b1),
-            .PIPE_REG          (1'b0),
-            .C_ADD_SUB         (1'b0),
-            .MULTALU36X18_MODE (0),
-            .MULT_RESET_MODE   ("SYNC")
-        ) u_multiply_add (
-            .A       (operand_a),
-            .B       (operand_b),
-            .C       (operand_c),
-            .ASIGN   (1'b1),
-            .BSIGN   (1'b1),
-            .ACCLOAD (1'b0),
-            .CASI    (55'd0),
-            .CLK     (clk),
-            .CE      (1'b1),
-            .RESET   (~reset_n),
-            .DOUT    (block_out),
-            .CASO    (cascade_unused)
-        );
-    end
+    // The block itself carries no placement: nextpnr packs a MULTALU36X18
+    // with auxiliary cells of the DSP macro, and with the block constrained
+    // those are left unbound ("Found unbound cell … of type DUMMY_CELL").
+    // With 162 placed flip-flops around the site the placer puts the block
+    // there of its own accord; tools/lab/pin_distance.py shows whether it
+    // did (every pin-driving flop within three tiles).
+    MULTALU36X18 #(
+        .AREG              (1'b1),   // the operands registered inside the block (the core's E3)
+        .BREG              (1'b1),
+        .CREG              (1'b1),
+        .ASIGN_REG         (1'b0),
+        .BSIGN_REG         (1'b0),
+        .ACCLOAD_REG0      (1'b0),
+        .ACCLOAD_REG1      (1'b0),
+        .OUT_REG           (1'b1),   // the sum registered inside the block (the core's E4)
+        .PIPE_REG          (1'b0),
+        .C_ADD_SUB         (1'b0),   // add c
+        .MULTALU36X18_MODE (0),      // a × b ± c
+        .MULT_RESET_MODE   ("SYNC")
+    ) u_multiply_add (
+        .A       (operand_a),
+        .B       (operand_b),
+        .C       (operand_c),
+        .ASIGN   (1'b1),
+        .BSIGN   (1'b1),
+        .ACCLOAD (1'b0),
+        .CASI    (55'd0),
+        .CLK     (clk),
+        .CE      (1'b1),
+        .RESET   (~reset_n),
+        .DOUT    (block_out),
+        .CASO    (cascade_unused)
+    );
 
 endmodule
 `default_nettype wire

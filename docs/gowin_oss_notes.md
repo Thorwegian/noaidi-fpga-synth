@@ -116,7 +116,12 @@ section 12; this file keeps the why and the how.
   constrained those are left unbound ("Found unbound cell
   '…_aux$1' of type 'DUMMY_CELL'"). The registers on its pins can be
   placed on the rows beside the macro (`csp_multiply_add.sv`), and the
-  block follows them.
+  block follows them — but every placed flop costs the placer freedom
+  for the logic it does time: with the DSP's 162 placed (1 965 cells
+  constrained) the report fell from 104–107 MHz to 85–93 on eight seeds
+  and the board failed every pass at 73.728, where the same netlist with
+  the memories' 1 641 placed and the DSP's left alone booted and played
+  4 of 4 (seed 5). The DSP's registers are therefore left to the placer.
 - **Placing the block alone is not enough: the registers on its pins
   have to be placed too.** With the register file's six blocks on the
   middle row and nothing else constrained, the write registers stayed
