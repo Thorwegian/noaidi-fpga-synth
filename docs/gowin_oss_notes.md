@@ -265,6 +265,17 @@ and the DSP. Issue #230 carries the patch work (fork
 - Placement varies a lot between seeds (82–124 MHz on the same netlist),
   and the untimed paths get no placement care at all, so their delay is
   placement luck too: a fault can appear and vanish between seeds.
+- **Rule (Thor, #222, 2026-10-17): whether the RTL works must not depend
+  on the seed.** Seeds are tried for three reasons, in this order: to find
+  the critical paths, by asking *why* one seed gives a working instrument
+  and another not, and making those paths less critical; to check that
+  the design works with just about any seed; and, as a last resort, to
+  unstick a placement that refuses to complete (if that keeps happening,
+  the design is too hard to place). A seed that happens to work is a
+  measurement, not a release. The instrument for the first use is a
+  per-bitstream fingerprint of what fails (section 3: the firmware's
+  `csp-verify` lists which writes a bitstream loses), compared across
+  seeds and configurations.
 
 ## 3. Measuring on the board
 
@@ -295,9 +306,25 @@ and the DSP. Issue #230 carries the patch work (fork
   neighbouring words hide a word-mixing fetch fault.
 - The acceptance script must pack the bitstream every time and print its
   sha: a stale `.fs` for a seed number cost two hours.
-- The firmware's link self-test at boot writes 0x0006–0x0009; 0x0008–
-  0x000B are read-only diagnostics, so it fails on 8 and 9 at any clock
-  (a test/map mismatch, not a link fault).
+- The firmware's link self-test at boot once wrote 0x0006–0x0009 and
+  failed on the two read-only diagnostic words at any clock (a test/map
+  mismatch, fixed 2026-10-17); a self-test that passes says the link and
+  its own program work, nothing about the register image.
+- **The register image first, timing second.** On a silent board ask
+  `csp-verify` (the firmware reads every register it wrote back through
+  the probe and counts the differences) before any timing experiment:
+  on 2026-10-17 every silent boot of three bitstreams had a wrong boot
+  image — the constant ONE zero or carrying another word's value — while
+  every self-test passed, and the symptom looked like timing for a day.
+  The image also gives a bitstream a fingerprint: `csp-resend` a dozen
+  times with a verify after each (`/tmp/claude_stress.py` on the dev box)
+  lists *which* writes it loses. One bitstream lost words by boot state
+  (the queue's read side, its pointer standing where the last session
+  left it), another lost the same four addresses on every boot and
+  single writes to them (bits late on the register file's write side),
+  a third lost none; the first two sounded the same, silent. The
+  firmware verifies and resends its boot image itself now, and logs the
+  count — a report, not a fix.
 
 ## 4. How the last two were found
 
