@@ -105,6 +105,24 @@ and the DSP. Issue #230 carries the patch work (fork
   fails at 72) and far below it on others; treat the report as a lower
   bound on *fabric* delay only and judge a bitstream on the board.
 
+- **Measured the same afternoon with the patched fork** (issue #230:
+  the dual-port port-B address arcs and DSP arcs from the data sheet):
+  the design with *no* placement constraints, placed by the patched tool
+  and packed with the 2026-10-17 generator, booted with the firmware's
+  register image right on four of four boots — the register file, the
+  instruction memory and the queue came through with their pin registers
+  24–42 tiles from the blocks — and silent, the envelope never rising:
+  the multiply-add's path, its operand registers 23 tiles from the DSP.
+  A forced 2 ns operand setup did not move the placer (26 tiles, worse
+  boots): the model's own numbers say every pin path is safe by a factor
+  of three at 73.728 MHz, and the board disagrees. A fine clock sweep
+  (72 → 74 MHz in half-megahertz steps, the counting program) shows the
+  fault rate rising smoothly on a failing bitstream (0, 0, 6 %, 16 %,
+  24 %) and staying under 1 % on the one that plays: a margin of about
+  1.5 MHz on one path that placement luck grants or not, not an effect
+  of the clock setting (the MS5351's 73.728 goes straight into the
+  fabric; no FPGA PLL).
+
 ## 2. The placer
 
 - **The placer does not care where a block RAM's pins come from.** It
