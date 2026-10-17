@@ -382,24 +382,12 @@ module csp_core (
     // as well.
     wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
     logic [AW-1:0] private_current;
+    wire  [5:0]    next_element   = (vector_issue && !vector_last_element) ? vector_element + 1'b1
+                                  : (vector_issue && !vector_last_instruction) ? 6'd0
+                                  : vector_element;
     wire           private_written_next = private_written
                                           || (vector_issue && vector_last_element && decoded_op == csp_pkg::OP_IDX);
-    // The private register of the element decode works on next: that of
-    // the next element, of element 0 (the body's next instruction) or of
-    // the element again (nothing issued) — the three read by registered
-    // indexes and the choice made last, so that the chain from the issue
-    // decision (the hazard check's) to private_current is the choice alone
-    // and not the 64:1 mux's select on top of it. With one mux selected by
-    // the computed next element this was the design's critical path on
-    // nine seeds of ten (10–12.5 ns, 10–13 LUTs against 13.56 ns, the
-    // board's lottery: issue #222).
-    wire [AW-1:0]  private_of_next = private_value[vector_element + 6'd1];
-    wire [AW-1:0]  private_of_same = private_value[vector_element];
-    wire [AW-1:0]  private_chosen  = !vector_issue              ? private_of_same
-                                   : !vector_last_element       ? private_of_next
-                                   : !vector_last_instruction   ? private_value[0]
-                                   :                              private_of_same;
-    wire [AW-1:0]  private_next   = private_written_next ? private_chosen : entry_private;
+    wire [AW-1:0]  private_next   = private_written_next ? private_value[next_element] : entry_private;
     wire [AW-1:0] decode_index_i  = vector_issuing ? (vector_on_j ? private_current : vector_own)
                                                    : index_i;
     wire [AW-1:0] decode_index_j  = vector_issuing ? (vector_on_j ? vector_own : private_current)

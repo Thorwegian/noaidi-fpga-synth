@@ -342,6 +342,16 @@ what feeds it; anything but a flop is a fault waiting for a seed.
 
 ## 5. Keeping the logic shallow: rules for a LUT4 fabric
 
+- **Only a register cuts a path; a mux rearranged in the RTL does not
+  survive synthesis.** Measured 2026-10-17: the critical path on nine
+  seeds of ten ran from the issue decision into a 64:1 mux's select and on
+  to the element's private index register (10–13 LUTs). Reading the three
+  candidate entries by registered indexes and choosing last — the muxes in
+  parallel with the decision on paper — placed at 84 MHz with the same
+  endpoint and **17** LUT levels: ABC re-folded the late select back into
+  the mux trees. Depth is decided by the synthesiser's view of the cone,
+  not by the RTL's shape; to shorten a chain, register something in it.
+
 The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
 LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the
 tool would build from pairs of LUTs are off in our flow (`-nowidelut`,
