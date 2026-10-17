@@ -25,6 +25,7 @@ level of each note so that a recording can be checked without listening.
 import argparse
 import subprocess
 import sys
+import threading
 import time
 import wave
 
@@ -45,11 +46,24 @@ def main():
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
+    parser.add_argument("--no-keepalive", action="store_true",
+                        help="send no Active Sensing between the notes (the firmware's panel input resets its parser "
+                             "after half a second of silence and drops the next message; a keyboard keeps it alive)")
     args = parser.parse_args()
 
     def midi(*messages):
         for message in messages:
             subprocess.run(["aseqsend", "-p", args.port, message], check=True)
+
+    # Active Sensing every quarter second, as a keyboard sends it, so that
+    # the synth's MIDI parser never sees the line as silent between notes.
+    stop = threading.Event()
+    def keepalive():
+        while not stop.is_set():
+            subprocess.run(["aseqsend", "-p", args.port, "FE"])
+            stop.wait(0.25)
+    if not args.no_keepalive:
+        threading.Thread(target=keepalive, daemon=True).start()
 
     # The whole sequence: 8 beats of scale, the last note held (3 more beats),
     # a bar of silence, 4 beats of triad, the tail; plus a beat of lead-in.
@@ -79,6 +93,7 @@ def main():
         at(beat)
         midi(*["80 %02X 00" % n for n in off], *["90 %02X %02X" % (n, VELOCITY) for n in on])
     recorder.wait()
+    stop.set()
 
     w = wave.open(args.out)
     x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2) / 32768.0
