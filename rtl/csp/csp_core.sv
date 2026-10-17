@@ -10,13 +10,17 @@
 // did. There are no delay slots. When an instruction needs a value that
 // is still in the pipeline, it waits until that value has been written.
 //
-//   D   decode: operand addresses from i and j; the register file's read
-//       addresses go in as the instruction issues
-//   R   the hazard check, on registered values; the register file's banks
-//       read; SKIP decides; LOOP's body end is prepared. An instruction
-//       that has to wait stays in R and reads its operands again every
-//       cycle, so that what it takes on leaving is what the register file
-//       held the cycle before
+//   D   decode: operand addresses from i and j, into A's registers as the
+//       instruction issues
+//   A   the hazard check, on registered values; the operand addresses sit
+//       in A's registers, which are the banks' address pins (nothing but a
+//       register on a block RAM's pin, section 12: decode's adders on the
+//       pins read another register on the board at 73.728 MHz). An
+//       instruction that has to wait stays in A, and the banks read its
+//       operands every cycle, so that what it takes on leaving is what the
+//       register file held the cycle before
+//   R   the banks' words in their output registers; SKIP decides; LOOP's
+//       body end is prepared
 //   E1  the banks' words, in E1's own registers (nothing but a register on
 //       a block RAM's output: the tool does not time what follows one) →
 //       the half or the pair, the operands in the accumulator's format, the
@@ -38,17 +42,17 @@
 // Timing rules (the reference model, tools/csp, counts them exactly):
 //
 // - An instruction issues from D at most once per cycle. (Where the model
-//   says an instruction issues, the RTL moves it on from R: a cycle later.)
-// - It waits while an older instruction in E1 … W will write a register it
+//   says an instruction issues, the RTL moves it on from A: a cycle later.)
+// - It waits while an older instruction in R … W will write a register it
 //   reads, the accumulator it reads (ACC), or the flags it reads (SEL,
 //   SKIP). The register file returns old data in the cycle of a write,
-//   so it leaves R the cycle after that instruction leaves W (it reads
+//   so it leaves A the cycle after that instruction leaves W (it reads
 //   again in the cycle after the write): an issue at cycle c lets a
-//   dependent instruction issue at c + 8 at the earliest.
+//   dependent instruction issue at c + 9 at the earliest.
 //   Skipped instructions are no-ops, but they wait and are waited for
 //   all the same: a skip is decided after decode.
 // - LOOP and IDX hold the front end until they are resolved in E1: the
-//   next instruction issues three cycles after them at the earliest.
+//   next instruction issues four cycles after them at the earliest.
 //   The loop records and i/j then hold their new values for decode.
 //
 // Vector loops (LOOP.vi, LOOP.vj; docs/csp_manual.md): once LOOP has
@@ -58,7 +62,7 @@
 // flags, in small arrays; what is in flight carries its run and element, so
 // the hazard check lets a flag reader wait for its own element only, and an
 // operand indexed by the element's index register wait for its IDX. The
-// loop ends three cycles after the last issue (counting the cycles R waits
+// loop ends four cycles after the last issue (counting the cycles A waits
 // not), as a LOOP's resolution does.
 //
 // The pass (1536 clocks, 48 kHz): the pass start writes the pass counter
@@ -103,7 +107,7 @@ module csp_core (
 
     // ---- constants --------------------------------------------------------------------
     localparam int RUN_END    = 1472;                          // instructions issue before this
-    localparam int DRAIN_END  = RUN_END + 9;                   // the pipeline's depth past D
+    localparam int DRAIN_END  = RUN_END + 10;                  // the pipeline's depth past D: A, R, E1 … E5, W, done
     localparam int WINDOW_END = DRAIN_END + csp_pkg::WRITE_WINDOW;
     localparam int PC_W       = csp_pkg::PROGRAM_W;
     localparam int AW         = csp_pkg::ADDRESS_W;
@@ -172,7 +176,7 @@ module csp_core (
     logic [17:0] pass_count;
     logic        in_pass;
     logic        run_open;           // instructions may issue: pass_cycle < RUN_END
-    logic        pipeline_busy;      // an instruction is in R … W (assigned below)
+    logic        pipeline_busy;      // an instruction is in A … W (assigned below)
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -284,16 +288,20 @@ module csp_core (
         logic                  entry_flags;         // vector: the flags are the loop's entry flags
     } control_t;
 
-    control_t read_stage, execute1_stage, execute2_stage, execute3_stage, execute4_stage,
-              execute5_stage, writeback_stage, writeback_done;   // done: W's instruction a cycle ago
+    control_t address_stage, read_stage, execute1_stage, execute2_stage, execute3_stage,
+              execute4_stage, execute5_stage, writeback_stage, writeback_done;   // done: W's instruction a cycle ago
 
-    // What R holds besides the control word: the operands it names (R reads
-    // them again for as long as it waits), and what it reads.
-    logic [csp_pkg::ADDRESS_W-1:0] read_r_address, read_x_address, read_y_address;
+    // What A holds besides the control word: the operands it names, in the
+    // registers that are the banks' address pins (the banks read them
+    // every cycle A waits), and what it reads; R takes them on from A.
+    logic [csp_pkg::ADDRESS_W-1:0] a_x_address, a_y_address;
+    logic a_reads_a, a_reads_x, a_reads_y;
+    logic a_a_wide, a_y_wide;
+    logic a_reads_accumulator, a_reads_flags;
+    logic [csp_pkg::ADDRESS_W-1:0] read_x_address, read_y_address;
     logic read_reads_a, read_reads_x, read_reads_y;
     logic read_a_wide, read_y_wide;
-    logic read_reads_accumulator, read_reads_flags;
-    logic r_hold;      // R's instruction waits for a value in the pipeline
+    logic a_hold;      // A's instruction waits for a value in the pipeline
 
     // ---- register file ---------------------------------------------------------------------
     logic [2:0][csp_pkg::REGISTER_W-1:0] read_address;
@@ -358,12 +366,9 @@ module csp_core (
     // The index registers decode sees: in a vector loop, the element's. The
     // element's private index comes out of a register of its own
     // (private_current), loaded every clock for the element decode works on
-    // next: the private array's read feeds nothing but that register, not
-    // the address adder and the banks' pins within the clock of the IDX's
-    // write (on the board at 73.728 MHz, an instruction that had waited for
-    // its element's IDX and was followed by another read a garbage operand
-    // through that index; docs/csp_isa.md section 12). The IDX's write is
-    // seen a clock later for it: private_pending covers E2 as well.
+    // next, so that the address adders work from registers alone. The
+    // IDX's write is seen a clock later for it: private_pending covers E2
+    // as well.
     wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
     logic [AW-1:0] private_current;
     wire  [5:0]    next_element   = (vector_issue && !vector_last_element) ? vector_element + 1'b1
@@ -396,9 +401,13 @@ module csp_core (
     wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
 
     // The probe takes the Y port once a pass, long after the last instruction
-    // has issued and drained (RUN_END + 9), and keeps the pair it reads.
+    // has issued and drained (DRAIN_END), and keeps the pair it reads: its
+    // address goes into A's Y register the cycle before, is on the pin at
+    // PROBE_CYCLE, and the pair is in the bank's output register the cycle
+    // after.
     localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 16;
-    wire probe_now = in_pass && pass_cycle == 11'(PROBE_CYCLE);
+    wire probe_load = in_pass && pass_cycle == 11'(PROBE_CYCLE - 1);
+    wire probe_now  = in_pass && pass_cycle == 11'(PROBE_CYCLE);
     logic probe_read;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -412,33 +421,25 @@ module csp_core (
         end
     end
 
-    // The register file is read for the instruction decode issues; for as long
-    // as R waits, R reads its own operands again, so that the values it takes
-    // on leaving are those of the cycle before.
-    // An instruction that waited for its element's private index settles
-    // for a clock once the index has landed: R's tracking registers take
-    // decode's addresses that clock, and the banks are addressed from those
-    // registers at the issue, not from decode's adders. (On the board at
-    // 73.728 MHz the adders' path to the pins, untimed, read another
-    // register for such an instruction when another followed it; the
-    // registered path, the one a hazard hold uses, read right.)
-    logic private_wait_q, settled_q;
-    wire  settle = decode_valid && private_used && !private_pending && private_wait_q;
+    // The banks' address pins are A's registers and nothing else: the
+    // banks read A's operands every cycle, for as long as A waits, so that
+    // the values the instruction takes on leaving A are those of the cycle
+    // before. (Decode's adders on the pins, and a mux choosing between them
+    // and a waiting instruction's registers, are paths the tool does not
+    // time; on the board at 73.728 MHz a j-indexed read right after the IDX
+    // that set j read another register, address bits dropped, once in ~48
+    // passes.)
     always_comb begin
-        read_address[0] = csp_pkg::REGISTER_W'(r_hold ? read_stage.r_address
-                                                : (settled_q ? read_r_address : decode_r_address));
-        read_address[1] = csp_pkg::REGISTER_W'(r_hold ? read_x_address
-                                                : (settled_q ? read_x_address : decode_x_address));
-        read_address[2] = probe_now ? probe_address
-                                    : csp_pkg::REGISTER_W'(r_hold ? read_y_address
-                                                            : (settled_q ? read_y_address : decode_y_address));
+        read_address[0] = csp_pkg::REGISTER_W'(address_stage.r_address);
+        read_address[1] = csp_pkg::REGISTER_W'(a_x_address);
+        read_address[2] = csp_pkg::REGISTER_W'(a_y_address);
     end
 
-    // The hazard check, in R, on registered values only: an older instruction in
-    // E1 … E5, W (or in W a cycle ago, which wrote while R's operands were read)
-    // writes something R's instruction reads. Decode makes no check: it hands
-    // R the operand addresses and R holds, reading them again, until nothing
-    // older is going to write them; the cycle R leaves is the cycle the
+    // The hazard check, in A, on registered values only: an older instruction in
+    // R, E1 … E5, W (or in W a cycle ago, which wrote while A's operands were read)
+    // writes something A's instruction reads. Decode makes no check: it hands
+    // A the operand addresses and A holds, the banks reading them again, until
+    // nothing older is going to write them; the cycle A leaves is the cycle the
     // instruction would have issued, had decode waited (the reference model
     // counts that). One call of stage_hazard for each stage, and no loop over
     // an array of the stages: yosys (the synthesis) turned that loop, with
@@ -457,26 +458,26 @@ module csp_core (
         written = pair_mask(older.r_address, older.r_wide);
         if (older.valid) begin
             if (older.writes_registers) begin
-                if (read_reads_a && older.r_address[AW-1:1] == read_stage.r_address[AW-1:1]
-                        && (written & pair_mask(read_stage.r_address, read_a_wide)) != 2'b00) begin
+                if (a_reads_a && older.r_address[AW-1:1] == address_stage.r_address[AW-1:1]
+                        && (written & pair_mask(address_stage.r_address, a_a_wide)) != 2'b00) begin
                     found = 1'b1;
                 end
-                if (read_reads_x && older.r_address[AW-1:1] == read_x_address[AW-1:1]
-                        && (written & pair_mask(read_x_address, 1'b0)) != 2'b00) begin
+                if (a_reads_x && older.r_address[AW-1:1] == a_x_address[AW-1:1]
+                        && (written & pair_mask(a_x_address, 1'b0)) != 2'b00) begin
                     found = 1'b1;
                 end
-                if (read_reads_y && older.r_address[AW-1:1] == read_y_address[AW-1:1]
-                        && (written & pair_mask(read_y_address, read_y_wide)) != 2'b00) begin
+                if (a_reads_y && older.r_address[AW-1:1] == a_y_address[AW-1:1]
+                        && (written & pair_mask(a_y_address, a_y_wide)) != 2'b00) begin
                     found = 1'b1;
                 end
             end
-            if (older.writes_accumulator && read_reads_accumulator) found = 1'b1;
+            if (older.writes_accumulator && a_reads_accumulator) found = 1'b1;
             // A flag reader in a vector loop waits for its own element's
             // flag setter, and for any that is not of this loop.
-            if (older.sets_flags && read_reads_flags
-                    && (!read_stage.vector || !older.vector
-                        || older.run != read_stage.run
-                        || older.element == read_stage.element)) begin
+            if (older.sets_flags && a_reads_flags
+                    && (!address_stage.vector || !older.vector
+                        || older.run != address_stage.run
+                        || older.element == address_stage.element)) begin
                 found = 1'b1;
             end
         end
@@ -484,13 +485,14 @@ module csp_core (
     endfunction
 
     // The same comparison, made a cycle early: in decode, for the instruction
-    // that is about to enter R, against the stages as they will stand when it
-    // is there (today's R, E1, E2, E3, E4, E5 and W, one stage on). The result
-    // is kept as one bit for each stage it concerns, hazard_pos[0] for E1 … [6]
-    // for W a cycle ago, and the bits move on with the pipeline while R waits
-    // (E1 is a bubble then, the others advance), so that r_hold is an OR of
-    // registered bits and not of the comparators: the long path to the clock
-    // enables of the whole data path. The behaviour is that of stage_hazard.
+    // that is about to enter A, against the stages as they will stand when it
+    // is there (today's A, R, E1, E2, E3, E4, E5 and W, one stage on). The
+    // result is kept as one bit for each stage it concerns, hazard_pos[0] for
+    // R … [7] for W a cycle ago, and the bits move on with the pipeline while
+    // A waits (R is a bubble then, the others advance), so that a_hold is an
+    // OR of registered bits and not of the comparators: the long path to the
+    // clock enables of the whole data path. The behaviour is that of
+    // stage_hazard.
     function automatic logic incoming_hazard(input logic [CONTROL_W-1:0] older_bits);
         control_t   older;
         logic [1:0] written;
@@ -524,36 +526,38 @@ module csp_core (
         incoming_hazard = found;
     endfunction
 
-    logic [6:0] hazard_pos;   // R's instruction waits for the stage at this position
+    logic [7:0] hazard_pos;   // A's instruction waits for the stage at this position
     wire hazard = |hazard_pos;
-    assign r_hold = read_stage.valid && hazard;
+    assign a_hold = address_stage.valid && hazard;
 
 `ifndef SYNTHESIS
-    // Simulation only: the registered bits must say what the comparison of R's
+    // Simulation only: the registered bits must say what the comparison of A's
     // registered operands against the stages says.
-    wire hazard_compared = stage_hazard(execute1_stage) | stage_hazard(execute2_stage)
+    wire hazard_compared = stage_hazard(read_stage) | stage_hazard(execute1_stage) | stage_hazard(execute2_stage)
                          | stage_hazard(execute3_stage) | stage_hazard(execute4_stage) | stage_hazard(execute5_stage)
                          | stage_hazard(writeback_stage) | stage_hazard(writeback_done);
     always @(posedge clk) begin
-        if (reset_n && read_stage.valid && hazard !== hazard_compared) begin
+        if (reset_n && address_stage.valid && hazard !== hazard_compared) begin
             $error("csp_core: hazard bits %b differ from the comparison (%b) at pc %0d",
-                   hazard_pos, hazard_compared, read_stage.pc);
+                   hazard_pos, hazard_compared, address_stage.pc);
         end
     end
 `endif
 
     // An operand indexed by the element's private index register waits while
-    // that element's IDX is in R, E1 or E2: the array is written at the end
+    // that element's IDX is in A, R, E1 or E2: the array is written at the end
     // of E1, the element's copy of it (private_current) at the end of E2,
-    // four cycles after the IDX issues.
+    // five cycles after the IDX issues.
     wire private_used = vector_issuing
             && (((uses_a(decoded_op, decoded.a) || writes_result(decoded_op))
                  && decoded.r[9] && decoded.r[8] == !vector_on_j)
                 || (uses_x(decoded_op) && decoded.x[9] && decoded.x[8] == !vector_on_j)
                 || (uses_y(decoded_op) && decoded.y[9] && decoded.y[8] == !vector_on_j));
     wire private_pending =
-            (read_stage.valid && read_stage.vector && read_stage.run == vector_run
-             && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
+            (address_stage.valid && address_stage.vector && address_stage.run == vector_run
+             && address_stage.element == vector_element && address_stage.instruction.op == csp_pkg::OP_IDX)
+            || (read_stage.valid && read_stage.vector && read_stage.run == vector_run
+                && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
             || (execute1_stage.valid && execute1_stage.vector && execute1_stage.run == vector_run
                 && execute1_stage.element == vector_element
                 && execute1_stage.instruction.op == csp_pkg::OP_IDX)
@@ -561,8 +565,14 @@ module csp_core (
                 && execute2_stage.element == vector_element
                 && execute2_stage.instruction.op == csp_pkg::OP_IDX);
 
-    wire issue = decode_valid && decode_has_word && run_open && !r_hold
-                 && !(private_used && private_pending) && !settle;
+    wire issue = decode_valid && decode_has_word && run_open && !a_hold
+                 && !(private_used && private_pending);
+    // An instruction still waiting in A at RUN_END would leave it past the
+    // pass's issue limit; the model does not issue it (the pass stops
+    // there), so neither does the RTL: it is dropped, and the pipeline has
+    // drained by DRAIN_END whatever waited. (An instruction that leaves A
+    // at RUN_END issued, in the model's count, the cycle before: in time.)
+    wire limit_drop = in_pass && pass_cycle == 11'(RUN_END) && a_hold;
 
     control_t issued;
     always_comb begin
@@ -586,7 +596,7 @@ module csp_core (
         issued.entry_flags        = !flags_written;
     end
 
-    // ---- R: the hazard check and SKIP; the banks read -------------------------------------------
+    // ---- R: the banks' words arrive; SKIP ----------------------------------------------------------
     wire [3:0]  read_op       = read_stage.instruction.op;
     wire        read_live     = read_stage.valid && skip_remaining == '0;
 
@@ -1146,7 +1156,7 @@ module csp_core (
     logic signed [53:0] w_accumulator;
 
     wire writing = writeback_stage.valid && writeback_stage.live;
-    assign pipeline_busy = read_stage.valid || execute1_stage.valid || execute2_stage.valid
+    assign pipeline_busy = address_stage.valid || read_stage.valid || execute1_stage.valid || execute2_stage.valid
                            || execute3_stage.valid || execute4_stage.valid || execute5_stage.valid
                            || writeback_stage.valid;
     wire element_flags_write = writing && writeback_stage.sets_flags && writeback_stage.vector;
@@ -1158,6 +1168,7 @@ module csp_core (
         if (!reset_n) begin
             decode_valid    <= 1'b0;
             decode_pc       <= '0;
+            address_stage   <= BUBBLE;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
@@ -1177,10 +1188,10 @@ module csp_core (
             vector_last_element_number <= '0; last_private <= '0;
             vector_stride <= '0; vector_own <= '0;
             private_written <= 1'b0; flags_written <= 1'b0;
-            private_wait_q <= 1'b0; settled_q <= 1'b0;
         end else if (pass_start) begin
             decode_valid    <= !held;
             decode_pc       <= '0;
+            address_stage   <= BUBBLE;
             read_stage      <= BUBBLE;
             execute1_stage  <= BUBBLE;
             execute2_stage  <= BUBBLE;
@@ -1196,8 +1207,6 @@ module csp_core (
             vector_issuing  <= 1'b0;
             vector_finish   <= '0;
         end else begin
-            private_wait_q <= decode_valid && private_used && private_pending;
-            settled_q      <= settle;
             // D: issue, or wait; a LOOP or IDX empties decode until it resolves.
             if (advance) begin
                 decode_valid <= 1'b1;
@@ -1217,7 +1226,8 @@ module csp_core (
             end
 
             // Vector loops: open at LOOP.vi's resolution, step through the
-            // elements as the body issues, end three cycles after the last.
+            // elements as the body issues, end four cycles after the last
+            // (when it is in E1, as a LOOP is when it resolves).
             if (opens_vector) begin
                 vector_issuing       <= 1'b1;
                 vector_on_j          <= execute1_stage.instruction.a[0];
@@ -1247,10 +1257,10 @@ module csp_core (
                 end else begin
                     vector_issuing <= 1'b0;
                     vector_own     <= vector_own + vector_stride;
-                    vector_finish  <= 2'd2;
+                    vector_finish  <= 2'd3;
                 end
             end
-            if (vector_finish != 2'd0 && !vector_issue && !r_hold) begin
+            if (vector_finish != 2'd0 && !vector_issue && !a_hold) begin
                 vector_finish <= vector_finish - 1'b1;
             end
             if (e1_vector_idx && execute1_stage.live
@@ -1258,28 +1268,36 @@ module csp_core (
                 last_private <= index_value;
             end
 
-            if (!r_hold) begin
-                read_stage <= issue ? issued : BUBBLE;
+            // A: the issued instruction, or a bubble; R takes A's on when A
+            // does not wait (R never waits itself).
+            if (!a_hold) begin
+                address_stage <= issue ? issued : BUBBLE;
+                read_stage    <= address_stage;
+            end else begin
+                read_stage    <= BUBBLE;
+                if (limit_drop) begin
+                    address_stage <= BUBBLE;
+                end
             end
 
             // R: SKIP counts instructions as they leave R.
-            if (read_stage.valid && !r_hold) begin
+            if (read_stage.valid) begin
                 if (skip_taken) begin
                     skip_remaining <= read_stage.instruction.y;
                 end else if (skip_remaining != '0) begin
                     skip_remaining <= skip_remaining - 1'b1;
                 end
             end
-            execute1_stage <= r_hold ? BUBBLE : read_leaving;
-            // The hazard bits: made for an instruction as it enters R, then
+            execute1_stage <= read_leaving;
+            // The hazard bits: made for an instruction as it enters A, then
             // carried along while it waits.
             if (issue) begin
                 hazard_pos <= {incoming_hazard(writeback_stage), incoming_hazard(execute5_stage),
                                incoming_hazard(execute4_stage), incoming_hazard(execute3_stage),
                                incoming_hazard(execute2_stage), incoming_hazard(execute1_stage),
-                               incoming_hazard(read_stage)};
-            end else if (r_hold) begin
-                hazard_pos <= {hazard_pos[5:0], 1'b0};
+                               incoming_hazard(read_stage), incoming_hazard(address_stage)};
+            end else if (a_hold && !limit_drop) begin
+                hazard_pos <= {hazard_pos[6:0], 1'b0};
             end else begin
                 hazard_pos <= '0;
             end
@@ -1316,24 +1334,33 @@ module csp_core (
 
     // The data path's registers: no reset, a bubble's values are never used.
     always_ff @(posedge clk) begin
-        if (!r_hold) begin
-            read_reads_a           <= reads_a;
-            read_reads_x           <= reads_x;
-            read_reads_y           <= reads_y;
-            read_r_address         <= decode_r_address;
-            read_x_address         <= decode_x_address;
-            read_y_address         <= decode_y_address;
-            read_a_wide            <= decode_a_wide;
-            read_y_wide            <= decode_y_wide;
-            read_reads_accumulator <= reads_accumulator;
-            read_reads_flags       <= reads_flags;
+        if (!a_hold) begin
+            a_reads_a           <= reads_a;
+            a_reads_x           <= reads_x;
+            a_reads_y           <= reads_y;
+            a_x_address         <= decode_x_address;
+            a_y_address         <= decode_y_address;
+            a_a_wide            <= decode_a_wide;
+            a_y_wide            <= decode_y_wide;
+            a_reads_accumulator <= reads_accumulator;
+            a_reads_flags       <= reads_flags;
+            read_reads_a        <= a_reads_a;
+            read_reads_x        <= a_reads_x;
+            read_reads_y        <= a_reads_y;
+            read_x_address      <= a_x_address;
+            read_y_address      <= a_y_address;
+            read_a_wide         <= a_a_wide;
+            read_y_wide         <= a_y_wide;
+        end
+        if (probe_load) begin
+            a_y_address <= AW'(probe_address);   // the pipeline is empty: A is a bubble
         end
 
         // The element's private index, for the element decode works on next
         // (at a vector loop's open: the entry's, for element 0).
         private_current <= opens_vector ? (execute1_stage.instruction.a[0] ? index_i : index_j)
                                         : private_next;
-        // E1 takes the banks' words every cycle: while R holds they are read
+        // E1 takes the banks' words every cycle: while A holds they are read
         // again and E1 is a bubble; the cycle R leaves, they are its.
         e1_a_even      <= read_even[0];
         e1_a_odd       <= read_odd[0];

@@ -112,10 +112,10 @@ module tb_csp_cosim #(
     always_ff @(posedge clk) begin
         if (pass_start) begin
             issue_end <= 0;
-        end else if (u_core.read_stage.valid && !u_core.r_hold
-                     && int'(u_core.read_stage.pc) < program_length) begin
-            // an instruction leaves R in the cycle after the one the model
-            // calls its issue (decode no longer waits for the hazards: R does)
+        end else if (u_core.address_stage.valid && !u_core.a_hold
+                     && int'(u_core.address_stage.pc) < program_length) begin
+            // an instruction leaves A in the cycle after the one the model
+            // calls its issue (decode no longer waits for the hazards: A does)
             issue_end <= int'(u_core.pass_cycle);
         end
     end
@@ -147,11 +147,16 @@ module tb_csp_cosim #(
                      u_core.buffer_valid, int'(u_core.buffer_place), u_core.inflight_valid, int'(u_core.inflight_place),
                      u_core.held_valid, int'(u_core.decode_pc), u_core.fetch_restart);
         end
-        if (trace_issues && u_core.read_stage.valid && !u_core.r_hold
-                && int'(u_core.read_stage.pc) < program_length) begin
-            $display("rtl pc %0d cycle %0d i %0d j %0d word %09h", int'(u_core.read_stage.pc),
+        if (trace_issues && u_core.is_loop) begin
+            $display("rtl loop pc %0d cycle %0d count %0d skip %0d x_word %0d reads_x %0d", int'(u_core.execute1_stage.pc),
+                     int'(u_core.pass_cycle), int'(u_core.loop_count), u_core.e1_skips_body,
+                     int'(u_core.e1_x_word), u_core.e1_reads_x);
+        end
+        if (trace_issues && u_core.address_stage.valid && !u_core.a_hold
+                && int'(u_core.address_stage.pc) < program_length) begin
+            $display("rtl pc %0d cycle %0d i %0d j %0d word %09h", int'(u_core.address_stage.pc),
                      int'(u_core.pass_cycle) - 1, int'(u_core.index_i), int'(u_core.index_j),
-                     u_core.read_stage.instruction);
+                     u_core.address_stage.instruction);
         end
     end
 

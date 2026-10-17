@@ -119,8 +119,9 @@ file held the cycle before).
 | Stage | Work |
 |---|---|
 | F | fetch: the instruction memory's word goes into a one-entry buffer register, and nowhere else (nothing but a register on a memory's output, section 12); the fetch runs one word ahead of decode, so moving on to the next instruction costs nothing; a jump (a loop's repeat, a skipped body) restarts it and costs two cycles, which the reference model counts. The buffered word and the word on the memory are known by their place relative to decode's pc (own, next), shifted down at a move, and a move is told apart (next, onto itself, a jump) from the loop control signals: no pc is compared with `next_pc`, which keeps the loop-end logic off the fetch's enables (section 12) |
-| D | decode, from the buffer's word: operand addresses from `i`/`j`; the register-file read addresses go in as the instruction issues |
-| R | the hazard check (the three operand addresses against those of E1 … W, and of W a cycle ago; made in D, one stage early, and carried in six registered bits while R waits, so that the stall decision is an OR of registers); the register file's banks read (three ports, the even and the odd word of each pair); `SKIP` decides |
+| D | decode, from the buffer's word: operand addresses from `i`/`j`, into A's registers as the instruction issues |
+| A | the hazard check (the three operand addresses against those of R … W, and of W a cycle ago; made in D, one stage early, and carried in eight registered bits while A waits, so that the stall decision is an OR of registers); the operand addresses sit in A's registers, which are the banks' address pins and nothing else (section 12: decode's adders on the pins read another register on the board), and the banks read them every cycle A waits, so that what the instruction takes on leaving is what the register file held the cycle before |
+| R | the banks' words in their output registers; `SKIP` decides; `LOOP`'s body end is prepared |
 | E1 | the words arrive in E1's registers straight from the banks' output registers (nothing but a register on a memory's output, section 12); the half or the pair chosen, the operands in the accumulator's format, the `SHIFT` count clamped; `Y − A` and `A + Y` (55 bits); `MIN`, `MAX`, `SEL`, `ANDXOR`; `LOOP` and `IDX` resolve |
 | E2 | saturate `Y − A` to Q4.32 and `A + Y` to 54 bits; the multiplier's operands; the `SHIFT` barrel shift |
 | E3 | MULTALU36X18: `a × b + c`; `SHIFT` saturates |
@@ -128,12 +129,12 @@ file held the cycle before).
 | E5 | overflow of the 54-bit sum; saturate or wrap to the destination; the flags |
 | W | write R (register file or sink area); the accumulator and the flags |
 
-A dependent instruction issues 8 cycles after the one it depends on (the RTL
-leaves R a cycle after the model's issue; the cycle counts are the same); the
-instruction after `LOOP` or `IDX` issues 3 cycles after it
+A dependent instruction issues 9 cycles after the one it depends on (the RTL
+leaves A a cycle after the model's issue; the cycle counts are the same); the
+instruction after `LOOP` or `IDX` issues 4 cycles after it
 (`csp::result_latency`, `csp::barrier_latency`; the model counts both).
 Independent instructions issue every cycle. There is no forwarding: it
-would shorten the 8 cycles but lengthen the paths, and vector loops
+would shorten the 9 cycles but lengthen the paths, and vector loops
 (below) hide the wait instead. (The eighth cycle is E4, the DSP's own
 output register with nothing after it but E5's: it costs the control
 program 17 cycles, 1452 → 1469, three short of the 1472 window — the
@@ -149,7 +150,7 @@ first try, a two-cycle machine without a pipeline (each instruction
 finished before the next), closed at 32.48 MHz.
 
 **Vector loops** (decided on #220, built). A chain of
-dependent instructions costs 8 cycles a link, but the same chain for
+dependent instructions costs 9 cycles a link, but the same chain for
 many voices need not wait at all: run each instruction for every voice
 before the next, and voice k's input was written long before voice k
 needs it. That is a vector processor in the Cray sense, one element

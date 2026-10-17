@@ -41,14 +41,13 @@ constexpr int max_vector_length  = 64;   // iterations of a vector loop
 // LOOP or IDX issues barrier_latency cycles after it at the earliest.
 // Program semantics do not depend on this: only the cycle count does.
 
-constexpr int result_latency  = 8;
-constexpr int barrier_latency = 3;
+constexpr int result_latency  = 9;
+constexpr int barrier_latency = 4;
 // In a vector loop, an element's own copy of an index register lands this
 // many cycles after that element's IDX (a register loaded a cycle after the
-// IDX writes); an operand through it that has to wait for it issues one
-// cycle after that still, the instruction settling with the banks addressed
-// from R's registers (csp_core.sv). One that arrives later waits not at all.
-constexpr int private_index_latency = 4;
+// IDX writes, csp_core.sv); an operand through it issues then at the
+// earliest.
+constexpr int private_index_latency = 5;
 // A jump (a loop's repeat, a skipped body) costs this many cycles more than
 // moving on to the next instruction: the fetch runs ahead on the next pc
 // only (rtl/csp/csp_core.sv, F).
