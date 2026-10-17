@@ -16,45 +16,63 @@
 // touches one bank and a wide access touches both at the same index:
 // one BSRAM per bank, six in all.
 //
-// A write is taken into a register of each copy's own (the bank enables,
-// the index and the words, decoded before it) and lands in the banks the
-// clock after: the banks' write pins see nothing but a register next to
-// them. Driven straight from the core, the write's address bits fanned out
-// over the chip to six blocks the tool does not time at their pins, and on
-// the board at 73.728 MHz a run of stores on consecutive cycles landed with
-// address bits dropped (docs/csp_isa.md section 12). The pass counter's
-// write comes the same way, on a pass's last cycle, and lands before the
-// next pass's first instruction reads it (once it went in directly on
-// the first cycle, by a mux on the banks' pins).
+// Every register on the banks' pins is the bank's own, placed beside its
+// block (csp_bank.sv): the tool does not time a path into or out of a
+// block RAM's pin, and a register it placed with the logic that feeds it,
+// tens of tiles away, is a path of the order of the clock period at
+// 73.728 MHz (docs/csp_isa.md section 12, docs/gowin_oss_notes.md).
 //
-// Reads are synchronous: the address goes in on one clock, the words
-// come out on the next, straight from the banks' output registers: the
-// even and the odd word of the pair, which the core takes into a register
-// of its own before choosing a half or taking the pair (nothing but a
-// register on a block RAM's output, docs/csp_isa.md section 12: the tool
-// does not time what follows one). A read of the register being written
-// in the same cycle returns the old value; the core's hazard check covers
-// that case. Register 0 is never written, so it always reads zero, and a
-// wide write to the pair at 0 is discarded.
+//   - A write is taken into each bank's register (the bank enables, the
+//     index and the words, decoded before it) and lands in the block the
+//     clock after. The pass counter's write comes the same way, on a
+//     pass's last cycle, and lands before the next pass's first
+//     instruction reads it.
+//   - A read's address goes into the bank's register (read_address: what
+//     the core's address stage takes this clock; held while read_hold, so
+//     that an instruction waiting in A keeps its operands on the pins),
+//     the block reads it the clock after, and its output register holds
+//     the even and the odd word of the pair the clock after that.
+//   - The pair is taken into the bank's output register, and that is what
+//     read_even / read_odd are: the core's E1 operands, three clocks
+//     after the address was given, with the core choosing a half or
+//     taking the pair from them.
+//
+// A read of the register being written in the same cycle returns the old
+// value; the core's hazard check covers that case. Register 0 is never
+// written, so it always reads zero, and a wide write to the pair at 0 is
+// discarded. The sites are the middle row of the chip's block RAMs, by
+// the core's logic, and the banks' flip-flops the fabric rows beside it.
 //------------------------------------------------------------------------
 `default_nettype none
-module csp_register_file (
+module csp_register_file #(
+    // the banks' BSRAM sites, even and odd of each copy (csp_bank.sv: the
+    // columns on the middle row, whose three columns and the rows beside
+    // it hold the bank's flip-flops; negative leaves a bank to the placer)
+    parameter int SITE_Y      = 27,
+    parameter int SITE_EVEN_0 = 13,
+    parameter int SITE_ODD_0  = 16,
+    parameter int SITE_EVEN_1 = 19,
+    parameter int SITE_ODD_1  = 22,
+    parameter int SITE_EVEN_2 = 31,           // the middle row has no sites at X25 and X28
+    parameter int SITE_ODD_2  = 34
+) (
     input  wire clk,
-    input  wire reset_n,      // clears the copies' write registers only; the banks keep their contents
+    input  wire reset_n,      // unused: the banks' registers start clear and keep their contents
 
-    // three read ports: A, X, Y
+    // three read ports: A, X, Y. The address as the core's address stage
+    // takes it; the pair three clocks later
     input  wire [2:0][csp_pkg::REGISTER_W-1:0] read_address,
+    input  wire                                read_hold,    // the address stage waits: addresses held
     output logic [2:0][csp_pkg::WORD_W-1:0]    read_even,    // the pair's upper word
     output logic [2:0][csp_pkg::WORD_W-1:0]    read_odd,     // and its lower
 
-    // one write port: taken into each copy's register now, in the banks
+    // one write port: taken into each bank's register now, in the blocks
     // the clock after
     input  wire                                write_enable,
     input  wire [csp_pkg::REGISTER_W-1:0]      write_address,
     input  wire                                write_wide,
     input  wire [csp_pkg::WIDE_W-1:0]          write_data    // word: low 18 bits
 );
-    localparam int BANK_DEPTH = csp_pkg::REGISTER_COUNT / 2;
     localparam int BANK_W     = csp_pkg::REGISTER_W - 1;
 
     // A write: which banks, at which index, with what.
@@ -67,54 +85,32 @@ module csp_register_file (
     wire [csp_pkg::WORD_W-1:0] odd_data  = write_data[csp_pkg::WORD_W-1:0];
 
     for (genvar port = 0; port < 3; port++) begin : g_copy
-        logic [csp_pkg::WORD_W-1:0] even_bank [BANK_DEPTH];
-        logic [csp_pkg::WORD_W-1:0] odd_bank  [BANK_DEPTH];
-        initial begin
-            for (int index = 0; index < BANK_DEPTH; index++) begin
-                even_bank[index] = '0;
-                odd_bank[index]  = '0;
-            end
-        end
-
-        // This copy's write register: the decoded write, a clock before the
-        // banks take it. `keep`, or yosys merges the three copies' identical
-        // registers into one, fanning out to six blocks' pins across the
-        // chip, which is what the copies are there to avoid.
-        logic                       even_write_q, odd_write_q;
-        logic [BANK_W-1:0]          index_q;
-        logic [csp_pkg::WORD_W-1:0] even_data_q, odd_data_q;
-        (* keep *) always_ff @(posedge clk or negedge reset_n) begin
-            if (!reset_n) begin
-                even_write_q <= 1'b0;
-                odd_write_q  <= 1'b0;
-            end else begin
-                even_write_q <= write_even_bank;
-                odd_write_q  <= write_odd_bank;
-            end
-        end
-        (* keep *) always_ff @(posedge clk) begin
-            index_q      <= write_index;
-            even_data_q  <= even_data;
-            odd_data_q   <= odd_data;
-        end
-
-        // Sync-only processes, so yosys infers a BSRAM per bank.
-        always_ff @(posedge clk) begin
-            if (even_write_q) begin
-                even_bank[index_q] <= even_data_q;
-            end
-        end
-        always_ff @(posedge clk) begin
-            if (odd_write_q) begin
-                odd_bank[index_q] <= odd_data_q;
-            end
-        end
+        localparam int SITE_EVEN = port == 0 ? SITE_EVEN_0 : port == 1 ? SITE_EVEN_1 : SITE_EVEN_2;
+        localparam int SITE_ODD  = port == 0 ? SITE_ODD_0  : port == 1 ? SITE_ODD_1  : SITE_ODD_2;
 
         wire [BANK_W-1:0] read_index = read_address[port][csp_pkg::REGISTER_W-1:1];
-        always_ff @(posedge clk) begin
-            read_even[port] <= even_bank[read_index];
-            read_odd[port]  <= odd_bank[read_index];
-        end
+        csp_bank #(
+            .SITE_X(SITE_EVEN), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1)
+        ) u_even (
+            .clk          (clk),
+            .write_enable (write_even_bank),
+            .write_index  (write_index),
+            .write_data   (even_data),
+            .read_index   (read_index),
+            .read_hold    (read_hold),
+            .read_data    (read_even[port])
+        );
+        csp_bank #(
+            .SITE_X(SITE_ODD), .SITE_Y(SITE_Y), .ADDRESS_REGISTER(1'b1), .OUTPUT_REGISTER(1'b1)
+        ) u_odd (
+            .clk          (clk),
+            .write_enable (write_odd_bank),
+            .write_index  (write_index),
+            .write_data   (odd_data),
+            .read_index   (read_index),
+            .read_hold    (read_hold),
+            .read_data    (read_odd[port])
+        );
     end
 
 endmodule

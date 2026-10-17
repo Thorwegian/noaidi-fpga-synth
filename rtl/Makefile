@@ -22,8 +22,8 @@ MOD = \
 	dsp/output_lpf.sv \
 	dsp/limiter.sv \
 	dsp/partial_pipeline.sv \
-	csp/csp_register_file.sv csp/csp_multiply_add.sv \
-	csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv \
+	csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
+	csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv \
 	csp/csp_core.sv \
 	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
@@ -185,7 +185,7 @@ VL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
 # variable delays).
 VL_FLAGS = --binary --timing -O3 --x-assign unique --x-initial unique -I. \
            -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD \
-           -Wno-MULTIDRIVEN -Wno-ZERODLY
+           -Wno-MULTIDRIVEN -Wno-ZERODLY -Wno-SELRANGE
 VERILATE = mkdir -p $(@D) && verilator $(VL_FLAGS) --top-module $(notdir $(@D)) --Mdir $(@D) -o sim
 
 ifeq ($(origin SIM_SEED),undefined)
@@ -196,7 +196,7 @@ run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator
 
 TB_PARTIAL = tb/tb_partial_pipeline.sv
 
-PARTIAL_SIM = $(PKG) csp/csp_pkg.sv csp/csp_sink_area.sv dsp/timebase.sv dsp/limiter.sv \
+PARTIAL_SIM = $(PKG) csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_sink_area.sv dsp/timebase.sv dsp/limiter.sv \
               dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/osc_core.sv
 
 obj_dir/tb_partial_pipeline/sim: $(PARTIAL_SIM) $(TB_PARTIAL) $(LUTS) Makefile
@@ -226,11 +226,11 @@ sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)
 
 # ---- the CSP (rtl/csp, #184): unit benches and the co-simulation ----
-CSP_NEW = csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
-          csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv
+CSP_NEW = csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
+          csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv
 
-obj_dir/tb_csp_register_file/sim: csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv Makefile
-	$(VERILATE) csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv
+obj_dir/tb_csp_register_file/sim: csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv Makefile
+	$(VERILATE) csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv
 
 sim-csp-register-file: obj_dir/tb_csp_register_file/sim
 	$(call run_sim,$<,tb/sim-csp-register-file.out)
@@ -257,7 +257,7 @@ CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp \
 obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
                        ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
-	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-SELRANGE \
 	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
 	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
 	    $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_COSIM_CPP))
@@ -275,7 +275,7 @@ obj_dir/csp_bench/sim: $(CSP_NEW) tb/csp_cosim/adsr_reference.sv dsp/osc_core.sv
                        $(CSP_BENCH_CPP) $(CSP_COSIM_HPP) ../app/main/csp/envelope.hpp \
                        $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
-	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -GREF_VOICES=16 \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-SELRANGE -GREF_VOICES=16 \
 	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
 	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -I$(abspath tb/csp_cosim) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
 	    $(CSP_NEW) tb/csp_cosim/adsr_reference.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_BENCH_CPP))
@@ -286,8 +286,8 @@ sim-csp-bench: obj_dir/csp_bench/sim
 # The system bench: the whole synthesizer (top.sv, Verilated) programmed over
 # SPI as the firmware programs it, with the control program loaded, and its
 # audio measured (tb/synth/synth_sim.cpp).
-SYNTH_RTL = $(PKG) csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
-            csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv \
+SYNTH_RTL = $(PKG) csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
+            csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv \
             dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/osc_core.sv \
             dsp/output_lpf.sv spdif/spdif_tx.sv i2s/i2s_tx.sv spi/spi_bus.sv top.sv
 SYNTH_CPP = tb/synth/synth_sim.cpp ../app/main/render.cpp ../app/main/engine_image.cpp ../app/main/engine_selftest.cpp \
@@ -303,7 +303,7 @@ obj_dir/synth_sim/sim: $(SYNTH_RTL) tb/synth/tb_synth.sv $(SYNTH_CPP) $(SYNTH_C_
                        ../app/main/patch.h ../app/main/csp/control_program.hpp ../app/main/csp/selftest_program.hpp \
                        ../app/main/engine_selftest.hpp                        ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(LUTS) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
-	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-SELRANGE \
 	    --top-module tb_synth --Mdir $(@D) -o sim \
 	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../app/main) -I$(abspath ../app/lib/tomlc17/src) -DSTARTUP_PATCH='\"$(abspath ../app/storage/Patches/Factory/Pads/Supersaw.toml)\"'" \
 	    -LDFLAGS "$(abspath $(SYNTH_C_OBJ))" \
@@ -395,8 +395,8 @@ clean:
 # self-test on it finds what the RTL bench cannot, differences between
 # the RTL and what the synthesis made of it. Slow.
 #----------------------------------------------------------------------
-GATE_RTL = $(PKG) csp/csp_pkg.sv tb/synth/top_csp.sv dsp/timebase.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
-           csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv spi/spi_bus.sv
+GATE_RTL = $(PKG) csp/csp_pkg.sv tb/synth/top_csp.sv dsp/timebase.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
+           csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_sink_area.sv csp/csp_core.sv spi/spi_bus.sv
 obj_dir/gate/netlist.v: $(GATE_RTL) Makefile
 	mkdir -p $(@D) && yosys -q -p 'read_verilog -sv $(GATE_RTL); synth_gowin -family gw2a -top top; write_verilog -noattr $@'
 obj_dir/gate/library.v: obj_dir/gate/netlist.v ../scripts/gate_library.py
@@ -421,7 +421,7 @@ sim-gate-selftest: obj_dir/synth_gate/sim
 # it building the netlist bench); not part of `make sim`.
 #----------------------------------------------------------------------
 LOCK_DIR = obj_dir/lock
-LOCK_RTL = $(PKG) csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv csp/csp_core.sv
+LOCK_RTL = $(PKG) csp/csp_pkg.sv csp/csp_placed_dff.sv csp/csp_bank.sv csp/csp_register_file.sv csp/csp_multiply_add.sv csp/csp_core.sv
 $(LOCK_DIR)/selftest.svh: ../scripts/gen_lockstep_selftest.py ../app/main/csp/selftest_program.hpp
 	mkdir -p $(@D) && python3 $< ../app/main/csp/selftest_program.hpp $@
 $(LOCK_DIR)/core_net.v: $(LOCK_RTL) Makefile
@@ -430,10 +430,10 @@ $(LOCK_DIR)/core_net.v: $(LOCK_RTL) Makefile
 $(LOCK_DIR)/library.v: $(LOCK_DIR)/core_net.v ../scripts/gate_library.py
 	python3 ../scripts/gate_library.py $< $(GOWIN_SIM) $@
 $(LOCK_DIR)/v/Vtb_lock: $(LOCK_DIR)/core_net.v $(LOCK_DIR)/library.v $(LOCK_DIR)/selftest.svh tb/lock/tb_lock.sv \
-                        csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_RTL) Makefile
+                        csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_RTL) Makefile
 	verilator --binary --timing -O0 -Wno-fatal -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -DSIM_GOWIN_PRIM \
 	    --top-module tb_lock -I$(LOCK_DIR) --Mdir $(@D) tb/lock/tb_lock.sv $(LOCK_RTL) \
-	    csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_DIR)/core_net.v $(LOCK_DIR)/library.v
+	    csp/csp_program_slice.sv csp/csp_instruction_memory.sv csp/csp_write_queue.sv $(LOCK_DIR)/core_net.v $(LOCK_DIR)/library.v
 
 sim-lockstep: $(LOCK_DIR)/v/Vtb_lock
 	$< | tee tb/sim-lockstep.out

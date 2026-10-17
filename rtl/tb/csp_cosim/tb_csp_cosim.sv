@@ -35,6 +35,7 @@ module tb_csp_cosim #(
 
     logic [csp_pkg::PROGRAM_W-1:0] fetch_address;
     logic [35:0]                   fetch_data;
+    logic                          buffer_load;
     logic                          queue_pop, queue_committed, queue_full;
     logic [csp_pkg::QUEUE_ADDRESS_W-1:0] queue_address;
     logic [csp_pkg::WORD_W-1:0]    queue_data;
@@ -50,6 +51,7 @@ module tb_csp_cosim #(
         .write_data    (imem_write_data),
         .clk           (clk),
         .fetch_address (fetch_address),
+        .buffer_load   (buffer_load),
         .fetch_data    (fetch_data)
     );
 
@@ -76,6 +78,7 @@ module tb_csp_cosim #(
         .held               (held),
         .fetch_address      (fetch_address),
         .fetch_data         (fetch_data),
+        .buffer_load        (buffer_load),
         .queue_pop          (queue_pop),
         .queue_committed    (queue_committed),
         .queue_address      (queue_address),
@@ -272,8 +275,8 @@ module tb_csp_cosim #(
         logic [csp_pkg::WORD_W-1:0] word;
         int index;
         index = address >>> 1;
-        word = address[0] ? u_core.u_register_file.g_copy[0].odd_bank[index]
-                          : u_core.u_register_file.g_copy[0].even_bank[index];
+        word = address[0] ? u_core.u_register_file.g_copy[0].u_odd.words[index]
+                          : u_core.u_register_file.g_copy[0].u_even.words[index];
         return int'($signed(word));
     endfunction
 

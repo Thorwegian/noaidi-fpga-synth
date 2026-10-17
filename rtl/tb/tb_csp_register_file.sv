@@ -75,13 +75,14 @@ module tb_csp_register_file;
         @(negedge clk);     // the write lands in the banks a clock after it is taken
     endtask
 
-    // Read on one port: address in, data one clock later.
+    // Read on one port: address in, data three clocks later (the bank's
+    // address register, the block's output register, the bank's).
     task automatic read(input int port, input int address, input logic wide,
                         output logic [WIDE_W-1:0] value);
         @(negedge clk);
         read_address[port] = REGISTER_W'(address);
         read_wide[port]    = wide;
-        @(posedge clk);
+        repeat (3) @(posedge clk);
         @(negedge clk);
         value = read_data[port];
     endtask
@@ -131,9 +132,12 @@ module tb_csp_register_file;
         write_data    = 36'h00777;
         read_address[0] = 11'd5;
         read_wide[0]    = 0;
-        @(posedge clk);
+        @(posedge clk);          // the address and the write into the bank's registers
         @(negedge clk);
         write_enable = 0;
+        @(posedge clk);          // the block reads and writes the index: the old word
+        @(posedge clk);          // which is in the bank's output register after this edge
+        @(negedge clk);
         if (read_data[0][WORD_W-1:0] !== 18'h12345) begin
             $display("FAIL read during write: 0x%0h, want the old 0x12345", read_data[0]);
             errors++;

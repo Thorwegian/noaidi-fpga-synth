@@ -600,9 +600,19 @@ small program. The new CSP gets:
   clocks after its pop, not one: with a mux and an incrementer reading
   ahead on the pin, a boot at 73.728 lost each batch's first words after
   the decoy — the control program's ONE and EIGHTH — and was silent), and
-  the register file's write taken into a register of each copy's own next
-  to its banks (the decode before it, the banks' pins after it; the
+  the register file's write taken into a register of each bank's own next
+  to its block (the decode before it, the block's pins after it; the
   result's write goes in from E5 so that it lands at W's edge as before),
+  the read's address into a register of the bank's own on the pin (what
+  the address stage takes, held while it waits) and the pair out of the
+  block's output register into a register of the bank's, which is what
+  E1 holds — and all three of a bank's registers *placed*, flip-flop by
+  flip-flop, on the fabric tiles beside its block (`csp_bank.sv`,
+  `csp_placed_dff.sv`: a `BEL` attribute each; the placer alone put them
+  with the logic that feeds them, 13–44 tiles away, and on the board a
+  store after idle cycles landed with an address bit still at its old
+  value, then with the write register placed, a read after idle cycles
+  returned register 0's word, the bubble's address still on the pins),
   the MAC's operands chosen in E1 so that E2's registers feed the DSP's
   pins (chosen in E2, the muxes sat on the pins), the sink area's write
   pins from a write register per replica with port A for the write alone
@@ -611,10 +621,17 @@ small program. The new CSP gets:
   than LUT-RAM (`ram_style = "logic"`: a `RAM16SDP4`'s pins are as
   untimed as a block's, and the index adder's carry chain fed one) — so
   that every path the report cannot see is a register fed by nothing but
-  a register, on the input side of a block as on the output side. What
-  is still on a pin: the register file's read address, decode's adders
-  and the settle mux (a stage in front of decode would register it), and
-  the sink area's read address and page mux, the partial pipeline's.
+  a register, on the input side of a block as on the output side, and
+  every such register placed beside its block where the tool would
+  otherwise put it far from the pin: the register file's three a bank,
+  the instruction memory's address and buffer registers a slice
+  (`csp_program_slice.sv`), the write queue's pointer and entry
+  registers (`csp_write_queue.sv`: the entry three clocks after its pop),
+  the sink area's write registers (its reads, the partial pipeline's,
+  are still the tool's to place), and the multiply-add unit's operand
+  registers (E2) and product register (E5) on the rows beside the DSP
+  (`csp_multiply_add.sv`). `tools/lab/placement_check.py` confirms on a
+  routed netlist that every constrained cell sits where it was told.
   `tools/lab/pin_audit.py` lists every block RAM's and DSP's pin with
   what drives or follows it in a routed netlist; run it on every build. The
   last of these was found with the lab tools: at 73.728 the self-test

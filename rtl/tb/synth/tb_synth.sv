@@ -75,8 +75,8 @@ module tb_synth (
 
     function int synth_register(input int address);
         logic [csp_pkg::WORD_W-1:0] word;
-        word = address[0] ? dut.u_csp.u_register_file.g_copy[0].odd_bank[address >>> 1]
-                          : dut.u_csp.u_register_file.g_copy[0].even_bank[address >>> 1];
+        word = address[0] ? dut.u_csp.u_register_file.g_copy[0].u_odd.words[address >>> 1]
+                          : dut.u_csp.u_register_file.g_copy[0].u_even.words[address >>> 1];
         return int'($signed(word));
     endfunction
 

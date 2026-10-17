@@ -57,7 +57,8 @@ section 12; this file keeps the why and the how.
     batch lost its first words after the decoy, the control program's
     constants ONE and EIGHTH among them, so every boot at 73.728 was
     silent while the running program replayed exactly; fixed by the
-    pointer's register on the pin, the entry two clocks after its pop.
+    pointer's register on the pin, the entry two clocks after its pop
+    (three, since the queue's registers were placed beside its block).
   - and, from the first audit of every pin (`tools/lab/pin_audit.py`,
     which should have come first): the MAC's operand muxes on the DSP's
     B and C pins, the sink area's write decode and its read/write address
@@ -88,6 +89,78 @@ section 12; this file keeps the why and the how.
   bound on *fabric* delay only and judge a bitstream on the board.
 
 ## 2. The placer
+
+- **The placer does not care where a block RAM's pins come from.** It
+  places by wirelength and by timing, and the paths into and out of a
+  block's pins have no timing, so a block goes wherever a site is free
+  (35 of the 46 BSRAM sites in use on this design) and the flops that
+  drive its pins stay with their logic. Measured on the routed netlist
+  (`tools/lab/pin_distance.py`): the register file's copy-0 banks at
+  (4..7, 9), the flops driving their address pins 47–50 tiles away, their
+  write pins 35–47; the sink area's replicas 26–56 tiles from their write
+  registers. A fifty-tile route is of the order of the period at 73.728,
+  and reads through that copy came back with another register's value
+  now and then, never at 50 MHz. The fix is a placement: a `BEL`
+  attribute on a hand-instantiated block ("X13Y27/BSRAM") is honoured by
+  nextpnr ("Placed N cells based on constraints"); it must be a plain
+  parameter of the module holding the instance (`csp_bank.sv`): yosys
+  rejects a `BEL` computed in a generate block, and drops one put on an
+  inferred memory. The BSRAM rows are at Y9, Y27 and Y45; the middle row
+  has no site at X25 or X28, and a block spans three columns of the
+  fabric (sites every third X). The DSP rows are Y18 and Y36, one row
+  each with fabric on both sides, a macro spanning nine columns (X1, X10,
+  X19 …); its units are named with an index, "X19Y36/MULTALU36X181",
+  "X19Y36/MULT18X1800", as the routed JSON's `NEXTPNR_BEL` shows them.
+- **Placing the block alone is not enough: the registers on its pins
+  have to be placed too.** With the register file's six blocks on the
+  middle row and nothing else constrained, the write registers stayed
+  30–44 tiles away (with the logic that feeds them) and a store after
+  idle cycles landed with an address bit still at its old value, every
+  pass, on every bitstream, never at 50 MHz (the five-word test, issue
+  #222). A flop is placed the same way as a block, a `BEL` attribute
+  naming a tile's slot ("X13Y26/DFF2"; six flops a tile, DFF0 … DFF5),
+  on a hand-instantiated `DFFE` in a module of one flop
+  (`csp_placed_dff.sv`), the tile a plain parameter; an *empty* `BEL`
+  is an assertion in nextpnr (`name.size() == 2`), not "unplaced", so
+  the attribute goes on only when a tile is named. With the write
+  registers placed (29 flops a bank, "Placed 196 cells based on
+  constraints", report 105 MHz) the stores landed and the next untimed
+  path showed: a read after idle cycles returned register 0's word, the
+  address stage's registers 13–33 tiles from the address pins still
+  showing the bubble's address when the block sampled them. So a bank
+  owns and places every register on its pins: the write, the read
+  address (held while the address stage waits) and the output (what
+  E1 holds), 57 flops on the ten fabric tiles of the block's three
+  columns in the rows beside it (`csp_bank.sv`).
+- **A flop's `BEL` alone does not hold: the packer pairs every flop with
+  the LUT that drives it** ("Constrained 2089 LUTFF pairs", a passthrough
+  LUT inserted where there is none, `…_passthrough_lut` in the routed
+  netlist) and places the pair by the LUT, so a flop constrained on its
+  own is placed on its slot first and carried off to its driver after
+  (342 of 342 on the first such build, 6–14 tiles away). The LUT in front
+  of the flop has to be hand-instantiated and placed on the slot's own
+  LUT ("X13Y26/LUT2" with "X13Y26/DFF2"): a `LUT1` passthrough, or the
+  `LUT3` mux that holds the flop, since a `DFFE` is refused on a slot
+  the tool calls a DFF ("Bel … of type 'DFF' is not valid for cell … of
+  type 'DFFE'"). Check the routed netlist's `NEXTPNR_BEL` against the
+  constraint on every build. Verilator note: Gowin's
+  flop models read `GSR.GSRO` upward, and with two `GSR` instances in
+  the design (the multiplier's, a bench's) the search finds none; the
+  flop module carries one of its own under `SIM_GOWIN_PRIM`.
+- The newest suite of the day (nextpnr 0.11.1, 2026-10-17) times no
+  block RAM pin either, and placed the same netlist at 80 MHz where the
+  pinned one gave 114 — but **its bitstream generator matters**: Apicula
+  `e9431eb` (2026-10-13, "give unused wires of used CFUs a static
+  source": span wires, X0 wires and LUT inputs without a pip kept their
+  default connection to an output of the cell and toggled with it; tied
+  to VCC/VSS as the vendor IDE does, GW2A only). The same routed netlist
+  (seed 7, every pin register placed) packed with the 2026-07-30
+  `gowin_pack` has its knee at 68–70 MHz (4 % of passes faulty at 70,
+  the counters themselves corrupted at 72); packed with the 2026-10-17
+  one it is clean through 72 MHz and fails at 73.728 (one set's read).
+  The report (92.45 MHz) is the same for both. Measured with the
+  counting program (`ADD3 QT, 0, [j+BASE], ZERO; SKIP nonzero, 1;
+  FAULTS += 1; PASSES += 1`), two 1.2 s runs a clock step.
 
 - **The heap placer hangs in legalisation** (some 10^8 attempts a cell)
   on most netlists of this design when they contain wide-LUT cells

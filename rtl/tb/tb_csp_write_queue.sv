@@ -66,16 +66,18 @@ module tb_csp_write_queue;
             pop = 1;
             @(negedge clk);
             pop = 0;
-            @(negedge clk);            // the next entry arrives two clocks after the pop
+            @(negedge clk);            // the next entry arrives three clocks after the pop
+            @(negedge clk);
             count++;
         end
     endtask
 
     // Pop on every clock an entry waits, as a held pass does, and check that
-    // the entries arrive in order, each two clocks after its pop.
+    // the entries arrive in order, each three clocks after its pop.
     task automatic drain_back_to_back(input int first, output int count);
         int   taken        = 0;
         logic pop_previous = 0;   // a pop two clocks before the clock checked
+        logic pop_before   = 0;   // and three before: its entry is checked
         logic pop_current;
         count = 0;
         repeat (20) @(posedge clk);    // let the toggle cross
@@ -85,7 +87,7 @@ module tb_csp_write_queue;
             pop         = pop_current;
             if (pop_current) count++;
             @(negedge clk);
-            if (pop_previous) begin
+            if (pop_before) begin
                 if (head_address !== csp_pkg::QUEUE_ADDRESS_W'(first + taken)
                     || head_data !== csp_pkg::WORD_W'(1000 + first + taken)) begin
                     $display("FAIL back-to-back entry %0d: 0x%0h = %0d", taken, head_address, head_data);
@@ -93,6 +95,7 @@ module tb_csp_write_queue;
                 end
                 taken++;
             end
+            pop_before   = pop_previous;
             pop_previous = pop_current;
         end
         pop = 0;

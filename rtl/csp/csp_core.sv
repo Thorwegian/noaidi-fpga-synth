@@ -83,7 +83,8 @@ module csp_core (
 
     // instruction memory (csp_instruction_memory)
     output logic [csp_pkg::PROGRAM_W-1:0]       fetch_address,
-    input  wire  [35:0]                         fetch_data,
+    input  wire  [35:0]                         fetch_data,    // the fetch buffer, in the memory's registers
+    output logic                                buffer_load,   // the buffer takes the memory's word
 
     // write queue (csp_write_queue)
     output logic                                queue_pop,
@@ -291,8 +292,8 @@ module csp_core (
     control_t address_stage, read_stage, execute1_stage, execute2_stage, execute3_stage,
               execute4_stage, execute5_stage, writeback_stage, writeback_done;   // done: W's instruction a cycle ago
 
-    // What A holds besides the control word: the operands it names, in the
-    // registers that are the banks' address pins (the banks read them
+    // What A holds besides the control word: the operands it names (the
+    // same values as the banks' own address registers, which read them
     // every cycle A waits), and what it reads; R takes them on from A.
     logic [csp_pkg::ADDRESS_W-1:0] a_x_address, a_y_address;
     logic a_reads_a, a_reads_x, a_reads_y;
@@ -314,6 +315,7 @@ module csp_core (
     csp_register_file u_register_file (
         .clk           (clk),
         .read_address  (read_address),
+        .read_hold     (a_hold),
         .reset_n       (reset_n),
         .read_even     (read_even),
         .read_odd      (read_odd),
@@ -346,13 +348,19 @@ module csp_core (
     logic [1:0]      fetch_place;       // its place relative to decode's pc
     logic            inflight_valid;    // the word on the memory's output is wanted
     logic [1:0]      inflight_place;
-    logic [35:0]     buffer_word;
+    // The buffer's word is the memory's fetch_data: the register sits in
+    // the memory's slices, beside their blocks, taken while buffer_load.
+    wire  [35:0]     buffer_word = fetch_data;
     logic            buffer_valid;
     logic [1:0]      buffer_place;      // PLACE_OWN or PLACE_NEXT
     logic            fetch_primed;      // word 0 was fetched at a pass's end (not before the first pass)
     logic [35:0]     held_instruction;  // decode's word, once taken from the buffer
     logic            held_valid;
-    assign fetch_address = fetch_pc;
+    // The memory's address registers (one a slice, beside its block) take
+    // what fetch_pc takes this clock: the memory reads fetch_pc's value
+    // the clock after it lands, as it did from fetch_pc itself.
+    logic [PC_W-1:0] fetch_pc_next;
+    assign fetch_address = fetch_pc_next;
 
     // ---- D: decode -----------------------------------------------------------------------------
     logic            decode_valid;      // decode_pc is an instruction to issue, once its word is here
@@ -402,37 +410,45 @@ module csp_core (
 
     // The probe takes the Y port once a pass, long after the last instruction
     // has issued and drained (DRAIN_END), and keeps the pair it reads: its
-    // address goes into A's Y register the cycle before, is on the pin at
-    // PROBE_CYCLE, and the pair is in the bank's output register the cycle
-    // after.
+    // address goes into the Y bank's address register (and A's) the cycle
+    // before, is on the pin at PROBE_CYCLE, the pair is in the block's
+    // output register the cycle after and in the bank's the cycle after
+    // that.
     localparam int PROBE_CYCLE = csp_pkg::CYCLES_PER_PASS - 16;
     wire probe_load = in_pass && pass_cycle == 11'(PROBE_CYCLE - 1);
     wire probe_now  = in_pass && pass_cycle == 11'(PROBE_CYCLE);
-    logic probe_read;
+    logic probe_read, probe_take;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             probe_read <= 1'b0;
+            probe_take <= 1'b0;
             probe_data <= '0;
         end else begin
             probe_read <= probe_now;
-            if (probe_read) begin
+            probe_take <= probe_read;
+            if (probe_take) begin
                 probe_data <= {read_even[2], read_odd[2]};
             end
         end
     end
 
-    // The banks' address pins are A's registers and nothing else: the
-    // banks read A's operands every cycle, for as long as A waits, so that
-    // the values the instruction takes on leaving A are those of the cycle
-    // before. (Decode's adders on the pins, and a mux choosing between them
-    // and a waiting instruction's registers, are paths the tool does not
-    // time; on the board at 73.728 MHz a j-indexed read right after the IDX
-    // that set j read another register, address bits dropped, once in ~48
-    // passes.)
+    // The banks' address pins are registers of the banks' own, beside the
+    // blocks (csp_bank.sv), loaded with what A takes this clock and held
+    // while A waits (read_hold): the banks read A's operands every cycle,
+    // for as long as A waits, so that the values the instruction takes on
+    // leaving A are those of the cycle before. A's own address registers
+    // are the same values, for the hazard check. (Decode's adders on the
+    // pins, and a mux choosing between them and a waiting instruction's
+    // registers, are paths the tool does not time; on the board at
+    // 73.728 MHz a j-indexed read right after the IDX that set j read
+    // another register, address bits dropped, once in ~48 passes — and
+    // with A's registers on the pins, 13–33 tiles from the blocks, a read
+    // after idle cycles returned register 0's word, the bubble's address
+    // still on the pins when the block sampled them.)
     always_comb begin
-        read_address[0] = csp_pkg::REGISTER_W'(address_stage.r_address);
-        read_address[1] = csp_pkg::REGISTER_W'(a_x_address);
-        read_address[2] = csp_pkg::REGISTER_W'(a_y_address);
+        read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
+        read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
+        read_address[2] = csp_pkg::REGISTER_W'(probe_load ? AW'(probe_address) : decode_y_address);
     end
 
     // The hazard check, in A, on registered values only: an older instruction in
@@ -607,7 +623,12 @@ module csp_core (
     // accumulator is read here too: an older instruction writing it has left
     // W a cycle before this one left R (the hazard check), so it is the same
     // value R would have read.
-    logic [17:0] e1_a_even, e1_a_odd, e1_x_even, e1_x_odd, e1_y_even, e1_y_odd;
+    // The banks' words, in the banks' output registers (csp_bank.sv): E1's
+    // operands, taken every cycle (while A holds they are read again and
+    // E1 is a bubble; the cycle R leaves, they are its).
+    wire [17:0] e1_a_even = read_even[0], e1_a_odd = read_odd[0];
+    wire [17:0] e1_x_even = read_even[1], e1_x_odd = read_odd[1];
+    wire [17:0] e1_y_even = read_even[2], e1_y_odd = read_odd[2];
     logic        e1_reads_a, e1_reads_x, e1_reads_y;
     logic        e1_a_wide, e1_y_wide;                        // the pair
     logic        e1_a_odd_half, e1_x_odd_half, e1_y_odd_half; // else which word
@@ -924,7 +945,7 @@ module csp_core (
     wire            buffer_take = (move_next && (hit_buffer || buffer_is_decode))
                                   || (!move && !held_valid && buffer_is_decode);
     wire            buffer_free = !buffer_valid || buffer_take;
-    wire            buffer_load = buffer_free && inflight_valid;
+    assign          buffer_load = buffer_free && inflight_valid;
     wire [1:0]      place_shift = {1'b0, move_next};   // places come down by one at a move on
 
     // ---- F: the fetch registers ----------------------------------------------------------------
@@ -932,6 +953,13 @@ module csp_core (
     // and fetches a word again when the buffer could not take it. Decode's
     // copy of its word is taken from the buffer at a move that hits it, or
     // the cycle the buffer brings decode's word.
+    // fetch_pc moves every clock: to a restart's pc, on by one, or back by
+    // one when the word on the memory was not wanted (the one the buffer
+    // could not take comes again); the memory's own address registers
+    // take the same value (fetch_address).
+    assign fetch_pc_next = fetch_restart                   ? fetch_restart_pc
+                         : (buffer_load || !inflight_valid) ? fetch_pc + 1'b1
+                         :                                    fetch_pc - 1'b1;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             fetch_pc        <= '0;
@@ -944,8 +972,8 @@ module csp_core (
             buffer_place    <= PLACE_OWN;
             held_valid      <= 1'b0;
         end else begin
+            fetch_pc <= fetch_pc_next;
             if (fetch_restart) begin
-                fetch_pc       <= fetch_restart_pc;
                 fetch_valid    <= 1'b1;
                 fetch_place    <= PLACE_OWN;
                 fetch_primed   <= 1'b1;
@@ -954,10 +982,8 @@ module csp_core (
             end else if (buffer_load || !inflight_valid) begin
                 inflight_valid <= fetch_valid;
                 inflight_place <= fetch_place - place_shift;
-                fetch_pc       <= fetch_pc + 1'b1;
                 fetch_place    <= fetch_place + 2'd1 - place_shift;
-                if (buffer_load) begin
-                    buffer_word  <= fetch_data;
+                if (buffer_load) begin                  // the memory's buffer register takes the word
                     buffer_place <= inflight_place - place_shift;
                     buffer_valid <= 1'b1;
                 end else if (buffer_take) begin
@@ -966,8 +992,7 @@ module csp_core (
                     buffer_place <= buffer_place - place_shift;
                 end
             end else begin
-                inflight_valid <= 1'b0;             // the word on the memory is not wanted:
-                fetch_pc       <= fetch_pc - 1'b1;  // the one the buffer could not take comes again
+                inflight_valid <= 1'b0;             // the word on the memory is not wanted
                 fetch_place    <= fetch_place - 2'd1 - place_shift;
                 if (buffer_take) begin
                     buffer_valid <= 1'b0;
@@ -994,11 +1019,12 @@ module csp_core (
     logic [17:0]        e2_logic_result;
     logic signed [18:0] e2_shift_total;
 
-    // The multiply-add unit's operands, from E1: these registers feed the
-    // DSP's pins and nothing else sits between.
-    logic signed [17:0] e2_multiply_a;
-    logic signed [35:0] e2_multiply_b;
-    logic signed [53:0] e2_multiply_c;
+    // The multiply-add unit's operands, from E1: the unit's own operand
+    // registers, placed on the DSP's pins (csp_multiply_add.sv); E3's
+    // copies for the flags are taken from them.
+    wire signed [17:0] e2_multiply_a;
+    wire signed [35:0] e2_multiply_b;
+    wire signed [53:0] e2_multiply_c;
 
     // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
     // saturates (E3).
@@ -1048,18 +1074,23 @@ module csp_core (
         if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    // The block takes E2's operand registers into its own input registers
-    // (its E3 copy of e3_multiply_*; the fabric's copy feeds the flags
-    // below) and multiplies register to register inside: the product is in
-    // its output register in E4, from where only E5's register takes it.
-    logic signed [53:0] product;        // registered inside the block (OUT_REG): E4's
-    csp_multiply_add u_multiply_add (
-        .clk     (clk),
-        .reset_n (reset_n),
-        .a       (e2_multiply_a),
-        .b       (e2_multiply_b),
-        .c       (e2_multiply_c),
-        .product (product)
+    // The unit takes E1's choice into its operand registers (E2, on the
+    // block's input pins), the block takes those into its own input
+    // registers (its E3 copy of e3_multiply_*; the fabric's copy feeds the
+    // flags below) and multiplies register to register inside: the sum is
+    // in its output register in E4, and in the unit's product register,
+    // on the output pins, in E5 — E5's register, placed beside the block.
+    wire signed [53:0] product;         // the unit's product register: E5's
+    csp_multiply_add #(.SITE_X(19), .SITE_Y(36), .UNIT(1)) u_multiply_add (
+        .clk       (clk),
+        .reset_n   (reset_n),
+        .a         (multiply_a_next),
+        .b         (multiply_b_next),
+        .c         (multiply_c_next),
+        .operand_a (e2_multiply_a),
+        .operand_b (e2_multiply_b),
+        .operand_c (e2_multiply_c),
+        .product   (product)
     );
 
     // What E4 needs to see whether the 54-bit sum wrapped inside the block:
@@ -1068,16 +1099,16 @@ module csp_core (
     wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
 
     // ---- E4: the product settles in the block's own register (OUT_REG); the rest waits ----------
-    // The DSP's registered product goes into E5's register and nowhere
-    // else (section 12: the tool does not time what follows a DSP's output);
-    // E4 is where it is a register's output and nothing more.
+    // The DSP's registered product goes into the unit's product register
+    // and nowhere else (section 12: the tool does not time what follows a
+    // DSP's output); E4 is where it is a register's output and nothing more.
     logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
     logic [17:0]        e4_logic_result;
     logic [35:0]        e4_shift_result;
     logic               e4_shift_saturated;
 
     // ---- E5: reduce to the destination; the flags ----------------------------------------------------
-    logic signed [53:0] e5_product;
+    wire signed [53:0]  e5_product = product;   // the unit's product register (csp_multiply_add.sv)
     logic               e5_product_nonzero, e5_signs_agree, e5_c_negative;
     logic [17:0]        e5_logic_result;
     logic [35:0]        e5_shift_result;
@@ -1360,14 +1391,7 @@ module csp_core (
         // (at a vector loop's open: the entry's, for element 0).
         private_current <= opens_vector ? (execute1_stage.instruction.a[0] ? index_i : index_j)
                                         : private_next;
-        // E1 takes the banks' words every cycle: while A holds they are read
-        // again and E1 is a bubble; the cycle R leaves, they are its.
-        e1_a_even      <= read_even[0];
-        e1_a_odd       <= read_odd[0];
-        e1_x_even      <= read_even[1];
-        e1_x_odd       <= read_odd[1];
-        e1_y_even      <= read_even[2];
-        e1_y_odd       <= read_odd[2];
+        // The banks' words are E1's by the banks' own output registers.
         e1_reads_a     <= read_reads_a;
         e1_reads_x     <= read_reads_x;
         e1_reads_y     <= read_reads_y;
@@ -1381,9 +1405,6 @@ module csp_core (
         e1_pc_plus_one <= read_stage.pc + 1'b1;
 
         e2_a_value         <= e1_a_value;
-        e2_multiply_a      <= multiply_a_next;
-        e2_multiply_b      <= multiply_b_next;
-        e2_multiply_c      <= multiply_c_next;
         e2_logic_result    <= logic_result;
         e2_shift_total     <= shift_total;
 
@@ -1402,7 +1423,6 @@ module csp_core (
         e4_shift_result    <= shift_result;
         e4_shift_saturated <= shift_saturated;
 
-        e5_product         <= product;          // the block's register (OUT_REG), nothing between
         e5_product_nonzero <= e4_product_nonzero;
         e5_signs_agree     <= e4_signs_agree;
         e5_c_negative      <= e4_c_negative;
@@ -1427,10 +1447,10 @@ module csp_core (
     wire writes_counter_now = pass_done;
     wire writes_result_now  = writing && writeback_stage.writes_registers;
     assign queue_pop    = window_open && queue_committed && !writes_counter_now && !writes_result_now;
-    // The queue hands out the entry two clocks after it is popped (the
-    // block's read at the pointer's register, then its pipeline register,
-    // csp_write_queue.sv); it is taken into registers of the fabric then,
-    // and applied the clock after that: the decoding and the memories' write
+    // The queue hands out the entry three clocks after it is popped (the
+    // block's read at the pointer's register, its pipeline register, then
+    // the queue's own output register beside the block, csp_write_queue.sv),
+    // and it is applied then: the decoding and the memories' write
     // enables work from a fabric register's output, and the block's output
     // register feeds nothing but a register (section 12: the tool times no
     // path into or out of a block RAM's pins; on the board, with the decode
@@ -1440,8 +1460,11 @@ module csp_core (
     // (Nothing else writes in the window: the pipeline is empty and the pass
     // counter is written on the pass's last cycle, after the window.)
     logic                               popped_valid, arrived_valid, staged_valid;
-    logic [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address;
-    logic [csp_pkg::WORD_W-1:0]          staged_data;
+    // The staged entry is the queue's own output register, placed beside
+    // its block (csp_write_queue.sv): the block's pipeline register feeds
+    // nothing but that register, and it holds the entry at staged_valid.
+    wire [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address = queue_address;
+    wire [csp_pkg::WORD_W-1:0]          staged_data    = queue_data;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             popped_valid  <= 1'b0;
@@ -1452,10 +1475,6 @@ module csp_core (
             arrived_valid <= popped_valid;
             staged_valid  <= arrived_valid;
         end
-    end
-    always_ff @(posedge clk) begin
-        staged_address <= queue_address;
-        staged_data    <= queue_data;
     end
 
     // A queued write names a register, or a sink word: the firmware's own
