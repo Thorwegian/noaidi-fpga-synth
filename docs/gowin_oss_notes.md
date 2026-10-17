@@ -270,3 +270,65 @@ zero at 73.728 and intact at 50, and the first two words of a batch are
 what sits behind the engine's decoy. The grep that would have found both
 in a minute: every block RAM's and DSP's pin in the routed netlist, and
 what feeds it; anything but a flop is a fault waiting for a seed.
+
+## 5. Keeping the logic shallow: rules for a LUT4 fabric
+
+The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
+LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the
+tool would build from pairs of LUTs are off in our flow (`-nowidelut`,
+section 2: the placer hangs on them), so every wide function is a tree
+of LUT4s and every level of that tree is a LUT delay plus a route. The
+data sheet (DS226 2.7E table 3-13, p. 36) puts a LUT4 at 0.31–0.46 ns
+and the flip-flop's clock-to-out at 0.20–0.23 ns; the routed reports of
+the CSP show 0.37–0.57 ns a level and 0.17–1.2 ns a hop between levels.
+At 73.728 MHz the period is 13.56 ns and the board wants the report at
+0.8 of that, so a path may hold about ten LUT levels with short routes,
+or six with the routes a mid-sized design actually gets. The CSP's
+critical path today is exactly that: the pass control, the index
+adders, the fetch buffer's word, the private-index mux — ten levels
+across half the chip. Rules that keep a path under that, in the order
+they pay:
+
+1. **A register on every block pin, and the register beside the block**
+   (section 1, `csp_bank.sv`): a block RAM's or DSP's pin is reached
+   through a route the tool times with values too small to matter, so
+   the route must be short by construction.
+2. **Decode once, into registers.** Anything derived from an
+   instruction word — which operand is wide, which port is read, whether
+   the instruction is a barrier — is computed the cycle the word arrives
+   and kept in flip-flops; the cycle that uses it reads a flip-flop, not
+   the word. A wide compare (`address < COUNT`, `op == X && a == Y`)
+   is three LUT levels on its own.
+3. **No mux wider than the LUT in a hot path.** A 4:1 mux is two LUT4
+   levels, an 8:1 three; a mux on a value that then goes through an
+   adder and a compare is the whole budget. Choose with a one-hot
+   select registered the cycle before, or move the choice to the
+   previous stage (the MAC's operands are chosen in E1 so that E2's
+   registers sit on the DSP's pins).
+4. **One adder a cycle, and nothing after it.** A carry chain is cheap
+   per bit (the ALU cell's `CIN` → `COUT` is 0.04 ns) but costs a LUT
+   level in and one out; an adder whose result feeds a compare, a mux
+   and a block's address pin in the same cycle is the register file's
+   old read path, the one that failed on the board.
+5. **Use the flip-flop's clock enable and reset, not a mux.** A hold
+   (`q <= hold ? q : d`) written as a mux is a LUT level on every bit;
+   written as an enable it is free. (The placed flops are the one
+   exception: nextpnr takes no `DFFE` on a slot it calls a `DFF`, so
+   their hold is a `LUT3`, section 2.)
+6. **Fan-out is routing.** A flip-flop that feeds forty LUTs across the
+   chip (a stage-valid bit, a hold) is a long net; duplicate it per
+   consumer group (yosys merges duplicates unless the register is
+   `(* keep *)`, section 1).
+7. **Read the report's path, not its number.** `nextpnr … --freq` prints
+   the worst path level by level (`Critical path report for clock`);
+   the count of `logic` lines is the depth, the `routing` lines the
+   spread. A path of ten `logic` lines is at the limit whatever the
+   frequency says, and a design that lands at 85 MHz on one seed and
+   107 on another has such a path: the spread is the placer's luck with
+   the routes, not the logic.
+8. **When a path will not fit, pipeline it and pay the latency in the
+   model** (`app/main/csp/csp.hpp`: `result_latency`, `barrier_latency`),
+   never in a half-cycle trick: the budget is 1 472 cycles a pass and
+   every stage costs a cycle on every dependent instruction, which is
+   the price to weigh (issue #222, the A stage: 1 437 → 1 472 cycles).
+
