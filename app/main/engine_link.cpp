@@ -212,7 +212,72 @@ void probe_task(void *) {
     }
 }
 
+// Every register the image knows, read back through the probe and compared:
+// how many differ, the first `limit` of them filled in.
+int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
+    int differing = 0;
+    // The probe reads the register file (0x000–0x7FF) a pair at a time; the
+    // sinks beyond it cannot be read back.
+    for (int even = 0; even < 0x800; even += 2) {
+        int32_t expected[2];
+        const bool known[2] = {image.known(even, &expected[0]),
+                               image.known(even + 1, &expected[1])};
+        if (!known[0] && !known[1]) {
+            continue;
+        }
+        const uint64_t pair = probe_pair(even);
+        const int32_t actual[2] = {
+                static_cast<int32_t>((pair >> 18) & 0x3FFFF),
+                static_cast<int32_t>(pair & 0x3FFFF)};
+        for (int half = 0; half < 2; ++half) {
+            if (known[half] && actual[half] != (expected[half] & 0x3FFFF)) {
+                if (differing < limit) {
+                    registers[differing] = even + half;
+                    wanted[differing]    = expected[half] & 0x3FFFF;
+                    held[differing]      = actual[half];
+                }
+                ++differing;
+            }
+        }
+    }
+    return differing;
+}
+
+// The boot image, read back before the first note: the write queue has lost
+// words of it on some boots (issue #222: the constant ONE among them, and
+// the synth silent for it, with every self-test passing), so what the chip
+// holds is checked against the image and the image sent again until they
+// agree, a bounded number of times. The console shows the count either way.
+constexpr int boot_image_attempts = 3;
+
+void verify_boot_image() {
+    for (int attempt = 1; attempt <= boot_image_attempts; ++attempt) {
+        const int lost = verify_image(nullptr, nullptr, nullptr, 0);
+        if (lost == 0) {
+            ESP_LOGI(tag, "boot image: every register as sent%s",
+                     attempt > 1 ? " (after a resend)" : "");
+            return;
+        }
+        ESP_LOGW(tag, "boot image: %d register(s) not as sent, sending it again (%d of %d)",
+                 lost, attempt, boot_image_attempts);
+        xSemaphoreTake(lock, portMAX_DELAY);
+        image.resend_all();
+        xSemaphoreGive(lock);
+        while (image.pending()) {
+            xSemaphoreTake(lock, portMAX_DELAY);
+            send(writes_per_tick, 0);
+            xSemaphoreGive(lock);
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+    }
+    ESP_LOGE(tag, "boot image: still not as sent after %d resends; the synth may be silent",
+             boot_image_attempts);
+}
+
 void engine_task(void *) {
+    if (!paused) {
+        verify_boot_image();
+    }
     int ticks = 0;
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -417,32 +482,7 @@ int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
     if (!running) {
         return -1;
     }
-    int differing = 0;
-    // The probe reads the register file (0x000–0x7FF) a pair at a time; the
-    // sinks beyond it cannot be read back.
-    for (int even = 0; even < 0x800; even += 2) {
-        int32_t expected[2];
-        const bool known[2] = {image.known(even, &expected[0]),
-                               image.known(even + 1, &expected[1])};
-        if (!known[0] && !known[1]) {
-            continue;
-        }
-        const uint64_t pair = probe_pair(even);
-        const int32_t actual[2] = {
-                static_cast<int32_t>((pair >> 18) & 0x3FFFF),
-                static_cast<int32_t>(pair & 0x3FFFF)};
-        for (int half = 0; half < 2; ++half) {
-            if (known[half] && actual[half] != (expected[half] & 0x3FFFF)) {
-                if (differing < limit) {
-                    registers[differing] = even + half;
-                    wanted[differing]    = expected[half] & 0x3FFFF;
-                    held[differing]      = actual[half];
-                }
-                ++differing;
-            }
-        }
-    }
-    return differing;
+    return verify_image(registers, wanted, held, limit);
 }
 
 void engine_link_resend(void) {

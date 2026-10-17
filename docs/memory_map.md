@@ -185,6 +185,13 @@ ports.
 - The firmware's image of the registers and sinks is `engine_link`'s: a write
   of the value already there is dropped, and what changed goes out in bursts
   of consecutive addresses, committed by one swap.
+- The image is read back after boot: every register the image knows, through
+  the probe, against what was sent, and the image is sent again (at most
+  three times) when they differ — the write queue has lost words of the boot
+  image on some boots (issue #222: the constant ONE among them, the synth
+  silent for it with every self-test passing). The console logs the count
+  either way, and `csp-verify`, `csp-resend` and `csp-poke … force` do the
+  same by hand. The sinks (`0x800` on) cannot be read back.
 - ADSR rates are 8-bit log₂ in the patch (4-bit octave + 4-bit
   1/16-octave fraction); firmware decodes them to the coefficient
   (`patch_adsr_rate_coeff`) the envelope program's rate is made from
