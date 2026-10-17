@@ -11,6 +11,40 @@ established it, so that a reader can repeat it rather than believe it.
 The rules that follow from these notes live in `docs/csp_isa.md`
 section 12; this file keeps the why and the how.
 
+## 0. The grade of each claim
+
+A design rule is worth what proved it. Every claim in these notes has
+one of three grades, and the table says which and what the measurement
+was; a claim with no measurement is a hypothesis, however plausible, and
+goes to `AGENTS.md` only when it has one.
+
+- **measured** — a controlled comparison on the board or in the tool,
+  one variable changed, repeatable from the files named;
+- **observed** — seen on the board, consistent with the claim, but not
+  isolated: another variable may be the cause;
+- **hypothesis** — a reading of the evidence, stated so that it can be
+  tested, not a rule.
+
+| claim | grade | the measurement |
+|---|---|---|
+| The bitstream generator's version moves the silicon limit: Apicula `e9431eb` (unused wires of used tiles tied off) took the same routed netlist's knee from 68–70 to 72–73.7 MHz | **measured** | one routed netlist, two `gowin_pack`s, the counting program over a clock sweep 60–73.7 MHz (section 2, issue #222 2026-10-17) |
+| nextpnr's Gowin arch has block RAM arcs (small: setup 0.03 ns, clock-to-out 2.26 bypass / 0.31 pipelined); the dual-port port-B address has none (a one-word bug); the DSP has none | **measured** | the chipdb's `bram` group read out; one-block tests at `--freq 400`: an adder into `ADB` invisible (894 MHz) until the fix (428), a `MULT18X18` invisible (371) until the arcs (259) (section 1, #230) |
+| The failure at 73.728 MHz is a timing margin that runs out gradually, not an effect of the clock setting | **measured** | the counting program at 72, 72.5, 73, 73.5, 73.728, 74 MHz on a failing and a playing bitstream: 0, 0, 6 %, 16 %, 24 % against ≤ 0.6 % (section 1) |
+| The model, with every figure the data sheets give, says every path through a block pin is safe by a factor of three at 73.728; the board disagrees | **measured** | the patched fork's reports against the boots (section 1, #230) |
+| Each fault in the list under section 1 was fixed by the register named there | **measured** | each has a before/after on the board with one change (the marker, self-test and replay instruments of section 3) |
+| *Therefore every block pin needs a register beside it, placed by hand* | **observed** | the one bitstream that plays four of four has them; but the unconstrained design through the patched tool booted with the register image intact four of four with its pin registers 24–42 tiles away — the rule as a *necessity* is not proved |
+| Placing the DSP's 162 operand and product registers costs the fabric's placement | **measured** | nine seeds at 84.6–92.6 MHz against 104–107 for the same netlist without them; every pass faulty on the board (section 2) |
+| The sum's registers near the DSP go with sound | **hypothesis** | a correlation over ten bitstreams (the two that played had them nearest), and with the product register placed one seed played three boots of four, the other none — not isolated from the seed |
+| The report-to-silicon ratio is about 0.8 | **observed** | fitted on two builds (0.82 and 0.78); a rule of thumb, not a law |
+| A flop's `BEL` alone is overridden by the LUT–flop pairing; the LUT must be placed with it | **measured** | `placement_check.py`: 342 of 342 flops moved, 0 of 706 once the LUTs carried the attribute (section 2) |
+| A `BEL` on a DSP primitive breaks the packer | **measured** | nextpnr's "unbound cell … DUMMY_CELL" on two seeds (section 2) |
+| yosys merges identical registers across copies; `(* keep *)` on the `always_ff` keeps them | **measured** | `merge_test`, and the register file's three write registers found as one (section 1) |
+| `-nowidelut` stops the placer's hang at the same Fmax | **measured** | the same design on every seed in minutes against hangs on most (section 2) |
+| Bypass-mode reads are the slow kind | **measured** | the data sheet's figures (DS226 2.7E table 3-14) and Apicula's (2.26 against 0.31 ns) |
+| The 14 October build (`aabbc41`) plays on this board today; the margin was lost in the commits since | **measured** | rebuilt in a worktree with the pinned flow, today's generator and its own firmware: the note at −22.2 dBFS, two of two boots (2026-10-17) |
+| Section 5's rules 1, 7 and 8 | **measured** | rule 1 by the faults above, 7 by the reports' spread (85–107 MHz on one netlist), 8 by the A stage's 35 cycles |
+| Section 5's rules 2–6 (decode once, no wide mux, one adder, enables, fan-out) | **hypothesis** | reasoned from the data sheet's LUT delay and the critical path's shape; not yet tested by a change that removed a level and moved the report |
+
 ## 1. What nextpnr does not time
 
 Correction (2026-10-17): the Gowin arch *does* carry block RAM timing
@@ -30,8 +64,10 @@ observations stand, the explanation "untimed" is only right for `ADB`
 and the DSP. Issue #230 carries the patch work (fork
 `Thorwegian/nextpnr`).
 
-- **No path that starts or ends at a block RAM's or a DSP's pin is
-  timed.** In no routed log does a reported path have a `DPX9B`, `SDPX9B`,
+- **No path that starts or ends at a block RAM's or a DSP's pin shows
+  in a report** (see the correction above: the block RAM's are timed with
+  values too small to show, the port-B address and the DSP are not timed
+  at all). In no routed log does a reported path have a `DPX9B`, `SDPX9B`,
   `SDPB`, `SPX9` or `MULT*` pin as source *or* sink. Probes
   (`tools/timing_probes`): a BSRAM read feeding an eight-deep adder chain
   into a flop is reported at 600 MHz, a `MULT18X18` product feeding a
