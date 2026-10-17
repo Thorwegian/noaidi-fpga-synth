@@ -21,10 +21,11 @@
 //       a block RAM's output: the tool does not time what follows one) →
 //       the half or the pair, the operands in the accumulator's format, the
 //       SHIFT count, whether LOOP's count is 0; INTERP's Y − A and ADD3's
-//       A + Y (55 bits); MIN, MAX, SEL, ANDXOR; LOOP and IDX are resolved
+//       A + Y (55 bits), saturated to 36 and 54; the multiply-add unit's
+//       operands chosen; MIN, MAX, SEL, ANDXOR; LOOP and IDX are resolved
 //       here
-//   E2  saturate Y − A to 36 bits and A + Y to 54; the multiply-add
-//       unit's operands; the SHIFT barrel shift
+//   E2  the multiply-add unit's operands in registers that feed the DSP's
+//       pins and nothing else; the SHIFT barrel shift
 //   E3  the multiply-add unit (MULTALU36X18): a × b + c; the SHIFT result
 //       saturated
 //   E4  the product settles in the block's own output register (OUT_REG):
@@ -202,7 +203,8 @@ module csp_core (
     // before its end: a write is staged for four cycles after it is taken
     // from the queue (the block's read, its output register, the fabric's
     // register, the register file's own), and must be in the register file
-    // before the next pass's first cycle (the pass counter's write).
+    // before the next pass's first cycle; the pass counter's write takes
+    // the last cycle.
     wire window_open = in_pass && !pipeline_busy && (pass_held ? (pass_cycle >= 11'd1
                                                                  && pass_cycle < 11'(csp_pkg::CYCLES_PER_PASS - 5))
                                              : (pass_cycle >= 11'(DRAIN_END)
@@ -254,8 +256,10 @@ module csp_core (
     logic [csp_pkg::ADDRESS_W-1:0] last_private;   // the last element's private register
     logic [csp_pkg::ADDRESS_W-1:0] vector_stride, vector_own;   // own: this element's index
 
-    logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
-    logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
+    // Flip-flops, not LUT-RAM (`ram_style`): the tool times every path
+    // through them, which it does not for a RAM16's pins (section 12).
+    (* ram_style = "logic" *) logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
+    (* ram_style = "logic" *) logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
     logic                          private_written;
     logic                          flags_written;
 
@@ -308,9 +312,7 @@ module csp_core (
         .write_enable  (rf_write_enable),
         .write_address (rf_write_address),
         .write_wide    (rf_write_wide),
-        .write_data    (rf_write_data),
-        .counter_write (write_counter),
-        .counter_data  (pass_count + 1'b1)
+        .write_data    (rf_write_data)
     );
 
     // ---- F: fetch ------------------------------------------------------------------------------
@@ -667,9 +669,44 @@ module csp_core (
     wire select_negative = (execute1_stage.vector && !execute1_stage.entry_flags)
                            ? element_flags[execute1_stage.element][0] : flag_negative;
 
-    // INTERP: Y − A in Q4.32 (saturated in E2, decision 3a). ADD3: A + Y.
+    // INTERP: Y − A in Q4.32 (saturated, decision 3a). ADD3: A + Y.
     wire signed [54:0] difference_full = 55'(e1_y_value) - 55'(e1_a_value);
     wire signed [54:0] sum_full        = 55'(e1_a_value) + 55'(e1_y_value);
+    wire signed [40:0] difference_q432 = 41'(difference_full >>> 14);
+    wire signed [35:0] difference =
+            difference_q432 > 41'sd34359738367  ? 36'sd34359738367 :
+            difference_q432 < -41'sd34359738368 ? -36'sd34359738368 : difference_q432[35:0];
+    wire signed [53:0] sum = sum_full > 55'(ACC_MAX) ? ACC_MAX
+                           : sum_full < 55'(ACC_MIN) ? ACC_MIN : sum_full[53:0];
+
+    // The multiply-add unit's operands, a × b + c, chosen here so that E2's
+    // registers feed the DSP's pins with nothing between (section 12: the
+    // tool times no path into a DSP's pins; chosen in E2, the muxes sat on
+    // the pins).
+    logic signed [17:0] multiply_a_next;
+    logic signed [35:0] multiply_b_next;
+    logic signed [53:0] multiply_c_next;
+    always_comb begin
+        multiply_a_next = e1_x_word;
+        multiply_b_next = e1_y_wide ? $signed(e1_y_operand) : 36'(e1_y_word) <<< 18;
+        multiply_c_next = e1_a_value;
+        case (e1_op)
+            csp_pkg::OP_INTERP: multiply_b_next = difference;
+            csp_pkg::OP_ADD3: begin
+                multiply_b_next = ONE_Q432;
+                multiply_c_next = sum;
+            end
+            csp_pkg::OP_CMP: begin
+                multiply_b_next = ONE_Q432;
+                multiply_c_next = -word_to_accumulator(e1_y_word);
+            end
+            csp_pkg::OP_ABS: begin
+                multiply_b_next = e1_x_word < 0 ? -ONE_Q432 : ONE_Q432;
+                multiply_c_next = '0;
+            end
+            default: ;
+        endcase
+    end
 
     // MIN, MAX, SEL, ANDXOR: one word, no overflow.
     logic [17:0] logic_result;
@@ -943,48 +980,15 @@ module csp_core (
     end
 
     // ---- E2 ------------------------------------------------------------------------------------
-    logic signed [54:0] e2_difference_full, e2_sum_full;
     logic signed [53:0] e2_a_value;
-    logic signed [17:0] e2_x_word, e2_y_word;
-    logic [35:0]        e2_y_operand;
-    logic               e2_y_wide;
     logic [17:0]        e2_logic_result;
     logic signed [18:0] e2_shift_total;
 
-    wire [3:0] e2_op = execute2_stage.instruction.op;
-
-    wire signed [40:0] difference_q432 = 41'(e2_difference_full >>> 14);
-    wire signed [35:0] difference =
-            difference_q432 > 41'sd34359738367  ? 36'sd34359738367 :
-            difference_q432 < -41'sd34359738368 ? -36'sd34359738368 : difference_q432[35:0];
-    wire signed [53:0] sum = e2_sum_full > 55'(ACC_MAX) ? ACC_MAX
-                           : e2_sum_full < 55'(ACC_MIN) ? ACC_MIN : e2_sum_full[53:0];
-
-    // The multiply-add unit's operands: a × b + c.
-    logic signed [17:0] multiply_a;
-    logic signed [35:0] multiply_b;
-    logic signed [53:0] multiply_c;
-    always_comb begin
-        multiply_a = e2_x_word;
-        multiply_b = e2_y_wide ? $signed(e2_y_operand) : 36'(e2_y_word) <<< 18;
-        multiply_c = e2_a_value;
-        case (e2_op)
-            csp_pkg::OP_INTERP: multiply_b = difference;
-            csp_pkg::OP_ADD3: begin
-                multiply_b = ONE_Q432;
-                multiply_c = sum;
-            end
-            csp_pkg::OP_CMP: begin
-                multiply_b = ONE_Q432;
-                multiply_c = -word_to_accumulator(e2_y_word);
-            end
-            csp_pkg::OP_ABS: begin
-                multiply_b = e2_x_word < 0 ? -ONE_Q432 : ONE_Q432;
-                multiply_c = '0;
-            end
-            default: ;
-        endcase
-    end
+    // The multiply-add unit's operands, from E1: these registers feed the
+    // DSP's pins and nothing else sits between.
+    logic signed [17:0] e2_multiply_a;
+    logic signed [35:0] e2_multiply_b;
+    logic signed [53:0] e2_multiply_c;
 
     // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
     // saturates (E3).
@@ -1034,17 +1038,17 @@ module csp_core (
         if (!execute3_stage.r_wide) shift_result[35:18] = '0;
     end
 
-    // The block takes E2's operands into its own input registers (its E3
-    // copy of e3_multiply_*; the fabric's copy feeds the flags below) and
-    // multiplies register to register inside: the product is in its output
-    // register in E4, from where only E5's register takes it.
+    // The block takes E2's operand registers into its own input registers
+    // (its E3 copy of e3_multiply_*; the fabric's copy feeds the flags
+    // below) and multiplies register to register inside: the product is in
+    // its output register in E4, from where only E5's register takes it.
     logic signed [53:0] product;        // registered inside the block (OUT_REG): E4's
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
-        .a       (multiply_a),
-        .b       (multiply_b),
-        .c       (multiply_c),
+        .a       (e2_multiply_a),
+        .b       (e2_multiply_b),
+        .c       (e2_multiply_c),
         .product (product)
     );
 
@@ -1349,19 +1353,16 @@ module csp_core (
         e1_body_last   <= read_stage.pc + PC_W'(read_stage.instruction.r);
         e1_pc_plus_one <= read_stage.pc + 1'b1;
 
-        e2_difference_full <= difference_full;
-        e2_sum_full        <= sum_full;
         e2_a_value         <= e1_a_value;
-        e2_x_word          <= e1_x_word;
-        e2_y_word          <= e1_y_word;
-        e2_y_operand       <= e1_y_operand;
-        e2_y_wide          <= e1_y_wide;
+        e2_multiply_a      <= multiply_a_next;
+        e2_multiply_b      <= multiply_b_next;
+        e2_multiply_c      <= multiply_c_next;
         e2_logic_result    <= logic_result;
         e2_shift_total     <= shift_total;
 
-        e3_multiply_a      <= multiply_a;
-        e3_multiply_b      <= multiply_b;
-        e3_multiply_c      <= multiply_c;
+        e3_multiply_a      <= e2_multiply_a;
+        e3_multiply_b      <= e2_multiply_b;
+        e3_multiply_c      <= e2_multiply_c;
         e3_logic_result    <= e2_logic_result;
         e3_shifted         <= shifted;
         e3_shift_forced    <= shift_forced;
@@ -1390,9 +1391,15 @@ module csp_core (
     end
 
     // ---- the register file's write port and the sinks ----------------------------------------------------
-    wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
-    wire writes_result_now = writing && writeback_stage.writes_registers;
-    assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
+    // The pass counter: the next pass's count goes in on this pass's last
+    // cycle, through the copies' write registers like every other write,
+    // and lands at the first cycle of the next pass, before any instruction
+    // reads it (it went in directly on the pass's first cycle before, by a
+    // mux on the banks' pins). The windows close early enough that nothing
+    // else is given to the register file on that cycle.
+    wire writes_counter_now = pass_done;
+    wire writes_result_now  = writing && writeback_stage.writes_registers;
+    assign queue_pop    = window_open && queue_committed && !writes_counter_now && !writes_result_now;
     // The queue hands out the entry two clocks after it is popped (the
     // block's read at the pointer's register, then its pipeline register,
     // csp_write_queue.sv); it is taken into registers of the fabric then,
@@ -1404,7 +1411,7 @@ module csp_core (
     // landed others two addresses off, and with a mux on the block's address
     // pin each batch lost its first words).
     // (Nothing else writes in the window: the pipeline is empty and the pass
-    // counter is written at the pass start, after the window.)
+    // counter is written on the pass's last cycle, after the window.)
     logic                               popped_valid, arrived_valid, staged_valid;
     logic [csp_pkg::QUEUE_ADDRESS_W-1:0] staged_address;
     logic [csp_pkg::WORD_W-1:0]          staged_data;
@@ -1435,8 +1442,8 @@ module csp_core (
     // copy, next to the banks) and lands it the clock after, so the result's
     // write goes in from E5, a clock before W, and lands at W's edge as it
     // always did; the queue's write goes in from the staged registers and
-    // lands a clock later than it did (the window allows for it). The pass
-    // counter goes in directly (csp_register_file.sv).
+    // lands a clock later than it did (the window allows for it); the pass
+    // counter goes in on the pass's last cycle (csp_register_file.sv).
     wire writes_result_next = execute5_stage.valid && execute5_stage.live && execute5_stage.writes_registers;
     always_comb begin
         rf_write_enable  = 1'b0;
@@ -1452,6 +1459,10 @@ module csp_core (
             rf_write_enable  = queue_writable;
             rf_write_address = csp_pkg::REGISTER_W'(staged_address);
             rf_write_data    = {18'd0, staged_data};
+        end else if (writes_counter_now) begin
+            rf_write_enable  = 1'b1;
+            rf_write_address = csp_pkg::REGISTER_W'(csp_pkg::IO_BASE);
+            rf_write_data    = {18'd0, pass_count + 1'b1};
         end
     end
 

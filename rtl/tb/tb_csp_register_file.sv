@@ -39,9 +39,7 @@ module tb_csp_register_file;
         .write_enable  (write_enable),
         .write_address (write_address),
         .write_wide    (write_wide),
-        .write_data    (write_data),
-        .counter_write (1'b0),
-        .counter_data  ('0)
+        .write_data    (write_data)
     );
 
     // The pair, or the half the address names, from the banks' words: what

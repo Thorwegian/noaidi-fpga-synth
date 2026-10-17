@@ -494,7 +494,7 @@ gain sinks between passes.
 | (new) write queue | — | firmware register writes waiting for the swap (section 2) | **1** (512 × 36: address + data). |
 | CSP `state_mem` | 1 | LFO phases, envelope levels | Folds into the register file's wide pairs: **0**. |
 | CSP `dmem_base`, `_base_gate`, `_sum` | 3 | three read copies of DMEM | The register file's three read ports (A, X, Y), 2048 words each: **6**. |
-| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **3 replicas** × 2 pages (one BSRAM per page): **6**. The active page's BSRAM serves the PAP on both ports while the CSP writes the other page, so 3 replicas give the 6 reads per cycle (#184). |
+| CSP sink replicas | 6 | pitch, duty, fc, q, gain L, gain R × 2 pages | 1024-word sink area, **6 replicas** × 2 pages (one BSRAM per page): **12**. Port B of the active page's BSRAM serves the PAP while port A takes the CSP's write from a register, so a replica gives one read per cycle (#184; first built as 3 replicas with port A shared between a read and the write, which put a mux on the pin — section 12). |
 | partial `osc/duty/filter/gain_param_ram` | 4 | the per-partial immediates × 2 pages | Gone: everything a partial reads is a sink: **0**. |
 | partial `ptrs0/ptrs1_param_ram` | 2 | sink pointers × 2 pages | ten pointers per partial (100 bits), one page, written whole: **3** (256 × 36, three wide). |
 | partial SVF state `ic*eq*_ram` | 4 | filter state | Needed. |
@@ -508,9 +508,9 @@ against 33 before the switch-over and the projected 27 to 29. LUT4 49 %,
 DFF 66 %. The CSP grew to a 2048-word register file, a 1024-word sink area
 and 1472 instructions on fewer BSRAM than before, paid for by `store_ram`,
 the second instruction page, the partials' immediates and their second
-page, and the sink area's two read ports per block. (The sink area's six
-blocks are `DPX9B` instantiated by hand: yosys copies a memory that has two
-read ports, which made it twelve; docs/memory_map.md has the findings.)
+page. (The sink area's twelve blocks are `DPX9B` instantiated by hand:
+yosys copies a memory that has two read ports, and gives a true dual-port
+one to flip-flops; docs/memory_map.md has the findings.)
 
 **Timing** (same run): the system clock closes at 92.8 MHz against the 73.728
 MHz it runs at; the SPI clock domain at 116 MHz.
@@ -601,9 +601,21 @@ small program. The new CSP gets:
   the decoy — the control program's ONE and EIGHTH — and was silent), and
   the register file's write taken into a register of each copy's own next
   to its banks (the decode before it, the banks' pins after it; the
-  result's write goes in from E5 so that it lands at W's edge as before)
-  — so that every path the report cannot see is a register fed by nothing
-  but a register, on the input side of a block as on the output side. The
+  result's write goes in from E5 so that it lands at W's edge as before),
+  the MAC's operands chosen in E1 so that E2's registers feed the DSP's
+  pins (chosen in E2, the muxes sat on the pins), the sink area's write
+  pins from a write register per replica with port A for the write alone
+  and port B for the read (shared, a mux of the two addresses sat on the
+  pin), and the elements' private indices and flags as flip-flops rather
+  than LUT-RAM (`ram_style = "logic"`: a `RAM16SDP4`'s pins are as
+  untimed as a block's, and the index adder's carry chain fed one) — so
+  that every path the report cannot see is a register fed by nothing but
+  a register, on the input side of a block as on the output side. What
+  is still on a pin: the register file's read address, decode's adders
+  and the settle mux (a stage in front of decode would register it), and
+  the sink area's read address and page mux, the partial pipeline's.
+  `tools/lab/pin_audit.py` lists every block RAM's and DSP's pin with
+  what drives or follows it in a routed netlist; run it on every build. The
   last of these was found with the lab tools: at 73.728 the self-test
   program's stores, on consecutive cycles with changing addresses, landed
   with address bits 5–6 dropped (0x062 at 0x002, 0x068 at 0x008 …), over
@@ -683,7 +695,7 @@ Decided on #222:
 | 13 | how the pointer RAM packs the pointers | ten pointers of ten bits (the voice's pitch, cutoff and gain; the channel's detune, offset, gain on each side, duty, resonance and mode), 100 bits in three BSRAM of 256 × 36 |
 | 14 | the sink words' formats | Q4.14; pitch and cutoff in octaves from middle C, resonance in octaves of Q, duty 1.0 the rail, gain linear and signed, mode `[1:0]` waveform, `[2]` cascade, `[4:3]` filter type |
 | 15 | the firmware's own sink words | written through the write queue (the address reaches the sinks), applied to both pages in the write window |
-| 16 | the sink area | six BSRAM, `DPX9B` instantiated by hand (yosys infers neither a block with two read ports nor a true dual-port RAM) |
+| 16 | the sink area | twelve BSRAM, `DPX9B` instantiated by hand (yosys infers neither a block with two read ports nor a true dual-port RAM); port A writes from a register, port B reads |
 | 17 | channels | the program works out `CHANNELS_IN_USE` of them (the firmware says 1 today); a channel's pulse width and resonance are program-computed sinks (the LFOs move them) |
 | 18 | the memory map | pointers `0x2000 + 64 p`, the queue `0x6000`, the program `0x8000`, `CTRL` bits swap, hold, test tone (docs/memory_map.md) |
 

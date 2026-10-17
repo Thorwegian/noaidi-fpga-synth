@@ -193,6 +193,18 @@ period; a partial enters the pipeline on each of time slots 0–255.
 keystroke = 256. The pipeline knows nothing of that grouping — 256
 interchangeable partials; unison is a firmware convention.
 
+**Why it looks like this**: the pipeline is a general sound engine, not
+a polysynth's voice card. Every partial is one oscillator → filter →
+gain unit that takes all its parameters from the sink area, and what
+instrument 256 of them make is decided by the control program (the
+CSP) and the sink layout, not by the gateware. An entirely different
+instrument — a drawbar organ, an additive engine, a drum machine, a
+bank of resonators — is a different control program on the same
+bitstream. The same machinery also synthesises what a fixed polysynth
+cannot: any partial can be any waveform through any filter at any
+pitch, retuned and regrouped every pass. On paper the compute is far
+beyond a polysynth's needs; spending it is the control program's job.
+
 **Per-partial chain** (26 stages): state/param RAM read → LUT reads
 → oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12 dB/oct single section or

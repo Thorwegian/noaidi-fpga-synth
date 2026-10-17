@@ -58,9 +58,24 @@ section 12; this file keeps the why and the how.
     constants ONE and EIGHTH among them, so every boot at 73.728 was
     silent while the running program replayed exactly; fixed by the
     pointer's register on the pin, the entry two clocks after its pop.
+  - and, from the first audit of every pin (`tools/lab/pin_audit.py`,
+    which should have come first): the MAC's operand muxes on the DSP's
+    B and C pins, the sink area's write decode and its read/write address
+    mux on the blocks' pins, the private index's LUT-RAM (`RAM16SDP4`)
+    written from an adder's carry chain; all registered or made flops.
+  - **and yosys merges the copies.** The register file's three write
+    registers and the sink area's six (one a copy, next to its blocks)
+    came out of `opt_merge` as one register each, fanning out to six and
+    twelve blocks' pins: identical flip-flops with identical inputs are
+    one flip-flop to yosys, a `keep` on the wire notwithstanding. `(* keep
+    *)` on the `always_ff` block keeps them apart (`merge_test`, 16 flops
+    from two blocks of 8); `pin_audit.py`'s last section, flops feeding
+    pins of more than one block, is the check.
   The input side of a block is as invisible as its output side: a
   memory's address and data pins, a DSP's operands, must come from a
-  register with nothing between.
+  register with nothing between. The LUT-RAM cells (`RAM16SDP4`) are
+  treated the same: small arrays in the core are flip-flops
+  (`ram_style = "logic"`).
 - **Bypass mode is the slow kind.** A block inferred from
   `q <= mem[addr]` reads asynchronously after the registered address; its
   clock-to-out plus any logic eats most of a 13.5 ns cycle. The pipeline

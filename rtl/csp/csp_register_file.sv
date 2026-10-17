@@ -23,8 +23,9 @@
 // over the chip to six blocks the tool does not time at their pins, and on
 // the board at 73.728 MHz a run of stores on consecutive cycles landed with
 // address bits dropped (docs/csp_isa.md section 12). The pass counter's
-// write, one isolated word a pass, goes in directly, so that it lands
-// before the pass's first instruction reads it.
+// write comes the same way, on a pass's last cycle, and lands before the
+// next pass's first instruction reads it (once it went in directly on
+// the first cycle, by a mux on the banks' pins).
 //
 // Reads are synchronous: the address goes in on one clock, the words
 // come out on the next, straight from the banks' output registers: the
@@ -51,10 +52,7 @@ module csp_register_file (
     input  wire                                write_enable,
     input  wire [csp_pkg::REGISTER_W-1:0]      write_address,
     input  wire                                write_wide,
-    input  wire [csp_pkg::WIDE_W-1:0]          write_data,   // word: low 18 bits
-    // the pass counter: in the banks this clock, at IO_BASE
-    input  wire                                counter_write,
-    input  wire [csp_pkg::WORD_W-1:0]          counter_data
+    input  wire [csp_pkg::WIDE_W-1:0]          write_data    // word: low 18 bits
 );
     localparam int BANK_DEPTH = csp_pkg::REGISTER_COUNT / 2;
     localparam int BANK_W     = csp_pkg::REGISTER_W - 1;
@@ -67,7 +65,6 @@ module csp_register_file (
     wire              write_odd_bank  = write_enable && !discard && (write_wide ||  write_odd);
     wire [csp_pkg::WORD_W-1:0] even_data = write_wide ? write_data[csp_pkg::WIDE_W-1:csp_pkg::WORD_W] : write_data[csp_pkg::WORD_W-1:0];
     wire [csp_pkg::WORD_W-1:0] odd_data  = write_data[csp_pkg::WORD_W-1:0];
-    localparam logic [BANK_W-1:0] COUNTER_INDEX = BANK_W'(csp_pkg::IO_BASE >> 1);   // an even register
 
     for (genvar port = 0; port < 3; port++) begin : g_copy
         logic [csp_pkg::WORD_W-1:0] even_bank [BANK_DEPTH];
@@ -80,11 +77,13 @@ module csp_register_file (
         end
 
         // This copy's write register: the decoded write, a clock before the
-        // banks take it.
+        // banks take it. `keep`, or yosys merges the three copies' identical
+        // registers into one, fanning out to six blocks' pins across the
+        // chip, which is what the copies are there to avoid.
         logic                       even_write_q, odd_write_q;
         logic [BANK_W-1:0]          index_q;
         logic [csp_pkg::WORD_W-1:0] even_data_q, odd_data_q;
-        always_ff @(posedge clk or negedge reset_n) begin
+        (* keep *) always_ff @(posedge clk or negedge reset_n) begin
             if (!reset_n) begin
                 even_write_q <= 1'b0;
                 odd_write_q  <= 1'b0;
@@ -93,7 +92,7 @@ module csp_register_file (
                 odd_write_q  <= write_odd_bank;
             end
         end
-        always_ff @(posedge clk) begin
+        (* keep *) always_ff @(posedge clk) begin
             index_q      <= write_index;
             even_data_q  <= even_data;
             odd_data_q   <= odd_data;
@@ -101,8 +100,8 @@ module csp_register_file (
 
         // Sync-only processes, so yosys infers a BSRAM per bank.
         always_ff @(posedge clk) begin
-            if (even_write_q || counter_write) begin
-                even_bank[counter_write ? COUNTER_INDEX : index_q] <= counter_write ? counter_data : even_data_q;
+            if (even_write_q) begin
+                even_bank[index_q] <= even_data_q;
             end
         end
         always_ff @(posedge clk) begin
