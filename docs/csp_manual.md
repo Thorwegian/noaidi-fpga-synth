@@ -258,7 +258,7 @@ instruction itself. The instruction's description says so.
   |---|---|---|
   | any, in a register | an instruction that writes that register | 8 cycles after it |
   | the first after `LOOP` or `IDX` | the `LOOP` or `IDX` | 3 cycles after it |
-  | in a vector loop, an element's operand through its own `IDX`'s index | that element's `IDX` | 4 cycles after it (the other elements fill them) |
+  | in a vector loop, an element's operand through its own `IDX`'s index | that element's `IDX` | 5 cycles after it if it has to wait (the other elements fill them); none if it arrives 4 cycles after |
   | the first of a body, as its loop repeats | the last of the body | 3 cycles after it (1 if the body is one instruction) |
   | the first after a `LOOP` whose count is 0 | the `LOOP` | 5 cycles after it |
   | any, independent | nothing before it | 1 cycle after the one before |

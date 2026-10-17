@@ -285,7 +285,7 @@ module csp_core (
 
     // What R holds besides the control word: the operands it names (R reads
     // them again for as long as it waits), and what it reads.
-    logic [csp_pkg::ADDRESS_W-1:0] read_x_address, read_y_address;
+    logic [csp_pkg::ADDRESS_W-1:0] read_r_address, read_x_address, read_y_address;
     logic read_reads_a, read_reads_x, read_reads_y;
     logic read_a_wide, read_y_wide;
     logic read_reads_accumulator, read_reads_flags;
@@ -413,11 +413,23 @@ module csp_core (
     // The register file is read for the instruction decode issues; for as long
     // as R waits, R reads its own operands again, so that the values it takes
     // on leaving are those of the cycle before.
+    // An instruction that waited for its element's private index settles
+    // for a clock once the index has landed: R's tracking registers take
+    // decode's addresses that clock, and the banks are addressed from those
+    // registers at the issue, not from decode's adders. (On the board at
+    // 73.728 MHz the adders' path to the pins, untimed, read another
+    // register for such an instruction when another followed it; the
+    // registered path, the one a hazard hold uses, read right.)
+    logic private_wait_q, settled_q;
+    wire  settle = decode_valid && private_used && !private_pending && private_wait_q;
     always_comb begin
-        read_address[0] = csp_pkg::REGISTER_W'(r_hold ? read_stage.r_address : decode_r_address);
-        read_address[1] = csp_pkg::REGISTER_W'(r_hold ? read_x_address : decode_x_address);
+        read_address[0] = csp_pkg::REGISTER_W'(r_hold ? read_stage.r_address
+                                                : (settled_q ? read_r_address : decode_r_address));
+        read_address[1] = csp_pkg::REGISTER_W'(r_hold ? read_x_address
+                                                : (settled_q ? read_x_address : decode_x_address));
         read_address[2] = probe_now ? probe_address
-                                    : csp_pkg::REGISTER_W'(r_hold ? read_y_address : decode_y_address);
+                                    : csp_pkg::REGISTER_W'(r_hold ? read_y_address
+                                                            : (settled_q ? read_y_address : decode_y_address));
     end
 
     // The hazard check, in R, on registered values only: an older instruction in
@@ -548,7 +560,7 @@ module csp_core (
                 && execute2_stage.instruction.op == csp_pkg::OP_IDX);
 
     wire issue = decode_valid && decode_has_word && run_open && !r_hold
-                 && !(private_used && private_pending);
+                 && !(private_used && private_pending) && !settle;
 
     control_t issued;
     always_comb begin
@@ -1161,6 +1173,7 @@ module csp_core (
             vector_last_element_number <= '0; last_private <= '0;
             vector_stride <= '0; vector_own <= '0;
             private_written <= 1'b0; flags_written <= 1'b0;
+            private_wait_q <= 1'b0; settled_q <= 1'b0;
         end else if (pass_start) begin
             decode_valid    <= !held;
             decode_pc       <= '0;
@@ -1179,6 +1192,8 @@ module csp_core (
             vector_issuing  <= 1'b0;
             vector_finish   <= '0;
         end else begin
+            private_wait_q <= decode_valid && private_used && private_pending;
+            settled_q      <= settle;
             // D: issue, or wait; a LOOP or IDX empties decode until it resolves.
             if (advance) begin
                 decode_valid <= 1'b1;
@@ -1301,6 +1316,7 @@ module csp_core (
             read_reads_a           <= reads_a;
             read_reads_x           <= reads_x;
             read_reads_y           <= reads_y;
+            read_r_address         <= decode_r_address;
             read_x_address         <= decode_x_address;
             read_y_address         <= decode_y_address;
             read_a_wide            <= decode_a_wide;

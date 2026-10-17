@@ -336,8 +336,11 @@ int64_t Processor::issue(const Instruction &instruction,
     auto wait_for_index = [&](uint16_t field) {
         const Operand operand = Operand::decode(field);
         if (state.vector && operand.mode == Operand::Mode::indexed
-            && operand.index == state.vector->private_index) {
-            cycle = std::max(cycle, board.index_ready);
+            && operand.index == state.vector->private_index && cycle < board.index_ready) {
+            // The element's copy of the index lands at index_ready; an
+            // instruction that had to wait for it settles for one more
+            // cycle (csp_core.sv: the banks addressed from R's registers).
+            cycle = board.index_ready + 1;
         }
     };
     auto wait_for = [&](bool reads, int address, bool wide) {

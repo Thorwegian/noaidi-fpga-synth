@@ -22,22 +22,23 @@
 
         IDX     i, =#CHANNELS, 0
         LOOP.vi channels, CHANNELS_IN_USE, =#64
+        ; Each LFO's record is pointed at once and all four products taken
+        ; from it (pitch, cutoff, duty, resonance): two IDX fewer than one
+        ; LFO per quantity, and each IDX's wait filled with the other's
+        ; products.
         IDX     j, [i+LFO1], 0                      ; j → LFO 1's record
         MAC     [i+TP], 0, [j+OUT], [i+LFO1_PITCH]
         MAC     [i+TC], 0, [j+OUT], [i+LFO1_CUTOFF]
-        IDX     j, [i+LFO2], 0
-        MAC     [i+TP], [i+TP], [j+OUT], [i+LFO2_PITCH]
-        MAC     [i+TC], [i+TC], [j+OUT], [i+LFO2_CUTOFF]
-        ADD3    [i+CH_PITCH], 0, [i+TP], [i+BEND]
-        MAC     [i+TC], [i+TC], [i+CH_PITCH], [i+KEY_TRACK]
-        ADD3    [i+CH_CUTOFF], 0, [i+TC], [i+CUTOFF_BASE]
-
-        IDX     j, [i+LFO1], 0
         MAC     [i+TD], 0, [j+OUT], [i+LFO1_DUTY]
         MAC     [i+TR], 0, [j+OUT], [i+LFO1_RESONANCE]
         IDX     j, [i+LFO2], 0
+        MAC     [i+TP], [i+TP], [j+OUT], [i+LFO2_PITCH]
+        MAC     [i+TC], [i+TC], [j+OUT], [i+LFO2_CUTOFF]
         MAC     [i+TD], [i+TD], [j+OUT], [i+LFO2_DUTY]
         MAC     [i+TR], [i+TR], [j+OUT], [i+LFO2_RESONANCE]
+        ADD3    [i+CH_PITCH], 0, [i+TP], [i+BEND]
+        MAC     [i+TC], [i+TC], [i+CH_PITCH], [i+KEY_TRACK]
+        ADD3    [i+CH_CUTOFF], 0, [i+TC], [i+CUTOFF_BASE]
         IDX     j, [i+SINK_BLOCK], 0                ; j → the channel's sinks
         ADD3    [j+DUTY_0], 0, [i+TD], [i+DUTY_BASE_0]
         ADD3    [j+DUTY_1], 0, [i+TD], [i+DUTY_BASE_1]
