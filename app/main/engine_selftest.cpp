@@ -43,8 +43,8 @@ public:
 
 private:
     void queue(int address, int32_t raw) {
-        port_.write_word(static_cast<uint16_t>(fpga_map::queue_base + address),
-                         static_cast<uint32_t>(raw) & word_mask);
+        port_.write_quad(fpga_map::fifo_door,
+                         fpga_map::fifo_quad(address, static_cast<uint32_t>(raw)));
     }
 
     void queue_wide(int address, int64_t raw36) {
@@ -55,23 +55,19 @@ private:
     // The program and the constants, and the LFOs: LFO 1 a triangle in the
     // first half, LFO 2 a saw in the second.
     void load() {
-        port_.write_word(fpga_map::ctrl, fpga_map::ctrl_hold);
-        uint32_t high = 0xFFFFFFFF;
+        port_.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold);
+        // A row is two quads; the first revision's 36-bit words ride in the
+        // lower one until the second revision's assembler (#235) writes
+        // 72-bit rows.
         for (size_t pc = 0; pc < st::words.size(); ++pc) {
-            const uint64_t word = st::words[pc];
-            if (static_cast<uint32_t>(word >> 32) != high) {
-                high = static_cast<uint32_t>(word >> 32);
-                port_.write_word(fpga_map::program_high, high);
-            }
-            port_.write_word(static_cast<uint16_t>(fpga_map::program_base + pc),
-                             static_cast<uint32_t>(word));
+            port_.write_quad(fpga_map::program_base + 2 * pc, 0);
+            port_.write_quad(fpga_map::program_base + 2 * pc + 1, st::words[pc]);
         }
         // What an earlier program left past the end of this one would run
         // after it, on a chip that has not been reset.
-        port_.write_word(fpga_map::program_high, 0);
-        for (size_t pc = st::words.size(); pc < fpga_map::program_words; ++pc) {
-            port_.write_word(static_cast<uint16_t>(fpga_map::program_base + pc),
-                             0);
+        for (size_t pc = st::words.size(); pc < fpga_map::program_rows; ++pc) {
+            port_.write_quad(fpga_map::program_base + 2 * pc, 0);
+            port_.write_quad(fpga_map::program_base + 2 * pc + 1, 0);
         }
         for (const st::Constant &constant : st::constants) {
             queue(constant.address, constant.raw);
@@ -98,10 +94,10 @@ private:
             queue(set + st::base, record);
             queue(set + (half == 0 ? st::n_triangle : st::n_saw), 1);
         }
-        port_.write_word(fpga_map::ctrl,
+        port_.write_quad(fpga_map::ctrl,
                          fpga_map::ctrl_hold | fpga_map::ctrl_swap);
         port_.wait_ms(2);
-        port_.write_word(fpga_map::ctrl, 0); // release
+        port_.write_quad(fpga_map::ctrl, 0); // release
     }
 
     void note(bool ok, const char *what, long got, long want) {
@@ -209,7 +205,7 @@ private:
 SelfTestResult run_selftest(SelfTestPort &port, bool leave_running) {
     SelfTestResult result = Run(port).run();
     if (!leave_running) {
-        port.write_word(fpga_map::ctrl, fpga_map::ctrl_hold);
+        port.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold);
     }
     return result;
 }

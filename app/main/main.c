@@ -11,7 +11,7 @@
 #include "esp_system.h"
 #include "esp_app_desc.h"
 
-#include "spi_regs.h"
+#include "spi_link.h"
 #include "midi_in.h"
 #include "midi_log.h"
 #include "event_bus.h"
@@ -82,58 +82,12 @@ void app_main(void) {
     midi_panel_init(2);
 
     // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
-    // 32 words (~60 us each) would blow the engine's 1 ms tick.
-    fpga_spi_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
+    // 32 quads (~130 us each) would blow the engine's 1 ms tick.
+    spi_link_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
 
-    // Word-protocol self-test (spi_bus.sv / docs/memory_map.md format).
-    // Mirrors tb_spi_bus.sv's cases so firmware and RTL agree on the
-    // same evidence.
-    int fails = 0;
-
-    printf("=== 1. single word write/read ===\n");
-    fpga_word_write(0x0005, 0xDEADBEEF);
-    uint32_t v = fpga_word_read(0x0005);
-    printf("word[0x0005] = %08lX %s\n", (unsigned long) v,
-           v == 0xDEADBEEF ? "OK" : "FAIL");
-    fails += (v != 0xDEADBEEF);
-
-    // Words 0x0006 and 0x0007 are the last two stored system registers;
-    // 0x0008 onwards are the status words (CSP passes, the queue, the
-    // limiter, dropped writes), read-only: a write to one is ignored.
-    printf("=== 2. burst auto-increment (system registers) ===\n");
-    uint32_t wq[2] = {0x11111111, 0x22222222};
-    uint32_t rq[2] = {0};
-    fpga_word_write_burst(0x0006, wq, 2);
-    bool id_ok = fpga_word_read_burst(0x0006, rq, 2);
-    for (int i = 0; i < 2; i++) {
-        printf("word[0x%04X] = %08lX %s\n", 0x0006 + i, (unsigned long) rq[i],
-               rq[i] == wq[i] ? "OK" : "FAIL");
-        fails += (rq[i] != wq[i]);
-    }
-    printf("ID byte on read frame: %s\n", id_ok ? "OK (A5)" : "FAIL");
-    fails += !id_ok;
-
-    printf("=== 2b. the status words ignore writes ===\n");
-    fpga_word_write(0x0008, 0xFFFFFFFF);
-    uint32_t status = fpga_word_read(0x0008);
-    printf("word[0x0008] = %08lX %s\n", (unsigned long) status,
-           status != 0xFFFFFFFF ? "OK (status, not the write)" : "FAIL");
-    fails += (status == 0xFFFFFFFF);
-
-    printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
-    // 0x1005 decodes to nothing. Probe addresses must miss EVERY decode
-    // window (an address inside the queue would move a live register at
-    // every boot): system 0x0000-0x0010, pointers 0x2000-0x5FFF, the
-    // CSP's queue 0x6000-0x6FFF, its program 0x8000-0x85BF.
-    fpga_word_write(0x1005, 0xBAD0BAD0);
-    uint32_t z    = fpga_word_read(0x1005);
-    uint32_t keep = fpga_word_read(0x0005);
-    printf("word[0x1005] = %08lX %s, word[0x0005] = %08lX %s\n",
-           (unsigned long) z, z == 0 ? "OK" : "FAIL", (unsigned long) keep,
-           keep == 0xDEADBEEF ? "OK" : "FAIL");
-    fails += (z != 0) + (keep != 0xDEADBEEF);
-
-    printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
+    // The link in nines, checked as tb_spi_bus.sv checks the slave, so that
+    // firmware and RTL agree on the same evidence.
+    spi_link_boot_check();
 
     // ── The synth proper ────────────────────────────────────────────
     // engine_link takes sole ownership of the SPI link from here on

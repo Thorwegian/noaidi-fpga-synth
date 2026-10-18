@@ -21,7 +21,7 @@
 #include "engine_selftest.hpp"
 #include "fpga_map.hpp"
 #include "render.hpp"
-#include "spi_regs.h"
+#include "spi_link.hpp"
 
 namespace {
 
@@ -40,15 +40,15 @@ constexpr int64_t tick_us = 1000;
 // by the next. A tick sends no more than this, the rest waits for the next.
 constexpr int writes_per_tick = 480;
 
-// The SPI link, as the image sends through it.
+// The SPI link, as the image sends through it: every quad into the FIFO's
+// door, in one frame without auto-increment.
 class SpiPort : public EnginePort {
 public:
-    void queue_burst(uint16_t address, const uint32_t *words,
-                     int count) override {
-        fpga_word_write_burst(address, words, static_cast<size_t>(count));
+    void queue(const fpga_map::quad_t *quads, int count) override {
+        spi_link::write_repeated(fpga_map::fifo_door, quads, static_cast<size_t>(count));
     }
-    void write_register(uint16_t address, uint32_t value) override {
-        fpga_word_write(address, value);
+    void write_register(uint32_t address, fpga_map::quad_t value) override {
+        spi_link::write_one(address, value);
     }
 };
 
@@ -57,16 +57,34 @@ SpiPort port;
 SemaphoreHandle_t lock = nullptr;
 TaskHandle_t task      = nullptr;
 bool test_tone         = false;
+bool data_stream       = false;
+int stream_source      = 0;
 bool running           = false;
 bool paused = false; // the tick sends nothing (the self-test has the chip)
 
-uint32_t ctrl_word(uint32_t bits) {
-    return bits | (test_tone ? fpga_map::ctrl_test_tone : 0);
+// CTRL as the engine keeps it: the levels it owns, over the bits asked for.
+fpga_map::quad_t ctrl_word(fpga_map::quad_t bits) {
+    return bits | (test_tone ? fpga_map::ctrl_test_tone : 0)
+           | (data_stream ? fpga_map::ctrl_data_stream : 0)
+           | (static_cast<fpga_map::quad_t>(stream_source & 3) << fpga_map::ctrl_source_shift);
 }
 
 // Send what is pending, at most `limit` words, and commit it with a swap.
-int send(int limit, uint32_t ctrl_bits) {
+int send(int limit, fpga_map::quad_t ctrl_bits) {
     return image.send(port, limit, ctrl_word(ctrl_bits));
+}
+
+// The low 32 bits of a status quad, read twice until the two agree: the
+// status quads cross from the system clock bit by bit.
+uint32_t read_status(uint32_t address) {
+    std::array<fpga_map::quad_t, 2> twice{};
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        spi_link::read_repeated(address, twice.data(), twice.size());
+        if (twice[0] == twice[1]) {
+            break;
+        }
+    }
+    return static_cast<uint32_t>(twice[1]);
 }
 
 void tick_timer_cb(void *) {
@@ -81,19 +99,18 @@ void check_gateware_health() {
     static uint32_t previous_passes  = 0;
     static uint32_t previous_dropped = 0;
     static int healthy_seconds       = 0;
-    std::array<uint32_t, fpga_map::diag_words> diag{};
+    std::array<fpga_map::quad_t, fpga_map::diag_words> diag{};
     xSemaphoreTake(lock, portMAX_DELAY);
-    const bool read_ok =
-            fpga_word_read_burst(fpga_map::diag_pass, diag.data(), diag.size());
+    const bool read_ok = spi_link::read(fpga_map::diag_pass, diag.data(), diag.size());
     xSemaphoreGive(lock);
     if (!read_ok) {
         ESP_LOGW(tag, "diagnostic read failed");
         return;
     }
-    const uint32_t passes    = diag[0] & 0x3FFFF;
+    const uint32_t passes    = static_cast<uint32_t>(diag[0]);
     const bool queue_full    = (diag[1] >> 10) & 1;
-    const uint32_t reduction = diag[2] >> 11; // codes of 0.375 dB
-    const uint32_t dropped   = diag[3] & 0xFFFF;
+    const uint32_t reduction = static_cast<uint32_t>(diag[2] >> 11); // codes of 0.375 dB
+    const uint32_t dropped   = static_cast<uint32_t>(diag[3] & 0xFFFF);
     const bool csp_stopped   = passes == previous_passes;
     const bool dropped_new   = dropped != previous_dropped;
     previous_passes          = passes;
@@ -119,23 +136,22 @@ void check_gateware_health() {
 // while the probe waits for its pass.
 uint64_t probe_pair(int register_address) {
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_write(fpga_map::probe_address,
-                    static_cast<uint32_t>(register_address));
+    spi_link::write_one(fpga_map::probe_address, static_cast<fpga_map::quad_t>(register_address));
     xSemaphoreGive(lock);
     vTaskDelay(pdMS_TO_TICKS(3)); // at least two passes
-    std::array<uint32_t, 2> pair{};
+    std::array<fpga_map::quad_t, 2> pair{};
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_read_burst(fpga_map::probe_even, pair.data(), pair.size());
+    spi_link::read(fpga_map::probe_even, pair.data(), pair.size());
     xSemaphoreGive(lock);
-    return (static_cast<uint64_t>(pair[0] & 0x3FFFF) << 18)
-           | (pair[1] & 0x3FFFF);
+    return ((pair[0] & fpga_map::word_mask) << fpga_map::word_bits)
+           | (pair[1] & fpga_map::word_mask);
 }
 
 // The boot self-test's way to the chip: the SPI link, and the probe.
 class SpiSelfTestPort : public SelfTestPort {
 public:
-    void write_word(uint16_t address, uint32_t value) override {
-        fpga_word_write(address, value);
+    void write_quad(uint32_t address, uint64_t value) override {
+        spi_link::write_one(address, value);
     }
     void wait_ms(int milliseconds) override {
         vTaskDelay(pdMS_TO_TICKS(milliseconds));
@@ -306,24 +322,14 @@ void engine_task(void *) {
     }
 }
 
-// Load the control program while the CSP is held.
+// Load the control program while the CSP is held: a row is two quads. The
+// first revision's 36-bit words ride in the lower quad until the second
+// revision's assembler (#235) writes 72-bit rows.
 void load_program() {
-    uint32_t high = 0xFFFFFFFF; // none yet
-    for (size_t pc = 0; pc < csp::control::words.size(); ++pc) {
-        const uint64_t word = csp::control::words[pc];
-        if (static_cast<uint32_t>(word >> 32) != high) {
-            high = static_cast<uint32_t>(word >> 32);
-            fpga_word_write(fpga_map::program_high, high);
-        }
-        fpga_word_write(static_cast<uint16_t>(fpga_map::program_base + pc),
-                        static_cast<uint32_t>(word));
-    }
-    // What an earlier program left past the end of this one would run after
-    // it, on a chip that has not been reset.
-    fpga_word_write(fpga_map::program_high, 0);
-    for (size_t pc = csp::control::words.size(); pc < fpga_map::program_words;
-         ++pc) {
-        fpga_word_write(static_cast<uint16_t>(fpga_map::program_base + pc), 0);
+    std::array<fpga_map::quad_t, 2> row{};
+    for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
+        row[1] = pc < csp::control::words.size() ? csp::control::words[pc] : 0;
+        spi_link::write(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row.data(), row.size());
     }
 }
 
@@ -338,19 +344,19 @@ void engine_link_init(void) {
 
     // The CSP starts held; make sure of it, whatever the last run left, then
     // give it the program, the constants and the wiring.
-    fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold);
 
     // The probe reads a register pair once a pass; after a reset it reads
     // pair 0, the row the constant ONE is in, and a read of a block RAM row
     // on one port while the other writes it is a collision (issue #222: ONE
     // lost at boot). Park it on a pair nothing writes until it is asked for.
-    fpga_word_write(fpga_map::probe_address, 0x5FE);
+    spi_link::write_one(fpga_map::probe_address, 0x5FE);
 
-    // The write queue outlives a reset of this chip: what the last run left in
+    // The write FIFO outlives a reset of this chip: what the last run left in
     // it (committed or not) would be applied during the self-test and the first
     // passes of the control program, over what they compute. Commit it and let
     // the held CSP apply it all now (up to 512 writes, in one pass when held).
-    fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Does the chip do what the model says? Say so before the sound depends
@@ -389,7 +395,7 @@ void engine_link_init(void) {
         paused = true;
         ESP_LOGW(tag, "hold_after_boot: the CSP stays held, the tick is paused");
     } else {
-        fpga_word_write(fpga_map::ctrl, ctrl_word(0)); // release
+        spi_link::write_one(fpga_map::ctrl, ctrl_word(0)); // release
     }
     ESP_LOGI(tag, "control program loaded: %u instructions, %u constants",
              static_cast<unsigned>(csp::control::words.size()),
@@ -418,25 +424,49 @@ void engine_link_pause(bool pause) {
     paused = pause;
 }
 
-bool engine_link_raw_write(uint16_t address, uint32_t value) {
+bool engine_link_raw_write(uint32_t address, uint64_t quad) {
     if (!running) {
         return false;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_write(address, value);
+    spi_link::write_one(address, quad);
     xSemaphoreGive(lock);
     return true;
 }
 
-bool engine_link_raw_write_burst(uint16_t address, const uint32_t *words,
-                                 int count) {
+bool engine_link_raw_write_burst(uint32_t address, const uint64_t *quads, int count,
+                                 bool auto_increment) {
     if (!running) {
         return false;
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_write_burst(address, words, static_cast<size_t>(count));
+    if (auto_increment) {
+        spi_link::write(address, quads, static_cast<size_t>(count));
+    } else {
+        spi_link::write_repeated(address, quads, static_cast<size_t>(count));
+    }
     xSemaphoreGive(lock);
     return true;
+}
+
+bool engine_link_raw_read(uint32_t address, uint64_t *quads, int count) {
+    if (!running) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const bool ok = spi_link::read(address, quads, static_cast<size_t>(count));
+    xSemaphoreGive(lock);
+    return ok;
+}
+
+uint32_t engine_link_status(uint32_t address) {
+    if (!running) {
+        return 0;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const uint32_t value = read_status(address);
+    xSemaphoreGive(lock);
+    return value;
 }
 
 bool engine_link_selftest(bool leave_running) {
@@ -446,7 +476,7 @@ bool engine_link_selftest(bool leave_running) {
     SpiSelfTestPort self_test_port;
     xSemaphoreTake(lock, portMAX_DELAY);
     paused = true;
-    fpga_word_write(fpga_map::ctrl, fpga_map::ctrl_hold);
+    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold);
     xSemaphoreGive(lock);
     const SelfTestResult result = run_selftest(self_test_port, leave_running);
     for (const std::string &line : result.lines) {
@@ -517,16 +547,15 @@ bool engine_link_point(int partial, const int *pointers) {
     if (!running || partial < 0 || partial >= fpga_map::partial_count) {
         return false;
     }
-    // Three pointers of ten bits to a word, the fourth word commits.
-    std::array<uint32_t, fpga_map::pointer_words> words{};
+    // Three pointers of ten bits to a quad, the fourth quad commits.
+    std::array<fpga_map::quad_t, fpga_map::pointer_words> quads{};
     for (int k = 0; k < render::pointer_count; ++k) {
-        words[k / 3] |= (static_cast<uint32_t>(pointers[k]) & 0x3FF)
+        quads[k / 3] |= (static_cast<fpga_map::quad_t>(pointers[k]) & 0x3FF)
                         << (10 * (k % 3));
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    fpga_word_write_burst(fpga_map::partial_base
-                                  + partial * fpga_map::partial_stride,
-                          words.data(), fpga_map::pointer_words);
+    spi_link::write(fpga_map::partial_base + static_cast<uint32_t>(partial) * fpga_map::partial_stride,
+                    quads.data(), quads.size());
     xSemaphoreGive(lock);
     return true;
 }
@@ -537,6 +566,17 @@ void engine_link_test_tone(bool on) {
     }
     xSemaphoreTake(lock, portMAX_DELAY);
     test_tone = on;
-    fpga_word_write(fpga_map::ctrl, ctrl_word(0));
+    spi_link::write_one(fpga_map::ctrl, ctrl_word(0));
+    xSemaphoreGive(lock);
+}
+
+void engine_link_data_stream(bool on, int source) {
+    if (!running) {
+        return;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    data_stream   = on;
+    stream_source = source;
+    spi_link::write_one(fpga_map::ctrl, ctrl_word(0));
     xSemaphoreGive(lock);
 }

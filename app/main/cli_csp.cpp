@@ -14,13 +14,14 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "engine_link.h"
 #include "fpga_map.hpp"
-#include "spi_regs.h"
+#include "spi_link.hpp"
 
 namespace {
 
@@ -102,17 +103,17 @@ int cmd_resend(int, char **) {
 }
 
 int cmd_diag(int, char **) {
-    uint32_t words[fpga_map::diag_words] = {};
-    if (!fpga_word_read_burst(fpga_map::diag_pass, words,
-                              fpga_map::diag_words)) {
-        std::printf("  the link answers no ID byte\n");
+    uint64_t quads[fpga_map::diag_words] = {};
+    if (!engine_link_raw_read(fpga_map::diag_pass, quads, fpga_map::diag_words)) {
+        std::printf("  the link answers no ID nonad\n");
         return 1;
     }
-    std::printf("  passes %lu  queue %lx  limiter %lx  dropped %lu\n",
-                static_cast<unsigned long>(words[0] & 0x3FFFF),
-                static_cast<unsigned long>(words[1]),
-                static_cast<unsigned long>(words[2]),
-                static_cast<unsigned long>(words[3] & 0xFFFF));
+    std::printf("  passes %lu  queue %llx  limiter %llx  dropped %lu  stream frames %lu\n",
+                static_cast<unsigned long>(engine_link_status(fpga_map::diag_pass)),
+                static_cast<unsigned long long>(quads[1]),
+                static_cast<unsigned long long>(quads[2]),
+                static_cast<unsigned long>(quads[3] & 0xFFFF),
+                static_cast<unsigned long>(engine_link_status(fpga_map::diag_stream)));
     return 0;
 }
 
@@ -140,10 +141,9 @@ int cmd_hold(int, char **) {
     engine_link_raw_write(fpga_map::ctrl,
                           fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
-    engine_link_raw_write(fpga_map::program_high, 0);
-    for (size_t pc = 0; pc < fpga_map::program_words; ++pc) {
-        engine_link_raw_write(
-                static_cast<uint16_t>(fpga_map::program_base + pc), 0);
+    for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
+        const uint64_t row[2] = {0, 0};
+        engine_link_raw_write_burst(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row, 2, true);
     }
     std::printf("  held, program cleared, tick paused\n");
     return 0;
@@ -157,10 +157,10 @@ int cmd_word(int argc, char **argv) {
     const unsigned pc =
             static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const uint64_t word = std::strtoull(argv[2], nullptr, 16);
-    engine_link_raw_write(fpga_map::program_high,
-                          static_cast<uint32_t>(word >> 32));
-    engine_link_raw_write(static_cast<uint16_t>(fpga_map::program_base + pc),
-                          static_cast<uint32_t>(word));
+    // A row is two quads; the first revision's word rides in the lower one
+    // until #235 writes 72-bit rows.
+    const uint64_t row[2] = {0, word};
+    engine_link_raw_write_burst(fpga_map::program_base + 2 * pc, row, 2, true);
     ++s_words_written;
     s_checksum = s_checksum * 31u + static_cast<unsigned>(pc) * 7u
                  + static_cast<unsigned>(word)
@@ -176,8 +176,8 @@ int cmd_const(int argc, char **argv) {
     const unsigned address =
             static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const int raw = static_cast<int>(std::strtol(argv[2], nullptr, 0));
-    engine_link_raw_write(static_cast<uint16_t>(fpga_map::queue_base + address),
-                          static_cast<uint32_t>(raw) & 0x3FFFF);
+    engine_link_raw_write(fpga_map::fifo_door,
+                          fpga_map::fifo_quad(static_cast<int>(address), static_cast<uint32_t>(raw)));
     ++s_words_written;
     s_checksum = s_checksum * 31u + address * 5u
                  + (static_cast<unsigned>(raw) & 0x3FFFFu);
@@ -195,16 +195,15 @@ int cmd_burst(int argc, char **argv) {
     const unsigned first = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const unsigned count = static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0));
     const unsigned seed  = static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
-    constexpr unsigned burst_words = 8;
-    for (unsigned at = 0; at < count; at += burst_words) {
-        uint32_t words[burst_words];
-        const unsigned n = std::min(burst_words, count - at);
+    constexpr unsigned burst_quads = 8;
+    for (unsigned at = 0; at < count; at += burst_quads) {
+        uint64_t quads[burst_quads];
+        const unsigned n = std::min(burst_quads, count - at);
         for (unsigned k = 0; k < n; ++k) {
-            words[k] = ((first + at + k) * 37u + seed) & 0x1FFFFu;
+            const unsigned address = first + at + k;
+            quads[k] = fpga_map::fifo_quad(static_cast<int>(address), (address * 37u + seed) & 0x1FFFFu);
         }
-        engine_link_raw_write_burst(
-                static_cast<uint16_t>(fpga_map::queue_base + first + at), words,
-                static_cast<int>(n));
+        engine_link_raw_write_burst(fpga_map::fifo_door, quads, static_cast<int>(n), false);
     }
     std::printf("  queued %u words in bursts\n", count);
     return 0;
@@ -220,36 +219,60 @@ int cmd_go(int, char **) {
     return 0;
 }
 
-// Does the SPI link carry what it is given? Random words to the scratch
-// registers and back, N rounds.
+// Does the SPI link carry what it is given? Random 36-bit quads to the
+// scratch quads and back, N rounds, singly and in bursts.
 int cmd_spitest(int argc, char **argv) {
     const int rounds =
             argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0))
                      : 1000;
-    uint32_t state = 0x12345678;
-    int single_bad = 0, burst_bad = 0;
+    constexpr int scratch_quads = fpga_map::scratch_last - fpga_map::scratch_first + 1;
+    uint64_t state = 0x12345678;
+    int single_bad = 0, burst_bad = 0, id_bad = 0;
     for (int round = 0; round < rounds; ++round) {
-        uint32_t words[5];
-        for (uint32_t &word : words) {
-            state = state * 1664525u + 1013904223u;
-            word  = state;
+        uint64_t quads[scratch_quads];
+        for (uint64_t &quad : quads) {
+            state = state * 6364136223846793005ull + 1442695040888963407ull;
+            quad  = (state >> 20) & spi_link::quad_mask;
         }
-        for (int k = 0; k < 5; ++k) {
-            engine_link_raw_write(static_cast<uint16_t>(3 + k), words[k]);
+        for (int k = 0; k < scratch_quads; ++k) {
+            engine_link_raw_write(fpga_map::scratch_first + k, quads[k]);
         }
-        for (int k = 0; k < 5; ++k) {
-            single_bad +=
-                    fpga_word_read(static_cast<uint16_t>(3 + k)) != words[k];
+        for (int k = 0; k < scratch_quads; ++k) {
+            uint64_t one = 0;
+            id_bad += !engine_link_raw_read(fpga_map::scratch_first + k, &one, 1);
+            single_bad += one != quads[k];
         }
-        engine_link_raw_write_burst(3, words, 5);
-        uint32_t back[5] = {};
-        fpga_word_read_burst(3, back, 5);
-        for (int k = 0; k < 5; ++k) {
-            burst_bad += back[k] != words[k];
+        engine_link_raw_write_burst(fpga_map::scratch_first, quads, scratch_quads, true);
+        uint64_t back[scratch_quads] = {};
+        id_bad += !engine_link_raw_read(fpga_map::scratch_first, back, scratch_quads);
+        for (int k = 0; k < scratch_quads; ++k) {
+            burst_bad += back[k] != quads[k];
         }
     }
-    std::printf("  %d rounds: %d single-word and %d burst mismatches\n", rounds,
-                single_bad, burst_bad);
+    std::printf("  %d rounds: %d single-quad and %d burst mismatches, %d frames without the ID\n",
+                rounds, single_bad, burst_bad, id_bad);
+    return 0;
+}
+
+// csp-stream off | lfsr | counter: the data stream on the 48 kHz S/PDIF
+// output, the pipe tools/lab/spdif_capture.py checks bit for bit.
+int cmd_stream(int argc, char **argv) {
+    if (argc != 2) {
+        std::printf("usage: csp-stream off|lfsr|counter\n");
+        return 1;
+    }
+    const char *what = argv[1];
+    if (std::strcmp(what, "off") == 0) {
+        engine_link_data_stream(false, 0);
+    } else if (std::strcmp(what, "lfsr") == 0) {
+        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_lfsr));
+    } else if (std::strcmp(what, "counter") == 0) {
+        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_counter));
+    } else {
+        std::printf("usage: csp-stream off|lfsr|counter\n");
+        return 1;
+    }
+    std::printf("  stream %s\n", what);
     return 0;
 }
 
@@ -276,15 +299,14 @@ int cmd_step(int argc, char **argv) {
             argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) : 1;
     // The pass counter counts held passes too (and register 0x040 follows it):
     // note where the run began and where it was held again, for `csp replay`.
-    const uint32_t first = fpga_word_read(fpga_map::diag_pass);
+    const uint32_t first = engine_link_status(fpga_map::diag_pass);
     engine_link_raw_write(fpga_map::ctrl, 0);
     vTaskDelay(pdMS_TO_TICKS(milliseconds));
     engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
-    const uint32_t last = fpga_word_read(fpga_map::diag_pass);
+    const uint32_t last = engine_link_status(fpga_map::diag_pass);
     vTaskDelay(pdMS_TO_TICKS(10));
     std::printf("  stepped %d ms from pass %lu to %lu\n", milliseconds,
-                static_cast<unsigned long>(first & 0x3FFFF),
-                static_cast<unsigned long>(last & 0x3FFFF));
+                static_cast<unsigned long>(first), static_cast<unsigned long>(last));
     return 0;
 }
 
@@ -319,8 +341,10 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-dump", "[first [count]]", "every register, a pair a line",
          cmd_dump, nullptr},
-        {"csp-spitest", "[rounds]", "write and read back scratch registers",
+        {"csp-spitest", "[rounds]", "write and read back the scratch quads",
          cmd_spitest, nullptr},
+        {"csp-stream", "off|lfsr|counter",
+         "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
          cmd_hold, nullptr},
         {"csp-word", "<pc> <hex>", "lab: write an instruction word", cmd_word,

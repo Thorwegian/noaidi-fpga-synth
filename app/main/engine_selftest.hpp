@@ -19,8 +19,8 @@
 class SelfTestPort {
 public:
     virtual ~SelfTestPort() = default;
-    // A word to an address of the SPI map (fpga_map.hpp).
-    virtual void write_word(uint16_t address, uint32_t value) = 0;
+    // A quad to an address of the SPI map (fpga_map.hpp).
+    virtual void write_quad(uint32_t address, uint64_t value) = 0;
     // Let the chip run.
     virtual void wait_ms(int milliseconds) = 0;
     // The CSP register pair at `register_address` (even), as the probe reads

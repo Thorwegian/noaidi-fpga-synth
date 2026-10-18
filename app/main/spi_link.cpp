@@ -1,0 +1,222 @@
+// spi_link.cpp — the SPI wire in nines, over the ESP-IDF SPI master
+//
+// Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+// License: CERN-OHL-S v2
+
+#include "spi_link.hpp"
+
+#include <array>
+#include <cstdio>
+
+#include "driver/spi_master.h"
+#include "esp_log.h"
+
+namespace spi_link {
+
+namespace {
+
+constexpr const char *tag = "spi_link";
+
+constexpr int command_nonads    = 1;
+constexpr int address_nonads    = address_bits / nonad_bits;
+constexpr int turnaround_nonads = nonads_per_quad;
+constexpr int frame_max_nonads  = command_nonads + address_nonads + turnaround_nonads
+                                   + nonads_per_quad * burst_max;
+constexpr size_t frame_max_bytes = (frame_max_nonads * nonad_bits + 7) / 8;
+
+constexpr uint32_t command_read           = uint32_t{1} << (nonad_bits - 1);
+constexpr uint32_t command_auto_increment = uint32_t{1} << (nonad_bits - 2);
+
+spi_device_handle_t device = nullptr;
+
+// Bits appended MSB first into a byte buffer: the frame as the slave
+// shifts it in, nine bits a nonad and nothing between.
+class BitPacker {
+public:
+    explicit BitPacker(uint8_t *buffer) : buffer_(buffer) {}
+
+    void append(uint64_t value, int bits) {
+        for (int bit = bits - 1; bit >= 0; --bit) {
+            if ((value >> bit) & 1) {
+                buffer_[length_ / 8] |= static_cast<uint8_t>(0x80 >> (length_ % 8));
+            }
+            ++length_;
+        }
+    }
+
+    int length_bits() const { return length_; }
+
+private:
+    uint8_t *buffer_;
+    int length_ = 0;
+};
+
+// Bits taken MSB first from a byte buffer: MISO as the master received it.
+class BitReader {
+public:
+    explicit BitReader(const uint8_t *buffer) : buffer_(buffer) {}
+
+    uint64_t take(int bits) {
+        uint64_t value = 0;
+        for (int bit = 0; bit < bits; ++bit) {
+            value = (value << 1) | ((buffer_[position_ / 8] >> (7 - position_ % 8)) & 1);
+            ++position_;
+        }
+        return value;
+    }
+
+    void skip(int bits) { position_ += bits; }
+
+private:
+    const uint8_t *buffer_;
+    int position_ = 0;
+};
+
+// One CS-framed transaction of `length_bits` bits, polling: the engine link
+// is the sole SPI owner and these are tiny, frequent frames, for which the
+// interrupt driver's per-transaction cost dominated.
+void transfer(const uint8_t *tx, uint8_t *rx, int length_bits) {
+    spi_transaction_t transaction = {};
+    transaction.length    = static_cast<size_t>(length_bits);
+    transaction.tx_buffer = tx;
+    transaction.rx_buffer = rx;
+    if (rx != nullptr) {
+        transaction.rxlength = static_cast<size_t>(length_bits);
+    }
+    ESP_ERROR_CHECK(spi_device_polling_transmit(device, &transaction));
+}
+
+void header(BitPacker &packer, uint32_t command, uint32_t address) {
+    packer.append(command, nonad_bits);
+    packer.append(address, address_bits);
+}
+
+} // namespace
+
+void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, uint32_t frequency_hz) {
+    spi_bus_config_t bus = {};
+    bus.mosi_io_num     = mosi_pin;
+    bus.miso_io_num     = miso_pin;
+    bus.sclk_io_num     = sclk_pin;
+    bus.quadwp_io_num   = -1;
+    bus.quadhd_io_num   = -1;
+    bus.max_transfer_sz = static_cast<int>(frame_max_bytes);
+
+    spi_device_interface_config_t interface = {};
+    interface.mode           = 0;             // CPOL 0, CPHA 0
+    interface.clock_speed_hz = static_cast<int>(frequency_hz);
+    interface.spics_io_num   = cs_pin;
+    interface.queue_size     = 1;
+
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_DISABLED));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &interface, &device));
+    ESP_LOGI(tag, "SPI in nines: MOSI %d MISO %d SCLK %d CS %d at %lu Hz", mosi_pin, miso_pin,
+             sclk_pin, cs_pin, static_cast<unsigned long>(frequency_hz));
+}
+
+namespace {
+
+void write_frame(uint32_t address, const quad_t *quads, size_t count, bool auto_increment) {
+    if (count > static_cast<size_t>(burst_max)) {
+        count = static_cast<size_t>(burst_max);
+    }
+    std::array<uint8_t, frame_max_bytes> frame{};
+    BitPacker packer(frame.data());
+    header(packer, auto_increment ? command_auto_increment : 0, address);
+    for (size_t index = 0; index < count; ++index) {
+        packer.append(quads[index] & quad_mask, quad_bits);
+    }
+    transfer(frame.data(), nullptr, packer.length_bits());
+}
+
+} // namespace
+
+void write(uint32_t address, const quad_t *quads, size_t count) {
+    write_frame(address, quads, count, true);
+}
+
+void write_one(uint32_t address, quad_t quad) {
+    write_frame(address, &quad, 1, true);
+}
+
+void write_repeated(uint32_t address, const quad_t *quads, size_t count) {
+    write_frame(address, quads, count, false);
+}
+
+namespace {
+
+bool read_frame(uint32_t address, quad_t *quads, size_t count, bool auto_increment) {
+    if (count > static_cast<size_t>(burst_max)) {
+        count = static_cast<size_t>(burst_max);
+    }
+    std::array<uint8_t, frame_max_bytes> tx{};
+    std::array<uint8_t, frame_max_bytes> rx{};
+    BitPacker packer(tx.data());
+    header(packer, command_read | (auto_increment ? command_auto_increment : 0), address);
+    packer.append(0, nonad_bits * turnaround_nonads);
+    packer.append(0, quad_bits * static_cast<int>(count));
+    transfer(tx.data(), rx.data(), packer.length_bits());
+
+    BitReader reader(rx.data());
+    const uint32_t id = static_cast<uint32_t>(reader.take(nonad_bits));
+    reader.skip(nonad_bits * (address_nonads + turnaround_nonads));
+    for (size_t index = 0; index < count; ++index) {
+        quads[index] = reader.take(quad_bits);
+    }
+    return id == id_nonad;
+}
+
+} // namespace
+
+bool read(uint32_t address, quad_t *quads, size_t count) {
+    return read_frame(address, quads, count, true);
+}
+
+bool read_repeated(uint32_t address, quad_t *quads, size_t count) {
+    return read_frame(address, quads, count, false);
+}
+
+quad_t read_one(uint32_t address) {
+    quad_t quad = 0;
+    read_frame(address, &quad, 1, true);
+    return quad;
+}
+
+} // namespace spi_link
+
+extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
+                              uint32_t frequency_hz) {
+    spi_link::init(mosi_pin, miso_pin, sclk_pin, cs_pin, frequency_hz);
+}
+
+extern "C" int spi_link_boot_check(void) {
+    using spi_link::quad_t;
+    int fails = 0;
+    auto check = [&fails](const char *what, bool ok) {
+        std::printf("%s %s\n", what, ok ? "OK" : "FAIL");
+        fails += !ok;
+    };
+
+    std::printf("=== the link in nines (rtl/spi/spi_bus.sv) ===\n");
+    constexpr uint32_t scratch = 0x00005;
+    constexpr quad_t whole     = 0xDEADBEEF5ull;             // all 36 bits
+    spi_link::write_one(scratch, whole);
+    check("1. a scratch quad written and read back whole", spi_link::read_one(scratch) == whole);
+
+    std::array<quad_t, 3> burst{0x111111111ull, 0x222222222ull, 0x333333333ull};
+    std::array<quad_t, 3> back{};
+    spi_link::write(scratch, burst.data(), burst.size());
+    const bool id_ok = spi_link::read(scratch, back.data(), back.size());
+    check("2. a burst of three quads, auto-increment", back == burst);
+    check("   the ID nonad on the read frame", id_ok);
+
+    spi_link::write_one(0x00008, spi_link::quad_mask);
+    check("3. a status quad ignores a write", spi_link::read_one(0x00008) != spi_link::quad_mask);
+
+    spi_link::write_one(0x00805, 0xBAD0BAD05ull);            // aliases 0x005 if broken
+    check("4. an address outside every window reads zero", spi_link::read_one(0x00805) == 0);
+    check("   and the scratch quad is unharmed", spi_link::read_one(scratch) == burst[0]);
+
+    std::printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
+    return fails;
+}
