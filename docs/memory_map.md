@@ -256,10 +256,14 @@ ports.
 
 ## SPI speed budget
 
-- Firmware default: **10 MHz**, one CS frame per transaction.
-- **Measured on hardware with the first revision's 32-bit wire: clean at
-  every rate from 1 MHz to 40 MHz** (the nine-bit wire is measured again the
-  same way when it exists). 88/88 transactions correct — write four registers, burst-read
+- Firmware default: **10 MHz**, one CS frame per transaction; `csp-spiclk
+  <MHz>` changes it at run time.
+- **Measured on hardware with the wire in nines (#233, 2026-10-18): clean at
+  10, 20, 26.7 and 40 MHz** — a thousand rounds of five scratch quads each,
+  singly and in a burst, at every rate: no quad wrong and the ID nonad on
+  every frame. (The ESP32 divides its 80 MHz: 30 asked gives 26.7.)
+- **Measured earlier with the first revision's 32-bit wire: clean at
+  every rate from 1 MHz to 40 MHz.** 88/88 transactions correct — write four registers, burst-read
   them back, check the ID byte and all four values, ×8 repetitions at each
   of 11 rates. 40 MHz is the ESP32-C3's ceiling for SPI2 through the GPIO
   matrix (the configured pins are not the IOMUX ones), not a limit of the
