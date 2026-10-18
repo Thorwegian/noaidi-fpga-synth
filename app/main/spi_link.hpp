@@ -40,6 +40,11 @@ using quad_t = uint64_t;
 // Bring up the ESP-IDF SPI master on these pins at this clock.
 void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, uint32_t frequency_hz);
 
+// Change the clock: the device is removed from the bus and added again at
+// the new rate (the link is measured clean to 40 MHz, the ESP32-C3's
+// ceiling through the GPIO matrix). The rate actually set is returned.
+uint32_t set_frequency(uint32_t frequency_hz);
+
 // Write `count` quads (at most burst_max) to consecutive addresses from
 // `address`; or one quad; or `count` quads all to `address` (the FIFO's
 // door takes a batch that way).

@@ -28,6 +28,17 @@ constexpr uint32_t command_read           = uint32_t{1} << (nonad_bits - 1);
 constexpr uint32_t command_auto_increment = uint32_t{1} << (nonad_bits - 2);
 
 spi_device_handle_t device = nullptr;
+int cs_pin_in_use          = -1;
+
+void add_device(int cs_pin, uint32_t frequency_hz) {
+    spi_device_interface_config_t interface = {};
+    interface.mode           = 0;             // CPOL 0, CPHA 0
+    interface.clock_speed_hz = static_cast<int>(frequency_hz);
+    interface.spics_io_num   = cs_pin;
+    interface.queue_size     = 1;
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &interface, &device));
+    cs_pin_in_use = cs_pin;
+}
 
 // Bits appended MSB first into a byte buffer: the frame as the slave
 // shifts it in, nine bits a nonad and nothing between.
@@ -102,16 +113,23 @@ void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, uint32_t frequen
     bus.quadhd_io_num   = -1;
     bus.max_transfer_sz = static_cast<int>(frame_max_bytes);
 
-    spi_device_interface_config_t interface = {};
-    interface.mode           = 0;             // CPOL 0, CPHA 0
-    interface.clock_speed_hz = static_cast<int>(frequency_hz);
-    interface.spics_io_num   = cs_pin;
-    interface.queue_size     = 1;
-
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_DISABLED));
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &interface, &device));
+    add_device(cs_pin, frequency_hz);
     ESP_LOGI(tag, "SPI in nines: MOSI %d MISO %d SCLK %d CS %d at %lu Hz", mosi_pin, miso_pin,
              sclk_pin, cs_pin, static_cast<unsigned long>(frequency_hz));
+}
+
+uint32_t set_frequency(uint32_t frequency_hz) {
+    if (device != nullptr) {
+        ESP_ERROR_CHECK(spi_bus_remove_device(device));
+        device = nullptr;
+    }
+    add_device(cs_pin_in_use, frequency_hz);
+    int actual_hz = 0;
+    ESP_ERROR_CHECK(spi_device_get_actual_freq(device, &actual_hz));
+    ESP_LOGI(tag, "SPI clock %lu Hz (asked %lu)", static_cast<unsigned long>(actual_hz) * 1000UL,
+             static_cast<unsigned long>(frequency_hz));
+    return static_cast<uint32_t>(actual_hz) * 1000U;
 }
 
 namespace {

@@ -254,6 +254,22 @@ int cmd_spitest(int argc, char **argv) {
     return 0;
 }
 
+// csp-spiclk <MHz>: the link's clock, for the test above at other rates.
+int cmd_spiclk(int argc, char **argv) {
+    if (argc != 2) {
+        std::printf("usage: csp-spiclk <MHz>\n");
+        return 1;
+    }
+    const double megahertz = std::strtod(argv[1], nullptr);
+    if (megahertz < 0.1 || megahertz > 80.0) {
+        std::printf("usage: csp-spiclk <MHz> (0.1 to 80)\n");
+        return 1;
+    }
+    const uint32_t actual = engine_link_spi_frequency(static_cast<uint32_t>(megahertz * 1e6));
+    std::printf("  SPI clock %.3f MHz\n", actual / 1e6);
+    return 0;
+}
+
 // csp-stream off | lfsr | counter: the data stream on the 48 kHz S/PDIF
 // output, the pipe tools/lab/spdif_capture.py checks bit for bit.
 int cmd_stream(int argc, char **argv) {
@@ -343,6 +359,7 @@ const console_cmd_t commands[] = {
          cmd_dump, nullptr},
         {"csp-spitest", "[rounds]", "write and read back the scratch quads",
          cmd_spitest, nullptr},
+        {"csp-spiclk", "<MHz>", "the SPI link's clock", cmd_spiclk, nullptr},
         {"csp-stream", "off|lfsr|counter",
          "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",

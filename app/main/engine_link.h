@@ -73,6 +73,8 @@ bool engine_link_raw_write_burst(uint32_t address, const uint64_t *quads, int co
 bool engine_link_raw_read(uint32_t address, uint64_t *quads, int count);
 // A status quad's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
+// The SPI clock, changed between frames; the rate actually set.
+uint32_t engine_link_spi_frequency(uint32_t frequency_hz);
 
 // The gateware's test tone: a full-scale 1500 Hz sine on both outputs.
 void engine_link_test_tone(bool on);

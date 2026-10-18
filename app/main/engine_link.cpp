@@ -469,6 +469,16 @@ uint32_t engine_link_status(uint32_t address) {
     return value;
 }
 
+uint32_t engine_link_spi_frequency(uint32_t frequency_hz) {
+    if (!running) {
+        return 0;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const uint32_t actual = spi_link::set_frequency(frequency_hz);
+    xSemaphoreGive(lock);
+    return actual;
+}
+
 bool engine_link_selftest(bool leave_running) {
     if (!running) {
         return false;
