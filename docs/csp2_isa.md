@@ -18,15 +18,16 @@ schedule the assembler proves. The rules behind each choice are
 measured ones (`gowin_oss_notes.md`, section 0); where this document
 says *because*, the number is there.
 
-## 0. Open questions
+## 0. Decisions
 
-Marked in the text where they bite; answer on the issue with the hash.
+Taken on issue #231; the text below is written to them.
 
-| hash | question | where |
+| decided | what | where |
 |---|---|---|
-| `d9f2a6c1` | the word: 72 bits (eight blocks) or 54 (six) | section 2 |
-| `b3e8c7d4` | the interlock: none at all, or kept for the queue's writes | section 8 |
-| `a7c5e1f8` | the sink area: six replicas, or a different shape | `csp2_architecture.md` |
+| 2026-10-18 | the word is 72 bits, eight 9-bit slices of one row | section 2 |
+| 2026-10-18 | no hardware interlock: the window's placement is the guarantee | section 8 |
+| 2026-10-18 | the sink area stays six replicas of two pages, twelve blocks | `csp2_architecture.md` section 2 |
+| 2026-10-18 | the wire is in nines: a 9-bit command, an 18-bit address, 36-bit units | `memory_map.md`, conventions |
 
 ## 1. A program
 
@@ -56,10 +57,10 @@ Marked in the text where they bite; answer on the issue with the hash.
 ## 2. The word
 
 One instruction is one **72-bit word**, read from eight block RAMs of
-2048 × 9 as one row (hash `d9f2a6c1`: 54 bits from six blocks would
-drop the immediate to 6 bits and a mode from each operand; the budget
-has the eight). Each field goes straight into a register of the stage
-that uses it; no field is decoded from another.
+2048 × 9 as one row (54 bits from six blocks would have dropped the
+immediate to 6 bits and a mode from each operand; the budget has the
+eight). Each field goes straight into a register of the stage that uses
+it; no field is decoded from another.
 
 | bits | field | contents |
 |---|---|---|
@@ -202,12 +203,13 @@ them once, at assembly, and runs identically on the model, in the
 cosim and on the chip — which is what the chip's self-test checks every
 boot with operands that change every pass.
 
-Hash `b3e8c7d4`: the firmware's queued writes land in the window at the
-end of a pass, when no instruction issues, so they need no interlock
-either; the question is whether to keep one check in hardware for them
-(a write landing in a row an instruction of the next pass's first cycles
-reads) or to let the window's placement guarantee it. The first
-revision's measurements say the guarantee is the cheaper proof.
+The firmware's queued writes land in the window at the end of a pass,
+when no instruction issues, so they need no interlock either: there is
+none in hardware. A write landing in a row an instruction of the next
+pass's first cycles reads is excluded by the window's placement (the
+last write lands before the pass boundary, `csp2_architecture.md`
+section 5), which the first revision's measurements showed to be the
+cheaper proof than a check in logic.
 
 ## 9. What changed from the first revision, and why
 

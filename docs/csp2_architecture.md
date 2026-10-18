@@ -96,12 +96,13 @@ both this document and the assembler when the RTL is.
 | decode ROM | 1 × (1024 × 18) | A: this word's row; B: the next word's | loaded with the program, as one image |
 | DMEM, the data memory | (1024 × 18) blocks: a copy per read port, each an even and an odd bank for the aligned pairs — two reads a cycle is four blocks, three is six; the datapath decides | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
 | the write FIFO | 1 × (512 × 36): one 36-bit wire unit an entry | A: the SPI write, on the SPI clock; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. The two ports never meet: the pointers cannot coincide on a row that holds data, and when the FIFO is empty the read port idles one row *behind* the head, not on the row the next write takes — the first revision idled on the head and hid the lost first word behind a decoy write. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
-| sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes, to the shadow page only; B: a partial replica's read of the active page, every clock | the double buffer: the partials read the active page on every clock, so nothing writes it; the CSP and the firmware write the shadow page and the pages swap at the pass boundary (the firmware's words, which the first revision wrote to both pages, go the same way and are taken over at the swap). Hash `a7c5e1f8`: the partials read six replicas in parallel on every clock, which is what the twelve blocks are for; a wider row (two sinks a row, six blocks) or a different replica count is the one budget question of this revision |
+| sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes, to the shadow page only; B: a partial replica's read of the active page, every clock | the double buffer: the partials read the active page on every clock, so nothing writes it; the CSP and the firmware write the shadow page and the pages swap at the pass boundary (the firmware's words, which the first revision wrote to both pages, go the same way and are taken over at the swap). Six replicas because the partials read six sinks in parallel on every clock; decided on #231 to stay as it is, twelve blocks |
 
 Thirty-five of the chip's forty-six blocks are in use at the end of the
 first revision (the partial pipeline and the output take the rest); the
 second revision adds four for the wide word and one for the ROM, and
-takes back what DMEM's port count and the sink area's answer allow.
+takes back two if DMEM needs two read ports rather than three: 38 or 40
+of 46.
 
 ## 3. The budget
 
@@ -109,7 +110,7 @@ takes back what DMEM's port count and the sink area's answer allow.
 |---|---|---|---|
 | flip-flops | 12193 | 15552 (78 %) | the limit that bites first: the SVF's ~6000 reset flops serve nothing and go; the front end's per-element state shrinks by four |
 | LUT4 | 10906 | 20736 (52 %) | the decoder's and the hazard check's LUTs go; the 16-way selects replace the 64-way |
-| block RAM | 35 | 46 | +5, minus the sink area's answer |
+| block RAM | 35 | 46 | +5 (four IMEM slices, the ROM): 40, or 38 with a two-port DMEM |
 | DSP | the multiply-add | | as is |
 
 A slice is one LUT4 and one flip-flop, and the chip has six usable

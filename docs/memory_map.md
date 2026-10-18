@@ -140,9 +140,7 @@ at `0x08000 + 2 pc`. The decode ROM's rows (1024 × 18, the operations as
 the upper half of the unit unused. Both are loaded as one image with the
 CSP held: the memories take writes only then, so a pass never runs half an
 old program and half a new, and instructions past the end of the program
-are zero, which is `NOP`. (The word's width is the open hash `d9f2a6c1`: at
-54 bits, six slices, a row is still two units, the first's upper half
-unused.)
+are zero, which is `NOP`.
 
 ## Write FIFO — `0x06000–0x06FFF`
 
