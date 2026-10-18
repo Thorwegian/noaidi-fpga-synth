@@ -1,6 +1,6 @@
 # Rules
 
-- Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop.
+- Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop. GitHub *is* the chat.
 
 - Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Questions are directed to GitHub - not the chat.
 

@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-// Hold the CSP, load its control program, write the constants and the
+// Hold the CSP, load its control program and its decode ROM, write the
 // static wiring (render::setup), release it, and start the 1 kHz tick task.
 // Call after spi_link_init().
 void engine_link_init(void);

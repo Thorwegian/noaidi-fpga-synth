@@ -8,7 +8,6 @@
 #include <array>
 #include <cstdio>
 
-#include "csp/lfo.hpp"
 #include "csp/selftest_program.hpp"
 #include "fpga_map.hpp"
 
@@ -31,79 +30,44 @@ public:
         load();
         port_.wait_ms(30);
         check_instructions();
-        const Counts first     = counts();
-        const uint64_t phase_1 = port_.probe(st::lfos + st::phase);
-        const uint64_t phase_2 =
-                port_.probe(st::lfos + 16 * st::lfo_size + st::phase);
+        const Counts first = counts();
         port_.wait_ms(100);
         check_halves(first, counts());
-        check_lfos(phase_1, phase_2);
         return result_;
     }
 
 private:
     void queue(int address, int32_t raw) {
-        port_.write_quad(fpga_map::fifo_door,
-                         fpga_map::fifo_quad(address, static_cast<uint32_t>(raw)));
+        port_.write_quad(fpga_map::fifo_door, fpga_map::fifo_quad(address, static_cast<uint32_t>(raw)));
     }
 
-    void queue_wide(int address, int64_t raw36) {
-        queue(address, static_cast<int32_t>(raw36 >> 18));
-        queue(address + 1, static_cast<int32_t>(raw36 & word_mask));
-    }
-
-    // The program and the constants, and the LFOs: LFO 1 a triangle in the
-    // first half, LFO 2 a saw in the second.
+    // The program: its rows into IMEM (two quads a row, bits 71:36 first),
+    // its control words into the decode ROM, and NOP rows past both, since
+    // what an earlier program left there would run after it on a chip that
+    // has not been reset. The program's constants are immediates in its rows.
     void load() {
         port_.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold);
-        // A row is two quads; the first revision's 36-bit words ride in the
-        // lower one until the second revision's assembler (#235) writes
-        // 72-bit rows.
-        for (size_t pc = 0; pc < st::words.size(); ++pc) {
-            port_.write_quad(fpga_map::program_base + 2 * pc, 0);
-            port_.write_quad(fpga_map::program_base + 2 * pc + 1, st::words[pc]);
+        for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
+            const csp::Row row = pc < st::rows.size() ? st::rows[pc] : csp::Row{};
+            port_.write_quad(fpga_map::program_base + 2 * pc, row.high);
+            port_.write_quad(fpga_map::program_base + 2 * pc + 1, row.low);
         }
-        // What an earlier program left past the end of this one would run
-        // after it, on a chip that has not been reset.
-        for (size_t pc = st::words.size(); pc < fpga_map::program_rows; ++pc) {
-            port_.write_quad(fpga_map::program_base + 2 * pc, 0);
-            port_.write_quad(fpga_map::program_base + 2 * pc + 1, 0);
-        }
-        for (const st::Constant &constant : st::constants) {
-            queue(constant.address, constant.raw);
+        for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
+            port_.write_quad(fpga_map::rom_base + row, row < st::rom.size() ? st::rom[row] : 0);
         }
         // The counters start at zero, whatever was there.
         for (const int counter_register :
-             {st::count_total, st::count_odd, st::count_half_odd,
-              st::count_chain_odd}) {
+             {st::count_total, st::count_odd, st::count_half_odd, st::count_chain_odd}) {
             queue(counter_register, 0);
         }
-        constexpr int one = 0x4000; // 1.0 in Q4.14
-        for (int half = 0; half < 2; ++half) {
-            const int record = st::lfos + half * 16 * st::lfo_size;
-            const int set    = st::lfo_sets + half * st::set_size;
-            // a loop runs over as many records of each shape as the set says:
-            // every count must be written, not only the one that is used
-            for (int word = 0; word < st::set_size; ++word) {
-                queue(set + word, 0);
-            }
-            queue_wide(record + st::phase_step, int64_t{1} << 22);
-            queue(record + st::depth, one);
-            queue(record + st::neg_depth, -one);
-            queue(record + st::gain, half == 0 ? one / 4 : one / 8);
-            queue(set + st::base, record);
-            queue(set + (half == 0 ? st::n_triangle : st::n_saw), 1);
-        }
-        port_.write_quad(fpga_map::ctrl,
-                         fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+        port_.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
         port_.wait_ms(2);
         port_.write_quad(fpga_map::ctrl, 0); // release
     }
 
     void note(bool ok, const char *what, long got, long want) {
         char line[96];
-        std::snprintf(line, sizeof line, "%s %s (got %ld, want %ld)",
-                      ok ? "ok  " : "FAIL", what, got, want);
+        std::snprintf(line, sizeof line, "%s %s (got %ld, want %ld)", ok ? "ok  " : "FAIL", what, got, want);
         result_.lines.emplace_back(line);
         result_.passed = result_.passed && ok;
     }
@@ -115,7 +79,8 @@ private:
         result_.passed = result_.passed && ok;
     }
 
-    // Instructions, one after another in a chain.
+    // Instructions, one after another in a chain, as the schedule placed
+    // them: a wrong latency shows as a wrong result.
     void check_instructions() {
         const long abs  = signed_word(port_.probe(st::res_abs) >> 18);
         const long mac  = signed_word(port_.probe(st::res_mac) >> 18);
@@ -137,63 +102,26 @@ private:
     };
 
     Counts counts() {
-        return {counter(st::count_total), counter(st::count_odd),
-                counter(st::count_half_odd), counter(st::count_chain_odd)};
+        return {counter(st::count_total), counter(st::count_odd), counter(st::count_half_odd),
+                counter(st::count_chain_odd)};
     }
 
-    // The half the LFOs work follows the pass counter's low bit: over a stretch
-    // of passes, as many odd as even (the program counts them itself, so that
-    // when the firmware looks does not matter), and the half's choice and the
-    // table read, which come from that bit through ANDXOR, SHIFT and IDX, agree
-    // with it.
+    // The pass counter's low bit: over a stretch of passes, as many odd as
+    // even (the program counts them itself, so that when the firmware looks
+    // does not matter), and the half's choice and the table read, which come
+    // from that bit through ANDXOR, SHIFT and IDX, agree with it.
     void check_halves(const Counts &first, const Counts &second) {
         const long total     = (second.total - first.total) & word_mask;
         const long odd       = (second.odd - first.odd) & word_mask;
         const long half_odd  = (second.half_odd - first.half_odd) & word_mask;
         const long chain_odd = (second.chain_odd - first.chain_odd) & word_mask;
         char line[96];
-        std::snprintf(line, sizeof line,
-                      "%ld passes, %ld with the pass counter's low bit set",
-                      total, odd);
+        std::snprintf(line, sizeof line, "%ld passes, %ld with the pass counter's low bit set", total, odd);
         note(total > 1000 && odd * 100 > total * 45 && odd * 100 < total * 55,
              "the pass counter's low bit is set in half of the passes (ANDXOR)");
         result_.lines.emplace_back(line);
-        note(half_odd >= odd - 2 && half_odd <= odd + 2,
-             "the half's choice follows it (SHIFT)", half_odd, odd);
-        note(chain_odd >= odd - 2 && chain_odd <= odd + 2,
-             "the table read follows it (IDX)", chain_odd, odd);
-    }
-
-    // The LFOs themselves: the triangle's scratch word and output move, and the
-    // two halves' phases advance at the same rate.
-    void check_lfos(uint64_t phase_1, uint64_t phase_2) {
-        const int triangle  = st::lfos;
-        const int saw       = st::lfos + 16 * st::lfo_size;
-        bool triangle_moves = false;
-        long out_first      = 0;
-        for (int sample = 0; sample < 4; ++sample) {
-            const long t = signed_word(port_.probe(triangle + st::p));
-            const long out =
-                    signed_word(port_.probe(triangle + st::gain) & word_mask);
-            if (sample == 0) {
-                out_first = out;
-            }
-            triangle_moves = triangle_moves || t != 0 || out != out_first;
-            port_.wait_ms(20);
-        }
-        note(triangle_moves,
-             "LFO 1 (triangle) has a scratch word and an output that move");
-        constexpr uint64_t wide_mask = (uint64_t{1} << 36) - 1;
-        const uint64_t after_1       = port_.probe(triangle + st::phase);
-        const uint64_t after_2       = port_.probe(saw + st::phase);
-        const long moved_1 =
-                static_cast<long>(((after_1 - phase_1) & wide_mask) >> 20);
-        const long moved_2 =
-                static_cast<long>(((after_2 - phase_2) & wide_mask) >> 20);
-        note(moved_1 > 100 && moved_2 > 100 && moved_1 * 10 < moved_2 * 11
-                     && moved_2 * 10 < moved_1 * 11,
-             "the two LFO halves' phases advance at the same rate", moved_1,
-             moved_2);
+        note(half_odd >= odd - 2 && half_odd <= odd + 2, "the half's choice follows it (SHIFT)", half_odd, odd);
+        note(chain_odd >= odd - 2 && chain_odd <= odd + 2, "the table read follows it (IDX)", chain_odd, odd);
     }
 
     SelfTestPort &port_;

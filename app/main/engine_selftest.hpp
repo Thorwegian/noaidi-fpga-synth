@@ -3,11 +3,12 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Loads tools/csp/programs/selftest.s (the LFOs, and some instructions in
-// dependent chains), lets it run, and reads its registers back through the
-// probe (docs/memory_map.md): does the chip do what the model says? The
-// system bench (rtl/tb/synth) runs the same code on the simulated chip; the
-// firmware runs it on the board at boot, and logs what it finds.
+// Loads tools/csp/programs/selftest.s (instructions in dependent chains, as
+// the assembler scheduled them, and counters that follow the pass counter),
+// lets it run, and reads its registers back through the probe
+// (docs/memory_map.md): does the chip do what the model says? The firmware
+// runs it on the board at boot and logs what it finds; the co-simulation
+// (#235) runs the same program on the simulated chip.
 
 #pragma once
 

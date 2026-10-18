@@ -1,16 +1,17 @@
-// csp.hpp — the CSP's instruction word, operands and number formats
+// csp.hpp — the CSP's instruction word, operands, control words and formats
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Shared by the firmware, which builds CSP programs as machine code
+// Shared by the firmware, which generates CSP programs as machine code
 // (program_builder.hpp), and the host tools in tools/csp (the reference
-// model and the macro assembler). docs/csp_manual.md is the
-// specification: section 3 for the formats, section 4 for the
-// instruction word and operands, section 9 for the opcodes.
+// model and the macro assembler). docs/csp2_isa.md is the specification:
+// section 2 for the word, 3 for the operands, 4 for the control word and
+// the operations, 8 for the latencies.
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 
@@ -18,40 +19,35 @@ namespace csp {
 
 // ---- sizes ---------------------------------------------------------------
 
-constexpr int register_count     = 2048;  // 0x000–0x7FF
-constexpr int sink_base          = 0x800; // sink area 0x800–0xBFF
-constexpr int sink_count         = 1024;
-constexpr int address_space      = 4096;  // what i and j can address
-constexpr int io_base            = 0x040; // read-only inputs
-constexpr int io_count           = 32;
-constexpr int constant_base      = 0x001; // the constant pool
-constexpr int constant_count     = 63;
-constexpr int direct_reach       = 512;  // direct operands: 0–511
-constexpr int max_program_length = 1472; // instructions per pass
-constexpr int write_window       = 48;   // queued writes per pass
-constexpr int cycles_per_pass    = 1536; // two samples at 73.728 MHz
-constexpr int pass_cycle_limit   = 1472; // instructions issue before this
-constexpr int max_vector_length  = 64;   // iterations of a vector loop
+constexpr int register_count = 2048;  // DMEM: 0x000–0x7FF
+constexpr int sink_base      = 0x800; // the sink area: 0x800–0xBFF
+constexpr int sink_count     = 1024;
+constexpr int address_space  = 4096;  // what i and j can address
+constexpr int io_base        = 0x040; // read-only inputs
+constexpr int io_count       = 32;
+constexpr int direct_reach   = 1024;  // a direct operand: 0–1023
+constexpr int program_rows   = 1472;  // instructions a pass
+constexpr int rom_rows       = 1024;  // the decode ROM's block: 1024 × 18
+constexpr int op_count       = 256;   // the rows the word's 8-bit op reaches
+constexpr int write_window   = 48;    // queued writes a pass
+constexpr int cycles_per_pass = 1536; // one 48 kHz sample
+constexpr int pass_cycle_limit = 1472; // instructions issue before this
+constexpr int vector_round   = 16;    // elements in flight in a vector loop
 
-// ---- pipeline timing (rtl/csp/csp_core.sv) ---------------------------------
+// ---- the pipeline's timing (rtl/csp/csp_core.sv) ---------------------------
 //
-// One instruction issues per cycle at most. An instruction that reads a
-// register, the accumulator or the flags an older one writes issues
-// result_latency cycles after it at the earliest; the instruction after a
-// LOOP or IDX issues barrier_latency cycles after it at the earliest.
-// Program semantics do not depend on this: only the cycle count does.
+// The chip has no interlock: the assembler places every instruction so
+// that what it reads has been written (docs/csp2_isa.md section 8). An
+// instruction issued at cycle c has its result in DMEM for an instruction
+// issued at c + result_latency; its flags and the accumulator are readable
+// at c + state_latency; an IDX's index is used at c + index_latency, which
+// the front end waits itself (a barrier); a loop's repeat and a skip's jump
+// cost jump_penalty cycles over moving on to the next word.
 
-constexpr int result_latency  = 9;
-constexpr int barrier_latency = 4;
-// In a vector loop, an element's own copy of an index register lands this
-// many cycles after that element's IDX (a register loaded a cycle after the
-// IDX writes, csp_core.sv); an operand through it issues then at the
-// earliest.
-constexpr int private_index_latency = 5;
-// A jump (a loop's repeat, a skipped body) costs this many cycles more than
-// moving on to the next instruction: the fetch runs ahead on the next pc
-// only (rtl/csp/csp_core.sv, F).
-constexpr int jump_penalty    = 2;
+constexpr int result_latency = 7;
+constexpr int state_latency  = 5;
+constexpr int index_latency  = 4;
+constexpr int jump_penalty   = 2;
 
 // ---- number formats -------------------------------------------------------
 //
@@ -85,36 +81,41 @@ constexpr int64_t smallest(int bits) {
     return -(int64_t{1} << (bits - 1));
 }
 
-// ---- opcodes --------------------------------------------------------------
+// ---- the operations -------------------------------------------------------
+//
+// What a program writes; each becomes one or more decode ROM rows by its
+// variant (in place, wide, from the accumulator).
 
-enum class Opcode : uint8_t {
-    nop    = 0,
-    loop   = 1,
-    macw   = 2,
-    interp = 3,
-    acc    = 4,
-    add3   = 5,
-    sel    = 6,
-    cmp    = 7,
-    min    = 8,
-    max    = 9,
-    andxor = 10,
-    shift  = 11,
-    mac    = 12,
-    abs    = 13,
-    skip   = 14,
-    idx    = 15,
+enum class Op : uint8_t {
+    nop,
+    mac,     // R = A + X × Y, saturating
+    macw,    // R = A + X × Y, wrapping
+    acc,     // accumulator = A + X × Y
+    interp,  // R = A + X × (Y − A)
+    add3,    // R = A + X + Y
+    cmp,     // R = X − Y, the flags set
+    abs,     // R = |X|
+    min,     // R = X < Y ? X : Y
+    max,     // R = X > Y ? X : Y
+    sel,     // R = cond clear ? X : Y
+    andxor,  // R = (X & Y) ^ A
+    shift,   // R = A × 2^Y
+    loop,    // a scalar loop on i or j
+    vloop,   // a vector loop on i or j
+    skip,    // the next n instructions are no-ops when cond holds
+    idx,     // i or j = X + Y
 };
 
-// The a field: which value is the A operand.
-enum class ASelect : uint8_t {
+std::string_view mnemonic(Op op);
+
+// Which value is the A operand of an arithmetic operation.
+enum class ASource : uint8_t {
     zero        = 0,
-    result      = 1, // A = R
-    accumulator = 2, // A = acc
-    wide        = 3, // A = R, and the instruction is wide
+    result      = 1, // A = R: update in place
+    accumulator = 2,
 };
 
-// SKIP conditions (X field).
+// The flag a conditional tests (the word's `cond` field).
 enum class Condition : uint8_t {
     always   = 0,
     negative = 1,
@@ -124,49 +125,125 @@ enum class Condition : uint8_t {
     overflow = 5,
 };
 
-std::string_view mnemonic(Opcode op);
-
-// Whether an opcode has a wide form (a = 3, `.w` in assembly).
-bool has_wide_form(Opcode op);
-
-// ---- operands -------------------------------------------------------------
-//
-// A 10-bit operand field: 0aaaaaaaaa direct, 10oooooooo i + o,
-// 11oooooooo j + o.
-
 enum class IndexRegister : uint8_t { i = 0, j = 1 };
 
-struct Operand {
-    enum class Mode : uint8_t { direct, indexed } mode = Mode::direct;
-    IndexRegister index                                = IndexRegister::i;
-    int value = 0; // the address (direct) or the offset (indexed)
+// ---- operands (docs/csp2_isa.md section 3) ---------------------------------
+//
+// A 12-bit field: a 2-bit mode and 10 bits. Mode 0 names a register
+// directly (0–1023); modes 1 and 2 put the offset's bits beside the index
+// register's; mode 3 is the word's immediate in x or y, and "no result" in r.
 
-    static Operand direct(int address) {
-        return {Mode::direct, IndexRegister::i, address};
-    }
+struct Operand {
+    enum class Mode : uint8_t { direct = 0, i = 1, j = 2, immediate = 3 } mode = Mode::direct;
+    int value = 0; // the address, the offset, or nothing
+
+    static Operand direct(int address) { return {Mode::direct, address}; }
     static Operand indexed(IndexRegister index, int offset) {
-        return {Mode::indexed, index, offset};
+        return {index == IndexRegister::i ? Mode::i : Mode::j, offset};
     }
+    static Operand immediate() { return {Mode::immediate, 0}; }
+    static Operand none() { return {Mode::immediate, 0}; }
+
+    bool is_indexed() const { return mode == Mode::i || mode == Mode::j; }
+    IndexRegister index() const { return mode == Mode::j ? IndexRegister::j : IndexRegister::i; }
 
     uint16_t encode() const;
     static Operand decode(uint16_t field);
     bool operator==(const Operand &) const = default;
 };
 
-// ---- the instruction word -------------------------------------------------
+// ---- the control word (docs/csp2_isa.md section 4) -------------------------
 //
-// [35:32] op  [31:30] a  [29:20] R  [19:10] X  [9:0] Y
+// One row of the decode ROM: what the datapath does for an `op`.
 
-struct Instruction {
-    Opcode op  = Opcode::nop;
-    ASelect a  = ASelect::zero;
-    uint16_t r = 0; // raw fields: an operand or an immediate,
-    uint16_t x = 0; // by opcode
-    uint16_t y = 0;
+enum class Unit : uint8_t {
+    none         = 0,
+    multiply_add = 1, // MAC, MACW, ACC, INTERP, ADD3, CMP, ABS: through the DSP
+    logic        = 2, // MIN, MAX, SEL, ANDXOR
+    shift        = 3,
+    loop         = 4,
+    skip         = 5,
+    index        = 6,
+};
 
-    uint64_t encode() const;
-    static Instruction decode(uint64_t word);
-    bool operator==(const Instruction &) const = default;
+enum class Writes : uint8_t {
+    nothing     = 0,
+    word        = 1, // a register (or a sink word, by the address)
+    pair        = 2, // a wide register
+    index_i     = 3,
+    index_j     = 4,
+    accumulator = 5,
+};
+
+enum class ConditionKind : uint8_t {
+    none   = 0,
+    select = 1, // SEL chooses by cond
+    skip   = 2, // SKIP skips by cond
+    flags  = 3, // the result sets the flags
+};
+
+// The multiply-add unit's sub-operations.
+enum class MultiplyAddOp : uint8_t { mac = 0, interp = 1, add3 = 2, cmp = 3, abs = 4 };
+// The logic unit's.
+enum class LogicOp : uint8_t { min = 0, max = 1, sel = 2, andxor = 3 };
+// The loop unit's.
+enum class LoopOp : uint8_t { scalar_i = 0, scalar_j = 1, vector_i = 2, vector_j = 3 };
+
+struct Control {
+    Unit unit             = Unit::none;    // [17:15]
+    Writes writes         = Writes::nothing; // [14:12]
+    ASource a_source      = ASource::zero; // [11:10]
+    bool y_wide           = false;         // [8]
+    ConditionKind cond    = ConditionKind::none; // [7:6]
+    bool barrier          = false;         // [5]
+    bool wrap             = false;         // [3]
+    uint8_t sub           = 0;             // [2:0]
+
+    uint32_t encode() const;
+    static Control decode(uint32_t row);
+    bool operator==(const Control &) const = default;
+};
+
+// The control word of an operation in a variant: wide (R and Y are pairs,
+// X a word) and the A source. Operations without a variant ignore them.
+Control control_of(Op op, bool wide, ASource a_source);
+
+// ---- the instruction word (docs/csp2_isa.md section 2) ---------------------
+//
+//   [71:64] op   the decode ROM row
+//   [63:60] cond
+//   [59:48] r    [47:36] x   [35:24] y
+//   [23:0]  imm  an 18-bit immediate; a loop's or a skip's end
+
+struct Row {
+    uint64_t high = 0; // bits 71:36, the first quad on the wire
+    uint64_t low  = 0; // bits 35:0, the second
+    bool operator==(const Row &) const = default;
+};
+
+struct Word {
+    uint16_t op    = 0; // the ROM row, 8 bits
+    uint8_t cond   = 0; // 4 bits
+    Operand r, x, y;
+    uint32_t imm   = 0; // 24 bits
+
+    Row encode() const;
+    static Word decode(const Row &row);
+    bool operator==(const Word &) const = default;
+};
+
+// A loop's numbers: its body's end in imm, its count in x's ten bits and
+// its stride in y's (docs/csp2_isa.md section 5). A skip's count in imm.
+constexpr int loop_count_max  = 1023;
+constexpr int loop_stride_max = 511;   // signed, ten bits
+
+// ---- an image: the program and its decode ROM ------------------------------
+
+struct Image {
+    std::array<Row, program_rows> rows{};   // the program, NOPs past its end
+    std::array<uint32_t, rom_rows> rom{};   // the control words; row 0 is NOP
+    int length   = 0;                       // rows the program uses
+    int rom_used = 1;                       // rows the ROM uses
 };
 
 } // namespace csp

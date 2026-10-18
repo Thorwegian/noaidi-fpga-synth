@@ -322,33 +322,59 @@ void engine_task(void *) {
     }
 }
 
-// Load the control program while the CSP is held: a row is two quads. The
-// first revision's 36-bit words ride in the lower quad until the second
-// revision's assembler (#235) writes 72-bit rows. Then read every row
-// back through IMEM's SPI port and count the quads that differ: the
-// program image is verified the way the register image is.
-void load_program() {
-    std::array<fpga_map::quad_t, 2> row{};
-    for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
-        row[1] = pc < csp::control::words.size() ? csp::control::words[pc] : 0;
-        spi_link::write(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row.data(), row.size());
+// The quad at `index` of the program image as the firmware sends it: a row
+// is two quads, bits 71:36 then 35:0, NOP rows past the program's end.
+fpga_map::quad_t program_quad(size_t index) {
+    const size_t pc = index / 2;
+    if (pc >= csp::control::rows.size()) {
+        return 0;
+    }
+    const csp::Row &row = csp::control::rows[pc];
+    return index % 2 == 0 ? row.high : row.low;
+}
+
+// The quad at `index` of the decode ROM image: one control word a row,
+// NOP rows (0) past the program's.
+fpga_map::quad_t rom_quad(size_t index) {
+    return index < csp::control::rom.size() ? csp::control::rom[index] : 0;
+}
+
+// Send `count` quads from `base` in bursts, and read them back through the
+// same port: how many differ from what was sent.
+template <typename Quad>
+int send_and_verify(uint32_t base, size_t count, Quad quad_at) {
+    std::array<fpga_map::quad_t, spi_link::burst_max> burst{};
+    for (size_t first = 0; first < count; first += burst.size()) {
+        const size_t n = std::min(burst.size(), count - first);
+        for (size_t k = 0; k < n; ++k) {
+            burst[k] = quad_at(first + k);
+        }
+        spi_link::write(base + static_cast<uint32_t>(first), burst.data(), n);
     }
     int differing = 0;
-    std::array<fpga_map::quad_t, spi_link::burst_max> back{};
-    for (size_t quad = 0; quad < 2 * fpga_map::program_rows; quad += back.size()) {
-        spi_link::read(fpga_map::program_base + static_cast<uint32_t>(quad), back.data(), back.size());
-        for (size_t index = 0; index < back.size() && quad + index < 2 * fpga_map::program_rows; ++index) {
-            const size_t pc = (quad + index) / 2;
-            const fpga_map::quad_t expected =
-                    (quad + index) % 2 == 0 ? 0 : (pc < csp::control::words.size() ? csp::control::words[pc] : 0);
-            differing += back[index] != (expected & spi_link::quad_mask);
+    for (size_t first = 0; first < count; first += burst.size()) {
+        const size_t n = std::min(burst.size(), count - first);
+        spi_link::read(base + static_cast<uint32_t>(first), burst.data(), n);
+        for (size_t k = 0; k < n; ++k) {
+            differing += burst[k] != (quad_at(first + k) & spi_link::quad_mask);
         }
     }
-    if (differing == 0) {
-        ESP_LOGI(tag, "program image: every quad as sent (%u rows)",
-                 static_cast<unsigned>(fpga_map::program_rows));
+    return differing;
+}
+
+// Load the control program while the CSP is held: the rows into IMEM and
+// the control words into the decode ROM, then both read back and counted
+// against what was sent, so the program image is verified the way the
+// register image is.
+void load_program() {
+    const int rows_differing = send_and_verify(fpga_map::program_base, 2 * fpga_map::program_rows, program_quad);
+    const int rom_differing  = send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_quad);
+    if (rows_differing == 0 && rom_differing == 0) {
+        ESP_LOGI(tag, "program image: every quad as sent (%u rows, %u decode rows)",
+                 static_cast<unsigned>(fpga_map::program_rows), static_cast<unsigned>(fpga_map::rom_rows));
     } else {
-        ESP_LOGE(tag, "program image: %d quad(s) not as sent", differing);
+        ESP_LOGE(tag, "program image: %d row quad(s) and %d decode quad(s) not as sent", rows_differing,
+                 rom_differing);
     }
 }
 
@@ -362,7 +388,7 @@ void engine_link_init(void) {
     }
 
     // The CSP starts held; make sure of it, whatever the last run left, then
-    // give it the program, the constants and the wiring.
+    // give it the program and the wiring.
     spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold);
 
     // The probe reads a register pair once a pass; after a reset it reads
@@ -396,10 +422,9 @@ void engine_link_init(void) {
 
     load_program();
 
+    // The program's constants are immediates in its rows; the register image
+    // starts from what the renderer sets up.
     render::Writes writes;
-    for (const csp::control::Constant &constant : csp::control::constants) {
-        writes.push_back({constant.address, constant.raw});
-    }
     render::setup(writes);
     for (const render::Write &write : writes) {
         image.set(write.address, write.raw);
@@ -416,9 +441,9 @@ void engine_link_init(void) {
     } else {
         spi_link::write_one(fpga_map::ctrl, ctrl_word(0)); // release
     }
-    ESP_LOGI(tag, "control program loaded: %u instructions, %u constants",
-             static_cast<unsigned>(csp::control::words.size()),
-             static_cast<unsigned>(csp::control::constants.size()));
+    ESP_LOGI(tag, "control program loaded: %u rows, %u decode rows, %d cycles a pass",
+             static_cast<unsigned>(csp::control::rows.size()), static_cast<unsigned>(csp::control::rom.size()),
+             csp::control::cycles);
 
     if (xTaskCreate(engine_task, "engine_link", task_stack, nullptr,
                     task_priority, &task)
