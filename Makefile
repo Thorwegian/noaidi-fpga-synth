@@ -61,8 +61,9 @@
 # of an Espressif Installation Manager install, under $IDF_TOOLS_PATH or
 # ~/.espressif/tools; $IDF_PATH's export.sh; the newest classic checkout, under
 # ~/.espressif/v*/esp-idf or ~/esp/esp-idf*. The script is sourced in a
-# subshell of its own, so the environment stays out of this one. Override with
-# IDF=<command that runs idf.py>.
+# subshell of its own, so the environment stays out of this one; its path goes
+# in the environment, not in $0, because the activation scripts refuse to run
+# when $0 names them. Override with IDF=<command that runs idf.py>.
 IDF_ACTIVATE ?= $(firstword \
     $(lastword $(sort $(wildcard $(IDF_TOOLS_PATH)/activate_idf_*.sh))) \
     $(lastword $(sort $(wildcard $(HOME)/.espressif/tools/activate_idf_*.sh))) \
@@ -72,7 +73,7 @@ IDF_ACTIVATE ?= $(firstword \
 ifneq ($(shell command -v idf.py 2>/dev/null),)
 IDF ?= idf.py
 else ifneq ($(IDF_ACTIVATE),)
-IDF ?= bash -c '. "$$0" >/dev/null && exec idf.py "$$@"' $(IDF_ACTIVATE)
+IDF ?= IDF_ACTIVATE="$(IDF_ACTIVATE)" bash -c '. "$$IDF_ACTIVATE" >/dev/null; command -v idf.py >/dev/null || { echo "make: $$IDF_ACTIVATE did not provide idf.py" >&2; exit 1; }; exec idf.py "$$@"' idf
 else
 IDF ?= sh -c 'echo "make: no ESP-IDF found: activate one, install it under ~/.espressif or ~/esp, or set IDF=" >&2; exit 1' --
 endif
