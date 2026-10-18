@@ -19,8 +19,19 @@ from `scripts/gen_sine_lut.py` and `rtl/dsp/osc_core.sv` with the same
 integer arithmetic. The 48 kHz output takes every other 96 kHz sample, so the
 tone has two possible phase sets; whichever matches is reported.
 
-usage: spdif_capture.py tone [--seconds N] [--device hw:1,0] [--port 16:0]
-                             [--wav FILE] [--keep FILE]
+The standing check is the data stream (`rtl/spdif/spdif_stream.sv`, the
+memory map's "data stream"): frames of 64 words with a sync word, a
+sequence number, 61 payload words from a known LFSR or the sample counter,
+and a CRC-32. A frame whose CRC fails is counted and the hunt for the next
+sync word starts after its sync word; the sequence numbers say how many
+frames went between the ones that arrived. The stream is switched on from
+the firmware's console (`csp-stream lfsr`), so this mode takes a capture
+made while it was on, or captures with --device alone.
+
+usage: spdif_capture.py tone   [--seconds N] [--device hw:1,0] [--port 16:0]
+                               [--wav FILE] [--keep FILE]
+       spdif_capture.py stream [--seconds N] [--device hw:1,0]
+                               [--wav FILE] [--keep FILE]
 
 With --wav the file is analysed instead of captured. --keep saves the capture.
 """
@@ -179,17 +190,123 @@ def analyse(samples):
         print("verdict: %d samples wrong — something between the board and the file changes values" % errors)
 
 
+# ---- the data stream ------------------------------------------------------
+
+STREAM_SYNC = 0xB7E15A3C
+STREAM_FRAME_WORDS = 64
+STREAM_CRC_POLYNOMIAL = 0x04C11DB7
+STREAM_LFSR_SEED = 1
+STREAM_LFSR_TAPS = 0x00400007
+SOURCE_LFSR, SOURCE_COUNTER = 0, 1
+
+
+def crc32_words(words):
+    """The stream's CRC: IEEE 802.3's polynomial, MSB first, all ones to start, no final inversion."""
+    crc = 0xFFFFFFFF
+    for word in words:
+        for bit in range(31, -1, -1):
+            feedback = ((crc >> 31) ^ (word >> bit)) & 1
+            crc = (crc << 1) & 0xFFFFFFFF
+            if feedback:
+                crc ^= STREAM_CRC_POLYNOMIAL
+    return crc
+
+
+def lfsr_32_steps(state):
+    for _ in range(32):
+        out = state >> 31
+        state = (state << 1) & 0xFFFFFFFF
+        if out:
+            state ^= STREAM_LFSR_TAPS
+    return state
+
+
+def analyse_stream(samples):
+    """Frames out of the capture: sync, sequence, CRC, and the payload against its source."""
+    words = ((samples[:, 0].astype(np.int64) & 0xFFFF) << 16) | (samples[:, 1].astype(np.int64) & 0xFFFF)
+    words = words.astype(np.uint64).tolist()
+    seconds = len(words) / SAMPLE_RATE
+    print("captured %d words (%.1f s)" % (len(words), seconds))
+    frames_ok = frames_bad_crc = 0
+    sequence_gaps = 0
+    payload_errors = 0
+    counter_slips = 0
+    expected_sequence = None
+    lfsr = None                      # unknown until the first LFSR frame is seen whole
+    previous_counter = None
+    position = 0
+    while position + STREAM_FRAME_WORDS <= len(words):
+        if words[position] != STREAM_SYNC:
+            position += 1
+            continue
+        frame = [int(w) for w in words[position:position + STREAM_FRAME_WORDS]]
+        if crc32_words(frame[:63]) != frame[63]:
+            frames_bad_crc += 1
+            position += 1            # a false sync, or a slipped frame: hunt on from the next word
+            continue
+        sequence = frame[1] >> 16
+        source = frame[1] & 3
+        if expected_sequence is not None and sequence != expected_sequence:
+            sequence_gaps += (sequence - expected_sequence) & 0xFFFF
+        expected_sequence = (sequence + 1) & 0xFFFF
+        payload = frame[2:63]
+        if source == SOURCE_LFSR:
+            if lfsr is None:
+                lfsr = payload[0]    # join the sequence where it stands: the state at position 2
+            state = lfsr
+            for index, word in enumerate(payload):
+                if word != state:
+                    payload_errors += 1
+                state = lfsr_32_steps(state)
+            # positions 0 and 1 of the next frame step the LFSR too, position 63 does not
+            lfsr = lfsr_32_steps(lfsr_32_steps(state))
+        else:
+            for index, word in enumerate(payload):
+                if previous_counter is not None:
+                    step = 4 if index == 0 else 1
+                    if word != (previous_counter + step) & 0xFFFFFFFF:
+                        counter_slips += 1
+                previous_counter = word
+            if lfsr is not None:
+                for _ in range(63):
+                    lfsr = lfsr_32_steps(lfsr)
+        frames_ok += 1
+        position += STREAM_FRAME_WORDS
+    print("frames: %d whole, %d with a failed CRC (a slip or a false sync); %d frames missing by the sequence numbers" % (
+        frames_ok, frames_bad_crc, sequence_gaps))
+    print("payload: %d LFSR words wrong, %d counter steps wrong" % (payload_errors, counter_slips))
+    rate = 32 * SAMPLE_RATE / 1e6
+    print("the pipe: %.3f Mbit/s, %d bits a sample" % (rate, 32))
+    if frames_ok and not frames_bad_crc and not sequence_gaps and not payload_errors and not counter_slips:
+        print("verdict: bit-perfect, every frame whole")
+    elif frames_ok:
+        print("verdict: frames arrive, with the losses above")
+    else:
+        print("verdict: no whole frame — is the stream on (csp-stream lfsr)?")
+
+
+def capture_stream(seconds, device, keep):
+    path = keep or "/tmp/spdif_capture.wav"
+    subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
+                    "-d", str(int(seconds)), path], check=True)
+    return read_wav(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description="the S/PDIF output as a data pipe")
-    parser.add_argument("mode", choices=["tone"], help="the known stream to check against")
+    parser.add_argument("mode", choices=["tone", "stream"], help="the known stream to check against")
     parser.add_argument("--seconds", type=float, default=30.0)
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth (CC 119 = the tone)")
     parser.add_argument("--wav", help="analyse this file instead of capturing")
     parser.add_argument("--keep", help="save the capture here")
     args = parser.parse_args()
-    samples = read_wav(args.wav) if args.wav else capture(args.seconds, args.device, args.port, args.keep)
-    analyse(samples)
+    if args.mode == "tone":
+        samples = read_wav(args.wav) if args.wav else capture(args.seconds, args.device, args.port, args.keep)
+        analyse(samples)
+    else:
+        samples = read_wav(args.wav) if args.wav else capture_stream(args.seconds, args.device, args.keep)
+        analyse_stream(samples)
 
 
 if __name__ == "__main__":

@@ -320,6 +320,7 @@ void cli_init(void) {
     cli::register_commands(cli::commands);
     cli::register_bank_commands();
     cli_system_init();
+    cli_csp_init();
     // A Program Change names its patch on the status bar.
     voice_alloc_set_patch_listener([](const char *name) {
         cli::set_current(std::string("/") + name);

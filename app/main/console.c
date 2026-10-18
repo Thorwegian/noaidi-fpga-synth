@@ -20,7 +20,7 @@
 #define LINE_MAX_BYTES   160 // the input line
 #define OUT_LINE_BYTES   256 // one printed line; longer ones split
 #define HISTORY_LEN      16
-#define MAX_COMMANDS     24
+#define MAX_COMMANDS     48
 #define MAX_ARGS         8
 #define MAX_CANDIDATES   32
 #define SIZE_QUERY_US    300000 // no answer by then: keep the size we have

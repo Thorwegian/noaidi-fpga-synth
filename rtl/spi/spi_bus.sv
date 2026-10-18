@@ -1,101 +1,71 @@
 //------------------------------------------------------------------------
-// spi_bus.sv — the memory-map wire protocol (docs/memory_map.md)
+// spi_bus.sv — the memory-map wire protocol, in nines (docs/memory_map.md)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Wire format (SPI Mode 0, MSB first — one CS-framed transaction):
+// Wire format (SPI Mode 0, MSB first, one CS-framed transaction). Every
+// block RAM on the chip is 9, 18 or 36 bits wide, so the wire is too:
 //
-//   byte 0      command: [7] 1 = read, 0 = write
-//                        [6] 1 = auto-increment address per word
-//                        [5:0] reserved (ignored)
-//   bytes 1..2  16-bit word address, MSB first
-//   WRITE:  bytes 3..          32-bit data words, MSB first, streaming
-//   READ:   bytes 3..4         two dummy bytes (turnaround)
-//           bytes 5..          32-bit data words, MSB first, streaming
+//   nonad 0       the command, 9 bits: [8] 1 = read, 0 = write
+//                                       [7] 1 = auto-increment the address per quad
+//                                       [6:0] reserved (ignored)
+//   nonads 1..2   the address, 18 bits, in quads, MSB first
+//   WRITE:  nonads 3..     36-bit quads, four nonads each, streaming
+//   READ:   nonads 3..6    one turnaround quad (the fetch's time)
+//           nonads 7..     36-bit quads, four nonads each, streaming
 //
-//   MISO: byte 0 = ID_BYTE (link check on every frame); address and
-//   dummy slots = 0x00; read data slots = the addressed words.
+//   MISO: nonad 0 = the ID nonad (a link check on every frame); the
+//   address and turnaround slots = 0; the read slots = the quads read.
 //
-// Why the read turnaround exists: the store's read port is in the
-// sysclk domain (dual-clock semi dual-port BSRAM — true dual-port does
-// not map on this toolchain, measured), so a fetch costs ~60 ns of
-// synchronizer + BSRAM read. The first data byte's shift register loads
-// HALF a bit period after the address completes — 12.5 ns at the
-// measured 40 MHz SPI ceiling — so without turnaround the first word
-// could never be fresh. Two dummy bytes give 400 ns. Burst words
-// prefetch two byte-slots early for the same margin. (The very first
-// firmware header specified "cmd + 2 dummy + N data"; it was right.)
+// What the quads address (docs/memory_map.md): the sixteen system quads
+// at 0x00000–0x0000F — CTRL, scratch, the status quads — and, as the
+// later issues add them, the FIFO, IMEM, the decode ROM and the pointers.
+// Writes outside the ranges are dropped, reads return zero: no aliasing.
 //
-// Wire format ≠ storage geometry: 16-bit addresses / 32-bit words on
-// the wire; BACKED_WORDS × 36-bit BSRAM behind it (11-bit space today).
-// Beyond the backed window: writes are dropped, reads return zero — no
-// aliasing.
+// Why the read turnaround exists: a read may be served from the system
+// clock domain through a synchroniser, and the first data nonad's shift
+// register loads half a bit period after the address completes — 12.5 ns
+// at the measured 40 MHz ceiling — so without a turnaround the first quad
+// could never be fresh. A quad's four nonads give 900 ns at that rate.
+// Burst quads prefetch a whole quad early for the same margin.
 //
-// Edge discipline as proven in spi_slave_regs.sv: MOSI sampled and
-// decoded on the RISING edge, MISO loaded on the FALLING edge,
-// posedge-CS async framing, power-up state declared.
+// Every write strobe is a combinational decode, valid exactly on the sclk
+// edge that completes a quad — the consumer takes it on that same edge
+// (there may be no further edges: a master stops clocking after the last
+// bit). MOSI is sampled and decoded on the RISING edge, MISO loaded on
+// the FALLING edge, with posedge-CS asynchronous framing and the power-up
+// state declared.
 //------------------------------------------------------------------------
 `default_nettype none
 module spi_bus #(
-    parameter int   AW_BACKED = synth_pkg::MAP_AW_BACKED,  // 2048 words backed
-    parameter [7:0] ID_BYTE   = synth_pkg::SPI_ID_BYTE
+    parameter logic [synth_pkg::SPI_NONAD_W-1:0] ID_NONAD = synth_pkg::SPI_ID_NONAD
 ) (
-    // ---- SPI side (master's clock) ----
+    // ---- SPI side (the master's clock) ----
     input  logic        sclk,
     input  logic        cs,          // active low
     input  logic        mosi,
     output logic        miso,
 
-    // ---- fabric side ----
-    input  logic        sysclk,
-    input  logic        rst_n,
+    // ---- CTRL's levels and event (sclk domain) ---------------------------
+    output logic        swap,                 // one sclk cycle: commit the write FIFO
+    output logic        csp_held,             // CTRL[1]: the CSP is held in reset
+    output logic        test_tone_enable,     // CTRL[2]
+    output logic        data_stream_enable,   // CTRL[3]: the 48 kHz S/PDIF carries the data stream
+    output logic [1:0]  stream_source,        // CTRL[5:4]
 
-    // ---- per-partial parameter writes (sclk domain) ----------------
-    // The memory map's 0x2000 + v*64 range, offsets 0..6 (OSC, DUTY,
-    // FILTER, GAIN, GATE, PTRS0, PTRS1). Combinational decode, valid
-    // exactly on the sclk edge that completes a data word — the
-    // consumer writes its RAM on that same edge (there may be no
-    // further edges: a master stops clocking after the last bit).
-    // Offsets 7..63 are dropped for now; per-partial read-back is TBD
-    // (reads in this range return zero).
-    output logic        partial_write_enable,
-    output logic [2:0]  partial_write_word,   // 0..6 = OSC..PTRS1 param RAM
-
-    // ---- DMEM base writes (sclk domain, mailbox toward sysclk) -----
-    // The write crosses clock domains through this 1-deep toggle
-    // mailbox; csp.sv syncs dmem_wr_toggle and commits each write into
-    // both DMEM pages (see its mailbox notes for the rate margin).
-    output logic [9:0]  dmem_wr_addr,
-    output logic [17:0] dmem_wr_data,
-    output logic        dmem_wr_toggle,  // toggles once per DMEM write
-
-    // ---- instruction table writes (sclk domain, paged like params) ---
-    // Instruction config is wiring: it rides the ping-pong pages and
-    // takes effect at the swap, same as the per-partial words.
-    output logic        imem_write_enable,
-    output logic [9:0]  imem_write_addr,   // {entry[7:0], word[1:0]}
-    output logic [31:0] imem_write_data,
-    output logic [7:0]  partial_write_index,
-    output logic [31:0] partial_write_data,
-
-    // CTRL@0x0002 bit 0: page swap request. Toggle semantics
-    // (sclk domain); the consumer syncs the toggle and flips its
-    // active page at the next time slot 512. The write also lands in
-    // the plain window RAM, so reading CTRL back shows the last value.
-    output logic        swap_toggle
+    // ---- the status quads (sclk domain, read-only, 0x8–0xF) --------------
+    input  logic [synth_pkg::MAP_SYSTEM_QUADS-synth_pkg::MAP_STORED_QUADS-1:0][synth_pkg::SPI_QUAD_W-1:0] status
 );
 
-    localparam int NWORDS = 1 << AW_BACKED;
-
     //--------------------------------------------------------------------
-    // Receive — rising edge; a byte completes AT RE8
+    // Receive — rising edge; a nonad completes at its ninth bit.
     //--------------------------------------------------------------------
-    logic [7:0] rx_shift;
-    logic [2:0] bit_count;
+    logic [synth_pkg::SPI_NONAD_W-2:0] rx_shift;
+    logic [3:0]              bit_count;
 
-    wire [7:0] rx_byte  = {rx_shift[6:0], mosi};
-    wire       byte_end = (bit_count == 3'd7);
+    wire [synth_pkg::SPI_NONAD_W-1:0] rx_nonad  = {rx_shift, mosi};
+    wire                    nonad_end = bit_count == 4'(synth_pkg::SPI_NONAD_W - 1);
 
     initial begin
         rx_shift  = '0;
@@ -107,97 +77,106 @@ module spi_bus #(
             rx_shift  <= '0;
             bit_count <= '0;
         end else begin
-            rx_shift  <= rx_byte;
-            bit_count <= bit_count + 3'd1;
+            rx_shift  <= rx_nonad[synth_pkg::SPI_NONAD_W-2:0];
+            bit_count <= nonad_end ? '0 : bit_count + 4'd1;
         end
     end
 
     //--------------------------------------------------------------------
-    // Frame decode (sclk domain)
-    //   phase 0 cmd · 1 addr-hi · 2 addr-lo · 3 read turnaround · 4 data
+    // The system quads: read back from the sclk domain, so a read needs
+    // no clock crossing. CTRL (0x2) keeps what was written, less the swap
+    // request, which is an event and not a state.
     //--------------------------------------------------------------------
-    logic [2:0]  frame_phase;
-    logic        is_read, auto_increment;
-    logic [15:0] word_addr;
-    logic        first_dummy_done;  // second turnaround byte pending
-    logic [1:0]  data_byte_index;   // byte index within the current word
-    logic [23:0] partial_word;      // first three data bytes of a word
+    localparam int STATUS_QUADS = synth_pkg::MAP_SYSTEM_QUADS - synth_pkg::MAP_STORED_QUADS;
 
-    wire addr_in_backed = (word_addr[15:AW_BACKED] == '0);
+    logic [synth_pkg::SPI_QUAD_W-1:0] system_quad [synth_pkg::MAP_STORED_QUADS];
+    initial begin
+        for (int quad = 0; quad < synth_pkg::MAP_STORED_QUADS; quad++) system_quad[quad] = '0;
+    end
 
-    // fetch request: toggle + quasi-static address (settle-time CDC,
-    // same pattern as spi_slave_regs' hardware-proven STATUS capture)
-    logic        fetch_toggle;
-    logic [15:0] fetch_addr;
-    logic [31:0] fetch_result;  // fetched word (sysclk domain, see below)
-    logic [31:0] stream_word;   // the word streaming out NOW — latched at
-                                // each word boundary so prefetches into
-                                // fetch_result cannot clip the tail bytes
+    function automatic logic [synth_pkg::SPI_QUAD_W-1:0] quad_at(input logic [synth_pkg::SPI_ADDRESS_W-1:0] address);
+        if (address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_STORED_QUADS)) begin
+            quad_at = system_quad[address[2:0]];
+        end else if (address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_SYSTEM_QUADS)) begin
+            quad_at = status[address[2:0]];
+        end else begin
+            quad_at = '0;
+        end
+    endfunction
+
+    //--------------------------------------------------------------------
+    // Frame decode (sclk domain)
+    //   phase 0 command · 1 address high · 2 address low · 3 turnaround · 4 data
+    //--------------------------------------------------------------------
+    typedef enum logic [2:0] {
+        PHASE_COMMAND      = 3'd0,
+        PHASE_ADDRESS_HIGH = 3'd1,
+        PHASE_ADDRESS_LOW  = 3'd2,
+        PHASE_TURNAROUND   = 3'd3,
+        PHASE_DATA         = 3'd4
+    } phase_e;
+
+    phase_e                  frame_phase;
+    logic                    is_read, auto_increment;
+    logic [synth_pkg::SPI_ADDRESS_W-1:0] quad_address;
+    logic [1:0]              nonad_index;    // the nonad within the current quad
+    logic [synth_pkg::SPI_QUAD_W-synth_pkg::SPI_NONAD_W-1:0] partial_quad;   // the quad's first three nonads
+    logic [synth_pkg::SPI_QUAD_W-1:0]   stream_quad;     // the quad streaming out NOW
 
     initial begin
-        frame_phase      = '0;
-        is_read          = 1'b0;
-        auto_increment   = 1'b0;
-        word_addr        = '0;
-        first_dummy_done = 1'b0;
-        data_byte_index  = '0;
-        partial_word     = '0;
-        fetch_toggle     = 1'b0;
-        fetch_addr       = '0;
-        stream_word      = '0;
+        frame_phase    = PHASE_COMMAND;
+        is_read        = 1'b0;
+        auto_increment = 1'b0;
+        quad_address   = '0;
+        nonad_index   = '0;
+        partial_quad   = '0;
+        stream_quad    = '0;
     end
+
+    // The quad read next: from the address just completed (its low nonad
+    // is on the wire) or from the next quad of a burst. One quad_at call,
+    // so that there is one copy of its multiplexers.
+    wire [synth_pkg::SPI_ADDRESS_W-1:0] next_read_address =
+        frame_phase == PHASE_ADDRESS_LOW ? {quad_address[synth_pkg::SPI_ADDRESS_W-1:synth_pkg::SPI_NONAD_W], rx_nonad}
+                                         : (auto_increment ? quad_address + 1'b1 : quad_address);
+
+    wire last_nonad_of_quad = nonad_index == 2'(synth_pkg::SPI_NONADS_PER_QUAD - 1);
 
     always_ff @(posedge sclk or posedge cs) begin
         if (cs) begin
-            frame_phase      <= '0;
-            first_dummy_done <= 1'b0;
-            data_byte_index  <= '0;
-        end else if (byte_end) begin
+            frame_phase  <= PHASE_COMMAND;
+            nonad_index <= '0;
+        end else if (nonad_end) begin
             case (frame_phase)
-                3'd0: begin                       // command
-                    is_read        <= rx_byte[7];
-                    auto_increment <= rx_byte[6];
-                    frame_phase    <= 3'd1;
+                PHASE_COMMAND: begin
+                    is_read        <= rx_nonad[synth_pkg::SPI_NONAD_W-1];
+                    auto_increment <= rx_nonad[synth_pkg::SPI_NONAD_W-2];
+                    frame_phase    <= PHASE_ADDRESS_HIGH;
                 end
-                3'd1: begin                       // address high
-                    word_addr[15:8] <= rx_byte;
-                    frame_phase     <= 3'd2;
+                PHASE_ADDRESS_HIGH: begin
+                    quad_address[synth_pkg::SPI_ADDRESS_W-1:synth_pkg::SPI_NONAD_W] <= rx_nonad;
+                    frame_phase <= PHASE_ADDRESS_LOW;
                 end
-                3'd2: begin                       // address low
-                    word_addr[7:0]  <= rx_byte;
-                    fetch_addr      <= {word_addr[15:8], rx_byte};
-                    fetch_toggle    <= ~fetch_toggle;   // fetch word 0
-                    data_byte_index <= '0;
-                    first_dummy_done <= 1'b0;
-                    frame_phase     <= is_read ? 3'd3 : 3'd4;
+                PHASE_ADDRESS_LOW: begin
+                    quad_address[synth_pkg::SPI_NONAD_W-1:0] <= rx_nonad;
+                    stream_quad  <= quad_at(next_read_address);
+                    nonad_index <= '0;
+                    frame_phase  <= is_read ? PHASE_TURNAROUND : PHASE_DATA;
                 end
-                3'd3: begin                       // read turnaround (2 bytes)
-                    first_dummy_done <= 1'b1;
-                    if (first_dummy_done) begin
-                        frame_phase <= 3'd4;
-                        stream_word <= fetch_result;  // word 0, fetched
-                                                      // >=2 byte-slots ago
+                PHASE_TURNAROUND: begin                  // one quad's worth of nonads
+                    nonad_index <= nonad_index + 2'd1;
+                    if (last_nonad_of_quad) begin
+                        frame_phase <= PHASE_DATA;
                     end
                 end
-                3'd4: begin                       // data words
-                    partial_word    <= {partial_word[15:0], rx_byte};
-                    data_byte_index <= data_byte_index + 2'd1;
-                    // prefetch the NEXT word two byte-slots before it
-                    // streams (~400 ns at 40 MHz against ~60 ns needed)
-                    if (data_byte_index == 2'd1) begin
-                        fetch_addr   <= auto_increment ? word_addr + 16'd1
-                                                       : word_addr;
-                        fetch_toggle <= ~fetch_toggle;
-                    end
-                    if (data_byte_index == 2'd3) begin
-                        stream_word <= fetch_result;  // latch the
-                                                      // prefetched next
-                                                      // word; fetch_result
-                                                      // is free to change
-                                                      // under later
-                                                      // prefetches
-                        if (auto_increment)
-                            word_addr <= word_addr + 16'd1;
+                PHASE_DATA: begin
+                    partial_quad <= {partial_quad[synth_pkg::SPI_QUAD_W-2*synth_pkg::SPI_NONAD_W-1:0], rx_nonad};
+                    nonad_index <= nonad_index + 2'd1;
+                    if (last_nonad_of_quad) begin
+                        stream_quad <= quad_at(next_read_address);    // the next quad of a burst
+                        if (auto_increment) begin
+                            quad_address <= quad_address + 1'b1;
+                        end
                     end
                 end
                 default: ;
@@ -206,139 +185,73 @@ module spi_bus #(
     end
 
     //--------------------------------------------------------------------
-    // Store — dual-clock semi dual-port BSRAM (write sclk, read sysclk).
-    // Sync-only, reset-free processes so yosys infers DPX9B (an async
-    // reset in a memory-write process blocks BSRAM inference).
+    // Write decode. A quad completes at the edge that receives its last
+    // nonad; every strobe below is valid on that edge, and its data are
+    // the quad on the wire: {partial_quad, rx_nonad}.
     //--------------------------------------------------------------------
-    logic [35:0] store_ram [0:NWORDS-1];
+    wire                   quad_complete = nonad_end && frame_phase == PHASE_DATA
+                                           && last_nonad_of_quad && !is_read;
+    wire [synth_pkg::SPI_QUAD_W-1:0]  quad_data     = {partial_quad, rx_nonad};
 
-    integer i0;
-    initial for (i0 = 0; i0 < NWORDS; i0 = i0 + 1) store_ram[i0] = '0;
+    wire in_system = quad_complete && quad_address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_SYSTEM_QUADS);
+    wire to_ctrl   = in_system && quad_address == synth_pkg::MAP_CTRL;
 
-    wire store_write_enable = byte_end && (frame_phase == 3'd4)
-                              && (data_byte_index == 2'd3)
-                              && !is_read && addr_in_backed;
+    // CTRL: the swap is an event; the rest are levels.
+    assign swap = to_ctrl && quad_data[synth_pkg::CTRL_SWAP];
 
-    // ---- per-partial write decode (MAP_PARTIAL_BASE + 256×64 words,
-    //      offsets 0..6) -------------------------------------------
-    localparam [15:0] PARTIAL_BASE = synth_pkg::MAP_PARTIAL_BASE;
-    localparam [15:0] PARTIAL_END  = synth_pkg::MAP_PARTIAL_BASE
-                                + 16'(synth_pkg::NUM_PARTIALS
-                                      * synth_pkg::MAP_PARTIAL_STRIDE);
-    wire        in_partial_range = (word_addr >= PARTIAL_BASE)
-                             && (word_addr <  PARTIAL_END);
-    wire [15:0] partial_rel_addr = word_addr - PARTIAL_BASE; // 0..0x3FFF in range
-    wire [13:0] partial_offset   = partial_rel_addr[13:0];
-    assign partial_write_enable = byte_end && (frame_phase == 3'd4)
-                               && (data_byte_index == 2'd3)
-                               && !is_read && in_partial_range
-                               && (partial_offset[5:3] == 3'd0)
-                               && (partial_offset[2:0] < 3'd7);
-    assign partial_write_word   = partial_offset[2:0];
-
-    // ---- instruction table write decode (0x0100..0x04FF) -------------
-    localparam [15:0] IMEM_BASE = synth_pkg::MAP_IMEM_BASE;
-    localparam [15:0] IMEM_END  = synth_pkg::MAP_IMEM_BASE
-                                + 16'(4 * synth_pkg::NUM_INSTR);
-    // All FOUR words per entry are writable. Word 3 carries the second ADSR
-    // rate word (kD's high bits, kR and sustain); excluding it here while the
-    // address map reserves the slot drops writes to it silently, which shows
-    // up as an envelope that will not release, because kR stays zero.
-    wire in_instruction_range = (word_addr >= IMEM_BASE)
-                          && (word_addr <  IMEM_END);
-    assign imem_write_enable = byte_end && (frame_phase == 3'd4)
-                                   && (data_byte_index == 2'd3)
-                                   && !is_read && in_instruction_range;
-    // Region-relative offset — word_addr[8:0] alone is WRONG here: the
-    // region starts at 0x0100, whose bit 8 is set, so a raw slice
-    // lands writes 64 entries off.
-    assign imem_write_addr = 10'(word_addr - synth_pkg::MAP_IMEM_BASE);
-    assign imem_write_data = {partial_word, rx_byte};
-
-    // ---- DMEM base write capture (see mailbox note at the ports) ---
-    wire in_dmem_range = (word_addr >= synth_pkg::MAP_DMEM_BASE)
-                     && (word_addr <  synth_pkg::MAP_DMEM_BASE
-                                      + 16'(synth_pkg::DMEM_WORDS));
-    initial dmem_wr_toggle = 1'b0;
     always_ff @(posedge sclk) begin
-        if (byte_end && (frame_phase == 3'd4) && (data_byte_index == 2'd3)
-            && !is_read && in_dmem_range) begin
-            dmem_wr_addr   <= word_addr[9:0];
-            dmem_wr_data   <= {partial_word[9:0], rx_byte}; // low 18 bits
-            dmem_wr_toggle <= ~dmem_wr_toggle;
+        if (in_system && quad_address[3] == 1'b0) begin
+            system_quad[quad_address[2:0]] <= to_ctrl ? quad_data & ~(synth_pkg::SPI_QUAD_W'(1) << synth_pkg::CTRL_SWAP) : quad_data;
         end
     end
-    assign partial_write_index = partial_offset[13:6];
-    assign partial_write_data  = {partial_word, rx_byte};
 
-    always_ff @(posedge sclk) begin
-        if (store_write_enable)
-            store_ram[word_addr[AW_BACKED-1:0]] <= {4'b0, partial_word, rx_byte};
-    end
-
-    // CTRL decode: a write to 0x0002 with bit 0 set toggles swap_toggle.
-    // Registered on the committing edge itself — no later edge is
-    // guaranteed (framing rule).
-    initial swap_toggle = 1'b0;
-    always_ff @(posedge sclk) begin
-        if (store_write_enable && (word_addr == synth_pkg::MAP_CTRL_ADDR)
-            && rx_byte[0])
-            swap_toggle <= ~swap_toggle;
-    end
-
-    //--------------------------------------------------------------------
-    // Fetch service (sysclk domain)
-    //--------------------------------------------------------------------
-    logic fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev;
-    logic        fetch_pending;
-    logic [35:0] store_read_data;
-
+    // The levels follow CTRL as written, from the edge after the quad
+    // completes.
     initial begin
-        {fetch_toggle_meta, fetch_toggle_sync, fetch_toggle_prev} = '0;
-        fetch_pending   = 1'b0;
-        store_read_data = '0;
-        fetch_result    = '0;
+        csp_held           = 1'b1;     // the CSP starts held: nothing runs until a program is loaded
+        test_tone_enable   = 1'b0;
+        data_stream_enable = 1'b0;
+        stream_source      = '0;
     end
-
-    always_ff @(posedge sysclk) begin
-        fetch_toggle_meta <= fetch_toggle;
-        fetch_toggle_sync <= fetch_toggle_meta;
-        fetch_toggle_prev <= fetch_toggle_sync;
-
-        store_read_data <= store_ram[fetch_addr[AW_BACKED-1:0]]; // BSRAM sync read
-        fetch_pending   <= (fetch_toggle_sync != fetch_toggle_prev);
-        if (fetch_pending)
-            fetch_result <= (fetch_addr[15:AW_BACKED] == '0)
-                          ? store_read_data[31:0] : 32'd0;
+    always_ff @(posedge sclk) begin
+        if (to_ctrl) begin
+            csp_held           <= quad_data[synth_pkg::CTRL_HOLD];
+            test_tone_enable   <= quad_data[synth_pkg::CTRL_TEST_TONE];
+            data_stream_enable <= quad_data[synth_pkg::CTRL_DATA_STREAM];
+            stream_source      <= quad_data[synth_pkg::CTRL_SOURCE_HIGH:synth_pkg::CTRL_SOURCE_LOW];
+        end
     end
 
     //--------------------------------------------------------------------
-    // Transmit — falling edge.  frame_phase/data_byte_index have already
-    // advanced at the RE8 before this FE8 load, so they index the slot
-    // about to stream.
+    // Transmit — falling edge. frame_phase and nonad_index have already
+    // advanced at the rising edge that completed the previous nonad, so
+    // they index the slot about to stream.
     //--------------------------------------------------------------------
-    wire [7:0] tx_byte =
-        (frame_phase == 3'd0)      ? ID_BYTE :
-        (frame_phase != 3'd4)      ? 8'h00   :
-        !is_read                   ? 8'h00   :
-        (data_byte_index == 2'd0)  ? stream_word[31:24] :
-        (data_byte_index == 2'd1)  ? stream_word[23:16] :
-        (data_byte_index == 2'd2)  ? stream_word[15:8]  :
-                                     stream_word[7:0];
+    logic [synth_pkg::SPI_NONAD_W-1:0] tx_nonad;
+    always_comb begin
+        if (frame_phase == PHASE_COMMAND) begin
+            tx_nonad = ID_NONAD;
+        end else if (frame_phase != PHASE_DATA || !is_read) begin
+            tx_nonad = '0;
+        end else begin
+            tx_nonad = stream_quad[synth_pkg::SPI_QUAD_W - 1 - synth_pkg::SPI_NONAD_W * nonad_index -: synth_pkg::SPI_NONAD_W];
+        end
+    end
 
-    logic [7:0] tx_shift;
-    initial tx_shift = ID_BYTE;
+    logic [synth_pkg::SPI_NONAD_W-1:0] tx_shift;
+    initial tx_shift = ID_NONAD;
 
     always_ff @(negedge sclk or posedge cs) begin
-        if (cs)
-            tx_shift <= ID_BYTE;
-        else if (bit_count == 3'd0)
-            tx_shift <= tx_byte;
-        else
-            tx_shift <= {tx_shift[6:0], 1'b0};
+        if (cs) begin
+            tx_shift <= ID_NONAD;
+        end else if (bit_count == '0) begin
+            tx_shift <= tx_nonad;
+        end else begin
+            tx_shift <= {tx_shift[synth_pkg::SPI_NONAD_W-2:0], 1'b0};
+        end
     end
 
-    assign miso = cs ? 1'b0 : tx_shift[7];
+    assign miso = cs ? 1'b0 : tx_shift[synth_pkg::SPI_NONAD_W-1];
 
 endmodule
 `default_nettype wire

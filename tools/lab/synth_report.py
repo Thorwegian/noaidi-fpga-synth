@@ -27,18 +27,17 @@ WATCHED_CELLS = ["LUT4", "DFF", "ALU", "BSRAM", "MULTALU36X18", "MULT18X18", "MU
 LUT_TYPES = {"LUT1", "LUT2", "LUT3", "LUT4", "MUX2_LUT5", "MUX2_LUT6", "MUX2_LUT7", "MUX2_LUT8"}
 
 
-def cell_kind(name):
-    """What a segment's cell is, from the suffix nextpnr gives its name."""
-    if "_LUT" in name or name.endswith("LUT4") or "_MUX2_LUT" in name:
-        return "lut"
-    if "_ALU" in name or name.endswith("ALU_SUM") or "_SUM" in name:
+def logic_kind(segment):
+    """What a logic segment crosses, from its ports: a LUT drives F (or O for
+    a wide-LUT mux), a carry cell drives COUT or SUM from CIN or its inputs.
+    The cell names nextpnr gives carry every cell the net passed through and
+    say nothing by themselves."""
+    to_port = segment.get("to", {}).get("port", "")
+    from_port = segment.get("from", {}).get("port", "")
+    if to_port in ("COUT", "SUM") or from_port == "CIN":
         return "carry"
-    if "DFF" in name or "DFFE" in name:
-        return "flop"
-    if "BSRAM" in name or "DPB" in name or "SDPB" in name or "DPX9B" in name or "SDPX9B" in name:
-        return "block ram"
-    if "MULTALU" in name or "ALU54D" in name or "MULT" in name:
-        return "dsp"
+    if to_port in ("F", "O", "OF"):
+        return "lut"
     return "other"
 
 
@@ -57,7 +56,7 @@ def dissect(path):
         cell = segment.get("from", {}).get("cell", "")
         if kind == "logic":
             logic += delay
-            what = cell_kind(cell)
+            what = logic_kind(segment)
             if what == "lut":
                 lut_levels += 1
             elif what == "carry":

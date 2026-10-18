@@ -5,7 +5,7 @@
 //
 // This is the single source of truth for the active sound: the
 // CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
-// RENDER it to DMEM words and partial words. Stored patches are files
+// RENDER it to the CSP's registers and sink words (render.cpp). Stored patches are files
 // in the format of docs/storage_format.md; loading and saving one
 // converts between that file and an instance of this. Multi-timbral layering / key split (channel awareness) is an
 // array of parts, each a patch_t — see performance_t at the bottom.
@@ -74,30 +74,22 @@ typedef struct {
     uint8_t release;
 } adsr_t;
 
-// ── ADSR wire format ─────────────────────────────────────────
-// The CSP does not decode rate nibbles or sustain: it multiplies by a
-// coefficient and shifts by a FIXED amount, so the multiply-accumulate
-// folds into one DSP block instead of a LUT barrel shifter feeding a
-// fabric carry chain. Firmware does the decode, which is control-rate
-// work and belongs on this side.
+// ── Envelope rates ──────────────────────────────────────────
+// The CSP's envelope program (tools/csp/programs/envelope.s) moves a level
+// toward a target by a rate times the distance left each pass. Firmware does
+// the decode of the patch's rate bytes, which is control-rate work and
+// belongs on this side: patch_adsr_rate_coeff gives an 18-bit coefficient k,
+// the fraction k / 2^24 of the distance an RC envelope covers each 96 kHz
+// sample (the gateware's original unit), and csp::envelope_rate
+// (csp/envelope.hpp) makes the program's wide rate of it.
 //
-// MIRRORED IN rtl/dsp/adsr.sv -- change both or neither:
-//
-//   word 1   [17:0] kA          [31:18] kD[13:0]
-//   word 3   [3:0]  kD[17:14]   [21:4]  kR       [31:22] sustain
-//
-// k spans 1..253952 (18 bits); the gateware does step = (delta*k) >>> 24.
-// Of the 256 rate codes, 224 land bit-exactly on the coefficient grid;
-// the worst error is 10% on a ~39 s release, affecting only settings
-// slower than ~11 s.
-#define ADSR_K_SHIFT       24u     // gateware's fixed output shift
-#define ADSR_K_MAX         253952u // 18 bits: mantissa 31 << 13
-#define ADSR_SUSTAIN_SHIFT 12u     // 10-bit sustain of a 22-bit level
+// k spans 1..253952 (18 bits). Of the 256 rate codes, 224 land bit-exactly on
+// the coefficient grid; the worst error is 10% on a ~39 s release, affecting
+// only settings slower than ~11 s.
+#define ADSR_K_SHIFT 24u // k is a fraction of 2^24
 
-uint32_t patch_adsr_rate_ad(const adsr_t *e);
-uint32_t patch_adsr_rate_dsr(const adsr_t *e);
 uint8_t patch_adsr_rate_byte(uint8_t patch_rate);
-// One rate byte -> the 18-bit coefficient k the gateware multiplies by.
+// One rate byte -> the 18-bit coefficient k.
 uint32_t patch_adsr_rate_coeff(uint8_t rate_byte);
 
 // ── LFO ─────────────────────────────────────────────────────────────
@@ -105,9 +97,10 @@ typedef struct {
     uint8_t shape; // osc_core shape (saw/pulse/tri/sine)
     uint16_t rate; // phase increment per sample, in 2^-25 of a
                    // cycle (subsonic..control rate)
-    int16_t depth; // signed COEF: the LFO swings its DMEM word
-                   // by ±depth/2 (the wave is ±0.5 in Q2.16)
-    uint8_t dest;  // LFO_DEST_*: the DMEM word it drives
+    int16_t depth; // signed: the LFO swings its destination by ±depth/2
+                   // raw units (1024 to an octave, or to the full pulse
+                   // width)
+    uint8_t dest;  // LFO_DEST_*: what it drives
 } lfo_t;
 
 // LFO destinations. Both LFOs take any of them.
@@ -147,7 +140,7 @@ typedef struct patch_s {
     filter_t filter;
     adsr_t env[PATCH_NUM_ENV]; // [0]=amp, [1]=MOD
     uint8_t mod_env_dest;      // MOD env destination (def: cutoff)
-    int16_t mod_env_depth;     // MOD env depth, signed raw DMEM value
+    int16_t mod_env_depth;     // MOD env depth, signed raw octave steps
                                // (the CSP's COEF is signed 18-bit;
                                // ±4096 = ±4 octaves of cutoff)
     lfo_t lfo[PATCH_NUM_LFO];
