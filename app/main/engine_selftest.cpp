@@ -38,31 +38,31 @@ public:
 
 private:
     void queue(int address, int32_t raw) {
-        port_.write_quad(fpga_map::fifo_door, fpga_map::fifo_quad(address, static_cast<uint32_t>(raw)));
+        port_.write_dword(fpga_map::fifo_door, fpga_map::fifo_dword(address, static_cast<uint32_t>(raw)));
     }
 
-    // The program: its rows into IMEM (two quads a row, bits 71:36 first),
+    // The program: its rows into IMEM (two dwords a row, bits 71:36 first),
     // its control words into the decode ROM, and NOP rows past both, since
     // what an earlier program left there would run after it on a chip that
     // has not been reset. The program's constants are immediates in its rows.
     void load() {
-        port_.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold);
+        port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
         for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
             const csp::Row row = pc < st::rows.size() ? st::rows[pc] : csp::Row{};
-            port_.write_quad(fpga_map::program_base + 2 * pc, row.high);
-            port_.write_quad(fpga_map::program_base + 2 * pc + 1, row.low);
+            port_.write_dword(fpga_map::program_base + 2 * pc, row.high);
+            port_.write_dword(fpga_map::program_base + 2 * pc + 1, row.low);
         }
         for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
-            port_.write_quad(fpga_map::rom_base + row, row < st::rom.size() ? st::rom[row] : 0);
+            port_.write_dword(fpga_map::rom_base + row, row < st::rom.size() ? st::rom[row] : 0);
         }
         // The counters start at zero, whatever was there.
         for (const int counter_register :
              {st::count_total, st::count_odd, st::count_half_odd, st::count_chain_odd}) {
             queue(counter_register, 0);
         }
-        port_.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+        port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
         port_.wait_ms(2);
-        port_.write_quad(fpga_map::ctrl, 0); // release
+        port_.write_dword(fpga_map::ctrl, 0); // release
     }
 
     void note(bool ok, const char *what, long got, long want) {
@@ -133,7 +133,7 @@ private:
 SelfTestResult run_selftest(SelfTestPort &port, bool leave_running) {
     SelfTestResult result = Run(port).run();
     if (!leave_running) {
-        port.write_quad(fpga_map::ctrl, fpga_map::ctrl_hold);
+        port.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
     }
     return result;
 }

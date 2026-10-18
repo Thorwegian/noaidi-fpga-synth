@@ -216,7 +216,7 @@ Control control_of(Op op, bool wide, ASource a_source);
 //   [23:0]  imm  an 18-bit immediate; a loop's or a skip's end
 
 struct Row {
-    uint64_t high = 0; // bits 71:36, the first quad on the wire
+    uint64_t high = 0; // bits 71:36, the first dword on the wire
     uint64_t low  = 0; // bits 35:0, the second
     bool operator==(const Row &) const = default;
 };

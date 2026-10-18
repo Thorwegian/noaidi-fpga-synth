@@ -16,15 +16,15 @@
 
 #include "fpga_map.hpp"
 
-// Where the quads go: the SPI link, or a simulated one.
+// Where the dwords go: the SPI link, or a simulated one.
 class EnginePort {
 public:
     virtual ~EnginePort() = default;
-    // Quads into the write FIFO's door, each carrying its own register or
-    // sink address (fpga_map::fifo_quad).
-    virtual void queue(const fpga_map::quad_t *quads, int count) = 0;
-    // A quad to a system register.
-    virtual void write_register(uint32_t address, fpga_map::quad_t value) = 0;
+    // Dwords into the write FIFO's door, each carrying its own register or
+    // sink address (fpga_map::fifo_dword).
+    virtual void queue(const fpga_map::dword_t *dwords, int count) = 0;
+    // A dword to a system register.
+    virtual void write_register(uint32_t address, fpga_map::dword_t value) = 0;
 };
 
 class EngineImage {
@@ -48,8 +48,8 @@ public:
     void resend_all();
 
     // Send at most `limit` pending words and commit them with a swap, the
-    // CTRL quad carrying `ctrl_bits` (hold, test tone). How many it sent.
-    int send(EnginePort &port, int limit, fpga_map::quad_t ctrl_bits);
+    // CTRL dword carrying `ctrl_bits` (hold, test tone). How many it sent.
+    int send(EnginePort &port, int limit, fpga_map::dword_t ctrl_bits);
 
 private:
     static constexpr int words = fpga_map::address_count;

@@ -27,7 +27,7 @@ Taken on issue #231; the text below is written to them.
 | 2026-10-18 | the word is 72 bits, eight 9-bit slices of one row | section 2 |
 | 2026-10-18 | no hardware interlock: the window's placement is the guarantee | section 8 |
 | 2026-10-18 | the sink area stays six replicas of two pages, twelve blocks | `csp2_architecture.md` section 2 |
-| 2026-10-18 | the wire is in nines: a 9-bit command, an 18-bit address, 36-bit quads of four nonads | `memory_map.md`, conventions |
+| 2026-10-18 | the wire is in nines: a 9-bit command, an 18-bit address, 36-bit dwords of four nonets | `memory_map.md`, conventions |
 
 ## 1. A program
 

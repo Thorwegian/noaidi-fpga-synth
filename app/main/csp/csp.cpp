@@ -133,7 +133,7 @@ Control control_of(Op op, bool wide, ASource a_source) {
 Row Word::encode() const {
     const uint64_t r_bits = r.encode(), x_bits = x.encode(), y_bits = y.encode();
     Row row;
-    // [71:64] op, [63:60] cond, [59:48] r, [47:36] x: the high quad's 36 bits are 71:36
+    // [71:64] op, [63:60] cond, [59:48] r, [47:36] x: the high dword's 36 bits are 71:36
     row.high = (static_cast<uint64_t>(op & 0xFF) << 28) | (static_cast<uint64_t>(cond & 0xF) << 24) | (r_bits << 12) | x_bits;
     // [35:24] y, [23:0] imm
     row.low = (y_bits << 24) | (imm & 0xFFFFFF);

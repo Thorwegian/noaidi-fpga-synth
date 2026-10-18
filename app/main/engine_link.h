@@ -63,15 +63,15 @@ bool engine_link_peek(int address, uint64_t *pair);
 bool engine_link_selftest(bool leave_running);
 
 // For experiments on a board (cli_csp.cpp): stop the 1 kHz tick sending the
-// register image, and write or read quads of the FPGA's SPI map directly
+// register image, and write or read dwords of the FPGA's SPI map directly
 // (fpga_map.hpp; a burst without auto-increment goes to one address, the
 // FIFO's door).
 void engine_link_pause(bool paused);
-bool engine_link_raw_write(uint32_t address, uint64_t quad);
-bool engine_link_raw_write_burst(uint32_t address, const uint64_t *quads, int count,
+bool engine_link_raw_write(uint32_t address, uint64_t dword);
+bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords, int count,
                                  bool auto_increment);
-bool engine_link_raw_read(uint32_t address, uint64_t *quads, int count);
-// A status quad's low 32 bits, read until two reads agree.
+bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count);
+// A status dword's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
 // The SPI clock, changed between frames; the rate actually set.
 uint32_t engine_link_spi_frequency(uint32_t frequency_hz);

@@ -17,15 +17,15 @@ namespace {
 
 constexpr const char *tag = "spi_link";
 
-constexpr int command_nonads    = 1;
-constexpr int address_nonads    = address_bits / nonad_bits;
-constexpr int turnaround_nonads = nonads_per_quad;
-constexpr int frame_max_nonads  = command_nonads + address_nonads + turnaround_nonads
-                                   + nonads_per_quad * burst_max;
-constexpr size_t frame_max_bytes = (frame_max_nonads * nonad_bits + 7) / 8;
+constexpr int command_nonets    = 1;
+constexpr int address_nonets    = address_bits / nonet_bits;
+constexpr int turnaround_nonets = nonets_per_dword;
+constexpr int frame_max_nonets  = command_nonets + address_nonets + turnaround_nonets
+                                   + nonets_per_dword * burst_max;
+constexpr size_t frame_max_bytes = (frame_max_nonets * nonet_bits + 7) / 8;
 
-constexpr uint32_t command_read           = uint32_t{1} << (nonad_bits - 1);
-constexpr uint32_t command_auto_increment = uint32_t{1} << (nonad_bits - 2);
+constexpr uint32_t command_read           = uint32_t{1} << (nonet_bits - 1);
+constexpr uint32_t command_auto_increment = uint32_t{1} << (nonet_bits - 2);
 
 spi_device_handle_t device = nullptr;
 int cs_pin_in_use          = -1;
@@ -41,7 +41,7 @@ void add_device(int cs_pin, uint32_t frequency_hz) {
 }
 
 // Bits appended MSB first into a byte buffer: the frame as the slave
-// shifts it in, nine bits a nonad and nothing between.
+// shifts it in, nine bits a nonet and nothing between.
 class BitPacker {
 public:
     explicit BitPacker(uint8_t *buffer) : buffer_(buffer) {}
@@ -98,7 +98,7 @@ void transfer(const uint8_t *tx, uint8_t *rx, int length_bits) {
 }
 
 void header(BitPacker &packer, uint32_t command, uint32_t address) {
-    packer.append(command, nonad_bits);
+    packer.append(command, nonet_bits);
     packer.append(address, address_bits);
 }
 
@@ -134,7 +134,7 @@ uint32_t set_frequency(uint32_t frequency_hz) {
 
 namespace {
 
-void write_frame(uint32_t address, const quad_t *quads, size_t count, bool auto_increment) {
+void write_frame(uint32_t address, const dword_t *dwords, size_t count, bool auto_increment) {
     if (count > static_cast<size_t>(burst_max)) {
         count = static_cast<size_t>(burst_max);
     }
@@ -142,28 +142,28 @@ void write_frame(uint32_t address, const quad_t *quads, size_t count, bool auto_
     BitPacker packer(frame.data());
     header(packer, auto_increment ? command_auto_increment : 0, address);
     for (size_t index = 0; index < count; ++index) {
-        packer.append(quads[index] & quad_mask, quad_bits);
+        packer.append(dwords[index] & dword_mask, dword_bits);
     }
     transfer(frame.data(), nullptr, packer.length_bits());
 }
 
 } // namespace
 
-void write(uint32_t address, const quad_t *quads, size_t count) {
-    write_frame(address, quads, count, true);
+void write(uint32_t address, const dword_t *dwords, size_t count) {
+    write_frame(address, dwords, count, true);
 }
 
-void write_one(uint32_t address, quad_t quad) {
-    write_frame(address, &quad, 1, true);
+void write_one(uint32_t address, dword_t dword) {
+    write_frame(address, &dword, 1, true);
 }
 
-void write_repeated(uint32_t address, const quad_t *quads, size_t count) {
-    write_frame(address, quads, count, false);
+void write_repeated(uint32_t address, const dword_t *dwords, size_t count) {
+    write_frame(address, dwords, count, false);
 }
 
 namespace {
 
-bool read_frame(uint32_t address, quad_t *quads, size_t count, bool auto_increment) {
+bool read_frame(uint32_t address, dword_t *dwords, size_t count, bool auto_increment) {
     if (count > static_cast<size_t>(burst_max)) {
         count = static_cast<size_t>(burst_max);
     }
@@ -171,33 +171,33 @@ bool read_frame(uint32_t address, quad_t *quads, size_t count, bool auto_increme
     std::array<uint8_t, frame_max_bytes> rx{};
     BitPacker packer(tx.data());
     header(packer, command_read | (auto_increment ? command_auto_increment : 0), address);
-    packer.append(0, nonad_bits * turnaround_nonads);
-    packer.append(0, quad_bits * static_cast<int>(count));
+    packer.append(0, nonet_bits * turnaround_nonets);
+    packer.append(0, dword_bits * static_cast<int>(count));
     transfer(tx.data(), rx.data(), packer.length_bits());
 
     BitReader reader(rx.data());
-    const uint32_t id = static_cast<uint32_t>(reader.take(nonad_bits));
-    reader.skip(nonad_bits * (address_nonads + turnaround_nonads));
+    const uint32_t id = static_cast<uint32_t>(reader.take(nonet_bits));
+    reader.skip(nonet_bits * (address_nonets + turnaround_nonets));
     for (size_t index = 0; index < count; ++index) {
-        quads[index] = reader.take(quad_bits);
+        dwords[index] = reader.take(dword_bits);
     }
-    return id == id_nonad;
+    return id == id_nonet;
 }
 
 } // namespace
 
-bool read(uint32_t address, quad_t *quads, size_t count) {
-    return read_frame(address, quads, count, true);
+bool read(uint32_t address, dword_t *dwords, size_t count) {
+    return read_frame(address, dwords, count, true);
 }
 
-bool read_repeated(uint32_t address, quad_t *quads, size_t count) {
-    return read_frame(address, quads, count, false);
+bool read_repeated(uint32_t address, dword_t *dwords, size_t count) {
+    return read_frame(address, dwords, count, false);
 }
 
-quad_t read_one(uint32_t address) {
-    quad_t quad = 0;
-    read_frame(address, &quad, 1, true);
-    return quad;
+dword_t read_one(uint32_t address) {
+    dword_t dword = 0;
+    read_frame(address, &dword, 1, true);
+    return dword;
 }
 
 } // namespace spi_link
@@ -208,7 +208,7 @@ extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_p
 }
 
 extern "C" int spi_link_boot_check(void) {
-    using spi_link::quad_t;
+    using spi_link::dword_t;
     int fails = 0;
     auto check = [&fails](const char *what, bool ok) {
         std::printf("%s %s\n", what, ok ? "OK" : "FAIL");
@@ -217,23 +217,23 @@ extern "C" int spi_link_boot_check(void) {
 
     std::printf("=== the link in nines (rtl/spi/spi_bus.sv) ===\n");
     constexpr uint32_t scratch = 0x00005;
-    constexpr quad_t whole     = 0xDEADBEEF5ull;             // all 36 bits
+    constexpr dword_t whole     = 0xDEADBEEF5ull;             // all 36 bits
     spi_link::write_one(scratch, whole);
-    check("1. a scratch quad written and read back whole", spi_link::read_one(scratch) == whole);
+    check("1. a scratch dword written and read back whole", spi_link::read_one(scratch) == whole);
 
-    std::array<quad_t, 3> burst{0x111111111ull, 0x222222222ull, 0x333333333ull};
-    std::array<quad_t, 3> back{};
+    std::array<dword_t, 3> burst{0x111111111ull, 0x222222222ull, 0x333333333ull};
+    std::array<dword_t, 3> back{};
     spi_link::write(scratch, burst.data(), burst.size());
     const bool id_ok = spi_link::read(scratch, back.data(), back.size());
-    check("2. a burst of three quads, auto-increment", back == burst);
-    check("   the ID nonad on the read frame", id_ok);
+    check("2. a burst of three dwords, auto-increment", back == burst);
+    check("   the ID nonet on the read frame", id_ok);
 
-    spi_link::write_one(0x00008, spi_link::quad_mask);
-    check("3. a status quad ignores a write", spi_link::read_one(0x00008) != spi_link::quad_mask);
+    spi_link::write_one(0x00008, spi_link::dword_mask);
+    check("3. a status dword ignores a write", spi_link::read_one(0x00008) != spi_link::dword_mask);
 
     spi_link::write_one(0x00805, 0xBAD0BAD05ull);            // aliases 0x005 if broken
     check("4. an address outside every window reads zero", spi_link::read_one(0x00805) == 0);
-    check("   and the scratch quad is unharmed", spi_link::read_one(scratch) == burst[0]);
+    check("   and the scratch dword is unharmed", spi_link::read_one(scratch) == burst[0]);
 
     std::printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
     return fails;

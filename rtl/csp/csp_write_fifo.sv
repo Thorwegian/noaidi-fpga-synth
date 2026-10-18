@@ -7,12 +7,12 @@
 //
 // The one queue in the system (docs/csp2_architecture.md section 2): one
 // SDPX9B of 512 × 36, port A written from the door on the SPI clock, a
-// quad an entry as it came over the wire — the register or sink address
+// dword an entry as it came over the wire — the register or sink address
 // in bits 35:24, the word in 23:6 — and port B read on the system clock
 // in pipeline mode (the entry is in the block's output register two
 // clocks after its address). A swap commits everything written so far;
 // the window pops committed entries, and a write to a full FIFO is
-// dropped and counted. It holds 511 quads: the 512th row is the one the
+// dropped and counted. It holds 511 dwords: the 512th row is the one the
 // parked reader sits on.
 //
 // The two ports never meet on a row (UG285-1.4E p24, note 1):
@@ -30,10 +30,10 @@
 // apart, far longer than the synchronisers.
 //
 // Pops are pipelined: a pop at clock t moves the pointer, and the entry
-// is on `head_quad` at t+2 (the block's address register samples the
+// is on `head_dword` at t+2 (the block's address register samples the
 // head's row at the pop's edge, its output register holds the entry a
 // clock later), for a lone pop and for pops on consecutive clocks alike. The window
-// counts pops it may make from `committed` and takes the quads as they
+// counts pops it may make from `committed` and takes the dwords as they
 // arrive, `head_valid` marking each.
 //------------------------------------------------------------------------
 `default_nettype none
@@ -41,8 +41,8 @@ module csp_write_fifo (
     // ---- the SPI side (sclk) ----
     input  wire                             sclk,
     input  wire                             sclk_reset_n,
-    input  wire                             write_enable,       // a quad for the door
-    input  wire [csp_pkg::QUAD_W-1:0]       write_quad,
+    input  wire                             write_enable,       // a dword for the door
+    input  wire [csp_pkg::DWORD_W-1:0]       write_dword,
     input  wire                             swap,               // one sclk cycle: commit
     output logic                            full,
     output logic [15:0]                     dropped,            // writes to a full FIFO, saturating
@@ -52,8 +52,8 @@ module csp_write_fifo (
     input  wire                             reset_n,
     input  wire                             pop,                // take the head entry
     output logic                            committed,          // a committed entry waits
-    output logic                            head_valid,         // head_quad is a popped entry
-    output logic [csp_pkg::QUAD_W-1:0]      head_quad,
+    output logic                            head_valid,         // head_dword is a popped entry
+    output logic [csp_pkg::DWORD_W-1:0]      head_dword,
     output wire  [csp_pkg::FIFO_POINTER_W-1:0] read_pointer_gray   // diagnostics
 );
 
@@ -156,7 +156,7 @@ module csp_write_fifo (
         else          read_index <= committed_next ? pointer_next[INDEX_W-1:0] : parked[INDEX_W-1:0];
     end
 
-    // A popped entry reaches head_quad two clocks after its pop.
+    // A popped entry reaches head_dword two clocks after its pop.
     logic [1:0] pop_pipe;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) pop_pipe <= '0;
@@ -179,7 +179,7 @@ module csp_write_fifo (
         .CEA     (entry_write),
         .RESETA  (1'b0),
         .ADA     ({entry_index, 1'b0, 4'b1111}),
-        .DI      (write_quad),
+        .DI      (write_dword),
         .BLKSELA (3'b000),
         .CLKB    (clk),
         .CEB     (1'b1),
@@ -187,24 +187,24 @@ module csp_write_fifo (
         .OCE     (1'b1),
         .ADB     ({read_index, 5'b00000}),
         .BLKSELB (3'b000),
-        .DO      (head_quad)
+        .DO      (head_dword)
     );
 `else
     // The block as the benches see it: the array, the address register's
     // read, and the pipeline register after it.
-    logic [csp_pkg::QUAD_W-1:0] entries [csp_pkg::FIFO_DEPTH];
-    logic [csp_pkg::QUAD_W-1:0] read_stage;
+    logic [csp_pkg::DWORD_W-1:0] entries [csp_pkg::FIFO_DEPTH];
+    logic [csp_pkg::DWORD_W-1:0] read_stage;
     initial begin
         for (int entry = 0; entry < csp_pkg::FIFO_DEPTH; entry++) entries[entry] = '0;
         read_stage = '0;
-        head_quad  = '0;
+        head_dword  = '0;
     end
     always_ff @(posedge sclk) begin
-        if (entry_write) entries[entry_index] <= write_quad;
+        if (entry_write) entries[entry_index] <= write_dword;
     end
     always_ff @(posedge clk) begin
         read_stage <= entries[read_index];
-        head_quad  <= read_stage;
+        head_dword  <= read_stage;
     end
 `endif
 

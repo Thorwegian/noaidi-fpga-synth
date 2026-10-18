@@ -40,7 +40,7 @@ flowchart TD
     MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>patch → registers and sinks"]
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
-        BUS --> Q["write FIFO<br/>511 quads of 36 bits"]
+        BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
         BUS --> PGM["IMEM: 1472 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
         Q --> CSP["CSP: the control program,<br/>once per 1536 cycles"]
@@ -55,23 +55,23 @@ flowchart TD
 ## Conventions
 
 - **The wire is in nines.** Every block RAM on the chip is 9, 18 or 36 bits
-  wide, so the link is too: a command nonad, two address nonads (18 bits)
-  and 36-bit payload quads, MSB first, nothing straddling a boundary. The
+  wide, so the link is too: a command nonet, two address nonets (18 bits)
+  and 36-bit payload dwords, MSB first, nothing straddling a boundary. The
   ESP32's SPI master clocks any number of bits per transfer; the slave counts
   to nine. (The first revision's 32-bit wire carried 18 useful bits in 32
   clocks and split a 36-bit instruction over a high-bits register; that is
   gone.)
-- **A quad is 36 bits**: a register or sink write is one quad (`[35:24]` the
+- **A dword is 36 bits**: a register or sink write is one dword (`[35:24]` the
   12-bit address, `[23:6]` the 18-bit word, `[5:0]` spare); a wide register is
-  two quads, the pair's halves; an instruction row is two quads; a decode ROM
-  row is one quad with the upper half unused; a status or probe word reads
-  back as one quad, 18 or 36 wide as it is.
-- **Address width: 18 bits**, in quads.
-- **Transaction format**: the command nonad, the address nonad, then quads
-  while CS is low (a burst: the address increments by one quad). Command:
+  two dwords, the pair's halves; an instruction row is two dwords; a decode ROM
+  row is one dword with the upper half unused; a status or probe word reads
+  back as one dword, 18 or 36 wide as it is.
+- **Address width: 18 bits**, in dwords.
+- **Transaction format**: the command nonet, the address nonet, then dwords
+  while CS is low (a burst: the address increments by one dword). Command:
   `[8] R/W` (1 = read), `[7] auto-increment`, `[6:0] reserved`. A read has one
-  dummy turnaround quad before the data. MISO's first nonad is always the ID
-  nonad (`0x0A5`), a link check on every frame.
+  dummy turnaround dword before the data. MISO's first nonet is always the ID
+  nonet (`0x0A5`), a link check on every frame.
 - **Writes outside the ranges below are dropped, reads return zero**: no
   aliasing. The ranges cannot overlap; `spi_bus` checks that at elaboration.
 - **Atomicity.** A register or sink write waits in the **write queue** until
@@ -91,15 +91,15 @@ flowchart TD
 
 ## Top-level map
 
-Addresses are in 36-bit quads.
+Addresses are in 36-bit dwords.
 
 | Address | Section | Size |
 |---|---|---|
-| `0x00000–0x0000F` | System registers (read back) | 16 quads |
-| `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K quads |
-| `0x06000` | The CSP's write FIFO's door: a quad carries its own register or sink address | 1 quad |
-| `0x08000–0x08B7F` | IMEM: 1472 instruction rows, two quads a row | 2944 quads |
-| `0x09000–0x093FF` | The decode ROM: 1024 rows, one quad a row | 1024 quads |
+| `0x00000–0x0000F` | System registers (read back) | 16 dwords |
+| `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K dwords |
+| `0x06000` | The CSP's write FIFO's door: a dword carries its own register or sink address | 1 dword |
+| `0x08000–0x08B7F` | IMEM: 1472 instruction rows, two dwords a row | 2944 dwords |
+| `0x09000–0x093FF` | The decode ROM: 1024 rows, one dword a row | 1024 dwords |
 
 Everything else is reserved. The regions' bases are the first revision's,
 widened; the map's rule stands — firm, and landscaped where the chip asks.
@@ -133,22 +133,22 @@ tone along with a swap.
 
 An instruction is 72 bits ([csp2_isa.md](csp2_isa.md) section 2), held as
 eight 9-bit slices of one row in eight blocks of 2048 × 9. A row is two
-quads: the first carries bits `[71:36]`, one 9-bit slice to each of the
+dwords: the first carries bits `[71:36]`, one 9-bit slice to each of the
 upper four blocks, the second bits `[35:0]` to the lower four; row `pc` is
 at `0x08000 + 2 pc`. The decode ROM's rows (1024 × 18, the operations as
-`csp2_isa.md` section 4 lists them) are one quad each at `0x09000 + op`,
-the upper half of the quad unused. Both are loaded as one image with the
+`csp2_isa.md` section 4 lists them) are one dword each at `0x09000 + op`,
+the upper half of the dword unused. Both are loaded as one image with the
 CSP held: the memories take writes only then, so a pass never runs half an
 old program and half a new, and instructions past the end of the program
 are zero, which is `NOP`.
 
 ## Write FIFO — the door at `0x06000`
 
-A quad written to the door queues a write of its 18-bit word (`[23:6]`) to
+A dword written to the door queues a write of its 18-bit word (`[23:6]`) to
 the register or sink word its top 12 bits (`[35:24]`) name (`0x000–0xBFF`),
 as the CSP's address space has it ([csp2_isa.md](csp2_isa.md), the register
-map); a batch is one frame of quads to the door without auto-increment, in
-any order of addresses, and the quad is the FIFO's entry as it is, the block
+map); a batch is one frame of dwords to the door without auto-increment, in
+any order of addresses, and the dword is the FIFO's entry as it is, the block
 in its 512 × 36 configuration:
 
 | `a` | What |
@@ -171,7 +171,7 @@ pass by the program, and the firmware must not write them. A channel's duty
 and resonance sinks are the program's (they move with the LFOs); the rest of
 its block is the firmware's.
 
-The FIFO holds 511 quads (its 512th row is the one the parked reader sits
+The FIFO holds 511 dwords (its 512th row is the one the parked reader sits
 on), so a batch larger than that needs a swap and a wait between chunks. The write window applies 48 a pass, a pass being 20.8 µs:
 a 1 kHz tick can send 480 and the FIFO is empty again before the next.
 
@@ -197,7 +197,7 @@ times after every word of positions 0–62, whichever source is sent), 1 is
 the pass counter, 2 is the probe's pair (its even word on the frame's even
 positions, its odd word on the odd ones, 18 bits each). A receiver that lost or repeated a sample fails
 the frame's CRC and re-synchronises on the next sync word; the sequence
-number says how many frames went. `DIAG_STREAM` (quad `0xF`) counts the
+number says how many frames went. `DIAG_STREAM` (dword `0xF`) counts the
 frames sent.
 
 ## Partial pointers — `0x2000 + 64 p`
@@ -260,8 +260,8 @@ ports.
 - Firmware default: **10 MHz**, one CS frame per transaction; `csp-spiclk
   <MHz>` changes it at run time.
 - **Measured on hardware with the wire in nines (#233, 2026-10-18): clean at
-  10, 20, 26.7 and 40 MHz** — a thousand rounds of five scratch quads each,
-  singly and in a burst, at every rate: no quad wrong and the ID nonad on
+  10, 20, 26.7 and 40 MHz** — a thousand rounds of five scratch dwords each,
+  singly and in a burst, at every rate: no dword wrong and the ID nonet on
   every frame. (The ESP32 divides its 80 MHz: 30 asked gives 26.7.)
 - **Measured earlier with the first revision's 32-bit wire: clean at
   every rate from 1 MHz to 40 MHz.** 88/88 transactions correct — write four registers, burst-read
@@ -276,8 +276,8 @@ ports.
   traffic justifies it.
 - Traffic: a note-on is a handful of words; a re-render of the patch is the
   words that changed; envelopes, LFOs, pitch and cutoff cost no SPI traffic.
-  The boot is the program (two quads a row) and the decode ROM (one a row),
-  the wiring (~400 quads; constants are immediates in the word), and 256
+  The boot is the program (two dwords a row) and the decode ROM (one a row),
+  the wiring (~400 dwords; constants are immediates in the word), and 256
   pointer entries.
 
 ## Known limits vs a full polysynth
@@ -309,7 +309,7 @@ gowin_pack, GW2AR-LV18QN88C8/I7).
 So a block with two read ports is **instantiated by hand**: the sink area is
 six `DPX9B` (`rtl/csp/csp_sink_area.sv`), the active page's block reading on
 both ports and the shadow page's taking the CSP's write on one of them, as
-the multiply-add quad's DSP is. Everything else is inferred as a semi
+the multiply-add dword's DSP is. Everything else is inferred as a semi
 dual-port block, one write and one read.
 
 Place-and-route of the whole design (`make pack`): the blocks and their

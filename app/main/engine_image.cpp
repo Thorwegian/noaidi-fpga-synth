@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr int burst_quads = 8; // the link's quads per transaction
+constexpr int burst_dwords = 8; // the link's dwords per transaction
 
 } // namespace
 
@@ -43,20 +43,20 @@ void EngineImage::resend_all() {
     }
 }
 
-int EngineImage::send(EnginePort &port, int limit, fpga_map::quad_t ctrl_bits) {
-    // Every quad carries its own address, so a burst takes the pending
+int EngineImage::send(EnginePort &port, int limit, fpga_map::dword_t ctrl_bits) {
+    // Every dword carries its own address, so a burst takes the pending
     // words as they come, consecutive or not.
     int sent = 0;
-    std::array<fpga_map::quad_t, burst_quads> burst;
+    std::array<fpga_map::dword_t, burst_dwords> burst;
     int count = 0;
     for (int address = 0; address < words && sent + count < limit; ++address) {
         if (!pending_[address]) {
             continue;
         }
-        burst[count++]    = fpga_map::fifo_quad(address, static_cast<uint32_t>(value_[address]));
+        burst[count++]    = fpga_map::fifo_dword(address, static_cast<uint32_t>(value_[address]));
         pending_[address] = false;
         known_[address]   = true;
-        if (count == burst_quads) {
+        if (count == burst_dwords) {
             port.queue(burst.data(), count);
             sent += count;
             count = 0;

@@ -32,7 +32,7 @@ package csp_pkg;
     parameter int ROM_W          = 18;
     parameter int ROM_ADDRESS_W  = 10;
 
-    parameter int FIFO_DEPTH     = 512;           // the write FIFO: 36-bit quads
+    parameter int FIFO_DEPTH     = 512;           // the write FIFO: 36-bit dwords
     parameter int FIFO_POINTER_W = 10;            // one more bit than the index: full from empty
 
     // ---- number formats -----------------------------------------------------
@@ -41,15 +41,15 @@ package csp_pkg;
     parameter int WORD_W = 18;
     parameter int WIDE_W = 36;
 
-    // A quad in the write FIFO: [35:24] the address, [23:6] the word, [5:0] spare.
-    parameter int QUAD_W          = 36;
-    parameter int QUAD_ADDRESS_LOW = 24;
-    parameter int QUAD_WORD_LOW   = 6;
+    // A dword in the write FIFO: [35:24] the address, [23:6] the word, [5:0] spare.
+    parameter int DWORD_W          = 36;
+    parameter int DWORD_ADDRESS_LOW = 24;
+    parameter int DWORD_WORD_LOW   = 6;
 
     // ---- the pass (docs/csp2_architecture.md section 5) -----------------------
     parameter int CYCLES_PER_PASS = 1536;         // one 48 kHz sample
     parameter int RUN_END         = 1472;         // instructions issue in 0 … RUN_END-1
-    parameter int WINDOW_START    = 1482;         // the write window: up to 48 of the FIFO's quads
+    parameter int WINDOW_START    = 1482;         // the write window: up to 48 of the FIFO's dwords
     parameter int WINDOW_END      = 1530;         //   pops in WINDOW_START … WINDOW_END-1
     parameter int WRITE_WINDOW    = WINDOW_END - WINDOW_START;
     parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 1;   // the probe reads its pair

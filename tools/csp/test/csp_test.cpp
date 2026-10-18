@@ -141,7 +141,7 @@ void test_encoding() {
     word.y    = Operand::direct(0x3FF);
     word.imm  = 0x3FFFD;
     const csp::Row row = word.encode();
-    check(row.high < (uint64_t{1} << 36) && row.low < (uint64_t{1} << 36), "a row is two 36-bit quads");
+    check(row.high < (uint64_t{1} << 36) && row.low < (uint64_t{1} << 36), "a row is two 36-bit dwords");
     check(csp::Word::decode(row) == word, "a word encodes and decodes round-trip");
     check_equal(static_cast<int64_t>(row.high >> 28), 0x5A, "op is bits 71:64");
     check(csp::Word::decode(csp::Row{}).op == 0, "an all-zero row is op 0, the NOP");

@@ -5,7 +5,7 @@
 // License: CERN-OHL-S v2
 //
 // One DPX9B of 1024 × 18. Port A is the SPI side on the SPI clock: the
-// firmware loads the operations' rows as one quad each (the low 18 bits)
+// firmware loads the operations' rows as one dword each (the low 18 bits)
 // with the program, and reads them back for its verify. Port B is the
 // decode on the system clock: the control word is in the block's output
 // register the clock after the `op` field addresses it (bypass mode; the

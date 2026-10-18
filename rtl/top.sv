@@ -95,17 +95,17 @@ module top (
     // DMEM written by the pass's window and read by the probe.
     //----------------------------------------------------------------
     logic                               fifo_write_enable, fifo_swap, fifo_full;
-    logic [synth_pkg::SPI_QUAD_W-1:0]              fifo_write_quad;
+    logic [synth_pkg::SPI_DWORD_W-1:0]              fifo_write_dword;
     logic [15:0]                        fifo_dropped;
     logic                               fifo_pop, fifo_committed, fifo_head_valid;
-    logic [synth_pkg::SPI_QUAD_W-1:0]              fifo_head_quad;
+    logic [synth_pkg::SPI_DWORD_W-1:0]              fifo_head_dword;
     logic [csp_pkg::FIFO_POINTER_W-1:0] fifo_read_gray;
 
     csp_write_fifo u_fifo (
         .sclk              (sclk),
         .sclk_reset_n      (rst_n),
         .write_enable      (fifo_write_enable),
-        .write_quad        (fifo_write_quad),
+        .write_dword        (fifo_write_dword),
         .swap              (fifo_swap),
         .full              (fifo_full),
         .dropped           (fifo_dropped),
@@ -114,13 +114,13 @@ module top (
         .pop               (fifo_pop),
         .committed         (fifo_committed),
         .head_valid        (fifo_head_valid),
-        .head_quad         (fifo_head_quad),
+        .head_dword         (fifo_head_dword),
         .read_pointer_gray (fifo_read_gray)
     );
 
     logic                              imem_load_enable, imem_upper;
     logic [csp_pkg::PROGRAM_W-1:0]     imem_row, fetch_address;
-    logic [synth_pkg::SPI_QUAD_W-1:0]             imem_load_quad, imem_read_quad;
+    logic [synth_pkg::SPI_DWORD_W-1:0]             imem_load_dword, imem_read_dword;
     logic [csp_pkg::ROW_W-1:0]         fetch_row;
 
     csp_imem u_imem (
@@ -128,10 +128,10 @@ module top (
         .load_enable   (imem_load_enable),
         .load_row      (imem_row),
         .load_upper    (imem_upper),
-        .load_quad     (imem_load_quad),
+        .load_dword     (imem_load_dword),
         .read_row      (imem_row),
         .read_upper    (imem_upper),
-        .read_quad     (imem_read_quad),
+        .read_dword     (imem_read_dword),
         .clk           (sysclk),
         .held          (csp_held_sync),
         .fetch_address (fetch_address),
@@ -184,7 +184,7 @@ module top (
         .fifo_pop           (fifo_pop),
         .fifo_committed     (fifo_committed),
         .fifo_head_valid    (fifo_head_valid),
-        .fifo_head_quad     (fifo_head_quad),
+        .fifo_head_dword     (fifo_head_dword),
         .dmem_write_enable  (dmem_write_enable),
         .dmem_write_address (dmem_write_address),
         .dmem_write_word    (dmem_write_word),
@@ -307,7 +307,7 @@ module top (
 
     //----------------------------------------------------------------
     // SPI control plane — the docs/memory_map.md wire protocol in nines.
-    // The status quads cross from the system clock through two flip-flops
+    // The status dwords cross from the system clock through two flip-flops
     // each; they are not coherent across bits, so a reader takes two reads
     // and compares. The FIFO's own figures are on the SPI clock already.
     //----------------------------------------------------------------
@@ -325,15 +325,15 @@ module top (
             {probe_meta, probe_sync}   <= {probe_pair, probe_meta};
         end
 
-    logic [synth_pkg::MAP_SYSTEM_QUADS-synth_pkg::MAP_STORED_QUADS-1:0][synth_pkg::SPI_QUAD_W-1:0] status;
+    logic [synth_pkg::MAP_SYSTEM_DWORDS-synth_pkg::MAP_STORED_DWORDS-1:0][synth_pkg::SPI_DWORD_W-1:0] status;
     always_comb begin
         status = '0;
-        status[synth_pkg::MAP_DIAG_PASS    - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(passes_sync);
-        status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'({fifo_full, fifo_read_gray});
-        status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(fifo_dropped);
-        status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(probe_sync[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
-        status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
-        status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(frames_sync);
+        status[synth_pkg::MAP_DIAG_PASS    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(passes_sync);
+        status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'({fifo_full, fifo_read_gray});
+        status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(fifo_dropped);
+        status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
+        status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
+        status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(frames_sync);
     end
 
     spi_bus u_spi (
@@ -349,12 +349,12 @@ module top (
         .probe_address      (probe_address_sclk),
         .status             (status),
         .fifo_write_enable  (fifo_write_enable),
-        .fifo_write_quad    (fifo_write_quad),
+        .fifo_write_dword    (fifo_write_dword),
         .imem_load_enable   (imem_load_enable),
         .imem_row           (imem_row),
         .imem_upper         (imem_upper),
-        .imem_load_quad     (imem_load_quad),
-        .imem_read_quad     (imem_read_quad),
+        .imem_load_dword     (imem_load_dword),
+        .imem_read_dword     (imem_read_dword),
         .rom_load_enable    (rom_load_enable),
         .rom_row            (rom_row),
         .rom_load_word      (rom_load_word),

@@ -26,12 +26,12 @@ module tb_csp_memories;
     // ---- IMEM ----
     logic                  imem_load = 0, imem_upper = 0;
     logic [PROGRAM_W-1:0]  imem_row = '0, fetch_address = '0;
-    logic [QUAD_W-1:0]     imem_quad = '0;
-    wire  [QUAD_W-1:0]     imem_read;
+    logic [DWORD_W-1:0]     imem_dword = '0;
+    wire  [DWORD_W-1:0]     imem_read;
     wire  [ROW_W-1:0]      fetch_row;
     csp_imem u_imem (
-        .sclk(sclk), .load_enable(imem_load), .load_row(imem_row), .load_upper(imem_upper), .load_quad(imem_quad),
-        .read_row(imem_row), .read_upper(imem_upper), .read_quad(imem_read),
+        .sclk(sclk), .load_enable(imem_load), .load_row(imem_row), .load_upper(imem_upper), .load_dword(imem_dword),
+        .read_row(imem_row), .read_upper(imem_upper), .read_dword(imem_read),
         .clk(clk), .held(held), .fetch_address(fetch_address), .fetch_row(fetch_row)
     );
 
@@ -48,16 +48,16 @@ module tb_csp_memories;
 
     // ---- the FIFO, DMEM and the pass ----
     logic              fifo_write = 0, swap = 0;
-    logic [QUAD_W-1:0] fifo_quad = '0;
+    logic [DWORD_W-1:0] fifo_dword = '0;
     wire               full, committed, head_valid, pop;
     wire [15:0]        dropped;
-    wire [QUAD_W-1:0]  head_quad;
+    wire [DWORD_W-1:0]  head_dword;
     wire [FIFO_POINTER_W-1:0] read_gray;
     csp_write_fifo u_fifo (
-        .sclk(sclk), .sclk_reset_n(reset_n), .write_enable(fifo_write), .write_quad(fifo_quad),
+        .sclk(sclk), .sclk_reset_n(reset_n), .write_enable(fifo_write), .write_dword(fifo_dword),
         .swap(swap), .full(full), .dropped(dropped),
         .clk(clk), .reset_n(reset_n), .pop(pop), .committed(committed), .head_valid(head_valid),
-        .head_quad(head_quad), .read_pointer_gray(read_gray)
+        .head_dword(head_dword), .read_pointer_gray(read_gray)
     );
 
     wire                  dmem_we, dmem_re;
@@ -75,7 +75,7 @@ module tb_csp_memories;
     wire [31:0] passes;
     csp_pass u_pass (
         .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .cycle(cycle), .pass_counter(passes),
-        .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_quad(head_quad),
+        .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_dword(head_dword),
         .dmem_write_enable(dmem_we), .dmem_write_address(dmem_wa), .dmem_write_word(dmem_wd),
         .probe_address(probe_address), .dmem_read_enable(dmem_re), .dmem_read_address(dmem_ra),
         .dmem_read_pair(dmem_pair), .probe_pair(probe_pair)
@@ -109,8 +109,8 @@ module tb_csp_memories;
         #50 sclk = 1; #50 sclk = 0;
     endtask
 
-    function automatic logic [QUAD_W-1:0] quad_of(input int address, input int word);
-        quad_of = (QUAD_W'(address) << QUAD_ADDRESS_LOW) | (QUAD_W'(word & 'h3FFFF) << QUAD_WORD_LOW);
+    function automatic logic [DWORD_W-1:0] dword_of(input int address, input int word);
+        dword_of = (DWORD_W'(address) << DWORD_ADDRESS_LOW) | (DWORD_W'(word & 'h3FFFF) << DWORD_WORD_LOW);
     endfunction
 
     function automatic logic [ROW_W-1:0] row_pattern(input int row);
@@ -118,7 +118,7 @@ module tb_csp_memories;
     endfunction
 
     logic [ROW_W-1:0] want_row;
-    logic [QUAD_W-1:0] got;
+    logic [DWORD_W-1:0] got;
     int wait_passes;
     initial begin
         reset_n = 0;
@@ -127,11 +127,11 @@ module tb_csp_memories;
         reset_n = 1;
         #100;
 
-        $display("--- 1. IMEM: every row loaded as two quads while held, read back, fetched ---");
+        $display("--- 1. IMEM: every row loaded as two dwords while held, read back, fetched ---");
         for (int row = 0; row < PROGRAM_ROWS; row++) begin
             want_row = row_pattern(row);
-            imem_row = PROGRAM_W'(row); imem_upper = 1; imem_quad = want_row[ROW_W-1:ROW_W/2]; imem_load = 1; sclk_edge();
-            imem_upper = 0; imem_quad = want_row[ROW_W/2-1:0]; sclk_edge();
+            imem_row = PROGRAM_W'(row); imem_upper = 1; imem_dword = want_row[ROW_W-1:ROW_W/2]; imem_load = 1; sclk_edge();
+            imem_upper = 0; imem_dword = want_row[ROW_W/2-1:0]; sclk_edge();
             imem_load = 0;
         end
         for (int row = 0; row < PROGRAM_ROWS; row += 97) begin
@@ -173,13 +173,13 @@ module tb_csp_memories;
         $display("--- 3. DMEM through the FIFO and the window, read by the probe ---");
         // 100 registers in one batch: three windows' worth
         for (int i = 0; i < 100; i++) begin
-            fifo_quad = quad_of('h100 + i, 'h2000 + 3 * i); fifo_write = 1; sclk_edge();
+            fifo_dword = dword_of('h100 + i, 'h2000 + 3 * i); fifo_write = 1; sclk_edge();
         end
         fifo_write = 0;
         swap = 1; sclk_edge(); swap = 0;
         // three passes land them all
         repeat (3 * CYCLES_PER_PASS + 10) @(posedge clk);
-        if (committed) begin $display("FAIL: quads still waiting after three passes"); errors++; end
+        if (committed) begin $display("FAIL: dwords still waiting after three passes"); errors++; end
         for (int i = 0; i < 100; i += 2) begin
             probe_address = REGISTER_W'('h100 + i);
             repeat (2 * CYCLES_PER_PASS) @(posedge clk);          // the pair is read at the pass's end
@@ -191,10 +191,10 @@ module tb_csp_memories;
         $display("pass: 100 words through the window, 50 pairs probed");
 
         $display("--- 4. register 0 and the inputs refuse writes; a sink word is dropped here ---");
-        fifo_quad = quad_of(0, 'h3FFFF); fifo_write = 1; sclk_edge();
-        fifo_quad = quad_of(IO_BASE + 3, 'h3FFFF); sclk_edge();
-        fifo_quad = quad_of(SINK_BASE + 9, 'h3FFFF); sclk_edge();
-        fifo_quad = quad_of(1, 'h12345); sclk_edge();
+        fifo_dword = dword_of(0, 'h3FFFF); fifo_write = 1; sclk_edge();
+        fifo_dword = dword_of(IO_BASE + 3, 'h3FFFF); sclk_edge();
+        fifo_dword = dword_of(SINK_BASE + 9, 'h3FFFF); sclk_edge();
+        fifo_dword = dword_of(1, 'h12345); sclk_edge();
         fifo_write = 0;
         swap = 1; sclk_edge(); swap = 0;
         repeat (CYCLES_PER_PASS + 10) @(posedge clk);

@@ -7,7 +7,7 @@
 // Eight DPX9B blocks of 2048 × 9, the same address on all eight, so that
 // one row is one 72-bit instruction (docs/csp2_architecture.md section 2:
 // slices, not replicas). Port A is the SPI side on the SPI clock: the
-// load writes a row as two quads, the first to the upper four slices
+// load writes a row as two dwords, the first to the upper four slices
 // (bits 71:36) and the second to the lower four, and reads them back the
 // same way for the firmware's verify. Port B is the fetch on the system
 // clock: the row is in the blocks' output registers the clock after its
@@ -25,10 +25,10 @@ module csp_imem (
     input  wire                             load_enable,
     input  wire [csp_pkg::PROGRAM_W-1:0]    load_row,
     input  wire                             load_upper,     // which half: 1 = bits 71:36
-    input  wire [csp_pkg::QUAD_W-1:0]       load_quad,
+    input  wire [csp_pkg::DWORD_W-1:0]       load_dword,
     input  wire [csp_pkg::PROGRAM_W-1:0]    read_row,       // the row the read-back wants
     input  wire                             read_upper,
-    output logic [csp_pkg::QUAD_W-1:0]      read_quad,      // the clock after read_row
+    output logic [csp_pkg::DWORD_W-1:0]      read_dword,      // the clock after read_row
 
     // ---- the fetch (clk) ----
     input  wire                             clk,
@@ -51,9 +51,9 @@ module csp_imem (
 
     for (genvar slice = 0; slice < csp_pkg::SLICES; slice++) begin : g_slice
         localparam bit UPPER = slice >= csp_pkg::SLICES / 2;
-        localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the quad's 9-bit lane
+        localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the dword's 9-bit lane
         wire write_this = load_enable && load_upper == UPPER;
-        wire [csp_pkg::SLICE_W-1:0] lane_in = load_quad[LANE * csp_pkg::SLICE_W +: csp_pkg::SLICE_W];
+        wire [csp_pkg::SLICE_W-1:0] lane_in = load_dword[LANE * csp_pkg::SLICE_W +: csp_pkg::SLICE_W];
 
 `ifdef SYNTHESIS
         // A 9-bit word's address is AD[13:3] (UG285-1.4E p4, table 2-2); the
@@ -106,10 +106,10 @@ module csp_imem (
 `endif
     end
 
-    // The read-back quad: the half asked for, as it was asked the clock before.
+    // The read-back dword: the half asked for, as it was asked the clock before.
     always_comb begin
         for (int lane = 0; lane < csp_pkg::SLICES / 2; lane++) begin
-            read_quad[lane * csp_pkg::SLICE_W +: csp_pkg::SLICE_W] = read_upper_q ? slice_out_a[lane + csp_pkg::SLICES / 2]
+            read_dword[lane * csp_pkg::SLICE_W +: csp_pkg::SLICE_W] = read_upper_q ? slice_out_a[lane + csp_pkg::SLICES / 2]
                                                                 : slice_out_a[lane];
         end
     end

@@ -31,15 +31,15 @@ package synth_pkg;
 
     //--- The wire (docs/memory_map.md, conventions) ------------------
     // Every block RAM on the chip is 9, 18 or 36 bits wide, so the SPI
-    // link is too: a 9-bit command nonad, an 18-bit address in 36-bit
-    // quads, and 36-bit payload quads. Nothing straddles a boundary.
-    parameter int SPI_NONAD_W  = 9;
+    // link is too: a 9-bit command nonet, an 18-bit address in 36-bit
+    // dwords, and 36-bit payload dwords. Nothing straddles a boundary.
+    parameter int SPI_NONET_W  = 9;
     parameter int SPI_ADDRESS_W = 18;
-    parameter int SPI_QUAD_W    = 36;
-    parameter int SPI_NONADS_PER_QUAD = SPI_QUAD_W / SPI_NONAD_W;   // 4
-    parameter logic [SPI_NONAD_W-1:0] SPI_ID_NONAD = 9'h0A5;      // MISO's first nonad, every frame
+    parameter int SPI_DWORD_W    = 36;
+    parameter int SPI_NONETS_PER_DWORD = SPI_DWORD_W / SPI_NONET_W;   // 4
+    parameter logic [SPI_NONET_W-1:0] SPI_ID_NONET = 9'h0A5;      // MISO's first nonet, every frame
 
-    // The system registers: sixteen quads at the bottom of the map.
+    // The system registers: sixteen dwords at the bottom of the map.
     parameter logic [SPI_ADDRESS_W-1:0] MAP_CTRL = 18'h00002;
     // CTRL's bits: [0] commit the write FIFO (an event), [1] hold the CSP,
     // [2] the test tone on the outputs, [3] the data stream on the 48 kHz
@@ -50,21 +50,21 @@ package synth_pkg;
     parameter int CTRL_DATA_STREAM = 3;
     parameter int CTRL_SOURCE_LOW  = 4;
     parameter int CTRL_SOURCE_HIGH = 5;
-    parameter int MAP_SYSTEM_QUADS = 16;
-    parameter int MAP_STORED_QUADS = 8;         // 0x0–0x7 are kept and read back; 0x8–0xF are status
-    parameter int MAP_DIAG_PASS    = 8;         // status quad: the passes since reset
-    parameter int MAP_DIAG_QUEUE   = 9;         // status quad: the FIFO's Gray read pointer, [10] full
-    parameter int MAP_DIAG_LIMITER = 10;        // status quad: the master limiter (with the output, #236)
-    parameter int MAP_DIAG_DROPPED = 11;        // status quad: writes dropped at a full FIFO
+    parameter int MAP_SYSTEM_DWORDS = 16;
+    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back; 0x8–0xF are status
+    parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset
+    parameter int MAP_DIAG_QUEUE   = 9;         // status dword: the FIFO's Gray read pointer, [10] full
+    parameter int MAP_DIAG_LIMITER = 10;        // status dword: the master limiter (with the output, #236)
+    parameter int MAP_DIAG_DROPPED = 11;        // status dword: writes dropped at a full FIFO
     parameter logic [SPI_ADDRESS_W-1:0] MAP_PROBE_ADDRESS = 18'h0000C;   // the pair the probe reads
-    parameter int MAP_PROBE_EVEN   = 13;        // status quad: the pair's even register
+    parameter int MAP_PROBE_EVEN   = 13;        // status dword: the pair's even register
     parameter int MAP_PROBE_ODD    = 14;        //   and its odd one
-    parameter int MAP_DIAG_STREAM  = 15;        // status quad: the stream's frames sent since reset
+    parameter int MAP_DIAG_STREAM  = 15;        // status dword: the stream's frames sent since reset
 
-    // The regions beyond the system quads (docs/memory_map.md, the map).
+    // The regions beyond the system dwords (docs/memory_map.md, the map).
     parameter logic [SPI_ADDRESS_W-1:0] MAP_FIFO_DOOR = 18'h06000;   // the write FIFO's door
-    parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two quads a row
-    parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one quad a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two dwords a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one dword a row
 
     //--- The S/PDIF data stream (rtl/spdif/spdif_stream.sv) -----------
     // A frame is 64 samples of 32 bits: the sync word, the sequence word,

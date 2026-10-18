@@ -82,7 +82,7 @@ void app_main(void) {
     midi_panel_init(2);
 
     // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
-    // 32 quads (~130 us each) would blow the engine's 1 ms tick.
+    // 32 dwords (~130 us each) would blow the engine's 1 ms tick.
     spi_link_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
 
     // The link in nines, checked as tb_spi_bus.sv checks the slave, so that
