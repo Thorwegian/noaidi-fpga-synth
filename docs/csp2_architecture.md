@@ -14,11 +14,21 @@ promise.*
 Each of these cost the first revision a fault that took a day to find;
 the second revision takes them as given.
 
-1. **Nothing but a register on a block RAM's or DSP's pin.** The
-   place-and-route tool times no path into or out of such a pin, and the
-   silicon takes about 0.82 of what the tool reports for the fabric. The
-   register sits beside the block, flip-flop by flip-flop
-   (`csp_placed_dff`), and the block itself at a chosen site.
+1. **The block's own registers are the registers on its pins.** A block
+   RAM samples its address, data and write enable on its clock and reads
+   through its output register (UG285-1.4E p6, the read modes; DS226-2.7E
+   p36, table 3-14: 0.31 ns from the output register against 2.26 ns from
+   the address); the DSP has input, pipeline and output registers
+   (UG287-1.4E p6, table 3-2; p30, table 4-10). The logic before a pin
+   ends in an ordinary flip-flop, which the nextpnr with the block RAM
+   and DSP timing arcs (#230) times; the silicon takes about 0.82 of what
+   the tool reports for the fabric. Nothing is placed by hand: the first
+   revision's fabric registers beside every block were a workaround for
+   a tool that timed no pin path, and with the patched tool and no
+   constraints its memories came through four boots of four. The one
+   path that did not, the DSP's operands, is measured again here; if the
+   acceptance wants those registers beside the block, that is one
+   measured exception, not a building block.
 2. **No row read while written.** A block reads the row on its address
    pins on every clock, idle or not, and a row read on one port in the
    clock the other port writes it can lose the write. Idle read ports
@@ -41,23 +51,23 @@ the second revision takes them as given.
 
 ```mermaid
 flowchart LR
-    F[F: instruction memory<br/>eight blocks, one 72-bit row<br/>a register on every pin] --> D[D: decode ROM<br/>port A the row of this word<br/>port B the row of the next<br/>control words registered]
+    F[F: IMEM<br/>eight blocks, one 72-bit row<br/>read through the blocks' output registers] --> D[D: decode ROM<br/>port A the row of this word<br/>port B the row of the next<br/>control words registered]
     D --> I[issue<br/>one registered bit:<br/>the cycle is below the limit]
     I --> A[A: addresses<br/>index high bits beside offset low bits<br/>private index: 16-way from a register]
-    A --> R[R: register file<br/>three copies, even and odd banks<br/>registers on the pins, parked when idle]
-    R --> E[E1 to E5: the DSP<br/>operand and product registers placed]
+    A --> R[R: DMEM<br/>a copy per read port, even and odd banks<br/>the blocks' own registers, parked when idle]
+    R --> E[E1 to E5: the DSP<br/>its own input and output registers]
     E --> W[W: the write<br/>from a registered word<br/>registers, a wide pair, a sink, an index]
 ```
 
 | stage | what happens | what is a register |
 |---|---|---|
-| F | the program counter addresses the eight instruction blocks; the row is in their output registers a clock later and in the fetch registers the clock after | the address on the pins, the row off the pins |
-| D | the `op` field addresses the decode ROM's port A; port B is addressed by the next word's `op` (the fetch runs one ahead), so the front end holds this instruction's control word and the next's | both control words, on the ROM's output pins |
+| F | the program counter, a register, addresses the eight IMEM blocks; the row is in their output registers a clock later | the program counter; the blocks' output registers |
+| D | the `op` field addresses the decode ROM's port A; port B is addressed by the next word's `op` (the fetch runs one ahead), so the front end holds this instruction's control word and the next's | both control words, in the ROM's output registers |
 | issue | the instruction issues when the cycle is below the pass's limit; there is no other condition, because the schedule is the assembler's (ISA section 8) | one bit |
-| A | each operand's address is formed by mode: direct, the index's high bits beside the offset, the immediate; the vector element's private index is one of sixteen registers chosen by the registered element number | the three addresses, into the banks' pin registers |
-| R | the three copies of the file read the three operands; the words are in the banks' output registers two clocks later | the pins, in and out |
-| E1–E5 | the multiply-add unit with its operand registers and its product register placed beside the DSP; the add, compare, select, min/max, logic and shift units in the fabric | every stage boundary |
-| W | the result goes from a registered word into the file's write registers (every copy), or to a sink, or to an index register | the write port's pins |
+| A | each operand's address is formed by mode: direct, the index's high bits beside the offset, the immediate; the vector element's private index is one of sixteen registers chosen by the registered element number | the addresses, as registers |
+| R | DMEM's copies read the operands; the words are in the blocks' output registers a clock later | the blocks' address and output registers |
+| E1–E5 | the multiply-add in the DSP, operands into its input registers and the sum out of its output register; the add, compare, select, min/max, logic and shift units in the fabric | every stage boundary |
+| W | the result goes from a registered word into DMEM (every copy), or to a sink, or to an index register | the word; the blocks' write registers |
 
 The front end has no hazard check, no skip counter per element and no
 64-way select: the depth that the first revision's seeds reported as
@@ -71,16 +81,16 @@ both this document and the assembler when the RTL is.
 
 | memory | blocks | ports | rule |
 |---|---|---|---|
-| instruction memory | 8 × (2048 × 9), one 72-bit row | A: the SPI load, held; B: the fetch | registers on both sides of the pins; loaded with the CSP held |
+| IMEM, the instruction memory | 8 × (2048 × 9), one 72-bit row | A: the SPI load on the SPI clock, with the CSP held; B: the fetch | a dual-clocked block: the load crosses no logic |
 | decode ROM | 1 × (1024 × 18) | A: this word's row; B: the next word's | loaded with the program, as one image |
-| register file | 6 × (1024 × 18): three read copies, each an even and an odd bank | A: the write (every copy); B: a read | parked on the inputs' last pair when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
-| write queue | 1 × (512 × 32) | A: the SPI write; B: the pop | the pop's address and entry through placed registers; the decoy slot |
+| DMEM, the data memory | (1024 × 18) blocks: a copy per read port, each an even and an odd bank for the aligned pairs — two reads a cycle is four blocks, three is six; the datapath decides | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
+| the write FIFO | 1 × (512 × 32) | A: the SPI write; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
 | sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes; B: a partial replica's read, every clock | hash `a7c5e1f8`: the partials read six replicas in parallel on every clock, which is what the twelve blocks are for; a wider row (two sinks a row, six blocks) or a different replica count is the one budget question of this revision, and the no-row-read-while-written rule holds here with the firmware's writes to both pages |
 
 Thirty-five of the chip's forty-six blocks are in use at the end of the
 first revision (the partial pipeline and the output take the rest); the
 second revision adds four for the wide word and one for the ROM, and
-takes back what the sink area's answer allows.
+takes back what DMEM's port count and the sink area's answer allow.
 
 ## 3. The budget
 
@@ -96,22 +106,25 @@ packing limit, which is why the first revision's last cut, five
 registered candidates for the private index, could not be placed at 58 %
 of the LUTs.
 
-## 4. Placement
+## 4. Placement and the flow
 
-What is placed by hand, and why, as the first revision measured it:
+Nothing is placed by hand. The blocks' own registers are the pin
+registers (rule 1), the fabric between registers is the tool's to place
+and time, and the design gives it chains short enough that every seed
+meets the clock — the acceptance says whether it does. The first
+revision placed a fabric register beside every block pin, flip-flop by
+flip-flop, and measured the rule as *observed*, not proved
+(`gowin_oss_notes.md` section 0): the second revision does not inherit
+it. The one path it measured as failing without placement, the DSP's
+operands, is where the acceptance looks first.
 
-- every block RAM and the DSP at a named site, their pin registers on
-  the tiles beside them (`csp_bank`, `csp_program_slice`,
-  `csp_write_queue`, `csp_multiply_add`): left to the placer, a pin
-  register went where its logic was, up to fifty tiles away, a route of
-  the order of the period;
-- nothing else: the fabric between registers is the tool's to place and
-  time, and the design gives it chains short enough that every seed
-  meets the clock — the acceptance says whether it does.
-
-Synthesis runs with `-nowidelut` (the wide-LUT clusters hang the
-legaliser), the pinned bitstream generator, and the nextpnr with the
-block RAM and DSP timing arcs (#230).
+The flow is the pinned bitstream generator and the nextpnr with the
+block RAM and DSP timing arcs (#230). Synthesis starts *without*
+`-nowidelut`: the first revision added it when its netlists, already
+carrying the placed registers and the 64-way selects, hung the
+legaliser on the wide-LUT clusters; whether a simpler netlist places
+with them was never tried. The flag comes back only if this netlist
+hangs — measured, not inherited.
 
 ## 5. The pass
 
@@ -119,7 +132,7 @@ block RAM and DSP timing arcs (#230).
 |---|---|
 | 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
 | 1472 … 1481 | the pipeline drains |
-| 1482 … 1529 | the write window: up to 48 of the firmware's queued writes, from the queue's placed registers into the file |
+| 1482 … 1529 | the write window: up to 48 of the firmware's writes, from the FIFO into DMEM |
 | 1530 … 1534 | the last writes land in the blocks |
 | 1535 | the probe reads its pair (the Y port, unparked for the cycle); the pass counter's write is taken |
 
@@ -130,7 +143,7 @@ complete pass.
 
 The firmware holds the CSP, writes the instruction rows and the decode
 ROM's rows as one image, writes the constants and the wiring through
-the queue, and releases. Then, before the first note:
+the FIFO, and releases. Then, before the first note:
 
 1. the **self-test**: a program of its own in the same image, run from
    the ROM, whose checks use operands that change every pass (`SHIFT`,
@@ -150,8 +163,8 @@ of a design change runs all three on every seed.
 | fault | found by | the rule it became |
 |---|---|---|
 | a boot image with ONE zero, the synth silent | `csp-verify` | no row read while written (the probe's row); parked read ports |
-| the queue losing a batch's first words | the dumps against the playing consensus | a register on the queue's address pin; the decoy |
+| the FIFO losing a batch's first words | the dumps against the playing consensus | the pop's address from a register with nothing between; the decoy |
 | a stale operand on 15 % of passes, the arpeggio 11 % short, noise under the tone | the self-test's SHIFT/IDX counts; the valley floor | the front end's depth: a ROM, not a decoder; no hazard check; 16 not 64 |
-| a store landing with address bits dropped | the five-word test | the write from a registered word; pin registers |
-| the report's frequency sorting nothing | the seed table | the report is the fabric's; the silicon is 0.82 of it; nothing on a pin is timed |
+| a store landing with address bits dropped | the five-word test | the write from a registered word |
+| the report's frequency sorting nothing | the seed table | the report is the fabric's; the silicon is 0.82 of it; the pin arcs come from the patched tool (#230) |
 | a mux rearranged, 10 → 17 levels | a build | only a register cuts a path |
