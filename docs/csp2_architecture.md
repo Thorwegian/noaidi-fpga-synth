@@ -34,10 +34,17 @@ the second revision takes them as given.
    pins on every clock, idle or not, and a row read on one port in the
    clock the other port writes it can lose the write — "performing read
    and write operations to the same address at the same time is not
-   allowed" (UG285-1.4E p6, note 1), found on the board before it was
-   found in the document. Idle read ports
-   are parked on a row nothing writes; the probe and the write window
-   are placed in cycles no instruction reads.
+   allowed" (UG285-1.4E p6 and p24, note 1), found on the board before it
+   was found in the document. Idle read ports are parked on a row
+   nothing writes; the probe and the write window are placed in cycles no
+   instruction reads. Two clocks on one block are allowed and used (the
+   FIFO, IMEM's load, the sink pages): with two clocks "the same time"
+   is any overlap of edges, so each such block states why its two ports
+   never meet on a row — pointers that cannot coincide, a fetch port
+   parked during the load, a page nothing reads while it is written. A
+   row polled on one clock and written on the other is forbidden by the
+   same sentence; single bits (the commit, the hold, the test tone, the
+   read pointer back) cross through flip-flops.
 3. **Only a register cuts a path.** A mux rearranged in the RTL does not
    survive synthesis; depth is the synthesiser's view of the cone.
 4. **The design meets 73.728 MHz on every seed, or it is redesigned.** A
@@ -88,8 +95,8 @@ both this document and the assembler when the RTL is.
 | IMEM, the instruction memory | 8 × (2048 × 9), one 72-bit row | A: the SPI load on the SPI clock, with the CSP held; B: the fetch | a dual-clocked block: the load crosses no logic |
 | decode ROM | 1 × (1024 × 18) | A: this word's row; B: the next word's | loaded with the program, as one image |
 | DMEM, the data memory | (1024 × 18) blocks: a copy per read port, each an even and an odd bank for the aligned pairs — two reads a cycle is four blocks, three is six; the datapath decides | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
-| the write FIFO | 1 × (512 × 32) | A: the SPI write; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
-| sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes; B: a partial replica's read, every clock | hash `a7c5e1f8`: the partials read six replicas in parallel on every clock, which is what the twelve blocks are for; a wider row (two sinks a row, six blocks) or a different replica count is the one budget question of this revision, and the no-row-read-while-written rule holds here with the firmware's writes to both pages |
+| the write FIFO | 1 × (512 × 32) | A: the SPI write, on the SPI clock; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. The two ports never meet: the pointers cannot coincide on a row that holds data, and when the FIFO is empty the read port idles one row *behind* the head, not on the row the next write takes — the first revision idled on the head and hid the lost first word behind a decoy write. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
+| sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes, to the shadow page only; B: a partial replica's read of the active page, every clock | the double buffer: the partials read the active page on every clock, so nothing writes it; the CSP and the firmware write the shadow page and the pages swap at the pass boundary (the firmware's words, which the first revision wrote to both pages, go the same way and are taken over at the swap). Hash `a7c5e1f8`: the partials read six replicas in parallel on every clock, which is what the twelve blocks are for; a wider row (two sinks a row, six blocks) or a different replica count is the one budget question of this revision |
 
 Thirty-five of the chip's forty-six blocks are in use at the end of the
 first revision (the partial pipeline and the output take the rest); the
@@ -170,7 +177,7 @@ of a design change runs all three on every seed.
 | fault | found by | the rule it became |
 |---|---|---|
 | a boot image with ONE zero, the synth silent | `csp-verify` | no row read while written (the probe's row); parked read ports |
-| the FIFO losing a batch's first words | the dumps against the playing consensus | the pop's address from a register with nothing between; the decoy |
+| the FIFO losing a batch's first words | the dumps against the playing consensus | the idle read port was on the row the next write took (rule 2); it idles one row behind, and the decoy write goes |
 | a stale operand on 15 % of passes, the arpeggio 11 % short, noise under the tone | the self-test's SHIFT/IDX counts; the valley floor | the front end's depth: a ROM, not a decoder; no hazard check; 16 not 64 |
 | a store landing with address bits dropped | the five-word test | the write from a registered word |
 | the report's frequency sorting nothing | the seed table | the report is the fabric's; the silicon is 0.82 of it; the pin arcs come from the patched tool (#230) |
