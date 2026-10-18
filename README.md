@@ -129,10 +129,13 @@ pll_clk O0=73728K -s
   is not on the path). Our C and C++ follow the Java Code Conventions,
   set out in `.clang-format`
 
-The `idf.py` invocation is machine-specific for now (Espressif's
-environment activation does not lend itself to standardized
-Makefiles); the top-level Makefile calls a `~/bin/idf` wrapper and
-`IDF=idf.py` overrides it inside an already-activated shell.
+The top-level Makefile finds ESP-IDF itself: `idf.py` on the `PATH` if the
+shell is activated, otherwise the newest Espressif activation script under
+`$IDF_TOOLS_PATH` or `~/.espressif/tools`, `$IDF_PATH/export.sh`, or the newest
+checkout under `~/.espressif/v*/esp-idf` or `~/esp/esp-idf*`. It sources the
+script in a subshell of its own, so nothing leaks into your shell. `IDF=...`
+overrides the detection with any command that runs `idf.py`; with no ESP-IDF
+found, the firmware targets say so and stop.
 
 ## Build & run
 
