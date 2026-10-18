@@ -7,7 +7,8 @@
 // (a pipe in a label, an unquoted bracket) is found by the reader, not
 // the author. This runs the same parser ahead of the commit:
 //
-//     npm install --no-save mermaid jsdom     (once, anywhere on NODE_PATH)
+//     npm install --no-save mermaid jsdom     (once, in the repository's root:
+//                                              node_modules there is ignored)
 //     node tools/lab/mermaid_check.mjs docs/*.md
 //
 // Exit status is the number of graphs that failed; each failure prints

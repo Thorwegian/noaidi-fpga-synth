@@ -14,3 +14,4 @@ sdkconfig.old
 !tools/lab/benchmark/*.json
 .tools/
 .tools.*/
+node_modules/
