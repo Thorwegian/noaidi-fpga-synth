@@ -19,7 +19,8 @@ the second revision takes them as given.
    through its output register (UG285-1.4E p6, the read modes; DS226-2.7E
    p36, table 3-14: 0.31 ns from the output register against 2.26 ns from
    the address); the DSP has input, pipeline and output registers
-   (UG287-1.4E p6, table 3-2; p30, table 4-10). The logic before a pin
+   (UG287-1.4E p6, table 3-2; p30, table 4-10; the blocks as graphs in
+   `gowin_primitives.md`). The logic before a pin
    ends in an ordinary flip-flop, which the nextpnr with the block RAM
    and DSP timing arcs (#230) times; the silicon takes about 0.82 of what
    the tool reports for the fabric. Nothing is placed by hand: the first
@@ -31,7 +32,10 @@ the second revision takes them as given.
    measured exception, not a building block.
 2. **No row read while written.** A block reads the row on its address
    pins on every clock, idle or not, and a row read on one port in the
-   clock the other port writes it can lose the write. Idle read ports
+   clock the other port writes it can lose the write — "performing read
+   and write operations to the same address at the same time is not
+   allowed" (UG285-1.4E p6, note 1), found on the board before it was
+   found in the document. Idle read ports
    are parked on a row nothing writes; the probe and the write window
    are placed in cycles no instruction reads.
 3. **Only a register cuts a path.** A mux rearranged in the RTL does not
@@ -101,10 +105,13 @@ takes back what DMEM's port count and the sink area's answer allow.
 | block RAM | 35 | 46 | +5, minus the sink area's answer |
 | DSP | the multiply-add | | as is |
 
-A slice is one LUT and one flip-flop: the flip-flop count is the
-packing limit, which is why the first revision's last cut, five
-registered candidates for the private index, could not be placed at 58 %
-of the LUTs.
+A slice is one LUT4 and one flip-flop, and the chip has six usable
+flip-flops for every eight LUTs: the fourth slice pair of each unit has
+registers that need a patch from Gowin (DS226-2.7E p9, figure 2-2;
+`gowin_primitives.md` section 4), so 2592 units give 20 736 LUT4 and
+15 552 flip-flops. The flip-flop count is the packing limit, which is why
+the first revision's last cut, five registered candidates for the
+private index, could not be placed at 58 % of the LUTs.
 
 ## 4. Placement and the flow
 
