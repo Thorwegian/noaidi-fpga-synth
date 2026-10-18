@@ -42,10 +42,26 @@
 # image is current — restart the ESP32 (make fw-flash, or its reset
 # button) so the full image is rewritten. Board must match tree.
 
-# idf wrapper that sources the ESP-IDF environment (see README.md
-# "Build requirements"); override with IDF=idf.py inside an
-# already-activated shell.
-IDF ?= $(HOME)/bin/idf
+# ESP-IDF, found without a wrapper (README.md "Build requirements"), in this
+# order: idf.py on the PATH (an activated shell); the newest activation script
+# of an Espressif Installation Manager install, under $IDF_TOOLS_PATH or
+# ~/.espressif/tools; $IDF_PATH's export.sh; the newest classic checkout, under
+# ~/.espressif/v*/esp-idf or ~/esp/esp-idf*. The script is sourced in a
+# subshell of its own, so the environment stays out of this one. Override with
+# IDF=<command that runs idf.py>.
+IDF_ACTIVATE ?= $(firstword \
+    $(lastword $(sort $(wildcard $(IDF_TOOLS_PATH)/activate_idf_*.sh))) \
+    $(lastword $(sort $(wildcard $(HOME)/.espressif/tools/activate_idf_*.sh))) \
+    $(wildcard $(IDF_PATH)/export.sh) \
+    $(lastword $(sort $(wildcard $(HOME)/.espressif/v*/esp-idf/export.sh))) \
+    $(lastword $(sort $(wildcard $(HOME)/esp/esp-idf*/export.sh))))
+ifneq ($(shell command -v idf.py 2>/dev/null),)
+IDF ?= idf.py
+else ifneq ($(IDF_ACTIVATE),)
+IDF ?= bash -c '. "$$0" >/dev/null && exec idf.py "$$@"' $(IDF_ACTIVATE)
+else
+IDF ?= sh -c 'echo "make: no ESP-IDF found: activate one, install it under ~/.espressif or ~/esp, or set IDF=" >&2; exit 1' --
+endif
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
 # The ESP32's USB serial port: Linux names it ttyACM, macOS cu.usbmodem.
 ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))
