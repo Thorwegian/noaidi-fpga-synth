@@ -274,7 +274,7 @@ int cmd_spiclk(int argc, char **argv) {
 // output, the pipe tools/lab/spdif_capture.py checks bit for bit.
 int cmd_stream(int argc, char **argv) {
     if (argc != 2) {
-        std::printf("usage: csp-stream off|lfsr|counter\n");
+        std::printf("usage: csp-stream off|lfsr|counter|probe\n");
         return 1;
     }
     const char *what = argv[1];
@@ -284,8 +284,10 @@ int cmd_stream(int argc, char **argv) {
         engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_lfsr));
     } else if (std::strcmp(what, "counter") == 0) {
         engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_counter));
+    } else if (std::strcmp(what, "probe") == 0) {
+        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_probe));
     } else {
-        std::printf("usage: csp-stream off|lfsr|counter\n");
+        std::printf("usage: csp-stream off|lfsr|counter|probe\n");
         return 1;
     }
     std::printf("  stream %s\n", what);
@@ -360,7 +362,7 @@ const console_cmd_t commands[] = {
         {"csp-spitest", "[rounds]", "write and read back the scratch quads",
          cmd_spitest, nullptr},
         {"csp-spiclk", "<MHz>", "the SPI link's clock", cmd_spiclk, nullptr},
-        {"csp-stream", "off|lfsr|counter",
+        {"csp-stream", "off|lfsr|counter|probe",
          "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
          cmd_hold, nullptr},

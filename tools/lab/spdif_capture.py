@@ -197,7 +197,7 @@ STREAM_FRAME_WORDS = 64
 STREAM_CRC_POLYNOMIAL = 0x04C11DB7
 STREAM_LFSR_SEED = 1
 STREAM_LFSR_TAPS = 0x00400007
-SOURCE_LFSR, SOURCE_COUNTER = 0, 1
+SOURCE_LFSR, SOURCE_COUNTER, SOURCE_PROBE = 0, 1, 2
 
 
 def crc32_words(words):
@@ -231,6 +231,7 @@ def analyse_stream(samples):
     sequence_gaps = 0
     payload_errors = 0
     counter_slips = 0
+    probe_pairs = {}                 # (even, odd) -> how many frames carried it
     expected_sequence = None
     lfsr = None                      # unknown until the first LFSR frame is seen whole
     previous_counter = None
@@ -260,7 +261,7 @@ def analyse_stream(samples):
                 state = lfsr_32_steps(state)
             # positions 0 and 1 of the next frame step the LFSR too, position 63 does not
             lfsr = lfsr_32_steps(lfsr_32_steps(state))
-        else:
+        elif source == SOURCE_COUNTER:
             for index, word in enumerate(payload):
                 if previous_counter is not None:
                     step = 4 if index == 0 else 1
@@ -270,11 +271,20 @@ def analyse_stream(samples):
             if lfsr is not None:
                 for _ in range(63):
                     lfsr = lfsr_32_steps(lfsr)
+        else:
+            # the probe's pair: the even word on even positions, the odd on odd ones
+            pair = (payload[0], payload[1])             # positions 2 and 3
+            probe_pairs[pair] = probe_pairs.get(pair, 0) + 1
+            if lfsr is not None:
+                for _ in range(63):
+                    lfsr = lfsr_32_steps(lfsr)
         frames_ok += 1
         position += STREAM_FRAME_WORDS
     print("frames: %d whole, %d with a failed CRC (a slip or a false sync); %d frames missing by the sequence numbers" % (
         frames_ok, frames_bad_crc, sequence_gaps))
     print("payload: %d LFSR words wrong, %d counter steps wrong" % (payload_errors, counter_slips))
+    for (even, odd), count in sorted(probe_pairs.items(), key=lambda item: -item[1])[:8]:
+        print("probe pair: even %05x odd %05x in %d frames" % (even, odd, count))
     rate = 32 * SAMPLE_RATE / 1e6
     print("the pipe: %.3f Mbit/s, %d bits a sample" % (rate, 32))
     if frames_ok and not frames_bad_crc and not sequence_gaps and not payload_errors and not counter_slips:

@@ -28,6 +28,7 @@ constexpr quad_t ctrl_data_stream   = quad_t{1} << 3;
 constexpr int ctrl_source_shift     = 4;
 constexpr quad_t stream_source_lfsr    = 0;
 constexpr quad_t stream_source_counter = 1;
+constexpr quad_t stream_source_probe   = 2;   // the probe's pair, even and odd words alternating
 
 // The scratch quads: read back what was written, nothing else.
 constexpr uint32_t scratch_first = 0x00003;
@@ -60,9 +61,10 @@ constexpr int pointer_words       = 4;
 // The CSP's write FIFO: a quad written to fifo_door carries its own
 // register or sink address in its top 12 bits and the 18-bit word below
 // them; the CTRL swap commits what is queued, and the CSP applies at most
-// 48 a pass (a pass is 20.8 µs). The FIFO holds 512.
+// 48 a pass (a pass is 20.8 µs). The FIFO holds 511: the 512th row is the
+// one its parked reader sits on.
 constexpr uint32_t fifo_door    = 0x06000;
-constexpr int queue_depth       = 512;
+constexpr int queue_depth       = 511;
 constexpr int address_count     = 0xC00;
 constexpr int writes_per_pass   = 48;
 constexpr int word_bits         = 18;

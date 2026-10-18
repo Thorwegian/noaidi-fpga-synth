@@ -6,10 +6,11 @@
 // License: CERN-OHL-S v2
 //
 // The second revision, built up issue by issue (#231). This top carries
-// the link and the pipe (#233): the SPI control plane in nines, the
-// test tone, and the S/PDIF data stream on the 48 kHz output, which the
-// dev box captures bit for bit. The CSP's memories, the core and the
-// partial pipeline follow in #234 to #236.
+// the link and the pipe (#233) and the CSP's memories under the row rule
+// (#234): the SPI control plane in nines, the test tone, the S/PDIF data
+// stream on the 48 kHz output, and IMEM, the decode ROM, the write FIFO,
+// DMEM and the pass with its write window and probe. The core comes
+// with #235, the sink area and the partial pipeline with #236.
 //
 // Timing: timebase.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the S/PDIF cell boundary
@@ -60,34 +61,139 @@ module top (
         .slot          (slot)
     );
 
-    // The 48 kHz samples since reset: the passes, once the CSP runs them.
-    logic [31:0] sample_counter;
-    always_ff @(posedge sysclk or negedge rst_n)
-        if (!rst_n)             sample_counter <= '0;
-        else if (sample_tick48) sample_counter <= sample_counter + 1'b1;
-
     //----------------------------------------------------------------
-    // CTRL's levels, from the SPI clock into the system clock: single
-    // bits through two flip-flops each.
+    // CTRL's levels and the probe's address, from the SPI clock into the
+    // system clock: single bits through two flip-flops each; the probe
+    // address is quasi-static and read a pass later.
     //----------------------------------------------------------------
     logic       csp_held_sclk, test_tone_sclk, data_stream_sclk;
     logic [1:0] stream_source_sclk;
+    logic [csp_pkg::REGISTER_W-1:0] probe_address_sclk;
     logic       csp_held_meta, csp_held_sync;
     logic       test_tone_meta, test_tone_sync;
     logic       data_stream_meta, data_stream_sync;
     logic [1:0] stream_source_meta, stream_source_sync;
+    logic [csp_pkg::REGISTER_W-1:0] probe_address_meta, probe_address_sync;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n) begin
-            {csp_held_meta, csp_held_sync}         <= 2'b11;     // held until released
-            {test_tone_meta, test_tone_sync}       <= 2'b00;
-            {data_stream_meta, data_stream_sync}   <= 2'b00;
+            {csp_held_meta, csp_held_sync}           <= 2'b11;     // held until released
+            {test_tone_meta, test_tone_sync}         <= 2'b00;
+            {data_stream_meta, data_stream_sync}     <= 2'b00;
             {stream_source_meta, stream_source_sync} <= '0;
+            {probe_address_meta, probe_address_sync} <= '0;
         end else begin
-            {csp_held_meta, csp_held_sync}         <= {csp_held_sclk, csp_held_meta};
-            {test_tone_meta, test_tone_sync}       <= {test_tone_sclk, test_tone_meta};
-            {data_stream_meta, data_stream_sync}   <= {data_stream_sclk, data_stream_meta};
+            {csp_held_meta, csp_held_sync}           <= {csp_held_sclk, csp_held_meta};
+            {test_tone_meta, test_tone_sync}         <= {test_tone_sclk, test_tone_meta};
+            {data_stream_meta, data_stream_sync}     <= {data_stream_sclk, data_stream_meta};
             {stream_source_meta, stream_source_sync} <= {stream_source_sclk, stream_source_meta};
+            {probe_address_meta, probe_address_sync} <= {probe_address_sclk, probe_address_meta};
         end
+
+    //----------------------------------------------------------------
+    // The CSP's memories (rtl/csp): IMEM and the decode ROM loaded over
+    // the SPI clock while the CSP is held, the write FIFO from the door,
+    // DMEM written by the pass's window and read by the probe.
+    //----------------------------------------------------------------
+    logic                               fifo_write_enable, fifo_swap, fifo_full;
+    logic [synth_pkg::SPI_QUAD_W-1:0]              fifo_write_quad;
+    logic [15:0]                        fifo_dropped;
+    logic                               fifo_pop, fifo_committed, fifo_head_valid;
+    logic [synth_pkg::SPI_QUAD_W-1:0]              fifo_head_quad;
+    logic [csp_pkg::FIFO_POINTER_W-1:0] fifo_read_gray;
+
+    csp_write_fifo u_fifo (
+        .sclk              (sclk),
+        .sclk_reset_n      (rst_n),
+        .write_enable      (fifo_write_enable),
+        .write_quad        (fifo_write_quad),
+        .swap              (fifo_swap),
+        .full              (fifo_full),
+        .dropped           (fifo_dropped),
+        .clk               (sysclk),
+        .reset_n           (rst_n),
+        .pop               (fifo_pop),
+        .committed         (fifo_committed),
+        .head_valid        (fifo_head_valid),
+        .head_quad         (fifo_head_quad),
+        .read_pointer_gray (fifo_read_gray)
+    );
+
+    logic                              imem_load_enable, imem_upper;
+    logic [csp_pkg::PROGRAM_W-1:0]     imem_row, fetch_address;
+    logic [synth_pkg::SPI_QUAD_W-1:0]             imem_load_quad, imem_read_quad;
+    logic [csp_pkg::ROW_W-1:0]         fetch_row;
+
+    csp_imem u_imem (
+        .sclk          (sclk),
+        .load_enable   (imem_load_enable),
+        .load_row      (imem_row),
+        .load_upper    (imem_upper),
+        .load_quad     (imem_load_quad),
+        .read_row      (imem_row),
+        .read_upper    (imem_upper),
+        .read_quad     (imem_read_quad),
+        .clk           (sysclk),
+        .held          (csp_held_sync),
+        .fetch_address (fetch_address),
+        .fetch_row     (fetch_row)
+    );
+    assign fetch_address = '0;      // the core's (#235)
+
+    logic                              rom_load_enable;
+    logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_row;
+    logic [csp_pkg::ROM_W-1:0]         rom_load_word, rom_read_word, control_word;
+
+    csp_decode_rom u_rom (
+        .sclk         (sclk),
+        .load_enable  (rom_load_enable),
+        .load_row     (rom_row),
+        .load_word    (rom_load_word),
+        .read_row     (rom_row),
+        .read_word    (rom_read_word),
+        .clk          (sysclk),
+        .held         (csp_held_sync),
+        .op           ('0),             // the core's (#235)
+        .control_word (control_word)
+    );
+
+    logic                              dmem_write_enable, dmem_read_enable;
+    logic [csp_pkg::REGISTER_W-1:0]    dmem_write_address, dmem_read_address;
+    logic [csp_pkg::WORD_W-1:0]        dmem_write_word;
+    logic [csp_pkg::WIDE_W-1:0]        dmem_read_pair, probe_pair;
+
+    csp_dmem u_dmem (
+        .clk           (sysclk),
+        .write_enable  (dmem_write_enable),
+        .write_address (dmem_write_address),
+        .write_wide    (1'b0),
+        .write_data    ({{csp_pkg::WORD_W{1'b0}}, dmem_write_word}),
+        .read_enable   (dmem_read_enable),
+        .read_address  (dmem_read_address),
+        .read_pair     (dmem_read_pair)
+    );
+
+    logic [csp_pkg::CYCLE_W-1:0] cycle;
+    logic [31:0]                 pass_counter;
+
+    csp_pass u_pass (
+        .clk                (sysclk),
+        .reset_n            (rst_n),
+        .pass_start         (sample_tick48),
+        .cycle              (cycle),
+        .pass_counter       (pass_counter),
+        .fifo_pop           (fifo_pop),
+        .fifo_committed     (fifo_committed),
+        .fifo_head_valid    (fifo_head_valid),
+        .fifo_head_quad     (fifo_head_quad),
+        .dmem_write_enable  (dmem_write_enable),
+        .dmem_write_address (dmem_write_address),
+        .dmem_write_word    (dmem_write_word),
+        .probe_address      (probe_address_sync),
+        .dmem_read_enable   (dmem_read_enable),
+        .dmem_read_address  (dmem_read_address),
+        .dmem_read_pair     (dmem_read_pair),
+        .probe_pair         (probe_pair)
+    );
 
     //----------------------------------------------------------------
     // Test tone (audio-chain purity check): 1500 Hz sine,
@@ -180,7 +286,8 @@ module top (
         .reset_n        (rst_n),
         .sample_tick    (sample_tick48),
         .source         (stream_source_sync),
-        .sample_counter (sample_counter),
+        .sample_counter (pass_counter),
+        .probe_pair     (probe_pair),
         .word           (stream_word),
         .frames_sent    (stream_frames)
     );
@@ -202,45 +309,64 @@ module top (
     // SPI control plane — the docs/memory_map.md wire protocol in nines.
     // The status quads cross from the system clock through two flip-flops
     // each; they are not coherent across bits, so a reader takes two reads
-    // and compares.
+    // and compares. The FIFO's own figures are on the SPI clock already.
     //----------------------------------------------------------------
-    logic [31:0] samples_meta, samples_sync;
+    logic [31:0] passes_meta, passes_sync;
     logic [15:0] frames_meta, frames_sync;
+    logic [csp_pkg::WIDE_W-1:0] probe_meta, probe_sync;
     always_ff @(posedge sclk or negedge rst_n)
         if (!rst_n) begin
-            {samples_meta, samples_sync} <= '0;
-            {frames_meta, frames_sync}   <= '0;
+            {passes_meta, passes_sync} <= '0;
+            {frames_meta, frames_sync} <= '0;
+            {probe_meta, probe_sync}   <= '0;
         end else begin
-            {samples_meta, samples_sync} <= {sample_counter, samples_meta};
-            {frames_meta, frames_sync}   <= {stream_frames, frames_meta};
+            {passes_meta, passes_sync} <= {pass_counter, passes_meta};
+            {frames_meta, frames_sync} <= {stream_frames, frames_meta};
+            {probe_meta, probe_sync}   <= {probe_pair, probe_meta};
         end
 
     logic [synth_pkg::MAP_SYSTEM_QUADS-synth_pkg::MAP_STORED_QUADS-1:0][synth_pkg::SPI_QUAD_W-1:0] status;
     always_comb begin
         status = '0;
-        status[synth_pkg::MAP_DIAG_PASS   - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(samples_sync);
-        status[synth_pkg::MAP_DIAG_STREAM - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(frames_sync);
+        status[synth_pkg::MAP_DIAG_PASS    - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(passes_sync);
+        status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'({fifo_full, fifo_read_gray});
+        status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(fifo_dropped);
+        status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(probe_sync[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
+        status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
+        status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_QUADS] = synth_pkg::SPI_QUAD_W'(frames_sync);
     end
 
-    logic swap_sclk;
     spi_bus u_spi (
         .sclk               (sclk),
         .cs                 (cs),
         .mosi               (mosi),
         .miso               (miso),
-        .swap               (swap_sclk),
+        .swap               (fifo_swap),
         .csp_held           (csp_held_sclk),
         .test_tone_enable   (test_tone_sclk),
         .data_stream_enable (data_stream_sclk),
         .stream_source      (stream_source_sclk),
-        .status             (status)
+        .probe_address      (probe_address_sclk),
+        .status             (status),
+        .fifo_write_enable  (fifo_write_enable),
+        .fifo_write_quad    (fifo_write_quad),
+        .imem_load_enable   (imem_load_enable),
+        .imem_row           (imem_row),
+        .imem_upper         (imem_upper),
+        .imem_load_quad     (imem_load_quad),
+        .imem_read_quad     (imem_read_quad),
+        .rom_load_enable    (rom_load_enable),
+        .rom_row            (rom_row),
+        .rom_load_word      (rom_load_word),
+        .rom_read_word      (rom_read_word)
     );
 
     //----------------------------------------------------------------
     // led[0]: 1 Hz clock-sanity blink, toggled every 48000 sample ticks
     // (0.5 s at 96 kHz). A correct sysclk blinks once a second; a wrong
     // MS5351 setting is visibly off. led[1]: lit while reset is held.
-    // led[2]: lit while the data stream is on. Others off.
+    // led[2]: lit while the data stream is on. led[3]: lit while the CSP
+    // is held. Others off.
     //----------------------------------------------------------------
     logic [15:0] blink_div;
     logic        blink;
@@ -257,7 +383,7 @@ module top (
             end
         end
 
-    assign led = {3'b111, ~data_stream_sync, ~rst, ~blink};
+    assign led = {2'b11, ~csp_held_sync, ~data_stream_sync, ~rst, ~blink};
 
 endmodule
 `default_nettype wire

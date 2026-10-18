@@ -25,7 +25,9 @@ SHELL := /bin/bash
 # from the first revision and return to the build with the sink area (#236).
 TOP = top
 PKG = synth_pkg.sv
+CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv
 MOD = \
+	$(CSP) \
 	$(TOP).sv \
 	dsp/timebase.sv \
 	dsp/osc_core.sv \
@@ -173,9 +175,24 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-# The wire in nines.
-obj_dir/tb_spi_bus/sim: $(PKG) spi/spi_bus.sv tb/tb_spi_bus.sv Makefile
-	$(VERILATE) $(PKG) spi/spi_bus.sv tb/tb_spi_bus.sv
+# The wire in nines, with the regions behind it modelled in the bench.
+obj_dir/tb_spi_bus/sim: $(PKG) csp/csp_pkg.sv spi/spi_bus.sv tb/tb_spi_bus.sv Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv spi/spi_bus.sv tb/tb_spi_bus.sv
+
+# The write FIFO across its two clocks, and the row rule at every edge.
+obj_dir/tb_csp_write_fifo/sim: csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo.sv Makefile
+	$(VERILATE) csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo.sv
+
+sim-fifo: obj_dir/tb_csp_write_fifo/sim
+	$(call run_sim,$<,tb/sim-fifo.out)
+
+# IMEM, the ROM, DMEM and the pass together: the boot's loads and
+# read-backs, the window, the probe, the row rule.
+obj_dir/tb_csp_memories/sim: $(CSP) tb/tb_csp_memories.sv Makefile
+	$(VERILATE) $(CSP) tb/tb_csp_memories.sv
+
+sim-memories: obj_dir/tb_csp_memories/sim
+	$(call run_sim,$<,tb/sim-memories.out)
 
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
@@ -227,13 +244,13 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
           tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-memories sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \

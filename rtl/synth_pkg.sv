@@ -52,8 +52,19 @@ package synth_pkg;
     parameter int CTRL_SOURCE_HIGH = 5;
     parameter int MAP_SYSTEM_QUADS = 16;
     parameter int MAP_STORED_QUADS = 8;         // 0x0–0x7 are kept and read back; 0x8–0xF are status
-    parameter int MAP_DIAG_PASS    = 8;         // status quad: the 48 kHz samples (the passes) since reset
+    parameter int MAP_DIAG_PASS    = 8;         // status quad: the passes since reset
+    parameter int MAP_DIAG_QUEUE   = 9;         // status quad: the FIFO's Gray read pointer, [10] full
+    parameter int MAP_DIAG_LIMITER = 10;        // status quad: the master limiter (with the output, #236)
+    parameter int MAP_DIAG_DROPPED = 11;        // status quad: writes dropped at a full FIFO
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_PROBE_ADDRESS = 18'h0000C;   // the pair the probe reads
+    parameter int MAP_PROBE_EVEN   = 13;        // status quad: the pair's even register
+    parameter int MAP_PROBE_ODD    = 14;        //   and its odd one
     parameter int MAP_DIAG_STREAM  = 15;        // status quad: the stream's frames sent since reset
+
+    // The regions beyond the system quads (docs/memory_map.md, the map).
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_FIFO_DOOR = 18'h06000;   // the write FIFO's door
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two quads a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one quad a row
 
     //--- The S/PDIF data stream (rtl/spdif/spdif_stream.sv) -----------
     // A frame is 64 samples of 32 bits: the sync word, the sequence word,
@@ -64,7 +75,8 @@ package synth_pkg;
     parameter logic [31:0] STREAM_LFSR_SEED = 32'h0000_0001;
     // The payload sources, chosen by CTRL[5:4].
     parameter logic [1:0] STREAM_SOURCE_LFSR    = 2'd0;   // a 32-bit maximal LFSR, 32 steps a word
-    parameter logic [1:0] STREAM_SOURCE_COUNTER = 2'd1;   // the 48 kHz sample counter
+    parameter logic [1:0] STREAM_SOURCE_COUNTER = 2'd1;   // the pass counter
+    parameter logic [1:0] STREAM_SOURCE_PROBE   = 2'd2;   // the probe's pair: even and odd words alternating
 
     //--- Partial sinks (docs/csp2_architecture.md, the sink area) ------
     // A partial reads ten sink words, named by ten pointers into the sink

@@ -13,7 +13,9 @@
 //   word 0        the sync word
 //   word 1        {frame_sequence[15:0], 12'b0, source[3:0]}: the frame's number
 //                 and what the payload is
-//   words 2..62   the payload, 61 words
+//   words 2..62   the payload, 61 words: the LFSR, the pass counter, or
+//                 the probe's pair (its even word on even positions, its
+//                 odd word on odd ones, 18 bits each)
 //   word 63       the CRC-32 of words 0..62 (IEEE 802.3's polynomial, MSB
 //                 first, initial all ones, no final inversion)
 //
@@ -33,7 +35,8 @@ module spdif_stream (
     input  wire        reset_n,
     input  wire        sample_tick,     // the 48 kHz sample boundary
     input  wire [1:0]  source,          // synth_pkg::STREAM_SOURCE_*
-    input  wire [31:0] sample_counter,  // the 48 kHz samples since reset
+    input  wire [31:0] sample_counter,  // the passes since reset
+    input  wire [35:0] probe_pair,      // the probe's pair as of the last pass: {even, odd}
     output logic [31:0] word,           // the word for this sample
     output logic [15:0] frames_sent     // frames completed since reset
 );
@@ -65,6 +68,9 @@ module spdif_stream (
     always_comb begin
         case (frame_source)
             synth_pkg::STREAM_SOURCE_COUNTER: payload = sample_counter;
+            // the pair's two words on alternate positions, 18 bits each
+            synth_pkg::STREAM_SOURCE_PROBE:   payload = position[0] ? {14'b0, probe_pair[17:0]}
+                                                                    : {14'b0, probe_pair[35:18]};
             default:                          payload = lfsr;
         endcase
     end

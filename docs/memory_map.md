@@ -40,7 +40,7 @@ flowchart TD
     MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>patch → registers and sinks"]
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
-        BUS --> Q["write FIFO<br/>512 quads of 36 bits"]
+        BUS --> Q["write FIFO<br/>511 quads of 36 bits"]
         BUS --> PGM["IMEM: 1472 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
         Q --> CSP["CSP: the control program,<br/>once per 1536 cycles"]
@@ -116,10 +116,10 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 | `0x009` | `DIAG_QUEUE` | read-only. `[9:0]` the write queue's read pointer, Gray-coded; `[10]` the queue is full |
 | `0x00A` | `DIAG_LIMITER` | read-only. `[18:0]` the master limiter's envelope state (`[18:11]` is the reduction in codes of 0.375 dB, `[10:0]` the fraction; 0 = none, 255 codes = 95.6 dB) |
 | `0x00B` | `DIAG_DROPPED` | read-only. `[15:0]` writes dropped because the queue was full (saturating) |
-| `0x00C` | `PROBE_ADDRESS` | `[10:0]` the CSP register (an aligned pair) the probe reads once a pass |
+| `0x00C` | `PROBE_ADDRESS` | `[10:0]` the CSP register (an aligned pair) the probe reads once a pass; at power-up the pair at `0x05E`, in the inputs, which nothing writes |
 | `0x00D` | `DIAG_PROBE_EVEN` | read-only. `[17:0]` the even register of the probed pair, as of the last pass |
 | `0x00E` | `DIAG_PROBE_ODD` | read-only. `[17:0]` the odd register of the probed pair |
-| `0x00F` | — | reads zero |
+| `0x00F` | `DIAG_STREAM` | read-only. `[15:0]` the data stream's frames sent since reset |
 
 The diagnostic words cross from the system clock through two flip-flops and are not coherent across bits; read twice.
 
@@ -171,8 +171,8 @@ pass by the program, and the firmware must not write them. A channel's duty
 and resonance sinks are the program's (they move with the LFOs); the rest of
 its block is the firmware's.
 
-The FIFO holds 512 quads, so a batch larger than that needs a swap and a
-wait between chunks. The write window applies 48 a pass, a pass being 20.8 µs:
+The FIFO holds 511 quads (its 512th row is the one the parked reader sits
+on), so a batch larger than that needs a swap and a wait between chunks. The write window applies 48 a pass, a pass being 20.8 µs:
 a 1 kHz tick can send 480 and the FIFO is empty again before the next.
 
 ## The data stream — the 48 kHz S/PDIF output as a pipe
@@ -194,7 +194,8 @@ come in frames of 64 (`rtl/spdif/spdif_stream.sv`):
 The source (`CTRL[5:4]`) is taken at the sync word and holds for the frame:
 0 is a 32-bit maximal LFSR (`x^32 + x^22 + x^2 + x + 1`, seed 1, stepped 32
 times after every word of positions 0–62, whichever source is sent), 1 is
-the 48 kHz sample counter. A receiver that lost or repeated a sample fails
+the pass counter, 2 is the probe's pair (its even word on the frame's even
+positions, its odd word on the odd ones, 18 bits each). A receiver that lost or repeated a sample fails
 the frame's CRC and re-synchronises on the next sync word; the sequence
 number says how many frames went. `DIAG_STREAM` (quad `0xF`) counts the
 frames sent.

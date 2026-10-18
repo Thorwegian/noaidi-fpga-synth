@@ -35,7 +35,7 @@ constexpr int task_priority = 6;
 // in sdkconfig.defaults).
 constexpr int64_t tick_us = 1000;
 
-// The FPGA's queue holds 512 writes and the CSP applies 48 a pass: 48 passes
+// The FPGA's FIFO holds 511 quads and the CSP applies 48 a pass: 48 passes
 // in a tick, so a tick can send nearly the whole queue and it is empty again
 // by the next. A tick sends no more than this, the rest waits for the next.
 constexpr int writes_per_tick = 480;
@@ -324,12 +324,31 @@ void engine_task(void *) {
 
 // Load the control program while the CSP is held: a row is two quads. The
 // first revision's 36-bit words ride in the lower quad until the second
-// revision's assembler (#235) writes 72-bit rows.
+// revision's assembler (#235) writes 72-bit rows. Then read every row
+// back through IMEM's SPI port and count the quads that differ: the
+// program image is verified the way the register image is.
 void load_program() {
     std::array<fpga_map::quad_t, 2> row{};
     for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
         row[1] = pc < csp::control::words.size() ? csp::control::words[pc] : 0;
         spi_link::write(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row.data(), row.size());
+    }
+    int differing = 0;
+    std::array<fpga_map::quad_t, spi_link::burst_max> back{};
+    for (size_t quad = 0; quad < 2 * fpga_map::program_rows; quad += back.size()) {
+        spi_link::read(fpga_map::program_base + static_cast<uint32_t>(quad), back.data(), back.size());
+        for (size_t index = 0; index < back.size() && quad + index < 2 * fpga_map::program_rows; ++index) {
+            const size_t pc = (quad + index) / 2;
+            const fpga_map::quad_t expected =
+                    (quad + index) % 2 == 0 ? 0 : (pc < csp::control::words.size() ? csp::control::words[pc] : 0);
+            differing += back[index] != (expected & spi_link::quad_mask);
+        }
+    }
+    if (differing == 0) {
+        ESP_LOGI(tag, "program image: every quad as sent (%u rows)",
+                 static_cast<unsigned>(fpga_map::program_rows));
+    } else {
+        ESP_LOGE(tag, "program image: %d quad(s) not as sent", differing);
     }
 }
 
@@ -355,7 +374,7 @@ void engine_link_init(void) {
     // The write FIFO outlives a reset of this chip: what the last run left in
     // it (committed or not) would be applied during the self-test and the first
     // passes of the control program, over what they compute. Commit it and let
-    // the held CSP apply it all now (up to 512 writes, in one pass when held).
+    // the held CSP apply it all now (up to 511 quads, in one pass when held).
     spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
 
@@ -386,7 +405,7 @@ void engine_link_init(void) {
         image.set(write.address, write.raw);
     }
     // Held, the CSP applies every committed write in one pass; the queue holds
-    // 512, so a chunk at a time, and a pass between.
+    // 511, so a chunk at a time, and a pass between.
     while (image.pending()) {
         send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
         vTaskDelay(pdMS_TO_TICKS(2));

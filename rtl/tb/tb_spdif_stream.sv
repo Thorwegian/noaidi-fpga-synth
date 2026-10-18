@@ -39,7 +39,7 @@ module tb_spdif_stream;
     logic [15:0] frames_sent;
     spdif_stream dut (
         .clk(clk), .reset_n(rst_n), .sample_tick(sample_tick48), .source(source),
-        .sample_counter(sample_counter), .word(word), .frames_sent(frames_sent)
+        .sample_counter(sample_counter), .probe_pair(36'h8_0001_2345), .word(word), .frames_sent(frames_sent)
     );
 
     wire spdif_out;
