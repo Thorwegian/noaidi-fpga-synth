@@ -8,8 +8,8 @@ nextpnr-himbaechel (gowin) and Apicula, the pinned suite of
 `tools/oss-cad-suite.version`, while bringing the CSP (`rtl/csp`) up at
 73.728 MHz on issue #222. Every item names the measurement that
 established it, so that a reader can repeat it rather than believe it.
-The rules that follow from these notes live in `docs/csp_isa.md`
-section 12; this file keeps the why and the how.
+The rules that follow from these notes live in `docs/csp2_architecture.md`
+section 0; this file keeps the why and the how.
 
 ## 0. The grade of each claim
 

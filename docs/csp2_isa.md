@@ -4,9 +4,9 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 *Draft for issue #231. What a program may write and assume; the machine
-that runs it is `csp2_architecture.md`. The first revision's documents
-(`csp_isa.md`, `csp_manual.md`) describe the branch of #222 and stay as
-its record.*
+that runs it is `csp2_architecture.md`. The first revision is the branch
+of #222, `feat/222-csp-switchover`, with its own documents; nothing of it
+is kept here for reference.*
 
 The second revision keeps what the first proved and drops what the chip
 measured as unaffordable: a fixed program per sample, three-operand
