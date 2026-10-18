@@ -40,8 +40,8 @@ flowchart TD
     MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>patch → registers and sinks"]
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
-        BUS --> Q["write queue<br/>512 × (address, word)"]
-        BUS --> PGM["program memory<br/>1472 × 36 bits"]
+        BUS --> Q["write FIFO<br/>512 units of 36 bits"]
+        BUS --> PGM["IMEM: 1472 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
         Q --> CSP["CSP: the control program,<br/>once per 1536 cycles"]
         PGM --> CSP
@@ -54,15 +54,24 @@ flowchart TD
 
 ## Conventions
 
-- **Register width: 32 bits on the wire.** A register or sink word is 18 bits,
-  Q4.14 (the low 18 bits of the wire word); a program word is 36 bits, the
-  high four through `PROGRAM_HIGH`.
-- **Address width: 16 bits** (word addresses).
-- **Transaction format**: 1 command byte + 2 address bytes + 4 data bytes per
-  word, MSB first. Command: `[7] R/W` (1 = read), `[6] auto-increment
-  (burst)`, `[5:0] reserved`. A read has two dummy turnaround bytes before the
-  data. A burst streams words while CS is low. MISO byte 0 is always the ID
-  byte (`0xA5`), a link check on every frame.
+- **The wire is in nines.** Every block RAM on the chip is 9, 18 or 36 bits
+  wide, so the link is too: a 9-bit command symbol, an 18-bit address symbol
+  and 36-bit payload units, MSB first, nothing straddling a boundary. The
+  ESP32's SPI master clocks any number of bits per transfer; the slave counts
+  to nine. (The first revision's 32-bit wire carried 18 useful bits in 32
+  clocks and split a 36-bit instruction over a high-bits register; that is
+  gone.)
+- **A unit is 36 bits**: a register or sink write is one unit (`[35:24]` the
+  12-bit address, `[23:6]` the 18-bit word, `[5:0]` spare); a wide register is
+  two units, the pair's halves; an instruction row is two units; a decode ROM
+  row is one unit with the upper half unused; a status or probe word reads
+  back as one unit, 18 or 36 wide as it is.
+- **Address width: 18 bits**, in units.
+- **Transaction format**: the command symbol, the address symbol, then units
+  while CS is low (a burst: the address increments by one unit). Command:
+  `[8] R/W` (1 = read), `[7] auto-increment`, `[6:0] reserved`. A read has one
+  dummy turnaround unit before the data. MISO's first symbol is always the ID
+  symbol (`0x0A5`), a link check on every frame.
 - **Writes outside the ranges below are dropped, reads return zero**: no
   aliasing. The ranges cannot overlap; `spi_bus` checks that at elaboration.
 - **Atomicity.** A register or sink write waits in the **write queue** until
@@ -73,19 +82,27 @@ flowchart TD
   SPI clock edge that completes the entry.
 - **CDC via BSRAM ports**: the SPI side writes on the sclk-clocked port and
   the system clock reads on the other; the dual-clock BSRAM *is* the
-  clock-domain crossing for the pointer RAM and the write queue.
+  clock-domain crossing for the pointer RAM, IMEM, the ROM and the write
+  FIFO — on the one condition that the two ports are never on the same row
+  at the same time (UG285-1.4E p6 and p24, note 1; `csp2_architecture.md`
+  rule 2), which each of them meets by construction: the FIFO by its
+  pointers, IMEM and the ROM by being loaded with the CSP held, the pointer
+  RAM by a whole entry written on one SPI clock edge.
 
 ## Top-level map
 
+Addresses are in 36-bit units.
+
 | Address | Section | Size |
 |---|---|---|
-| `0x0000–0x000F` | System registers (read back) | 16 words |
-| `0x0010` | `PROGRAM_HIGH` (write only) | 1 word |
-| `0x2000–0x5FFF` | Partial pointers (256 × 64) | 16K words |
-| `0x6000–0x6FFF` | The CSP's write queue: register or sink word at `0x6000 + a` | 4K words |
-| `0x8000–0x85BF` | The CSP's program memory (1472 instructions) | 1472 words |
+| `0x00000–0x0000F` | System registers (read back) | 16 units |
+| `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K units |
+| `0x06000–0x06FFF` | The CSP's write FIFO: register or sink word at `0x6000 + a` | 4K units |
+| `0x08000–0x08B7F` | IMEM: 1472 instruction rows, two units a row | 2944 units |
+| `0x09000–0x093FF` | The decode ROM: 1024 rows, one unit a row | 1024 units |
 
-Everything else is reserved.
+Everything else is reserved. The regions' bases are the first revision's,
+widened; the map's rule stands — firm, and landscaped where the chip asks.
 
 ## System registers — `0x0000–0x000F`
 
@@ -112,21 +129,27 @@ the pass it is committed in. `CTRL` reads back its last value without the
 commit bit. Every `CTRL` write sets all three bits: pass the hold and the test
 tone along with a swap.
 
-## Program — `PROGRAM_HIGH`, `0x8000–0x85BF`
+## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x093FF`
 
-An instruction is 72 bits ([csp2_isa.md](csp2_isa.md) section 2), held in
-eight blocks of 2048 × 9 and loaded together with the decode ROM's 1024 × 18
-image; how the window lays the eight slices and the ROM over SPI words is
-decided with the RTL (the word's width is open under hash `d9f2a6c1`). What
-stands: the memory takes writes only while the CSP is held, so a pass never
-runs half an old program and half a new, and instructions past the end of
-the program are zero, which is `NOP`.
+An instruction is 72 bits ([csp2_isa.md](csp2_isa.md) section 2), held as
+eight 9-bit slices of one row in eight blocks of 2048 × 9. A row is two
+units: the first carries bits `[71:36]`, one 9-bit slice to each of the
+upper four blocks, the second bits `[35:0]` to the lower four; row `pc` is
+at `0x08000 + 2 pc`. The decode ROM's rows (1024 × 18, the operations as
+`csp2_isa.md` section 4 lists them) are one unit each at `0x09000 + op`,
+the upper half of the unit unused. Both are loaded as one image with the
+CSP held: the memories take writes only then, so a pass never runs half an
+old program and half a new, and instructions past the end of the program
+are zero, which is `NOP`. (The word's width is the open hash `d9f2a6c1`: at
+54 bits, six slices, a row is still two units, the first's upper half
+unused.)
 
-## Write queue — `0x6000–0x6FFF`
+## Write FIFO — `0x06000–0x06FFF`
 
-A word written to `0x6000 + a` queues a write of its low 18 bits to register
+A unit written to `0x6000 + a` queues a write of its 18-bit word to register
 or sink word `a` (`0x000–0xBFF`), as the CSP's address space has it
-([csp2_isa.md](csp2_isa.md), the register map):
+([csp2_isa.md](csp2_isa.md), the register map); the unit is the FIFO's entry
+as it is, the block in its 512 × 36 configuration:
 
 | `a` | What |
 |---|---|
@@ -141,15 +164,16 @@ or sink word `a` (`0x000–0xBFF`), as the CSP's address space has it
 
 The layout of every block is `tools/csp/programs/map.s`, the one definition;
 `csp header` writes it into `app/main/csp/control_program.hpp`. Sink words the
-firmware writes go to both pages of the sink area, so they survive the page
-flip at the end of a pass; the CSP's own sink words are written every pass by
-the program, and the firmware must not write them. A channel's duty and
-resonance sinks are the program's (they move with the LFOs); the rest of its
-block is the firmware's.
+firmware writes land on the sink area's shadow page, like the CSP's own, and
+are taken over at the page flip; a partial never reads a page being written
+(`csp2_architecture.md` rule 2). The CSP's own sink words are written every
+pass by the program, and the firmware must not write them. A channel's duty
+and resonance sinks are the program's (they move with the LFOs); the rest of
+its block is the firmware's.
 
-The queue holds 512 writes, so a burst larger than that needs a swap and a
+The FIFO holds 512 units, so a batch larger than that needs a swap and a
 wait between chunks. The write window applies 48 a pass, a pass being 20.8 µs:
-a 1 kHz tick can send 480 and the queue is empty again before the next.
+a 1 kHz tick can send 480 and the FIFO is empty again before the next.
 
 ## Partial pointers — `0x2000 + 64 p`
 
@@ -209,8 +233,9 @@ ports.
 ## SPI speed budget
 
 - Firmware default: **10 MHz**, one CS frame per transaction.
-- **Measured on hardware: clean at every rate from 1 MHz to
-  40 MHz.** 88/88 transactions correct — write four registers, burst-read
+- **Measured on hardware with the first revision's 32-bit wire: clean at
+  every rate from 1 MHz to 40 MHz** (the nine-bit wire is measured again the
+  same way when it exists). 88/88 transactions correct — write four registers, burst-read
   them back, check the ID byte and all four values, ×8 repetitions at each
   of 11 rates. 40 MHz is the ESP32-C3's ceiling for SPI2 through the GPIO
   matrix (the configured pins are not the IOMUX ones), not a limit of the
@@ -222,8 +247,9 @@ ports.
   traffic justifies it.
 - Traffic: a note-on is a handful of words; a re-render of the patch is the
   words that changed; envelopes, LFOs, pitch and cutoff cost no SPI traffic.
-  The boot is the program (82 words ×2), the constants and the wiring
-  (~400 words), and 256 pointer entries.
+  The boot is the program (two units a row) and the decode ROM (one a row),
+  the wiring (~400 units; constants are immediates in the word), and 256
+  pointer entries.
 
 ## Known limits vs a full polysynth
 
