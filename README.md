@@ -112,6 +112,11 @@ pll_clk O0=73728K -s
   clang-format==21.1.8`; `CLANG_FORMAT=` points the Makefile at it if it
   is not on the path). Our C and C++ follow the Java Code Conventions,
   set out in `.clang-format`
+- **The tomlc17 submodule** — `app/lib/tomlc17` is the TOML parser the
+  firmware links ([cktan/tomlc17](https://github.com/cktan/tomlc17)),
+  vendored as a git submodule. Clone with `--recurse-submodules`, or
+  after a plain clone run `git submodule update --init`; `make fw` needs
+  its headers and fails without it.
 
 The top-level Makefile finds ESP-IDF itself: `idf.py` on the `PATH` if the
 shell is activated, otherwise the newest Espressif activation script under
