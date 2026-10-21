@@ -708,7 +708,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
     std::map<uint32_t, uint16_t> rom_index;
     rom_index[0] = 0;
     // the vector loops' rows are fixed: the chip's front end knows them by number
-    for (const auto [which, row] : {std::pair{IndexRegister::i, op_vector_loop_i}, std::pair{IndexRegister::j, op_vector_loop_j}}) {
+    for (const auto &[which, row] : {std::pair{IndexRegister::i, op_vector_loop_i}, std::pair{IndexRegister::j, op_vector_loop_j}}) {
         Control vector  = control_of(Op::vloop, false, ASource::zero);
         vector.sub      = static_cast<uint8_t>(2 | (which == IndexRegister::j ? 1 : 0));
         built.image.rom[row] = vector.encode();
