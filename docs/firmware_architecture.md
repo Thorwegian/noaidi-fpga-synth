@@ -66,7 +66,9 @@ different facts:
   `esp_timer` passes that deadline it promotes the voice to IDLE and
   mutes its partials (GATE off). The check runs in the note-on
   allocation scan and in the voice task's periodic sweep — no timer
-  task. This estimate-and-mute is to be replaced by linear gain.
+  task. The sound's end is the pipeline's: the voice's gain word is the
+  envelope's level, and the pipeline silences a partial whose word has
+  fallen below 2^−10 (−60 dB); the estimate only frees the voice.
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.

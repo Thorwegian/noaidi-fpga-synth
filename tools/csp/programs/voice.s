@@ -9,12 +9,17 @@
 ;
 ;   pitch  = NOTE + CH_PITCH                        octaves
 ;   cutoff = 4 × U_M × MOD_AMOUNT + NOTE × KEY_TRACK + CH_CUTOFF   octaves
-;   gain   = OUT_A × VOLUME                         linear (OUT_A is the
-;                                                   amp envelope × velocity)
+;   gain   = OUT_A                                  the fraction of the
+;                                                   pipeline's 60 dB span
+;                                                   (the amp envelope ×
+;                                                   velocity, envelope.s)
 ;
 ; written to the voice's three sinks, the words the program owns for a voice.
-; The scratch fields hold the three results (U_A, U_M, D) until the sinks
-; are addressed: j points at the channel first, then at the sinks.
+; The partial pipeline takes the gain's exponential, as the old engine's
+; attenuation LUT did, so the envelope's level moves the gain in dB and the
+; patch's volume is in the channel's left and right gains. The scratch fields
+; hold the pitch and the cutoff (U_A, U_M) until the sinks are addressed: j
+; points at the channel first, then at the sinks.
 
         IDX     i, =#VOICES, 0
         LOOP.vi voices, =#VOICE_COUNT, =#VOICE_SIZE
@@ -25,9 +30,8 @@
                                                         ;   reaches 32 octaves; a word holds 8
         MAC     [i+U_M], [i+U_M], [i+NOTE], [j+KEY_TRACK]
         ADD3    [i+U_M], [i+U_M], [j+CH_CUTOFF], 0
-        MAC     [i+D], 0, [i+OUT_A], [j+VOLUME]
         IDX     j, [i+SINK], 0                      ; j → the voice's sinks
         MAC     [j+SINK_PITCH], 0, [i+U_A], ONE
         MAC     [j+SINK_CUTOFF], 0, [i+U_M], ONE
-        MAC     [j+SINK_GAIN], 0, [i+D], ONE
+        MAC     [j+SINK_GAIN], 0, [i+OUT_A], ONE
 voices:

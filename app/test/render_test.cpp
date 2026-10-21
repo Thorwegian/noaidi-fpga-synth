@@ -112,21 +112,18 @@ void test_envelope() {
     const int base   = channel + cp::envelopes;
     check(wide_at(state, base + 0 + cp::target) == int64_t{0x533333} << 10,
           "attack aims at 1.3");
-    // half the old 60 dB span is 30 dB down
-    check(wide_at(state, base + 4 + cp::target)
-                  == (static_cast<int64_t>(0x400000 * std::pow(10.0, -1.5))
-                      << 10),
-          "decay aims at the sustain level, as many dB down as the old gain's");
+    // the level is the fraction of the gain's 60 dB span: half of it is 30 dB
+    // down, and the sustain goes in as it is
+    check(wide_at(state, base + 4 + cp::target) == int64_t{0x200} << 22,
+          "decay aims at the sustain level, a fraction of the span");
     check(wide_at(state, base + 8 + cp::target) == 0, "release aims at zero");
     const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(0x80));
     check(wide_at(state, base + 0 + cp::rate) == csp::envelope_rate(k),
           "attack rate is the coefficient, per pass");
     check(wide_at(state, base + 8 + cp::rate)
                   == csp::envelope_rate(
-                          3
-                          * patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
-          "release rate: three times the patch's, to sound as the old gain's "
-          "fall did");
+                          patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
+          "release rate: the patch's, the level being the gain in dB");
     // faster codes are faster
     check(csp::envelope_rate(patch_adsr_rate_coeff(patch_adsr_rate_byte(0xF0)))
                   > csp::envelope_rate(
@@ -172,8 +169,8 @@ void test_notes() {
           "full velocity, full amount");
     check(full_state.at(base + cp::gate) == 16384, "note-on opens the gate");
     const double amp = soft_state.at(base + cp::velocity) / 16384.0;
-    check(std::fabs(amp - std::pow(10.0, -3.0 * (1.0 - 64.0 / 127.0))) < 1e-3,
-          "a soft note is as many dB down as the velocity says");
+    check(std::fabs(amp - 64.0 / 127.0) < 1e-3,
+          "a soft note's amount is the velocity's fraction of the span");
     check(std::fabs(soft_state.at(base + cp::velocity_m) / 16384.0
                     - 64.0 / 127.0)
                   < 1e-3,
@@ -202,7 +199,6 @@ void test_controllers() {
     controllers.bend  = -170;
     render::Writes writes;
     render::cutoff(patch, controllers, writes);
-    render::volume(patch, writes);
     render::pitch_bend(patch, controllers, writes);
     const auto state = state_of(writes);
     // the knob (1 octave), the wheel (1000/1024) and the half octave
@@ -212,15 +208,21 @@ void test_controllers() {
           "the cutoff is the knob, the wheel and the half octave");
     check(state.at(channel + cp::key_track) == 16384,
           "key tracking 64 is 100 %");
-    check(state.at(channel + cp::volume) == 16384,
-          "the reference volume is unity");
     check(std::fabs(octaves_at(state, channel + cp::bend) - (-170 / 1024.0))
                   < 1e-3,
           "bend");
+    // the patch's volume is in the channel's gains (the voice's gain word is
+    // the envelope's): 16 steps are 6 dB
+    render::Writes sound;
+    render::channel_sound(patch, sound);
+    const int32_t reference_left =
+            state_of(sound).at(cp::channel_sinks + cp::gain_left);
     patch.volume = 0xCF + 16;
     render::Writes louder;
-    render::volume(patch, louder);
-    check(state_of(louder).at(channel + cp::volume) == 32768,
+    render::channel_sound(patch, louder);
+    check(std::abs(state_of(louder).at(cp::channel_sinks + cp::gain_left)
+                   - 2 * reference_left)
+                  <= 2,
           "16 steps of volume are 6 dB");
 }
 

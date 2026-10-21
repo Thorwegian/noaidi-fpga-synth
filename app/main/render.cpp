@@ -27,9 +27,8 @@ constexpr int raw_octave   = 1024;                  // the patch's octave
 constexpr int word_per_raw = word_one / raw_octave; // 16
 constexpr int32_t middle_c = 5 * raw_octave;        // MIDI note 60, UQ4.10
 
-// UQ4.4 volume codes: 0xFF is loudest; the unity anchor of the old log gain.
-constexpr int volume_reference = 0xCF;
-constexpr int volume_mute      = 0x00;
+// UQ4.4 volume codes: 0xFF is loudest, 16 steps an octave.
+constexpr int volume_mute = 0x00;
 
 // The envelopes' segments, as the program's table lays them out.
 constexpr int amp_attack   = 0;
@@ -110,14 +109,12 @@ double velocity_scale(uint8_t velocity, uint8_t amount) {
     return 1.0 - (amount / 127.0) * (1.0 - velocity_curve(velocity));
 }
 
-// The amp envelope's amount for a note. The old gain was in dB and the
-// velocity scaled the envelope's span of 60 dB, so a soft note rose to a
-// lower peak from the same floor; the gain is linear now, and the same
-// peak, in dB, is a power of ten.
+// The amp envelope's amount for a note: the velocity scales the envelope's
+// span of 60 dB (the partial pipeline's, synth_pkg.sv GAIN_SPAN_OCTAVES, which
+// takes the exponential of the voice's gain word), so a soft note rises to a
+// lower peak from the same floor, as it always did.
 double amp_amount(const patch_t &patch, uint8_t velocity) {
-    constexpr double span_db = 60.0;
-    const double g           = velocity_scale(velocity, patch.vel_amp_amt);
-    return std::pow(10.0, -span_db / 20.0 * (1.0 - g));
+    return velocity_scale(velocity, patch.vel_amp_amt);
 }
 
 // The amount the mod envelope's depth is scaled by.
@@ -131,35 +128,23 @@ int32_t note_word(uint8_t note) {
     return octaves(raw - middle_c);
 }
 
-// How much faster the amp envelope falls than its patch's time says. The
-// patch's decay and release times are those of a fall in the old gain: its
-// level fell by an RC curve and the gain in dB followed it, 60 dB × (1 − level),
-// so a release of 11 s was 30 dB down in one second, 51 dB in three, and
-// silent by four. The gain is linear now, and the same RC curve in amplitude
-// reaches 20 dB in three seconds and 60 only after eleven. A rate three times
-// the patch's puts the new fall within a few dB of the old one at three
-// seconds and after (and 10 dB slower in the first). The mod envelope moves
-// the cutoff in octaves, as it always did, and keeps the patch's rates.
-constexpr uint32_t amp_fall_factor = 3;
-
 // An envelope's rows: attack aims past full scale, decay at the sustain level,
-// release at zero; each with its rate. `sustain` is the level the decay aims
-// at, in the 22-bit scale of the level (0x400000 is full scale); `fall_factor`
-// multiplies the decay's and the release's rates.
-void envelope(const adsr_t &env, int sustain, uint32_t fall_factor, int attack,
-              int decay, int release, Writes &writes) {
-    auto row = [&](int segment, int64_t target22, uint8_t rate_code,
-                   uint32_t factor) {
-        const int base = channel_register(cp::envelopes + segment);
-        const uint32_t k =
-                patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code)) * factor;
+// release at zero; each with the patch's rate, as adsr.sv had it — the amp
+// envelope's level is the gain in dB (the pipeline's exponential), the mod
+// envelope's the cutoff in octaves, so a fall is the patch's. `sustain` is
+// the level the decay aims at, in the 22-bit scale of the level (0x400000 is
+// full scale).
+void envelope(const adsr_t &env, int sustain, int attack, int decay,
+              int release, Writes &writes) {
+    auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
+        const int base   = channel_register(cp::envelopes + segment);
+        const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code));
         wide(writes, base + cp::target, target22 << 10);
-        wide(writes, base + cp::rate,
-             csp::envelope_rate(std::min<uint32_t>(k, (1u << 18) - 1)));
+        wide(writes, base + cp::rate, csp::envelope_rate(k));
     };
-    row(attack, attack_target, env.attack, 1);
-    row(decay, sustain, env.decay, fall_factor);
-    row(release, 0, env.release, fall_factor);
+    row(attack, attack_target, env.attack);
+    row(decay, sustain, env.decay);
+    row(release, 0, env.release);
 }
 
 // The voicing's gains for one partial, as UQ4.4 codes: the volume anchor and
@@ -173,7 +158,9 @@ struct Codes {
 Codes gain_codes(const patch_t &patch, const Voicing &partial, int sounding) {
     const int makeup = sounding <= 2 ? 8 : sounding <= 4 ? 4 : 0;
     const int mix    = patch.osc_mix; // + favours osc 2, − osc 1
-    int volume       = volume_reference + makeup;
+    // the patch's volume (a UQ4.4 code, 16 steps an octave) and the make-up:
+    // the voice's gain word is the envelope's alone
+    int volume = patch.volume + makeup;
     if (partial.oscillator == 0 && mix > 0) {
         volume -= mix;
     }
@@ -281,7 +268,7 @@ void setup(Writes &writes) {
         for (const int field :
              {cp::bend, cp::lfo1_pitch, cp::lfo1_cutoff, cp::lfo2_pitch,
               cp::lfo2_cutoff, cp::cutoff_base, cp::key_track, cp::mod_amount,
-              cp::volume, cp::lfo1_duty, cp::lfo2_duty, cp::lfo1_resonance,
+              cp::lfo1_duty, cp::lfo2_duty, cp::lfo1_resonance,
               cp::lfo2_resonance, cp::duty_base_0, cp::duty_base_1,
               cp::resonance_base}) {
             put(writes, record + field, 0);
@@ -306,27 +293,16 @@ void setup(Writes &writes) {
 }
 
 void amp_envelope(const patch_t &patch, Writes &writes) {
-    // The patch's sustain is a fraction of the old gain's span of 60 dB, which
-    // the envelope walked in dB; the gain is linear now, so the same loudness
-    // is a power of ten.
-    constexpr double span_db = 60.0;
-    const double fraction =
-            std::min<uint16_t>(patch.env[0].sustain, 0x3FF) / 1024.0;
-    const int sustain =
-            patch.env[0].sustain >= 0x3FF
-                    ? level_22_one
-                    : static_cast<int>(
-                              level_22_one
-                              * std::pow(10.0,
-                                         -span_db / 20.0 * (1.0 - fraction)));
-    envelope(patch.env[0], sustain, amp_fall_factor, amp_attack, amp_decay,
-             amp_release, writes);
+    // the sustain is a fraction of the gain's span of 60 dB, the level's
+    envelope(patch.env[0],
+             std::min<uint16_t>(patch.env[0].sustain, 0x3FF) << 12, amp_attack,
+             amp_decay, amp_release, writes);
 }
 
 void mod_envelope(const patch_t &patch, Writes &writes) {
     // linear in octaves of cutoff: the sustain is a fraction of the depth
     envelope(patch.env[1],
-             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, 1,
+             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12,
              mod_attack, mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
     // program takes MOD_AMOUNT as a quarter of the depth and multiplies by
@@ -350,11 +326,6 @@ void cutoff(const patch_t &patch, const Controllers &controllers,
     // 64 is 100 %
     put(writes, channel_register(cp::key_track),
         clamp_word(int64_t{patch.filter.key_track} * word_one / 64));
-}
-
-void volume(const patch_t &patch, Writes &writes) {
-    put(writes, channel_register(cp::volume),
-        fraction(std::exp2((patch.volume - volume_reference) / 16.0)));
 }
 
 void pitch_bend(const patch_t &patch, const Controllers &controllers,
@@ -461,16 +432,16 @@ void silence(int voice, Writes &writes) {
 }
 
 int64_t release_tail_us(const patch_t &patch) {
-    // The level falls by k / 2^24 of what is left each 96 kHz sample; the
-    // tail is audible until it is 80 dB down, plus the link's latency.
-    constexpr double decibels = 80.0;
-    constexpr double latency  = 25000.0; // µs
+    // The level falls by k / 2^24 of what is left each 96 kHz sample, and the
+    // partial pipeline silences the voice once its level is below 2^-10 (the
+    // gain word's mute, synth_pkg.sv GAIN_MUTE: 60 dB down); plus the link's
+    // latency.
+    constexpr double mute_level = 1.0 / 1024.0;
+    constexpr double latency    = 25000.0; // µs
     const uint32_t k =
-            patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release))
-            * amp_fall_factor;
+            patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release));
     const double per_sample = k / 16777216.0;
-    const double samples =
-            std::log(std::pow(10.0, decibels / 20.0)) / per_sample;
+    const double samples    = -std::log(mute_level) / per_sample;
     return static_cast<int64_t>(samples * 1.0e6 / 96000.0 + latency);
 }
 

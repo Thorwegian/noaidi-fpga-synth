@@ -25,10 +25,10 @@
 namespace csp::control {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 1472;
+inline constexpr int cycles = 1440;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 142> rows{{
+inline constexpr std::array<Row, 141> rows{{
     {0x030060040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -99,22 +99,22 @@ inline constexpr std::array<Row, 142> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x010000c10ull, 0xc40000056ull},
     {0x050000421ull, 0x000000000ull},
-    {0x0a0429807ull, 0x41d000000ull},
-    {0x0a042a807ull, 0x41e000000ull},
-    {0x0a0433807ull, 0x42b000000ull},
-    {0x0a0434807ull, 0x42d000000ull},
+    {0x0a0428807ull, 0x41d000000ull},
+    {0x0a0429807ull, 0x41e000000ull},
+    {0x0a0432807ull, 0x42a000000ull},
+    {0x0a0433807ull, 0x42c000000ull},
     {0x050000422ull, 0x000000000ull},
-    {0x0c0429807ull, 0x41f000000ull},
-    {0x0c042a807ull, 0x420000000ull},
-    {0x0c0433807ull, 0x42c000000ull},
-    {0x0c0434807ull, 0x42e000000ull},
-    {0x0d0427429ull, 0x41c000000ull},
-    {0x0c042a427ull, 0x424000000ull},
-    {0x0d042842aull, 0x423000000ull},
-    {0x050000432ull, 0x000000000ull},
-    {0x0d0800433ull, 0x42f000000ull},
-    {0x0d0801433ull, 0x430000000ull},
-    {0x0d0802434ull, 0x431000000ull},
+    {0x0c0428807ull, 0x41f000000ull},
+    {0x0c0429807ull, 0x420000000ull},
+    {0x0c0432807ull, 0x42b000000ull},
+    {0x0c0433807ull, 0x42d000000ull},
+    {0x0d0426428ull, 0x41c000000ull},
+    {0x0c0429426ull, 0x424000000ull},
+    {0x0d0427429ull, 0x423000000ull},
+    {0x050000431ull, 0x000000000ull},
+    {0x0d0800432ull, 0x42e000000ull},
+    {0x0d0801432ull, 0x42f000000ull},
+    {0x0d0802433ull, 0x430000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -159,18 +159,17 @@ inline constexpr std::array<Row, 142> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x010000c20ull, 0xc1000008eull},
+    {0x010000c20ull, 0xc1000008dull},
     {0x050000405ull, 0x000000000ull},
-    {0x0d040640eull, 0x827000000ull},
+    {0x0d040640eull, 0x826000000ull},
     {0x0a0407407ull, 0x825000000ull},
     {0x040407000ull, 0xc00000002ull},
     {0x0c040740eull, 0x824000000ull},
-    {0x100407828ull, 0x000000000ull},
-    {0x0a040c40bull, 0x826000000ull},
+    {0x100407827ull, 0x000000000ull},
     {0x05000040full, 0x000000000ull},
     {0x0a0800406ull, 0xc00004000ull},
     {0x0a0801407ull, 0xc00004000ull},
-    {0x0a080240cull, 0xc00004000ull},
+    {0x0a080240bull, 0xc00004000ull},
 }};
 
 // The decode ROM: one control word a row, row 0 the NOP.
@@ -190,8 +189,8 @@ inline constexpr int channel_count = 16;
 inline constexpr int channel_sinks = 2304;
 inline constexpr int channel_sink_size = 48;
 inline constexpr int channel_size = 64;
-inline constexpr int ch_cutoff = 40;
-inline constexpr int ch_pitch = 39;
+inline constexpr int ch_cutoff = 39;
+inline constexpr int ch_pitch = 38;
 inline constexpr int correction = 3686;
 inline constexpr int cutoff_base = 35;
 inline constexpr int cutoff_offset = 12;
@@ -200,8 +199,8 @@ inline constexpr int depth = 4;
 inline constexpr int detune = 4;
 inline constexpr int duty_0 = 0;
 inline constexpr int duty_1 = 1;
-inline constexpr int duty_base_0 = 47;
-inline constexpr int duty_base_1 = 48;
+inline constexpr int duty_base_0 = 46;
+inline constexpr int duty_base_1 = 47;
 inline constexpr int eighth = 2048;
 inline constexpr int envelopes = 0;
 inline constexpr int four = 65536;
@@ -215,14 +214,14 @@ inline constexpr int level_a = 0;
 inline constexpr int level_m = 8;
 inline constexpr int lfo1 = 33;
 inline constexpr int lfo1_cutoff = 30;
-inline constexpr int lfo1_duty = 43;
+inline constexpr int lfo1_duty = 42;
 inline constexpr int lfo1_pitch = 29;
-inline constexpr int lfo1_resonance = 45;
+inline constexpr int lfo1_resonance = 44;
 inline constexpr int lfo2 = 34;
 inline constexpr int lfo2_cutoff = 32;
-inline constexpr int lfo2_duty = 44;
+inline constexpr int lfo2_duty = 43;
 inline constexpr int lfo2_pitch = 31;
-inline constexpr int lfo2_resonance = 46;
+inline constexpr int lfo2_resonance = 45;
 inline constexpr int lfos = 128;
 inline constexpr int lfos_a_half = 12;
 inline constexpr int lfo_sets = 112;
@@ -249,20 +248,20 @@ inline constexpr int phase = 0;
 inline constexpr int phase_step = 2;
 inline constexpr int rate = 2;
 inline constexpr int resonance = 2;
-inline constexpr int resonance_base = 49;
+inline constexpr int resonance_base = 48;
 inline constexpr int saws_a_half = 0;
 inline constexpr int segment_size = 4;
 inline constexpr int set_size = 8;
 inline constexpr int sines_a_half = 6;
 inline constexpr int sink = 15;
 inline constexpr int sinks = 2048;
-inline constexpr int sink_block = 50;
+inline constexpr int sink_block = 49;
 inline constexpr int sink_cutoff = 1;
 inline constexpr int sink_gain = 2;
 inline constexpr int sink_pitch = 0;
 inline constexpr int sink_spare = 3;
 inline constexpr int spare = 11;
-inline constexpr int spare_channel = 53;
+inline constexpr int spare_channel = 52;
 inline constexpr int spare_head = 3;
 inline constexpr int spare_sinks = 38;
 inline constexpr int squares_a_half = 6;
@@ -270,10 +269,10 @@ inline constexpr int stage_a = 2;
 inline constexpr int stage_m = 10;
 inline constexpr int t = 9;
 inline constexpr int target = 0;
-inline constexpr int tc = 42;
-inline constexpr int td = 51;
-inline constexpr int tp = 41;
-inline constexpr int tr = 52;
+inline constexpr int tc = 41;
+inline constexpr int td = 50;
+inline constexpr int tp = 40;
+inline constexpr int tr = 51;
 inline constexpr int triangles_a_half = 0;
 inline constexpr int u_a = 6;
 inline constexpr int u_m = 7;
@@ -283,7 +282,6 @@ inline constexpr int voices = 1536;
 inline constexpr int voice_count = 32;
 inline constexpr int voice_sinks_size = 8;
 inline constexpr int voice_size = 16;
-inline constexpr int volume = 38;
 inline constexpr int z = 10;
 inline constexpr int zero = 0;
 inline constexpr int zero_sink = 3071;

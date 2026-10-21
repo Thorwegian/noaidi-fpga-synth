@@ -45,7 +45,7 @@ attack is the first 77 % of an RC charge toward 1.3 times full scale
 (convex in amplitude, F1 below fixed), and the decay and release are RC
 falls (exponential amplitude, as every classic). The patch's sustain stays a
 fraction of the old 60 dB span (`render.cpp` turns it into the same loudness).
-An RC fall in amplitude is slow in dB near the start, so `render.cpp` multiplies the decay and release rates by three (`amp_fall_factor`) to land near the old dB-linear feel. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
+The amp envelope's level is the voice's gain word, the fraction of a span of 60 dB that the partial pipeline turns into a linear gain (`2^(10 × (level − 1))`, silent below 2^−10): a fall is an RC in dB, as `adsr.sv`'s was, at the patch's rate, and the velocity's amount and the sustain are fractions of the span. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our

@@ -51,6 +51,7 @@ LUTS = \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
 	dsp/att_lut.hex \
+	dsp/gain_lut.hex \
 	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
 	dsp/sine_lut.hex
@@ -70,6 +71,9 @@ dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
 dsp/att_lut.hex: ../scripts/gen_att_lut.py
+	python3 $<
+
+dsp/gain_lut.hex: ../scripts/gen_gain_lut.py
 	python3 $<
 
 dsp/log_lut.hex: ../scripts/gen_log_lut.py
@@ -235,6 +239,14 @@ obj_dir/tb_sink_area/sim: $(PKG) csp/csp_pkg.sv $(SINK) tb/tb_sink_area.sv Makef
 sim-sink: obj_dir/tb_sink_area/sim
 	$(call run_sim,$<,tb/sim-sink.out)
 
+# The partial pipeline: every stage against the bench's model of the sink words it reads,
+# the voice gain's decode included
+obj_dir/tb_partial_pipeline/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_partial_pipeline.sv $(LUTS) Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_partial_pipeline.sv
+
+sim-partial: obj_dir/tb_partial_pipeline/sim
+	$(call run_sim,$<,tb/sim-partial.out)
+
 # The lab: every device's reference agrees with it, and an injected fault is counted (all fifteen devices).
 obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
 	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
@@ -298,7 +310,7 @@ SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-csp-cosim.ou
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-sink sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \

@@ -233,7 +233,7 @@ The ten words, as the partial pipeline reads them (all Q4.14):
 | cutoff | voice + channel | likewise, clamped to the flat `FC_MAX` |
 | resonance | one | octaves of Q above Butterworth, never below zero |
 | duty | one | pulse width, 1.0 being the rail (`2^23`) |
-| gain | voice × (left, right) | linear, signed, clamped to ±8.0 |
+| gain | voice × (left, right) | the voice's word is the fraction of a span of 60 dB (the envelope's level × velocity, 0 … 1): the pipeline takes 2^(10 × (word − 1)), unity at 1 and above, silence below 2^−10; the channel's left and right are linear; the product signed, clamped to ±8.0 |
 | mode | one | `[1:0]` waveform (0 saw, 1 pulse, 2 triangle, 3 sine), `[2]` cascade (24 dB/oct), `[4:3]` filter type (0 LP, 1 BP, 2 HP) |
 
 The partial pipeline takes two cycles a partial (512 of the sample's 768

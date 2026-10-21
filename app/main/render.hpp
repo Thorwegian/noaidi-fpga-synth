@@ -84,7 +84,6 @@ void mod_envelope(const patch_t &patch, Writes &writes);
 void cutoff(const patch_t &patch, const Controllers &controllers,
             Writes &writes);
 
-void volume(const patch_t &patch, Writes &writes);
 void pitch_bend(const patch_t &patch, const Controllers &controllers,
                 Writes &writes);
 
@@ -93,7 +92,8 @@ void lfo(const patch_t &patch, int i, Writes &writes);
 
 // The patch's sound in the channel's sinks and registers that depend on the
 // voice structure: each partial's detune, cutoff offset and gain on each
-// side, the oscillators' modes and pulse widths, the resonance.
+// side (the patch's volume is in these), the oscillators' modes and pulse
+// widths, the resonance.
 void channel_sound(const patch_t &patch, Writes &writes);
 
 // A note struck on a voice: its pitch, its velocity's amounts, the gate.

@@ -88,7 +88,13 @@ package synth_pkg;
     //--- Partial sinks (docs/csp2_architecture.md, the sink area) ------
     // A partial reads ten sink words, named by ten pointers into the sink
     // area, over two cycles. Words are Q4.14; pitch and cutoff are
-    // octaves from the reference below, the gains linear.
+    // octaves from the reference below; the voice's gain is the fraction
+    // of a span of GAIN_SPAN_OCTAVES (the envelope's level, 0 … 1), which
+    // the pipeline decodes to 2^(span × (word − 1)) — unity at 1, silent
+    // below GAIN_MUTE — as the old engine's attenuation LUT did; the
+    // channel's left and right gains are linear.
+    parameter int GAIN_SPAN_OCTAVES    = 10;    // 60 dB; 8 + 2, the shifts of the decode
+    parameter logic [17:0] GAIN_MUTE   = 18'd16; // 2^-10: a word below it is silence
     parameter int POINTER_W            = 10;    // $clog2(sink words)
     parameter int POINTERS_PER_PARTIAL = 10;
     // The last word of the sink area, which nobody writes: always zero.

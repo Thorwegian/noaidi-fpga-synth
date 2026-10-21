@@ -172,9 +172,11 @@ void update_cutoff() {
     send(writes);
 }
 
+// The patch's volume is in the channel's left and right gains, with the
+// voicing's own terms.
 void update_volume() {
     render::Writes writes;
-    render::volume(g_patch, writes);
+    render::channel_sound(g_patch, writes);
     send(writes);
 }
 

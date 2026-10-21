@@ -968,7 +968,7 @@ void test_control_program() {
                   lfos + half * m.address("LFOS_A_HALF") * lfo_size);
     }
     struct Channel {
-        double bend, p1, c1, p2, c2, base, track, amount, volume;
+        double bend, p1, c1, p2, c2, base, track, amount;
         int lfo1, lfo2;
         double d1, d2, r1, r2, duty0, duty1, resonance; // the pulse width and Q
     };
@@ -978,7 +978,7 @@ void test_control_program() {
     for (int c = 0; c < 16; ++c) {
         channel[c]     = {0.02 * (c - 8),  0.1 + 0.01 * c,   -0.2 + 0.03 * c,
                           0.05 * (c % 4),  0.4 - 0.02 * c,   0.5 + 0.1 * (c % 5),
-                          0.25 * (c % 5),  0.3 + 0.05 * c,   0.2 + 0.05 * c,
+                          0.25 * (c % 5),  0.3 + 0.05 * c,
                           (3 * c) % lfo_count, (7 * c + 5) % lfo_count, 0.03 * (c % 5),
                           -0.02 * (c % 3), 0.1 * (c % 4),    0.05 * (c % 6),
                           0.1 + 0.02 * c,  -0.3 + 0.03 * c,  0.5 + 0.1 * (c % 7)};
@@ -999,7 +999,6 @@ void test_control_program() {
         cpu.write(at(base, "CUTOFF_BASE"), q(channel[c].base));
         cpu.write(at(base, "KEY_TRACK"), q(channel[c].track));
         cpu.write(at(base, "MOD_AMOUNT"), q(channel[c].amount));
-        cpu.write(at(base, "VOLUME"), q(channel[c].volume));
         cpu.write(at(base, "LFO1"), lfos + channel[c].lfo1 * lfo_size);
         cpu.write(at(base, "LFO2"), lfos + channel[c].lfo2 * lfo_size);
     }
@@ -1041,8 +1040,10 @@ void test_control_program() {
         const Channel &c       = channel[a.channel];
         const double ch_pitch  = c.bend + lfo_out[c.lfo1] * c.p1 + lfo_out[c.lfo2] * c.p2;
         const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1 + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
+        // the gain sink is the amp envelope's level × velocity, the fraction of
+        // the pipeline's span: the pipeline takes the exponential
         const double want[3]   = {a.note + ch_pitch, 4 * a.level_m * c.amount + a.note * c.track + ch_cutoff,
-                                  a.level_a * a.velocity * c.volume};
+                                  a.level_a * a.velocity};
         const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF", "SINK_GAIN"};
         for (int k = 0; k < 3; ++k) {
             const int offset = (sinks - csp::sink_base) + v * 8 + m.address(fields[k]);

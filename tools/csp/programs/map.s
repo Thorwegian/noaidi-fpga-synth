@@ -87,7 +87,6 @@
         .field CUTOFF_BASE, 1       ; the cutoff knob, the wheel…, in octaves
         .field KEY_TRACK, 1         ; 1.0: the cutoff follows the pitch
         .field MOD_AMOUNT, 1        ; the mod envelope's depth on the cutoff, in octaves
-        .field VOLUME, 1            ; linear
         .field CH_PITCH, 1          ; bend and the pitch LFOs: added to every note
         .field CH_CUTOFF, 1         ; the cutoff, with the LFOs and the tracking of CH_PITCH
         .field TP, 1                ; scratch
@@ -102,7 +101,7 @@
         .field SINK_BLOCK, 1        ; the address of the channel's sinks (below)
         .field TD, 1                ; scratch
         .field TR, 1
-        .field SPARE_CHANNEL, 11    ; a channel is 64 words
+        .field SPARE_CHANNEL, 12    ; a channel is 64 words
         .end
 
 ; ---- the envelopes ----------------------------------------------------------------
@@ -124,7 +123,7 @@
         .field LEVEL_M, 2           ; 8: the mod envelope's level
         .field STAGE_M, 1           ; 10
         .field OUT_A, 1             ; 11: level × velocity
-        .field D, 1                 ; 12: scratch; the voice's gain
+        .field D, 1                 ; 12: scratch; an envelope's distance to its target
         .field VELOCITY_M, 1        ; 13: the mod envelope's amount (the firmware's)
         .field NOTE, 1              ; 14: in octaves
         .field SINK, 1              ; 15: the address of the voice's sinks

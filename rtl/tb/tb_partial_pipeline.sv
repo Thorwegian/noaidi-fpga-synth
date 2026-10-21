@@ -17,7 +17,7 @@
 //      first partial after the flip, and not before
 //   4. effective parameters: pitch, cutoff, resonance and duty from the
 //      sink words, biased and clamped (the extremes included)
-//   5. gains: voice word × channel word, clamped
+//   5. gains: the voice word's exponential × channel word, clamped
 //   6. oscillator: per-partial phase advance == LUT delta each period
 //   7. SVF dynamics: both filter state pairs leave zero
 //   8. gain multiply: s10_out == (s9_sample * gain) >>> 14, exact
@@ -59,7 +59,7 @@ module tb_partial_pipeline;
     //----------------------------------------------------------------
     // The sink area and the pipeline
     //----------------------------------------------------------------
-    logic                          sink_write_enable, sink_write_both, pass_done;
+    logic                          sink_write_enable, sink_write_both, pass_start;
     logic [9:0]                    sink_write_address;
     logic [17:0]                   sink_write_data;
     logic [5:0][9:0]               sink_read_address;
@@ -69,7 +69,7 @@ module tb_partial_pipeline;
         .clk(clk), .reset_n(rst_n),
         .write_enable(sink_write_enable), .write_both(sink_write_both),
         .write_address(sink_write_address), .write_data(sink_write_data),
-        .pass_done(pass_done),
+        .pass_start(pass_start),
         .read_address(sink_read_address), .read_data(sink_read_data)
     );
 
@@ -121,8 +121,10 @@ module tb_partial_pipeline;
                 word_of_kind = (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : (r % 65537) - 32768;
             synth_pkg::POINTER_CUTOFF_CHANNEL:
                 word_of_kind = (r % 4097) - 2048;
-            synth_pkg::POINTER_GAIN_VOICE:     // 0 … 0.2
-                word_of_kind = (j == 0) ? 0 : (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : r % 3277;
+            synth_pkg::POINTER_GAIN_VOICE:     // the fraction of the span: 0 … 0.6 (−24 dB and
+                                               // down), the mute's edge (15, 16), unity, the rails
+                word_of_kind = (j == 0) ? 0 : (j == 1) ? 15 : (j == 2) ? 16 : (j == 13) ? 16384
+                             : (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : r % 9831;
             synth_pkg::POINTER_GAIN_LEFT:      // 0 … 0.5 (and the pan law's far side: 0)
                 word_of_kind = (j < 3) ? 0 : (r % 8193);
             synth_pkg::POINTER_GAIN_RIGHT:
@@ -170,7 +172,7 @@ module tb_partial_pipeline;
         sink_write_both    = 1'b1;
         sink_write_address = '0;
         sink_write_data    = '0;
-        pass_done          = 1'b0;
+        pass_start         = 1'b0;
         for (int w = 0; w < 1024; w++) begin
             sink_model[w] = 0;
         end
@@ -181,9 +183,11 @@ module tb_partial_pipeline;
     //----------------------------------------------------------------
     reg [23:0] pl [0:1023];
     reg [15:0] fl [0:1023];
+    reg [15:0] gl [0:1023];     // the voice gain's octave fraction
     initial begin
         $readmemh("dsp/phase_lut.hex", pl);
         $readmemh("dsp/svf_fc_lut.hex", fl);
+        $readmemh("dsp/gain_lut.hex", gl);
     end
 
     localparam integer PITCH_REFERENCE = 5120;                       // synth_pkg's 14'h1400, signed
@@ -209,8 +213,20 @@ module tb_partial_pipeline;
     function automatic integer exp_duty(input integer p);
         exp_duty = clamp(sink_word(p, 7) <<< 9, -8388608, 8388607);
     endfunction
+    // the voice's gain word decoded as the pipeline does: the span's attenuation
+    // in octaves, the fraction through gain_lut, the whole octaves a shift;
+    // silence below GAIN_MUTE, unity (less a step) at 1.0 and above
+    function automatic integer exp_voice_gain(input integer p);
+        integer w, attenuation;
+        w = sink_word(p, 4);
+        if (w < integer'(synth_pkg::GAIN_MUTE)) exp_voice_gain = 0;
+        else begin
+            attenuation    = (w >= 16384) ? 0 : (16384 - w) * synth_pkg::GAIN_SPAN_OCTAVES;
+            exp_voice_gain = gl[(attenuation >> 4) & 1023] >> (2 + (attenuation >> 14));
+        end
+    endfunction
     function automatic integer exp_gain(input integer p, input integer k);
-        exp_gain = clamp((sink_word(p, 4) * sink_word(p, k)) >>> 14, -131072, 131071);
+        exp_gain = clamp((exp_voice_gain(p) * sink_word(p, k)) >>> 14, -131072, 131071);
     endfunction
     function automatic integer exp_delta(input integer p);
         integer pitch;
@@ -440,10 +456,10 @@ module tb_partial_pipeline;
         sink_write_enable  <= 1'b0;
         wait (period == 4 && slot == 767);
         @(posedge clk);
-        pass_done <= 1'b1;
+        pass_start <= 1'b1;
         sink_model[CHANGED_WORD] = CHANGED_VALUE;   // from the next cycle on
         @(posedge clk);
-        pass_done <= 1'b0;
+        pass_start <= 1'b0;
     end
 
     //----------------------------------------------------------------
