@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "esp_log.h"
@@ -296,15 +298,25 @@ int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
 constexpr int boot_image_attempts = 3;
 
 void verify_boot_image() {
+    constexpr int named = 4; // the first differing registers, in the log: which words a boot loses
     for (int attempt = 1; attempt <= boot_image_attempts; ++attempt) {
-        const int lost = verify_image(nullptr, nullptr, nullptr, 0);
+        int registers[named];
+        int32_t wanted[named], held[named];
+        const int lost = verify_image(registers, wanted, held, named);
         if (lost == 0) {
             ESP_LOGI(tag, "boot image: every register as sent%s",
                      attempt > 1 ? " (after a resend)" : "");
             return;
         }
-        ESP_LOGW(tag, "boot image: %d register(s) not as sent, sending it again (%d of %d)",
-                 lost, attempt, boot_image_attempts);
+        char first[named * 32 + 1] = "";
+        for (int k = 0; k < std::min(lost, named); ++k) {
+            char one[32];
+            std::snprintf(one, sizeof one, " %03x:%ld/%ld", registers[k], static_cast<long>(wanted[k]),
+                          static_cast<long>(held[k]));
+            std::strncat(first, one, sizeof first - std::strlen(first) - 1);
+        }
+        ESP_LOGW(tag, "boot image: %d register(s) not as sent (image/chip:%s), sending it again (%d of %d)",
+                 lost, first, attempt, boot_image_attempts);
         // the CSP is held: the window applies a committed chunk within a few passes
         image.resend_all();
         while (image.pending()) {
