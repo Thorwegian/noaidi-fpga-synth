@@ -279,31 +279,27 @@ and the DSP. Issue #230 carries the patch work (fork
 
 ## 3. Measuring on the board
 
-- **The volatile clock**: `pll_clk O0=<kHz>K` on the BL616's CLI (via
-  `/tmp/claude_bl4.py` on the dev box; DTR/RTS, Ctrl-X Ctrl-C CR) sets the
-  board's system clock without a rebuild; always end with `O0=73728K`.
-  Sweep 50/64/66/68/70/72/73.728 to find a bitstream's real limit.
-- **Step-and-replay** is the instrument for "does the chip compute what
-  the model computes": `tools/lab/snapshot.py A B <ms>` (freeze, dump,
-  `csp-step`, dump; B carries a `P first last` line), then
-  `csp replay <program .s files> -a A -b B` on the host. 0 differences
-  over ~500 passes is the acceptance. It starts from the chip's state,
-  so it cannot see that the state is wrong: compare a boot image at
-  73.728 with one at 50 MHz for that (`csp-dump 0x0 0x800` after a boot).
+- **The volatile clock**: `pll_clk O0=<kHz>K` on the BL616's CLI
+  (`tools/lab/board_clock.py <kHz>`: the board's second serial port,
+  DTR/RTS, Ctrl-X Ctrl-C CR, a character at a time) sets the board's
+  system clock without a rebuild; always end with 73728. Sweep upwards
+  from 73.728 to find a bitstream's real limit.
+- **The chip check** is the instrument for "does the chip compute what the
+  model computes", the co-simulation's method on silicon: `csp script
+  <program>.s -f <seed>` prints the console lines that fill every register
+  from the seed and load a program whose `RUN_COUNT` register (0x3FE)
+  counts its passes; `tools/lab/chip_check.py` sends them, lets the chip
+  run, freezes it and reads every register back (`csp-peek`); `csp match
+  <program>.s -c <dump> -f <seed>` runs the model for the passes the dump
+  counts and diffs every register but the inputs. 0 differences on every
+  program in `tools/csp/programs/checks/` is the acceptance. It starts
+  from a state it chose, so a wrong state is seen too (its predecessor,
+  step-and-replay, started from the chip's and could not).
 - **Bisect by words** when a program fails: `csp-hold` (clears the
   program and the decode ROM), `csp-rom row hex` for the ROM rows,
   `csp-row pc hi lo` for the first N words, `csp-const` for the constants
-  (`csp script <program>.s -f <seed>` prints the whole sequence), `csp-go`,
-  run, `csp-freeze`, dump; "constants intact?" is a criterion that needs
-  no model.
-- **The chip check** is the co-simulation's method on silicon: `csp script`
-  fills every register from a seed and loads a program whose `RUN_COUNT`
-  register (0x3FE) counts its passes; the board runs it, `csp-freeze`,
-  `csp-peek` dumps every register; `csp match <program>.s -c <dump> -f
-  <seed>` runs the model for the passes the dump counts and diffs every
-  register but the inputs. 0 differences on every program in
-  `tools/csp/programs/checks/` is the acceptance; the dev box's
-  `claude_chipcheck.py` does the board side.
+  (the script's own lines, cut short), `csp-go`, run, `csp-freeze`, dump;
+  "constants intact?" is a criterion that needs no model.
 - **Micro-programs** of one to five words isolate a construct; the set
   that passes at 73.728 (plain, `IDX`-relative, vector `i`, private `j`,
   read-modify-write, a register rewritten through the queue while read)
@@ -327,7 +323,7 @@ and the DSP. Issue #230 carries the patch work (fork
   image — the constant ONE zero or carrying another word's value — while
   every self-test passed, and the symptom looked like timing for a day.
   The image also gives a bitstream a fingerprint: `csp-resend` a dozen
-  times with a verify after each (`/tmp/claude_stress.py` on the dev box)
+  times with a verify after each (a console loop on the dev box)
   lists *which* writes it loses. One bitstream lost words by boot state
   (the queue's read side, its pointer standing where the last session
   left it), another lost the same four addresses on every boot and
