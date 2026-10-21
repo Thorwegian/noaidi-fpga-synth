@@ -369,6 +369,21 @@ what feeds it; anything but a flop is a fault waiting for a seed.
   endpoint and **17** LUT levels: ABC re-folded the late select back into
   the mux trees. Depth is decided by the synthesiser's view of the cone,
   not by the RTL's shape; to shorten a chain, register something in it.
+- **Measured 2026-10-21 (the lab, #241: eb72fdb seed 1, the CSP beside it
+  in the same bitstream).** A chain of LUT4 levels between two registers,
+  18 chains wide on an LFSR's bits, compared every cycle with a reference
+  that takes one level a cycle (`rtl/lab/dut_lut_chain.sv`): **2, 4, 6 and
+  8 levels miss nowhere to 133 MHz**, the clock generator's ceiling (about
+  800 M cycles a clock, 3 s each); **10 levels miss from 105 MHz** (5 × 10⁻⁵
+  a cycle at 105, 1.3 × 10⁻⁴ at 110, 5.7 × 10⁻³ at 133). Carry chains of
+  18, 36 and 54 bits, an adder a cycle registered in and out
+  (`dut_carry_chain.sv`), miss nowhere to 133 MHz. Eight levels with the
+  routes a small module gets hold a 7.5 ns period and ten break at 9.5, so
+  at 13.56 ns the LUT depth of a path is not what breaks the core at 96 MHz
+  (the chip check, #235); what its paths have and these do not — block RAM
+  and DSP pins, long routes, fan-out — is, and the lab's next devices
+  measure those. The graph: `docs/lab/lab_sweep_eb72fdb.png`
+  (`tools/lab/lab_sweep_plot.py`).
 
 The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
 LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the
