@@ -11,7 +11,7 @@
 ; engine_selftest.cpp. The schedule the assembler lays out is part of what
 ; is tested: the chip runs the rows as placed, with no interlock, so a wrong
 ; latency shows as a wrong result. Only registers the control program does
-; not keep anything in are used (0x062 … 0x06F and 0x100 … 0x10F).
+; not keep anything in are used (0x062 … 0x06F and 0x100 … 0x111).
 
         .reg   RES_PASS_BIT, 0x062      ; the pass counter's low bit
         .reg   RES_HALF,     0x064      ; the half's choice, 0 or 8
@@ -49,10 +49,18 @@
         .reg   COUNT_ODD,        0x102
         .reg   COUNT_HALF_ODD,   0x104
         .reg   COUNT_CHAIN_ODD,  0x106
+        .reg   COUNT_PASSES,     0x10E      ; wraps: one a pass, whatever the capture's length
+        .reg   ONE_RAW,          0x110      ; 1.0, for MACW's product of 1 raw step
         .reg   TEST_BIT,         0x108
         .reg   TEST_HALF,        0x10A
         .reg   TEST_CHAIN,       0x10C
 
+        ; A counter that wraps, for a capture of any length: the other counters
+        ; saturate at the largest word after 2.7 s, which the firmware's reads of
+        ; differences do not mind. The probe's pair at COUNT_PASSES, streamed over
+        ; S/PDIF (spdif_capture.py stream --probe-counter), must step once a pass.
+        ADD3    ONE_RAW, 0, =1.0, ZERO
+        MACW    COUNT_PASSES, COUNT_PASSES, ONE_RAW, =#1
         ADD3    COUNT_TOTAL, COUNT_TOTAL, =#1, ZERO
         ANDXOR  TEST_BIT, 0, PASS, =#1
         ADD3    COUNT_ODD, COUNT_ODD, TEST_BIT, ZERO

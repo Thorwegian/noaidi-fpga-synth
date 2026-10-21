@@ -30,7 +30,7 @@ made while it was on, or captures with --device alone.
 
 usage: spdif_capture.py tone   [--seconds N] [--device hw:1,0] [--port 16:0]
                                [--wav FILE] [--keep FILE]
-       spdif_capture.py stream [--seconds N] [--device hw:1,0]
+       spdif_capture.py stream [--seconds N] [--device hw:1,0] [--probe-counter]
                                [--wav FILE] [--keep FILE]
 
 With --wav the file is analysed instead of captured. --keep saves the capture.
@@ -221,8 +221,13 @@ def lfsr_32_steps(state):
     return state
 
 
-def analyse_stream(samples):
-    """Frames out of the capture: sync, sequence, CRC, and the payload against its source."""
+def analyse_stream(samples, probe_counter=False):
+    """Frames out of the capture: sync, sequence, CRC, and the payload against its source.
+
+    With probe_counter, the probe's register is a counter a program adds one to in every
+    pass: the stream carries one word a pass, the even register's on even positions, so the
+    even words must step by 2 inside a frame and by 4 across the header, the CRC and the
+    sync between frames. Any other step is a pass the chip did not run (or ran twice)."""
     words = ((samples[:, 0].astype(np.int64) & 0xFFFF) << 16) | (samples[:, 1].astype(np.int64) & 0xFFFF)
     words = words.astype(np.uint64).tolist()
     seconds = len(words) / SAMPLE_RATE
@@ -235,6 +240,8 @@ def analyse_stream(samples):
     expected_sequence = None
     lfsr = None                      # unknown until the first LFSR frame is seen whole
     previous_counter = None
+    previous_even = None
+    probe_steps = probe_step_errors = 0
     position = 0
     while position + STREAM_FRAME_WORDS <= len(words):
         if words[position] != STREAM_SYNC:
@@ -275,6 +282,14 @@ def analyse_stream(samples):
             # the probe's pair: the even word on even positions, the odd on odd ones
             pair = (payload[0], payload[1])             # positions 2 and 3
             probe_pairs[pair] = probe_pairs.get(pair, 0) + 1
+            if probe_counter:
+                for index in range(0, len(payload), 2):
+                    word = payload[index] & 0x3FFFF
+                    if previous_even is not None:
+                        probe_steps += 1
+                        if word != (previous_even + (4 if index == 0 else 2)) & 0x3FFFF:
+                            probe_step_errors += 1
+                    previous_even = word
             if lfsr is not None:
                 for _ in range(63):
                     lfsr = lfsr_32_steps(lfsr)
@@ -283,8 +298,13 @@ def analyse_stream(samples):
     print("frames: %d whole, %d with a failed CRC (a slip or a false sync); %d frames missing by the sequence numbers" % (
         frames_ok, frames_bad_crc, sequence_gaps))
     print("payload: %d LFSR words wrong, %d counter steps wrong" % (payload_errors, counter_slips))
-    for (even, odd), count in sorted(probe_pairs.items(), key=lambda item: -item[1])[:8]:
-        print("probe pair: even %05x odd %05x in %d frames" % (even, odd, count))
+    if probe_counter:
+        print("probe counter: %d steps checked, %d not 2 (or 4 across a frame): %d passes lost or repeated at most" % (
+            probe_steps, probe_step_errors, probe_step_errors))
+        counter_slips += probe_step_errors
+    else:
+        for (even, odd), count in sorted(probe_pairs.items(), key=lambda item: -item[1])[:8]:
+            print("probe pair: even %05x odd %05x in %d frames" % (even, odd, count))
     rate = 32 * SAMPLE_RATE / 1e6
     print("the pipe: %.3f Mbit/s, %d bits a sample" % (rate, 32))
     if frames_ok and not frames_bad_crc and not sequence_gaps and not payload_errors and not counter_slips:
@@ -310,13 +330,15 @@ def main():
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth (CC 119 = the tone)")
     parser.add_argument("--wav", help="analyse this file instead of capturing")
     parser.add_argument("--keep", help="save the capture here")
+    parser.add_argument("--probe-counter", action="store_true",
+                        help="stream mode: the probed register counts the passes, check its steps")
     args = parser.parse_args()
     if args.mode == "tone":
         samples = read_wav(args.wav) if args.wav else capture(args.seconds, args.device, args.port, args.keep)
         analyse(samples)
     else:
         samples = read_wav(args.wav) if args.wav else capture_stream(args.seconds, args.device, args.keep)
-        analyse_stream(samples)
+        analyse_stream(samples, args.probe_counter)
 
 
 if __name__ == "__main__":

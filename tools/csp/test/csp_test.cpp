@@ -917,6 +917,7 @@ void test_selftest_program() {
         check_equal(m.get("RES_ADD3"), q(-3.5), "ADD3 after that, 0.5 − 4.0");
         check_equal(m.get("RES_SEL"), q(0.125), "SEL after a CMP");
         check_equal(m.get("COUNT_TOTAL"), pass, "COUNT_TOTAL counts the passes");
+        check_equal(m.get("COUNT_PASSES"), pass, "COUNT_PASSES, which wraps, counts them too");
     }
     check_equal(m.get("COUNT_ODD"), 2, "COUNT_ODD counts the odd passes");
     check_equal(m.get("COUNT_HALF_ODD"), 2, "COUNT_HALF_ODD agrees");
