@@ -276,13 +276,10 @@ void verify_boot_image() {
         }
         ESP_LOGW(tag, "boot image: %d register(s) not as sent, sending it again (%d of %d)",
                  lost, attempt, boot_image_attempts);
-        xSemaphoreTake(lock, portMAX_DELAY);
+        // the CSP is held: the window applies a committed chunk within a few passes
         image.resend_all();
-        xSemaphoreGive(lock);
         while (image.pending()) {
-            xSemaphoreTake(lock, portMAX_DELAY);
-            send(writes_per_tick, 0);
-            xSemaphoreGive(lock);
+            send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
             vTaskDelay(pdMS_TO_TICKS(2));
         }
     }
@@ -291,9 +288,6 @@ void verify_boot_image() {
 }
 
 void engine_task(void *) {
-    if (!paused) {
-        verify_boot_image();
-    }
     int ticks = 0;
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -435,6 +429,9 @@ void engine_link_init(void) {
         send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
         vTaskDelay(pdMS_TO_TICKS(2));
     }
+    // read back while the CSP is still held: once released, the program rewrites
+    // the registers that hold its state, which the image set too
+    verify_boot_image();
     if (hold_after_boot) {
         paused = true;
         ESP_LOGW(tag, "hold_after_boot: the CSP stays held, the tick is paused");

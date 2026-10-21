@@ -76,6 +76,11 @@ module spi_bus #(
     output logic [csp_pkg::ROM_W-1:0]        rom_load_word,
     input  logic [csp_pkg::ROM_W-1:0]        rom_read_word,
 
+    // ---- a partial's pointers (sclk domain): the entry, whole, when its fourth dword arrives ----
+    output logic                             pointer_write_enable,
+    output logic [7:0]                       pointer_write_index,
+    output logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data,
+
     // the lab's counters (#241), read as they are
     output logic [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] lab_index,
     input  logic [synth_pkg::SPI_DWORD_W-1:0] lab_dword,
@@ -303,6 +308,23 @@ module spi_bus #(
     assign rom_load_enable  = dword_complete && in_rom(dword_address);
     assign rom_row          = rom_offset[csp_pkg::ROM_ADDRESS_W-1:0];
     assign rom_load_word    = dword_data[csp_pkg::ROM_W-1:0];
+
+    // A partial's pointers (docs/memory_map.md: MAP_PARTIAL_BASE + 64 p, dwords 0 … 3): three
+    // 10-bit pointers a dword, the first at the bottom; the fourth dword completes the entry,
+    // which the partial pipeline's pointer RAM takes whole on that edge.
+    localparam logic [synth_pkg::SPI_ADDRESS_W-1:0] PARTIAL_END =
+            synth_pkg::MAP_PARTIAL_BASE + synth_pkg::SPI_ADDRESS_W'(synth_pkg::NUM_PARTIALS * synth_pkg::MAP_PARTIAL_STRIDE);
+    wire        in_partial     = dword_address >= synth_pkg::MAP_PARTIAL_BASE && dword_address < PARTIAL_END;
+    wire [synth_pkg::SPI_ADDRESS_W-1:0] partial_offset = dword_address - synth_pkg::MAP_PARTIAL_BASE;
+    wire [5:0]  pointer_dword  = partial_offset[5:0];
+    logic [3 * synth_pkg::POINTER_W-1:0] pointer_stage [3];
+    initial for (int dword = 0; dword < 3; dword++) pointer_stage[dword] = '0;
+    always_ff @(posedge sclk) begin
+        if (dword_complete && in_partial && pointer_dword < 6'd3) pointer_stage[pointer_dword[1:0]] <= dword_data[3 * synth_pkg::POINTER_W-1:0];
+    end
+    assign pointer_write_enable = dword_complete && in_partial && pointer_dword == 6'd3;
+    assign pointer_write_index  = partial_offset[13:6];
+    assign pointer_write_data   = {dword_data[synth_pkg::POINTER_W-1:0], pointer_stage[2], pointer_stage[1], pointer_stage[0]};
 
     //--------------------------------------------------------------------
     // Transmit — falling edge. frame_phase and nonet_index have already

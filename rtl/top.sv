@@ -9,8 +9,8 @@
 // the link and the pipe (#233) and the CSP's memories under the row rule
 // (#234): the SPI control plane in nines, the test tone, the S/PDIF data
 // stream on the 48 kHz output, and IMEM, the decode ROM, the write FIFO,
-// DMEM and the pass with its write window and probe. The core comes
-// with #235, the sink area and the partial pipeline with #236.
+// DMEM and the pass with its write window and probe; the core (#235);
+// and the sink area, the partial pipeline and the output (#236).
 //
 // Timing: timebase.sv owns every timebase — the sample boundary
 //         (768 sysclk = 1 sample), the S/PDIF cell boundary
@@ -187,6 +187,51 @@ module top (
         .sink_write_data    (sink_write_data)
     );
 
+    //----------------------------------------------------------------
+    // The sink area (#236): what the pass published, the pages flipping
+    // with the pass, read by the partial pipeline through its pointers
+    //----------------------------------------------------------------
+    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::SINK_WORD_W-1:0] sink_read_address;
+    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
+
+    csp_sink_area u_sink_area (
+        .clk           (sysclk),
+        .reset_n       (rst_n),
+        .write_enable  (sink_write_enable),
+        .write_address (sink_write_address),
+        .write_data    (sink_write_data),
+        .pass_start    (sample_tick48),
+        .read_address  (sink_read_address),
+        .read_data     (sink_read_data)
+    );
+
+    //----------------------------------------------------------------
+    // The 256-partial pipeline: its pointers from the bus (sclk domain,
+    // an entry at a time), its words from the sink area, its mix out
+    //----------------------------------------------------------------
+    logic        pointer_write_enable;
+    logic [7:0]  pointer_write_index;
+    logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
+    logic signed [23:0] sample_left, sample_right;   // Q0.24
+    logic [18:0] master_gain_q;
+
+    partial_pipeline u_partial_pipeline (
+        .clk                  (sysclk),
+        .rst_n                (rst_n),
+        .slot                 (slot),
+        .slot_issue           (slot_issue),
+        .sample_tick          (sample_tick),
+        .sclk                 (sclk),
+        .pointer_write_enable (pointer_write_enable),
+        .pointer_write_index  (pointer_write_index),
+        .pointer_write_data   (pointer_write_data),
+        .sink_read_address    (sink_read_address),
+        .sink_read_data       (sink_read_data),
+        .mix_left             (sample_left),
+        .mix_right            (sample_right),
+        .master_gain_q        (master_gain_q)
+    );
+
     // the lab (#241): devices under test with their mismatch counters, read through the link
     lab u_lab (
         .clk             (sysclk),
@@ -203,8 +248,8 @@ module top (
     // ~0 dBFS (sine LUT peak << 8 = 8388352 of 8388607, −0.0003 dB).
     // Midband deliberately: coupling caps in an analog chain
     // attenuate low tones, and 1500 Hz measures flat. Enabled by
-    // CTRL bit 2 (firmware maps CC 119); it is the output while the
-    // synthesizer's mix does not exist yet. At 48 kHz capture the tone
+    // CTRL bit 2 (firmware maps CC 119); it replaces the mix at both
+    // outputs. At 48 kHz capture the tone
     // lands exactly on bin 32 of a 1024-point FFT — coherent, no
     // window, harmonics on exact bins (64, 96, ...).
     //----------------------------------------------------------------
@@ -224,8 +269,17 @@ module top (
     // concat IS the <<8 with the sign landing at bit 23.
     wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
 
-    wire signed [23:0] out_left  = test_tone_sync ? tone_sample : 24'sd0;
-    wire signed [23:0] out_right = test_tone_sync ? tone_sample : 24'sd0;
+    //----------------------------------------------------------------
+    // Output low-pass (output_lpf.sv): one-pole 6 dB/oct on the mix,
+    // corner ≈ 2 kHz, settling to exact zero on silence; before the
+    // test-tone mux, so the purity reference stays unfiltered
+    //----------------------------------------------------------------
+    logic signed [23:0] lpf_l, lpf_r;
+    output_lpf #(.SHIFT(3)) u_lpf_l (.clk (sysclk), .rst_n (rst_n), .tick (sample_tick), .in (sample_left),  .out (lpf_l));
+    output_lpf #(.SHIFT(3)) u_lpf_r (.clk (sysclk), .rst_n (rst_n), .tick (sample_tick), .in (sample_right), .out (lpf_r));
+
+    wire signed [23:0] out_left  = test_tone_sync ? tone_sample : lpf_l;
+    wire signed [23:0] out_right = test_tone_sync ? tone_sample : lpf_r;
 
     //----------------------------------------------------------------
     // 96 kHz S/PDIF transmitter (parked on pin 86) and the I2S master
@@ -333,6 +387,7 @@ module top (
         status[synth_pkg::MAP_DIAG_PASS    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(passes_sync);
         status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'({fifo_full, fifo_read_gray});
         status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(fifo_dropped);
+        status[synth_pkg::MAP_DIAG_LIMITER - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(master_gain_q);
         status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
         status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
         status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(frames_sync);
@@ -361,6 +416,9 @@ module top (
         .rom_row            (rom_row),
         .rom_load_word      (rom_load_word),
         .rom_read_word      (rom_read_word),
+        .pointer_write_enable (pointer_write_enable),
+        .pointer_write_index  (pointer_write_index),
+        .pointer_write_data   (pointer_write_data),
         .lab_index          (lab_index),
         .lab_dword          (lab_dword),
         .lab_snapshot       (lab_snapshot)

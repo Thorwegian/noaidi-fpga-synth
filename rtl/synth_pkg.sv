@@ -62,6 +62,8 @@ package synth_pkg;
     parameter int MAP_DIAG_STREAM  = 15;        // status dword: the stream's frames sent since reset
 
     // The regions beyond the system dwords (docs/memory_map.md, the map).
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_PARTIAL_BASE = 18'h02000;   // a partial's pointers: four dwords at base + 64 p
+    parameter int MAP_PARTIAL_STRIDE = 64;
     parameter logic [SPI_ADDRESS_W-1:0] MAP_FIFO_DOOR = 18'h06000;   // the write FIFO's door
     parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two dwords a row
     parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one dword a row

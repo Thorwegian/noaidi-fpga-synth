@@ -19,17 +19,20 @@ export PATH := $(CAD_SUITE)/bin:$(PATH)
 # failed synthesis instead of silently routing a stale netlist.
 SHELL := /bin/bash
 
-# The second revision's top (docs/csp2_architecture.md), as far as the
-# issues have built it: the link and the pipe (#233). The partial pipeline
-# and the filter (dsp/partial_pipeline.sv, dsp/svf_tpt.sv) are in the tree
-# from the first revision and return to the build with the sink area (#236).
+# The second revision's top (docs/csp2_architecture.md): the link and the
+# pipe (#233), the CSP (#234, #235), and the sink area with the partial
+# pipeline and the output from the first revision (#236).
 TOP = top
 PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
+SINK = csp/csp_sink_area.sv
+AUDIO = dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
 LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/lab.sv
 MOD = \
 	$(CSP) \
+	$(SINK) \
+	$(AUDIO) \
 	$(LAB) \
 	$(TOP).sv \
 	dsp/timebase.sv \
@@ -220,6 +223,13 @@ obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.
 sim-csp-cosim: obj_dir/csp_cosim/sim
 	$(call run_sim,$<,tb/sim-csp-cosim.out)
 
+# The sink area: the pages flip with the pass, every port reads the page the pass before wrote.
+obj_dir/tb_sink_area/sim: $(PKG) csp/csp_pkg.sv $(SINK) tb/tb_sink_area.sv Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) tb/tb_sink_area.sv
+
+sim-sink: obj_dir/tb_sink_area/sim
+	$(call run_sim,$<,tb/sim-sink.out)
+
 # The lab: every device's reference agrees with it, and an injected fault is counted (all fifteen devices).
 obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
 	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
@@ -277,13 +287,13 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
           tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-sink sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \
