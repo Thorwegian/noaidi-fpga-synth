@@ -55,7 +55,7 @@ module spi_bus #(
     output logic        csp_held,             // CTRL[1]: the CSP is held in reset
     output logic        test_tone_enable,     // CTRL[2]
     output logic        data_stream_enable,   // CTRL[3]: the 48 kHz S/PDIF carries the data stream
-    output logic [1:0]  stream_source,        // CTRL[5:4]
+    output logic [synth_pkg::STREAM_SOURCE_W-1:0] stream_source,   // CTRL[6:4]
     output logic [csp_pkg::REGISTER_W-1:0] probe_address,   // system dword 0xC
 
     // ---- the status dwords (sclk domain, read-only, 0x8–0xF) --------------

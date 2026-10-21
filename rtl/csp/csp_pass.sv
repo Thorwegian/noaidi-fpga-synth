@@ -53,8 +53,10 @@ module csp_pass (
     // the probe: a pair read at the pass's end, through DMEM's R copy. The request is a
     // cycle ahead of the read pins (which come from a register), the words two cycles on.
     output logic                            probe_request,
+    input  wire  [csp_pkg::REGISTER_W-1:0]  probe_register_in,  // the register asked for, when asked
     input  wire  [csp_pkg::WIDE_W-1:0]      dmem_read_pair,
-    output logic [csp_pkg::WIDE_W-1:0]      probe_pair          // as of the last pass
+    output logic [csp_pkg::WIDE_W-1:0]      probe_pair,         // as of the last pass
+    output logic [csp_pkg::REGISTER_W-1:0]  probe_register      // the register it was read at
 );
 
     // ---- the cycle count -----------------------------------------------------
@@ -108,17 +110,23 @@ module csp_pass (
     assign probe_request = cycle == csp_pkg::CYCLE_W'(csp_pkg::PROBE_CYCLE);
 
     logic probe_pins_q, probe_words_q;
+    logic [csp_pkg::REGISTER_W-1:0] probe_register_asked;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            probe_pins_q  <= 1'b0;
-            probe_words_q <= 1'b0;
-            probe_pair    <= '0;
+            probe_pins_q   <= 1'b0;
+            probe_words_q  <= 1'b0;
+            probe_pair     <= '0;
+            probe_register <= '0;
         end else begin
             probe_pins_q  <= probe_request;      // the read pins are driven
             probe_words_q <= probe_pins_q;       // the words are in the blocks' output registers
-            if (probe_words_q) probe_pair <= dmem_read_pair;
+            if (probe_words_q) begin
+                probe_pair     <= dmem_read_pair;
+                probe_register <= probe_register_asked;
+            end
         end
     end
+    always_ff @(posedge clk) if (probe_request) probe_register_asked <= probe_register_in;
 
 endmodule
 `default_nettype wire

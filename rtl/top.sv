@@ -67,12 +67,12 @@ module top (
     // address is quasi-static and read a pass later.
     //----------------------------------------------------------------
     logic       csp_held_sclk, test_tone_sclk, data_stream_sclk;
-    logic [1:0] stream_source_sclk;
+    logic [synth_pkg::STREAM_SOURCE_W-1:0] stream_source_sclk;
     logic [csp_pkg::REGISTER_W-1:0] probe_address_sclk;
     logic       csp_held_meta, csp_held_sync;
     logic       test_tone_meta, test_tone_sync;
     logic       data_stream_meta, data_stream_sync;
-    logic [1:0] stream_source_meta, stream_source_sync;
+    logic [synth_pkg::STREAM_SOURCE_W-1:0] stream_source_meta, stream_source_sync;
     logic [csp_pkg::REGISTER_W-1:0] probe_address_meta, probe_address_sync;
     always_ff @(posedge sysclk or negedge rst_n)
         if (!rst_n) begin
@@ -160,6 +160,9 @@ module top (
     logic [csp_pkg::CYCLE_W-1:0] cycle;
     logic [31:0]                 pass_counter;
     logic [csp_pkg::WIDE_W-1:0]  probe_pair;
+    logic [csp_pkg::REGISTER_W-1:0] probe_register;   // the register the pair was read at
+    // the stream's dump source walks the register file: the probe takes every register in turn
+    wire probe_sweep = data_stream_sync && stream_source_sync == synth_pkg::STREAM_SOURCE_DUMP;
     logic                        sink_write_enable;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
     logic [csp_pkg::WORD_W-1:0]  sink_write_data;
@@ -179,7 +182,9 @@ module top (
         .fifo_head_valid    (fifo_head_valid),
         .fifo_head_dword    (fifo_head_dword),
         .probe_address      (probe_address_sync),
+        .probe_sweep        (probe_sweep),
         .probe_pair         (probe_pair),
+        .probe_register     (probe_register),
         .cycle              (cycle),
         .pass_counter       (pass_counter),
         .sink_write_enable  (sink_write_enable),
@@ -191,10 +196,15 @@ module top (
     // The sink area (#236): what the pass published, the pages flipping
     // with the pass, read by the partial pipeline through its pointers
     //----------------------------------------------------------------
-    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::SINK_WORD_W-1:0] sink_read_address;
-    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
+    // the partial pipeline's six read ports, and a seventh for the data stream: the sink word at
+    // the probe address's low ten bits, as the partials would read it (the debug port, #236)
+    localparam int SINK_PORTS = synth_pkg::SINK_READ_PORTS + 1;
+    localparam int SINK_DEBUG = synth_pkg::SINK_READ_PORTS;
+    logic [SINK_PORTS-1:0][csp_pkg::SINK_WORD_W-1:0] sink_read_address;
+    logic [SINK_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
+    assign sink_read_address[SINK_DEBUG] = probe_address_sync[csp_pkg::SINK_WORD_W-1:0];
 
-    csp_sink_area u_sink_area (
+    csp_sink_area #(.READ_PORTS (SINK_PORTS)) u_sink_area (
         .clk           (sysclk),
         .reset_n       (rst_n),
         .write_enable  (sink_write_enable),
@@ -225,14 +235,16 @@ module top (
         .pointer_write_enable (pointer_write_enable),
         .pointer_write_index  (pointer_write_index),
         .pointer_write_data   (pointer_write_data),
-        .sink_read_address    (sink_read_address),
-        .sink_read_data       (sink_read_data),
+        .sink_read_address    (sink_read_address[synth_pkg::SINK_READ_PORTS-1:0]),
+        .sink_read_data       (sink_read_data[synth_pkg::SINK_READ_PORTS-1:0]),
         .mix_left             (sample_left),
         .mix_right            (sample_right),
         .master_gain_q        (master_gain_q)
     );
 
-    // the lab (#241): devices under test with their mismatch counters, read through the link
+    // the lab (#241): devices under test with their mismatch counters, read through the link —
+    // a build of its own (`make pack.fs LAB=1`): its flip-flops do not fit beside the audio path
+`ifdef LAB
     lab u_lab (
         .clk             (sysclk),
         .reset_n         (rst_n),
@@ -241,6 +253,9 @@ module top (
         .index           (lab_index),
         .dword           (lab_dword)
     );
+`else
+    assign lab_dword = '0;
+`endif
 
     //----------------------------------------------------------------
     // Test tone (audio-chain purity check): 1500 Hz sine,
@@ -344,6 +359,10 @@ module top (
         .source         (stream_source_sync),
         .sample_counter (pass_counter),
         .probe_pair     (probe_pair),
+        .probe_register (probe_register),
+        .sink_word      (sink_read_data[SINK_DEBUG]),
+        .mix_left       (sample_left),
+        .mix_right      (sample_right),
         .word           (stream_word),
         .frames_sent    (stream_frames)
     );

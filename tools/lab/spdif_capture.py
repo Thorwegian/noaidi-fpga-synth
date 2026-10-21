@@ -197,7 +197,7 @@ STREAM_FRAME_WORDS = 64
 STREAM_CRC_POLYNOMIAL = 0x04C11DB7
 STREAM_LFSR_SEED = 1
 STREAM_LFSR_TAPS = 0x00400007
-SOURCE_LFSR, SOURCE_COUNTER, SOURCE_PROBE = 0, 1, 2
+SOURCE_LFSR, SOURCE_COUNTER, SOURCE_PROBE, SOURCE_ENGINE, SOURCE_DUMP = 0, 1, 2, 3, 4
 
 
 def crc32_words(words):
@@ -237,6 +237,10 @@ def analyse_stream(samples, probe_counter=False):
     payload_errors = 0
     counter_slips = 0
     probe_pairs = {}                 # (even, odd) -> how many frames carried it
+    registers = {}                   # the dump source: register -> its word, the last seen
+    dump_words = 0
+    sink_words = {}                  # the engine source: sink word -> samples it was seen in
+    mix_left, mix_right = [], []     # and the mix's top 14 bits, a sample each
     expected_sequence = None
     lfsr = None                      # unknown until the first LFSR frame is seen whole
     previous_counter = None
@@ -253,7 +257,7 @@ def analyse_stream(samples, probe_counter=False):
             position += 1            # a false sync, or a slipped frame: hunt on from the next word
             continue
         sequence = frame[1] >> 16
-        source = frame[1] & 3
+        source = frame[1] & 7
         if expected_sequence is not None and sequence != expected_sequence:
             sequence_gaps += (sequence - expected_sequence) & 0xFFFF
         expected_sequence = (sequence + 1) & 0xFFFF
@@ -275,6 +279,26 @@ def analyse_stream(samples, probe_counter=False):
                     if word != (previous_counter + step) & 0xFFFFFFFF:
                         counter_slips += 1
                 previous_counter = word
+            if lfsr is not None:
+                for _ in range(63):
+                    lfsr = lfsr_32_steps(lfsr)
+        elif source == SOURCE_DUMP:
+            # the register file: a register a pass, its index in the top 11 bits, its word in the low 18
+            for word in payload:
+                registers[word >> 21] = word & 0x3FFFF
+                dump_words += 1
+            if lfsr is not None:
+                for _ in range(63):
+                    lfsr = lfsr_32_steps(lfsr)
+        elif source == SOURCE_ENGINE:
+            # the engine's view: the sink word in the top 18 bits, the mix's top 14 bits below
+            # (left on even positions, right on odd), a sample each
+            for index, word in enumerate(payload):
+                sink = word >> 14
+                sink_words[sink] = sink_words.get(sink, 0) + 1
+                mix = word & 0x3FFF
+                mix = mix - 0x4000 if mix & 0x2000 else mix
+                (mix_left if index % 2 == 0 else mix_right).append(mix)
             if lfsr is not None:
                 for _ in range(63):
                     lfsr = lfsr_32_steps(lfsr)
@@ -305,6 +329,26 @@ def analyse_stream(samples, probe_counter=False):
     else:
         for (even, odd), count in sorted(probe_pairs.items(), key=lambda item: -item[1])[:8]:
             print("probe pair: even %05x odd %05x in %d frames" % (even, odd, count))
+    if dump_words:
+        print("dump: %d registers of 2048 seen in %d words (%.1f times each)" % (
+            len(registers), dump_words, dump_words / max(len(registers), 1)))
+    if sink_words:
+        def signed18(raw):
+            return raw - 0x40000 if raw & 0x20000 else raw
+        print("sink word at the probe's address: %d distinct values over %d samples; the commonest:" % (
+            len(sink_words), sum(sink_words.values())))
+        for raw, count in sorted(sink_words.items(), key=lambda item: -item[1])[:6]:
+            print("  %05x (%d, %.4f) in %d samples" % (raw, signed18(raw), signed18(raw) / 16384.0, count))
+        for name, mix in (("left", mix_left), ("right", mix_right)):
+            if not mix:
+                continue
+            values = np.array(mix, dtype=np.float64) / 8192.0          # 14 bits: full scale is 8192
+            peak = np.max(np.abs(values))
+            rms = np.sqrt(np.mean(values * values))
+            print("mix %s: peak %s, rms %s, %d of %d samples nonzero" % (
+                name, "%.1f dBFS" % (20 * np.log10(peak)) if peak > 0 else "silence",
+                "%.1f dBFS" % (20 * np.log10(rms)) if rms > 0 else "silence",
+                int(np.count_nonzero(values)), len(values)))
     rate = 32 * SAMPLE_RATE / 1e6
     print("the pipe: %.3f Mbit/s, %d bits a sample" % (rate, 32))
     if frames_ok and not frames_bad_crc and not sequence_gaps and not payload_errors and not counter_slips:
@@ -313,6 +357,23 @@ def analyse_stream(samples, probe_counter=False):
         print("verdict: frames arrive, with the losses above")
     else:
         print("verdict: no whole frame — is the stream on (csp-stream lfsr)?")
+    return registers
+
+
+def write_dump(registers, path, before=""):
+    """The registers as csp-peek prints them (a pair a line), for `csp match -c`; the first line
+    carries the pass counter's register before the run, as chip_check.py writes it."""
+    with open(path, "w") as out:
+        out.write("# before the run: %s\n" % before)
+        for even in range(0, 2048, 2):
+            if even not in registers and even + 1 not in registers:
+                continue
+            fields = []
+            for address in (even, even + 1):
+                if address in registers:
+                    raw = registers[address]
+                    fields.append("%03x: %05x (%d)" % (address, raw, raw - 0x40000 if raw & 0x20000 else raw))
+            out.write("  " + "   ".join(fields) + "\n")
 
 
 def capture_stream(seconds, device, keep):
@@ -332,13 +393,17 @@ def main():
     parser.add_argument("--keep", help="save the capture here")
     parser.add_argument("--probe-counter", action="store_true",
                         help="stream mode: the probed register counts the passes, check its steps")
+    parser.add_argument("--dump", help="stream mode, the dump source: write the register file here, as csp-peek prints it")
     args = parser.parse_args()
     if args.mode == "tone":
         samples = read_wav(args.wav) if args.wav else capture(args.seconds, args.device, args.port, args.keep)
         analyse(samples)
     else:
         samples = read_wav(args.wav) if args.wav else capture_stream(args.seconds, args.device, args.keep)
-        analyse_stream(samples, args.probe_counter)
+        registers = analyse_stream(samples, args.probe_counter)
+        if args.dump:
+            write_dump(registers, args.dump)
+            print("%d registers written to %s" % (len(registers), args.dump))
 
 
 if __name__ == "__main__":

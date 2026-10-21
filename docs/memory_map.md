@@ -110,7 +110,7 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 |---|---|---|
 | `0x000` | `ID` | reserved (the ID byte rides MISO byte 0 of every frame) |
 | `0x001` | `STATUS` | reserved |
-| `0x002` | `CTRL` | `[0]` commit the write queue (an event: write 1 to commit), `[1]` hold the CSP in reset, `[2]` replace the output with the test tone |
+| `0x002` | `CTRL` | `[0]` commit the write queue (an event: write 1 to commit), `[1]` hold the CSP in reset, `[2]` replace the output with the test tone, `[3]` the data stream on the 48 kHz output, `[6:4]` its source |
 | `0x003–0x007` | scratch | read back what was written |
 | `0x008` | `DIAG_PASS` | read-only. `[17:0]` passes the CSP has run since reset (two reads a few ms apart must differ, or the CSP has stopped) |
 | `0x009` | `DIAG_QUEUE` | read-only. `[9:0]` the write queue's read pointer, Gray-coded; `[10]` the queue is full |
@@ -192,11 +192,18 @@ come in frames of 64 (`rtl/spdif/spdif_stream.sv`):
 | 2–62 | the payload, 61 words |
 | 63 | the CRC-32 of words 0–62: IEEE 802.3's polynomial `0x04C11DB7`, MSB first, initial all ones, no final inversion |
 
-The source (`CTRL[5:4]`) is taken at the sync word and holds for the frame:
+The source (`CTRL[6:4]`) is taken at the sync word and holds for the frame:
 0 is a 32-bit maximal LFSR (`x^32 + x^22 + x^2 + x + 1`, seed 1, stepped 32
 times after every word of positions 0–62, whichever source is sent), 1 is
 the pass counter, 2 is the probe's pair (its even word on the frame's even
-positions, its odd word on the odd ones, 18 bits each). A receiver that lost or repeated a sample fails
+positions, its odd word on the odd ones, 18 bits each), 3 is the engine's
+view — the sink word at the probe address's low ten bits, as the partials
+read it, in `[31:14]`, and the mix's top 14 bits in `[13:0]`, the left
+channel on even positions and the right on odd ones: the S/PDIF output as
+the debug port; 4 is the register file — the probe walks it a register a
+pass, each word the register's index in `[31:21]` and its word in `[17:0]`,
+the whole file in 2048 samples (43 ms), held or running, which is how
+`chip_check.py --stream` reads a frozen chip back. A receiver that lost or repeated a sample fails
 the frame's CRC and re-synchronises on the next sync word; the sequence
 number says how many frames went. `DIAG_STREAM` (dword `0xF`) counts the
 frames sent.

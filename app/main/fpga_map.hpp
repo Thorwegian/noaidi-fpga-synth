@@ -29,6 +29,9 @@ constexpr int ctrl_source_shift     = 4;
 constexpr dword_t stream_source_lfsr    = 0;
 constexpr dword_t stream_source_counter = 1;
 constexpr dword_t stream_source_probe   = 2;   // the probe's pair, even and odd words alternating
+constexpr dword_t stream_source_engine  = 3;   // the sink word at the probe address's low ten bits, and the mix
+constexpr dword_t stream_source_dump    = 4;   // the register file, a register a pass: its index and its word
+constexpr dword_t stream_source_mask    = 7;   // CTRL[6:4]
 
 // The scratch dwords: read back what was written, nothing else.
 constexpr uint32_t scratch_first = 0x00003;

@@ -35,9 +35,12 @@ module csp (
     input  wire                              fifo_head_valid,
     input  wire  [csp_pkg::DWORD_W-1:0]      fifo_head_dword,
 
-    // the probe
+    // the probe: the firmware's register, or with probe_sweep every register in turn, one a pass
+    // (the data stream's dump of the register file); the pair, and the register it was read at
     input  wire  [csp_pkg::REGISTER_W-1:0]   probe_address,
+    input  wire                              probe_sweep,
     output logic [csp_pkg::WIDE_W-1:0]       probe_pair,
+    output logic [csp_pkg::REGISTER_W-1:0]   probe_register,
 
     output logic [csp_pkg::CYCLE_W-1:0]      cycle,
     output logic [31:0]                      pass_counter,
@@ -61,6 +64,14 @@ module csp (
     logic [csp_pkg::REGISTER_W-1:0]   pass_write_address;
     logic [csp_pkg::WORD_W-1:0]       pass_write_word;
 
+    // the probe's register: the sweep's counter, stepped a register a pass, or the firmware's
+    logic [csp_pkg::REGISTER_W-1:0] sweep_register;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)                        sweep_register <= '0;
+        else if (pass_start && probe_sweep)  sweep_register <= sweep_register + 1'b1;
+    end
+    wire [csp_pkg::REGISTER_W-1:0] probe_register_asked = probe_sweep ? sweep_register : probe_address;
+
     csp_core u_core (
         .clk                 (clk),
         .reset_n             (reset_n),
@@ -81,7 +92,7 @@ module csp (
         .read_y_odd_index    (read_y_odd_index),
         .read_y_pair         (read_y_pair),
         .probe_request       (probe_request),
-        .probe_index         (probe_address[csp_pkg::REGISTER_W-1:1]),
+        .probe_index         (probe_register_asked[csp_pkg::REGISTER_W-1:1]),
         .write_even_enable   (write_even_enable),
         .write_odd_enable    (write_odd_enable),
         .write_index         (write_index),
@@ -110,8 +121,10 @@ module csp (
         .dmem_write_address (pass_write_address),
         .dmem_write_word    (pass_write_word),
         .probe_request      (probe_request),
+        .probe_register_in  (probe_register_asked),
         .dmem_read_pair     (read_r_pair),
-        .probe_pair         (probe_pair)
+        .probe_pair         (probe_pair),
+        .probe_register     (probe_register)
     );
 
     // DMEM's three copies: every one takes every write; the R copy is the probe's while the core is idle

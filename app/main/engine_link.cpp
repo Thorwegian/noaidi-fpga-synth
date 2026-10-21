@@ -66,7 +66,7 @@ bool paused = false; // the tick sends nothing (the self-test has the chip)
 fpga_map::dword_t ctrl_word(fpga_map::dword_t bits) {
     return bits | (test_tone ? fpga_map::ctrl_test_tone : 0)
            | (data_stream ? fpga_map::ctrl_data_stream : 0)
-           | (static_cast<fpga_map::dword_t>(stream_source & 3) << fpga_map::ctrl_source_shift);
+           | (static_cast<fpga_map::dword_t>(stream_source & fpga_map::stream_source_mask) << fpga_map::ctrl_source_shift);
 }
 
 // Send what is pending, at most `limit` words, and commit it with a swap.

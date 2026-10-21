@@ -49,7 +49,7 @@ package synth_pkg;
     parameter int CTRL_TEST_TONE   = 2;
     parameter int CTRL_DATA_STREAM = 3;
     parameter int CTRL_SOURCE_LOW  = 4;
-    parameter int CTRL_SOURCE_HIGH = 5;
+    parameter int CTRL_SOURCE_HIGH = 6;
     parameter int MAP_SYSTEM_DWORDS = 16;
     parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back; 0x8–0xF are status
     parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset
@@ -78,9 +78,12 @@ package synth_pkg;
     parameter logic [31:0] STREAM_CRC_POLYNOMIAL = 32'h04C1_1DB7;  // IEEE 802.3, MSB first, no final inversion
     parameter logic [31:0] STREAM_LFSR_SEED = 32'h0000_0001;
     // The payload sources, chosen by CTRL[5:4].
-    parameter logic [1:0] STREAM_SOURCE_LFSR    = 2'd0;   // a 32-bit maximal LFSR, 32 steps a word
-    parameter logic [1:0] STREAM_SOURCE_COUNTER = 2'd1;   // the pass counter
-    parameter logic [1:0] STREAM_SOURCE_PROBE   = 2'd2;   // the probe's pair: even and odd words alternating
+    parameter int STREAM_SOURCE_W = CTRL_SOURCE_HIGH - CTRL_SOURCE_LOW + 1;
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_LFSR    = 3'd0;   // a 32-bit maximal LFSR, 32 steps a word
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_COUNTER = 3'd1;   // the pass counter
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_PROBE   = 3'd2;   // the probe's pair: even and odd words alternating
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_ENGINE  = 3'd3;   // the sink word at the probe's address, and the mix (left, right alternating)
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_DUMP    = 3'd4;   // the register file, one register a pass: its index and its word
 
     //--- Partial sinks (docs/csp2_architecture.md, the sink area) ------
     // A partial reads ten sink words, named by ten pointers into the sink

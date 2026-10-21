@@ -11,11 +11,20 @@
 // frames of 64 (docs/memory_map.md, the stream):
 //
 //   word 0        the sync word
-//   word 1        {frame_sequence[15:0], 12'b0, source[3:0]}: the frame's number
+//   word 1        {frame_sequence[15:0], 13'b0, source[2:0]}: the frame's number
 //                 and what the payload is
-//   words 2..62   the payload, 61 words: the LFSR, the pass counter, or
-//                 the probe's pair (its even word on even positions, its
-//                 odd word on odd ones, 18 bits each)
+//   words 2..62   the payload, 61 words: the LFSR, the pass counter, the
+//                 probe's pair (its even word on even positions, its odd
+//                 word on odd ones, 18 bits each), or the engine's view —
+//                 the sink word the partials read at the probe's address in
+//                 the top 18 bits and the mix's top 14 bits below it, the
+//                 left channel on even positions and the right on odd ones
+//                 (the S/PDIF output as the debug port: what the program
+//                 published and what the partials made of it, a sample at a
+//                 time), or the register file — the probe walking it a
+//                 register a pass, each word the register's index in the top
+//                 11 bits and its word in the low 18: the whole file in 2048
+//                 samples, 43 ms, held or running
 //   word 63       the CRC-32 of words 0..62 (IEEE 802.3's polynomial, MSB
 //                 first, initial all ones, no final inversion)
 //
@@ -34,9 +43,13 @@ module spdif_stream (
     input  wire        clk,
     input  wire        reset_n,
     input  wire        sample_tick,     // the 48 kHz sample boundary
-    input  wire [1:0]  source,          // synth_pkg::STREAM_SOURCE_*
+    input  wire [synth_pkg::STREAM_SOURCE_W-1:0] source,   // synth_pkg::STREAM_SOURCE_*
     input  wire [31:0] sample_counter,  // the passes since reset
     input  wire [35:0] probe_pair,      // the probe's pair as of the last pass: {even, odd}
+    input  wire [10:0] probe_register,  // the register the pair was read at, csp_pkg::REGISTER_W bits (the dump walks the file)
+    input  wire [17:0] sink_word,       // the sink word at the probe's address, as the partials read it
+    input  wire signed [23:0] mix_left, // the partial pipeline's mix, before the output low-pass
+    input  wire signed [23:0] mix_right,
     output logic [31:0] word,           // the word for this sample
     output logic [15:0] frames_sent     // frames completed since reset
 );
@@ -48,7 +61,7 @@ module spdif_stream (
     // says what the payload is, so the payload cannot change under it.
     logic [5:0]  position;
     logic [15:0] frame_sequence;
-    logic [1:0]  frame_source;
+    logic [synth_pkg::STREAM_SOURCE_W-1:0] frame_source;
 
     // ---- the serial engines: 32 steps after each issued word --------------
     logic [5:0]  steps_left;
@@ -71,6 +84,9 @@ module spdif_stream (
             // the pair's two words on alternate positions, 18 bits each
             synth_pkg::STREAM_SOURCE_PROBE:   payload = position[0] ? {14'b0, probe_pair[17:0]}
                                                                     : {14'b0, probe_pair[35:18]};
+            synth_pkg::STREAM_SOURCE_ENGINE:  payload = {sink_word, position[0] ? mix_right[23:10] : mix_left[23:10]};
+            // the register file, a register a pass: its index, then its word out of the pair
+            synth_pkg::STREAM_SOURCE_DUMP:    payload = {probe_register, 3'b0, probe_register[0] ? probe_pair[17:0] : probe_pair[35:18]};
             default:                          payload = lfsr;
         endcase
     end
@@ -80,7 +96,7 @@ module spdif_stream (
     always_comb begin
         case (position)
             6'd0:    issued = synth_pkg::STREAM_SYNC;
-            6'd1:    issued = {frame_sequence, 12'b0, 2'b0, frame_source};
+            6'd1:    issued = {frame_sequence, 13'b0, frame_source};
             6'd63:   issued = crc;
             default: issued = payload;
         endcase

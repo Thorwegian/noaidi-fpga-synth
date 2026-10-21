@@ -11,7 +11,7 @@ file of csp-peek's lines. On the host, `csp match <program>.s -c <file> -f
 and diffs every register but the inputs: 0 differences is the acceptance.
 
 usage: chip_check.py SCRIPT OUT [--run SECONDS] [--khz KHZ] [--port /dev/ttyACM0]
-                     [--peek first:count ...]
+                     [--peek first:count ...] [--stream [--device hw:1,0]]
 
 With --khz the system clock is set before the load (board_clock.py) and
 restored to the design's 73.728 MHz after the read-back, whatever happened.
@@ -23,6 +23,7 @@ import time
 import serial
 
 import board_clock
+import spdif_capture
 
 PORT = "/dev/ttyACM0"
 REGISTERS = 0x800              # DMEM: the registers csp-peek reads, 16 a line
@@ -91,6 +92,9 @@ def main():
     parser.add_argument("--peek", type=window, action="append",
                         help="read only this window, first:count (repeatable); default every register. "
                              "Keep 0x040:2 and RUN_COUNT's 0x3f0:16 in, for csp match")
+    parser.add_argument("--stream", action="store_true",
+                        help="read every register over the S/PDIF pipe (csp-stream dump, 43 ms a file) instead of peeking")
+    parser.add_argument("--device", default="hw:1,0", help="--stream: the ALSA capture device of the S/PDIF input")
     args = parser.parse_args()
     with open(args.script) as file:
         lines = [line.strip() for line in file if line.strip() and not line.startswith("#")]
@@ -104,7 +108,15 @@ def main():
             print("the console refused:", line, reply)
         time.sleep(args.run)
         print(command(port, "csp-freeze", 0.5).strip())
-        read_registers(port, args.out, before, args.peek)
+        if args.stream:
+            # the debug port: the register file over the pipe, every register a few times over
+            command(port, "csp-stream dump", 0.3)
+            samples = spdif_capture.capture_stream(0.3, args.device, None)
+            command(port, "csp-stream off", 0.3)
+            registers = spdif_capture.analyse_stream(samples)
+            spdif_capture.write_dump(registers, args.out, before)
+        else:
+            read_registers(port, args.out, before, args.peek)
         print("sent %d lines; %s holds the registers" % (len(lines), args.out))
     finally:
         if args.khz:
