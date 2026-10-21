@@ -88,8 +88,12 @@ dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 # revision starts without the flag and measures (docs/csp2_architecture.md
 # section 4): `make WIDELUT=-nowidelut` turns it on for a comparison.
 WIDELUT ?=
+# The lab's block and fan-out devices do not fit beside the CSP (rtl/lab/lab_pkg.sv):
+# `make pack.fs LAB_BLOCKS=1` builds the lab with all fifteen devices.
+LAB_BLOCKS ?=
+LAB_DEFINES = $(if $(LAB_BLOCKS),-DLAB_BLOCKS,)
 yosys.json: $(SRC) $(LUTS) Makefile
-	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
+	set -o pipefail; yosys -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
 
 # The placement seed. Seeds are probes, not a lottery (docs/gowin_oss_notes.md):
 # every seed must meet the clock, and `make timing-sweep` says whether they do.
@@ -216,9 +220,9 @@ obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.
 sim-csp-cosim: obj_dir/csp_cosim/sim
 	$(call run_sim,$<,tb/sim-csp-cosim.out)
 
-# The lab: every device's reference agrees with it, and an injected fault is counted.
+# The lab: every device's reference agrees with it, and an injected fault is counted (all fifteen devices).
 obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
-	$(VERILATE) $(PKG) $(LAB) tb/tb_lab.sv
+	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
 
 sim-lab: obj_dir/tb_lab/sim
 	$(call run_sim,$<,tb/sim-lab.out)

@@ -61,7 +61,9 @@ module lab (
     dut_carry_chain #(.BITS (36))   u_carry_36  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[6]), .mismatch (mismatch[6]));
     dut_carry_chain #(.BITS (54))   u_carry_54  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[7]), .mismatch (mismatch[7]));
     // the blocks and the nets the chains do not have: the DSP's multiply-add, a block RAM's data out
-    // into logic, an adder in front of a block RAM's address pins, a register's fan-out
+    // into logic, an adder in front of a block RAM's address pins, a register's fan-out — a build
+    // of their own (lab_pkg.sv: LAB_BLOCKS), since their references do not fit beside the CSP
+    if (lab_pkg::DEVICES > 8) begin : g_blocks
     dut_dsp         #(.PIPE (0))            u_dsp          (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[8]),  .mismatch (mismatch[8]));
     dut_dsp         #(.PIPE (1))            u_dsp_piped    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[9]),  .mismatch (mismatch[9]));
     dut_bsram       #(.LOGIC_AFTER (1'b1))  u_bsram_logic  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[10]), .mismatch (mismatch[10]));
@@ -69,6 +71,7 @@ module lab (
     dut_bsram_pins  #(.ADDER (1'b1))        u_pins_adder   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[12]), .mismatch (mismatch[12]));
     dut_bsram_pins  #(.ADDER (1'b0))        u_pins_reg     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[13]), .mismatch (mismatch[13]));
     dut_fanout      #(.FANOUT (64))         u_fanout_64    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[14]), .mismatch (mismatch[14]));
+    end
 
     // ---- the counters: cycles, and each device's mismatches, saturating ----
     logic [lab_pkg::COUNTER_W-1:0] cycles;

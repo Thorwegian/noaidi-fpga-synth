@@ -7,5 +7,12 @@
 package lab_pkg;
     parameter int STIMULUS_W = 96;    // the pattern every device is fed from: two LFSRs side by side
     parameter int COUNTER_W  = 36;    // a counter is one dword of the map
-    parameter int DEVICES    = 15;    // devices under test, each a counter; lab.sv instantiates them
+    // devices under test, each a counter; lab.sv instantiates them. The chains alone fit beside
+    // the CSP; the block and fan-out devices (their references are thousands of flip-flops) are
+    // a build of their own: `make pack.fs LAB_BLOCKS=1`. The bench runs all of them.
+`ifdef LAB_BLOCKS
+    parameter int DEVICES    = 15;
+`else
+    parameter int DEVICES    = 8;
+`endif
 endpackage
