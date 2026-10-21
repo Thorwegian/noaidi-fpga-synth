@@ -925,6 +925,8 @@ void test_selftest_program() {
         check_equal(m.get("COUNT_PASSES"), pass, "COUNT_PASSES, which wraps, counts them too");
         check_equal(m.get("PASS_VIA_LOGIC"), pass, "the logic unit's copy of the pass counter");
         check_equal(m.get("PASS_VIA_DSP"), pass, "the multiply-add's copy");
+        check_equal(m.get("PASS_VIA_LOGIC_A"), pass, "the logic unit's second copy");
+        check_equal(m.get("PASS_VIA_LOGIC_B"), pass, "and its third");
     }
     check_equal(m.get("COUNT_ODD"), 2, "COUNT_ODD counts the odd passes");
     check_equal(m.get("COUNT_HALF_ODD"), 2, "COUNT_HALF_ODD agrees");
