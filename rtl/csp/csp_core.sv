@@ -910,58 +910,56 @@ module csp_core (
     wire e5_sum_wrapped = e5_ma_flags[2] && e5_ma_flags[1] && e5_product[53] != e5_ma_flags[0];
     wire signed [53:0] product_saturated = e5_sum_wrapped ? (e5_ma_flags[0] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX) : e5_product;
 
+    // The result in the destination's format, saturated to its width by the bits above it: a
+    // value fits when they are all its sign (no comparator chain, #238: E5's was the chip's longest
+    // path once E1b's was cut).
     logic [35:0] arithmetic_result;
     logic        arithmetic_saturated;
     always_comb begin
         logic signed [53:0] chosen;
         logic signed [21:0] word_part;
         logic signed [39:0] wide_part;
+        logic               word_fits, wide_fits;
         chosen    = e5_wraps ? e5_product : product_saturated;
         word_part = 22'(chosen >>> 32);
         wide_part = 40'(chosen >>> 14);
+        word_fits = word_part[21:17] == {5{word_part[17]}};
+        wide_fits = wide_part[39:35] == {5{wide_part[35]}};
         arithmetic_result    = '0;
         arithmetic_saturated = e5_sum_wrapped && !e5_wraps;
         if (e5_r_wide) begin
-            if (e5_wraps) begin
+            if (e5_wraps || wide_fits) begin
                 arithmetic_result = wide_part[35:0];
-            end else if (wide_part > 40'sd34359738367) begin
-                arithmetic_result = 36'h7_ffff_ffff;  arithmetic_saturated = 1'b1;
-            end else if (wide_part < -40'sd34359738368) begin
-                arithmetic_result = 36'h8_0000_0000;  arithmetic_saturated = 1'b1;
             end else begin
-                arithmetic_result = wide_part[35:0];
+                arithmetic_result    = wide_part[39] ? 36'h8_0000_0000 : 36'h7_ffff_ffff;
+                arithmetic_saturated = 1'b1;
             end
         end else begin
-            if (e5_wraps) begin
+            if (e5_wraps || word_fits) begin
                 arithmetic_result = {18'd0, word_part[17:0]};
-            end else if (word_part > 22'sd131071) begin
-                arithmetic_result = {18'd0, 18'h1ffff};  arithmetic_saturated = 1'b1;
-            end else if (word_part < -22'sd131072) begin
-                arithmetic_result = {18'd0, 18'h20000};  arithmetic_saturated = 1'b1;
             end else begin
-                arithmetic_result = {18'd0, word_part[17:0]};
+                arithmetic_result    = {18'd0, word_part[21] ? 18'h20000 : 18'h1ffff};
+                arithmetic_saturated = 1'b1;
             end
         end
     end
 
-    // SHIFT: the value is in the destination's raw units; saturate to its range
+    // SHIFT: the value is in the destination's raw units; saturate to its range, by the bits
+    // above it (the value is 90 bits wide: a comparator chain here was 41 carry cells)
     logic [35:0] shift_result;
     logic        shift_saturated;
+    wire shift_fits_wide = e5_shift_value[89:35] == {55{e5_shift_value[35]}};
+    wire shift_fits_word = e5_shift_value[89:17] == {73{e5_shift_value[17]}};
     always_comb begin
-        logic signed [89:0] limit_high, limit_low;
         if (e5_r_wide) begin
-            limit_high = (90'sd1 <<< 35) - 1;  limit_low = -(90'sd1 <<< 35);
+            shift_saturated = !shift_fits_wide;
+            shift_result    = shift_fits_wide ? e5_shift_value[35:0]
+                                              : (e5_shift_value[89] ? 36'h8_0000_0000 : 36'h7_ffff_ffff);
         end else begin
-            limit_high = (90'sd1 <<< 17) - 1;  limit_low = -(90'sd1 <<< 17);
+            shift_saturated = !shift_fits_word;
+            shift_result    = {18'd0, shift_fits_word ? e5_shift_value[17:0]
+                                                      : (e5_shift_value[89] ? 18'h20000 : 18'h1ffff)};
         end
-        shift_saturated = 1'b1;
-        if (e5_shift_value > limit_high)      shift_result = 36'(limit_high);
-        else if (e5_shift_value < limit_low)  shift_result = 36'(limit_low);
-        else begin
-            shift_result    = 36'(e5_shift_value);
-            shift_saturated = 1'b0;
-        end
-        if (!e5_r_wide) shift_result[35:18] = '0;
     end
 
     // the result and its overflow flag, by unit
