@@ -41,7 +41,7 @@ constexpr int vector_round   = 16;    // elements in flight in a vector loop
 // instruction issued at cycle c has its result in DMEM for an instruction
 // issued at c + result_latency; its flags and the accumulator are readable
 // at c + state_latency; an IDX's index is used at c + index_latency, which
-// the front end waits itself (a barrier); a loop's repeat and a skip's jump
+// the assembler lays after it as three wait rows (the chip has no stall); a loop's repeat and a skip's jump
 // cost jump_penalty cycles over moving on to the next word.
 
 constexpr int result_latency = 7;
@@ -193,9 +193,10 @@ struct Control {
     Unit unit             = Unit::none;    // [17:15]
     Writes writes         = Writes::nothing; // [14:12]
     ASource a_source      = ASource::zero; // [11:10]
+    bool reads_x          = false;         // [9]  X is read (from DMEM, or the immediate)
     bool y_wide           = false;         // [8]
     ConditionKind cond    = ConditionKind::none; // [7:6]
-    bool barrier          = false;         // [5]
+    bool reads_y          = false;         // [5]  Y is read
     bool wrap             = false;         // [3]
     uint8_t sub           = 0;             // [2:0]
 

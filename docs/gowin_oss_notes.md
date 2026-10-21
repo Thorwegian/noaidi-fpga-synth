@@ -418,7 +418,7 @@ they pay:
    107 on another has such a path: the spread is the placer's luck with
    the routes, not the logic.
 8. **When a path will not fit, pipeline it and pay the latency in the
-   model** (`app/main/csp/csp.hpp`: `result_latency`, `barrier_latency`),
+   model** (`app/main/csp/csp.hpp`: `result_latency`, `index_latency`),
    never in a half-cycle trick: the budget is 1 472 cycles a pass and
    every stage costs a cycle on every dependent instruction, which is
    the price to weigh (issue #222, the A stage: 1 437 → 1 472 cycles).

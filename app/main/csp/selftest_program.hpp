@@ -24,7 +24,7 @@ namespace csp::selftest {
 inline constexpr int cycles = 87;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 84> rows{{
+inline constexpr std::array<Row, 87> rows{{
     {0x010062040ull, 0xc00000001ull},
     {0x010064040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
@@ -41,6 +41,9 @@ inline constexpr std::array<Row, 84> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x040000c00ull, 0x064000063ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x050065800ull, 0xc00004000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -113,8 +116,8 @@ inline constexpr std::array<Row, 84> rows{{
 
 // The decode ROM: one control word a row, row 0 the NOP.
 inline constexpr std::array<uint32_t, 10> rom{
-    0x00000, 0x110c3, 0x194c0, 0x090c2, 0x34021, 0x090c0, 0x090c4, 0x090c3,
-    0x11042, 0x094c2,
+    0x00000, 0x112e3, 0x194e0, 0x092e2, 0x34221, 0x092e0, 0x092c4, 0x092e3,
+    0x11262, 0x096e2,
 };
 
 // Registers, blocks and fields.

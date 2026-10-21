@@ -149,12 +149,22 @@ void test_encoding() {
     check(Operand::decode(0x0FF) == Operand::direct(0xFF), "operand 00 0011111111 is direct 255");
     check(Operand::decode(0xC00).mode == Operand::Mode::immediate, "mode 3 is an immediate");
 
-    csp::Control control{csp::Unit::multiply_add, csp::Writes::pair, csp::ASource::result, true,
-                         csp::ConditionKind::flags, false, true, 0};
+    csp::Control control{csp::Unit::multiply_add, csp::Writes::pair, csp::ASource::result, true, true,
+                         csp::ConditionKind::flags, true, true, 0};
     check(csp::Control::decode(control.encode()) == control, "a control word encodes and decodes round-trip");
     check_equal(csp::control_of(csp::Op::nop, false, csp::ASource::zero).encode(), 0, "NOP's control word is 0");
-    check(csp::control_of(csp::Op::idx, false, csp::ASource::zero).barrier, "IDX is a barrier");
-    check(csp::control_of(csp::Op::loop, false, csp::ASource::zero).barrier, "LOOP is a barrier");
+    // which operands a row reads: the chip parks the read ports of the others
+    const auto reads = [](csp::Op op) {
+        const csp::Control c = csp::control_of(op, false, csp::ASource::zero);
+        return (c.reads_x ? 1 : 0) | (c.reads_y ? 2 : 0);
+    };
+    check_equal(reads(csp::Op::mac), 3, "MAC reads X and Y");
+    check_equal(reads(csp::Op::abs), 1, "ABS reads X only");
+    check_equal(reads(csp::Op::shift), 2, "SHIFT reads Y only (X is not read)");
+    check_equal(reads(csp::Op::idx), 3, "IDX reads X and Y");
+    check_equal(reads(csp::Op::loop), 0, "LOOP reads nothing: its numbers are in the word");
+    check_equal(reads(csp::Op::skip), 0, "SKIP reads nothing");
+    check_equal(reads(csp::Op::nop), 0, "NOP reads nothing");
 }
 
 // ---- arithmetic ---------------------------------------------------------------
@@ -311,12 +321,12 @@ void test_schedule() {
                 "a read of acc waits for ACC");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"), csp::state_latency + 1, "SEL waits for the flags");
     check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"), csp::index_latency + 1,
-                "the instruction after IDX waits the barrier");
+                "the instruction after IDX comes index_latency cycles on");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nNOP\nNOP\nNOP\nNOP\nNOP\nNOP\nMAC B_, 0, A_, =1.0\n"),
                 csp::result_latency + 1, "a program's own NOPs count toward the wait");
 }
 
-// IDX takes effect for the next instruction, after the barrier; the
+// IDX takes effect for the instruction index_latency rows on; the
 // index's bits sit beside the offset's.
 void test_index() {
     Machine m(std::string(registers) + R"(
@@ -396,7 +406,7 @@ void test_vector_loops() {
     check_equal(vector->processor.read(0x200 + 8 + 2), q(1.0), "and the next element's (positive: X)");
     check_equal(vector->processor.read(0x200 + 8 * 5 + 4), q(0.625), "an element's [j+…] uses its own j");
     check_equal(vector->processor.index(csp::IndexRegister::j), 0x307, "after the loop, j is the last element's");
-    // IDX (the barrier), LOOP.vi, then 5 rows × 8 elements without a wait:
+    // IDX and its wait rows, LOOP.vi, then 5 rows × 8 elements without a wait:
     // with 8 elements a round, every dependency is a row apart.
     check_equal(vector_report.cycles, csp::index_latency + 1 + 5 * 8 + csp::index_latency - 1,
                 "a vector loop of 8 elements never waits");
@@ -487,6 +497,37 @@ outer_end:
     check_equal(m.get("C_"), q(1.0), "the program continues after both");
     check_equal(m.processor.index(csp::IndexRegister::j), 3, "the outer loop stepped j three times");
     check(report.errors.empty(), "without errors");
+}
+
+// The chip has no stall, so what the front end used to wait for is rows: an
+// IDX is followed by three NOPs, a loop of count 0 is not there at all, and
+// a SKIP does not cross the end of its loop.
+void test_decisions() {
+    const csp::Program idx = csp::assemble(std::string(registers) + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
+    check(idx.ok, "IDX assembles");
+    check_equal(idx.image.length, 1 + (csp::index_latency - 1) + 1, "an IDX is followed by index_latency - 1 NOP rows");
+    for (int row = 1; row < csp::index_latency; ++row) {
+        check(csp::Word::decode(idx.image.rows[static_cast<size_t>(row)]).op == 0, "the row after an IDX is a NOP");
+    }
+
+    const csp::Program without = csp::assemble(std::string(registers) + "MAC A_, 0, =1.0, =1.0\n");
+    const csp::Program with_empty = csp::assemble(std::string(registers) + "LOOP.i end, =#0, =#1\nMAC B_, 0, =2.0, =2.0\n"
+                                                  "LOOP.j end2, =#0, =#1\nIDX i, =#0x200, 0\nMAC C_, 0, =3.0, =3.0\n"
+                                                  "end2:\nend:\nMAC A_, 0, =1.0, =1.0\n");
+    check(with_empty.ok, "loops of count 0 assemble");
+    check(with_empty.image.rows == without.image.rows && with_empty.image.length == without.image.length,
+          "a loop of count 0 and its body, nested loops and all, leave no row");
+    check_equal(with_empty.cycles, without.cycles, "and cost no cycle");
+
+    const csp::Program skip_ok = csp::assemble(std::string(registers) +
+            "LOOP.i end, =#2, =#1\nCMP ZERO, B_, C_\nSKIP neg, 1\nMAC A_, 0, =1.0, =1.0\nend:\nNOP\n");
+    check(skip_ok.ok, "a SKIP that ends at its loop's end assembles");
+    check(has_diagnostic(csp::assemble(std::string(registers) +
+                          "LOOP.i end, =#2, =#1\nCMP ZERO, B_, C_\nSKIP neg, 3\nMAC A_, 0, =1.0, =1.0\nend:\nNOP\nNOP\n"),
+                         true, "does not cross the end of its loop"),
+          "a SKIP past its loop's end is rejected");
+    check(csp::assemble(std::string(registers) + "CMP ZERO, B_, C_\nSKIP neg, 2\nNOP\nNOP\nNOP\n").ok,
+          "a SKIP outside any loop is free to skip");
 }
 
 void test_queue_and_swap() {
@@ -1097,6 +1138,7 @@ int main() {
     test_loops();
     test_vector_loops();
     test_empty_inner_loop_at_outer_end();
+    test_decisions();
     test_queue_and_swap();
     test_hold();
     test_limits();

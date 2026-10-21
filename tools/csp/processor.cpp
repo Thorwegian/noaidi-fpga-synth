@@ -597,7 +597,7 @@ PassReport Processor::pass() {
     registers_[io_base] = static_cast<int32_t>(sign_extend(pass_count_, word_bits));
 
     if (held_) {
-        state.report.writes_applied = apply_window(cycles_per_pass);
+        state.report.writes_applied = apply_window(write_window);   // a held pass takes the window's 48, as the chip does
         active_page_                = 1 - active_page_;
         return state.report;
     }
@@ -625,7 +625,7 @@ PassReport Processor::pass() {
         } else {
             execute(decoded, state);
             note_writes(decoded, state);
-            state.cycle += decoded.op == Op::idx ? index_latency : 1;
+            ++state.cycle;   // an IDX is one cycle: the NOP rows after it carry the wait
         }
         end_loops(state);
     }

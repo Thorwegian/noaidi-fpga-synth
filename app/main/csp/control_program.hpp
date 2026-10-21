@@ -28,7 +28,7 @@ namespace csp::control {
 inline constexpr int cycles = 1465;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 136> rows{{
+inline constexpr std::array<Row, 151> rows{{
     {0x010060040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -44,13 +44,19 @@ inline constexpr std::array<Row, 136> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x030000c00ull, 0x060000070ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x040000800ull, 0x000000000ull},
-    {0x050000c03ull, 0xc10000015ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x050000c03ull, 0xc1000001bull},
     {0x060400c00ull, 0x402004000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x070407400ull, 0x406000000ull},
-    {0x050000c03ull, 0xc1000001dull},
+    {0x050000c03ull, 0xc10000023ull},
     {0x000000000ull, 0x000000000ull},
     {0x060400c00ull, 0x402004000ull},
     {0x000000000ull, 0x000000000ull},
@@ -58,7 +64,7 @@ inline constexpr std::array<Row, 136> rows{{
     {0x080000400ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x091407405ull, 0x404000000ull},
-    {0x050000c03ull, 0xc10000029ull},
+    {0x050000c03ull, 0xc1000002full},
     {0x000000000ull, 0x000000000ull},
     {0x060400c00ull, 0x402004000ull},
     {0x000000000ull, 0x000000000ull},
@@ -70,7 +76,7 @@ inline constexpr std::array<Row, 136> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x0b0407409ull, 0x405000000ull},
-    {0x050000c03ull, 0xc1000004aull},
+    {0x050000c03ull, 0xc10000050ull},
     {0x000000000ull, 0x000000000ull},
     {0x060400c00ull, 0x402004000ull},
     {0x000000000ull, 0x000000000ull},
@@ -107,7 +113,10 @@ inline constexpr std::array<Row, 136> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x040000c00ull, 0x000000200ull},
-    {0x050000c10ull, 0xc40000060ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x050000c10ull, 0xc40000069ull},
     {0x030000421ull, 0x000000000ull},
     {0x070429807ull, 0x41d000000ull},
     {0x07042a807ull, 0x41e000000ull},
@@ -129,7 +138,10 @@ inline constexpr std::array<Row, 136> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x040000c00ull, 0x000000600ull},
-    {0x050000c20ull, 0xc10000078ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x050000c20ull, 0xc10000084ull},
     {0x0d0406402ull, 0xc00000004ull},
     {0x0d040740aull, 0xc00000014ull},
     {0x080000400ull, 0xc00004000ull},
@@ -153,7 +165,10 @@ inline constexpr std::array<Row, 136> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x040000c00ull, 0x000000600ull},
-    {0x050000c20ull, 0xc10000088ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x050000c20ull, 0xc10000097ull},
     {0x030000405ull, 0x000000000ull},
     {0x0b040640eull, 0x827000000ull},
     {0x070407407ull, 0x825000000ull},
@@ -169,8 +184,8 @@ inline constexpr std::array<Row, 136> rows{{
 
 // The decode ROM: one control word a row, row 0 the NOP.
 inline constexpr std::array<uint32_t, 16> rom{
-    0x00000, 0x110c3, 0x194c0, 0x34021, 0x33020, 0x20022, 0x0a5c8, 0x090c0,
-    0x090c3, 0x11042, 0x090c4, 0x090c2, 0x094c0, 0x110c1, 0x0a5c0, 0x094c2,
+    0x00000, 0x112e3, 0x194e0, 0x34221, 0x33220, 0x20002, 0x0a7e8, 0x092e0,
+    0x092e3, 0x11262, 0x092c4, 0x092e2, 0x096e0, 0x112e1, 0x0a7e0, 0x096e2,
 };
 
 // Registers, blocks and fields.

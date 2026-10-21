@@ -92,11 +92,11 @@ int assemble_command(const csp::Program &program) {
     }
     for (int row = 0; row < image.rom_used; ++row) {
         const csp::Control control = csp::Control::decode(image.rom[static_cast<size_t>(row)]);
-        std::printf("rom %02x = %05x  unit %d writes %d a %d%s cond %d%s%s sub %d\n", row,
+        std::printf("rom %02x = %05x  unit %d writes %d a %d%s%s%s cond %d%s sub %d\n", row,
                     image.rom[static_cast<size_t>(row)], static_cast<int>(control.unit),
                     static_cast<int>(control.writes), static_cast<int>(control.a_source),
-                    control.y_wide ? " wide-y" : "", static_cast<int>(control.cond), control.barrier ? " barrier" : "",
-                    control.wrap ? " wrap" : "", control.sub);
+                    control.reads_x ? " x" : "", control.reads_y ? " y" : "", control.y_wide ? " wide-y" : "",
+                    static_cast<int>(control.cond), control.wrap ? " wrap" : "", control.sub);
     }
     std::printf("%d rows, %d decode rows, %d cycles a pass\n", image.length, image.rom_used, program.cycles);
     return 0;

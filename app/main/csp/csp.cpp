@@ -44,8 +44,8 @@ Operand Operand::decode(uint16_t field) {
 
 uint32_t Control::encode() const {
     return (static_cast<uint32_t>(unit) << 15) | (static_cast<uint32_t>(writes) << 12)
-           | (static_cast<uint32_t>(a_source) << 10) | (y_wide ? 1u << 8 : 0)
-           | (static_cast<uint32_t>(cond) << 6) | (barrier ? 1u << 5 : 0) | (wrap ? 1u << 3 : 0)
+           | (static_cast<uint32_t>(a_source) << 10) | (reads_x ? 1u << 9 : 0) | (y_wide ? 1u << 8 : 0)
+           | (static_cast<uint32_t>(cond) << 6) | (reads_y ? 1u << 5 : 0) | (wrap ? 1u << 3 : 0)
            | (sub & 7u);
 }
 
@@ -54,78 +54,67 @@ Control Control::decode(uint32_t row) {
     control.unit     = static_cast<Unit>((row >> 15) & 7);
     control.writes   = static_cast<Writes>((row >> 12) & 7);
     control.a_source = static_cast<ASource>((row >> 10) & 3);
+    control.reads_x  = (row >> 9) & 1;
     control.y_wide   = (row >> 8) & 1;
     control.cond     = static_cast<ConditionKind>((row >> 6) & 3);
-    control.barrier  = (row >> 5) & 1;
+    control.reads_y  = (row >> 5) & 1;
     control.wrap     = (row >> 3) & 1;
     control.sub      = row & 7;
     return control;
 }
 
 Control control_of(Op op, bool wide, ASource a_source) {
-    Control c;
+    // Control fields in order: unit, writes, a_source, reads_x, y_wide, cond, reads_y, wrap, sub.
     const Writes result = wide ? Writes::pair : Writes::word;
     switch (op) {
     case Op::nop:
-        break;
+        return {};
     case Op::mac:
     case Op::macw:
-        c = {Unit::multiply_add, result, a_source, wide, ConditionKind::flags, false, op == Op::macw,
-             static_cast<uint8_t>(MultiplyAddOp::mac)};
-        break;
+        return {Unit::multiply_add, result, a_source, true, wide, ConditionKind::flags, true, op == Op::macw,
+                static_cast<uint8_t>(MultiplyAddOp::mac)};
     case Op::acc:
-        c = {Unit::multiply_add, Writes::accumulator, a_source, false, ConditionKind::none, false, false,
-             static_cast<uint8_t>(MultiplyAddOp::mac)};
-        break;
+        return {Unit::multiply_add, Writes::accumulator, a_source, true, false, ConditionKind::none, true, false,
+                static_cast<uint8_t>(MultiplyAddOp::mac)};
     case Op::interp:
-        c = {Unit::multiply_add, result, a_source, wide, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(MultiplyAddOp::interp)};
-        break;
+        return {Unit::multiply_add, result, a_source, true, wide, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(MultiplyAddOp::interp)};
     case Op::add3:
-        c = {Unit::multiply_add, result, a_source, wide, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(MultiplyAddOp::add3)};
-        break;
+        return {Unit::multiply_add, result, a_source, true, wide, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(MultiplyAddOp::add3)};
     case Op::cmp:
-        c = {Unit::multiply_add, Writes::word, ASource::zero, false, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(MultiplyAddOp::cmp)};
-        break;
+        return {Unit::multiply_add, Writes::word, ASource::zero, true, false, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(MultiplyAddOp::cmp)};
     case Op::abs:
-        c = {Unit::multiply_add, Writes::word, ASource::zero, false, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(MultiplyAddOp::abs)};
-        break;
+        return {Unit::multiply_add, Writes::word, ASource::zero, true, false, ConditionKind::flags, false, false,
+                static_cast<uint8_t>(MultiplyAddOp::abs)};
     case Op::min:
-        c = {Unit::logic, Writes::word, ASource::zero, false, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(LogicOp::min)};
-        break;
+        return {Unit::logic, Writes::word, ASource::zero, true, false, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(LogicOp::min)};
     case Op::max:
-        c = {Unit::logic, Writes::word, ASource::zero, false, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(LogicOp::max)};
-        break;
+        return {Unit::logic, Writes::word, ASource::zero, true, false, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(LogicOp::max)};
     case Op::sel:
-        c = {Unit::logic, Writes::word, ASource::zero, false, ConditionKind::select, false, false,
-             static_cast<uint8_t>(LogicOp::sel)};
-        break;
+        return {Unit::logic, Writes::word, ASource::zero, true, false, ConditionKind::select, true, false,
+                static_cast<uint8_t>(LogicOp::sel)};
     case Op::andxor:
-        c = {Unit::logic, Writes::word, a_source, false, ConditionKind::flags, false, false,
-             static_cast<uint8_t>(LogicOp::andxor)};
-        break;
+        return {Unit::logic, Writes::word, a_source, true, false, ConditionKind::flags, true, false,
+                static_cast<uint8_t>(LogicOp::andxor)};
     case Op::shift:
-        c = {Unit::shift, result, a_source, false, ConditionKind::flags, false, false, 0};
-        break;
+        // the count is Y; X is not read
+        return {Unit::shift, result, a_source, false, false, ConditionKind::flags, true, false, 0};
     case Op::loop:
     case Op::vloop:
-        // the index register is the sub-operation's low bit, set by the caller
-        c = {Unit::loop, Writes::nothing, ASource::zero, false, ConditionKind::none, true, false,
-             static_cast<uint8_t>(op == Op::vloop ? LoopOp::vector_i : LoopOp::scalar_i)};
-        break;
+        // the index register is the sub-operation's low bit, set by the caller; the
+        // count, the stride and the end are in the word, not read from DMEM
+        return {Unit::loop, Writes::nothing, ASource::zero, false, false, ConditionKind::none, false, false,
+                static_cast<uint8_t>(op == Op::vloop ? LoopOp::vector_i : LoopOp::scalar_i)};
     case Op::skip:
-        c = {Unit::skip, Writes::nothing, ASource::zero, false, ConditionKind::skip, false, false, 0};
-        break;
+        return {Unit::skip, Writes::nothing, ASource::zero, false, false, ConditionKind::skip, false, false, 0};
     case Op::idx:
-        c = {Unit::index, Writes::index_i, ASource::zero, false, ConditionKind::none, true, false, 0};
-        break;
+        return {Unit::index, Writes::index_i, ASource::zero, true, false, ConditionKind::none, true, false, 0};
     }
-    return c;
+    return {};
 }
 
 // ---- the word -------------------------------------------------------------

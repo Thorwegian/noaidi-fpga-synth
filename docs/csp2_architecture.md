@@ -83,9 +83,9 @@ flowchart LR
 The front end has no hazard check, no skip counter per element and no
 64-way select: the depth that the first revision's seeds reported as
 10–13 LUT levels into the private index register is here a block read
-plus a 16-way select from a register. The result latency, the barrier
-latency and the index latency are fixed numbers the assembler schedules
-by; they are decided with the datapath's stage count and written into
+plus a 16-way select from a register. The result latency and the index
+latency are fixed numbers the assembler schedules by (an `IDX` is followed
+by the NOP rows of its latency: the chip has no stall); they are decided with the datapath's stage count and written into
 both this document and the assembler when the RTL is.
 
 ## 2. The memories

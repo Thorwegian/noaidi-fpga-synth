@@ -342,6 +342,15 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                     break;
                 }
             }
+            // nor the end of the loop it is in: the repeat discards the rows behind the loop's
+            // last, which would take the skipped count with them
+            for (size_t outer_at = 0; outer_at < at; ++outer_at) {
+                const Entry &outer = instructions_[outer_at];
+                if ((outer.op == Op::loop || outer.op == Op::vloop) && at < outer.end && entry.end > outer.end) {
+                    built.issues.push_back({at, true, "a SKIP does not cross the end of its loop"});
+                    break;
+                }
+            }
         }
     }
     // Nesting: at most two, on different index registers, the inner inside the
@@ -461,6 +470,11 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         int64_t next = start;
         for (size_t at = from; at < to;) {
             const Entry &entry = instructions_[at];
+            if ((entry.op == Op::loop || entry.op == Op::vloop) && entry.count == 0) {
+                // A loop that runs nothing is not assembled: not its row, not its body, no cost.
+                at = entry.end;
+                continue;
+            }
             if (entry.op == Op::loop) {
                 // The LOOP issues when its slot comes; the body follows.
                 int64_t cycle = std::max(next, start);
@@ -513,14 +527,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                 }
                 // The loop's cost: the body `count` times, a jump between
                 // iterations; the board after the last iteration is this one's,
-                // shifted to where the last one ends. A count of 0 runs
-                // nothing: the rows are laid out and skipped.
-                if (entry.count == 0) {
-                    at_index[entry.which == IndexRegister::j ? 1 : 0].known_base = false;
-                    next = cycle + 1;
-                    at   = entry.end;
-                    continue;
-                }
+                // shifted to where the last one ends.
                 const int64_t body_cycles = body_end - body_start;
                 const int64_t last_start  = body_start + (count - 1) * (body_cycles + jump_penalty);
                 body_board.shift(last_start - body_start);
@@ -625,13 +632,6 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                     ++row;
                 }
                 if (out) loop_end_row[at] = out->size();
-                if (entry.count == 0) {
-                    // nothing runs: the rows are laid out and skipped
-                    at_index[entry.which == IndexRegister::j ? 1 : 0].known_base = false;
-                    next = cycle + 1;
-                    at   = entry.end;
-                    continue;
-                }
                 // the loop's cycles: every row for every round
                 const int64_t rows = row;
                 int64_t end_cycle = body_cycle;
@@ -659,6 +659,11 @@ ProgramBuilder::Built ProgramBuilder::build() const {
             if (out) {
                 for (int w = 0; w < waits; ++w) out->push_back({wait_nop, true});
                 out->push_back({at});
+                // the chip has no stall: the index lands index_latency cycles after the
+                // IDX issues, so the rows between are NOPs the program carries
+                if (entry.op == Op::idx) {
+                    for (int w = 1; w < index_latency; ++w) out->push_back({wait_nop, true});
+                }
             }
             issue_cycle[at] = cycle;
             note_writes(entry, at_board, at_index, cycle);
@@ -687,9 +692,15 @@ ProgramBuilder::Built ProgramBuilder::build() const {
     }
 
     // ---- the rows and the ROM ----
-    built.position.assign(instructions_.size(), 0);
+    constexpr size_t omitted = static_cast<size_t>(-1);
+    built.position.assign(instructions_.size(), omitted);   // a loop of count 0 and its body have no row
     for (size_t row = 0; row < placed.size(); ++row) {
         if (placed[row].source != wait_nop) built.position[placed[row].source] = row;
+    }
+    // the first placed row at or after each instruction (a SKIP may end where a loop was omitted)
+    std::vector<size_t> first_row(instructions_.size() + 1, placed.size());
+    for (size_t at = instructions_.size(); at-- > 0;) {
+        first_row[at] = built.position[at] != omitted ? built.position[at] : first_row[at + 1];
     }
     std::map<uint32_t, uint16_t> rom_index;
     rom_index[0] = 0;
@@ -724,7 +735,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
             break;
         case Op::skip: {
             word.cond = static_cast<uint8_t>(entry.cond);
-            const size_t end_row = entry.end < instructions_.size() ? built.position[entry.end] : placed.size();
+            const size_t end_row = first_row[std::min(entry.end, instructions_.size())];
             word.imm = static_cast<uint32_t>(end_row - row - 1);   // the rows skipped
             break;
         }

@@ -117,15 +117,21 @@ The control word:
 
 | bits | field | values |
 |---|---|---|
-| 17:15 | unit | multiply-add, add, compare, select, min/max, logic, shift, front end |
-| 14:12 | writes | nothing, a register, a wide pair, a sink word, index `i`, index `j`, the accumulator |
+| 17:15 | unit | none, multiply-add, logic, shift, loop, skip, index |
+| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j`, the accumulator |
 | 11:10 | accumulator source | zero, `r` (update in place), the accumulator |
-| 9:8 | wide operands | `x` wide, `y` wide |
+| 9 | reads X | X is read: from DMEM, or the immediate |
+| 8 | wide Y | Y is a pair |
 | 7:6 | condition kind | none, select by `cond`, skip by `cond`, set the flags |
-| 5 | barrier | the front end waits for the result (a loop or an index) |
-| 4 | immediate | an operand is the `imm` field |
+| 5 | reads Y | Y is read |
+| 4 | spare | |
 | 3 | wrap | the sum wraps instead of saturating (phase accumulators) |
-| 2:0 | spare | |
+| 2:0 | sub-operation | the unit's operation: MAC, INTERP, ADD3, CMP, ABS; MIN, MAX, SEL, ANDXOR; scalar or vector loop on `i` or `j`; `i` or `j` for `IDX` |
+
+The two reads bits and the accumulator source say which of DMEM's three
+read ports a row uses (R when the accumulator source is `r`, X, Y); the
+ports it does not use are parked on a row nothing writes, so that an
+operand field the row ignores can never meet a write under the row rule.
 
 The operations, by family (the mnemonics are the first revision's where
 the operation is the same):
@@ -151,6 +157,10 @@ image is the assembler's, loaded with the program.
 *count* times, stepping `i` or `j` by *stride*; they nest one level,
 each with its own counter. The three numbers are in the word: the body's
 end in `imm`, the count in `x`'s immediate mode, the stride in `y`'s.
+A repeat costs two cycles (the two rows behind the last body row are in
+flight and are discarded). **A loop whose count is 0 is not assembled**:
+neither its row nor its body is in the image, since the chip cannot skip
+a body for free and the count is a number the generator knows.
 
 **Vector loops** (`LOOP.vi`, `LOOP.vj`) run their body across the loop's
 elements, instruction by instruction, every element in turn — the first
@@ -172,6 +182,13 @@ overflow. `SEL` chooses between its sources by the flag named in
 `cond`; `SKIP` makes the next *n* instructions no-ops when the flag
 named in `cond` is set, at the scalar level only, and a skipped
 instruction still takes its cycle. There is no other control flow.
+
+A `SKIP` decides in its third cycle, from the flags register: it kills the
+two rows behind it, which are already in the pipeline, and counts the
+rest as they arrive. So it may not cross a `LOOP`, and may not cross the
+end of the loop it is in (the repeat discards the rows behind the loop's
+last, which would take the skipped count with them): the assembler
+rejects both. It ends at the loop's end, or anywhere short of it.
 
 ## 7. The register map
 
@@ -196,8 +213,9 @@ Register 0 reads zero and takes no write.
 The assembler knows, for every row, how many cycles after issue the
 result is in the file (the multiply-add's, the add's, the index's, the
 flags'), and places each instruction no earlier than its operands allow;
-a `LOOP` or `IDX` is a barrier the front end waits on for a known
-number of cycles. The numbers are the architecture's (`csp2_architecture.md`
+an `IDX` is followed by three NOP rows, which the assembler lays itself
+(the chip has no stall to wait with), so that the index is in its register
+four cycles after the `IDX` issues. The numbers are the architecture's (`csp2_architecture.md`
 gives them) and the reference model's; a program is scheduled against
 them once, at assembly, and runs identically on the model, in the
 cosim and on the chip — which is what the chip's self-test checks every
