@@ -283,9 +283,11 @@ int cmd_const(int argc, char **argv) {
     return 0;
 }
 
-// csp-burst <first register> <count> <seed>: queue the registers' test values
-// (register × 37 + seed) as the engine does, in bursts of up to 8 consecutive
-// words (applies on csp-go).
+// csp-burst <first register> <count> <seed>: the registers' test values
+// (register × 37 + seed) through the write queue, in bursts of up to 8
+// consecutive dwords and committed a chunk at a time, as the engine loads the
+// boot image: the window applies only committed dwords, the queue holds 511
+// of them, and a held CSP applies a committed chunk within a few passes.
 int cmd_burst(int argc, char **argv) {
     if (argc != 4) {
         std::printf("usage: csp-burst <first register> <count> <seed>\n");
@@ -295,6 +297,8 @@ int cmd_burst(int argc, char **argv) {
     const unsigned count = static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0));
     const unsigned seed  = static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
     constexpr unsigned burst_dwords = 8;
+    constexpr unsigned chunk_dwords = static_cast<unsigned>(fpga_map::queue_depth / 2);
+    unsigned since_commit = 0;
     for (unsigned at = 0; at < count; at += burst_dwords) {
         uint64_t dwords[burst_dwords];
         const unsigned n = std::min(burst_dwords, count - at);
@@ -303,8 +307,14 @@ int cmd_burst(int argc, char **argv) {
             dwords[k] = fpga_map::fifo_dword(static_cast<int>(address), (address * 37u + seed) & 0x1FFFFu);
         }
         engine_link_raw_write_burst(fpga_map::fifo_door, dwords, static_cast<int>(n), false);
+        since_commit += n;
+        if (since_commit >= chunk_dwords || at + n == count) {
+            engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+            vTaskDelay(pdMS_TO_TICKS(2));
+            since_commit = 0;
+        }
     }
-    std::printf("  queued %u words in bursts\n", count);
+    std::printf("  queued %u words, committed %u a chunk\n", count, chunk_dwords);
     return 0;
 }
 
@@ -471,7 +481,7 @@ const console_cmd_t commands[] = {
         {"csp-const", "<register> <raw>",
          "lab: write a register (applies on csp-go)", cmd_const, nullptr},
         {"csp-burst", "<register> <count> <seed>",
-         "lab: queue test values in bursts of 8, as the engine does", cmd_burst,
+         "lab: test values through the queue, committed a chunk at a time, as the engine does", cmd_burst,
          nullptr},
         {"csp-go", "", "lab: commit the writes and release the CSP", cmd_go,
          nullptr},

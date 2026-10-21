@@ -15,7 +15,8 @@
 // that ran, so that a frozen chip's state can be matched to the model's); and on
 // the last cycles it reads the probe's pair out of DMEM for the firmware.
 // The instructions' cycles (0 to 1471) are the core's (csp_core.sv), and the
-// hold changes nothing here: a held chip still takes the firmware's writes,
+// hold changes nothing here: a held chip still takes the firmware's committed
+// writes (the FIFO holds 511, committed a chunk at a time by the CTRL swap),
 // so its image can be loaded and verified before anything runs.
 //
 // Timing against the row rule: a pop at cycle t puts its dword on the FIFO's
