@@ -47,7 +47,7 @@ module csp_pass (
 
     // DMEM's write port, this module's while the window is open
     output logic                            dmem_write_enable,
-    output logic [csp_pkg::REGISTER_W-1:0]  dmem_write_address,
+    output logic [csp_pkg::ADDRESS_W-1:0]   dmem_write_address,   // a register, or a sink word (0x800 …)
     output logic [csp_pkg::WORD_W-1:0]      dmem_write_word,
 
     // the probe: a pair read at the pass's end, through DMEM's R copy. The request is a
@@ -82,8 +82,10 @@ module csp_pass (
     assign fifo_pop = window_open && fifo_committed;
 
     // A dword's address names a register (0x000–0x7FF) or a sink word
-    // (0x800–0xBFF); the sinks come with the sink area (#236), so for now a
-    // sink word is dropped here. The inputs (0x040–0x05F) are read-only.
+    // (0x800–0xBFF): both go through the core's write registers, a register
+    // to DMEM, a sink word to the sink area's both pages (the firmware's
+    // words survive the flip: the model does the same). The inputs
+    // (0x040–0x05F) are read-only.
     // The FIFO's head is a block's output: a register takes it before any logic does
     logic                       head_valid_q;
     logic [csp_pkg::DWORD_W-1:0] head_dword_q;
@@ -97,12 +99,14 @@ module csp_pass (
     wire                 head_is_register = head_address < csp_pkg::ADDRESS_W'(csp_pkg::REGISTER_COUNT)
                                             && !(head_address >= csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE)
                                                  && head_address < csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT));
+    wire                 head_is_sink     = head_address >= csp_pkg::ADDRESS_W'(csp_pkg::SINK_BASE)
+                                            && head_address < csp_pkg::ADDRESS_W'(csp_pkg::SINK_BASE + csp_pkg::SINK_COUNT);
     // The pass counter, for the next pass, into the input register the program reads it from
     wire counter_write_now = cycle == csp_pkg::CYCLE_W'(csp_pkg::COUNTER_CYCLE) && program_ran;
     wire [31:0] next_pass  = pass_counter + 32'd1;
 
-    assign dmem_write_enable  = (head_valid_q && head_is_register) || counter_write_now;
-    assign dmem_write_address = counter_write_now ? csp_pkg::REGISTER_W'(csp_pkg::IO_BASE) : head_address[csp_pkg::REGISTER_W-1:0];
+    assign dmem_write_enable  = (head_valid_q && (head_is_register || head_is_sink)) || counter_write_now;
+    assign dmem_write_address = counter_write_now ? csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE) : head_address;
     assign dmem_write_word    = counter_write_now ? next_pass[csp_pkg::WORD_W-1:0]
                                                   : head_dword_q[csp_pkg::DWORD_WORD_LOW +: csp_pkg::WORD_W];
 

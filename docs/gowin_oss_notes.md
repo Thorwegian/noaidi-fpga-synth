@@ -284,6 +284,16 @@ and the DSP. Issue #230 carries the patch work (fork
   DTR/RTS, Ctrl-X Ctrl-C CR, a character at a time) sets the board's
   system clock without a rebuild; always end with 73728. Sweep upwards
   from 73.728 to find a bitstream's real limit.
+- **The S/PDIF pipe is the debug port** (Thor, #236, 2026-10-21): 1.5 Mbit/s
+  against the console's bytes a second. `csp-stream dump` carries the whole
+  register file in 43 ms, held or running (the probe walks it a register a
+  pass), `csp-stream engine` the sink word at the probe's address as the
+  partials read it beside the pipeline's mix, a sample at a time;
+  `tools/lab/spdif_capture.py stream` decodes both (`--dump` writes the file
+  as csp-peek prints it). The first use found the silent engine's cause in
+  one capture under a held note: the program's sinks moving, the firmware's
+  zero. Read the registers over the pipe (`chip_check.py --stream`), not the
+  console (2048 registers: 32 s).
 - **The chip check** is the instrument for "does the chip compute what the
   model computes", the co-simulation's method on silicon: `csp script
   <program>.s -f <seed>` prints the console lines that fill every register

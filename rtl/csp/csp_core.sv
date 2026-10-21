@@ -104,11 +104,12 @@ module csp_core (
     // the pass's own writes (the firmware's window, the pass counter), taken at the same registers
     // when the core is idle
     input  wire                              extra_write_enable,
-    input  wire  [csp_pkg::REGISTER_W-1:0]   extra_write_address,
+    input  wire  [csp_pkg::ADDRESS_W-1:0]    extra_write_address,   // a register, or a sink word
     input  wire  [csp_pkg::WORD_W-1:0]       extra_write_word,
 
     // the sink area
     output logic                             sink_write_enable,
+    output logic                             sink_write_both,    // the pass's word (the firmware's): both pages
     output logic [csp_pkg::SINK_WORD_W-1:0]  sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]       sink_write_data
 );
@@ -957,9 +958,10 @@ module csp_core (
     wire        core_even_enable  = e5_register_write && !e5_discard && (e5_r_wide || !e5_address[0]);
     wire        core_odd_enable   = e5_register_write && !e5_discard && (e5_r_wide ||  e5_address[0]);
     // the pass's writes arrive while the core is idle: one word, never wide
+    wire        extra_is_sink     = extra_write_address[11:10] == 2'b10;     // 0x800 … 0xBFF
     wire        extra_discard     = extra_write_address == '0;
-    wire        extra_even_enable = extra_write_enable && !extra_discard && !extra_write_address[0];
-    wire        extra_odd_enable  = extra_write_enable && !extra_discard &&  extra_write_address[0];
+    wire        extra_even_enable = extra_write_enable && !extra_is_sink && !extra_discard && !extra_write_address[0];
+    wire        extra_odd_enable  = extra_write_enable && !extra_is_sink && !extra_discard &&  extra_write_address[0];
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -970,6 +972,7 @@ module csp_core (
             write_even_enable <= 1'b0;
             write_odd_enable  <= 1'b0;
             sink_write_enable <= 1'b0;
+            sink_write_both   <= 1'b0;
         end else begin
             // the flags: the registers', or inside a vector loop the element's copy, and the
             // registers' too for the last element, whose flags the rows after the loop see
@@ -981,7 +984,9 @@ module csp_core (
             if (e5_live && e5_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
             write_even_enable <= extra_write_enable ? extra_even_enable : core_even_enable;
             write_odd_enable  <= extra_write_enable ? extra_odd_enable  : core_odd_enable;
-            sink_write_enable <= e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD;
+            // a sink word: the row's, or the pass's (the firmware's, into both pages)
+            sink_write_enable <= extra_write_enable ? extra_is_sink : (e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD);
+            sink_write_both   <= extra_write_enable && extra_is_sink;
         end
     end
 
@@ -1004,8 +1009,8 @@ module csp_core (
         write_index        <= extra_write_enable ? extra_write_address[AW-1:1] : e5_address[AW-1:1];
         write_even_data    <= extra_write_enable ? extra_write_word : (e5_r_wide ? result[35:18] : result[17:0]);
         write_odd_data     <= extra_write_enable ? extra_write_word : result[17:0];
-        sink_write_address <= e5_write_address[csp_pkg::SINK_WORD_W-1:0];
-        sink_write_data    <= result[17:0];
+        sink_write_address <= extra_write_enable ? extra_write_address[csp_pkg::SINK_WORD_W-1:0] : e5_write_address[csp_pkg::SINK_WORD_W-1:0];
+        sink_write_data    <= extra_write_enable ? extra_write_word : result[17:0];
     end
 
 endmodule

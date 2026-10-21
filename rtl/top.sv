@@ -163,7 +163,7 @@ module top (
     logic [csp_pkg::REGISTER_W-1:0] probe_register;   // the register the pair was read at
     // the stream's dump source walks the register file: the probe takes every register in turn
     wire probe_sweep = data_stream_sync && stream_source_sync == synth_pkg::STREAM_SOURCE_DUMP;
-    logic                        sink_write_enable;
+    logic                        sink_write_enable, sink_write_both;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
     logic [csp_pkg::WORD_W-1:0]  sink_write_data;
 
@@ -188,6 +188,7 @@ module top (
         .cycle              (cycle),
         .pass_counter       (pass_counter),
         .sink_write_enable  (sink_write_enable),
+        .sink_write_both    (sink_write_both),
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data)
     );
@@ -218,6 +219,7 @@ module top (
         .clk           (sysclk),
         .reset_n       (rst_n),
         .write_enable  (sink_write_enable),
+        .write_both    (sink_write_both),
         .write_address (sink_write_address),
         .write_data    (sink_write_data),
         .pass_start    (sample_tick48),

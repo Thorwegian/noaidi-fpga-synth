@@ -24,8 +24,12 @@
 // register in front of a block's pin (rule 1), and the write lands a clock
 // after the core gives it, long before the pass ends.
 //
-// The two ports never meet on a row (UG285-1.4E p6, note 1): the core
-// writes the shadow page's blocks and the partials read the active page's.
+// The core's words go to the shadow page; the firmware's (through the
+// pass's window, write_both) to both pages, so that a flip keeps them: a
+// channel setting only a MIDI message moves. The two ports never meet on a
+// row (UG285-1.4E p6, note 1) for the core's words; a firmware word lands
+// in the window, when the partials are reading whatever row their pointers
+// name — one row of one block, at most once a pass, the same word both times.
 // The word POINTER_ZERO (1023) is never written and reads zero.
 //------------------------------------------------------------------------
 `default_nettype none
@@ -37,6 +41,7 @@ module csp_sink_area #(
 
     // the core's sink write, its W stage's registers
     input  wire                                     write_enable,
+    input  wire                                     write_both,        // the firmware's word: both pages, so the flip keeps it
     input  wire [csp_pkg::SINK_WORD_W-1:0]          write_address,
     input  wire [csp_pkg::WORD_W-1:0]               write_data,
     input  wire                                     pass_start,        // the pages flip
@@ -68,7 +73,7 @@ module csp_sink_area #(
         (* keep *) logic [csp_pkg::WORD_W-1:0]      data_q;
         always_ff @(posedge clk or negedge reset_n) begin
             if (!reset_n) written_q <= '0;
-            else          written_q <= {write_enable && active_page == 1'b0, write_enable && active_page == 1'b1};
+            else          written_q <= {write_enable && (write_both || active_page == 1'b0), write_enable && (write_both || active_page == 1'b1)};
         end
         always_ff @(posedge clk) begin
             address_q <= write_address;
@@ -108,8 +113,8 @@ module csp_sink_area #(
         for (int page = 0; page < 2; page++) for (int word = 0; word < WORDS; word++) pages[page][word] = '0;
     end
     always_ff @(posedge clk) begin
-        written_q[0] <= write_enable && active_page == 1'b1;
-        written_q[1] <= write_enable && active_page == 1'b0;
+        written_q[0] <= write_enable && (write_both || active_page == 1'b1);
+        written_q[1] <= write_enable && (write_both || active_page == 1'b0);
         address_q    <= write_address;
         data_q       <= write_data;
         for (int page = 0; page < 2; page++) begin

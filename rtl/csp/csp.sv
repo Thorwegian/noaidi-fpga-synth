@@ -47,6 +47,7 @@ module csp (
 
     // the sink area (#236)
     output logic                             sink_write_enable,
+    output logic                             sink_write_both,    // the firmware's word: both pages
     output logic [csp_pkg::SINK_WORD_W-1:0]  sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]       sink_write_data
 );
@@ -61,7 +62,7 @@ module csp (
 
     // the pass: the window's writes, the counter's, and the probe's request
     logic                             pass_write_enable, probe_request;
-    logic [csp_pkg::REGISTER_W-1:0]   pass_write_address;
+    logic [csp_pkg::ADDRESS_W-1:0]    pass_write_address;
     logic [csp_pkg::WORD_W-1:0]       pass_write_word;
 
     // the probe's register: the sweep's counter, stepped a register a pass, or the firmware's
@@ -102,6 +103,7 @@ module csp (
         .extra_write_address (pass_write_address),
         .extra_write_word    (pass_write_word),
         .sink_write_enable   (sink_write_enable),
+        .sink_write_both     (sink_write_both),
         .sink_write_address  (sink_write_address),
         .sink_write_data     (sink_write_data)
     );

@@ -67,7 +67,7 @@ module tb_csp_cosim (
     logic [csp_pkg::CYCLE_W-1:0]  cycle;
     logic [31:0]                  pass_counter;
     logic [csp_pkg::WIDE_W-1:0]   probe_pair;
-    logic                         sink_write_enable;
+    logic                         sink_write_enable, sink_write_both;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
     logic [csp_pkg::WORD_W-1:0]   sink_write_data;
 
@@ -78,7 +78,7 @@ module tb_csp_cosim (
         .fifo_head_dword (fifo_head_dword),
         .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_pair (probe_pair), .probe_register (),
         .cycle (cycle), .pass_counter (pass_counter),
-        .sink_write_enable (sink_write_enable), .sink_write_address (sink_write_address), .sink_write_data (sink_write_data)
+        .sink_write_enable (sink_write_enable), .sink_write_both (sink_write_both), .sink_write_address (sink_write_address), .sink_write_data (sink_write_data)
     );
 
     // ---- the sink area: two pages, the program writes the shadow one, the pages flip at a pass's start ----
@@ -87,7 +87,10 @@ module tb_csp_cosim (
     initial for (int page = 0; page < 2; page++) for (int word = 0; word < csp_pkg::SINK_COUNT; word++) sink_pages[page][word] = '0;
     always_ff @(posedge clk) begin
         if (pass_start) shadow_page <= ~shadow_page;
-        if (sink_write_enable) sink_pages[shadow_page][sink_write_address] <= sink_write_data;
+        if (sink_write_enable) begin
+            sink_pages[shadow_page][sink_write_address] <= sink_write_data;
+            if (sink_write_both) sink_pages[~shadow_page][sink_write_address] <= sink_write_data;   // the firmware's word
+        end
     end
 
     // ---- the cycles a pass took: the issue cycle after the program's last row (the model's report.cycles) ----

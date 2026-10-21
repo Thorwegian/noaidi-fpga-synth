@@ -19,6 +19,7 @@ module tb_sink_area;
     always #6.781 clk = ~clk;
     logic reset_n = 1;
     logic write_enable = 0;
+    logic write_both = 0;
     logic [csp_pkg::SINK_WORD_W-1:0] write_address = '0;
     logic [csp_pkg::WORD_W-1:0]      write_data = '0;
     logic pass_start = 0;
@@ -26,7 +27,7 @@ module tb_sink_area;
     wire  [PORTS-1:0][csp_pkg::WORD_W-1:0]      read_data;
 
     csp_sink_area u_sink_area (
-        .clk (clk), .reset_n (reset_n), .write_enable (write_enable), .write_address (write_address),
+        .clk (clk), .reset_n (reset_n), .write_enable (write_enable), .write_both (write_both), .write_address (write_address),
         .write_data (write_data), .pass_start (pass_start), .read_address (read_address), .read_data (read_data)
     );
 
@@ -76,7 +77,16 @@ module tb_sink_area;
         expect_all(5, 0, "a word the second pass did not write is the older page's (empty)");
         $display("pass: the shadow page is published a pass later");
 
-        $display("--- 3. the word nobody writes reads zero ---");
+        $display("--- 3. a firmware word (both pages) survives the flips ---");
+        write_both = 1; write(9, 77); write_both = 0;
+        expect_all(9, 77, "at once, on the page the partials read");
+        flip();
+        expect_all(9, 77, "after a flip");
+        flip();
+        expect_all(9, 77, "and the next");
+        $display("pass: the firmware's word is on both pages");
+
+        $display("--- 4. the word nobody writes reads zero ---");
         expect_all(1023, 0, "the zero word");
         $display("pass: word 1023 is zero");
 
