@@ -43,7 +43,10 @@ int cmd_pairwatch(int argc, char **argv) {
     }
     const int first = static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1;
     const int reads = argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 2000;
-    int disagree = 0, failed = 0;
+    // The pair's two status words are fetched a few microseconds apart within one
+    // link frame, so the odd half is the next pass's in a share of the reads that
+    // grows with the clock: a difference of exactly one is that, not a miss.
+    int disagree = 0, next_pass = 0, failed = 0;
     uint64_t first_disagreement = 0;
     for (int n = 0; n < reads; ++n) {
         uint64_t pair = 0;
@@ -53,17 +56,23 @@ int cmd_pairwatch(int argc, char **argv) {
         }
         const unsigned even = static_cast<unsigned>(pair >> 18) & 0x3FFFF;
         const unsigned odd  = static_cast<unsigned>(pair) & 0x3FFFF;
-        if (even != odd) {
-            if (disagree == 0) {
-                first_disagreement = pair;
-            }
-            ++disagree;
+        if (even == odd) {
+            continue;
         }
+        if (odd == ((even + 1) & 0x3FFFF)) {
+            ++next_pass;
+            continue;
+        }
+        if (disagree == 0) {
+            first_disagreement = pair;
+        }
+        ++disagree;
         if ((n & 255) == 255) {
             vTaskDelay(1); // let the idle task run: the watchdog
         }
     }
-    std::printf("  pair %03x: %d of %d reads disagree", first, disagree, reads);
+    std::printf("  pair %03x: %d of %d reads disagree (%d more were the next pass's odd half)", first, disagree, reads,
+                next_pass);
     if (disagree > 0) {
         std::printf(" (first: %05x vs %05x)",
                     static_cast<unsigned>(first_disagreement >> 18) & 0x3FFFF,
