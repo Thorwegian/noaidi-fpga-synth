@@ -35,6 +35,10 @@ package csp_pkg;
     parameter int ROM_W          = 18;
     parameter int ROM_ADDRESS_W  = 10;
     parameter logic [ROM_ADDRESS_W-1:0] ROM_PARK_ROW = '1;   // the decode parks here while held, likewise
+    // the vector loops' rows, the same in every program (csp.hpp): the front end knows a vector
+    // loop by its op field, one cycle after the row is captured, before the ROM has decoded it
+    parameter logic [7:0] OP_LOOP_VI = 8'd1;
+    parameter logic [7:0] OP_LOOP_VJ = 8'd2;
 
     parameter int FIFO_DEPTH     = 512;           // the write FIFO: 36-bit dwords
     parameter int FIFO_POINTER_W = 10;            // one more bit than the index: full from empty

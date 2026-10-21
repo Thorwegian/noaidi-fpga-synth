@@ -109,7 +109,17 @@ reads in its E1b (4) and a `SKIP` in its R2 (2): a reader of either issues
 cycles after the `IDX` issues, the three rows between being NOPs the
 assembler lays itself. A loop's repeat is decided in A and redirects the
 program counter: the four rows behind the loop's last, in D3, D2, D1 and F,
-are discarded, so a repeat costs **4** cycles.
+are discarded, so a repeat costs **4** cycles. A vector loop's row is known
+in D2, from the op field captured in D1 (the ROM's rows 1 and 2 are the
+vector loops'), one cycle after the body's first row went out for element
+0: the row fetched in that cycle is killed, and from then on the front end
+fetches each body row once an element of the round, the element's number
+riding down the pipeline with the row — **1** bubble to enter, **0** to
+leave. In A the loop's own index is the element's (the base stepped by the
+stride, by element); the other index and the flags are the element's
+private copies, sixteen of each, written by its own `IDX` (E1) and `CMP`
+(E5) and read through to the registers until then; the last element's
+land in the registers too.
 
 No block RAM output feeds logic and no logic feeds a block RAM pin: IMEM's
 row, the ROM's control word, DMEM's words and the write FIFO's head are each

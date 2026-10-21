@@ -541,6 +541,9 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
                 note_writes(body, state);
                 mine = {other_index, flags_, state.scoreboard.state_ready, state.scoreboard.index_ready[other_slot]};
                 ++state.cycle;
+                // the bubble behind the first row's first element: the chip's front end knows
+                // the loop one cycle late and kills the row it fetched meanwhile
+                if (first == 0 && row == start && element == 0) ++state.cycle;
             }
         }
     }
@@ -569,7 +572,7 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
                                                                 each.other_index_ready);
         }
     }
-    state.cycle += index_latency - 1;
+    // nothing to leave: the own index after the loop is in its register for the next row
     state.pc = end;
 }
 

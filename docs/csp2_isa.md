@@ -149,7 +149,10 @@ the operation is the same):
 | front end | `LOOP`, `LOOP.v`, `SKIP`, `IDX`, `NOP` | section 5, section 6 |
 
 A row the program never uses is a row the ROM never holds; the ROM's
-image is the assembler's, loaded with the program.
+image is the assembler's, loaded with the program. Three rows are fixed in
+every image: row 0 is `NOP`, rows 1 and 2 are `LOOP.vi` and `LOOP.vj` —
+the front end knows a vector loop by its `op` field, one cycle after the
+row is captured and before the ROM has decoded it (section 5).
 
 ## 5. Loops
 
@@ -174,6 +177,18 @@ checks it).
 
 Inside a vector loop: no loop, no `SKIP`, no `ACC`; `SEL` for anything
 conditional. A vector loop may be the inner loop of a scalar one.
+
+What a vector loop costs: its own row, one cycle; each body row once an
+element of the round, one cycle each, rounds back to back; and **one
+bubble** behind the first row's first element — the front end knows the
+loop one cycle after that element went out, from the row's `op` field,
+and kills the row it fetched meanwhile. Nothing to leave: on the last
+element of the last round the loop's index register takes the index
+after the loop (the base stepped once an element), and the last
+element's other index and flags are in the registers for the rows after.
+Until an element's own `IDX` or `CMP` has written its private copy, the
+element reads the register's value, so an `IDX` or `CMP` from before the
+loop still in flight lands where the first elements read it.
 
 ## 6. Conditionality
 

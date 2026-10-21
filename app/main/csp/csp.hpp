@@ -34,6 +34,13 @@ constexpr int cycles_per_pass = 1536; // one 48 kHz sample
 constexpr int pass_cycle_limit = 1472; // instructions issue before this
 constexpr int vector_round   = 16;    // elements in flight in a vector loop
 
+// The decode ROM's rows for the vector loops, the same in every program: the
+// chip's front end knows a vector loop by its op field, one cycle after the
+// row is captured and before the ROM has decoded it (rtl/csp/csp_core.sv).
+constexpr uint16_t op_vector_loop_i = 1;
+constexpr uint16_t op_vector_loop_j = 2;
+constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
+
 // ---- the pipeline's timing (rtl/csp/csp_core.sv) ---------------------------
 //
 // The chip has no interlock: the assembler places every instruction so
@@ -42,7 +49,10 @@ constexpr int vector_round   = 16;    // elements in flight in a vector loop
 // issued at c + result_latency; its flags and the accumulator are readable
 // at c + state_latency; an IDX's index is used at c + index_latency, which
 // the assembler lays after it as three wait rows (the chip has no stall); a loop's repeat and a skip's jump
-// cost jump_penalty cycles over moving on to the next word.
+// cost jump_penalty cycles over moving on to the next word. A vector loop
+// issues each body row once an element of the round, one cycle each, after
+// one bubble behind the first row's first element (the front end knows the
+// loop one cycle late), and costs nothing to leave.
 
 constexpr int result_latency = 9;
 constexpr int state_latency  = 7;

@@ -634,9 +634,10 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                     ++row;
                 }
                 if (out) loop_end_row[at] = out->size();
-                // the loop's cycles: every row for every round
+                // the loop's cycles: every row for every round, and the bubble behind the
+                // first row's first element (the chip's front end knows the loop one cycle late)
                 const int64_t rows = row;
-                int64_t end_cycle = body_cycle;
+                int64_t end_cycle = body_cycle + 1;
                 for (int r = 0; r < rounds; ++r) {
                     const int in_round = std::min(count - r * vector_round, vector_round);
                     end_cycle += rows * in_round;
@@ -649,7 +650,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                 at_index[0] = body_index[0];
                 at_index[1] = body_index[1];
                 at_index[entry.which == IndexRegister::j ? 1 : 0].known_base = false;
-                next = end_cycle + index_latency - 1;
+                next = end_cycle;                        // the loop costs nothing to leave
                 at   = entry.end;
                 continue;
             }
@@ -706,6 +707,14 @@ ProgramBuilder::Built ProgramBuilder::build() const {
     }
     std::map<uint32_t, uint16_t> rom_index;
     rom_index[0] = 0;
+    // the vector loops' rows are fixed: the chip's front end knows them by number
+    for (const auto [which, row] : {std::pair{IndexRegister::i, op_vector_loop_i}, std::pair{IndexRegister::j, op_vector_loop_j}}) {
+        Control vector  = control_of(Op::vloop, false, ASource::zero);
+        vector.sub      = static_cast<uint8_t>(2 | (which == IndexRegister::j ? 1 : 0));
+        built.image.rom[row] = vector.encode();
+        rom_index[vector.encode()] = row;
+    }
+    built.image.rom_used = rom_reserved;
     auto rom_row = [&](const Control &control) -> uint16_t {
         const uint32_t bits = control.encode();
         const auto found    = rom_index.find(bits);

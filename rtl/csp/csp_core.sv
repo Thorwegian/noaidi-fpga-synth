@@ -46,10 +46,24 @@
 // and kills the two rows already behind it, then counts the rest as they
 // arrive; it never crosses a LOOP or the end of its loop (the assembler checks).
 //
-// Scalar only: vector loops are #236's. A row that is not a real row (the
-// bubble of a redirect, a cycle before the pass's rows) is `present` = 0; a
-// row a SKIP killed is present but not `live`: it still ends a loop, and
-// reads, but writes nothing and changes no state.
+// A vector loop (docs/csp2_isa.md section 5) is the front end's other rule:
+// each body row is fetched once for every element of a round of sixteen, the
+// element's number riding down the pipeline with the row. The loop's row is
+// known at D2, from the op field captured at D1 (the decode ROM's rows
+// csp_pkg::OP_LOOP_VI and OP_LOOP_VJ are the vector loops' and nothing
+// else's), one cycle after the body's first row went out for element 0: the
+// row fetched in that cycle is killed, and the first row is fetched again
+// for the elements after — a loop costs one bubble to enter and nothing to
+// leave. In A the loop's own index is the element's (the base stepped by the
+// stride, by element), and the other index and the flags are the element's
+// private copies, sixteen of each, read through to the registers until the
+// element's own IDX or CMP has written them; the last element's land in the
+// registers too, for the rows after the loop.
+//
+// A row that is not a real row (the bubble of a redirect or of a vector
+// loop's entry, a cycle before the pass's rows) is `present` = 0; a row a
+// SKIP killed is present but not `live`: it still ends a loop, and reads,
+// but writes nothing and changes no state.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_core (
@@ -143,6 +157,19 @@ module csp_core (
     logic signed [53:0] accumulator;
     logic               flag_negative, flag_zero, flag_overflow;
 
+    // ---- the vector loop's state in A and the elements' private copies ----------------------
+    logic               va_own_is_j;                       // the loop steps j; i is the other index
+    logic [11:0]        va_stride;
+    logic [11:0]        va_round_base;                     // the own index of the round's element 0
+    logic [11:0]        va_element_index;                  // the own index of the instance in A
+    logic [11:0]        va_after;                          // the own index after the loop: the base stepped once an element
+    logic [PC_W-1:0]    va_last;                           // the body's last row
+    // the other index and the flags, an element's own once its IDX or CMP has written them; until
+    // then the registers' (which an IDX or CMP from before the loop may still be writing)
+    logic [11:0]        other_copy [16];
+    logic [15:0]        other_valid;
+    logic [15:0]        copy_negative, copy_zero, copy_overflow, copy_valid;
+
     // ---- loop contexts: one for each index register, the later pushed the inner ------
     logic               loop_active_i, loop_active_j;
     logic [PC_W-1:0]    loop_start_i, loop_start_j;       // the first body row
@@ -161,6 +188,22 @@ module csp_core (
     logic [PC_W-1:0]    redirect_target;
     logic [10:0]        skip_remaining;
 
+    // ---- the vector loop in the front end: each body row fetched once an element of the round ----
+    localparam int ELEMENT_W = 4;                          // a round: sixteen elements
+    localparam int ROUND     = 1 << ELEMENT_W;
+    logic               v_fetching;                        // the fetch is inside a vector body
+    logic [PC_W-1:0]    v_start, v_last;                   // the body's first and last row
+    logic [ELEMENT_W-1:0] v_element;                       // the element the next fetch is for
+    logic [ELEMENT_W:0] v_in_round;                        // elements in this round, 1 … 16
+    logic [9:0]         v_left;                            // elements in the rounds after this one
+    // the row's tags, with it down the pipeline: a vector instance, its element, the element the
+    // last of its round (A resets the own index for the next row), the last element of the last
+    // round (the loop ends with its last row; its IDX and CMP land in the registers)
+    logic [ELEMENT_W-1:0] decode_element, rom_element, capture_element, a_element;
+    logic               decode_vector, rom_vector, capture_vector, a_vector;
+    logic               decode_rowlast, rom_rowlast, capture_rowlast, a_rowlast;
+    logic               decode_final, rom_final, capture_final, a_final;
+
     // running is the hold as sampled at the pass start: a pass that started runs its rows to the
     // end whatever the hold does meanwhile, so that a pass is atomic and a frozen chip's registers
     // are a whole number of passes (the chip check, tools/lab/chip_check.py)
@@ -176,6 +219,29 @@ module csp_core (
     wire  [10:0] skip_after_inflight = skip_count > 11'd2 ? skip_count - 11'd2 : 11'd0;
     wire  [10:0] skip_remaining_now  = skip_taken ? skip_after_inflight : skip_remaining;
 
+    // The vector loop's row at D2: its op field, captured at D1, is one of the two rows the ROM
+    // keeps for vector loops. The fetch now in flight is the body's second row for element 0,
+    // one too early: killed. The body's first row went out the cycle before, for element 0.
+    wire        v_detect       = rom_valid && !redirect
+                                 && (rom_row[71:64] == csp_pkg::OP_LOOP_VI || rom_row[71:64] == csp_pkg::OP_LOOP_VJ);
+    wire [9:0]  v_count        = rom_row[45:36];           // the loop's count, x's ten bits
+    wire [ELEMENT_W:0] v_first_round = v_count > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_count[ELEMENT_W:0];
+    // this cycle's fetch as a vector instance — the registers' row and element, or at the detection
+    // the body's first row for element 0, which the cycle before fetched (the killed fetch stands
+    // in for it here, so that the next fetch follows the same rule as any other)
+    wire        v_now          = v_fetching || v_detect;
+    wire [ELEMENT_W-1:0] v_element_now = v_detect ? '0 : v_element;
+    wire [ELEMENT_W:0] v_in_round_now  = v_detect ? v_first_round : v_in_round;
+    wire [9:0]  v_left_now     = v_detect ? v_count - 10'(v_first_round) : v_left;
+    wire [PC_W-1:0] v_start_now = v_detect ? rom_pc + 1'b1 : v_start;
+    wire [PC_W-1:0] v_last_now  = v_detect ? rom_row[PC_W-1:0] - 1'b1 : v_last;
+    wire [PC_W-1:0] v_row_now   = v_detect ? v_start_now : pc;
+    wire        v_last_element = v_element_now == ELEMENT_W'(v_in_round_now - 1'b1);
+    wire        v_last_row     = v_row_now == v_last_now;
+    wire        v_round_done   = v_now && v_last_element && v_last_row;
+    wire        v_done         = v_round_done && v_left_now == '0;
+    wire [ELEMENT_W:0] v_next_round = v_left_now > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_left_now[ELEMENT_W:0];
+
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             running        <= 1'b0;
@@ -186,17 +252,21 @@ module csp_core (
             a_present      <= 1'b0;
             a_live         <= 1'b0;
             skip_remaining <= '0;
+            v_fetching     <= 1'b0;
         end else begin
             if (pass_start) running <= !held;
             // a pass that starts held parks IMEM's fetch on the row the load writes first (the
             // pins are the register) and stays parked until a pass starts running
-            if (pass_start)     pc <= held ? csp_pkg::PROGRAM_PARK_ROW : '0;
-            else if (!running)  pc <= csp_pkg::PROGRAM_PARK_ROW;
-            else if (redirect)  pc <= redirect_target;
-            else                pc <= pc + 1'b1;
+            if (pass_start)         pc <= held ? csp_pkg::PROGRAM_PARK_ROW : '0;
+            else if (!running)      pc <= csp_pkg::PROGRAM_PARK_ROW;
+            else if (redirect)      pc <= redirect_target;
+            else if (v_now && !v_last_element)          pc <= v_row_now;            // the same row, the next element
+            else if (v_round_done && v_left_now != '0)  pc <= v_start_now;          // the next round
+            else if (v_now)                             pc <= v_row_now + 1'b1;     // the next row, or past the body
+            else                                        pc <= pc + 1'b1;
             // a row is in flight for four cycles between the program counter and A: a repeat
-            // discards the four behind the loop's last
-            decode_valid  <= fetch_valid && !redirect && !pass_start;
+            // discards the four behind the loop's last; a vector loop's detection kills the one row
+            decode_valid  <= fetch_valid && !redirect && !pass_start && !v_detect;
             rom_valid     <= decode_valid && !redirect;
             capture_valid <= rom_valid && !redirect;
             a_present     <= arrive;
@@ -204,7 +274,38 @@ module csp_core (
             if (pass_start)                                  skip_remaining <= '0;
             else if (arrive && skip_remaining_now != '0)     skip_remaining <= skip_remaining_now - 11'd1;
             else                                             skip_remaining <= skip_remaining_now;
+            // the vector fetch
+            if (pass_start || redirect || v_done) v_fetching <= 1'b0;
+            else if (v_detect)                     v_fetching <= 1'b1;
+            if (v_now) begin
+                v_element  <= v_last_element ? '0 : v_element_now + 1'b1;
+                v_in_round <= v_round_done ? v_next_round : v_in_round_now;
+                v_left     <= v_round_done ? v_left_now - 10'(v_next_round) : v_left_now;
+                v_start    <= v_start_now;
+                v_last     <= v_last_now;
+            end
         end
+    end
+
+    // the tags, registered with the row they belong to: the row fetched this cycle is at D1 next
+    // cycle; at the detection the row at D1 is the body's first for element 0, tagged on its way to D2
+    always_ff @(posedge clk) begin
+        decode_vector   <= v_fetching;
+        decode_element  <= v_element;
+        decode_rowlast  <= v_fetching && v_last_element;
+        decode_final    <= v_fetching && v_last_element && v_left == '0;
+        rom_vector      <= v_detect ? 1'b1 : decode_vector;
+        rom_element     <= v_detect ? '0 : decode_element;
+        rom_rowlast     <= v_detect ? v_last_element : decode_rowlast;
+        rom_final       <= v_detect ? (v_last_element && v_left_now == '0) : decode_final;
+        capture_vector  <= rom_vector;
+        capture_element <= rom_element;
+        capture_rowlast <= rom_rowlast;
+        capture_final   <= rom_final;
+        a_vector        <= capture_vector;
+        a_element       <= capture_element;
+        a_rowlast       <= capture_rowlast;
+        a_final         <= capture_final;
     end
 
     // Nothing but a register between a block's output and the logic that uses it, and nothing
@@ -237,9 +338,14 @@ module csp_core (
     wire [11:0] a_y_operand  = a_row[35:24];
     wire [23:0] a_imm        = a_row[23:0];
 
-    wire [11:0] a_r_address  = operand_address(a_r_operand, index_i, index_j);
-    wire [11:0] a_x_address  = operand_address(a_x_operand, index_i, index_j);
-    wire [11:0] a_y_address  = operand_address(a_y_operand, index_i, index_j);
+    // the indexes an instance of a vector body addresses by: the loop's own is the element's, the
+    // other the element's copy when its own IDX has set it, else the register's
+    wire [11:0] a_other = other_valid[a_element] ? other_copy[a_element] : (va_own_is_j ? index_i : index_j);
+    wire [11:0] a_i     = a_vector ? (va_own_is_j ? a_other : va_element_index) : index_i;
+    wire [11:0] a_j     = a_vector ? (va_own_is_j ? va_element_index : a_other) : index_j;
+    wire [11:0] a_r_address  = operand_address(a_r_operand, a_i, a_j);
+    wire [11:0] a_x_address  = operand_address(a_x_operand, a_i, a_j);
+    wire [11:0] a_y_address  = operand_address(a_y_operand, a_i, a_j);
     wire        a_r_none     = a_r_operand[11:10] == csp_pkg::MODE_IMMEDIATE;   // no result
     wire        a_x_immediate = a_x_operand[11:10] == csp_pkg::MODE_IMMEDIATE;
     wire        a_y_immediate = a_y_operand[11:10] == csp_pkg::MODE_IMMEDIATE;
@@ -252,11 +358,38 @@ module csp_core (
     wire a_read_y = a_present && a_reads_y && !a_y_immediate && !a_y_address[11];
 
     // ---- A: loops ---------------------------------------------------------------------------
-    wire a_is_loop = a_present && a_live && a_unit == csp_pkg::UNIT_LOOP && !a_sub[1];   // scalar only
+    wire a_is_loop = a_present && a_live && a_unit == csp_pkg::UNIT_LOOP && !a_sub[1];   // scalar
     wire a_loop_on_j = a_sub[0];
 
-    wire hit_i = a_present && loop_active_i && a_pc == loop_last_i;
-    wire hit_j = a_present && loop_active_j && a_pc == loop_last_j;
+    // a vector loop's row: the own index's base, the stride, the body's last row; the elements'
+    // copies all stale. Its instances: the own index stepped by element, reset for each row to
+    // the round's base, which the last row's last element moves on by a round; on the last
+    // element of the last round the own index register takes the index after the loop.
+    wire a_is_vector_loop = a_present && a_live && a_unit == csp_pkg::UNIT_LOOP && a_sub[1];
+    wire a_instance       = a_present && a_vector;
+    wire a_vector_exit    = a_instance && a_final && a_pc == va_last;
+    wire [11:0] a_own_index = a_loop_on_j ? index_j : index_i;
+    wire [11:0] va_next_base = va_round_base + {va_stride[7:0], 4'd0};   // a round on: sixteen strides
+
+    always_ff @(posedge clk) begin
+        if (a_is_vector_loop) begin
+            va_own_is_j      <= a_loop_on_j;
+            va_stride        <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
+            va_round_base    <= a_own_index;
+            va_element_index <= a_own_index;
+            va_after         <= a_own_index;
+            va_last          <= a_imm[PC_W-1:0] - 1'b1;
+        end else if (a_instance) begin
+            if (!a_rowlast)                 va_element_index <= va_element_index + va_stride;
+            else if (a_pc != va_last)       va_element_index <= va_round_base;
+            else begin                      va_element_index <= va_next_base; va_round_base <= va_next_base; end
+            if (a_pc == va_last)            va_after <= va_after + va_stride;
+        end
+    end
+
+    // a scalar loop whose last row is a vector loop's ends on the last element of the last round
+    wire hit_i = a_present && loop_active_i && a_pc == loop_last_i && (!a_vector || a_final);
+    wire hit_j = a_present && loop_active_j && a_pc == loop_last_j && (!a_vector || a_final);
     wire exhausted_i = loop_remaining_i == 10'd1;
     wire exhausted_j = loop_remaining_j == 10'd1;
     // a row that ends two loops ends the inner first, and the outer only if the inner is exhausted
@@ -307,6 +440,11 @@ module csp_core (
     // ---- R1: the read pins -------------------------------------------------------------------
     logic               r1_live;
     logic [17:0]        r1_control;
+    // the vector tags, with the row to the stages that use them: the element (E1's IDX, E1b's
+    // SEL, E5's flags), the instance (the same), the last element of the last round (E1, E5)
+    logic [ELEMENT_W-1:0] r1_element, r2_element, e1_element, e1b_element, e2_element, e3_element, e4_element, e5_element;
+    logic               r1_vector, r2_vector, e1_vector, e1b_vector, e2_vector, e3_vector, e4_vector, e5_vector;
+    logic               r1_final, r2_final, e1_final, e1b_final, e2_final, e3_final, e4_final, e5_final;
     logic [3:0]         r1_cond;
     logic [23:0]        r1_imm;
     logic               r1_r_wide, r1_y_wide, r1_x_immediate, r1_y_immediate, r1_r_none;
@@ -326,6 +464,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         r1_control       <= a_control;
+        {r1_element, r1_vector, r1_final} <= {a_element, a_vector, a_final};
         r1_cond          <= a_cond;
         r1_imm           <= a_imm;
         r1_r_wide        <= a_r_wide;
@@ -362,6 +501,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         r2_control       <= r1_control;
+        {r2_element, r2_vector, r2_final} <= {r1_element, r1_vector, r1_final};
         r2_cond          <= r1_cond;
         r2_imm           <= r1_imm;
         r2_r_wide        <= r1_r_wide;
@@ -396,6 +536,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e1_control       <= r2_control;
+        {e1_element, e1_vector, e1_final} <= {r2_element, r2_vector, r2_final};
         e1_cond          <= r2_cond;
         e1_r_none        <= r2_r_none;
         e1_write_address <= r2_write_address;
@@ -444,6 +585,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e1b_control       <= e1_control;
+        {e1b_element, e1b_vector, e1b_final} <= {e1_element, e1_vector, e1_final};
         e1b_cond          <= e1_cond;
         e1b_r_none        <= e1_r_none;
         e1b_write_address <= e1_write_address;
@@ -511,6 +653,12 @@ module csp_core (
     wire e1b_signs_agree     = (multiply_a[17] ^ multiply_b[35]) == multiply_c[53];
     wire e1b_c_negative      = multiply_c[53];
 
+    // the flags a SEL chooses by: inside a vector loop the element's own once its CMP has landed
+    wire e1b_own_flags = e1b_vector && copy_valid[e1b_element];
+    wire e1b_negative  = e1b_own_flags ? copy_negative[e1b_element] : flag_negative;
+    wire e1b_zero      = e1b_own_flags ? copy_zero[e1b_element]     : flag_zero;
+    wire e1b_overflow  = e1b_own_flags ? copy_overflow[e1b_element] : flag_overflow;
+
     // MIN, MAX, SEL, ANDXOR: one word, no overflow
     logic [17:0] e1b_logic_result;
     always_comb begin
@@ -522,7 +670,7 @@ module csp_core (
         case (e1b_sub)
             csp_pkg::LOGIC_MIN: e1b_logic_result = $signed(e1b_x) < $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
             csp_pkg::LOGIC_MAX: e1b_logic_result = $signed(e1b_x) > $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
-            csp_pkg::LOGIC_SEL: e1b_logic_result = condition_holds(e1b_cond, flag_negative, flag_zero, flag_overflow) ? e1b_y[17:0] : e1b_x;
+            csp_pkg::LOGIC_SEL: e1b_logic_result = condition_holds(e1b_cond, e1b_negative, e1b_zero, e1b_overflow) ? e1b_y[17:0] : e1b_x;
             default:            e1b_logic_result = (e1b_x & e1b_y[17:0]) ^ a_bits;
         endcase
     end
@@ -541,20 +689,36 @@ module csp_core (
     // IDX: the sum of X and Y, twelve bits
     wire [11:0] index_sum = e1_x[11:0] + e1_y[11:0];
 
+    wire e1_is_index = e1_live && e1_unit == csp_pkg::UNIT_INDEX;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             index_i <= '0;
             index_j <= '0;
         end else begin
             // a loop's step at its last row's A: the index register, stepped by the stride, whether the
-            // loop repeats or ends
+            // loop repeats or ends; a vector loop's own index after the loop, on its last instance
             if (process_i) index_i <= index_i + loop_stride_i;
             if (process_j) index_j <= index_j + loop_stride_j;
-            if (e1_live && e1_unit == csp_pkg::UNIT_INDEX) begin
+            if (a_vector_exit) begin
+                if (va_own_is_j) index_j <= va_after + va_stride;
+                else             index_i <= va_after + va_stride;
+            end
+            // an IDX: the register, or inside a vector loop the element's copy, and the register
+            // too for the last element, whose indexes the rows after the loop see
+            if (e1_is_index && (!e1_vector || e1_final)) begin
                 if (e1_writes == csp_pkg::WRITES_INDEX_J) index_j <= index_sum;
                 else                                      index_i <= index_sum;
             end
         end
+    end
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)              other_valid <= '0;
+        else if (a_is_vector_loop) other_valid <= '0;
+        else if (e1_is_index && e1_vector) other_valid[e1_element] <= 1'b1;
+    end
+    always_ff @(posedge clk) begin
+        if (e1_is_index && e1_vector) other_copy[e1_element] <= index_sum;
     end
 
     // ---- E2: the block's input registers sample the operand registers; the payload waits -----------------------------
@@ -575,6 +739,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e2_control         <= e1b_control;
+        {e2_element, e2_vector, e2_final} <= {e1b_element, e1b_vector, e1b_final};
         e2_r_none          <= e1b_r_none;
         e2_write_address   <= e1b_write_address;
         e2_logic_result    <= e1b_logic_result;
@@ -624,6 +789,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e3_control         <= e2_control;
+        {e3_element, e3_vector, e3_final} <= {e2_element, e2_vector, e2_final};
         e3_r_none          <= e2_r_none;
         e3_write_address   <= e2_write_address;
         e3_logic_result    <= e2_logic_result;
@@ -654,6 +820,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e4_control       <= e3_control;
+        {e4_element, e4_vector, e4_final} <= {e3_element, e3_vector, e3_final};
         e4_r_none        <= e3_r_none;
         e4_write_address <= e3_write_address;
         e4_logic_result  <= e3_logic_result;
@@ -680,6 +847,7 @@ module csp_core (
 
     always_ff @(posedge clk) begin
         e5_control       <= e4_control;
+        {e5_element, e5_vector, e5_final} <= {e4_element, e4_vector, e4_final};
         e5_r_none        <= e4_r_none;
         e5_write_address <= e4_write_address;
         e5_logic_result  <= e4_logic_result;
@@ -803,7 +971,9 @@ module csp_core (
             write_odd_enable  <= 1'b0;
             sink_write_enable <= 1'b0;
         end else begin
-            if (e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS) begin
+            // the flags: the registers', or inside a vector loop the element's copy, and the
+            // registers' too for the last element, whose flags the rows after the loop see
+            if (e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS && (!e5_vector || e5_final)) begin
                 flag_negative <= result_negative;
                 flag_zero     <= result_zero;
                 flag_overflow <= result_overflow;
@@ -812,6 +982,20 @@ module csp_core (
             write_even_enable <= extra_write_enable ? extra_even_enable : core_even_enable;
             write_odd_enable  <= extra_write_enable ? extra_odd_enable  : core_odd_enable;
             sink_write_enable <= e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD;
+        end
+    end
+
+    wire e5_sets_copy = e5_live && e5_vector && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)              copy_valid <= '0;
+        else if (a_is_vector_loop) copy_valid <= '0;
+        else if (e5_sets_copy)     copy_valid[e5_element] <= 1'b1;
+    end
+    always_ff @(posedge clk) begin
+        if (e5_sets_copy) begin
+            copy_negative[e5_element] <= result_negative;
+            copy_zero[e5_element]     <= result_zero;
+            copy_overflow[e5_element] <= result_overflow;
         end
     end
 
