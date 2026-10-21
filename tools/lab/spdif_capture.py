@@ -37,6 +37,7 @@ With --wav the file is analysed instead of captured. --keep saves the capture.
 """
 import argparse
 import math
+import os
 import subprocess
 import sys
 import time
@@ -95,11 +96,12 @@ def capture(seconds, device, port, keep):
     def midi(message):
         subprocess.run(["aseqsend", "-p", port, message], check=True)
 
-    path = keep or "/tmp/spdif_capture.wav"
+    path = keep or os.path.join(os.environ.get("TMPDIR", "/tmp"), "spdif_capture.wav")
     midi("B0 %02X 7F" % TONE_CC)
     time.sleep(0.5)
+    # arecord's -d is whole seconds, and 0 records for ever: at least one
     subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
-                    "-d", str(int(seconds)), path], check=True)
+                    "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)
     midi("B0 %02X 00" % TONE_CC)
     return read_wav(path)
 
@@ -377,9 +379,10 @@ def write_dump(registers, path, before=""):
 
 
 def capture_stream(seconds, device, keep):
-    path = keep or "/tmp/spdif_capture.wav"
+    path = keep or os.path.join(os.environ.get("TMPDIR", "/tmp"), "spdif_capture.wav")
+    # arecord's -d is whole seconds, and 0 records for ever: at least one
     subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
-                    "-d", str(int(seconds)), path], check=True)
+                    "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)
     return read_wav(path)
 
 
