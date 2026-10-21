@@ -651,12 +651,16 @@ module csp_core (
     // INTERP: Y - A in Q4.32, saturated. ADD3: A + Y, saturated to the accumulator.
     wire signed [54:0] difference_full = 55'(e1b_y_value) - 55'(e1b_a_value);
     wire signed [54:0] sum_full        = 55'(e1b_a_value) + 55'(e1b_y_value);
+    // Saturated by the bits above the result: a value fits when they are all its sign. No
+    // comparator chain behind the adder's (#238: with the comparators and the operand's zero test,
+    // this was the chip's longest path once the front end's was cut).
     wire signed [40:0] difference_q432 = 41'(difference_full >>> 14);
+    wire difference_fits = difference_q432[40:35] == {6{difference_q432[35]}};
     wire signed [35:0] difference_saturated =
-            difference_q432 >  41'sd34359738367  ?  36'sd34359738367 :
-            difference_q432 < -41'sd34359738368  ? -36'sd34359738368 : difference_q432[35:0];
-    wire signed [53:0] sum_saturated = sum_full > 55'(ACCUMULATOR_MAX) ? ACCUMULATOR_MAX
-                                     : sum_full < 55'(ACCUMULATOR_MIN) ? ACCUMULATOR_MIN : sum_full[53:0];
+            difference_fits ? difference_q432[35:0]
+                            : (difference_q432[40] ? -36'sd34359738368 : 36'sd34359738367);
+    wire sum_fits = sum_full[54] == sum_full[53];
+    wire signed [53:0] sum_saturated = sum_fits ? sum_full[53:0] : (sum_full[54] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX);
 
     // the multiply-add's operands: a × b + c
     logic signed [17:0] multiply_a;
@@ -684,10 +688,8 @@ module csp_core (
         endcase
     end
 
-    // what E4 needs to see whether the 54-bit sum wrapped inside the block
-    wire e1b_product_nonzero = multiply_a != '0 && multiply_b != '0;
-    wire e1b_signs_agree     = (multiply_a[17] ^ multiply_b[35]) == multiply_c[53];
-    wire e1b_c_negative      = multiply_c[53];
+    // (what E5 needs to see whether the 54-bit sum wrapped inside the block is taken at E3, from
+    // the operand registers the block samples)
 
     // the flags a SEL chooses by: inside a vector loop the element's own once its CMP has landed
     wire e1b_own_flags = e1b_vector && copy_valid[e1b_element] && copy_generation[e1b_element] == e1b_generation;
@@ -765,7 +767,6 @@ module csp_core (
     logic               e2_r_none;
     logic [11:0]        e2_write_address;
     logic [17:0]        e2_logic_result;
-    logic [2:0]         e2_ma_flags;                 // {product nonzero, signs agree, c negative}
     logic signed [53:0] e2_shift_value;
     logic               e2_shift_left;
     logic [5:0]         e2_shift_magnitude;
@@ -781,7 +782,6 @@ module csp_core (
         e2_r_none          <= e1b_r_none;
         e2_write_address   <= e1b_write_address;
         e2_logic_result    <= e1b_logic_result;
-        e2_ma_flags        <= {e1b_product_nonzero, e1b_signs_agree, e1b_c_negative};
         e2_shift_value     <= e1b_a_value;
         e2_shift_left      <= shift_left;
         e2_shift_magnitude <= shift_magnitude;
@@ -815,7 +815,7 @@ module csp_core (
     logic               e3_r_none;
     logic [11:0]        e3_write_address;
     logic [17:0]        e3_logic_result;
-    logic [2:0]         e3_ma_flags;
+    logic [2:0]         e3_ma_flags;                 // {product nonzero, signs agree, c negative}
     logic signed [53:0] e3_shift_value;
     logic               e3_shift_left;
     logic [5:0]         e3_shift_magnitude;
@@ -831,7 +831,12 @@ module csp_core (
         e3_r_none          <= e2_r_none;
         e3_write_address   <= e2_write_address;
         e3_logic_result    <= e2_logic_result;
-        e3_ma_flags        <= e2_ma_flags;
+        // what E5 needs to see whether the 54-bit sum wrapped inside the block: from the operand
+        // registers the block samples, a cycle after E1b's logic ended in them (the same arrival
+        // at E5 as from E1b, and E1b's adder no longer feeds a zero test)
+        e3_ma_flags        <= {multiply_a_q != '0 && multiply_b_q != '0,
+                               (multiply_a_q[17] ^ multiply_b_q[35]) == multiply_c_q[53],
+                               multiply_c_q[53]};
         e3_shift_value     <= e2_shift_value;
         e3_shift_left      <= e2_shift_left;
         e3_shift_magnitude <= e2_shift_magnitude;
