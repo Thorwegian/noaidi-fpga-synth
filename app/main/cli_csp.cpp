@@ -206,7 +206,7 @@ int cmd_selftest(int argc, char **argv) {
 }
 
 // A lab on the board: csp-hold (stop the tick, hold the CSP, clear its program),
-// csp-word and csp-const (load), csp-go (release it). Then csp-peek.
+// csp-row, csp-rom and csp-const (load), csp-go (release it). Then csp-peek.
 // What the lab has loaded since csp-hold, to check against the host's list.
 unsigned s_words_written;
 unsigned s_checksum;
@@ -223,26 +223,47 @@ int cmd_hold(int, char **) {
         const uint64_t row[2] = {0, 0};
         engine_link_raw_write_burst(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row, 2, true);
     }
-    std::printf("  held, program cleared, tick paused\n");
+    for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
+        engine_link_raw_write(fpga_map::rom_base + static_cast<uint32_t>(row), 0);
+    }
+    std::printf("  held, program and decode ROM cleared, tick paused\n");
     return 0;
 }
 
-int cmd_word(int argc, char **argv) {
-    if (argc != 3) {
-        std::printf("usage: csp-word <pc> <36-bit hex>\n");
+// csp-row writes one 72-bit instruction row: two dwords, bits 71:36 then 35:0,
+// at the row's place in IMEM. The CSP must be held (csp-hold).
+int cmd_row(int argc, char **argv) {
+    if (argc != 4) {
+        std::printf("usage: csp-row <pc> <bits 71:36 hex> <bits 35:0 hex>\n");
         return 1;
     }
-    const unsigned pc =
-            static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
-    const uint64_t word = std::strtoull(argv[2], nullptr, 16);
-    // A row is two dwords; the first revision's word rides in the lower one
-    // until #235 writes 72-bit rows.
-    const uint64_t row[2] = {0, word};
+    const unsigned pc    = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const uint64_t row[2] = {std::strtoull(argv[2], nullptr, 16) & spi_link::dword_mask,
+                             std::strtoull(argv[3], nullptr, 16) & spi_link::dword_mask};
+    if (pc >= fpga_map::program_rows) {
+        std::printf("  the program has %u rows\n", static_cast<unsigned>(fpga_map::program_rows));
+        return 1;
+    }
     engine_link_raw_write_burst(fpga_map::program_base + 2 * pc, row, 2, true);
     ++s_words_written;
-    s_checksum = s_checksum * 31u + static_cast<unsigned>(pc) * 7u
-                 + static_cast<unsigned>(word)
-                 + static_cast<unsigned>(word >> 32);
+    s_checksum = s_checksum * 31u + pc * 7u + static_cast<unsigned>(row[0]) + static_cast<unsigned>(row[1]);
+    return 0;
+}
+
+// csp-rom writes one row of the decode ROM: a control word. The CSP must be held.
+int cmd_rom(int argc, char **argv) {
+    if (argc != 3) {
+        std::printf("usage: csp-rom <row> <control word hex>\n");
+        return 1;
+    }
+    const unsigned row  = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const uint64_t word = std::strtoull(argv[2], nullptr, 16) & 0x3FFFF;
+    if (row >= fpga_map::rom_rows) {
+        std::printf("  the decode ROM has %u rows\n", static_cast<unsigned>(fpga_map::rom_rows));
+        return 1;
+    }
+    engine_link_raw_write(fpga_map::rom_base + row, word);
+    s_checksum = s_checksum * 31u + row * 11u + static_cast<unsigned>(word);
     return 0;
 }
 
@@ -444,8 +465,9 @@ const console_cmd_t commands[] = {
          "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
          cmd_hold, nullptr},
-        {"csp-word", "<pc> <hex>", "lab: write an instruction word", cmd_word,
+        {"csp-row", "<pc> <hi hex> <lo hex>", "lab: write an instruction row (bits 71:36, 35:0)", cmd_row,
          nullptr},
+        {"csp-rom", "<row> <hex>", "lab: write a decode ROM row", cmd_rom, nullptr},
         {"csp-const", "<register> <raw>",
          "lab: write a register (applies on csp-go)", cmd_const, nullptr},
         {"csp-burst", "<register> <count> <seed>",

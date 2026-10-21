@@ -120,9 +120,7 @@ bool condition_holds(Condition condition, const Flags &flags) {
 
 } // namespace
 
-Processor::Processor() {
-    registers_[io_base] = 1;   // the first pass's number; each pass writes the next one's at its end, as the chip does
-}
+Processor::Processor() = default;   // the pass counter's register is 0 after reset, as the chip's, until a running pass writes the next pass's number
 
 // ---- firmware side --------------------------------------------------------
 
@@ -598,9 +596,10 @@ PassReport Processor::pass() {
     ++pass_count_;
 
     if (held_) {
-        state.report.writes_applied = apply_window(write_window);   // a held pass takes the window's 48, as the chip does
+        // a held pass takes the window's 48 writes, as the chip does, and leaves the pass
+        // counter's register at the number of the pass after the last one that ran
+        state.report.writes_applied = apply_window(write_window);
         active_page_                = 1 - active_page_;
-        registers_[io_base]         = static_cast<int32_t>(sign_extend(pass_count_ + 1, word_bits));
         return state.report;
     }
 

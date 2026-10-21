@@ -291,9 +291,19 @@ and the DSP. Issue #230 carries the patch work (fork
   so it cannot see that the state is wrong: compare a boot image at
   73.728 with one at 50 MHz for that (`csp-dump 0x0 0x800` after a boot).
 - **Bisect by words** when a program fails: `csp-hold` (clears the
-  program), `csp-word pc hex` for the first N words, `csp-const` for the
-  constants (from `csp asm map.s <program>.s`), `csp-go`, run, `csp-freeze`,
-  dump; "constants intact?" is a criterion that needs no model.
+  program and the decode ROM), `csp-rom row hex` for the ROM rows,
+  `csp-row pc hi lo` for the first N words, `csp-const` for the constants
+  (`csp script <program>.s -f <seed>` prints the whole sequence), `csp-go`,
+  run, `csp-freeze`, dump; "constants intact?" is a criterion that needs
+  no model.
+- **The chip check** is the co-simulation's method on silicon: `csp script`
+  fills every register from a seed and loads a program whose `RUN_COUNT`
+  register (0x3FE) counts its passes; the board runs it, `csp-freeze`,
+  `csp-peek` dumps every register; `csp match <program>.s -c <dump> -f
+  <seed>` runs the model for the passes the dump counts and diffs every
+  register but the inputs. 0 differences on every program in
+  `tools/csp/programs/checks/` is the acceptance; the dev box's
+  `claude_chipcheck.py` does the board side.
 - **Micro-programs** of one to five words isolate a construct; the set
   that passes at 73.728 (plain, `IDX`-relative, vector `i`, private `j`,
   read-modify-write, a register rewritten through the queue while read)

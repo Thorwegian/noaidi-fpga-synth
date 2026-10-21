@@ -99,6 +99,7 @@ module csp (
         .clk                (clk),
         .reset_n            (reset_n),
         .pass_start         (pass_start),
+        .held               (held),
         .cycle              (cycle),
         .pass_counter       (pass_counter),
         .fifo_pop           (fifo_pop),

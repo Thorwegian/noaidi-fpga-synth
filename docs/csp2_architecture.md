@@ -192,7 +192,7 @@ hangs — measured, not inherited.
 | 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
 | 1472 … 1481 | the pipeline drains |
 | 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (1484 … 1531), a register of `csp_pass` takes it, the core's write registers the cycle after, and DMEM samples it one cycle on, 1486 … 1533 |
-| 1533 | the pass counter, for the next pass, is asked for through the same registers (sampled at 1534) into input register 0x040 |
+| 1533 | the pass counter, for the next pass, is asked for through the same registers (sampled at 1534) into input register 0x040 — while the CSP runs; held, the register keeps the number of the pass after the last one that ran, so a frozen chip's state matches the model's |
 | 1534 | the probe asks for its pair: the R copy's read registers take the probe's row |
 | 1535 | the probe's read pins are driven from those registers; its words are out in the cycle after, the next pass's first |
 

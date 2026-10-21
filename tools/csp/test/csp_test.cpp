@@ -910,10 +910,15 @@ std::string control_program(int saws, int squares, int triangles, int sines) {
 void test_selftest_program() {
     Machine m(read_program("map.s") + read_program("selftest.s"));
     m.start();
+    // the pass counter's register holds 0 in the first pass after reset (nothing wrote it yet)
+    // and the pass's number from the second on; the program sees that value
+    int odd_passes = 0;
     for (int pass = 1; pass <= 4; ++pass) {
         const csp::PassReport report = m.run();
         check(report.errors.empty(), "the self-test runs without early reads");
-        const int bit = static_cast<int>(m.processor.pass_count() & 1);
+        const int seen = pass == 1 ? 0 : pass;
+        const int bit  = seen & 1;
+        odd_passes += bit;
         check_equal(m.get("RES_PASS_BIT"), bit, "RES_PASS_BIT follows the pass counter");
         check_equal(m.get("RES_HALF"), bit * 8, "RES_HALF is the bit × 8");
         check_equal(m.get("RES_CHAIN"), bit ? 0x808 : 0x4000, "RES_CHAIN reads the table through IDX");
@@ -923,14 +928,14 @@ void test_selftest_program() {
         check_equal(m.get("RES_SEL"), q(0.125), "SEL after a CMP");
         check_equal(m.get("COUNT_TOTAL"), pass, "COUNT_TOTAL counts the passes");
         check_equal(m.get("COUNT_PASSES"), pass, "COUNT_PASSES, which wraps, counts them too");
-        check_equal(m.get("PASS_VIA_LOGIC"), pass, "the logic unit's copy of the pass counter");
-        check_equal(m.get("PASS_VIA_DSP"), pass, "the multiply-add's copy");
-        check_equal(m.get("PASS_VIA_LOGIC_A"), pass, "the logic unit's second copy");
-        check_equal(m.get("PASS_VIA_LOGIC_B"), pass, "and its third");
+        check_equal(m.get("PASS_VIA_LOGIC"), seen, "the logic unit's copy of the pass counter");
+        check_equal(m.get("PASS_VIA_DSP"), seen, "the multiply-add's copy");
+        check_equal(m.get("PASS_VIA_LOGIC_A"), seen, "the logic unit's second copy");
+        check_equal(m.get("PASS_VIA_LOGIC_B"), seen, "and its third");
     }
-    check_equal(m.get("COUNT_ODD"), 2, "COUNT_ODD counts the odd passes");
-    check_equal(m.get("COUNT_HALF_ODD"), 2, "COUNT_HALF_ODD agrees");
-    check_equal(m.get("COUNT_CHAIN_ODD"), 2, "COUNT_CHAIN_ODD agrees");
+    check_equal(m.get("COUNT_ODD"), odd_passes, "COUNT_ODD counts the odd passes");
+    check_equal(m.get("COUNT_HALF_ODD"), odd_passes, "COUNT_HALF_ODD agrees");
+    check_equal(m.get("COUNT_CHAIN_ODD"), odd_passes, "COUNT_CHAIN_ODD agrees");
 }
 
 // The whole program on 16 channels and 32 voices, every one different. The
@@ -1130,10 +1135,15 @@ void test_control_program_lfos() {
                 m.program.image.length);
     check(worst <= csp::pass_cycle_limit, "the control program with the sines fits a pass: " + std::to_string(worst));
     check_equal(worst, m.program.cycles, "the model counts the cycles the assembler scheduled");
-    // every LFO in the loops has been updated twice in four passes
+    // each half updates in the passes whose pass counter has its parity: the counter's register
+    // reads 0 in the first pass after reset and the pass's number from then on (0, 2, 3, 4), so
+    // the even half updated three times and the odd half once
+    int updates[2] = {0, 0};
+    for (int pass = 1; pass <= 4; ++pass) updates[(pass == 1 ? 0 : pass) & 1]++;
     for (int k = 0; k < 2 * a_half; ++k) {
         const int64_t phase = cpu.read_wide(at(record_of(k), "PHASE"));
-        check_equal(phase, 2 * q_wide(step * 16.0), "LFO " + std::to_string(k) + " updated twice");
+        check_equal(phase, updates[k / a_half] * q_wide(step * 16.0),
+                    "LFO " + std::to_string(k) + " updated " + std::to_string(updates[k / a_half]) + " times");
     }
 }
 
