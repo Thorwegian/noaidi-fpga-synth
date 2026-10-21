@@ -62,31 +62,53 @@ the second revision takes them as given.
 
 ```mermaid
 flowchart LR
-    F[F: IMEM<br/>eight blocks, one 72-bit row<br/>read through the blocks' output registers] --> D[D: decode ROM<br/>port A the row of this word<br/>port B the row of the next<br/>control words registered]
-    D --> I[issue<br/>one registered bit:<br/>the cycle is below the limit]
-    I --> A[A: addresses<br/>index high bits beside offset low bits<br/>private index: 16-way from a register]
-    A --> R[R: DMEM<br/>a copy per read port, even and odd banks<br/>the blocks' own registers, parked when idle]
-    R --> E[E1 to E5: the DSP<br/>its own input and output registers]
-    E --> W[W: the write<br/>from a registered word<br/>registers, a wide pair, a sink, an index]
+    F[F: the program counter<br/>drives IMEM's address pins] --> D[D: IMEM's output register<br/>the decode ROM addressed<br/>from the op field]
+    D --> A[A: the control word out of the ROM's register<br/>operand addresses: index bits beside offset bits<br/>loops pushed and ended, indexes stepped]
+    A --> R1[R1: DMEM's three copies<br/>read pins driven from registers<br/>idle ports and banks parked]
+    R1 --> R2[R2: the words in the blocks' output registers<br/>a SKIP decides]
+    R2 --> E1[E1: operands formatted<br/>the DSP's operands formed<br/>logic unit, IDX, shifter prepared]
+    E1 --> E2[E2: the DSP computes<br/>its own registers on its pins<br/>the shifter's coarse stage]
+    E2 --> E3[E3: the product captured<br/>the shifter's fine stage]
+    E3 --> E4[E4: reduced, saturated or wrapped<br/>flags and accumulator written]
+    E4 --> W[W: write pins from registers<br/>the write lands at the next edge]
 ```
 
-| stage | what happens | what is a register |
-|---|---|---|
-| F | the program counter, a register, addresses the eight IMEM blocks; the row is in their output registers a clock later | the program counter; the blocks' output registers |
-| D | the `op` field addresses the decode ROM's port A; port B is addressed by the next word's `op` (the fetch runs one ahead), so the front end holds this instruction's control word and the next's | both control words, in the ROM's output registers |
-| issue | the instruction issues when the cycle is below the pass's limit; there is no other condition, because the schedule is the assembler's (ISA section 8) | one bit |
-| A | each operand's address is formed by mode: direct, the index's high bits beside the offset, the immediate; the vector element's private index is one of sixteen registers chosen by the registered element number | the addresses, as registers |
-| R | DMEM's copies read the operands; the words are in the blocks' output registers a clock later | the blocks' address and output registers |
-| E1–E5 | the multiply-add in the DSP, operands into its input registers and the sum out of its output register; the add, compare, select, min/max, logic and shift units in the fabric | every stage boundary |
-| W | the result goes from a registered word into DMEM (every copy), or to a sink, or to an index register | the word; the blocks' write registers |
+A row presented to IMEM in cycle *k* is in A in *k*+2, the cycle the assembler
+calls its issue (`FIRST_ISSUE_CYCLE`, 2, for the program's first row); the
+cycles below count from there.
 
-The front end has no hazard check, no skip counter per element and no
-64-way select: the depth that the first revision's seeds reported as
+| stage | cycle | what happens | what is a register |
+|---|---|---|---|
+| F | −2 | the program counter drives IMEM | the program counter |
+| D | −1 | IMEM's output register holds the row; the op field addresses the decode ROM | IMEM's and the ROM's own registers; the row and its pc, copied |
+| A | 0 | the control word is out of the ROM's register; each operand's address is formed by mode (direct, the index's bits beside the offset's, the immediate); a `LOOP` is pushed, a loop's last row repeats or ends it and steps its index register | the addresses, the control word, the row's fields |
+| R1 | 1 | DMEM's three copies sample their address pins, driven from registers; the ports and banks a row does not use are parked | the registers on the pins; the blocks' own |
+| R2 | 2 | the words are in the blocks' output registers, picked by word (the odd or even half) or the immediate; a `SKIP` reads the flags and kills the two rows behind it | the operands, captured |
+| E1 | 3 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; an `IDX` written; the shifter's count worked out | the DSP's own input registers; the logic result, the shifter's inputs |
+| E2 | 4 | the multiply-add computes; the shifter's coarse stage | the DSP's own output register; the shifter |
+| E3 | 5 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
+| E4 | 6 | the sum reduced to its destination, saturated or wrapped; the flags and the accumulator written | the flags and the accumulator; the write registers |
+| W | 7 | the write registers drive DMEM's write pins (or a sink word's); the write lands at the edge after | the registers on the pins |
+
+The numbers the assembler schedules by follow from the table. A result is
+readable by a row issued **7** cycles after the row that wrote it (its read
+pins are driven at 1, the write is sampled at the end of 7, so a reader at
+issue + 7 samples one edge later and never meets it on a row). The flags
+and the accumulator are in their registers from cycle 7, which a `SEL`
+reads in its E1 (3) and a `SKIP` in its R2 (2), so a reader of either
+issues **5** cycles after the writer. An `IDX` writes its index at the end
+of its E1; a row's A reads it **4** cycles after the `IDX` issues, the
+three rows between being NOPs the assembler lays itself. A loop's repeat is
+decided in A and redirects the program counter: the two rows behind the
+loop's last, in D and in F, are discarded, so a repeat costs **2** cycles.
+
+The front end has no hazard check, no stall, no skip counter per element
+and no 64-way select: the depth that the first revision's seeds reported as
 10–13 LUT levels into the private index register is here a block read
-plus a 16-way select from a register. The result latency and the index
-latency are fixed numbers the assembler schedules by (an `IDX` is followed
-by the NOP rows of its latency: the chip has no stall); they are decided with the datapath's stage count and written into
-both this document and the assembler when the RTL is.
+plus short selects from registers. The latencies are the assembler's and the
+model's (`csp.hpp`: `result_latency`, `state_latency`, `index_latency`,
+`jump_penalty`) and the RTL's (`csp_pkg.sv`); the co-simulation checks that
+the chip issues in the cycle the model counts.
 
 ## 2. The memories
 
@@ -94,7 +116,7 @@ both this document and the assembler when the RTL is.
 |---|---|---|---|
 | IMEM, the instruction memory | 8 × (2048 × 9): eight 9-bit slices of one 72-bit row, the same address on all eight, not replicas | A: the SPI load on the SPI clock, with the CSP held; B: the fetch | a dual-clocked block: the load crosses no logic; a row is two 36-bit dwords on the wire (`memory_map.md`) |
 | decode ROM | 1 × (1024 × 18) | A: this word's row; B: the next word's | loaded with the program, as one image |
-| DMEM, the data memory | (1024 × 18) blocks: a copy per read port, each an even and an odd bank for the aligned pairs — two reads a cycle is four blocks, three is six; the datapath decides | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
+| DMEM, the data memory | 6 × (1024 × 18): a copy for each of the three read ports (R, X and Y), each an even and an odd bank for the aligned pairs; every copy takes every write | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
 | the write FIFO | 1 × (512 × 36), holding 511: one 36-bit wire dword an entry | A: the SPI write, on the SPI clock; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. The two ports never meet: the pointers cannot coincide on a row that holds data, and when the FIFO is empty the read port idles one row *behind* the head, not on the row the next write takes — the first revision idled on the head and hid the lost first word behind a decoy write. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
 | sink area | 12 × (1024 × 18) today: six replicas × two pages | A: the CSP's and the firmware's writes, to the shadow page only; B: a partial replica's read of the active page, every clock | the double buffer: the partials read the active page on every clock, so nothing writes it; the CSP and the firmware write the shadow page and the pages swap at the pass boundary (the firmware's words, which the first revision wrote to both pages, go the same way and are taken over at the swap). Six replicas because the partials read six sinks in parallel on every clock; decided on #231 to stay as it is, twelve blocks |
 
@@ -148,8 +170,9 @@ hangs — measured, not inherited.
 | 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
 | 1472 … 1481 | the pipeline drains |
 | 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each lands in DMEM two cycles after its pop, 1484 … 1531 |
-| 1530 … 1534 | the last writes land in the blocks |
-| 1535 | the probe reads its pair (the Y port, unparked for the cycle); the pass counter's write is taken |
+| 1530 … 1532 | the last writes land in the blocks |
+| 1533 | the pass counter, for the next pass, is written into input register 0x040 |
+| 1535 | the probe reads its pair (the R copy's port, unparked for the cycle) |
 
 The sink pages flip at the pass boundary; the partials always read one
 complete pass.

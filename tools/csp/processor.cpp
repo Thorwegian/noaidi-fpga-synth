@@ -120,7 +120,9 @@ bool condition_holds(Condition condition, const Flags &flags) {
 
 } // namespace
 
-Processor::Processor() = default;
+Processor::Processor() {
+    registers_[io_base] = 1;   // the first pass's number; each pass writes the next one's at its end, as the chip does
+}
 
 // ---- firmware side --------------------------------------------------------
 
@@ -594,11 +596,11 @@ void Processor::end_loops(PassState &state) {
 PassReport Processor::pass() {
     PassState state;
     ++pass_count_;
-    registers_[io_base] = static_cast<int32_t>(sign_extend(pass_count_, word_bits));
 
     if (held_) {
         state.report.writes_applied = apply_window(write_window);   // a held pass takes the window's 48, as the chip does
         active_page_                = 1 - active_page_;
+        registers_[io_base]         = static_cast<int32_t>(sign_extend(pass_count_ + 1, word_bits));
         return state.report;
     }
 
@@ -636,6 +638,7 @@ PassReport Processor::pass() {
 
     state.report.writes_applied = apply_window(write_window);
     active_page_                = 1 - active_page_;
+    registers_[io_base]         = static_cast<int32_t>(sign_extend(pass_count_ + 1, word_bits));
     return state.report;
 }
 

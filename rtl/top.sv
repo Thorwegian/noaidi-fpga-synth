@@ -137,10 +137,10 @@ module top (
         .fetch_address (fetch_address),
         .fetch_row     (fetch_row)
     );
-    assign fetch_address = '0;      // the core's (#235)
 
     logic                              rom_load_enable;
     logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_row;
+    logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op;
     logic [csp_pkg::ROM_W-1:0]         rom_load_word, rom_read_word, control_word;
 
     csp_decode_rom u_rom (
@@ -152,47 +152,38 @@ module top (
         .read_word    (rom_read_word),
         .clk          (sysclk),
         .held         (csp_held_sync),
-        .op           ('0),             // the core's (#235)
+        .op           (rom_op),
         .control_word (control_word)
-    );
-
-    logic                              dmem_write_enable, dmem_read_enable;
-    logic [csp_pkg::REGISTER_W-1:0]    dmem_write_address, dmem_read_address;
-    logic [csp_pkg::WORD_W-1:0]        dmem_write_word;
-    logic [csp_pkg::WIDE_W-1:0]        dmem_read_pair, probe_pair;
-
-    csp_dmem u_dmem (
-        .clk           (sysclk),
-        .write_enable  (dmem_write_enable),
-        .write_address (dmem_write_address),
-        .write_wide    (1'b0),
-        .write_data    ({{csp_pkg::WORD_W{1'b0}}, dmem_write_word}),
-        .read_enable   (dmem_read_enable),
-        .read_address  (dmem_read_address),
-        .read_pair     (dmem_read_pair)
     );
 
     logic [csp_pkg::CYCLE_W-1:0] cycle;
     logic [31:0]                 pass_counter;
+    logic [csp_pkg::WIDE_W-1:0]  probe_pair;
+    logic                        sink_write_enable;
+    logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
+    logic [csp_pkg::WORD_W-1:0]  sink_write_data;
 
-    csp_pass u_pass (
+    // the CSP: the core, DMEM's three copies and the pass (the sinks' writes wait for #236)
+    csp u_csp (
         .clk                (sysclk),
         .reset_n            (rst_n),
         .pass_start         (sample_tick48),
-        .cycle              (cycle),
-        .pass_counter       (pass_counter),
+        .held               (csp_held_sync),
+        .fetch_address      (fetch_address),
+        .fetch_row          (fetch_row),
+        .rom_op             (rom_op),
+        .control_word       (control_word),
         .fifo_pop           (fifo_pop),
         .fifo_committed     (fifo_committed),
         .fifo_head_valid    (fifo_head_valid),
-        .fifo_head_dword     (fifo_head_dword),
-        .dmem_write_enable  (dmem_write_enable),
-        .dmem_write_address (dmem_write_address),
-        .dmem_write_word    (dmem_write_word),
+        .fifo_head_dword    (fifo_head_dword),
         .probe_address      (probe_address_sync),
-        .dmem_read_enable   (dmem_read_enable),
-        .dmem_read_address  (dmem_read_address),
-        .dmem_read_pair     (dmem_read_pair),
-        .probe_pair         (probe_pair)
+        .probe_pair         (probe_pair),
+        .cycle              (cycle),
+        .pass_counter       (pass_counter),
+        .sink_write_enable  (sink_write_enable),
+        .sink_write_address (sink_write_address),
+        .sink_write_data    (sink_write_data)
     );
 
     //----------------------------------------------------------------

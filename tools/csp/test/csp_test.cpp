@@ -512,12 +512,17 @@ void test_decisions() {
 
     const csp::Program without = csp::assemble(std::string(registers) + "MAC A_, 0, =1.0, =1.0\n");
     const csp::Program with_empty = csp::assemble(std::string(registers) + "LOOP.i end, =#0, =#1\nMAC B_, 0, =2.0, =2.0\n"
-                                                  "LOOP.j end2, =#0, =#1\nIDX i, =#0x200, 0\nMAC C_, 0, =3.0, =3.0\n"
+                                                  "LOOP.j end2, =#0, =#1\nMAC D_, 0, =4.0, =4.0\nMAC C_, 0, =3.0, =3.0\n"
                                                   "end2:\nend:\nMAC A_, 0, =1.0, =1.0\n");
     check(with_empty.ok, "loops of count 0 assemble");
     check(with_empty.image.rows == without.image.rows && with_empty.image.length == without.image.length,
           "a loop of count 0 and its body, nested loops and all, leave no row");
     check_equal(with_empty.cycles, without.cycles, "and cost no cycle");
+
+    check(has_diagnostic(csp::assemble("LOOP.i end, =#2, =#1\nIDX i, =#0x200, 0\nend:\nNOP\n"), true, "own index register"),
+          "a loop body cannot set its own index register");
+    check(csp::assemble(std::string(registers) + "LOOP.i end, =#2, =#1\nIDX j, =#0x200, 0\nend:\nNOP\n").ok,
+          "but it may set the other");
 
     const csp::Program skip_ok = csp::assemble(std::string(registers) +
             "LOOP.i end, =#2, =#1\nCMP ZERO, B_, C_\nSKIP neg, 1\nMAC A_, 0, =1.0, =1.0\nend:\nNOP\n");

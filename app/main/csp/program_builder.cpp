@@ -368,6 +368,8 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                 if (inner.op == Op::idx && inner.which == outer.which) {
                     built.issues.push_back({inner_at, true, "a vector body cannot set the loop's own index register"});
                 }
+            } else if (inner.op == Op::idx && inner.which == outer.which) {
+                built.issues.push_back({inner_at, true, "a loop body cannot set the loop's own index register"});
             } else if (inner.op == Op::loop || inner.op == Op::vloop) {
                 if (inner.which == outer.which) {
                     built.issues.push_back({inner_at, true, "nested loops need different index registers"});

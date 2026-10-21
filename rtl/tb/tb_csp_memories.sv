@@ -67,7 +67,7 @@ module tb_csp_memories;
     logic [REGISTER_W-1:0] probe_address = REGISTER_W'(PARK_REGISTER);
     csp_dmem u_dmem (
         .clk(clk), .write_enable(dmem_we), .write_address(dmem_wa), .write_wide(1'b0),
-        .write_data({{WORD_W{1'b0}}, dmem_wd}), .read_enable(dmem_re), .read_address(dmem_ra), .read_pair(dmem_pair)
+        .write_data({{WORD_W{1'b0}}, dmem_wd}), .read_enable(dmem_re), .read_address(dmem_ra), .read_wide(1'b1), .read_pair(dmem_pair)
     );
 
     logic pass_start = 0;
@@ -100,7 +100,7 @@ module tb_csp_memories;
         end
     end
     always @(posedge clk) begin
-        if (dmem_we && u_dmem.read_index == u_dmem.write_index && (dmem_re || u_dmem.read_index != u_dmem.PARK_INDEX)) begin
+        if (dmem_we && u_dmem.read_index_even == u_dmem.write_index && (dmem_re || u_dmem.read_index_even != u_dmem.PARK_INDEX)) begin
             $display("FAIL row rule: DMEM writes index %0d while a read sits on it", u_dmem.write_index); errors++;
         end
     end

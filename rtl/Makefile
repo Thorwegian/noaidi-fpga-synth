@@ -25,7 +25,8 @@ SHELL := /bin/bash
 # from the first revision and return to the build with the sink area (#236).
 TOP = top
 PKG = synth_pkg.sv
-CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv
+CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
+      csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 MOD = \
 	$(CSP) \
 	$(TOP).sv \
@@ -194,6 +195,25 @@ obj_dir/tb_csp_memories/sim: $(CSP) tb/tb_csp_memories.sv Makefile
 sim-memories: obj_dir/tb_csp_memories/sim
 	$(call run_sim,$<,tb/sim-memories.out)
 
+# The co-simulation: the RTL, Verilated to C++, against tools/csp's reference model in one executable
+# (tb/csp_cosim/csp_cosim.cpp). It runs the boot self-test and some directed programs, and random scalar
+# ones built with csp::ProgramBuilder, comparing every register, the published sinks, i, j, the
+# accumulator, the flags and the cycles after every pass, and DMEM's row rule at every edge.
+# `sim +rtltrace` prints the rows entering the address stage.
+CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
+                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp
+CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp
+obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
+                       $(wildcard ../tools/csp/programs/*.s) Makefile
+	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-SELRANGE \
+	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
+	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
+	    $(CSP) tb/csp_cosim/tb_csp_cosim.sv $(abspath $(CSP_COSIM_CPP))
+
+sim-csp-cosim: obj_dir/csp_cosim/sim
+	$(call run_sim,$<,tb/sim-csp-cosim.out)
+
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
 
@@ -244,13 +264,13 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
           tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-memories sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \

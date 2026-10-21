@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------
-// csp_dmem.sv — the data memory: 2048 words, an even and an odd bank
+// csp_dmem.sv — one read copy of the data memory: 2048 words, an even and an odd bank
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -9,14 +9,22 @@
 // so that a word write touches one bank and a wide access reads the
 // aligned pair from both at one index. Port A is the write, port B the
 // read, both on the system clock; a read is in the blocks' output
-// registers the clock after its index (bypass mode). The core's copies
-// per read port come with the core (#235): every copy takes every write.
+// registers the clock after its index (bypass mode). The core instantiates
+// three copies (R, X and Y), every one taking every write.
 //
-// The two ports never meet on a row (UG285-1.4E p6, note 1): a read port
-// that nothing uses is parked on the row of PARK_REGISTER, in the inputs
-// nothing writes, and the pass's schedule keeps the window's writes and
-// the probe's read apart (csp_pass.sv). Register 0 reads zero: a write
-// to it, or a wide write to the pair at 0, is discarded.
+// The two ports never meet on a row (UG285-1.4E p6, note 1): a block reads
+// the row on its address pins on every clock, so a read port that nothing
+// uses is parked on the row of PARK_REGISTER, in the inputs nothing the
+// program writes, and a word read parks the bank it does not need: a read of
+// an even register reads the even bank only, since the odd bank's row beside
+// it could meet a write to the odd register and lose it. The pass's
+// schedule keeps the window's writes and the probe's read apart
+// (csp_pass.sv) and the assembler's keeps an instruction's read away from
+// the write it depends on. Register 0 reads zero: a write to it, or a wide
+// write to the pair at 0, is discarded.
+//
+// In simulation a read and a write to one row of one bank in the same clock
+// is counted in row_rule_violations, which a bench asserts is zero.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_dmem (
@@ -28,9 +36,10 @@ module csp_dmem (
     input  wire                             write_wide,
     input  wire [csp_pkg::WIDE_W-1:0]       write_data,     // a word in the low 18 bits
 
-    // the read: a word, or the aligned pair; parked when not enabled
+    // the read: a word (the bank its address names) or the aligned pair; parked when not enabled
     input  wire                             read_enable,
     input  wire [csp_pkg::REGISTER_W-1:0]   read_address,
+    input  wire                             read_wide,
     output logic [csp_pkg::WIDE_W-1:0]      read_pair       // {even, odd} the clock after
 );
 
@@ -45,7 +54,10 @@ module csp_dmem (
     wire [csp_pkg::WORD_W-1:0] even_data = write_wide ? write_data[csp_pkg::WIDE_W-1:csp_pkg::WORD_W] : write_data[csp_pkg::WORD_W-1:0];
     wire [csp_pkg::WORD_W-1:0] odd_data  = write_data[csp_pkg::WORD_W-1:0];
 
-    wire [BANK_W-1:0] read_index = read_enable ? read_address[csp_pkg::REGISTER_W-1:1] : PARK_INDEX;
+    wire read_even_bank = read_enable && (read_wide || !read_address[0]);
+    wire read_odd_bank  = read_enable && (read_wide ||  read_address[0]);
+    wire [BANK_W-1:0] read_index_even = read_even_bank ? read_address[csp_pkg::REGISTER_W-1:1] : PARK_INDEX;
+    wire [BANK_W-1:0] read_index_odd  = read_odd_bank  ? read_address[csp_pkg::REGISTER_W-1:1] : PARK_INDEX;
 
     logic [csp_pkg::WORD_W-1:0] even_word, odd_word;
 
@@ -60,7 +72,7 @@ module csp_dmem (
         .CLKA (clk), .CLKB (clk), .CEA (1'b1), .CEB (1'b1), .OCEA (1'b1), .OCEB (1'b1),
         .RESETA (1'b0), .RESETB (1'b0), .BLKSELA (3'b000), .BLKSELB (3'b000),
         .WREA (write_even_bank), .WREB (1'b0),
-        .ADA ({write_index, 4'b0011}), .ADB ({read_index, 4'b0000}),
+        .ADA ({write_index, 4'b0011}), .ADB ({read_index_even, 4'b0000}),
         .DIA (even_data), .DIB (18'd0), .DOA (), .DOB (even_word)
     );
     DPX9B #(
@@ -71,13 +83,15 @@ module csp_dmem (
         .CLKA (clk), .CLKB (clk), .CEA (1'b1), .CEB (1'b1), .OCEA (1'b1), .OCEB (1'b1),
         .RESETA (1'b0), .RESETB (1'b0), .BLKSELA (3'b000), .BLKSELB (3'b000),
         .WREA (write_odd_bank), .WREB (1'b0),
-        .ADA ({write_index, 4'b0011}), .ADB ({read_index, 4'b0000}),
+        .ADA ({write_index, 4'b0011}), .ADB ({read_index_odd, 4'b0000}),
         .DIA (odd_data), .DIB (18'd0), .DOA (), .DOB (odd_word)
     );
 `else
     logic [csp_pkg::WORD_W-1:0] even_bank [csp_pkg::REGISTER_COUNT / 2];
     logic [csp_pkg::WORD_W-1:0] odd_bank  [csp_pkg::REGISTER_COUNT / 2];
+    int row_rule_violations;
     initial begin
+        row_rule_violations = 0;
         for (int index = 0; index < csp_pkg::REGISTER_COUNT / 2; index++) begin
             even_bank[index] = '0;
             odd_bank[index]  = '0;
@@ -86,8 +100,11 @@ module csp_dmem (
     always_ff @(posedge clk) begin
         if (write_even_bank) even_bank[write_index] <= even_data;
         if (write_odd_bank)  odd_bank[write_index]  <= odd_data;
-        even_word <= even_bank[read_index];
-        odd_word  <= odd_bank[read_index];
+        even_word <= even_bank[read_index_even];
+        odd_word  <= odd_bank[read_index_odd];
+        // the row rule: one row of one block, read and written in the same clock
+        if (write_even_bank && read_index_even == write_index) row_rule_violations <= row_rule_violations + 1;
+        if (write_odd_bank  && read_index_odd  == write_index) row_rule_violations <= row_rule_violations + 1;
     end
 `endif
 

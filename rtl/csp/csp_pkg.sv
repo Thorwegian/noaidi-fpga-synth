@@ -6,8 +6,8 @@
 //
 // The second revision's constants, as docs/csp2_isa.md and
 // docs/csp2_architecture.md give them; the firmware's side is
-// app/main/fpga_map.hpp. The instruction word's fields and the operations
-// come with the core (#235).
+// app/main/fpga_map.hpp and app/main/csp/csp.hpp (the assembler's, which these
+// mirror: the control word's fields and the operand modes).
 //------------------------------------------------------------------------
 package csp_pkg;
 
@@ -52,7 +52,79 @@ package csp_pkg;
     parameter int WINDOW_START    = 1482;         // the write window: up to 48 of the FIFO's dwords
     parameter int WINDOW_END      = 1530;         //   pops in WINDOW_START … WINDOW_END-1
     parameter int WRITE_WINDOW    = WINDOW_END - WINDOW_START;
+    parameter int COUNTER_CYCLE   = 1533;         // the pass counter's write for the next pass, after the window's last lands (1531)
     parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 1;   // the probe reads its pair
     parameter int CYCLE_W         = 11;
+
+    // ---- the core's pipeline (docs/csp2_architecture.md section 1) --------------
+    // A row presented to IMEM in cycle k is in the decode stage in k+1 (IMEM's
+    // output register, the ROM addressed from it) and in the address stage A in
+    // k+2, the cycle the assembler calls its issue. From there: R1 the DMEM read
+    // pins, R2 the words, E1 the operands formatted, E2 and E3 the multiply-add
+    // (or the shifter), E4 reduced and saturated, W the write pins.
+    parameter int FIRST_ISSUE_CYCLE = 2;       // the address stage of the program's row 0
+    parameter int RESULT_LATENCY    = 7;       // A to the cycle a reader's A may follow a W
+    parameter int STATE_LATENCY     = 5;       // the flags and the accumulator
+    parameter int INDEX_LATENCY     = 4;       // an IDX's index, in the register for the A stage
+    parameter int JUMP_PENALTY      = 2;       // the rows in flight behind a loop's last row
+
+    // ---- the instruction word (docs/csp2_isa.md section 2) -----------------------
+    //   [71:64] op   [63:60] cond   [59:48] r   [47:36] x   [35:24] y   [23:0] imm
+    parameter int OPERAND_W   = 12;            // a mode (2) and ten bits
+    parameter int SINK_WORD_W = 10;            // an address in the sink area, below SINK_BASE
+
+    // operand modes (the top two bits of an operand)
+    parameter logic [1:0] MODE_DIRECT    = 2'd0;
+    parameter logic [1:0] MODE_I         = 2'd1;
+    parameter logic [1:0] MODE_J         = 2'd2;
+    parameter logic [1:0] MODE_IMMEDIATE = 2'd3;   // the immediate; for r, no result
+
+    // ---- the control word (docs/csp2_isa.md section 4) ------------------------------
+    //   [17:15] unit  [14:12] writes  [11:10] A source  [9] reads X  [8] wide Y
+    //   [7:6] condition kind  [5] reads Y  [3] wrap  [2:0] sub-operation
+    parameter logic [2:0] UNIT_NONE         = 3'd0;
+    parameter logic [2:0] UNIT_MULTIPLY_ADD = 3'd1;
+    parameter logic [2:0] UNIT_LOGIC        = 3'd2;
+    parameter logic [2:0] UNIT_SHIFT        = 3'd3;
+    parameter logic [2:0] UNIT_LOOP         = 3'd4;
+    parameter logic [2:0] UNIT_SKIP         = 3'd5;
+    parameter logic [2:0] UNIT_INDEX        = 3'd6;
+
+    parameter logic [2:0] WRITES_NOTHING     = 3'd0;
+    parameter logic [2:0] WRITES_WORD        = 3'd1;
+    parameter logic [2:0] WRITES_PAIR        = 3'd2;
+    parameter logic [2:0] WRITES_INDEX_I     = 3'd3;
+    parameter logic [2:0] WRITES_INDEX_J     = 3'd4;
+    parameter logic [2:0] WRITES_ACCUMULATOR = 3'd5;
+
+    parameter logic [1:0] A_SOURCE_ZERO        = 2'd0;
+    parameter logic [1:0] A_SOURCE_RESULT      = 2'd1;
+    parameter logic [1:0] A_SOURCE_ACCUMULATOR = 2'd2;
+
+    parameter logic [1:0] CONDITION_KIND_NONE   = 2'd0;
+    parameter logic [1:0] CONDITION_KIND_SELECT = 2'd1;
+    parameter logic [1:0] CONDITION_KIND_SKIP   = 2'd2;
+    parameter logic [1:0] CONDITION_KIND_FLAGS  = 2'd3;
+
+    // sub-operations
+    parameter logic [2:0] MULTIPLY_ADD_MAC    = 3'd0;     // also ACC
+    parameter logic [2:0] MULTIPLY_ADD_INTERP = 3'd1;
+    parameter logic [2:0] MULTIPLY_ADD_ADD3   = 3'd2;
+    parameter logic [2:0] MULTIPLY_ADD_CMP    = 3'd3;
+    parameter logic [2:0] MULTIPLY_ADD_ABS    = 3'd4;
+    parameter logic [2:0] LOGIC_MIN    = 3'd0;
+    parameter logic [2:0] LOGIC_MAX    = 3'd1;
+    parameter logic [2:0] LOGIC_SEL    = 3'd2;
+    parameter logic [2:0] LOGIC_ANDXOR = 3'd3;
+
+    // the flag a conditional tests (the word's cond field)
+    parameter logic [3:0] CONDITION_ALWAYS   = 4'd0;
+    parameter logic [3:0] CONDITION_NEGATIVE = 4'd1;
+    parameter logic [3:0] CONDITION_POSITIVE = 4'd2;
+    parameter logic [3:0] CONDITION_ZERO     = 4'd3;
+    parameter logic [3:0] CONDITION_NONZERO  = 4'd4;
+    parameter logic [3:0] CONDITION_OVERFLOW = 4'd5;
+
+    parameter int ACCUMULATOR_W = 54;          // Q8.46
 
 endpackage
