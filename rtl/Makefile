@@ -27,7 +27,7 @@ TOP = top
 PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
-LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/lab.sv
+LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/lab.sv
 MOD = \
 	$(CSP) \
 	$(LAB) \
