@@ -5,13 +5,19 @@
 DSP cell, what drives each input pin and what each output pin feeds.
 nextpnr-himbaechel times no path that starts or ends at such a pin
 (docs/gowin_oss_notes.md), so anything but a flip-flop there is untimed
-and fails on the board by placement luck. Run it on every build:
+and fails on the board by placement luck. The build runs it on the
+synthesised netlist (make yosys.json: rtl/Makefile) and fails on a finding;
+the routed one audits the same:
 
+    pin_audit.py rtl/yosys.json
     pin_audit.py rtl/pnr.json
 
 The first section is what to fix: block type, pin, the driver's type, how
 many pins, and one example. Power and ground drivers are left out; the
-carry cells (ALU) are fabric and are not blocks.
+carry cells (ALU) are fabric and are not blocks. The last section is a
+flip-flop feeding the pins of more than one block: a route the tool does
+not time, which dropped address bits in both revisions (issue #238); every
+block's pins have a register of their own, so none is allowed.
 """
 import json
 import re
@@ -84,6 +90,8 @@ shared = Counter()
 for flop, blocks in fanout.items():
     if len(blocks) > 1:
         shared[len(blocks)] += 1
-        if len(blocks) >= 3:   # a fetch address feeds the instruction memory's four slices by design
-            print("  %s -> %d blocks" % (flop, len(blocks)))
+        print("  %s -> %d blocks" % (flop, len(blocks)))
 print("  histogram (blocks fed: flops):", dict(sorted(shared.items())))
+findings = sum(bad_inputs.values()) + sum(bad_outputs.values()) + sum(shared.values())
+print("verdict: %s" % ("every block pin has a flip-flop of its own" if findings == 0 else "%d finding(s)" % findings))
+sys.exit(1 if findings else 0)

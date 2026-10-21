@@ -124,7 +124,15 @@ and the DSP. Issue #230 carries the patch work (fork
     one flip-flop to yosys, a `keep` on the wire notwithstanding. `(* keep
     *)` on the `always_ff` block keeps them apart (`merge_test`, 16 flops
     from two blocks of 8); `pin_audit.py`'s last section, flops feeding
-    pins of more than one block, is the check.
+    pins of more than one block, is the check — and since 5e18a78 the build
+    runs it on the synthesised netlist and fails on a finding, because the
+    second revision's register file took the caller's one register for its
+    six blocks and met the fault again: one boot in six to eight read a
+    never-written register as zero, 0x400 below a voice's level the program
+    writes every pass (#238, found with the dump stream over repeated
+    boots). Every block's pins have a register of their own now: the
+    register file's write per bank of each copy, the fetch address per
+    slice of the instruction memory, the sink area's write per block.
   The input side of a block is as invisible as its output side: a
   memory's address and data pins, a DSP's operands, must come from a
   register with nothing between. The LUT-RAM cells (`RAM16SDP4`) are
