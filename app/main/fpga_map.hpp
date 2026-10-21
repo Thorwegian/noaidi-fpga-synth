@@ -75,10 +75,14 @@ constexpr dword_t fifo_dword(int address, uint32_t raw) {
 }
 
 // The CSP's program: a 72-bit row is two dwords, the first its upper half,
-// at program_base + 2 × pc; the decode ROM's rows one dword each.
+// at program_base + 2 × pc; the decode ROM's rows one dword each. The word's op
+// field is eight bits, so the ROM's first 256 rows are all a program can name; the
+// block holds 1024, and its last row is where the decode parks while the CSP is
+// held, which a load must not write (a write meeting a read of the same row can
+// be lost), as IMEM's last row, where the fetch parks, lies past the program's.
 constexpr uint32_t program_base = 0x08000;
 constexpr size_t program_rows   = 1472;
 constexpr uint32_t rom_base     = 0x09000;
-constexpr size_t rom_rows       = 1024;
+constexpr size_t rom_rows       = 256;
 
 } // namespace fpga_map

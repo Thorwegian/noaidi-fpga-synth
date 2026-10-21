@@ -99,7 +99,7 @@ Addresses are in 36-bit dwords.
 | `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K dwords |
 | `0x06000` | The CSP's write FIFO's door: a dword carries its own register or sink address | 1 dword |
 | `0x08000–0x08B7F` | IMEM: 1472 instruction rows, two dwords a row | 2944 dwords |
-| `0x09000–0x093FF` | The decode ROM: 1024 rows, one dword a row | 1024 dwords |
+| `0x09000–0x090FF` | The decode ROM: the 256 rows an op can name, one dword a row (the block has 1024; the last is where the decode parks) | 256 dwords |
 
 Everything else is reserved. The regions' bases are the first revision's,
 widened; the map's rule stands — firm, and landscaped where the chip asks.
@@ -129,15 +129,16 @@ the pass it is committed in. `CTRL` reads back its last value without the
 commit bit. Every `CTRL` write sets all three bits: pass the hold and the test
 tone along with a swap.
 
-## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x093FF`
+## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x090FF`
 
 An instruction is 72 bits ([csp2_isa.md](csp2_isa.md) section 2), held as
 eight 9-bit slices of one row in eight blocks of 2048 × 9. A row is two
 dwords: the first carries bits `[71:36]`, one 9-bit slice to each of the
 upper four blocks, the second bits `[35:0]` to the lower four; row `pc` is
-at `0x08000 + 2 pc`. The decode ROM's rows (1024 × 18, the operations as
-`csp2_isa.md` section 4 lists them) are one dword each at `0x09000 + op`,
-the upper half of the dword unused. Both are loaded as one image with the
+at `0x08000 + 2 pc`. The decode ROM's rows (a block of 1024 × 18 of which the word's eight-bit `op`
+reaches the first 256; the operations as `csp2_isa.md` section 4 lists them) are
+one dword each at `0x09000 + op`, the upper half of the dword unused. The last
+row is not written: the decode parks on it while the CSP is held. Both are loaded as one image with the
 CSP held: the memories take writes only then, so a pass never runs half an
 old program and half a new, and instructions past the end of the program
 are zero, which is `NOP`.

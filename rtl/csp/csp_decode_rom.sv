@@ -12,8 +12,8 @@
 // second port for the next word's row is the core's question, #235).
 //
 // The two ports never meet on a row (UG285-1.4E p6, note 1): the load
-// happens while the CSP is held, and a held CSP parks the decode on the
-// last row, which the load writes first.
+// happens while the CSP is held, and the caller parks the decode on the last
+// row (csp_pkg::ROM_PARK_ROW), which the load writes first.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_decode_rom (
@@ -27,15 +27,12 @@ module csp_decode_rom (
 
     // ---- the decode (clk) ----
     input  wire                                clk,
-    input  wire                                held,
     input  wire [csp_pkg::ROM_ADDRESS_W-1:0]   op,
     output logic [csp_pkg::ROM_W-1:0]          control_word    // the clock after op
 );
 
-    localparam logic [csp_pkg::ROM_ADDRESS_W-1:0] PARK_ROW = '1;
-
     wire [csp_pkg::ROM_ADDRESS_W-1:0] port_a_row = load_enable ? load_row : read_row;
-    wire [csp_pkg::ROM_ADDRESS_W-1:0] port_b_row = held ? PARK_ROW : op;
+    wire [csp_pkg::ROM_ADDRESS_W-1:0] port_b_row = op;   // a register of the caller's, parked by it while held
 
 `ifdef SYNTHESIS
     // An 18-bit word's address is AD[13:4]; the two low bits of ADA are

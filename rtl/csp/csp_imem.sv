@@ -15,8 +15,9 @@
 //
 // The two ports never meet on a row (UG285-1.4E p6, note 1): the load
 // and the read-back happen while the CSP is held, when nothing fetches,
-// and the fetch address is parked on the last row (which the load writes
-// first and the program never reaches) whenever the CSP is held.
+// and the caller parks the fetch address on the last row (csp_pkg::PROGRAM_PARK_ROW,
+// which the load writes first and the program never reaches) whenever the CSP is
+// held: the address pins are the caller's register, with no logic here.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_imem (
@@ -32,17 +33,14 @@ module csp_imem (
 
     // ---- the fetch (clk) ----
     input  wire                             clk,
-    input  wire                             held,           // park the fetch
     input  wire [csp_pkg::PROGRAM_W-1:0]    fetch_address,
     output logic [csp_pkg::ROW_W-1:0]       fetch_row       // the clock after fetch_address
 );
 
-    localparam logic [csp_pkg::PROGRAM_W-1:0] PARK_ROW = '1;         // the last row: the load's first, the run's never
-
     // Port A: a write or a read of one half, nine bits a slice.
     wire [csp_pkg::PROGRAM_W-1:0] port_a_row = load_enable ? load_row : read_row;
     wire                 port_a_upper = load_enable ? load_upper : read_upper;
-    wire [csp_pkg::PROGRAM_W-1:0] port_b_row = held ? PARK_ROW : fetch_address;
+    wire [csp_pkg::PROGRAM_W-1:0] port_b_row = fetch_address;   // a register of the caller's, parked by it while the CSP is held
 
     logic [csp_pkg::SLICES-1:0][csp_pkg::SLICE_W-1:0] slice_out_a;
     logic [csp_pkg::SLICES-1:0][csp_pkg::SLICE_W-1:0] slice_out_b;

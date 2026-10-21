@@ -43,13 +43,13 @@ module tb_csp_cosim (
     csp_imem u_imem (
         .sclk (sclk), .load_enable (imem_load), .load_row (imem_row), .load_upper (imem_upper), .load_dword (imem_dword),
         .read_row (imem_row), .read_upper (imem_upper), .read_dword (imem_read_dword),
-        .clk (clk), .held (held), .fetch_address (fetch_address), .fetch_row (fetch_row)
+        .clk (clk), .fetch_address (fetch_address), .fetch_row (fetch_row)
     );
 
     csp_decode_rom u_rom (
         .sclk (sclk), .load_enable (rom_load), .load_row (rom_row), .load_word (rom_word),
         .read_row (rom_row), .read_word (rom_read_word),
-        .clk (clk), .held (held), .op (rom_op), .control_word (control_word)
+        .clk (clk), .op (rom_op), .control_word (control_word)
     );
 
     logic                       fifo_full, fifo_pop, fifo_committed, fifo_head_valid;

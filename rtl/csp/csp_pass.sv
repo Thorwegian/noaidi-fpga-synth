@@ -17,12 +17,13 @@
 // so its image can be loaded and verified before anything runs.
 //
 // Timing against the row rule: a pop at cycle t puts its dword on the FIFO's
-// head two cycles later, the core's write registers take it that cycle and
-// drive DMEM's pins the cycle after, so the 48 pops of 1482 to 1529 are
-// sampled by DMEM at 1485 to 1532. The pass counter's write is asked at 1533
-// and sampled at 1534; the probe is asked at 1534, its read pins are
-// driven in 1535, and its words are out in the cycle after, which is the
-// pass's first: the read follows the last write by three clocks.
+// head two cycles later, a register here takes it, the core's write registers
+// the cycle after, and DMEM's pins are driven the cycle after that, so the 48
+// pops of 1482 to 1529 are sampled by DMEM at 1486 to 1533. The pass counter's
+// write is asked at 1533 and sampled at 1534. The probe is asked at 1534, its
+// read pins are driven in 1535 and its words are out in the cycle after, the
+// pass's first: its read follows the counter's write by one clock and the
+// window's last write by two.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_pass (
@@ -71,7 +72,16 @@ module csp_pass (
     // A dword's address names a register (0x000–0x7FF) or a sink word
     // (0x800–0xBFF); the sinks come with the sink area (#236), so for now a
     // sink word is dropped here. The inputs (0x040–0x05F) are read-only.
-    wire [csp_pkg::ADDRESS_W-1:0] head_address = fifo_head_dword[csp_pkg::DWORD_ADDRESS_LOW +: csp_pkg::ADDRESS_W];
+    // The FIFO's head is a block's output: a register takes it before any logic does
+    logic                       head_valid_q;
+    logic [csp_pkg::DWORD_W-1:0] head_dword_q;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) head_valid_q <= 1'b0;
+        else          head_valid_q <= fifo_head_valid;
+    end
+    always_ff @(posedge clk) head_dword_q <= fifo_head_dword;
+
+    wire [csp_pkg::ADDRESS_W-1:0] head_address = head_dword_q[csp_pkg::DWORD_ADDRESS_LOW +: csp_pkg::ADDRESS_W];
     wire                 head_is_register = head_address < csp_pkg::ADDRESS_W'(csp_pkg::REGISTER_COUNT)
                                             && !(head_address >= csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE)
                                                  && head_address < csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT));
@@ -79,10 +89,10 @@ module csp_pass (
     wire counter_write_now = cycle == csp_pkg::CYCLE_W'(csp_pkg::COUNTER_CYCLE);
     wire [31:0] next_pass  = pass_counter + 32'd1;
 
-    assign dmem_write_enable  = (fifo_head_valid && head_is_register) || counter_write_now;
+    assign dmem_write_enable  = (head_valid_q && head_is_register) || counter_write_now;
     assign dmem_write_address = counter_write_now ? csp_pkg::REGISTER_W'(csp_pkg::IO_BASE) : head_address[csp_pkg::REGISTER_W-1:0];
     assign dmem_write_word    = counter_write_now ? next_pass[csp_pkg::WORD_W-1:0]
-                                                  : fifo_head_dword[csp_pkg::DWORD_WORD_LOW +: csp_pkg::WORD_W];
+                                                  : head_dword_q[csp_pkg::DWORD_WORD_LOW +: csp_pkg::WORD_W];
 
     // ---- the probe -----------------------------------------------------------
     assign probe_request = cycle == csp_pkg::CYCLE_W'(csp_pkg::PROBE_CYCLE);

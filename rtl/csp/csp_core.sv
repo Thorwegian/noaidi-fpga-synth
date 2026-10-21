@@ -8,17 +8,21 @@
 // instruction set; tools/csp/processor.cpp is the model this is checked
 // against, cycle for cycle. A row presented to IMEM in cycle k is
 //
-//   F   k      the program counter drives IMEM's address pins
-//   D   k+1    IMEM's output register holds the row, the decode ROM is addressed
-//              from its op field
-//   A   k+2    the control word is out of the ROM's register: operand addresses
-//              are formed (the index's bits beside the offset's), loops are
-//              pushed and ended, the index registers stepped. This is the
-//              cycle the assembler calls the row's issue (csp_pkg::FIRST_ISSUE_CYCLE
-//              is the A cycle of the program's row 0)
+//   F   k      the program counter, IMEM's pin register, drives its address pins
+//   D1  k+1    IMEM's output register holds the row: captured, its op field into
+//              the ROM's address register (parked while held)
+//   D2  k+2    the ROM's address pins are driven from that register
+//   D3  k+3    the control word is out of the ROM's output register: captured
+//   A   k+4    the control word is in a register of ours: operand addresses are
+//              formed (the index's bits beside the offset's), loops are pushed and
+//              ended, the index registers stepped. This is the cycle the assembler
+//              calls the row's issue (csp_pkg::FIRST_ISSUE_CYCLE is the A cycle of
+//              the program's row 0)
 //   R1  +1     the read pins of DMEM's three copies are driven from registers
-//   R2  +2     the words are in the blocks' output registers; a SKIP decides
-//   E1  +3     operands formatted, the multiply-add's operands formed into registers,
+//   R2  +2     the words are in the blocks' output registers, captured as they come;
+//              a SKIP decides
+//   E1  +3     the words picked, operands formatted, the multiply-add's operands formed
+//              into registers,
 //              MIN, MAX, SEL and ANDXOR done, an IDX written, the shifter prepared
 //   E2  +4     the multiply-add's own input registers sample those operand registers
 //              (nothing between them: the logic before a block's pin is untimed)
@@ -34,7 +38,7 @@
 // There is no interlock and no stall: the assembler places every row so that
 // what it reads has been written, and lays the IDX's three NOP rows itself.
 // The front end therefore has one rule of its own, the loop: a repeat is
-// decided in A and redirects the program counter, discarding the two rows in
+// decided in A and redirects the program counter, discarding the four rows in
 // flight behind the loop's last (csp_pkg::JUMP_PENALTY). A SKIP decides in R2
 // and kills the two rows already behind it, then counts the rest as they
 // arrive; it never crosses a LOOP or the end of its loop (the assembler checks).
@@ -146,19 +150,19 @@ module csp_core (
 
     // ---- the front end ------------------------------------------------------------
     logic               running;                           // this pass runs the program
-    logic [PC_W-1:0]    pc, decode_pc, a_pc;
-    logic               decode_valid, a_present, a_live;
-    logic [csp_pkg::ROW_W-1:0] a_row;
+    logic [PC_W-1:0]    pc, decode_pc, rom_pc, capture_pc, a_pc;
+    logic               decode_valid, rom_valid, capture_valid, a_present, a_live;
+    logic [csp_pkg::ROW_W-1:0] rom_row, capture_row, a_row;
+    logic [csp_pkg::ROM_W-1:0] a_control;           // the control word, captured out of the ROM
     logic               redirect;
     logic [PC_W-1:0]    redirect_target;
     logic [10:0]        skip_remaining;
 
     wire fetch_valid = running && !held && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
 
-    assign fetch_address = pc;
-    assign rom_op        = csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
+    assign fetch_address = pc;       // the program counter is IMEM's pin register
 
-    wire arrive = decode_valid && !redirect;               // a real row enters A next cycle
+    wire arrive = capture_valid && !redirect;              // a real row enters A next cycle
 
     // SKIP: decided in R2, below
     logic        skip_taken;
@@ -171,37 +175,54 @@ module csp_core (
             running        <= 1'b0;
             pc             <= '0;
             decode_valid   <= 1'b0;
+            rom_valid      <= 1'b0;
+            capture_valid  <= 1'b0;
             a_present      <= 1'b0;
             a_live         <= 1'b0;
             skip_remaining <= '0;
         end else begin
             if (pass_start) running <= !held;
-            if (pass_start)     pc <= '0;
+            // held, IMEM's fetch parks on the row the load writes first: the pins are the register
+            if (held)           pc <= csp_pkg::PROGRAM_PARK_ROW;
+            else if (pass_start) pc <= '0;
             else if (redirect)  pc <= redirect_target;
             else                pc <= pc + 1'b1;
-            decode_valid <= fetch_valid && !redirect && !pass_start;
-            a_present    <= arrive;
-            a_live       <= arrive && skip_remaining_now == '0;
+            // a row is in flight for four cycles between the program counter and A: a repeat
+            // discards the four behind the loop's last
+            decode_valid  <= fetch_valid && !redirect && !pass_start;
+            rom_valid     <= decode_valid && !redirect;
+            capture_valid <= rom_valid && !redirect;
+            a_present     <= arrive;
+            a_live        <= arrive && skip_remaining_now == '0;
             if (pass_start)                                  skip_remaining <= '0;
             else if (arrive && skip_remaining_now != '0)     skip_remaining <= skip_remaining_now - 11'd1;
             else                                             skip_remaining <= skip_remaining_now;
         end
     end
 
+    // Nothing but a register between a block's output and the logic that uses it, and nothing
+    // but a register in front of its pins: IMEM's row is captured (its op field into the ROM's
+    // address register, parked while held), the ROM's control word is captured on its way to A.
     always_ff @(posedge clk) begin
-        decode_pc <= pc;
-        a_pc      <= decode_pc;
-        a_row     <= fetch_row;
+        decode_pc   <= pc;
+        rom_pc      <= decode_pc;
+        rom_row     <= fetch_row;
+        rom_op      <= held ? csp_pkg::ROM_PARK_ROW : csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
+        capture_pc  <= rom_pc;
+        capture_row <= rom_row;
+        a_pc        <= capture_pc;
+        a_row       <= capture_row;
+        a_control   <= control_word;
     end
 
     // ---- A: the row and its control word -----------------------------------------------
-    wire [2:0]  a_unit       = control_word[17:15];
-    wire [2:0]  a_writes     = control_word[14:12];
-    wire [1:0]  a_source     = control_word[11:10];
-    wire        a_reads_x    = control_word[9];
-    wire        a_wide_y     = control_word[8];
-    wire        a_reads_y    = control_word[5];
-    wire [2:0]  a_sub        = control_word[2:0];
+    wire [2:0]  a_unit       = a_control[17:15];
+    wire [2:0]  a_writes     = a_control[14:12];
+    wire [1:0]  a_source     = a_control[11:10];
+    wire        a_reads_x    = a_control[9];
+    wire        a_wide_y     = a_control[8];
+    wire        a_reads_y    = a_control[5];
+    wire [2:0]  a_sub        = a_control[2:0];
 
     wire [3:0]  a_cond       = a_row[63:60];
     wire [11:0] a_r_operand  = a_row[59:48];
@@ -297,7 +318,7 @@ module csp_core (
     end
 
     always_ff @(posedge clk) begin
-        r1_control       <= control_word;
+        r1_control       <= a_control;
         r1_cond          <= a_cond;
         r1_imm           <= a_imm;
         r1_r_wide        <= a_r_wide;
@@ -357,13 +378,9 @@ module csp_core (
     logic [3:0]         e1_cond;
     logic               e1_r_none;
     logic [11:0]        e1_write_address;
-    logic [35:0]        e1_r, e1_y;
-    logic [17:0]        e1_x;
-
-    wire [17:0] r2_immediate_word = r2_imm[17:0];
-    wire [17:0] r2_r_word = r2_r_odd ? read_r_pair[17:0] : read_r_pair[35:18];
-    wire [17:0] r2_x_word = r2_x_immediate ? r2_immediate_word : (r2_x_odd ? read_x_pair[17:0] : read_x_pair[35:18]);
-    wire [17:0] r2_y_word = r2_y_immediate ? r2_immediate_word : (r2_y_odd ? read_y_pair[17:0] : read_y_pair[35:18]);
+    logic [35:0]        e1_r_pair, e1_x_pair, e1_y_pair;      // DMEM's words, captured as they came
+    logic               e1_r_odd, e1_x_odd, e1_y_odd, e1_x_immediate, e1_y_immediate;
+    logic [17:0]        e1_imm;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) e1_live <= 1'b0;
@@ -375,9 +392,15 @@ module csp_core (
         e1_cond          <= r2_cond;
         e1_r_none        <= r2_r_none;
         e1_write_address <= r2_write_address;
-        e1_r             <= r2_r_wide ? read_r_pair : {18'd0, r2_r_word};
-        e1_x             <= r2_x_word;
-        e1_y             <= r2_y_wide ? read_y_pair : {18'd0, r2_y_word};
+        e1_r_pair        <= read_r_pair;
+        e1_x_pair        <= read_x_pair;
+        e1_y_pair        <= read_y_pair;
+        e1_r_odd         <= r2_r_odd;
+        e1_x_odd         <= r2_x_odd;
+        e1_y_odd         <= r2_y_odd;
+        e1_x_immediate   <= r2_x_immediate;
+        e1_y_immediate   <= r2_y_immediate;
+        e1_imm           <= r2_imm[17:0];
     end
 
     wire [2:0] e1_unit    = e1_control[17:15];
@@ -386,6 +409,14 @@ module csp_core (
     wire       e1_wide_y  = e1_control[8];
     wire [2:0] e1_sub     = e1_control[2:0];
     wire       e1_r_wide  = e1_writes == csp_pkg::WRITES_PAIR;
+
+    // the operands, picked out of the words: a word by its address's low bit, or the immediate
+    wire [17:0] e1_x_word = e1_x_immediate ? e1_imm : (e1_x_odd ? e1_x_pair[17:0] : e1_x_pair[35:18]);
+    wire [17:0] e1_y_word = e1_y_immediate ? e1_imm : (e1_y_odd ? e1_y_pair[17:0] : e1_y_pair[35:18]);
+    wire [17:0] e1_r_word = e1_r_odd ? e1_r_pair[17:0] : e1_r_pair[35:18];
+    wire [17:0] e1_x      = e1_x_word;
+    wire [35:0] e1_y      = e1_wide_y ? e1_y_pair : {18'd0, e1_y_word};
+    wire [35:0] e1_r      = e1_r_wide ? e1_r_pair : {18'd0, e1_r_word};
 
     // A and Y in the accumulator's format
     logic signed [53:0] e1_a_value;

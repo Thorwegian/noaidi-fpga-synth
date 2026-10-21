@@ -29,10 +29,12 @@ package csp_pkg;
     parameter int SLICE_W        = 9;
     parameter int SLICES         = ROW_W / SLICE_W;
     parameter int PROGRAM_W      = 11;            // $clog2(IMEM_ROWS)
+    parameter logic [PROGRAM_W-1:0] PROGRAM_PARK_ROW = '1;   // IMEM's fetch parks here while held: the row the load writes first, the run never reads
 
     parameter int ROM_ROWS       = 1024;          // the decode ROM: one row an operation
     parameter int ROM_W          = 18;
     parameter int ROM_ADDRESS_W  = 10;
+    parameter logic [ROM_ADDRESS_W-1:0] ROM_PARK_ROW = '1;   // the decode parks here while held, likewise
 
     parameter int FIFO_DEPTH     = 512;           // the write FIFO: 36-bit dwords
     parameter int FIFO_POINTER_W = 10;            // one more bit than the index: full from empty
@@ -59,17 +61,17 @@ package csp_pkg;
     parameter int CYCLE_W         = 11;
 
     // ---- the core's pipeline (docs/csp2_architecture.md section 1) --------------
-    // A row presented to IMEM in cycle k is in the decode stage in k+1 (IMEM's
-    // output register, the ROM addressed from it) and in the address stage A in
-    // k+2, the cycle the assembler calls its issue. From there: R1 the DMEM read
+    // A row presented to IMEM in cycle k is in IMEM's output register in k+1, in the
+    // ROM's address register in k+2, the control word is out of the ROM in k+3 and in A
+    // in k+4, the cycle the assembler calls its issue. From there: R1 the DMEM read
     // pins, R2 the words, E1 the operands formatted into registers, E2 the multiply-add's
     // own input registers, E3 its compute, E4 the product out, E5 reduced and saturated,
     // W the write pins.
-    parameter int FIRST_ISSUE_CYCLE = 2;       // the address stage of the program's row 0
+    parameter int FIRST_ISSUE_CYCLE = 4;       // the address stage of the program's row 0
     parameter int RESULT_LATENCY    = 8;       // A to the cycle a reader's A may follow a W
     parameter int STATE_LATENCY     = 6;       // the flags and the accumulator, for a SKIP (a SEL and an A operand take 5)
     parameter int INDEX_LATENCY     = 4;       // an IDX's index, in the register for the A stage
-    parameter int JUMP_PENALTY      = 2;       // the rows in flight behind a loop's last row
+    parameter int JUMP_PENALTY      = 4;       // the rows in flight behind a loop's last row
 
     // ---- the instruction word (docs/csp2_isa.md section 2) -----------------------
     //   [71:64] op   [63:60] cond   [59:48] r   [47:36] x   [35:24] y   [23:0] imm

@@ -133,7 +133,6 @@ module top (
         .read_upper    (imem_upper),
         .read_dword     (imem_read_dword),
         .clk           (sysclk),
-        .held          (csp_held_sync),
         .fetch_address (fetch_address),
         .fetch_row     (fetch_row)
     );
@@ -151,7 +150,6 @@ module top (
         .read_row     (rom_row),
         .read_word    (rom_read_word),
         .clk          (sysclk),
-        .held         (csp_held_sync),
         .op           (rom_op),
         .control_word (control_word)
     );

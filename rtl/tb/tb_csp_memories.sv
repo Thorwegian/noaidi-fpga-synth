@@ -25,25 +25,25 @@ module tb_csp_memories;
 
     // ---- IMEM ----
     logic                  imem_load = 0, imem_upper = 0;
-    logic [PROGRAM_W-1:0]  imem_row = '0, fetch_address = '0;
+    logic [PROGRAM_W-1:0]  imem_row = '0, fetch_address = PROGRAM_PARK_ROW;   // parked while loading: the caller's job now
     logic [DWORD_W-1:0]     imem_dword = '0;
     wire  [DWORD_W-1:0]     imem_read;
     wire  [ROW_W-1:0]      fetch_row;
     csp_imem u_imem (
         .sclk(sclk), .load_enable(imem_load), .load_row(imem_row), .load_upper(imem_upper), .load_dword(imem_dword),
         .read_row(imem_row), .read_upper(imem_upper), .read_dword(imem_read),
-        .clk(clk), .held(held), .fetch_address(fetch_address), .fetch_row(fetch_row)
+        .clk(clk), .fetch_address(fetch_address), .fetch_row(fetch_row)
     );
 
     // ---- the ROM ----
     logic                     rom_load = 0;
-    logic [ROM_ADDRESS_W-1:0] rom_row = '0, op = '0;
+    logic [ROM_ADDRESS_W-1:0] rom_row = '0, op = ROM_PARK_ROW;
     logic [ROM_W-1:0]         rom_word = '0;
     wire  [ROM_W-1:0]         rom_read, control_word;
     csp_decode_rom u_rom (
         .sclk(sclk), .load_enable(rom_load), .load_row(rom_row), .load_word(rom_word),
         .read_row(rom_row), .read_word(rom_read),
-        .clk(clk), .held(held), .op(op), .control_word(control_word)
+        .clk(clk), .op(op), .control_word(control_word)
     );
 
     // ---- the FIFO, DMEM and the pass ----
@@ -91,10 +91,10 @@ module tb_csp_memories;
 
     // ---- the row rule, at every edge (DMEM counts its own violations in simulation) ----
     always @(posedge sclk) begin
-        if (imem_load && !held && u_imem.port_b_row == imem_row) begin
+        if (imem_load && u_imem.port_b_row == imem_row) begin
             $display("FAIL row rule: IMEM loads row %0d while the fetch reads it", imem_row); errors++;
         end
-        if (rom_load && !held && u_rom.port_b_row == rom_row) begin
+        if (rom_load && u_rom.port_b_row == rom_row) begin
             $display("FAIL row rule: the ROM loads row %0d while the decode reads it", rom_row); errors++;
         end
     end
@@ -144,10 +144,11 @@ module tb_csp_memories;
             if (fetch_row != row_pattern(row)) begin $display("FAIL IMEM fetch row %0d: %018h", row, fetch_row); errors++; end
         end
         $display("pass: IMEM fetched on port B");
+        fetch_address = PROGRAM_PARK_ROW;
         held = 1;
 
         $display("--- 2. the ROM: rows loaded and read back, decoded ---");
-        for (int row = 0; row < ROM_ROWS; row++) begin
+        for (int row = 0; row < ROM_ROWS - 1; row++) begin       // not the last: the decode parks on it
             rom_row = ROM_ADDRESS_W'(row); rom_word = ROM_W'(row * 7 + 3); rom_load = 1; sclk_edge();
         end
         rom_load = 0;
@@ -161,6 +162,7 @@ module tb_csp_memories;
             @(negedge clk); #1;
             if (control_word != ROM_W'(row * 7 + 3)) begin $display("FAIL ROM decode row %0d: %05h", row, control_word); errors++; end
         end
+        op = ROM_PARK_ROW;
         $display("pass: the ROM loaded, read back, decoded");
 
         $display("--- 3. DMEM through the FIFO and the window, read by the probe ---");

@@ -47,7 +47,7 @@ constexpr int vector_round   = 16;    // elements in flight in a vector loop
 constexpr int result_latency = 8;
 constexpr int state_latency  = 6;
 constexpr int index_latency  = 4;
-constexpr int jump_penalty   = 2;
+constexpr int jump_penalty   = 4;
 
 // ---- number formats -------------------------------------------------------
 //

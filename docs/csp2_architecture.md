@@ -62,8 +62,10 @@ the second revision takes them as given.
 
 ```mermaid
 flowchart LR
-    F[F: the program counter<br/>drives IMEM's address pins] --> D[D: IMEM's output register<br/>the decode ROM addressed<br/>from the op field]
-    D --> A[A: the control word out of the ROM's register<br/>operand addresses: index bits beside offset bits<br/>loops pushed and ended, indexes stepped]
+    F[F: the program counter, IMEM's pin register] --> D1[D1: IMEM's output register<br/>captured; the op field into<br/>the ROM's address register]
+    D1 --> D2[D2: the ROM's address pins<br/>driven from that register]
+    D2 --> D3[D3: the ROM's output register<br/>captured]
+    D3 --> A[A: the control word in a register of ours<br/>operand addresses: index bits beside offset bits<br/>loops pushed and ended, indexes stepped]
     A --> R1[R1: DMEM's three copies<br/>read pins are registers<br/>idle ports and banks parked]
     R1 --> R2[R2: the words in the blocks' output registers<br/>a SKIP decides]
     R2 --> E1[E1: operands formatted<br/>the DSP's operands formed into registers<br/>logic unit, IDX, shifter prepared]
@@ -74,18 +76,20 @@ flowchart LR
     E5 --> W[W: write pins are registers<br/>the write lands at the next edge]
 ```
 
-A row presented to IMEM in cycle *k* is in A in *k*+2, the cycle the assembler
-calls its issue (`FIRST_ISSUE_CYCLE`, 2, for the program's first row); the
+A row presented to IMEM in cycle *k* is in A in *k*+4, the cycle the assembler
+calls its issue (`FIRST_ISSUE_CYCLE`, 4, for the program's first row); the
 cycles below count from there.
 
 | stage | cycle | what happens | what is a register |
 |---|---|---|---|
-| F | −2 | the program counter drives IMEM | the program counter |
-| D | −1 | IMEM's output register holds the row; the op field addresses the decode ROM | IMEM's and the ROM's own registers; the row and its pc, copied |
+| F | −4 | the program counter, a register, drives IMEM's address pins | the program counter |
+| D1 | −3 | IMEM's output register holds the row; a register takes it, and its op field into the ROM's address register (parked while held) | IMEM's own register; the row, its pc, the ROM's pin register |
+| D2 | −2 | the ROM's address pins are driven from that register | the ROM's own register |
+| D3 | −1 | the ROM's output register holds the control word; a register takes it | the control word, captured |
 | A | 0 | the control word is out of the ROM's register; each operand's address is formed by mode (direct, the index's bits beside the offset's, the immediate); a `LOOP` is pushed, a loop's last row repeats or ends it and steps its index register; the read rows of DMEM's banks are chosen, the idle banks parked | the addresses, the control word, the row's fields, DMEM's read pins |
 | R1 | 1 | DMEM's three copies sample their pins | the blocks' own |
-| R2 | 2 | the words are in the blocks' output registers, picked by word (the odd or even half) or the immediate; a `SKIP` reads the flags and kills the two rows behind it | the operands, captured |
-| E1 | 3 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; an `IDX` written; the shifter's count worked out | the multiply-add's operand registers; the logic result, the shifter's inputs |
+| R2 | 2 | the words are in the blocks' output registers; registers take them as they come; a `SKIP` reads the flags and kills the two rows behind it | the words, captured |
+| E1 | 3 | the words picked (the odd or even half, or the immediate); A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; an `IDX` written; the shifter's count worked out | the multiply-add's operand registers; the logic result, the shifter's inputs |
 | E2 | 4 | the block's input registers sample the operand registers | the block's own input registers |
 | E3 | 5 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
 | E4 | 6 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
@@ -102,8 +106,13 @@ reads in its E1 (3) and a `SKIP` in its R2 (2): a reader of either issues
 `IDX` writes its index at the end of its E1; a row's A reads it **4**
 cycles after the `IDX` issues, the three rows between being NOPs the
 assembler lays itself. A loop's repeat is decided in A and redirects the
-program counter: the two rows behind the loop's last, in D and in F, are
-discarded, so a repeat costs **2** cycles.
+program counter: the four rows behind the loop's last, in D3, D2, D1 and F,
+are discarded, so a repeat costs **4** cycles.
+
+No block RAM output feeds logic and no logic feeds a block RAM pin: IMEM's
+row, the ROM's control word, DMEM's words and the write FIFO's head are each
+captured by a register before anything reads them, and the program counter,
+the ROM's address register and DMEM's read and write registers are the pins.
 
 E2 exists so that nothing but a register is in front of the DSP's input pins:
 the logic before a block's pin is not timed (rule 1), and E1's operand logic, the
@@ -178,7 +187,7 @@ hangs — measured, not inherited.
 |---|---|
 | 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
 | 1472 … 1481 | the pipeline drains |
-| 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (1484 … 1531), the core's write registers take it that cycle, and DMEM samples it one cycle later, 1485 … 1532 |
+| 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (1484 … 1531), a register of `csp_pass` takes it, the core's write registers the cycle after, and DMEM samples it one cycle on, 1486 … 1533 |
 | 1533 | the pass counter, for the next pass, is asked for through the same registers (sampled at 1534) into input register 0x040 |
 | 1534 | the probe asks for its pair: the R copy's read registers take the probe's row |
 | 1535 | the probe's read pins are driven from those registers; its words are out in the cycle after, the next pass's first |
