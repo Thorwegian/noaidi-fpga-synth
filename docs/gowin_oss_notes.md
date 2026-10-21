@@ -380,7 +380,8 @@ and the flip-flop's clock-to-out at 0.20–0.23 ns; the routed reports of
 the CSP show 0.37–0.57 ns a level and 0.17–1.2 ns a hop between levels.
 At 73.728 MHz the period is 13.56 ns and the board wants the report at
 0.8 of that, so a path may hold about ten LUT levels with short routes,
-or six with the routes a mid-sized design actually gets. The CSP's
+or six with the routes a mid-sized design actually gets (the lab's chains,
+measured above, hold eight levels at 7.5 ns: short routes). The CSP's
 critical path today is exactly that: the pass control, the index
 adders, the fetch buffer's word, the private-index mux — ten levels
 across half the chip. Rules that keep a path under that, in the order
