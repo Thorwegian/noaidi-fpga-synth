@@ -18,14 +18,16 @@
 //              is the A cycle of the program's row 0)
 //   R1  +1     the read pins of DMEM's three copies are driven from registers
 //   R2  +2     the words are in the blocks' output registers; a SKIP decides
-//   E1  +3     operands formatted, the multiply-add's operands formed, MIN, MAX,
-//              SEL and ANDXOR done, an IDX written, the shifter prepared
-//   E2  +4     the multiply-add computes (the block's own registers on its pins);
+//   E1  +3     operands formatted, the multiply-add's operands formed into registers,
+//              MIN, MAX, SEL and ANDXOR done, an IDX written, the shifter prepared
+//   E2  +4     the multiply-add's own input registers sample those operand registers
+//              (nothing between them: the logic before a block's pin is untimed)
+//   E3  +5     the multiply-add computes (the block's own output register holds it);
 //              the shifter's coarse stage
-//   E3  +5     the product is out of the block, captured; the shifter's fine stage
-//   E4  +6     the sum reduced to its destination, saturated or wrapped, the flags
+//   E4  +6     the product is out of the block, captured; the shifter's fine stage
+//   E5  +7     the sum reduced to its destination, saturated or wrapped, the flags
 //              and the accumulator written
-//   W   +7     the write pins of DMEM are driven from registers; the write lands
+//   W   +8     the write pins of DMEM are driven from registers; the write lands
 //              at the edge after, so an instruction issued RESULT_LATENCY cycles
 //              later reads it
 //
@@ -483,7 +485,7 @@ module csp_core (
         end
     end
 
-    // ---- E2: the multiply-add computes; the shifter's coarse stage -------------------------------
+    // ---- E2: the block's input registers sample the operand registers; the payload waits -----------------------------
     logic               e2_live;
     logic [17:0]        e2_control;
     logic               e2_r_none;
@@ -510,29 +512,38 @@ module csp_core (
         e2_shift_magnitude <= shift_magnitude;
     end
 
-    logic signed [53:0] product;                      // E3: out of the block
+    // The multiply-add's operands are registers of the fabric's, with no logic between them and the
+    // block's input pins (docs/csp2_architecture.md rule 1): E1's logic, the 55-bit subtract of INTERP
+    // among it, ends in these registers, and the block's own input registers sample them a cycle later.
+    logic signed [17:0] multiply_a_q;
+    logic signed [35:0] multiply_b_q;
+    logic signed [53:0] multiply_c_q;
+    always_ff @(posedge clk) begin
+        multiply_a_q <= multiply_a;
+        multiply_b_q <= multiply_b;
+        multiply_c_q <= multiply_c;
+    end
+
+    logic signed [53:0] product;                      // E4: out of the block
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
-        .a       (multiply_a),
-        .b       (multiply_b),
-        .c       (multiply_c),
+        .a       (multiply_a_q),
+        .b       (multiply_b_q),
+        .c       (multiply_c_q),
         .product (product)
     );
 
-    wire signed [89:0] e2_shift_extended = {{36{e2_shift_value[53]}}, e2_shift_value};
-    wire        [5:0]  e2_coarse = {e2_shift_magnitude[5:3], 3'b000};
-
-    // ---- E3 ---------------------------------------------------------------------------------------------
+    // ---- E3: the block computes; the shifter's coarse stage ---------------------------------------------------------
     logic               e3_live;
     logic [17:0]        e3_control;
     logic               e3_r_none;
     logic [11:0]        e3_write_address;
     logic [17:0]        e3_logic_result;
     logic [2:0]         e3_ma_flags;
-    logic signed [89:0] e3_shift_value;
+    logic signed [53:0] e3_shift_value;
     logic               e3_shift_left;
-    logic [2:0]         e3_shift_fine;
+    logic [5:0]         e3_shift_magnitude;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) e3_live <= 1'b0;
@@ -540,25 +551,29 @@ module csp_core (
     end
 
     always_ff @(posedge clk) begin
-        e3_control       <= e2_control;
-        e3_r_none        <= e2_r_none;
-        e3_write_address <= e2_write_address;
-        e3_logic_result  <= e2_logic_result;
-        e3_ma_flags      <= e2_ma_flags;
-        e3_shift_value   <= e2_shift_left ? (e2_shift_extended <<< e2_coarse) : (e2_shift_extended >>> e2_coarse);
-        e3_shift_left    <= e2_shift_left;
-        e3_shift_fine    <= e2_shift_magnitude[2:0];
+        e3_control         <= e2_control;
+        e3_r_none          <= e2_r_none;
+        e3_write_address   <= e2_write_address;
+        e3_logic_result    <= e2_logic_result;
+        e3_ma_flags        <= e2_ma_flags;
+        e3_shift_value     <= e2_shift_value;
+        e3_shift_left      <= e2_shift_left;
+        e3_shift_magnitude <= e2_shift_magnitude;
     end
 
-    // ---- E4: reduced to the destination, saturated or wrapped, the flags --------------------------------
+    wire signed [89:0] e3_shift_extended = {{36{e3_shift_value[53]}}, e3_shift_value};
+    wire        [5:0]  e3_coarse = {e3_shift_magnitude[5:3], 3'b000};
+
+    // ---- E4: the product is out of the block, captured; the shifter's fine stage ----------------------------------
     logic               e4_live;
     logic [17:0]        e4_control;
     logic               e4_r_none;
     logic [11:0]        e4_write_address;
     logic [17:0]        e4_logic_result;
     logic [2:0]         e4_ma_flags;
-    logic signed [53:0] e4_product;
     logic signed [89:0] e4_shift_value;
+    logic               e4_shift_left;
+    logic [2:0]         e4_shift_fine;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) e4_live <= 1'b0;
@@ -571,20 +586,46 @@ module csp_core (
         e4_write_address <= e3_write_address;
         e4_logic_result  <= e3_logic_result;
         e4_ma_flags      <= e3_ma_flags;
-        e4_product       <= product;
-        e4_shift_value   <= e3_shift_left ? (e3_shift_value <<< e3_shift_fine) : (e3_shift_value >>> e3_shift_fine);
+        e4_shift_value   <= e3_shift_left ? (e3_shift_extended <<< e3_coarse) : (e3_shift_extended >>> e3_coarse);
+        e4_shift_left    <= e3_shift_left;
+        e4_shift_fine    <= e3_shift_magnitude[2:0];
     end
 
-    wire [2:0] e4_unit      = e4_control[17:15];
-    wire [2:0] e4_writes    = e4_control[14:12];
-    wire [1:0] e4_cond_kind = e4_control[7:6];
-    wire       e4_wraps     = e4_control[3];
-    wire       e4_r_wide    = e4_writes == csp_pkg::WRITES_PAIR;
+    // ---- E5: reduced to the destination, saturated or wrapped, the flags --------------------------------
+    logic               e5_live;
+    logic [17:0]        e5_control;
+    logic               e5_r_none;
+    logic [11:0]        e5_write_address;
+    logic [17:0]        e5_logic_result;
+    logic [2:0]         e5_ma_flags;
+    logic signed [53:0] e5_product;
+    logic signed [89:0] e5_shift_value;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e5_live <= 1'b0;
+        else          e5_live <= e4_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e5_control       <= e4_control;
+        e5_r_none        <= e4_r_none;
+        e5_write_address <= e4_write_address;
+        e5_logic_result  <= e4_logic_result;
+        e5_ma_flags      <= e4_ma_flags;
+        e5_product       <= product;
+        e5_shift_value   <= e4_shift_left ? (e4_shift_value <<< e4_shift_fine) : (e4_shift_value >>> e4_shift_fine);
+    end
+
+    wire [2:0] e5_unit      = e5_control[17:15];
+    wire [2:0] e5_writes    = e5_control[14:12];
+    wire [1:0] e5_cond_kind = e5_control[7:6];
+    wire       e5_wraps     = e5_control[3];
+    wire       e5_r_wide    = e5_writes == csp_pkg::WRITES_PAIR;
 
     // The sum wraps inside the block when the product and c share a sign the sum does not have;
     // then it saturates (or, for MACW, wraps).
-    wire e4_sum_wrapped = e4_ma_flags[2] && e4_ma_flags[1] && e4_product[53] != e4_ma_flags[0];
-    wire signed [53:0] product_saturated = e4_sum_wrapped ? (e4_ma_flags[0] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX) : e4_product;
+    wire e5_sum_wrapped = e5_ma_flags[2] && e5_ma_flags[1] && e5_product[53] != e5_ma_flags[0];
+    wire signed [53:0] product_saturated = e5_sum_wrapped ? (e5_ma_flags[0] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX) : e5_product;
 
     logic [35:0] arithmetic_result;
     logic        arithmetic_saturated;
@@ -592,13 +633,13 @@ module csp_core (
         logic signed [53:0] chosen;
         logic signed [21:0] word_part;
         logic signed [39:0] wide_part;
-        chosen    = e4_wraps ? e4_product : product_saturated;
+        chosen    = e5_wraps ? e5_product : product_saturated;
         word_part = 22'(chosen >>> 32);
         wide_part = 40'(chosen >>> 14);
         arithmetic_result    = '0;
-        arithmetic_saturated = e4_sum_wrapped && !e4_wraps;
-        if (e4_r_wide) begin
-            if (e4_wraps) begin
+        arithmetic_saturated = e5_sum_wrapped && !e5_wraps;
+        if (e5_r_wide) begin
+            if (e5_wraps) begin
                 arithmetic_result = wide_part[35:0];
             end else if (wide_part > 40'sd34359738367) begin
                 arithmetic_result = 36'h7_ffff_ffff;  arithmetic_saturated = 1'b1;
@@ -608,7 +649,7 @@ module csp_core (
                 arithmetic_result = wide_part[35:0];
             end
         end else begin
-            if (e4_wraps) begin
+            if (e5_wraps) begin
                 arithmetic_result = {18'd0, word_part[17:0]};
             end else if (word_part > 22'sd131071) begin
                 arithmetic_result = {18'd0, 18'h1ffff};  arithmetic_saturated = 1'b1;
@@ -625,19 +666,19 @@ module csp_core (
     logic        shift_saturated;
     always_comb begin
         logic signed [89:0] limit_high, limit_low;
-        if (e4_r_wide) begin
+        if (e5_r_wide) begin
             limit_high = (90'sd1 <<< 35) - 1;  limit_low = -(90'sd1 <<< 35);
         end else begin
             limit_high = (90'sd1 <<< 17) - 1;  limit_low = -(90'sd1 <<< 17);
         end
         shift_saturated = 1'b1;
-        if (e4_shift_value > limit_high)      shift_result = 36'(limit_high);
-        else if (e4_shift_value < limit_low)  shift_result = 36'(limit_low);
+        if (e5_shift_value > limit_high)      shift_result = 36'(limit_high);
+        else if (e5_shift_value < limit_low)  shift_result = 36'(limit_low);
         else begin
-            shift_result    = 36'(e4_shift_value);
+            shift_result    = 36'(e5_shift_value);
             shift_saturated = 1'b0;
         end
-        if (!e4_r_wide) shift_result[35:18] = '0;
+        if (!e5_r_wide) shift_result[35:18] = '0;
     end
 
     // the result and its overflow flag, by unit
@@ -646,9 +687,9 @@ module csp_core (
     always_comb begin
         result          = arithmetic_result;
         result_overflow = arithmetic_saturated;
-        case (e4_unit)
+        case (e5_unit)
             csp_pkg::UNIT_LOGIC: begin
-                result          = {18'd0, e4_logic_result};
+                result          = {18'd0, e5_logic_result};
                 result_overflow = 1'b0;
             end
             csp_pkg::UNIT_SHIFT: begin
@@ -659,22 +700,22 @@ module csp_core (
         endcase
     end
 
-    wire result_negative = e4_r_wide ? result[35] : result[17];
-    wire result_zero     = e4_r_wide ? result == '0 : result[17:0] == '0;
+    wire result_negative = e5_r_wide ? result[35] : result[17];
+    wire result_zero     = e5_r_wide ? result == '0 : result[17:0] == '0;
 
     // where the write goes: a register (not an input, which the program never writes), or a sink word
-    wire e4_is_register = !e4_write_address[11];
-    wire e4_is_input    = e4_write_address[10:0] >= 11'(csp_pkg::IO_BASE) && e4_write_address[10:0] < 11'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT);
-    wire e4_is_sink     = e4_write_address[11:10] == 2'b10;
-    wire e4_writes_dest = e4_live && !e4_r_none && (e4_writes == csp_pkg::WRITES_WORD || e4_writes == csp_pkg::WRITES_PAIR);
+    wire e5_is_register = !e5_write_address[11];
+    wire e5_is_input    = e5_write_address[10:0] >= 11'(csp_pkg::IO_BASE) && e5_write_address[10:0] < 11'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT);
+    wire e5_is_sink     = e5_write_address[11:10] == 2'b10;
+    wire e5_writes_dest = e5_live && !e5_r_none && (e5_writes == csp_pkg::WRITES_WORD || e5_writes == csp_pkg::WRITES_PAIR);
 
     // DMEM's write pins, decoded here so that they come from registers: a bank's enable (a word write
     // takes the bank of its address, a wide one both, register 0 neither), one row, a word for each bank
-    wire        e4_register_write = e4_writes_dest && e4_is_register && !e4_is_input;
-    wire [AW-1:0] e4_address      = e4_write_address[AW-1:0];
-    wire        e4_discard        = e4_address == '0;
-    wire        core_even_enable  = e4_register_write && !e4_discard && (e4_r_wide || !e4_address[0]);
-    wire        core_odd_enable   = e4_register_write && !e4_discard && (e4_r_wide ||  e4_address[0]);
+    wire        e5_register_write = e5_writes_dest && e5_is_register && !e5_is_input;
+    wire [AW-1:0] e5_address      = e5_write_address[AW-1:0];
+    wire        e5_discard        = e5_address == '0;
+    wire        core_even_enable  = e5_register_write && !e5_discard && (e5_r_wide || !e5_address[0]);
+    wire        core_odd_enable   = e5_register_write && !e5_discard && (e5_r_wide ||  e5_address[0]);
     // the pass's writes arrive while the core is idle: one word, never wide
     wire        extra_discard     = extra_write_address == '0;
     wire        extra_even_enable = extra_write_enable && !extra_discard && !extra_write_address[0];
@@ -690,24 +731,24 @@ module csp_core (
             write_odd_enable  <= 1'b0;
             sink_write_enable <= 1'b0;
         end else begin
-            if (e4_live && e4_cond_kind == csp_pkg::CONDITION_KIND_FLAGS) begin
+            if (e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS) begin
                 flag_negative <= result_negative;
                 flag_zero     <= result_zero;
                 flag_overflow <= result_overflow;
             end
-            if (e4_live && e4_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
+            if (e5_live && e5_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
             write_even_enable <= extra_write_enable ? extra_even_enable : core_even_enable;
             write_odd_enable  <= extra_write_enable ? extra_odd_enable  : core_odd_enable;
-            sink_write_enable <= e4_writes_dest && e4_is_sink && e4_writes == csp_pkg::WRITES_WORD;
+            sink_write_enable <= e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD;
         end
     end
 
     // ---- W: the write pins ---------------------------------------------------------------------------------
     always_ff @(posedge clk) begin
-        write_index        <= extra_write_enable ? extra_write_address[AW-1:1] : e4_address[AW-1:1];
-        write_even_data    <= extra_write_enable ? extra_write_word : (e4_r_wide ? result[35:18] : result[17:0]);
+        write_index        <= extra_write_enable ? extra_write_address[AW-1:1] : e5_address[AW-1:1];
+        write_even_data    <= extra_write_enable ? extra_write_word : (e5_r_wide ? result[35:18] : result[17:0]);
         write_odd_data     <= extra_write_enable ? extra_write_word : result[17:0];
-        sink_write_address <= e4_write_address[csp_pkg::SINK_WORD_W-1:0];
+        sink_write_address <= e5_write_address[csp_pkg::SINK_WORD_W-1:0];
         sink_write_data    <= result[17:0];
     end
 

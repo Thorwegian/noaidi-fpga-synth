@@ -64,13 +64,14 @@ the second revision takes them as given.
 flowchart LR
     F[F: the program counter<br/>drives IMEM's address pins] --> D[D: IMEM's output register<br/>the decode ROM addressed<br/>from the op field]
     D --> A[A: the control word out of the ROM's register<br/>operand addresses: index bits beside offset bits<br/>loops pushed and ended, indexes stepped]
-    A --> R1[R1: DMEM's three copies<br/>read pins driven from registers<br/>idle ports and banks parked]
+    A --> R1[R1: DMEM's three copies<br/>read pins are registers<br/>idle ports and banks parked]
     R1 --> R2[R2: the words in the blocks' output registers<br/>a SKIP decides]
-    R2 --> E1[E1: operands formatted<br/>the DSP's operands formed<br/>logic unit, IDX, shifter prepared]
-    E1 --> E2[E2: the DSP computes<br/>its own registers on its pins<br/>the shifter's coarse stage]
-    E2 --> E3[E3: the product captured<br/>the shifter's fine stage]
-    E3 --> E4[E4: reduced, saturated or wrapped<br/>flags and accumulator written]
-    E4 --> W[W: write pins from registers<br/>the write lands at the next edge]
+    R2 --> E1[E1: operands formatted<br/>the DSP's operands formed into registers<br/>logic unit, IDX, shifter prepared]
+    E1 --> E2[E2: the DSP's own input registers sample<br/>the operand registers, nothing between]
+    E2 --> E3[E3: the DSP computes<br/>the shifter's coarse stage]
+    E3 --> E4[E4: the product captured<br/>the shifter's fine stage]
+    E4 --> E5[E5: reduced, saturated or wrapped<br/>flags and accumulator written]
+    E5 --> W[W: write pins are registers<br/>the write lands at the next edge]
 ```
 
 A row presented to IMEM in cycle *k* is in A in *k*+2, the cycle the assembler
@@ -81,26 +82,34 @@ cycles below count from there.
 |---|---|---|---|
 | F | −2 | the program counter drives IMEM | the program counter |
 | D | −1 | IMEM's output register holds the row; the op field addresses the decode ROM | IMEM's and the ROM's own registers; the row and its pc, copied |
-| A | 0 | the control word is out of the ROM's register; each operand's address is formed by mode (direct, the index's bits beside the offset's, the immediate); a `LOOP` is pushed, a loop's last row repeats or ends it and steps its index register | the addresses, the control word, the row's fields |
-| R1 | 1 | DMEM's three copies sample their address pins, driven from registers; the ports and banks a row does not use are parked | the registers on the pins; the blocks' own |
+| A | 0 | the control word is out of the ROM's register; each operand's address is formed by mode (direct, the index's bits beside the offset's, the immediate); a `LOOP` is pushed, a loop's last row repeats or ends it and steps its index register; the read rows of DMEM's banks are chosen, the idle banks parked | the addresses, the control word, the row's fields, DMEM's read pins |
+| R1 | 1 | DMEM's three copies sample their pins | the blocks' own |
 | R2 | 2 | the words are in the blocks' output registers, picked by word (the odd or even half) or the immediate; a `SKIP` reads the flags and kills the two rows behind it | the operands, captured |
-| E1 | 3 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; an `IDX` written; the shifter's count worked out | the DSP's own input registers; the logic result, the shifter's inputs |
-| E2 | 4 | the multiply-add computes; the shifter's coarse stage | the DSP's own output register; the shifter |
-| E3 | 5 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
-| E4 | 6 | the sum reduced to its destination, saturated or wrapped; the flags and the accumulator written | the flags and the accumulator; the write registers |
-| W | 7 | the write registers drive DMEM's write pins (or a sink word's); the write lands at the edge after | the registers on the pins |
+| E1 | 3 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; an `IDX` written; the shifter's count worked out | the multiply-add's operand registers; the logic result, the shifter's inputs |
+| E2 | 4 | the block's input registers sample the operand registers | the block's own input registers |
+| E3 | 5 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
+| E4 | 6 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
+| E5 | 7 | the sum reduced to its destination, saturated or wrapped; the flags and the accumulator written; DMEM's write enables, row and words decoded | the flags and the accumulator; the write registers |
+| W | 8 | the write registers drive DMEM's write pins (or a sink word's); the write lands at the edge after | the registers on the pins |
 
 The numbers the assembler schedules by follow from the table. A result is
-readable by a row issued **7** cycles after the row that wrote it (its read
-pins are driven at 1, the write is sampled at the end of 7, so a reader at
-issue + 7 samples one edge later and never meets it on a row). The flags
-and the accumulator are in their registers from cycle 7, which a `SEL`
-reads in its E1 (3) and a `SKIP` in its R2 (2), so a reader of either
-issues **5** cycles after the writer. An `IDX` writes its index at the end
-of its E1; a row's A reads it **4** cycles after the `IDX` issues, the
-three rows between being NOPs the assembler lays itself. A loop's repeat is
-decided in A and redirects the program counter: the two rows behind the
-loop's last, in D and in F, are discarded, so a repeat costs **2** cycles.
+readable by a row issued **8** cycles after the row that wrote it (its read
+pins are driven at 1, the write is sampled at the end of 8, so a reader at
+issue + 8 samples one edge later and never meets it on a row). The flags
+and the accumulator are in their registers from cycle 8, which a `SEL`
+reads in its E1 (3) and a `SKIP` in its R2 (2): a reader of either issues
+5 and **6** cycles after the writer; the assembler takes 6 for both. An
+`IDX` writes its index at the end of its E1; a row's A reads it **4**
+cycles after the `IDX` issues, the three rows between being NOPs the
+assembler lays itself. A loop's repeat is decided in A and redirects the
+program counter: the two rows behind the loop's last, in D and in F, are
+discarded, so a repeat costs **2** cycles.
+
+E2 exists so that nothing but a register is in front of the DSP's input pins:
+the logic before a block's pin is not timed (rule 1), and E1's operand logic, the
+55-bit subtract of INTERP among it, is the longest in the core. The first version of
+this core formed the operands in E1 straight into the pins; what the board made of
+that, and of this, is in section 4.
 
 The front end has no hazard check, no stall, no skip counter per element
 and no 64-way select: the depth that the first revision's seeds reported as

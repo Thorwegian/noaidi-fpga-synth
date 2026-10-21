@@ -62,11 +62,12 @@ package csp_pkg;
     // A row presented to IMEM in cycle k is in the decode stage in k+1 (IMEM's
     // output register, the ROM addressed from it) and in the address stage A in
     // k+2, the cycle the assembler calls its issue. From there: R1 the DMEM read
-    // pins, R2 the words, E1 the operands formatted, E2 and E3 the multiply-add
-    // (or the shifter), E4 reduced and saturated, W the write pins.
+    // pins, R2 the words, E1 the operands formatted into registers, E2 the multiply-add's
+    // own input registers, E3 its compute, E4 the product out, E5 reduced and saturated,
+    // W the write pins.
     parameter int FIRST_ISSUE_CYCLE = 2;       // the address stage of the program's row 0
-    parameter int RESULT_LATENCY    = 7;       // A to the cycle a reader's A may follow a W
-    parameter int STATE_LATENCY     = 5;       // the flags and the accumulator
+    parameter int RESULT_LATENCY    = 8;       // A to the cycle a reader's A may follow a W
+    parameter int STATE_LATENCY     = 6;       // the flags and the accumulator, for a SKIP (a SEL and an A operand take 5)
     parameter int INDEX_LATENCY     = 4;       // an IDX's index, in the register for the A stage
     parameter int JUMP_PENALTY      = 2;       // the rows in flight behind a loop's last row
 
