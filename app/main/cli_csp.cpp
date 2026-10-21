@@ -195,6 +195,42 @@ int cmd_diag(int, char **) {
     return 0;
 }
 
+// The write trap (#238): armed on a register (or a sink word, 0x800 + its
+// index), it keeps the last write it caught — the pass's cycle, the word,
+// who wrote — and counts the hits. The capture crosses from the CSP's
+// clock as it is, so it is read until two reads agree.
+int cmd_trap(int argc, char **argv) {
+    if (argc > 1) {
+        const bool off = std::strcmp(argv[1], "off") == 0;
+        const uint32_t address =
+                off ? 0 : static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0)) & 0xFFF;
+        engine_link_raw_write(fpga_map::trap, address);
+        if (off) {
+            std::printf("  the trap is off\n");
+        } else {
+            std::printf("  the trap watches %s 0x%03x\n",
+                        address & fpga_map::trap_sink_flag ? "sink word" : "register",
+                        static_cast<unsigned>(address & ~fpga_map::trap_sink_flag));
+        }
+        return 0;
+    }
+    uint64_t capture = 0, again = ~uint64_t{0};
+    for (int attempt = 0; attempt < 8 && capture != again; ++attempt) {
+        if (!engine_link_raw_read(fpga_map::trap, &capture, 1) ||
+            !engine_link_raw_read(fpga_map::trap, &again, 1)) {
+            std::printf("  the link answers no ID nonet\n");
+            return 1;
+        }
+    }
+    const unsigned hits      = static_cast<unsigned>(capture >> 30) & 0x3F;
+    const bool     from_pass = (capture >> 29) & 1;
+    const unsigned cycle     = static_cast<unsigned>(capture >> 18) & 0x7FF;
+    const unsigned word      = static_cast<unsigned>(capture) & 0x3FFFF;
+    std::printf("  hits %u (mod 64)  last: cycle %u  word 0x%05x  by the %s\n", hits, cycle,
+                word, from_pass ? "pass (the window or the sink area)" : "core");
+    return 0;
+}
+
 int cmd_selftest(int argc, char **argv) {
     const bool leave_running = argc > 1;
     std::printf(
@@ -510,6 +546,8 @@ const console_cmd_t commands[] = {
         {"csp-resend", "", "send the whole register image again", cmd_resend,
          nullptr},
         {"csp-diag", "", "the gateware's diagnostic words", cmd_diag, nullptr},
+        {"csp-trap", "[<register>|0x800+<sink>|off]",
+         "arm the write trap on a register or a sink word, or read what it caught", cmd_trap, nullptr},
 };
 
 } // namespace

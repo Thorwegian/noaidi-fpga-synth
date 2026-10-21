@@ -35,7 +35,13 @@ constexpr dword_t stream_source_mask    = 7;   // CTRL[6:4]
 
 // The scratch dwords: read back what was written, nothing else.
 constexpr uint32_t scratch_first = 0x00003;
-constexpr uint32_t scratch_last  = 0x00007;
+constexpr uint32_t scratch_last  = 0x00006;
+
+// The write trap (#238): written, the CSP register a write of the core's
+// or the pass's is caught on (bit 11 set: a sink word, by index; 0: none);
+// read, what it caught — {hits[5:0], by the pass, cycle[10:0], word[17:0]}.
+constexpr uint32_t trap            = 0x00007;
+constexpr uint32_t trap_sink_flag  = 0x800;
 
 // The status dwords (read-only, spi_bus.sv): the 48 kHz samples — the
 // passes — since reset, the write FIFO's state, the master limiter, the

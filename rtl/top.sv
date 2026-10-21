@@ -69,6 +69,8 @@ module top (
     logic       csp_held_sclk, test_tone_sclk, data_stream_sclk;
     logic [synth_pkg::STREAM_SOURCE_W-1:0] stream_source_sclk;
     logic [csp_pkg::REGISTER_W-1:0] probe_address_sclk;
+    logic [csp_pkg::ADDRESS_W-1:0]  trap_address_sclk, trap_address_meta, trap_address_sync;   // the write trap (#238)
+    logic [synth_pkg::SPI_DWORD_W-1:0] trap_capture;
     logic       csp_held_meta, csp_held_sync;
     logic       test_tone_meta, test_tone_sync;
     logic       data_stream_meta, data_stream_sync;
@@ -81,12 +83,14 @@ module top (
             {data_stream_meta, data_stream_sync}     <= 2'b00;
             {stream_source_meta, stream_source_sync} <= '0;
             {probe_address_meta, probe_address_sync} <= '0;
+            {trap_address_meta, trap_address_sync}   <= '0;
         end else begin
             {csp_held_meta, csp_held_sync}           <= {csp_held_sclk, csp_held_meta};
             {test_tone_meta, test_tone_sync}         <= {test_tone_sclk, test_tone_meta};
             {data_stream_meta, data_stream_sync}     <= {data_stream_sclk, data_stream_meta};
             {stream_source_meta, stream_source_sync} <= {stream_source_sclk, stream_source_meta};
             {probe_address_meta, probe_address_sync} <= {probe_address_sclk, probe_address_meta};
+            {trap_address_meta, trap_address_sync}   <= {trap_address_sclk, trap_address_meta};
         end
 
     //----------------------------------------------------------------
@@ -185,6 +189,8 @@ module top (
         .fifo_head_valid    (fifo_head_valid),
         .fifo_head_dword    (fifo_head_dword),
         .probe_address      (probe_address_sync),
+        .trap_address       (trap_address_sync),
+        .trap_capture       (trap_capture),
         .probe_sweep        (probe_sweep),
         .probe_step         (probe_step),
         .probe_pair         (probe_pair),
@@ -441,6 +447,8 @@ module top (
         .data_stream_enable (data_stream_sclk),
         .stream_source      (stream_source_sclk),
         .probe_address      (probe_address_sclk),
+        .trap_address       (trap_address_sclk),
+        .trap_capture       (trap_capture),
         .status             (status),
         .fifo_write_enable  (fifo_write_enable),
         .fifo_write_dword    (fifo_write_dword),

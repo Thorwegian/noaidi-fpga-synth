@@ -111,7 +111,8 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 | `0x000` | `ID` | reserved (the ID byte rides MISO byte 0 of every frame) |
 | `0x001` | `STATUS` | reserved |
 | `0x002` | `CTRL` | `[0]` commit the write queue (an event: write 1 to commit), `[1]` hold the CSP in reset, `[2]` replace the output with the test tone, `[3]` the data stream on the 48 kHz output, `[6:4]` its source |
-| `0x003–0x007` | scratch | read back what was written |
+| `0x003–0x006` | scratch | read back what was written |
+| `0x007` | `TRAP` | written: `[10:0]` the CSP register, or with `[11]` set the sink word by index, that the write trap watches (0: none); read: what it caught — `[35:30]` the hits (mod 64), `[29]` the last was the pass's (the window's or the sink area's), `[28:18]` its cycle in the pass, `[17:0]` its word. The lab's instrument for a write nobody asked for (#238) |
 | `0x008` | `DIAG_PASS` | read-only. `[17:0]` passes the CSP has run since reset (two reads a few ms apart must differ, or the CSP has stopped) |
 | `0x009` | `DIAG_QUEUE` | read-only. `[9:0]` the write queue's read pointer, Gray-coded; `[10]` the queue is full |
 | `0x00A` | `DIAG_LIMITER` | read-only. `[18:0]` the master limiter's envelope state (`[18:11]` is the reduction in codes of 0.375 dB, `[10:0]` the fraction; 0 = none, 255 codes = 95.6 dB) |

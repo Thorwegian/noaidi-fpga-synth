@@ -51,11 +51,13 @@ package synth_pkg;
     parameter int CTRL_SOURCE_LOW  = 4;
     parameter int CTRL_SOURCE_HIGH = 6;
     parameter int MAP_SYSTEM_DWORDS = 16;
-    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back; 0x8–0xF are status
+    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back (0x7 reads the trap's capture); 0x8–0xF are status
     parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset
     parameter int MAP_DIAG_QUEUE   = 9;         // status dword: the FIFO's Gray read pointer, [10] full
     parameter int MAP_DIAG_LIMITER = 10;        // status dword: the master limiter (with the output, #236)
     parameter int MAP_DIAG_DROPPED = 11;        // status dword: writes dropped at a full FIFO
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_TRAP = 18'h00007;   // written: the register a write trap watches (0: none,
+                                                               //   bit 11: a sink word); read: the trap's capture (#238)
     parameter logic [SPI_ADDRESS_W-1:0] MAP_PROBE_ADDRESS = 18'h0000C;   // the pair the probe reads
     parameter int MAP_PROBE_EVEN   = 13;        // status dword: the pair's even register
     parameter int MAP_PROBE_ODD    = 14;        //   and its odd one

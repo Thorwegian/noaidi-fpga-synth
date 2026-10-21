@@ -304,6 +304,14 @@ and the DSP. Issue #230 carries the patch work (fork
   one capture under a held note: the program's sinks moving, the firmware's
   zero. Read the registers over the pipe (`chip_check.py --stream`), not the
   console (2048 registers: 32 s).
+- **The write trap** (`csp-trap <register>`, `csp-trap 0x800+<sink index>`,
+  `csp-trap` to read, `off`; system dword 0x7, #238) catches a write nobody
+  asked for where it happens: the CSP latches the last write to the watched
+  register — the pass's cycle, the word, the core's or the pass's — and
+  counts the hits. The cycle names the row whose W stage fell in it (the
+  model's `CSP_TRACE` gives the cycle of every row's write for the offset);
+  a pass's write with a word the firmware never sent is the window's, from
+  the FIFO or the wire. Arm it before the boot's image and read after.
 - **The chip check** is the instrument for "does the chip compute what the
   model computes", the co-simulation's method on silicon: `csp script
   <program>.s -f <seed>` prints the console lines that fill every register

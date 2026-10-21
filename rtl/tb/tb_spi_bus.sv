@@ -28,6 +28,8 @@ module tb_spi_bus;
     wire        swap, csp_held, test_tone_enable, data_stream_enable;
     wire [1:0]  stream_source;
     wire [csp_pkg::REGISTER_W-1:0] probe_address;
+    wire [csp_pkg::ADDRESS_W-1:0]  trap_address;                        // the trap's register, as written to dword 0x7
+    logic [SPI_DWORD_W-1:0]        trap_capture = 36'hC_AFE0_0042;      // what dword 0x7 reads: the CSP's capture
     logic [MAP_SYSTEM_DWORDS-MAP_STORED_DWORDS-1:0][SPI_DWORD_W-1:0] status;
     initial begin
         for (int dword = 0; dword < MAP_SYSTEM_DWORDS - MAP_STORED_DWORDS; dword++)
@@ -52,6 +54,7 @@ module tb_spi_bus;
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
         .swap(swap), .csp_held(csp_held), .test_tone_enable(test_tone_enable),
         .data_stream_enable(data_stream_enable), .stream_source(stream_source), .probe_address(probe_address),
+        .trap_address(trap_address), .trap_capture(trap_capture),
         .status(status),
         .fifo_write_enable(fifo_write_enable), .fifo_write_dword(fifo_write_dword),
         .imem_load_enable(imem_load_enable), .imem_row(imem_row), .imem_upper(imem_upper),
@@ -183,12 +186,15 @@ module tb_spi_bus;
         check9("turnaround slot silent", rx_nonets[3], 9'h000);
         check36("dword[0x5]", read_dwords[0], 36'hD_EADB_EEF5);
 
-        $display("--- 3. burst auto-increment write + read (the scratch dwords) ---");
+        $display("--- 3. burst auto-increment write + read (the scratch dwords, then the trap) ---");
         write_dwords[0] = 36'h1_1111_1111; write_dwords[1] = 36'h2_2222_2222; write_dwords[2] = 36'h3_3333_3333;
         write_burst(18'h00005, 3, 1);
         read_burst(18'h00005, 3, 1);
-        for (j = 0; j < 3; j = j + 1)
+        for (j = 0; j < 2; j = j + 1)
             check36($sformatf("dword[0x%0h]", 5 + j), read_dwords[j], {9{j[3:0] + 4'd1}});
+        // dword 0x7 is the trap: written, the register it watches; read, the CSP's capture
+        checkn("the trap's register written", trap_address, 12'h333);
+        check36("dword[0x7] reads the trap's capture", read_dwords[2], trap_capture);
 
         $display("--- 4. a non-incrementing read repeats one address ---");
         read_burst(18'h00006, 2, 0);
@@ -290,13 +296,13 @@ module tb_spi_bus;
         half = 13;                        // ~38 MHz
         read_burst(18'h00006, 2, 1);
         check36("fast dword[0x6]", read_dwords[0], 36'h2_2222_2222);
-        check36("fast dword[0x7]", read_dwords[1], 36'h3_3333_3333);
+        check36("fast dword[0x7]", read_dwords[1], trap_capture);
         read_burst(MAP_IMEM_BASE + 18'd21, 2, 1);
         check36("fast IMEM dword 21", read_dwords[0], 36'h8_0001_1111);
         check36("fast IMEM dword 22", read_dwords[1], 36'h8_0002_2222);
         write_dwords[0] = 36'h0_BADF_00D7;
-        write_burst(18'h00007, 1, 1);
-        read_burst(18'h00007, 1, 1);
+        write_burst(18'h00004, 1, 1);
+        read_burst(18'h00004, 1, 1);
         check36("fast write/read", read_dwords[0], 36'h0_BADF_00D7);
         check9("fast frame ID", rx_nonets[0], ID);
 

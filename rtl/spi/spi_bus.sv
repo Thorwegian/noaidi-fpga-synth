@@ -57,6 +57,8 @@ module spi_bus #(
     output logic        data_stream_enable,   // CTRL[3]: the 48 kHz S/PDIF carries the data stream
     output logic [synth_pkg::STREAM_SOURCE_W-1:0] stream_source,   // CTRL[6:4]
     output logic [csp_pkg::REGISTER_W-1:0] probe_address,   // system dword 0xC
+    output logic [csp_pkg::ADDRESS_W-1:0]  trap_address,    // system dword 0x7: the register a write trap watches (#238)
+    input  wire  [synth_pkg::SPI_DWORD_W-1:0] trap_capture,  //   and what it caught, read back at the same dword (the system clock's: read twice)
 
     // ---- the status dwords (sclk domain, read-only, 0x8–0xF) --------------
     input  logic [synth_pkg::MAP_SYSTEM_DWORDS-synth_pkg::MAP_STORED_DWORDS-1:0][synth_pkg::SPI_DWORD_W-1:0] status,
@@ -145,7 +147,9 @@ module spi_bus #(
     end
 
     function automatic logic [synth_pkg::SPI_DWORD_W-1:0] system_at(input logic [synth_pkg::SPI_ADDRESS_W-1:0] address);
-        if (address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_STORED_DWORDS)) begin
+        if (address == synth_pkg::MAP_TRAP) begin
+            system_at = trap_capture;
+        end else if (address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_STORED_DWORDS)) begin
             system_at = system_dword[address[2:0]];
         end else if (address == synth_pkg::MAP_PROBE_ADDRESS) begin
             system_at = synth_pkg::SPI_DWORD_W'(probe_register);
@@ -269,6 +273,7 @@ module spi_bus #(
         end
     end
     assign probe_address = probe_register;
+    assign trap_address  = system_dword[synth_pkg::MAP_TRAP[2:0]][csp_pkg::ADDRESS_W-1:0];
 
     // The levels follow CTRL as written, from the edge after the dword
     // completes.

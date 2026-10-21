@@ -43,6 +43,12 @@ module csp (
     output logic [csp_pkg::WIDE_W-1:0]       probe_pair,
     output logic [csp_pkg::REGISTER_W-1:0]   probe_register,
 
+    // the write trap (#238): a write of the core's or the pass's to this register (bit 11: a sink
+    // word) latches the pass's cycle and the word, with a count of hits — a stray write's source
+    // row follows from the cycle its W stage falls in. 0 watches nothing.
+    input  wire  [csp_pkg::ADDRESS_W-1:0]    trap_address,
+    output logic [csp_pkg::DWORD_W-1:0]      trap_capture,       // {hits[5:0], from the pass, cycle[10:0], word[17:0]}
+
     output logic [csp_pkg::CYCLE_W-1:0]      cycle,
     output logic [31:0]                      pass_counter,
 
@@ -150,6 +156,30 @@ module csp (
         .write_even_data (write_even_data), .write_odd_data (write_odd_data),
         .read_even_index (read_y_even_index), .read_odd_index (read_y_odd_index), .read_pair (read_y_pair)
     );
+
+    // ---- the write trap -------------------------------------------------------------------------
+    logic [5:0]                 trap_hits;
+    logic [csp_pkg::CYCLE_W-1:0] trap_cycle;
+    logic [csp_pkg::WORD_W-1:0]  trap_word;
+    logic                       trap_from_pass;
+    wire trap_armed = trap_address != '0;
+    wire trap_even  = write_even_enable && !trap_address[11] && {write_index, 1'b0} == trap_address[csp_pkg::REGISTER_W-1:0];
+    wire trap_odd   = write_odd_enable  && !trap_address[11] && {write_index, 1'b1} == trap_address[csp_pkg::REGISTER_W-1:0];
+    wire trap_sink  = sink_write_enable &&  trap_address[11] && sink_write_address == trap_address[csp_pkg::SINK_WORD_W-1:0];
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            trap_hits      <= '0;
+            trap_cycle     <= '0;
+            trap_word      <= '0;
+            trap_from_pass <= 1'b0;
+        end else if (trap_armed && (trap_even || trap_odd || trap_sink)) begin
+            trap_hits      <= trap_hits + 1'b1;   // a count that wraps, not a total
+            trap_cycle     <= cycle;
+            trap_word      <= trap_sink ? sink_write_data : trap_even ? write_even_data : write_odd_data;
+            trap_from_pass <= trap_sink ? sink_write_both : pass_write_enable;
+        end
+    end
+    assign trap_capture = {trap_hits, trap_from_pass, 11'(trap_cycle), trap_word};
 
 endmodule
 `default_nettype wire
