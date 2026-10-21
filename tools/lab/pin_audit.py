@@ -29,7 +29,10 @@ FLOP = re.compile(r"^DFF")
 CONST = {"GND", "VCC"}
 
 design = json.load(open(sys.argv[1]))
-module = next(iter(design["modules"].values()))
+# the design's own module: yosys's JSON lists its abc9 helper modules first, and the first of
+# them audited clean for a day (#238); the top is the one marked so, or the biggest
+module = next((m for m in design["modules"].values() if m.get("attributes", {}).get("top")), None) \
+    or max(design["modules"].values(), key=lambda m: len(m["cells"]))
 cells = module["cells"]
 
 driver = {}          # net -> (cell name, cell type, port)

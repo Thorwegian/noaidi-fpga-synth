@@ -55,24 +55,27 @@ module csp_dmem (
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    read_odd_index,
     output logic [csp_pkg::WIDE_W-1:0]         read_pair       // {even, odd} the clock after
 );
-    // each bank's write register: the pins' own
-    (* keep *) logic                             even_enable_q, odd_enable_q;
-    (* keep *) logic [csp_pkg::BANK_INDEX_W-1:0] even_index_q, odd_index_q;
-    (* keep *) logic [csp_pkg::WORD_W-1:0]       even_data_q, odd_data_q;
-    always_ff @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
-            even_enable_q <= 1'b0;
-            odd_enable_q  <= 1'b0;
-        end else begin
-            even_enable_q <= write_even_enable;
-            odd_enable_q  <= write_odd_enable;
-        end
+    // each bank's write register: the pins' own. The `keep` goes on the process, one a bank:
+    // identical flip-flops with identical inputs are one flip-flop to yosys, a `keep` on the
+    // signal notwithstanding (docs/gowin_oss_notes.md; the pin audit tells).
+    logic                             even_enable_q, odd_enable_q;
+    logic [csp_pkg::BANK_INDEX_W-1:0] even_index_q, odd_index_q;
+    logic [csp_pkg::WORD_W-1:0]       even_data_q, odd_data_q;
+    (* keep *) always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) even_enable_q <= 1'b0;
+        else          even_enable_q <= write_even_enable;
     end
-    always_ff @(posedge clk) begin
+    (* keep *) always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) odd_enable_q <= 1'b0;
+        else          odd_enable_q <= write_odd_enable;
+    end
+    (* keep *) always_ff @(posedge clk) begin
         even_index_q <= write_index;
-        odd_index_q  <= write_index;
         even_data_q  <= write_even_data;
-        odd_data_q   <= write_odd_data;
+    end
+    (* keep *) always_ff @(posedge clk) begin
+        odd_index_q <= write_index;
+        odd_data_q  <= write_odd_data;
     end
 
     logic [csp_pkg::WORD_W-1:0] even_word, odd_word;

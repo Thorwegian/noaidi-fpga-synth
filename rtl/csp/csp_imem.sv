@@ -57,9 +57,10 @@ module csp_imem (
         localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the dword's 9-bit lane
         wire write_this = load_enable && load_upper == UPPER;
         wire [csp_pkg::SLICE_W-1:0] lane_in = load_dword[LANE * csp_pkg::SLICE_W +: csp_pkg::SLICE_W];
-        // this slice's copy of the program counter: the fetch pins' own register
-        (* keep *) logic [csp_pkg::PROGRAM_W-1:0] port_b_row;
-        always_ff @(posedge clk) port_b_row <= fetch_next;
+        // this slice's copy of the program counter: the fetch pins' own register (the `keep` on
+        // the process, or yosys merges the eight copies into one)
+        logic [csp_pkg::PROGRAM_W-1:0] port_b_row;
+        (* keep *) always_ff @(posedge clk) port_b_row <= fetch_next;
 
 `ifdef SYNTHESIS
         // A 9-bit word's address is AD[13:3] (UG285-1.4E p4, table 2-2); the

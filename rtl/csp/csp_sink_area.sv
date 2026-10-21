@@ -69,8 +69,8 @@ module csp_sink_area #(
     for (genvar replica = 0; replica < READ_PORTS; replica++) begin : g_replica
         // this replica's write enables: which page's block takes the write (the shadow page's,
         // as it was when the write was given)
-        (* keep *) logic [1:0]                      written_q;
-        always_ff @(posedge clk or negedge reset_n) begin
+        logic [1:0]                      written_q;
+        (* keep *) always_ff @(posedge clk or negedge reset_n) begin
             if (!reset_n) written_q <= '0;
             else          written_q <= {write_enable && (write_both || active_page == 1'b0), write_enable && (write_both || active_page == 1'b1)};
         end
@@ -81,9 +81,9 @@ module csp_sink_area #(
         for (genvar page = 0; page < 2; page++) begin : g_page
             // this block's write register, the address and the word: the pins' own (one register
             // for two blocks is a route the tool does not time, #238)
-            (* keep *) logic [csp_pkg::SINK_WORD_W-1:0] address_q;
-            (* keep *) logic [csp_pkg::WORD_W-1:0]      data_q;
-            always_ff @(posedge clk) begin
+            logic [csp_pkg::SINK_WORD_W-1:0] address_q;
+            logic [csp_pkg::WORD_W-1:0]      data_q;
+            (* keep *) always_ff @(posedge clk) begin   // the keep on the process: yosys merges kept signals
                 address_q <= write_address;
                 data_q    <= write_data;
             end

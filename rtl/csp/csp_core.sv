@@ -170,6 +170,10 @@ module csp_core (
     logic [PC_W-1:0]    va_last;                           // the body's last row
     // the other index and the flags, an element's own once its IDX or CMP has written them; until
     // then the registers' (which an IDX or CMP from before the loop may still be writing)
+    // LUT-RAM cells (RAM16SDP4), whose data pins take an IDX's sum straight from its adder: a
+    // route the tool does not time (the pin audit, #238). As flip-flops the design no longer
+    // places (the legaliser gives up at this utilisation); the sum cannot come from a register
+    // without a cycle on the IDX, which the control program's pass has no room for.
     logic [11:0]        other_copy [16];
     logic [3:0]         other_generation [16];
     logic [15:0]        other_valid;
