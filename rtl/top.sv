@@ -119,7 +119,7 @@ module top (
     );
 
     logic                              imem_load_enable, imem_upper;
-    logic [csp_pkg::PROGRAM_W-1:0]     imem_row, fetch_address;
+    logic [csp_pkg::PROGRAM_W-1:0]     imem_row, fetch_next;
     logic [synth_pkg::SPI_DWORD_W-1:0]             imem_load_dword, imem_read_dword;
     logic [csp_pkg::ROW_W-1:0]         fetch_row;
 
@@ -133,7 +133,7 @@ module top (
         .read_upper    (imem_upper),
         .read_dword     (imem_read_dword),
         .clk           (sysclk),
-        .fetch_address (fetch_address),
+        .fetch_next (fetch_next),
         .fetch_row     (fetch_row)
     );
 
@@ -176,7 +176,7 @@ module top (
         .reset_n            (rst_n),
         .pass_start         (sample_tick48),
         .held               (csp_held_sync),
-        .fetch_address      (fetch_address),
+        .fetch_next      (fetch_next),
         .fetch_row          (fetch_row),
         .rom_op             (rom_op),
         .control_word       (control_word),

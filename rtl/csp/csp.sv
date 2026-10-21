@@ -24,7 +24,7 @@ module csp (
     input  wire                              held,
 
     // IMEM and the decode ROM
-    output logic [csp_pkg::PROGRAM_W-1:0]    fetch_address,
+    output logic [csp_pkg::PROGRAM_W-1:0]    fetch_next,     // the program counter's next value: IMEM's slices register it
     input  wire  [csp_pkg::ROW_W-1:0]        fetch_row,
     output logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op,
     input  wire  [csp_pkg::ROM_W-1:0]        control_word,
@@ -80,7 +80,7 @@ module csp (
         .pass_start          (pass_start),
         .held                (held),
         .cycle               (cycle),
-        .fetch_address       (fetch_address),
+        .fetch_next          (fetch_next),
         .fetch_row           (fetch_row),
         .rom_op              (rom_op),
         .control_word        (control_word),
@@ -130,21 +130,22 @@ module csp (
         .probe_register     (probe_register)
     );
 
-    // DMEM's three copies: every one takes every write; the R copy is the probe's while the core is idle
+    // DMEM's three copies: every one takes every write, into a register of each bank's own; the R copy
+    // is the probe's while the core is idle
     csp_dmem u_dmem_r (
-        .clk (clk),
+        .clk (clk), .reset_n (reset_n),
         .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
         .write_even_data (write_even_data), .write_odd_data (write_odd_data),
         .read_even_index (read_r_even_index), .read_odd_index (read_r_odd_index), .read_pair (read_r_pair)
     );
     csp_dmem u_dmem_x (
-        .clk (clk),
+        .clk (clk), .reset_n (reset_n),
         .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
         .write_even_data (write_even_data), .write_odd_data (write_odd_data),
         .read_even_index (read_x_even_index), .read_odd_index (read_x_odd_index), .read_pair (read_x_pair)
     );
     csp_dmem u_dmem_y (
-        .clk (clk),
+        .clk (clk), .reset_n (reset_n),
         .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
         .write_even_data (write_even_data), .write_odd_data (write_odd_data),
         .read_even_index (read_y_even_index), .read_odd_index (read_y_odd_index), .read_pair (read_y_pair)

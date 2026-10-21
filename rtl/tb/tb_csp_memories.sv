@@ -32,7 +32,7 @@ module tb_csp_memories;
     csp_imem u_imem (
         .sclk(sclk), .load_enable(imem_load), .load_row(imem_row), .load_upper(imem_upper), .load_dword(imem_dword),
         .read_row(imem_row), .read_upper(imem_upper), .read_dword(imem_read),
-        .clk(clk), .fetch_address(fetch_address), .fetch_row(fetch_row)
+        .clk(clk), .fetch_next(fetch_address), .fetch_row(fetch_row)
     );
 
     // ---- the ROM ----
@@ -74,7 +74,7 @@ module tb_csp_memories;
     // is the pass, the window, DMEM and the probe
     csp u_csp (
         .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .held(1'b1),
-        .fetch_address(unused_fetch_address), .fetch_row(fetch_row), .rom_op(unused_rom_op), .control_word(control_word),
+        .fetch_next(unused_fetch_address), .fetch_row(fetch_row), .rom_op(unused_rom_op), .control_word(control_word),
         .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_dword(head_dword),
         .probe_address(probe_address), .probe_sweep(1'b0), .probe_step(1'b0), .probe_pair(probe_pair), .probe_register(), .cycle(cycle), .pass_counter(passes),
         .sink_write_enable(unused_sink_enable), .sink_write_both(), .sink_write_address(unused_sink_address), .sink_write_data(unused_sink_data)
@@ -91,7 +91,7 @@ module tb_csp_memories;
 
     // ---- the row rule, at every edge (DMEM counts its own violations in simulation) ----
     always @(posedge sclk) begin
-        if (imem_load && u_imem.port_b_row == imem_row) begin
+        if (imem_load && u_imem.g_slice[0].port_b_row == imem_row) begin   // every slice's copy is the same
             $display("FAIL row rule: IMEM loads row %0d while the fetch reads it", imem_row); errors++;
         end
         if (rom_load && u_rom.port_b_row == rom_row) begin
@@ -139,8 +139,8 @@ module tb_csp_memories;
         $display("pass: IMEM read back on port A");
         held = 0;
         for (int row = 0; row < PROGRAM_ROWS; row += 131) begin
-            @(negedge clk) fetch_address = PROGRAM_W'(row);
-            @(negedge clk); #1;
+            @(negedge clk) fetch_address = PROGRAM_W'(row);   // the next value: the slices' own registers take it
+            @(negedge clk); @(negedge clk); #1;
             if (fetch_row != row_pattern(row)) begin $display("FAIL IMEM fetch row %0d: %018h", row, fetch_row); errors++; end
         end
         $display("pass: IMEM fetched on port B");

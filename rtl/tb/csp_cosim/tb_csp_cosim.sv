@@ -33,7 +33,7 @@ module tb_csp_cosim (
     input  wire                              swap
 );
 
-    logic [csp_pkg::PROGRAM_W-1:0]      fetch_address;
+    logic [csp_pkg::PROGRAM_W-1:0]      fetch_next;
     logic [csp_pkg::ROW_W-1:0]          fetch_row;
     logic [csp_pkg::ROM_ADDRESS_W-1:0]  rom_op;
     logic [csp_pkg::ROM_W-1:0]          control_word;
@@ -43,7 +43,7 @@ module tb_csp_cosim (
     csp_imem u_imem (
         .sclk (sclk), .load_enable (imem_load), .load_row (imem_row), .load_upper (imem_upper), .load_dword (imem_dword),
         .read_row (imem_row), .read_upper (imem_upper), .read_dword (imem_read_dword),
-        .clk (clk), .fetch_address (fetch_address), .fetch_row (fetch_row)
+        .clk (clk), .fetch_next (fetch_next), .fetch_row (fetch_row)
     );
 
     csp_decode_rom u_rom (
@@ -73,7 +73,7 @@ module tb_csp_cosim (
 
     csp u_csp (
         .clk (clk), .reset_n (reset_n), .pass_start (pass_start), .held (held),
-        .fetch_address (fetch_address), .fetch_row (fetch_row), .rom_op (rom_op), .control_word (control_word),
+        .fetch_next (fetch_next), .fetch_row (fetch_row), .rom_op (rom_op), .control_word (control_word),
         .fifo_pop (fifo_pop), .fifo_committed (fifo_committed), .fifo_head_valid (fifo_head_valid),
         .fifo_head_dword (fifo_head_dword),
         .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_step (1'b0), .probe_pair (probe_pair), .probe_register (),

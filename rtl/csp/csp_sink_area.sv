@@ -18,11 +18,12 @@
 // dual-ported: port B reads, port A takes the write, each page's block
 // through its own; a replica of the two blocks is one read port, six
 // replicas the six, twelve blocks in all, and every replica takes every
-// write. Each replica keeps the write in a register of its own beside its
-// blocks for a clock (`keep`, or yosys merges the six into one register
-// fanning out to twelve blocks' pins across the chip): nothing but a
-// register in front of a block's pin (rule 1), and the write lands a clock
-// after the core gives it, long before the pass ends.
+// write. Each block keeps the write in a register of its own beside it
+// for a clock (`keep`, or yosys merges the copies into one register
+// fanning out to twelve blocks' pins across the chip; a register for two
+// blocks is a route the tool does not time, #238): nothing but a register
+// in front of a block's pin (rule 1), and the write lands a clock after
+// the core gives it, long before the pass ends.
 //
 // The core's words go to the shadow page; the firmware's (through the
 // pass's window, write_both) to both pages, so that a flip keeps them: a
@@ -66,24 +67,26 @@ module csp_sink_area #(
 
 `ifdef SYNTHESIS
     for (genvar replica = 0; replica < READ_PORTS; replica++) begin : g_replica
-        // this replica's write register: which page's block takes the write (the shadow page's,
-        // as it was when the write was given), the address, the word
+        // this replica's write enables: which page's block takes the write (the shadow page's,
+        // as it was when the write was given)
         (* keep *) logic [1:0]                      written_q;
-        (* keep *) logic [csp_pkg::SINK_WORD_W-1:0] address_q;
-        (* keep *) logic [csp_pkg::WORD_W-1:0]      data_q;
         always_ff @(posedge clk or negedge reset_n) begin
             if (!reset_n) written_q <= '0;
             else          written_q <= {write_enable && (write_both || active_page == 1'b0), write_enable && (write_both || active_page == 1'b1)};
-        end
-        always_ff @(posedge clk) begin
-            address_q <= write_address;
-            data_q    <= write_data;
         end
 
         // each block's output, page 1's above page 0's: a flat vector, since yosys takes an
         // unpacked array for a memory and the blocks' outputs for its conflicting writers
         logic [2 * csp_pkg::WORD_W-1:0] block_data;
         for (genvar page = 0; page < 2; page++) begin : g_page
+            // this block's write register, the address and the word: the pins' own (one register
+            // for two blocks is a route the tool does not time, #238)
+            (* keep *) logic [csp_pkg::SINK_WORD_W-1:0] address_q;
+            (* keep *) logic [csp_pkg::WORD_W-1:0]      data_q;
+            always_ff @(posedge clk) begin
+                address_q <= write_address;
+                data_q    <= write_data;
+            end
             // An 18-bit word's address is AD[13:4]; the low two bits of ADA are the write's
             // lane enables, both on (csp_dmem.sv does the same)
             DPX9B #(

@@ -17,7 +17,13 @@
 // and the read-back happen while the CSP is held, when nothing fetches,
 // and the caller parks the fetch address on the last row (csp_pkg::PROGRAM_PARK_ROW,
 // which the load writes first and the program never reaches) whenever the CSP is
-// held: the address pins are the caller's register, with no logic here.
+// held. The fetch address arrives as the program counter's next value and
+// every slice registers it for itself, beside nothing but its pins (`keep`,
+// or yosys merges the eight into one register fanning out to eight blocks'
+// pins across the chip: the place-and-route tool times no path into a pin,
+// and a register driving six blocks' pins dropped an address bit on some
+// boots, issue #238); the row is in the blocks' output registers the clock
+// after the counter holds the value, as with the counter on the pins.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_imem (
@@ -33,14 +39,13 @@ module csp_imem (
 
     // ---- the fetch (clk) ----
     input  wire                             clk,
-    input  wire [csp_pkg::PROGRAM_W-1:0]    fetch_address,
-    output logic [csp_pkg::ROW_W-1:0]       fetch_row       // the clock after fetch_address
+    input  wire [csp_pkg::PROGRAM_W-1:0]    fetch_next,     // the program counter's next value
+    output logic [csp_pkg::ROW_W-1:0]       fetch_row       // the row at that value, the clock after it holds
 );
 
     // Port A: a write or a read of one half, nine bits a slice.
     wire [csp_pkg::PROGRAM_W-1:0] port_a_row = load_enable ? load_row : read_row;
     wire                 port_a_upper = load_enable ? load_upper : read_upper;
-    wire [csp_pkg::PROGRAM_W-1:0] port_b_row = fetch_address;   // a register of the caller's, parked by it while the CSP is held
 
     logic [csp_pkg::SLICES-1:0][csp_pkg::SLICE_W-1:0] slice_out_a;
     logic [csp_pkg::SLICES-1:0][csp_pkg::SLICE_W-1:0] slice_out_b;
@@ -52,6 +57,9 @@ module csp_imem (
         localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the dword's 9-bit lane
         wire write_this = load_enable && load_upper == UPPER;
         wire [csp_pkg::SLICE_W-1:0] lane_in = load_dword[LANE * csp_pkg::SLICE_W +: csp_pkg::SLICE_W];
+        // this slice's copy of the program counter: the fetch pins' own register
+        (* keep *) logic [csp_pkg::PROGRAM_W-1:0] port_b_row;
+        always_ff @(posedge clk) port_b_row <= fetch_next;
 
 `ifdef SYNTHESIS
         // A 9-bit word's address is AD[13:3] (UG285-1.4E p4, table 2-2); the

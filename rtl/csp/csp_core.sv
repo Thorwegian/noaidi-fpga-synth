@@ -77,7 +77,7 @@ module csp_core (
     input  wire [csp_pkg::CYCLE_W-1:0]       cycle,          // 0 in a pass's first cycle
 
     // F and D: IMEM and the decode ROM
-    output logic [csp_pkg::PROGRAM_W-1:0]    fetch_address,
+    output logic [csp_pkg::PROGRAM_W-1:0]    fetch_next,        // the program counter's next value: IMEM's slices register it
     input  wire  [csp_pkg::ROW_W-1:0]        fetch_row,
     output logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op,
     input  wire  [csp_pkg::ROM_W-1:0]        control_word,
@@ -225,7 +225,9 @@ module csp_core (
     // are a whole number of passes (the chip check, tools/lab/chip_check.py)
     wire fetch_valid = running && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
 
-    assign fetch_address = pc;       // the program counter is IMEM's pin register
+    // IMEM's address pins have a register of their own in every slice, loaded with what the
+    // program counter loads: the next value goes out (csp_imem.sv)
+    assign fetch_next = pc_next;
 
     wire arrive = capture_valid && !redirect;              // a real row enters A next cycle
 
@@ -268,6 +270,17 @@ module csp_core (
     wire        v_done         = v_round_done && v_left_now_zero;
     wire [ELEMENT_W:0] v_next_round = v_left_now > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_left_now[ELEMENT_W:0];
 
+    // the next program counter: a pass that starts held parks IMEM's fetch on the row the load
+    // writes first and stays parked until a pass starts running; a repeat first, then the vector
+    // loop's next instance, round or row
+    wire [PC_W-1:0] pc_next = pass_start ? (held ? csp_pkg::PROGRAM_PARK_ROW : '0)
+                            : !running ? csp_pkg::PROGRAM_PARK_ROW
+                            : redirect ? redirect_target
+                            : (v_now && !v_last_element) ? v_row_now            // the same row, the next element
+                            : (v_round_done && !v_left_now_zero) ? v_start_now  // the next round
+                            : v_now ? v_row_now + 1'b1                          // the next row, or past the body
+                            : pc + 1'b1;
+
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             running        <= 1'b0;
@@ -282,15 +295,7 @@ module csp_core (
             v_generation   <= '0;
         end else begin
             if (pass_start) running <= !held;
-            // a pass that starts held parks IMEM's fetch on the row the load writes first (the
-            // pins are the register) and stays parked until a pass starts running
-            if (pass_start)         pc <= held ? csp_pkg::PROGRAM_PARK_ROW : '0;
-            else if (!running)      pc <= csp_pkg::PROGRAM_PARK_ROW;
-            else if (redirect)      pc <= redirect_target;
-            else if (v_now && !v_last_element)          pc <= v_row_now;            // the same row, the next element
-            else if (v_round_done && !v_left_now_zero)  pc <= v_start_now;          // the next round
-            else if (v_now)                             pc <= v_row_now + 1'b1;     // the next row, or past the body
-            else                                        pc <= pc + 1'b1;
+            pc <= pc_next;
             // a row is in flight for four cycles between the program counter and A: a repeat
             // discards the four behind the loop's last; a vector loop's detection kills the one row
             decode_valid  <= fetch_valid && !redirect && !pass_start && !v_detect_row;
@@ -1009,8 +1014,6 @@ module csp_core (
             flag_negative     <= 1'b0;
             flag_zero         <= 1'b0;
             flag_overflow     <= 1'b0;
-            write_even_enable <= 1'b0;
-            write_odd_enable  <= 1'b0;
             sink_write_enable <= 1'b0;
             sink_write_both   <= 1'b0;
         end else begin
@@ -1022,8 +1025,6 @@ module csp_core (
                 flag_overflow <= result_overflow;
             end
             if (e5_live && e5_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
-            write_even_enable <= extra_write_enable ? extra_even_enable : core_even_enable;
-            write_odd_enable  <= extra_write_enable ? extra_odd_enable  : core_odd_enable;
             // a sink word: the row's, or the pass's (the firmware's, into both pages)
             sink_write_enable <= extra_write_enable ? extra_is_sink : (e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD);
             sink_write_both   <= extra_write_enable && extra_is_sink;
@@ -1045,10 +1046,16 @@ module csp_core (
     end
 
     // ---- W: the write pins ---------------------------------------------------------------------------------
+    // The register file's write: the next values, which every bank of every copy registers for
+    // itself beside its pins (csp_dmem.sv) — one register driving six blocks' pins across the chip
+    // dropped an address bit on some boots (#238, as in the first revision).
+    assign write_even_enable = extra_write_enable ? extra_even_enable : core_even_enable;
+    assign write_odd_enable  = extra_write_enable ? extra_odd_enable  : core_odd_enable;
+    assign write_index       = extra_write_enable ? extra_write_address[AW-1:1] : e5_address[AW-1:1];
+    assign write_even_data   = extra_write_enable ? extra_write_word : (e5_r_wide ? result[35:18] : result[17:0]);
+    assign write_odd_data    = extra_write_enable ? extra_write_word : result[17:0];
+    // the sink area's write: the core's register, then a register of every page's own (csp_sink_area.sv)
     always_ff @(posedge clk) begin
-        write_index        <= extra_write_enable ? extra_write_address[AW-1:1] : e5_address[AW-1:1];
-        write_even_data    <= extra_write_enable ? extra_write_word : (e5_r_wide ? result[35:18] : result[17:0]);
-        write_odd_data     <= extra_write_enable ? extra_write_word : result[17:0];
         sink_write_address <= extra_write_enable ? extra_write_address[csp_pkg::SINK_WORD_W-1:0] : e5_write_address[csp_pkg::SINK_WORD_W-1:0];
         sink_write_data    <= extra_write_enable ? extra_write_word : result[17:0];
     end

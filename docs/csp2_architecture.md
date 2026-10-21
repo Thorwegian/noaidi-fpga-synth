@@ -130,8 +130,14 @@ land in the registers too.
 
 No block RAM output feeds logic and no logic feeds a block RAM pin: IMEM's
 row, the ROM's control word, DMEM's words and the write FIFO's head are each
-captured by a register before anything reads them, and the program counter,
-the ROM's address register and DMEM's read and write registers are the pins.
+captured by a register before anything reads them, and the ROM's address
+register and DMEM's read registers are the pins. A block's pins have a
+register of their own: the program counter's next value is registered in
+each of IMEM's eight slices, DMEM's write in each bank of each copy, the
+sink area's write in each of its blocks (`keep`, or yosys merges the copies).
+The tool times no path into a pin, and one register driving six blocks'
+pins across the chip dropped an address bit on some boots (#238: a voice's
+level written 0x400 low; the first revision's fault, met again).
 
 E2 exists so that nothing but a register is in front of the DSP's input pins:
 the logic before a block's pin is not timed (rule 1), and E1b's operand logic, the

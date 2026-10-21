@@ -12,6 +12,17 @@
 // registers the clock after its index (bypass mode). The core instantiates
 // three copies (R, X and Y), every one taking every write.
 //
+// The write arrives as the W stage's next values and lands a clock later,
+// from a register of each bank's own, beside nothing but its pins: the
+// enable, the index and the word, kept apart (`keep`) from the other
+// bank's and the other copies', or yosys merges the six into one register
+// fanning out to six blocks' pins across the chip — the first revision's
+// dropped address bits (docs/gowin_oss_notes.md), and this revision's
+// once more, when the core's one register drove all six: one boot in
+// eight wrote a voice's level 0x400 low (issue #238). The place-and-route
+// tool times no path into a block's pin, so the register must be the
+// pin's alone; nothing else is in front of it.
+//
 // The two ports never meet on a row (UG285-1.4E p6, note 1): a block reads
 // the row on its address pins on every clock, so a read port that nothing
 // uses is parked on the row of PARK_REGISTER (csp_pkg::PARK_INDEX), in the inputs
@@ -22,10 +33,9 @@
 // and the assembler's keeps an instruction's read away from the write it
 // depends on.
 //
-// Every input is a register of the caller's, decoded and parked beforehand:
-// the logic before a block's pin is the one thing the tool does not time
-// (docs/csp2_architecture.md rule 1), so none is left here. Register 0 reads
-// zero: its writes are dropped by the caller before they reach the pins.
+// The read indexes are registers of the caller's, decoded and parked
+// beforehand, one register a port and a bank. Register 0 reads zero: its
+// writes are dropped by the caller before they reach the pins.
 //
 // In simulation a read and a write to one row of one bank in the same clock
 // is counted in row_rule_violations, which a bench asserts is zero.
@@ -33,22 +43,39 @@
 `default_nettype none
 module csp_dmem (
     input  wire                                clk,
-
-    // the write: a bank's enable, one row index, a word for each bank
+    input  wire                                reset_n,
+    // the write, the W stage's next values: a bank's enable, one row index, a word for each bank
     input  wire                                write_even_enable,
     input  wire                                write_odd_enable,
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    write_index,
     input  wire [csp_pkg::WORD_W-1:0]          write_even_data,
     input  wire [csp_pkg::WORD_W-1:0]          write_odd_data,
-
     // the read: each bank's row, the parked row when the bank is not read
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    read_even_index,
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    read_odd_index,
     output logic [csp_pkg::WIDE_W-1:0]         read_pair       // {even, odd} the clock after
 );
+    // each bank's write register: the pins' own
+    (* keep *) logic                             even_enable_q, odd_enable_q;
+    (* keep *) logic [csp_pkg::BANK_INDEX_W-1:0] even_index_q, odd_index_q;
+    (* keep *) logic [csp_pkg::WORD_W-1:0]       even_data_q, odd_data_q;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            even_enable_q <= 1'b0;
+            odd_enable_q  <= 1'b0;
+        end else begin
+            even_enable_q <= write_even_enable;
+            odd_enable_q  <= write_odd_enable;
+        end
+    end
+    always_ff @(posedge clk) begin
+        even_index_q <= write_index;
+        odd_index_q  <= write_index;
+        even_data_q  <= write_even_data;
+        odd_data_q   <= write_odd_data;
+    end
 
     logic [csp_pkg::WORD_W-1:0] even_word, odd_word;
-
 `ifdef SYNTHESIS
     // An 18-bit word's address is AD[13:4]; the low two bits of ADA are the
     // write's lane enables, both on.
@@ -59,9 +86,9 @@ module csp_dmem (
     ) u_even (
         .CLKA (clk), .CLKB (clk), .CEA (1'b1), .CEB (1'b1), .OCEA (1'b1), .OCEB (1'b1),
         .RESETA (1'b0), .RESETB (1'b0), .BLKSELA (3'b000), .BLKSELB (3'b000),
-        .WREA (write_even_enable), .WREB (1'b0),
-        .ADA ({write_index, 4'b0011}), .ADB ({read_even_index, 4'b0000}),
-        .DIA (write_even_data), .DIB (18'd0), .DOA (), .DOB (even_word)
+        .WREA (even_enable_q), .WREB (1'b0),
+        .ADA ({even_index_q, 4'b0011}), .ADB ({read_even_index, 4'b0000}),
+        .DIA (even_data_q), .DIB (18'd0), .DOA (), .DOB (even_word)
     );
     DPX9B #(
         .READ_MODE0 (1'b0), .READ_MODE1 (1'b0), .WRITE_MODE0 (2'b00), .WRITE_MODE1 (2'b00),
@@ -70,9 +97,9 @@ module csp_dmem (
     ) u_odd (
         .CLKA (clk), .CLKB (clk), .CEA (1'b1), .CEB (1'b1), .OCEA (1'b1), .OCEB (1'b1),
         .RESETA (1'b0), .RESETB (1'b0), .BLKSELA (3'b000), .BLKSELB (3'b000),
-        .WREA (write_odd_enable), .WREB (1'b0),
-        .ADA ({write_index, 4'b0011}), .ADB ({read_odd_index, 4'b0000}),
-        .DIA (write_odd_data), .DIB (18'd0), .DOA (), .DOB (odd_word)
+        .WREA (odd_enable_q), .WREB (1'b0),
+        .ADA ({odd_index_q, 4'b0011}), .ADB ({read_odd_index, 4'b0000}),
+        .DIA (odd_data_q), .DIB (18'd0), .DOA (), .DOB (odd_word)
     );
 `else
     logic [csp_pkg::WORD_W-1:0] even_bank [csp_pkg::REGISTER_COUNT / 2];
@@ -86,17 +113,15 @@ module csp_dmem (
         end
     end
     always_ff @(posedge clk) begin
-        if (write_even_enable) even_bank[write_index] <= write_even_data;
-        if (write_odd_enable)  odd_bank[write_index]  <= write_odd_data;
+        if (even_enable_q) even_bank[even_index_q] <= even_data_q;
+        if (odd_enable_q)  odd_bank[odd_index_q]   <= odd_data_q;
         even_word <= even_bank[read_even_index];
         odd_word  <= odd_bank[read_odd_index];
         // the row rule: one row of one block, read and written in the same clock
-        if (write_even_enable && read_even_index == write_index) row_rule_violations <= row_rule_violations + 1;
-        if (write_odd_enable  && read_odd_index  == write_index) row_rule_violations <= row_rule_violations + 1;
+        if (even_enable_q && read_even_index == even_index_q) row_rule_violations <= row_rule_violations + 1;
+        if (odd_enable_q  && read_odd_index  == odd_index_q)  row_rule_violations <= row_rule_violations + 1;
     end
 `endif
-
     assign read_pair = {even_word, odd_word};
-
 endmodule
 `default_nettype wire
