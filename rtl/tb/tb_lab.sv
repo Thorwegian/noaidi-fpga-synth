@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 //------------------------------------------------------------------------
-// tb_lab.sv — the lab proves itself before the board (#241)
+// tb_lab.sv — the lab proves itself earlier the board (#241)
 //
 // Every device's reference must agree with it at any clock, since in
 // simulation nothing is late: thirty thousand cycles with every mismatch
@@ -38,7 +38,7 @@ module tb_lab;
     endtask
 
     logic [synth_pkg::SPI_DWORD_W-1:0] first [DEVICES + 1];
-    logic [synth_pkg::SPI_DWORD_W-1:0] before [DEVICES + 1];
+    logic [synth_pkg::SPI_DWORD_W-1:0] earlier [DEVICES + 1];
     logic [synth_pkg::SPI_DWORD_W-1:0] second [DEVICES + 1];
     logic [synth_pkg::SPI_DWORD_W-1:0] later [DEVICES + 1];
     initial begin
@@ -57,17 +57,17 @@ module tb_lab;
 
         $display("--- 2. a fault injected into each device in turn is counted there, and only there ---");
         for (int f = 0; f < DEVICES; f++) begin
-            snapshot_and_read(before);
+            snapshot_and_read(earlier);
             inject_fault = '0; inject_fault[f] = 1'b1;
             repeat (1000) @(posedge clk);
             inject_fault = '0;
             repeat (100) @(posedge clk);
             snapshot_and_read(second);
-            if (second[f + 1] - before[f + 1] < 900 || second[f + 1] - before[f + 1] > 1100) begin
-                $display("FAIL device %0d counted %0d of about 1000", f + 1, second[f + 1] - before[f + 1]); errors++;
+            if (second[f + 1] - earlier[f + 1] < 900 || second[f + 1] - earlier[f + 1] > 1100) begin
+                $display("FAIL device %0d counted %0d of about 1000", f + 1, second[f + 1] - earlier[f + 1]); errors++;
             end
             for (int d = 1; d <= DEVICES; d++) begin
-                if (d != f + 1 && second[d] != before[d]) begin $display("FAIL device %0d counted %0d from device %0d's fault", d, second[d] - before[d], f + 1); errors++; end
+                if (d != f + 1 && second[d] != earlier[d]) begin $display("FAIL device %0d counted %0d from device %0d's fault", d, second[d] - earlier[d], f + 1); errors++; end
             end
         end
         $display("pass: every device counts its own fault and no other's");
