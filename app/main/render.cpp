@@ -264,7 +264,7 @@ void setup(Writes &writes) {
     // the one channel: its LFOs (the first record of each half of the pool)
     // and its sinks
     put(writes, channel_register(cp::lfo1), cp::lfos);
-    put(writes, channel_register(cp::lfo2), cp::lfos + 16 * cp::lfo_size);
+    put(writes, channel_register(cp::lfo2), cp::lfos + cp::lfos_a_half * cp::lfo_size);
     put(writes, channel_register(cp::sink_block), cp::channel_sinks);
 
     for (int voice = 0; voice < voice_count; ++voice) {
@@ -344,7 +344,7 @@ void pitch_bend(const patch_t &patch, const Controllers &controllers,
 
 void lfo(const patch_t &patch, int i, Writes &writes) {
     const lfo_t &l         = patch.lfo[i];
-    const int record       = cp::lfos + i * 16 * cp::lfo_size;
+    const int record       = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
     const int set          = cp::lfo_sets + i * cp::set_size;
     const int shape        = l.shape & 3;
     constexpr int saw      = 0;
