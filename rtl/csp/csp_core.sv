@@ -200,8 +200,10 @@ module csp_core (
     logic               v_fetching;                        // the fetch is inside a vector body
     logic [PC_W-1:0]    v_start, v_last;                   // the body's first and last row
     logic [ELEMENT_W-1:0] v_element;                       // the element the next fetch is for
-    logic [ELEMENT_W:0] v_in_round;                        // elements in this round, 1 … 16
+    logic [ELEMENT_W-1:0] v_round_last;                    // the round's last element, 0 … 15
     logic [9:0]         v_left;                            // elements in the rounds after this one
+    logic               v_left_zero;                       //   none: this round is the last
+    logic [PC_W-1:0]    rom_next_pc;                       // the row after the one at D2: the body's first at a detection
     // the generation: one more for every loop and every round, with every instance down the
     // pipeline; an element's private copy of the other index or the flags is its own only when
     // its generation matches, so a copy written by an earlier loop (or round, whose element k
@@ -236,24 +238,34 @@ module csp_core (
     // The vector loop's row at D2: its op field, captured at D1, is one of the two rows the ROM
     // keeps for vector loops. The fetch now in flight is the body's second row for element 0,
     // one too early: killed. The body's first row went out the cycle before, for element 0.
-    wire        v_detect       = rom_valid && !redirect
+    // The decision is compares and muxes on registered values: the row's numbers as the assembler
+    // laid them (the body's last row in imm, the count's first round from its high bits, the row
+    // after this one registered at D1), the round's last element kept instead of its size, and the
+    // scalar loops' repeat out of its head — a repeat has its priority at the program counter's mux
+    // and keeps the state from the row it kills (#238: this path was the chip's longest, 11 levels).
+    wire        v_detect_row   = rom_valid
                                  && (rom_row[71:64] == csp_pkg::OP_LOOP_VI || rom_row[71:64] == csp_pkg::OP_LOOP_VJ);
+    wire        v_detect       = v_detect_row && !redirect; // the row stands
     wire [9:0]  v_count        = rom_row[45:36];           // the loop's count, x's ten bits
-    wire [ELEMENT_W:0] v_first_round = v_count > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_count[ELEMENT_W:0];
+    wire        v_count_beyond_round = (|v_count[9:ELEMENT_W+1]) || (v_count[ELEMENT_W] && |v_count[ELEMENT_W-1:0]);  // > 16
+    wire [ELEMENT_W-1:0] v_first_round_last = v_count_beyond_round ? ELEMENT_W'(ROUND - 1)
+                                                                   : ELEMENT_W'(v_count[ELEMENT_W-1:0] - 1'b1);  // 16 → 15
+    wire [9:0]  v_first_left   = v_count_beyond_round ? v_count - 10'(ROUND) : '0;   // the elements after the first round
     // this cycle's fetch as a vector instance — the registers' row and element, or at the detection
     // the body's first row for element 0, which the cycle before fetched (the killed fetch stands
     // in for it here, so that the next fetch follows the same rule as any other)
-    wire        v_now          = v_fetching || v_detect;
-    wire [ELEMENT_W-1:0] v_element_now = v_detect ? '0 : v_element;
-    wire [ELEMENT_W:0] v_in_round_now  = v_detect ? v_first_round : v_in_round;
-    wire [9:0]  v_left_now     = v_detect ? v_count - 10'(v_first_round) : v_left;
-    wire [PC_W-1:0] v_start_now = v_detect ? rom_pc + 1'b1 : v_start;
-    wire [PC_W-1:0] v_last_now  = v_detect ? rom_row[PC_W-1:0] - 1'b1 : v_last;
-    wire [PC_W-1:0] v_row_now   = v_detect ? v_start_now : pc;
-    wire        v_last_element = v_element_now == ELEMENT_W'(v_in_round_now - 1'b1);
+    wire        v_now          = v_fetching || v_detect_row;
+    wire [ELEMENT_W-1:0] v_element_now    = v_detect_row ? '0 : v_element;
+    wire [ELEMENT_W-1:0] v_round_last_now = v_detect_row ? v_first_round_last : v_round_last;
+    wire [9:0]  v_left_now     = v_detect_row ? v_first_left : v_left;
+    wire        v_left_now_zero = v_detect_row ? !v_count_beyond_round : v_left_zero;
+    wire [PC_W-1:0] v_start_now = v_detect_row ? rom_next_pc : v_start;
+    wire [PC_W-1:0] v_last_now  = v_detect_row ? rom_row[PC_W-1:0] : v_last;
+    wire [PC_W-1:0] v_row_now   = v_detect_row ? rom_next_pc : pc;
+    wire        v_last_element = v_element_now == v_round_last_now;
     wire        v_last_row     = v_row_now == v_last_now;
     wire        v_round_done   = v_now && v_last_element && v_last_row;
-    wire        v_done         = v_round_done && v_left_now == '0;
+    wire        v_done         = v_round_done && v_left_now_zero;
     wire [ELEMENT_W:0] v_next_round = v_left_now > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_left_now[ELEMENT_W:0];
 
     always_ff @(posedge clk or negedge reset_n) begin
@@ -276,12 +288,12 @@ module csp_core (
             else if (!running)      pc <= csp_pkg::PROGRAM_PARK_ROW;
             else if (redirect)      pc <= redirect_target;
             else if (v_now && !v_last_element)          pc <= v_row_now;            // the same row, the next element
-            else if (v_round_done && v_left_now != '0)  pc <= v_start_now;          // the next round
+            else if (v_round_done && !v_left_now_zero)  pc <= v_start_now;          // the next round
             else if (v_now)                             pc <= v_row_now + 1'b1;     // the next row, or past the body
             else                                        pc <= pc + 1'b1;
             // a row is in flight for four cycles between the program counter and A: a repeat
             // discards the four behind the loop's last; a vector loop's detection kills the one row
-            decode_valid  <= fetch_valid && !redirect && !pass_start && !v_detect;
+            decode_valid  <= fetch_valid && !redirect && !pass_start && !v_detect_row;
             rom_valid     <= decode_valid && !redirect;
             capture_valid <= rom_valid && !redirect;
             a_present     <= arrive;
@@ -292,13 +304,14 @@ module csp_core (
             // the vector fetch
             if (pass_start || redirect || v_done) v_fetching <= 1'b0;
             else if (v_detect)                     v_fetching <= 1'b1;
-            if (v_detect || (v_round_done && v_left_now != '0)) v_generation <= v_generation + 1'b1;
-            if (v_now) begin
-                v_element  <= v_last_element ? '0 : v_element_now + 1'b1;
-                v_in_round <= v_round_done ? v_next_round : v_in_round_now;
-                v_left     <= v_round_done ? v_left_now - 10'(v_next_round) : v_left_now;
-                v_start    <= v_start_now;
-                v_last     <= v_last_now;
+            if (v_detect || (v_round_done && !v_left_now_zero && !redirect)) v_generation <= v_generation + 1'b1;
+            if (v_now) begin   // a detection a repeat kills loads what the next detection overwrites
+                v_element    <= v_last_element ? '0 : v_element_now + 1'b1;
+                v_round_last <= v_round_done ? ELEMENT_W'(v_next_round - 1'b1) : v_round_last_now;
+                v_left       <= v_round_done ? v_left_now - 10'(v_next_round) : v_left_now;
+                v_left_zero  <= v_round_done ? v_left_now == 10'(v_next_round) : v_left_now_zero;
+                v_start      <= v_start_now;
+                v_last       <= v_last_now;
             end
         end
     end
@@ -310,12 +323,13 @@ module csp_core (
         decode_element  <= v_element;
         decode_generation <= v_generation;
         decode_rowlast  <= v_fetching && v_last_element;
-        decode_final    <= v_fetching && v_last_element && v_left == '0;
-        rom_vector      <= v_detect ? 1'b1 : decode_vector;
-        rom_element     <= v_detect ? '0 : decode_element;
-        rom_generation  <= v_detect ? v_generation + 1'b1 : decode_generation;   // the new loop's
-        rom_rowlast     <= v_detect ? v_last_element : decode_rowlast;
-        rom_final       <= v_detect ? (v_last_element && v_left_now == '0) : decode_final;
+        decode_final    <= v_fetching && v_last_element && v_left_zero;
+        // a detection a repeat kills tags a row the repeat discards
+        rom_vector      <= v_detect_row ? 1'b1 : decode_vector;
+        rom_element     <= v_detect_row ? '0 : decode_element;
+        rom_generation  <= v_detect_row ? v_generation + 1'b1 : decode_generation;   // the new loop's
+        rom_rowlast     <= v_detect_row ? v_last_element : decode_rowlast;
+        rom_final       <= v_detect_row ? (v_last_element && v_left_now_zero) : decode_final;
         capture_vector  <= rom_vector;
         capture_element <= rom_element;
         capture_generation <= rom_generation;
@@ -334,6 +348,7 @@ module csp_core (
     always_ff @(posedge clk) begin
         decode_pc   <= pc;
         rom_pc      <= decode_pc;
+        rom_next_pc <= decode_pc + 1'b1;
         rom_row     <= fetch_row;
         rom_op      <= !running ? csp_pkg::ROM_PARK_ROW : csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
         capture_pc  <= rom_pc;
@@ -398,7 +413,7 @@ module csp_core (
             va_round_base    <= a_own_index;
             va_element_index <= a_own_index;
             va_after         <= a_own_index;
-            va_last          <= a_imm[PC_W-1:0] - 1'b1;
+            va_last          <= a_imm[PC_W-1:0];          // the body's last row, as the row names it
         end else if (a_instance) begin
             if (!a_rowlast)                 va_element_index <= va_element_index + va_stride;
             else if (a_pc != va_last)       va_element_index <= va_round_base;
@@ -447,12 +462,12 @@ module csp_core (
                 loop_remaining_j <= a_x_operand[9:0];
                 loop_stride_j    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
                 loop_start_j     <= a_pc + 1'b1;
-                loop_last_j      <= a_imm[PC_W-1:0] - 1'b1;
+                loop_last_j      <= a_imm[PC_W-1:0];
             end else begin
                 loop_remaining_i <= a_x_operand[9:0];
                 loop_stride_i    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
                 loop_start_i     <= a_pc + 1'b1;
-                loop_last_i      <= a_imm[PC_W-1:0] - 1'b1;
+                loop_last_i      <= a_imm[PC_W-1:0];
             end
         end
     end

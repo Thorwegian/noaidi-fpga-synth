@@ -215,6 +215,10 @@ void ProgramBuilder::close_loop(size_t at, size_t end) {
         issue("close_loop at a position that is not a LOOP");
         return;
     }
+    if (end <= at + 1) {
+        issue("a loop's body is empty"); // the row names its last body row, which must exist
+        return;
+    }
     instructions_[at].end  = end;
     instructions_[at].open = false;
 }
@@ -742,7 +746,8 @@ ProgramBuilder::Built ProgramBuilder::build() const {
             control.sub = static_cast<uint8_t>((entry.op == Op::vloop ? 2 : 0) | (entry.which == IndexRegister::j ? 1 : 0));
             word.x      = Operand{Operand::Mode::immediate, entry.count & 0x3FF};
             word.y      = Operand{Operand::Mode::immediate, entry.immediate & 0x3FF};
-            word.imm    = static_cast<uint32_t>(loop_end_row[placed[row].source]);
+            // the body's last row: the chip compares, it does not subtract (#238)
+            word.imm    = static_cast<uint32_t>(loop_end_row[placed[row].source] - 1);
             break;
         case Op::skip: {
             word.cond = static_cast<uint8_t>(entry.cond);

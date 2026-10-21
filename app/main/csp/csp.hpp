@@ -243,8 +243,8 @@ struct Word {
     bool operator==(const Word &) const = default;
 };
 
-// A loop's numbers: its body's end in imm, its count in x's ten bits and
-// its stride in y's (docs/csp2_isa.md section 5). A skip's count in imm.
+// A loop's numbers: its body's last row in imm, its count in x's ten bits
+// and its stride in y's (docs/csp2_isa.md section 5). A skip's count in imm.
 constexpr int loop_count_max  = 1023;
 constexpr int loop_stride_max = 511;   // signed, ten bits
 

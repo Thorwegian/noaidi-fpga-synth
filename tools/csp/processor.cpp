@@ -466,7 +466,7 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     }
     case Op::loop: {
         const auto which   = static_cast<IndexRegister>(control.sub & 1);
-        const size_t end   = word.imm & 0x7FF;
+        const size_t end   = (word.imm & 0x7FF) + 1;             // the row names the body's last row
         const int count    = word.x.value;                       // the ten bits, unsigned
         const int stride   = static_cast<int>(sign_extend(word.y.value, 10));
         const size_t start = state.pc;                           // already past the LOOP row
@@ -494,7 +494,7 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
     const auto own     = static_cast<IndexRegister>(decoded.control.sub & 1);
     const auto other   = own == IndexRegister::i ? IndexRegister::j : IndexRegister::i;
     const size_t start = at + 1;
-    const size_t end   = word.imm & 0x7FF;
+    const size_t end   = (word.imm & 0x7FF) + 1;                // the row names the body's last row
     const int count    = word.x.value;
     const int stride   = static_cast<int>(sign_extend(word.y.value, 10));
     if (end <= start || count <= 0) {

@@ -159,7 +159,8 @@ row is captured and before the ROM has decoded it (section 5).
 **Scalar loops** (`LOOP.i`, `LOOP.j`) repeat the next *n* instructions
 *count* times, stepping `i` or `j` by *stride*; they nest one level,
 each with its own counter. The three numbers are in the word: the body's
-end in `imm`, the count in `x`'s immediate mode, the stride in `y`'s.
+last row in `imm` (the assembler subtracts; the chip only compares), the
+count in `x`'s immediate mode, the stride in `y`'s.
 A repeat costs four cycles (the four rows behind the last body row are in
 flight, in the registered front end, and are discarded). **A loop whose count is 0 is not assembled**:
 neither its row nor its body is in the image, since the chip cannot skip

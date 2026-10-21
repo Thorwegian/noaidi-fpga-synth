@@ -115,7 +115,14 @@ vector loops'), one cycle after the body's first row went out for element
 0: the row fetched in that cycle is killed, and from then on the front end
 fetches each body row once an element of the round, the element's number
 riding down the pipeline with the row — **1** bubble to enter, **0** to
-leave. In A the loop's own index is the element's (the base stepped by the
+leave. The decision in D2 is compares and muxes on registered values: the
+row's numbers as the assembler laid them (the body's last row in `imm`,
+the first round from the count's high bits), the row after the one in D2
+registered a stage before, the round's last element kept rather than its
+size; a scalar loop's repeat is not in the decision's head — it has its
+priority at the program counter's mux and the state keeps nothing from a
+row it kills (#238: with the repeat and the subtractions in the chain this
+path was the chip's longest, 11 levels). In A the loop's own index is the element's (the base stepped by the
 stride, by element); the other index and the flags are the element's
 private copies, sixteen of each, written by its own `IDX` (E1) and `CMP`
 (E5) and read through to the registers until then; the last element's
