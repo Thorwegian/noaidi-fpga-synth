@@ -74,6 +74,32 @@ int send(int limit, fpga_map::dword_t ctrl_bits) {
     return image.send(port, limit, ctrl_word(ctrl_bits));
 }
 
+// Every register to zero, while the CSP is held, before the image: the data
+// memory keeps whatever the last run left (a chip check's fill, a saturated
+// scratch word), and a register the image never writes — the bend, a scratch
+// field — would carry it into the program. Bursts of eight through the FIFO's
+// door, committed a chunk at a time and applied by the held CSP's window, as
+// csp-burst does (cli_csp.cpp).
+void clear_registers() {
+    constexpr int burst_dwords = 8;
+    constexpr int chunk_dwords = fpga_map::queue_depth / 2;
+    int since_commit           = 0;
+    for (int at = 1; at < csp::register_count; at += burst_dwords) {
+        fpga_map::dword_t dwords[burst_dwords];
+        const int n = std::min(burst_dwords, csp::register_count - at);
+        for (int k = 0; k < n; ++k) {
+            dwords[k] = fpga_map::fifo_dword(at + k, 0);
+        }
+        spi_link::write(fpga_map::fifo_door, dwords, static_cast<size_t>(n));
+        since_commit += n;
+        if (since_commit >= chunk_dwords || at + n >= csp::register_count) {
+            spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+            vTaskDelay(pdMS_TO_TICKS(2));
+            since_commit = 0;
+        }
+    }
+}
+
 // The low 32 bits of a status dword, read twice until the two agree: the
 // status dwords cross from the system clock bit by bit.
 uint32_t read_status(uint32_t address) {
@@ -397,6 +423,7 @@ void engine_link_init(void) {
     // the held CSP apply it all now (up to 511 dwords, in one pass when held).
     spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
+    clear_registers();
 
     // Does the chip do what the model says? Say so before the sound depends
     // on it; the control program loads over the test either way.
