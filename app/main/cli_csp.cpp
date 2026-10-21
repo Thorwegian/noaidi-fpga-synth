@@ -30,6 +30,52 @@ int signed_word(uint64_t raw18) {
     return word >= (1 << 17) ? word - (1 << 18) : word;
 }
 
+// csp-pairwatch reads one register pair through the probe again and again and
+// counts the reads whose two halves differ. The self-test program writes the
+// pass counter into both halves of two pairs (through the multiply-add and
+// the logic unit, and through the logic unit twice), so at a raised clock the
+// count is the rate at which one of the two paths miscomputes, measured on the
+// chip, which no timing report can give for a path it does not time.
+int cmd_pairwatch(int argc, char **argv) {
+    if (argc < 2) {
+        std::printf("usage: csp-pairwatch <register> [reads]   (an even register; default 2000 reads)\n");
+        return 1;
+    }
+    const int first = static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1;
+    const int reads = argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 2000;
+    int disagree = 0, failed = 0;
+    uint64_t first_disagreement = 0;
+    for (int n = 0; n < reads; ++n) {
+        uint64_t pair = 0;
+        if (!engine_link_peek(first, &pair)) {
+            ++failed;
+            continue;
+        }
+        const unsigned even = static_cast<unsigned>(pair >> 18) & 0x3FFFF;
+        const unsigned odd  = static_cast<unsigned>(pair) & 0x3FFFF;
+        if (even != odd) {
+            if (disagree == 0) {
+                first_disagreement = pair;
+            }
+            ++disagree;
+        }
+        if ((n & 255) == 255) {
+            vTaskDelay(1); // let the idle task run: the watchdog
+        }
+    }
+    std::printf("  pair %03x: %d of %d reads disagree", first, disagree, reads);
+    if (disagree > 0) {
+        std::printf(" (first: %05x vs %05x)",
+                    static_cast<unsigned>(first_disagreement >> 18) & 0x3FFFF,
+                    static_cast<unsigned>(first_disagreement) & 0x3FFFF);
+    }
+    if (failed > 0) {
+        std::printf("; %d reads failed", failed);
+    }
+    std::printf("\n");
+    return 0;
+}
+
 int cmd_peek(int argc, char **argv) {
     if (argc < 2) {
         std::printf("usage: csp-peek <register> [count]   (decimal or 0x..)\n");
@@ -380,6 +426,8 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-peek", "<register> [count]",
          "read CSP registers (even-aligned pairs)", cmd_peek, nullptr},
+        {"csp-pairwatch", "<register> [reads]",
+         "read a pair many times, count the reads whose halves differ", cmd_pairwatch, nullptr},
         {"csp-poke", "<register> <raw> [force]",
          "queue a write to a CSP register ('force': even if the image says it is there)",
          cmd_poke, nullptr},

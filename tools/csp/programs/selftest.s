@@ -50,8 +50,10 @@
         .reg   COUNT_HALF_ODD,   0x104
         .reg   COUNT_CHAIN_ODD,  0x106
         .reg   COUNT_PASSES,     0x10E      ; wraps: one a pass, whatever the capture's length
-        .reg   PASS_VIA_LOGIC,   0x112      ; the pass counter copied through the logic unit (fabric only)
-        .reg   PASS_VIA_DSP,     0x114      ; the pass counter copied through the multiply-add (the DSP)
+        .reg   PASS_VIA_LOGIC,   0x112      ; the pass counter copied through the logic unit (fabric only)…
+        .reg   PASS_VIA_DSP,     0x113      ; …and through the multiply-add (the DSP), the two an aligned pair
+        .reg   PASS_VIA_LOGIC_A, 0x114      ; two more copies through the logic unit, a pair of their own
+        .reg   PASS_VIA_LOGIC_B, 0x115
         .reg   ONE_RAW,          0x110      ; 1.0, for MACW's product of 1 raw step
         .reg   TEST_BIT,         0x108
         .reg   TEST_HALF,        0x10A
@@ -63,11 +65,15 @@
         ; S/PDIF (spdif_capture.py stream --probe-counter), must step once a pass.
         ADD3    ONE_RAW, 0, =1.0, ZERO
         MACW    COUNT_PASSES, COUNT_PASSES, ONE_RAW, =#1
-        ; Two copies of the pass counter, streamed over the pipe at a raised clock
-        ; (claude_rev2_rate.sh): a wrong step on one path and not the other names
-        ; the unit whose timing fails first. Each is one row with no chain.
+        ; Copies of the pass counter, in aligned pairs the firmware's probe reads from
+        ; one pass: the console's csp-pairwatch reads a pair thousands of times at a
+        ; raised clock and counts the reads whose halves disagree. The first pair
+        ; counts the multiply-add's misses (against the logic unit's copy), the
+        ; second the logic unit's own. Each copy is one row with no chain.
         ANDXOR  PASS_VIA_LOGIC, 0, PASS, =#-1       ; PASS & all ones: the logic unit
         MAC     PASS_VIA_DSP, 0, PASS, =1.0         ; PASS × 1.0: the multiply-add
+        ANDXOR  PASS_VIA_LOGIC_A, 0, PASS, =#-1
+        ANDXOR  PASS_VIA_LOGIC_B, 0, PASS, =#-1
         ADD3    COUNT_TOTAL, COUNT_TOTAL, =#1, ZERO
         ANDXOR  TEST_BIT, 0, PASS, =#1
         ADD3    COUNT_ODD, COUNT_ODD, TEST_BIT, ZERO
