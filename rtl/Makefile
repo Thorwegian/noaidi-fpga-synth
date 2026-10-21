@@ -92,11 +92,12 @@ dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 # section 4): `make WIDELUT=-nowidelut` turns it on for a comparison.
 WIDELUT ?=
 # The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
-# `make pack.fs LAB=1` builds the chains beside the CSP, `LAB=1 LAB_BLOCKS=1` all fifteen
-# devices (rtl/lab/lab_pkg.sv); without LAB the lab's region reads zero.
-LAB ?=
+# `make pack.fs LAB_BUILD=1` builds the chains beside the CSP, `LAB_BUILD=1 LAB_BLOCKS=1` all
+# fifteen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
+# (LAB above is the lab's file list.)
+LAB_BUILD ?=
 LAB_BLOCKS ?=
-LAB_DEFINES = $(if $(LAB),-DLAB,) $(if $(LAB_BLOCKS),-DLAB_BLOCKS,)
+LAB_DEFINES = $(if $(LAB_BUILD),-DLAB,) $(if $(LAB_BLOCKS),-DLAB_BLOCKS,)
 yosys.json: $(SRC) $(LUTS) Makefile
 	set -o pipefail; yosys -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
 

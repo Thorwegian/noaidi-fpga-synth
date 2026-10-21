@@ -243,7 +243,7 @@ module top (
     );
 
     // the lab (#241): devices under test with their mismatch counters, read through the link —
-    // a build of its own (`make pack.fs LAB=1`): its flip-flops do not fit beside the audio path
+    // a build of its own (`make pack.fs LAB_BUILD=1`): its flip-flops do not fit beside the audio path
 `ifdef LAB
     lab u_lab (
         .clk             (sysclk),
