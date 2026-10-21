@@ -4,12 +4,19 @@
 ; License: CERN-OHL-S v2
 ;
 ; After map.s. Every loop has a fixed count (docs/csp2_isa.md section 5),
-; so how many LFOs of each shape a half holds is a number in the program,
-; not a register: the firmware's generator (#237) writes it with the
-; program. Until then, this file is the one place the numbers live; the
-; tests assemble the program with their own. The shapes of a half add up
-; to at most LFOS_A_HALF (map.s), and i walks the half's records in the
-; order saws, squares, triangles, sines.
+; so how many channels and voices the program runs and how many LFOs of
+; each shape a half holds are numbers in the program, not registers: the
+; firmware's generator (#237) writes them with the program. Until then,
+; this file is the one place the numbers live; the tests assemble the
+; program with their own. The firmware reads them from the generated header
+; (app/main/csp/control_program.hpp) and wires every channel and voice the
+; loops run, whether it uses it or not: a loop runs every element with
+; whatever its registers hold. The shapes of a half add up to at most
+; LFOS_A_HALF (map.s), and i walks the half's records in the order saws,
+; squares, triangles, sines.
+
+        .equ   CHANNEL_COUNT, 16
+        .equ   VOICE_COUNT, 32
 
         .equ   SAWS_A_HALF, 0
         .equ   SQUARES_A_HALF, 6

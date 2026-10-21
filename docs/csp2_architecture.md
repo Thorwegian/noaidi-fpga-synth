@@ -222,7 +222,11 @@ The firmware holds the CSP, writes the instruction rows and the decode
 ROM's rows as one image, writes the wiring through the FIFO, and
 releases; the wire is in nines (a 9-bit command, an 18-bit address,
 36-bit dwords: `memory_map.md`, conventions), so every dword is one row of
-one block. Then, before the first note:
+one block. The register file outlives the firmware's reset, so the boot
+zeroes every register between the self-test and the image, and the image
+wires every channel and voice the program's loops run (their counts are
+the program's, `counts.s`), used or not: a loop runs every element with
+whatever its registers hold. Then, before the first note:
 
 1. the **self-test**: a program of its own in the same image, run from
    the ROM, whose checks use operands that change every pass (`SHIFT`,

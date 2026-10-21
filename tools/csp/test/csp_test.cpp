@@ -898,6 +898,8 @@ std::string read_program(const char *part) {
 // parts, joined in order.
 std::string control_program(int saws, int squares, int triangles, int sines) {
     std::string source = read_program("map.s");
+    source += "        .equ CHANNEL_COUNT, 16\n";
+    source += "        .equ VOICE_COUNT, 32\n";
     source += "        .equ SAWS_A_HALF, " + std::to_string(saws) + "\n";
     source += "        .equ SQUARES_A_HALF, " + std::to_string(squares) + "\n";
     source += "        .equ TRIANGLES_A_HALF, " + std::to_string(triangles) + "\n";

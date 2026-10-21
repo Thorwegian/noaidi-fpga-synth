@@ -74,12 +74,15 @@ int send(int limit, fpga_map::dword_t ctrl_bits) {
     return image.send(port, limit, ctrl_word(ctrl_bits));
 }
 
-// Every register to zero, while the CSP is held, before the image: the data
-// memory keeps whatever the last run left (a chip check's fill, a saturated
-// scratch word), and a register the image never writes — the bend, a scratch
-// field — would carry it into the program. Bursts of eight through the FIFO's
-// door, committed a chunk at a time and applied by the held CSP's window, as
-// csp-burst does (cli_csp.cpp).
+// Every register to zero, while the CSP is held, after the self-test and
+// before the image: the register file outlives this chip's reset and keeps
+// whatever the last run left (the self-test's values, a chip check's fill and
+// pointers, a saturated scratch word), and a register the image never writes
+// — a scratch field, an unused channel's — would carry it into the program.
+// Bursts of eight through the FIFO's door, every dword at the door's address
+// (spi_link::write auto-increments, and landed one dword in eight: issue
+// #238), committed a chunk at a time and applied by the held CSP's window,
+// as csp-burst does (cli_csp.cpp).
 void clear_registers() {
     constexpr int burst_dwords = 8;
     constexpr int chunk_dwords = fpga_map::queue_depth / 2;
@@ -90,7 +93,7 @@ void clear_registers() {
         for (int k = 0; k < n; ++k) {
             dwords[k] = fpga_map::fifo_dword(at + k, 0);
         }
-        spi_link::write(fpga_map::fifo_door, dwords, static_cast<size_t>(n));
+        spi_link::write_repeated(fpga_map::fifo_door, dwords, static_cast<size_t>(n));
         since_commit += n;
         if (since_commit >= chunk_dwords || at + n >= csp::register_count) {
             spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
@@ -423,7 +426,6 @@ void engine_link_init(void) {
     // the held CSP apply it all now (up to 511 dwords, in one pass when held).
     spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
-    clear_registers();
 
     // Does the chip do what the model says? Say so before the sound depends
     // on it; the control program loads over the test either way.
@@ -441,6 +443,9 @@ void engine_link_init(void) {
         }
     }
 
+    // Nothing of the test, or of what ran before this chip was reset, under
+    // the image: every register zero, then the program and the image.
+    clear_registers();
     load_program();
 
     // The program's constants are immediates in its rows; the register image

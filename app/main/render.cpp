@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 #include "csp/control_program.hpp"
 #include "csp/csp.hpp"
@@ -261,14 +262,31 @@ std::array<int, pointer_count> pointers_of(int voice, int slot,
 
 void setup(Writes &writes) {
     put(writes, cp::channels_in_use, 1);
-    // the one channel: its LFOs (the first record of each half of the pool)
-    // and its sinks
-    put(writes, channel_register(cp::lfo1), cp::lfos);
-    put(writes, channel_register(cp::lfo2), cp::lfos + cp::lfos_a_half * cp::lfo_size);
-    put(writes, channel_register(cp::sink_block), cp::channel_sinks);
-    // the bend at its centre: a register the program reads is in the image,
-    // whatever the memory held before, and the boot's verify covers it
-    put(writes, channel_register(cp::bend), 0);
+    // Every channel the program's loop runs (the count is fixed in the
+    // program, counts.s), used or not: its LFOs the first record of each half
+    // of the pool, its sinks its own block, and the bend, every depth and
+    // every base zero, so that a channel the firmware does not use computes
+    // zeros into its own block and nothing else, whatever the register file
+    // held before (issue #238: a chip check's pointers left in channels 1–15
+    // ran its fill, shaped by the LFOs, into channel 0's duty and resonance
+    // sinks). A register the program reads is in the image, and the boot's
+    // verify covers it.
+    static_assert(voice_count == cp::voice_count, "the voices the program runs");
+    for (int channel = 0; channel < cp::channel_count; ++channel) {
+        const int record = cp::channels + channel * cp::channel_size;
+        put(writes, record + cp::lfo1, cp::lfos);
+        put(writes, record + cp::lfo2, cp::lfos + cp::lfos_a_half * cp::lfo_size);
+        put(writes, record + cp::sink_block,
+            cp::channel_sinks + channel * cp::channel_sink_size);
+        for (const int field :
+             {cp::bend, cp::lfo1_pitch, cp::lfo1_cutoff, cp::lfo2_pitch,
+              cp::lfo2_cutoff, cp::cutoff_base, cp::key_track, cp::mod_amount,
+              cp::volume, cp::lfo1_duty, cp::lfo2_duty, cp::lfo1_resonance,
+              cp::lfo2_resonance, cp::duty_base_0, cp::duty_base_1,
+              cp::resonance_base}) {
+            put(writes, record + field, 0);
+        }
+    }
 
     for (int voice = 0; voice < voice_count; ++voice) {
         put(writes, voice_register(voice, cp::channel), channel_base);

@@ -72,8 +72,9 @@ std::array<int, pointer_count> pointers_of(int voice, int slot,
 // ---- the writes -----------------------------------------------------------------
 
 // Everything that does not depend on the patch: every voice idle on channel
-// 0, the channel's and the LFOs' wiring, the sinks that stay zero. Once, at
-// start-up, after the constants.
+// 0, every channel's wiring (the program runs them all; the unused ones at
+// zero depth into their own sinks), the LFOs', the sinks that stay zero. Once,
+// at start-up, after the constants.
 void setup(Writes &writes);
 
 void amp_envelope(const patch_t &patch, Writes &writes);

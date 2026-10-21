@@ -64,8 +64,27 @@ void test_setup() {
           "the channel's sinks");
     check(state.at(channel + cp::lfo1) == cp::lfos,
           "LFO 1 is the pool's first record");
-    check(state.at(channel + cp::lfo2) == cp::lfos + 16 * cp::lfo_size,
+    check(state.at(channel + cp::lfo2)
+                  == cp::lfos + cp::lfos_a_half * cp::lfo_size,
           "LFO 2 is the second half's first");
+    // every channel the program's loop runs is wired, the unused ones to
+    // their own sinks at zero depth (issue #238)
+    for (int other = 0; other < cp::channel_count; ++other) {
+        const int record = cp::channels + other * cp::channel_size;
+        check(state.at(record + cp::sink_block)
+                      == cp::channel_sinks + other * cp::channel_sink_size,
+              "every channel has its own sinks");
+        check(state.at(record + cp::lfo1) == cp::lfos
+                      && state.at(record + cp::lfo2)
+                                 == cp::lfos + cp::lfos_a_half * cp::lfo_size,
+              "every channel's LFOs are in the pool");
+        check(state.at(record + cp::mod_amount) == 0
+                      && state.at(record + cp::lfo1_pitch) == 0
+                      && state.at(record + cp::duty_base_0) == 0
+                      && state.at(record + cp::resonance_base) == 0
+                      && state.at(record + cp::bend) == 0,
+              "every channel starts at zero depth");
+    }
     for (int voice = 0; voice < render::voice_count; ++voice) {
         const int base = cp::voices + voice * cp::voice_size;
         check(state.at(base + cp::sink) == cp::sinks + 8 * voice,
@@ -215,7 +234,7 @@ void test_lfo() {
     render::Writes writes;
     render::lfo(patch, 1, writes);
     const auto state = state_of(writes);
-    const int record = cp::lfos + 16 * cp::lfo_size;
+    const int record = cp::lfos + cp::lfos_a_half * cp::lfo_size;
     const int set    = cp::lfo_sets + cp::set_size;
     check(state.at(set + cp::base) == record, "the set points at the record");
     check(state.at(set + cp::n_saw) == 1 && state.at(set + cp::n_sine) == 0,

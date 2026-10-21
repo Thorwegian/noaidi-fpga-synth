@@ -41,7 +41,7 @@
 ; ---- globals --------------------------------------------------------------
         .reg   PASS, 0x040          ; the pass counter
         .reg   PARITY, 0x060        ; scratch for the LFOs' half
-        .reg   CHANNELS_IN_USE, 0x061   ; how many channels the firmware uses (the firmware's; the loop count is fixed, counts.s)
+        .reg   CHANNELS_IN_USE, 0x061   ; how many channels the firmware uses (the firmware's; the loop runs CHANNEL_COUNT, counts.s)
         .equ   LFO_SETS, 0x070
 
 ; the LFOs update every other pass, half of them each time (24 kHz): a set

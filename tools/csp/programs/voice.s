@@ -17,7 +17,7 @@
 ; are addressed: j points at the channel first, then at the sinks.
 
         IDX     i, =#VOICES, 0
-        LOOP.vi voices, =#32, =#VOICE_SIZE
+        LOOP.vi voices, =#VOICE_COUNT, =#VOICE_SIZE
         IDX     j, [i+CHANNEL], 0                   ; j → the channel
         ADD3    [i+U_A], 0, [i+NOTE], [j+CH_PITCH]
         MAC     [i+U_M], 0, [i+U_M], [j+MOD_AMOUNT]     ; U_M: the mod envelope's output (envelope.s)

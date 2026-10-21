@@ -288,7 +288,9 @@ and the DSP. Issue #230 carries the patch work (fork
   against the console's bytes a second. `csp-stream dump` carries the whole
   register file in 43 ms, held or running (the probe walks it a register a
   pass), `csp-stream engine` the sink word at the probe's address as the
-  partials read it beside the pipeline's mix, a sample at a time;
+  partials read it beside the pipeline's mix, a sample at a time (the
+  address's low ten bits: `csp-peek <sink index>` sets it, 0 … 1023, as
+  `csp-peek` refuses 0x800 and above);
   `tools/lab/spdif_capture.py stream` decodes both (`--dump` writes the file
   as csp-peek prints it). The first use found the silent engine's cause in
   one capture under a held note: the program's sinks moving, the firmware's
@@ -308,7 +310,13 @@ and the DSP. Issue #230 carries the patch work (fork
   pass count fits; it found the vector loop's copies read one pass stale
   at one register of 2016). It starts
   from a state it chose, so a wrong state is seen too (its predecessor,
-  step-and-replay, started from the chip's and could not).
+  step-and-replay, started from the chip's and could not). What it leaves
+  in the register file stays until the firmware's boot zeroes every
+  register, after the self-test and before the image (the file outlives
+  the firmware's reset; #238: the clear's burst through the door landed
+  one dword in eight, and the check's channel pointers left in channels
+  1–15 ran its fill, LFO-shaped, into channel 0's duty and resonance
+  sinks — a pad eight semitones dark, found through the pipe).
 - **Bisect by words** when a program fails: `csp-hold` (clears the
   program and the decode ROM), `csp-rom row hex` for the ROM rows,
   `csp-row pc hi lo` for the first N words, `csp-const` for the constants

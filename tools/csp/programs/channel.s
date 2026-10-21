@@ -18,10 +18,12 @@
 ;   RESONANCE      = RESONANCE_BASE + LFO 1 × LFO1_RESONANCE
 ;                    + LFO 2 × LFO2_RESONANCE
 ;
-; The loop covers every channel: a loop's count is fixed in the program.
+; The loop covers every channel (CHANNEL_COUNT, counts.s): a loop's count is
+; fixed in the program, so a channel the firmware does not use runs too, with
+; the pointers and the zero depths the firmware's image gives it.
 
         IDX     i, =#CHANNELS, 0
-        LOOP.vi channels, =#16, =#CHANNEL_SIZE
+        LOOP.vi channels, =#CHANNEL_COUNT, =#CHANNEL_SIZE
         ; Each LFO's record is pointed at once and all four products taken
         ; from it (pitch, cutoff, duty, resonance): two IDX fewer than one
         ; LFO per quantity, and each IDX's wait filled with the other's

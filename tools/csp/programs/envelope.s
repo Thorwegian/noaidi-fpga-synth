@@ -36,7 +36,7 @@
 ; and segment layouts are in map.s.)
 
         IDX     i, =#VOICES, 0              ; i → voice 0
-        LOOP.vi done, =#32, =#VOICE_SIZE    ; every voice
+        LOOP.vi done, =#VOICE_COUNT, =#VOICE_SIZE   ; every voice (counts.s)
         MAX     [i+U_A], [i+STAGE_A], =#4   ;   attack → decay, if…
         MAX     [i+U_M], [i+STAGE_M], =#20
         CMP     ZERO, [i+LEVEL_A], FULL     ;   …full scale is reached
