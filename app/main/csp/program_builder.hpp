@@ -16,8 +16,13 @@
 // when their addresses are equal; an indexed operand names a known
 // address when its index register was set from an immediate alone (IDX
 // with a register of 0), and otherwise may name anything, so it waits for
-// every earlier write. Knowing more (the regions the first draft had) was
-// measured at three cycles in 1465 on the control program.
+// every earlier write — inside a vector loop too, where the base steps per
+// element, so two indexed operands with different offsets are still kept
+// ceil(latency / elements) rows apart. Knowing more (the regions the first
+// draft had) was measured at three cycles in 1465 on the control program,
+// and the vector rule costs nothing at sixteen elements; a finer rule
+// (offsets through one index register conflict only when equal) is #236's
+// if its loops need it.
 //
 // Built without exceptions or RTTI, as the firmware is.
 

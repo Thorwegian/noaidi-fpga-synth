@@ -25,11 +25,12 @@
 namespace csp::control {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 1470;
+inline constexpr int cycles = 1433;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 156> rows{{
+inline constexpr std::array<Row, 115> rows{{
     {0x010060040ull, 0xc00000001ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -45,6 +46,7 @@ inline constexpr std::array<Row, 156> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x030000c00ull, 0x060000070ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -53,64 +55,19 @@ inline constexpr std::array<Row, 156> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x050000c03ull, 0xc1000001dull},
+    {0x050000c0cull, 0xc10000026ull},
     {0x060400c00ull, 0x402004000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x070407400ull, 0x406000000ull},
-    {0x050000c03ull, 0xc10000025ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x060400c00ull, 0x402004000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x080000400ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x091407405ull, 0x404000000ull},
-    {0x050000c03ull, 0xc10000031ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x060400c00ull, 0x402004000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0a0409400ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x070409409ull, 0x406000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0b0407409ull, 0x405000000ull},
-    {0x050000c03ull, 0xc10000052ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x060400c00ull, 0x402004000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
     {0x070408400ull, 0xc00000800ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0a0409408ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
+    {0x080409408ull, 0x000000000ull},
     {0x070409409ull, 0x408000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
     {0x070409409ull, 0xc00030000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0c0409408ull, 0xc00010000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0a040a409ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
+    {0x090409408ull, 0xc00010000ull},
+    {0x08040a409ull, 0x000000000ull},
     {0x07040a409ull, 0x40a000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
     {0x070407409ull, 0xc0000319aull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x0c040740aull, 0xc00000e66ull},
-    {0x000000000ull, 0x000000000ull},
-    {0x000000000ull, 0x000000000ull},
+    {0x09040740aull, 0xc00000e66ull},
     {0x070407407ull, 0x404000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -119,24 +76,25 @@ inline constexpr std::array<Row, 156> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x050000c10ull, 0xc4000006cull},
+    {0x050000c10ull, 0xc40000041ull},
     {0x030000421ull, 0x000000000ull},
     {0x070429807ull, 0x41d000000ull},
     {0x07042a807ull, 0x41e000000ull},
     {0x070433807ull, 0x42b000000ull},
     {0x070434807ull, 0x42d000000ull},
     {0x030000422ull, 0x000000000ull},
-    {0x0c0429807ull, 0x41f000000ull},
-    {0x0c042a807ull, 0x420000000ull},
-    {0x0c0433807ull, 0x42c000000ull},
-    {0x0c0434807ull, 0x42e000000ull},
-    {0x0b0427429ull, 0x41c000000ull},
-    {0x0c042a427ull, 0x424000000ull},
-    {0x0b042842aull, 0x423000000ull},
+    {0x090429807ull, 0x41f000000ull},
+    {0x09042a807ull, 0x420000000ull},
+    {0x090433807ull, 0x42c000000ull},
+    {0x090434807ull, 0x42e000000ull},
+    {0x0a0427429ull, 0x41c000000ull},
+    {0x09042a427ull, 0x424000000ull},
+    {0x0a042842aull, 0x423000000ull},
     {0x030000432ull, 0x000000000ull},
-    {0x0b0800433ull, 0x42f000000ull},
-    {0x0b0801433ull, 0x430000000ull},
-    {0x0b0802434ull, 0x431000000ull},
+    {0x0a0800433ull, 0x42f000000ull},
+    {0x0a0801433ull, 0x430000000ull},
+    {0x0a0802434ull, 0x431000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -145,40 +103,41 @@ inline constexpr std::array<Row, 156> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x050000c20ull, 0xc10000088ull},
-    {0x0d0406402ull, 0xc00000004ull},
-    {0x0d040740aull, 0xc00000014ull},
-    {0x080000400ull, 0xc00004000ull},
-    {0x091402406ull, 0x402000000ull},
-    {0x080000408ull, 0xc00004000ull},
-    {0x09140a407ull, 0x40a000000ull},
+    {0x050000c20ull, 0xc1000005eull},
+    {0x0b0406402ull, 0xc00000004ull},
+    {0x0b040740aull, 0xc00000014ull},
+    {0x0c0000400ull, 0xc00004000ull},
+    {0x0d1402406ull, 0x402000000ull},
+    {0x0c0000408ull, 0xc00004000ull},
+    {0x0d140a407ull, 0x40a000000ull},
     {0x010406402ull, 0xc00000004ull},
     {0x01040740aull, 0xc00000014ull},
-    {0x080000403ull, 0xc00004000ull},
-    {0x091402406ull, 0xc00000008ull},
-    {0x09140a407ull, 0xc00000018ull},
+    {0x0c0000403ull, 0xc00004000ull},
+    {0x0d1402406ull, 0xc00000008ull},
+    {0x0d140a407ull, 0xc00000018ull},
     {0x030000405ull, 0x402000000ull},
-    {0x08040c800ull, 0x400000000ull},
+    {0x0c040c800ull, 0x400000000ull},
     {0x0e040040cull, 0x802000000ull},
     {0x07040b400ull, 0x404000000ull},
     {0x030000405ull, 0x40a000000ull},
-    {0x08040c800ull, 0x408000000ull},
+    {0x0c040c800ull, 0x408000000ull},
     {0x0e040840cull, 0x802000000ull},
     {0x070407408ull, 0x40d000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x040000c00ull, 0x000000600ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x050000c20ull, 0xc1000009cull},
+    {0x050000c20ull, 0xc10000073ull},
     {0x030000405ull, 0x000000000ull},
-    {0x0b040640eull, 0x827000000ull},
+    {0x0a040640eull, 0x827000000ull},
     {0x070407407ull, 0x825000000ull},
     {0x020407000ull, 0xc00000002ull},
-    {0x0c040740eull, 0x824000000ull},
+    {0x09040740eull, 0x824000000ull},
     {0x0f0407828ull, 0x000000000ull},
     {0x07040c40bull, 0x826000000ull},
     {0x03000040full, 0x000000000ull},
@@ -190,7 +149,7 @@ inline constexpr std::array<Row, 156> rows{{
 // The decode ROM: one control word a row, row 0 the NOP.
 inline constexpr std::array<uint32_t, 16> rom{
     0x00000, 0x112e3, 0x194e0, 0x34221, 0x33220, 0x20002, 0x0a7e8, 0x092e0,
-    0x092e3, 0x11262, 0x092c4, 0x092e2, 0x096e0, 0x112e1, 0x0a7e0, 0x096e2,
+    0x092c4, 0x096e0, 0x092e2, 0x112e1, 0x092e3, 0x11262, 0x0a7e0, 0x096e2,
 };
 
 // Registers, blocks and fields.
@@ -262,10 +221,10 @@ inline constexpr int phase_step = 2;
 inline constexpr int rate = 2;
 inline constexpr int resonance = 2;
 inline constexpr int resonance_base = 49;
-inline constexpr int saws_a_half = 3;
+inline constexpr int saws_a_half = 0;
 inline constexpr int segment_size = 4;
 inline constexpr int set_size = 8;
-inline constexpr int sines_a_half = 3;
+inline constexpr int sines_a_half = 12;
 inline constexpr int sink = 15;
 inline constexpr int sinks = 2048;
 inline constexpr int sink_block = 50;
@@ -277,7 +236,7 @@ inline constexpr int spare = 11;
 inline constexpr int spare_channel = 53;
 inline constexpr int spare_head = 3;
 inline constexpr int spare_sinks = 38;
-inline constexpr int squares_a_half = 3;
+inline constexpr int squares_a_half = 0;
 inline constexpr int stage_a = 2;
 inline constexpr int stage_m = 10;
 inline constexpr int t = 9;
@@ -286,7 +245,7 @@ inline constexpr int tc = 42;
 inline constexpr int td = 51;
 inline constexpr int tp = 41;
 inline constexpr int tr = 52;
-inline constexpr int triangles_a_half = 3;
+inline constexpr int triangles_a_half = 0;
 inline constexpr int u_a = 6;
 inline constexpr int u_m = 7;
 inline constexpr int velocity = 4;

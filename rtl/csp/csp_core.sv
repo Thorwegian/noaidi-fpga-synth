@@ -21,17 +21,20 @@
 //   R1  +1     the read pins of DMEM's three copies are driven from registers
 //   R2  +2     the words are in the blocks' output registers, captured as they come;
 //              a SKIP decides
-//   E1  +3     the words picked, operands formatted, the multiply-add's operands formed
-//              into registers,
-//              MIN, MAX, SEL and ANDXOR done, an IDX written, the shifter prepared
-//   E2  +4     the multiply-add's own input registers sample those operand registers
+//   E1  +3     the words picked (the odd or even half, or the immediate), the
+//              operands formatted into registers; an IDX written; MIN, MAX, SEL
+//              and ANDXOR need no arithmetic and are done in the stage after
+//   E1b +4     the arithmetic: INTERP's difference and ADD3's sum saturated, the
+//              multiply-add's operands formed into registers, the logic unit's
+//              result, the shifter's count
+//   E2  +5     the multiply-add's own input registers sample those operand registers
 //              (nothing between them: the logic before a block's pin is untimed)
-//   E3  +5     the multiply-add computes (the block's own output register holds it);
+//   E3  +6     the multiply-add computes (the block's own output register holds it);
 //              the shifter's coarse stage
-//   E4  +6     the product is out of the block, captured; the shifter's fine stage
-//   E5  +7     the sum reduced to its destination, saturated or wrapped, the flags
+//   E4  +7     the product is out of the block, captured; the shifter's fine stage
+//   E5  +8     the sum reduced to its destination, saturated or wrapped, the flags
 //              and the accumulator written
-//   W   +8     the write pins of DMEM are driven from registers; the write lands
+//   W   +9     the write pins of DMEM are driven from registers; the write lands
 //              at the edge after, so an instruction issued RESULT_LATENCY cycles
 //              later reads it
 //
@@ -418,20 +421,54 @@ module csp_core (
     wire [35:0] e1_y      = e1_wide_y ? e1_y_pair : {18'd0, e1_y_word};
     wire [35:0] e1_r      = e1_r_wide ? e1_r_pair : {18'd0, e1_r_word};
 
+    // ---- E1b: the arithmetic on the picked operands ----------------------------------------------------
+    // The pick above (the odd or even half, or the immediate) and the formatting are one stage;
+    // the 55-bit subtract and add with their saturation are the next, so that neither sits in
+    // front of the other: with both in one stage the report fell from 160 to 90 MHz.
+    logic               e1b_live;
+    logic [17:0]        e1b_control;
+    logic [3:0]         e1b_cond;
+    logic               e1b_r_none;
+    logic [11:0]        e1b_write_address;
+    logic [17:0]        e1b_x;
+    logic [35:0]        e1b_y, e1b_r;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e1b_live <= 1'b0;
+        else          e1b_live <= e1_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e1b_control       <= e1_control;
+        e1b_cond          <= e1_cond;
+        e1b_r_none        <= e1_r_none;
+        e1b_write_address <= e1_write_address;
+        e1b_x             <= e1_x;
+        e1b_y             <= e1_y;
+        e1b_r             <= e1_r;
+    end
+
+    wire [2:0] e1b_unit    = e1b_control[17:15];
+    wire [2:0] e1b_writes  = e1b_control[14:12];
+    wire [1:0] e1b_source  = e1b_control[11:10];
+    wire       e1b_wide_y  = e1b_control[8];
+    wire [2:0] e1b_sub     = e1b_control[2:0];
+    wire       e1b_r_wide  = e1b_writes == csp_pkg::WRITES_PAIR;
+
     // A and Y in the accumulator's format
-    logic signed [53:0] e1_a_value;
+    logic signed [53:0] e1b_a_value;
     always_comb begin
-        case (e1_source)
-            csp_pkg::A_SOURCE_RESULT:      e1_a_value = e1_r_wide ? wide_to_accumulator(e1_r) : word_to_accumulator(e1_r[17:0]);
-            csp_pkg::A_SOURCE_ACCUMULATOR: e1_a_value = accumulator;
-            default:                       e1_a_value = 54'sd0;
+        case (e1b_source)
+            csp_pkg::A_SOURCE_RESULT:      e1b_a_value = e1b_r_wide ? wide_to_accumulator(e1b_r) : word_to_accumulator(e1b_r[17:0]);
+            csp_pkg::A_SOURCE_ACCUMULATOR: e1b_a_value = accumulator;
+            default:                       e1b_a_value = 54'sd0;
         endcase
     end
-    wire signed [53:0] e1_y_value = e1_wide_y ? wide_to_accumulator(e1_y) : word_to_accumulator(e1_y[17:0]);
+    wire signed [53:0] e1b_y_value = e1b_wide_y ? wide_to_accumulator(e1b_y) : word_to_accumulator(e1b_y[17:0]);
 
     // INTERP: Y - A in Q4.32, saturated. ADD3: A + Y, saturated to the accumulator.
-    wire signed [54:0] difference_full = 55'(e1_y_value) - 55'(e1_a_value);
-    wire signed [54:0] sum_full        = 55'(e1_a_value) + 55'(e1_y_value);
+    wire signed [54:0] difference_full = 55'(e1b_y_value) - 55'(e1b_a_value);
+    wire signed [54:0] sum_full        = 55'(e1b_a_value) + 55'(e1b_y_value);
     wire signed [40:0] difference_q432 = 41'(difference_full >>> 14);
     wire signed [35:0] difference_saturated =
             difference_q432 >  41'sd34359738367  ?  36'sd34359738367 :
@@ -444,10 +481,10 @@ module csp_core (
     logic signed [35:0] multiply_b;
     logic signed [53:0] multiply_c;
     always_comb begin
-        multiply_a = e1_x;
-        multiply_b = e1_wide_y ? e1_y : {e1_y[17:0], 18'd0};            // a word's Q4.14 is Q4.32 shifted by 18
-        multiply_c = e1_a_value;
-        case (e1_sub)
+        multiply_a = e1b_x;
+        multiply_b = e1b_wide_y ? e1b_y : {e1b_y[17:0], 18'd0};            // a word's Q4.14 is Q4.32 shifted by 18
+        multiply_c = e1b_a_value;
+        case (e1b_sub)
             csp_pkg::MULTIPLY_ADD_INTERP: multiply_b = difference_saturated;
             csp_pkg::MULTIPLY_ADD_ADD3: begin
                 multiply_b = ONE_Q432;
@@ -455,10 +492,10 @@ module csp_core (
             end
             csp_pkg::MULTIPLY_ADD_CMP: begin
                 multiply_b = ONE_Q432;
-                multiply_c = -word_to_accumulator(e1_y[17:0]);
+                multiply_c = -word_to_accumulator(e1b_y[17:0]);
             end
             csp_pkg::MULTIPLY_ADD_ABS: begin
-                multiply_b = e1_x[17] ? -ONE_Q432 : ONE_Q432;
+                multiply_b = e1b_x[17] ? -ONE_Q432 : ONE_Q432;
                 multiply_c = 54'sd0;
             end
             default: ;
@@ -466,32 +503,32 @@ module csp_core (
     end
 
     // what E4 needs to see whether the 54-bit sum wrapped inside the block
-    wire e1_product_nonzero = multiply_a != '0 && multiply_b != '0;
-    wire e1_signs_agree     = (multiply_a[17] ^ multiply_b[35]) == multiply_c[53];
-    wire e1_c_negative      = multiply_c[53];
+    wire e1b_product_nonzero = multiply_a != '0 && multiply_b != '0;
+    wire e1b_signs_agree     = (multiply_a[17] ^ multiply_b[35]) == multiply_c[53];
+    wire e1b_c_negative      = multiply_c[53];
 
     // MIN, MAX, SEL, ANDXOR: one word, no overflow
-    logic [17:0] e1_logic_result;
+    logic [17:0] e1b_logic_result;
     always_comb begin
         logic [17:0] a_bits;
         logic signed [21:0] a_upper;
-        a_upper = 22'(e1_a_value >>> 32);
-        a_bits  = e1_source == csp_pkg::A_SOURCE_ZERO ? 18'd0
+        a_upper = 22'(e1b_a_value >>> 32);
+        a_bits  = e1b_source == csp_pkg::A_SOURCE_ZERO ? 18'd0
                 : (a_upper > 22'sd131071 ? 18'h1ffff : (a_upper < -22'sd131072 ? 18'h20000 : a_upper[17:0]));
-        case (e1_sub)
-            csp_pkg::LOGIC_MIN: e1_logic_result = $signed(e1_x) < $signed(e1_y[17:0]) ? e1_x : e1_y[17:0];
-            csp_pkg::LOGIC_MAX: e1_logic_result = $signed(e1_x) > $signed(e1_y[17:0]) ? e1_x : e1_y[17:0];
-            csp_pkg::LOGIC_SEL: e1_logic_result = condition_holds(e1_cond, flag_negative, flag_zero, flag_overflow) ? e1_y[17:0] : e1_x;
-            default:            e1_logic_result = (e1_x & e1_y[17:0]) ^ a_bits;
+        case (e1b_sub)
+            csp_pkg::LOGIC_MIN: e1b_logic_result = $signed(e1b_x) < $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
+            csp_pkg::LOGIC_MAX: e1b_logic_result = $signed(e1b_x) > $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
+            csp_pkg::LOGIC_SEL: e1b_logic_result = condition_holds(e1b_cond, flag_negative, flag_zero, flag_overflow) ? e1b_y[17:0] : e1b_x;
+            default:            e1b_logic_result = (e1b_x & e1b_y[17:0]) ^ a_bits;
         endcase
     end
 
     // SHIFT: the count is Y; the shift is relative to the destination's format (the count less 32
     // for a word, less 14 for a wide value), the count clamped to +-63. Left past 36 bits any
     // nonzero value saturates anyway, and right past 54 bits a value is its sign: both clamp.
-    wire signed [17:0] shift_count   = e1_y[17:0];
+    wire signed [17:0] shift_count   = e1b_y[17:0];
     wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63 : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
-    wire signed [8:0]  shift_total   = 9'(shift_clamped) - (e1_r_wide ? 9'sd14 : 9'sd32);
+    wire signed [8:0]  shift_total   = 9'(shift_clamped) - (e1b_r_wide ? 9'sd14 : 9'sd32);
     wire               shift_left    = shift_total >= 0;
     wire signed [8:0]  shift_right_amount = -shift_total;
     wire [5:0] shift_magnitude = shift_left ? (shift_total > 9'sd36 ? 6'd36 : shift_total[5:0])
@@ -529,16 +566,16 @@ module csp_core (
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) e2_live <= 1'b0;
-        else          e2_live <= e1_live;
+        else          e2_live <= e1b_live;
     end
 
     always_ff @(posedge clk) begin
-        e2_control         <= e1_control;
-        e2_r_none          <= e1_r_none;
-        e2_write_address   <= e1_write_address;
-        e2_logic_result    <= e1_logic_result;
-        e2_ma_flags        <= {e1_product_nonzero, e1_signs_agree, e1_c_negative};
-        e2_shift_value     <= e1_a_value;
+        e2_control         <= e1b_control;
+        e2_r_none          <= e1b_r_none;
+        e2_write_address   <= e1b_write_address;
+        e2_logic_result    <= e1b_logic_result;
+        e2_ma_flags        <= {e1b_product_nonzero, e1b_signs_agree, e1b_c_negative};
+        e2_shift_value     <= e1b_a_value;
         e2_shift_left      <= shift_left;
         e2_shift_magnitude <= shift_magnitude;
     end

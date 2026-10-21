@@ -406,20 +406,25 @@ void test_vector_loops() {
     check_equal(vector->processor.read(0x200 + 8 + 2), q(1.0), "and the next element's (positive: X)");
     check_equal(vector->processor.read(0x200 + 8 * 5 + 4), q(0.625), "an element's [j+…] uses its own j");
     check_equal(vector->processor.index(csp::IndexRegister::j), 0x307, "after the loop, j is the last element's");
-    // IDX and its wait rows, LOOP.vi, then 5 rows × 8 elements without a wait:
-    // with 8 elements a round, every dependency is a row apart.
-    check_equal(vector_report.cycles, csp::index_latency + 1 + 5 * 8 + csp::index_latency - 1,
-                "a vector loop of 8 elements never waits");
+    // IDX and its wait rows, LOOP.vi, then the body's rows for each of the 8 elements, the
+    // index latency less one after. A dependent pair of rows is ceil(latency / elements) rows
+    // apart: the MAC and the CMP that reads its result, and the IDX after the SEL (inside a
+    // vector loop the index's base is unknown, so an indexed read waits for every earlier
+    // indexed write).
+    const int spacing_8 = (csp::result_latency + 7) / 8;
+    check_equal(vector_report.cycles, csp::index_latency + 1 + (5 + 2 * (spacing_8 - 1)) * 8 + csp::index_latency - 1,
+                "a vector loop of 8 elements: dependent rows ceil(latency / 8) apart, nothing else");
     check(scalar_report.cycles > vector_report.cycles, "the scalar loop waits inside each iteration");
 
-    // Two elements a round: a dependent row is ceil(7 / 2) = 4 rows on.
+    // Two elements a round: a dependent row is ceil(latency / 2) rows on.
     Machine two(body + "        LOOP.vi 2, =#2, =#8\n" + "        MAC [i+DOUBLE], 0, [i+X], =2.0\n"
                 + "        MAC [i+PICK], 0, [i+DOUBLE], =1.0\n");
     two.start();
     const csp::PassReport two_report = two.run();
     check(two_report.errors.empty(), "a two-element loop is spaced by the latency");
-    check_equal(two_report.cycles, csp::index_latency + 1 + 5 * 2 + csp::index_latency - 1,
-                "three wait rows between the dependent pair");
+    const int spacing_2 = (csp::result_latency + 1) / 2;
+    check_equal(two_report.cycles, csp::index_latency + 1 + (2 + (spacing_2 - 1)) * 2 + csp::index_latency - 1,
+                "ceil(latency / 2) - 1 wait rows between the dependent pair");
 
     Machine shared(body
                    + "        .reg T, 0x060\n"
