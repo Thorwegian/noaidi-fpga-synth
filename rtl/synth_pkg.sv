@@ -65,6 +65,8 @@ package synth_pkg;
     parameter logic [SPI_ADDRESS_W-1:0] MAP_FIFO_DOOR = 18'h06000;   // the write FIFO's door
     parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two dwords a row
     parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one dword a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_LAB_BASE  = 18'h0A000;   // the lab's counters (#241): read-only, one dword each
+    parameter int MAP_LAB_DWORDS = 64;
 
     //--- The S/PDIF data stream (rtl/spdif/spdif_stream.sv) -----------
     // A frame is 64 samples of 32 bits: the sync word, the sequence word,

@@ -41,6 +41,12 @@ module tb_spi_bus;
     wire [csp_pkg::ROM_W-1:0]         rom_load_word;
     logic [SPI_DWORD_W-1:0]  imem_read_dword;
     logic [csp_pkg::ROM_W-1:0] rom_read_word;
+    // the lab's region: a counter bank the bench models as index × 1000, and the snapshot toggle
+    wire  [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] lab_index;
+    wire  [synth_pkg::SPI_DWORD_W-1:0] lab_dword = synth_pkg::SPI_DWORD_W'(lab_index) * 36'd1000;
+    wire  lab_snapshot;
+    int   snapshot_toggles = 0;
+    always @(lab_snapshot) snapshot_toggles++;
 
     spi_bus #(.ID_NONET(ID)) dut (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
@@ -51,7 +57,8 @@ module tb_spi_bus;
         .imem_load_enable(imem_load_enable), .imem_row(imem_row), .imem_upper(imem_upper),
         .imem_load_dword(imem_load_dword), .imem_read_dword(imem_read_dword),
         .rom_load_enable(rom_load_enable), .rom_row(rom_row), .rom_load_word(rom_load_word),
-        .rom_read_word(rom_read_word)
+        .rom_read_word(rom_read_word),
+        .lab_index(lab_index), .lab_dword(lab_dword), .lab_snapshot(lab_snapshot)
     );
 
     // The blocks behind the regions, as the slave sees them: written at the
@@ -266,6 +273,18 @@ module tb_spi_bus;
         read_burst(MAP_ROM_BASE + 18'd7, 2, 1);
         check36("ROM row 7 read back", read_dwords[0], 36'h2_1234);
         check36("ROM row 8 read back", read_dwords[1], 36'h0_5678);
+
+        $display("--- 10b. the lab's counters: read as they are, a snapshot at the base and only there ---");
+        j = snapshot_toggles;
+        read_burst(MAP_LAB_BASE, 4, 1);
+        check36("lab dword 0", read_dwords[0], 36'd0);
+        check36("lab dword 1", read_dwords[1], 36'd1000);
+        check36("lab dword 3", read_dwords[3], 36'd3000);
+        if (snapshot_toggles != j + 1) begin $display("FAIL a read from the lab's base toggled the snapshot %0d times, not once", snapshot_toggles - j); errors = errors + 1; end
+        read_burst(MAP_LAB_BASE + 18'd8, 2, 1);
+        check36("lab dword 9", read_dwords[1], 36'd9000);
+        if (snapshot_toggles != j + 1) begin $display("FAIL a read from the lab's ninth dword toggled the snapshot"); errors = errors + 1; end
+        else $display("pass: the lab's dwords, one snapshot for a read from the base");
 
         $display("--- 11. the read suite again at a 40 MHz-class SCLK ---");
         half = 13;                        // ~38 MHz

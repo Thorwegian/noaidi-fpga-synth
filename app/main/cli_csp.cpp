@@ -36,6 +36,29 @@ int signed_word(uint64_t raw18) {
 // the logic unit, and through the logic unit twice), so at a raised clock the
 // count is the rate at which one of the two paths miscomputes, measured on the
 // chip, which no timing report can give for a path it does not time.
+// csp-raw reads dwords of the SPI map as they are: the lab's counters (#241),
+// the status words, anything the map lets the link read.
+int cmd_raw(int argc, char **argv) {
+    if (argc < 2) {
+        std::printf("usage: csp-raw <address> [count]   (a map address, hex or decimal; at most 64)\n");
+        return 1;
+    }
+    const uint32_t first = static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0));
+    const int count = std::min(64, argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 1);
+    uint64_t dwords[64];
+    for (int done = 0; done < count; done += 8) { // the link reads at most eight a burst
+        if (!engine_link_raw_read(first + done, dwords + done, std::min(8, count - done))) {
+            std::printf("  the link is not running\n");
+            return 1;
+        }
+    }
+    for (int i = 0; i < count; ++i) {
+        std::printf("  %05lx: %09llx (%llu)\n", static_cast<unsigned long>(first + i),
+                    static_cast<unsigned long long>(dwords[i]), static_cast<unsigned long long>(dwords[i]));
+    }
+    return 0;
+}
+
 int cmd_pairwatch(int argc, char **argv) {
     if (argc < 2) {
         std::printf("usage: csp-pairwatch <register> [reads]   (an even register; default 2000 reads)\n");
@@ -426,6 +449,7 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-peek", "<register> [count]",
          "read CSP registers (even-aligned pairs)", cmd_peek, nullptr},
+        {"csp-raw", "<address> [count]", "read dwords of the SPI map as they are", cmd_raw, nullptr},
         {"csp-pairwatch", "<register> [reads]",
          "read a pair many times, count the reads whose halves differ", cmd_pairwatch, nullptr},
         {"csp-poke", "<register> <raw> [force]",

@@ -85,4 +85,9 @@ constexpr size_t program_rows   = 1472;
 constexpr uint32_t rom_base     = 0x09000;
 constexpr size_t rom_rows       = 256;
 
+// The lab's counters (#241): read-only dwords, one a device under test, the
+// first the cycle counter they are measured against.
+constexpr uint32_t lab_base   = 0x0A000;
+constexpr int lab_dwords      = 64;
+
 } // namespace fpga_map

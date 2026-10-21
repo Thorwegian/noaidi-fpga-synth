@@ -140,6 +140,9 @@ module top (
     logic                              rom_load_enable;
     logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_row;
     logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op;
+    logic                                    lab_snapshot;
+    logic [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] lab_index;
+    logic [synth_pkg::SPI_DWORD_W-1:0]       lab_dword;
     logic [csp_pkg::ROM_W-1:0]         rom_load_word, rom_read_word, control_word;
 
     csp_decode_rom u_rom (
@@ -182,6 +185,16 @@ module top (
         .sink_write_enable  (sink_write_enable),
         .sink_write_address (sink_write_address),
         .sink_write_data    (sink_write_data)
+    );
+
+    // the lab (#241): devices under test with their mismatch counters, read through the link
+    lab u_lab (
+        .clk             (sysclk),
+        .reset_n         (rst_n),
+        .inject_fault    (1'b0),
+        .snapshot_toggle (lab_snapshot),
+        .index           (lab_index),
+        .dword           (lab_dword)
     );
 
     //----------------------------------------------------------------
@@ -347,7 +360,10 @@ module top (
         .rom_load_enable    (rom_load_enable),
         .rom_row            (rom_row),
         .rom_load_word      (rom_load_word),
-        .rom_read_word      (rom_read_word)
+        .rom_read_word      (rom_read_word),
+        .lab_index          (lab_index),
+        .lab_dword          (lab_dword),
+        .lab_snapshot       (lab_snapshot)
     );
 
     //----------------------------------------------------------------
