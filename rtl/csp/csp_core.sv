@@ -161,7 +161,10 @@ module csp_core (
     logic [PC_W-1:0]    redirect_target;
     logic [10:0]        skip_remaining;
 
-    wire fetch_valid = running && !held && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
+    // running is the hold as sampled at the pass start: a pass that started runs its rows to the
+    // end whatever the hold does meanwhile, so that a pass is atomic and a frozen chip's registers
+    // are a whole number of passes (the chip check, tools/lab/chip_check.py)
+    wire fetch_valid = running && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
 
     assign fetch_address = pc;       // the program counter is IMEM's pin register
 
@@ -185,9 +188,10 @@ module csp_core (
             skip_remaining <= '0;
         end else begin
             if (pass_start) running <= !held;
-            // held, IMEM's fetch parks on the row the load writes first: the pins are the register
-            if (held)           pc <= csp_pkg::PROGRAM_PARK_ROW;
-            else if (pass_start) pc <= '0;
+            // a pass that starts held parks IMEM's fetch on the row the load writes first (the
+            // pins are the register) and stays parked until a pass starts running
+            if (pass_start)     pc <= held ? csp_pkg::PROGRAM_PARK_ROW : '0;
+            else if (!running)  pc <= csp_pkg::PROGRAM_PARK_ROW;
             else if (redirect)  pc <= redirect_target;
             else                pc <= pc + 1'b1;
             // a row is in flight for four cycles between the program counter and A: a repeat
@@ -205,12 +209,12 @@ module csp_core (
 
     // Nothing but a register between a block's output and the logic that uses it, and nothing
     // but a register in front of its pins: IMEM's row is captured (its op field into the ROM's
-    // address register, parked while held), the ROM's control word is captured on its way to A.
+    // address register, parked while no pass runs), the ROM's control word is captured on its way to A.
     always_ff @(posedge clk) begin
         decode_pc   <= pc;
         rom_pc      <= decode_pc;
         rom_row     <= fetch_row;
-        rom_op      <= held ? csp_pkg::ROM_PARK_ROW : csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
+        rom_op      <= !running ? csp_pkg::ROM_PARK_ROW : csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
         capture_pc  <= rom_pc;
         capture_row <= rom_row;
         a_pc        <= capture_pc;

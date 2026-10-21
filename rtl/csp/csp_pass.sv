@@ -10,9 +10,10 @@
 // 1529) it pops up to 48 of the firmware's committed dwords from the FIFO
 // and writes each word into DMEM where the dword's address says; after the
 // window's last write has landed it writes the next pass's number, the pass
-// counter's low word, into the input register 0x040 (cycle 1533, while the
-// CSP runs: held, the register keeps the number of the pass after the last one
-// that ran, so that a frozen chip's state can be matched to the model's); and on
+// counter's low word, into the input register 0x040 (cycle 1533, in a pass
+// that ran its program: a pass that starts held leaves the register at the
+// number of the pass after the last one that ran, so that a frozen chip's
+// state can be matched to the model's); and on
 // the last cycles it reads the probe's pair out of DMEM for the firmware.
 // The instructions' cycles (0 to 1471) are the core's (csp_core.sv), and the
 // hold changes nothing here: a held chip still takes the firmware's committed
@@ -57,13 +58,18 @@ module csp_pass (
 );
 
     // ---- the cycle count -----------------------------------------------------
+    // program_ran is the hold as sampled at the pass start, as the core samples it: a pass
+    // that started running writes its counter at the end whatever the hold does meanwhile
+    logic program_ran;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             cycle        <= '0;
             pass_counter <= '0;
+            program_ran  <= 1'b0;
         end else if (pass_start) begin
             cycle        <= '0;
             pass_counter <= pass_counter + 1'b1;
+            program_ran  <= !held;
         end else if (cycle != csp_pkg::CYCLE_W'(csp_pkg::CYCLES_PER_PASS - 1)) begin
             cycle <= cycle + 1'b1;
         end
@@ -90,7 +96,7 @@ module csp_pass (
                                             && !(head_address >= csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE)
                                                  && head_address < csp_pkg::ADDRESS_W'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT));
     // The pass counter, for the next pass, into the input register the program reads it from
-    wire counter_write_now = cycle == csp_pkg::CYCLE_W'(csp_pkg::COUNTER_CYCLE) && !held;
+    wire counter_write_now = cycle == csp_pkg::CYCLE_W'(csp_pkg::COUNTER_CYCLE) && program_ran;
     wire [31:0] next_pass  = pass_counter + 32'd1;
 
     assign dmem_write_enable  = (head_valid_q && head_is_register) || counter_write_now;

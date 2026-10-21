@@ -11,6 +11,7 @@ file of csp-peek's lines. On the host, `csp match <program>.s -c <file> -f
 and diffs every register but the inputs: 0 differences is the acceptance.
 
 usage: chip_check.py SCRIPT OUT [--run SECONDS] [--khz KHZ] [--port /dev/ttyACM0]
+                     [--peek first:count ...]
 
 With --khz the system clock is set before the load (board_clock.py) and
 restored to the design's 73.728 MHz after the read-back, whatever happened.
@@ -61,14 +62,23 @@ def load(port, lines):
     return refused, before
 
 
-def read_registers(port, out, before):
-    """Every register pair through the probe, csp-peek's lines as printed,
-    after a line with the pass counter's register before the run (csp match
-    seeds the model's pass counter from the two)."""
+def read_registers(port, out, before, windows):
+    """The registers through the probe, csp-peek's lines as printed, after a
+    line with the pass counter's register before the run (csp match seeds the
+    model's pass counter from the two). All of them, or the windows asked for
+    (--peek), each (first, count): a micro-program's few registers in seconds."""
     with open(out, "w") as file:
         file.write("# before the run: %s\n" % before)
-        for first in range(0, REGISTERS, PEEK_WORDS):
-            file.write(command(port, "csp-peek 0x%03x %d" % (first, PEEK_WORDS), 0.25))
+        for first, count in windows or [(0, REGISTERS)]:
+            for at in range(first, first + count, PEEK_WORDS):
+                words = min(PEEK_WORDS, first + count - at)
+                file.write(command(port, "csp-peek 0x%03x %d" % (at, words), 0.25))
+
+
+def window(text):
+    """--peek first:count, both in any base, e.g. 0x200:32."""
+    first, count = text.split(":")
+    return int(first, 0), int(count, 0)
 
 
 def main():
@@ -78,6 +88,9 @@ def main():
     parser.add_argument("--run", type=float, default=0.5, help="seconds the chip runs before the freeze")
     parser.add_argument("--khz", type=int, default=0, help="the system clock during the run, in kHz")
     parser.add_argument("--port", default=PORT)
+    parser.add_argument("--peek", type=window, action="append",
+                        help="read only this window, first:count (repeatable); default every register. "
+                             "Keep 0x040:2 and RUN_COUNT's 0x3f0:16 in, for csp match")
     args = parser.parse_args()
     with open(args.script) as file:
         lines = [line.strip() for line in file if line.strip() and not line.startswith("#")]
@@ -91,7 +104,7 @@ def main():
             print("the console refused:", line, reply)
         time.sleep(args.run)
         print(command(port, "csp-freeze", 0.5).strip())
-        read_registers(port, args.out, before)
+        read_registers(port, args.out, before, args.peek)
         print("sent %d lines; %s holds the registers" % (len(lines), args.out))
     finally:
         if args.khz:
