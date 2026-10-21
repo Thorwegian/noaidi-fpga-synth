@@ -161,8 +161,11 @@ module top (
     logic [31:0]                 pass_counter;
     logic [csp_pkg::WIDE_W-1:0]  probe_pair;
     logic [csp_pkg::REGISTER_W-1:0] probe_register;   // the register the pair was read at
-    // the stream's dump source walks the register file: the probe takes every register in turn
+    // the stream's dump source walks the register file: the probe takes every register in turn,
+    // moving on only when the stream's word two samples on will carry it (not a header's)
     wire probe_sweep = data_stream_sync && stream_source_sync == synth_pkg::STREAM_SOURCE_DUMP;
+    logic stream_carries_in_two;
+    wire probe_step  = probe_sweep && stream_carries_in_two;
     logic                        sink_write_enable, sink_write_both;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
     logic [csp_pkg::WORD_W-1:0]  sink_write_data;
@@ -183,6 +186,7 @@ module top (
         .fifo_head_dword    (fifo_head_dword),
         .probe_address      (probe_address_sync),
         .probe_sweep        (probe_sweep),
+        .probe_step         (probe_step),
         .probe_pair         (probe_pair),
         .probe_register     (probe_register),
         .cycle              (cycle),
@@ -377,7 +381,8 @@ module top (
         .mix_left       (sample_left),
         .mix_right      (sample_right),
         .word           (stream_word),
-        .frames_sent    (stream_frames)
+        .frames_sent    (stream_frames),
+        .carries_in_two (stream_carries_in_two)
     );
 
     wire signed [23:0] spdif48_l = data_stream_sync ? {stream_word[31:16], 8'b0} : dec48_l;

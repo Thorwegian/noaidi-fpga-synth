@@ -76,7 +76,7 @@ module tb_csp_memories;
         .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .held(1'b1),
         .fetch_address(unused_fetch_address), .fetch_row(fetch_row), .rom_op(unused_rom_op), .control_word(control_word),
         .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_dword(head_dword),
-        .probe_address(probe_address), .probe_sweep(1'b0), .probe_pair(probe_pair), .probe_register(), .cycle(cycle), .pass_counter(passes),
+        .probe_address(probe_address), .probe_sweep(1'b0), .probe_step(1'b0), .probe_pair(probe_pair), .probe_register(), .cycle(cycle), .pass_counter(passes),
         .sink_write_enable(unused_sink_enable), .sink_write_both(), .sink_write_address(unused_sink_address), .sink_write_data(unused_sink_data)
     );
 

@@ -51,7 +51,11 @@ module spdif_stream (
     input  wire signed [23:0] mix_left, // the partial pipeline's mix, before the output low-pass
     input  wire signed [23:0] mix_right,
     output logic [31:0] word,           // the word for this sample
-    output logic [15:0] frames_sent     // frames completed since reset
+    output logic [15:0] frames_sent,    // frames completed since reset
+    // the dump's sweep steps only when the word two samples on will carry the probe's pair
+    // (the pair asked at a pass's end is captured in the next pass and streamed at the one
+    // after): a register asked under a header or CRC position would never be seen
+    output logic        carries_in_two
 );
 
     localparam int WORD_W = 32;
@@ -90,6 +94,9 @@ module spdif_stream (
             default:                          payload = lfsr;
         endcase
     end
+
+    wire [5:0] position_in_two = position + 6'd2;
+    assign carries_in_two = position_in_two != 6'd0 && position_in_two != 6'd1 && position_in_two != 6'd63;
 
     // The word for the position about to be issued.
     logic [31:0] issued;

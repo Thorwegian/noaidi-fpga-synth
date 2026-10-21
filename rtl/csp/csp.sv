@@ -38,7 +38,8 @@ module csp (
     // the probe: the firmware's register, or with probe_sweep every register in turn, one a pass
     // (the data stream's dump of the register file); the pair, and the register it was read at
     input  wire  [csp_pkg::REGISTER_W-1:0]   probe_address,
-    input  wire                              probe_sweep,
+    input  wire                              probe_sweep,        // the sweep's register is the probe's
+    input  wire                              probe_step,         // and it moves on at this pass's start
     output logic [csp_pkg::WIDE_W-1:0]       probe_pair,
     output logic [csp_pkg::REGISTER_W-1:0]   probe_register,
 
@@ -69,7 +70,7 @@ module csp (
     logic [csp_pkg::REGISTER_W-1:0] sweep_register;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n)                        sweep_register <= '0;
-        else if (pass_start && probe_sweep)  sweep_register <= sweep_register + 1'b1;
+        else if (pass_start && probe_step)   sweep_register <= sweep_register + 1'b1;
     end
     wire [csp_pkg::REGISTER_W-1:0] probe_register_asked = probe_sweep ? sweep_register : probe_address;
 

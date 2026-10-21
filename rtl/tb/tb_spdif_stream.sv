@@ -40,7 +40,7 @@ module tb_spdif_stream;
     spdif_stream dut (
         .clk(clk), .reset_n(rst_n), .sample_tick(sample_tick48), .source(source),
         .sample_counter(sample_counter), .probe_pair(36'h8_0001_2345), .probe_register(11'h123),
-        .sink_word(18'h2ABCD), .mix_left(24'sd0), .mix_right(24'sd0), .word(word), .frames_sent(frames_sent)
+        .sink_word(18'h2ABCD), .mix_left(24'sd0), .mix_right(24'sd0), .word(word), .frames_sent(frames_sent), .carries_in_two()
     );
 
     wire spdif_out;

@@ -202,7 +202,7 @@ read it, in `[31:14]`, and the mix's top 14 bits in `[13:0]`, the left
 channel on even positions and the right on odd ones: the S/PDIF output as
 the debug port; 4 is the register file — the probe walks it a register a
 pass, each word the register's index in `[31:21]` and its word in `[17:0]`,
-the whole file in 2048 samples (43 ms), held or running, which is how
+the whole file in a little over 2048 samples (the probe holds its register while the word two samples on would be a header's, so none is missed; 45 ms), held or running, which is how
 `chip_check.py --stream` reads a frozen chip back. A receiver that lost or repeated a sample fails
 the frame's CRC and re-synchronises on the next sync word; the sequence
 number says how many frames went. `DIAG_STREAM` (dword `0xF`) counts the

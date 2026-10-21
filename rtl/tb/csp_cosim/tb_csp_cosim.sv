@@ -76,7 +76,7 @@ module tb_csp_cosim (
         .fetch_address (fetch_address), .fetch_row (fetch_row), .rom_op (rom_op), .control_word (control_word),
         .fifo_pop (fifo_pop), .fifo_committed (fifo_committed), .fifo_head_valid (fifo_head_valid),
         .fifo_head_dword (fifo_head_dword),
-        .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_pair (probe_pair), .probe_register (),
+        .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_step (1'b0), .probe_pair (probe_pair), .probe_register (),
         .cycle (cycle), .pass_counter (pass_counter),
         .sink_write_enable (sink_write_enable), .sink_write_both (sink_write_both), .sink_write_address (sink_write_address), .sink_write_data (sink_write_data)
     );
