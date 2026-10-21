@@ -191,7 +191,7 @@ module top (
     lab u_lab (
         .clk             (sysclk),
         .reset_n         (rst_n),
-        .inject_fault    (1'b0),
+        .inject_fault    ('0),
         .snapshot_toggle (lab_snapshot),
         .index           (lab_index),
         .dword           (lab_dword)

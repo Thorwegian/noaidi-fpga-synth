@@ -29,7 +29,7 @@
 module lab (
     input  wire                                   clk,
     input  wire                                   reset_n,
-    input  wire                                   inject_fault,     // simulation only: device 1's result corrupted
+    input  wire [lab_pkg::DEVICES-1:0]            inject_fault,     // simulation only: a device's result corrupted
     input  wire                                   snapshot_toggle,  // from the bus, on the SPI clock
     input  wire [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] index,      // which dword the link reads
     output logic [synth_pkg::SPI_DWORD_W-1:0]     dword
@@ -52,14 +52,14 @@ module lab (
     // ---- the devices ----
     logic [lab_pkg::DEVICES-1:0] mismatch;
 
-    dut_lut_chain   #(.LEVELS (2))  u_lut_2     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault), .mismatch (mismatch[0]));
-    dut_lut_chain   #(.LEVELS (4))  u_lut_4     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[1]));
-    dut_lut_chain   #(.LEVELS (6))  u_lut_6     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[2]));
-    dut_lut_chain   #(.LEVELS (8))  u_lut_8     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[3]));
-    dut_lut_chain   #(.LEVELS (10)) u_lut_10    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[4]));
-    dut_carry_chain #(.BITS (18))   u_carry_18  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[5]));
-    dut_carry_chain #(.BITS (36))   u_carry_36  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[6]));
-    dut_carry_chain #(.BITS (54))   u_carry_54  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (1'b0), .mismatch (mismatch[7]));
+    dut_lut_chain   #(.LEVELS (2))  u_lut_2     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[0]), .mismatch (mismatch[0]));
+    dut_lut_chain   #(.LEVELS (4))  u_lut_4     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[1]), .mismatch (mismatch[1]));
+    dut_lut_chain   #(.LEVELS (6))  u_lut_6     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[2]), .mismatch (mismatch[2]));
+    dut_lut_chain   #(.LEVELS (8))  u_lut_8     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[3]), .mismatch (mismatch[3]));
+    dut_lut_chain   #(.LEVELS (10)) u_lut_10    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[4]), .mismatch (mismatch[4]));
+    dut_carry_chain #(.BITS (18))   u_carry_18  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[5]), .mismatch (mismatch[5]));
+    dut_carry_chain #(.BITS (36))   u_carry_36  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[6]), .mismatch (mismatch[6]));
+    dut_carry_chain #(.BITS (54))   u_carry_54  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[7]), .mismatch (mismatch[7]));
 
     // ---- the counters: cycles, and each device's mismatches, saturating ----
     logic [lab_pkg::COUNTER_W-1:0] cycles;
