@@ -169,10 +169,17 @@ hangs — measured, not inherited.
 |---|---|
 | 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
 | 1472 … 1481 | the pipeline drains |
-| 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each lands in DMEM two cycles after its pop, 1484 … 1531 |
-| 1530 … 1532 | the last writes land in the blocks |
-| 1533 | the pass counter, for the next pass, is written into input register 0x040 |
-| 1535 | the probe reads its pair (the R copy's port, unparked for the cycle) |
+| 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (1484 … 1531), the core's write registers take it that cycle, and DMEM samples it one cycle later, 1485 … 1532 |
+| 1533 | the pass counter, for the next pass, is asked for through the same registers (sampled at 1534) into input register 0x040 |
+| 1534 | the probe asks for its pair: the R copy's read registers take the probe's row |
+| 1535 | the probe's read pins are driven from those registers; its words are out in the cycle after, the next pass's first |
+
+Every DMEM pin, read and write, is a register of the core's: the rows with the
+parked ones already chosen, the banks' enables already decoded (a word write takes one
+bank, a wide one both, register 0 neither). The logic before a block's pin is the one
+path the tool does not time (rule 1); the first version of this core had a write mux
+and the address-zero decode between its registers and the pins, and its first board
+run failed at 102 MHz against a report of 161.
 
 The sink pages flip at the pass boundary; the partials always read one
 complete pass.

@@ -20,6 +20,8 @@ package csp_pkg;
     parameter int IO_BASE        = 'h040;         // read-only inputs, never written:
     parameter int IO_COUNT       = 32;            //   the rows an idle read port parks on
     parameter int PARK_REGISTER  = IO_BASE + IO_COUNT - 2;   // 0x05E, an aligned pair
+    parameter int BANK_INDEX_W   = REGISTER_W - 1;           // a row of an even or an odd bank
+    parameter logic [BANK_INDEX_W-1:0] PARK_INDEX = BANK_INDEX_W'(PARK_REGISTER >> 1);   // the row an idle read port sits on
 
     parameter int PROGRAM_ROWS   = 1472;          // instructions a pass
     parameter int IMEM_ROWS      = 2048;          // a slice's depth
@@ -53,7 +55,7 @@ package csp_pkg;
     parameter int WINDOW_END      = 1530;         //   pops in WINDOW_START … WINDOW_END-1
     parameter int WRITE_WINDOW    = WINDOW_END - WINDOW_START;
     parameter int COUNTER_CYCLE   = 1533;         // the pass counter's write for the next pass, after the window's last lands (1531)
-    parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 1;   // the probe reads its pair
+    parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 2;   // the probe asks for its pair: the read pins are driven in the cycle after, its words are out in the next
     parameter int CYCLE_W         = 11;
 
     // ---- the core's pipeline (docs/csp2_architecture.md section 1) --------------

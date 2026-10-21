@@ -60,25 +60,24 @@ module tb_csp_memories;
         .head_dword(head_dword), .read_pointer_gray(read_gray)
     );
 
-    wire                  dmem_we, dmem_re;
-    wire [REGISTER_W-1:0] dmem_wa, dmem_ra;
-    wire [WORD_W-1:0]     dmem_wd;
-    wire [WIDE_W-1:0]     dmem_pair, probe_pair;
+    wire [WIDE_W-1:0]     probe_pair;
     logic [REGISTER_W-1:0] probe_address = REGISTER_W'(PARK_REGISTER);
-    csp_dmem u_dmem (
-        .clk(clk), .write_enable(dmem_we), .write_address(dmem_wa), .write_wide(1'b0),
-        .write_data({{WORD_W{1'b0}}, dmem_wd}), .read_enable(dmem_re), .read_address(dmem_ra), .read_wide(1'b1), .read_pair(dmem_pair)
-    );
-
     logic pass_start = 0;
     wire [CYCLE_W-1:0] cycle;
     wire [31:0] passes;
-    csp_pass u_pass (
-        .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .cycle(cycle), .pass_counter(passes),
+    wire [PROGRAM_W-1:0] unused_fetch_address;
+    wire [ROM_ADDRESS_W-1:0] unused_rom_op;
+    wire                 unused_sink_enable;
+    wire [SINK_WORD_W-1:0] unused_sink_address;
+    wire [WORD_W-1:0]    unused_sink_data;
+    // the CSP held for good: the bench loads and fetches IMEM and the ROM itself; what runs here
+    // is the pass, the window, DMEM and the probe
+    csp u_csp (
+        .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .held(1'b1),
+        .fetch_address(unused_fetch_address), .fetch_row(fetch_row), .rom_op(unused_rom_op), .control_word(control_word),
         .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_dword(head_dword),
-        .dmem_write_enable(dmem_we), .dmem_write_address(dmem_wa), .dmem_write_word(dmem_wd),
-        .probe_address(probe_address), .dmem_read_enable(dmem_re), .dmem_read_address(dmem_ra),
-        .dmem_read_pair(dmem_pair), .probe_pair(probe_pair)
+        .probe_address(probe_address), .probe_pair(probe_pair), .cycle(cycle), .pass_counter(passes),
+        .sink_write_enable(unused_sink_enable), .sink_write_address(unused_sink_address), .sink_write_data(unused_sink_data)
     );
 
     // the 48 kHz tick: every 1536 clocks
@@ -90,7 +89,7 @@ module tb_csp_memories;
 
     int errors = 0;
 
-    // ---- the row rule, at every edge ----
+    // ---- the row rule, at every edge (DMEM counts its own violations in simulation) ----
     always @(posedge sclk) begin
         if (imem_load && !held && u_imem.port_b_row == imem_row) begin
             $display("FAIL row rule: IMEM loads row %0d while the fetch reads it", imem_row); errors++;
@@ -99,12 +98,6 @@ module tb_csp_memories;
             $display("FAIL row rule: the ROM loads row %0d while the decode reads it", rom_row); errors++;
         end
     end
-    always @(posedge clk) begin
-        if (dmem_we && u_dmem.read_index_even == u_dmem.write_index && (dmem_re || u_dmem.read_index_even != u_dmem.PARK_INDEX)) begin
-            $display("FAIL row rule: DMEM writes index %0d while a read sits on it", u_dmem.write_index); errors++;
-        end
-    end
-
     task automatic sclk_edge();
         #50 sclk = 1; #50 sclk = 0;
     endtask
@@ -207,6 +200,9 @@ module tb_csp_memories;
         if (probe_pair != '0) begin $display("FAIL input pair: %09h", probe_pair); errors++; end
         else $display("pass: the inputs stay zero");
 
+        if (u_csp.u_dmem_r.row_rule_violations != 0) begin
+            $display("FAIL row rule: DMEM counted %0d read-while-written rows", u_csp.u_dmem_r.row_rule_violations); errors++;
+        end
         $display("");
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);

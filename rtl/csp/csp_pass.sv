@@ -11,16 +11,18 @@
 // and writes each word into DMEM where the dword's address says; after the
 // window's last write has landed it writes the next pass's number, the pass
 // counter's low word, into the input register 0x040 (cycle 1533); and on
-// the last cycle it reads the probe's pair out of DMEM for the firmware.
+// the last cycles it reads the probe's pair out of DMEM for the firmware.
 // The instructions' cycles (0 to 1471) are the core's (csp_core.sv), and the
 // hold changes nothing here: a held chip still takes the firmware's writes,
 // so its image can be loaded and verified before anything runs.
 //
-// Timing against the row rule: a pop at cycle t puts its dword on the
-// FIFO's head two cycles later, so the 48 pops of 1482 to 1529 land in
-// DMEM at 1484 to 1531; the probe's read at 1535 follows the last write
-// by three clocks, and its pair is in the blocks' output registers at the
-// pass boundary. The probe's read port is parked between.
+// Timing against the row rule: a pop at cycle t puts its dword on the FIFO's
+// head two cycles later, the core's write registers take it that cycle and
+// drive DMEM's pins the cycle after, so the 48 pops of 1482 to 1529 are
+// sampled by DMEM at 1485 to 1532. The pass counter's write is asked at 1533
+// and sampled at 1534; the probe is asked at 1534, its read pins are
+// driven in 1535, and its words are out in the cycle after, which is the
+// pass's first: the read follows the last write by three clocks.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_pass (
@@ -42,10 +44,9 @@ module csp_pass (
     output logic [csp_pkg::REGISTER_W-1:0]  dmem_write_address,
     output logic [csp_pkg::WORD_W-1:0]      dmem_write_word,
 
-    // the probe: a pair read on the pass's last cycle
-    input  wire  [csp_pkg::REGISTER_W-1:0]  probe_address,      // an aligned pair
-    output logic                            dmem_read_enable,
-    output logic [csp_pkg::REGISTER_W-1:0]  dmem_read_address,
+    // the probe: a pair read at the pass's end, through DMEM's R copy. The request is a
+    // cycle ahead of the read pins (which come from a register), the words two cycles on.
+    output logic                            probe_request,
     input  wire  [csp_pkg::WIDE_W-1:0]      dmem_read_pair,
     output logic [csp_pkg::WIDE_W-1:0]      probe_pair          // as of the last pass
 );
@@ -84,18 +85,18 @@ module csp_pass (
                                                   : fifo_head_dword[csp_pkg::DWORD_WORD_LOW +: csp_pkg::WORD_W];
 
     // ---- the probe -----------------------------------------------------------
-    wire probe_now = cycle == csp_pkg::CYCLE_W'(csp_pkg::PROBE_CYCLE);
-    assign dmem_read_enable  = probe_now;
-    assign dmem_read_address = {probe_address[csp_pkg::REGISTER_W-1:1], 1'b0};
+    assign probe_request = cycle == csp_pkg::CYCLE_W'(csp_pkg::PROBE_CYCLE);
 
-    logic probe_read_q;
+    logic probe_pins_q, probe_words_q;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            probe_read_q <= 1'b0;
-            probe_pair   <= '0;
+            probe_pins_q  <= 1'b0;
+            probe_words_q <= 1'b0;
+            probe_pair    <= '0;
         end else begin
-            probe_read_q <= probe_now;
-            if (probe_read_q) probe_pair <= dmem_read_pair;   // the pair is out the clock after
+            probe_pins_q  <= probe_request;      // the read pins are driven
+            probe_words_q <= probe_pins_q;       // the words are in the blocks' output registers
+            if (probe_words_q) probe_pair <= dmem_read_pair;
         end
     end
 

@@ -11,10 +11,10 @@
 // and csp_pass for the cycle count, the firmware's write window and the
 // probe. The one write port and the one probe read are shared in time, not
 // in space: the core's writes end at cycle 1480 (the last row's A is at most
-// 1473, its W seven later) and the window's begin at 1484, so an OR of the
-// two, with the core's address winning, is the whole arbitration; likewise
-// the probe's read at the pass's last cycle uses the R copy while the core is
-// idle.
+// 1473, its W seven later) and the window's begin at 1485, and both go
+// through the core's own write registers, which take the pass's write when it
+// has one; likewise the probe asks for the R copy's read registers at the
+// pass's end, while the core is idle. DMEM's pins are all registers.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp (
@@ -48,48 +48,52 @@ module csp (
     output logic [csp_pkg::WORD_W-1:0]       sink_write_data
 );
 
-    // the core's ports
-    logic                            core_read_r_enable, core_read_r_wide, core_read_x_enable, core_read_y_enable, core_read_y_wide;
-    logic [csp_pkg::REGISTER_W-1:0]  core_read_r_address, core_read_x_address, core_read_y_address;
-    logic [csp_pkg::WIDE_W-1:0]      read_r_pair, read_x_pair, read_y_pair;
-    logic                            core_write_enable, core_write_wide;
-    logic [csp_pkg::REGISTER_W-1:0]  core_write_address;
-    logic [csp_pkg::WIDE_W-1:0]      core_write_data;
+    // the core's ports: DMEM's pins are the core's registers
+    logic [csp_pkg::BANK_INDEX_W-1:0] read_r_even_index, read_r_odd_index, read_x_even_index, read_x_odd_index,
+                                      read_y_even_index, read_y_odd_index;
+    logic [csp_pkg::WIDE_W-1:0]       read_r_pair, read_x_pair, read_y_pair;
+    logic                             write_even_enable, write_odd_enable;
+    logic [csp_pkg::BANK_INDEX_W-1:0] write_index;
+    logic [csp_pkg::WORD_W-1:0]       write_even_data, write_odd_data;
+
+    // the pass: the window's writes, the counter's, and the probe's request
+    logic                             pass_write_enable, probe_request;
+    logic [csp_pkg::REGISTER_W-1:0]   pass_write_address;
+    logic [csp_pkg::WORD_W-1:0]       pass_write_word;
 
     csp_core u_core (
-        .clk                (clk),
-        .reset_n            (reset_n),
-        .pass_start         (pass_start),
-        .held               (held),
-        .cycle              (cycle),
-        .fetch_address      (fetch_address),
-        .fetch_row          (fetch_row),
-        .rom_op             (rom_op),
-        .control_word       (control_word),
-        .read_r_enable      (core_read_r_enable),
-        .read_r_wide        (core_read_r_wide),
-        .read_r_address     (core_read_r_address),
-        .read_r_pair        (read_r_pair),
-        .read_x_enable      (core_read_x_enable),
-        .read_x_address     (core_read_x_address),
-        .read_x_pair        (read_x_pair),
-        .read_y_enable      (core_read_y_enable),
-        .read_y_wide        (core_read_y_wide),
-        .read_y_address     (core_read_y_address),
-        .read_y_pair        (read_y_pair),
-        .write_enable       (core_write_enable),
-        .write_wide         (core_write_wide),
-        .write_address      (core_write_address),
-        .write_data         (core_write_data),
-        .sink_write_enable  (sink_write_enable),
-        .sink_write_address (sink_write_address),
-        .sink_write_data    (sink_write_data)
+        .clk                 (clk),
+        .reset_n             (reset_n),
+        .pass_start          (pass_start),
+        .held                (held),
+        .cycle               (cycle),
+        .fetch_address       (fetch_address),
+        .fetch_row           (fetch_row),
+        .rom_op              (rom_op),
+        .control_word        (control_word),
+        .read_r_even_index   (read_r_even_index),
+        .read_r_odd_index    (read_r_odd_index),
+        .read_r_pair         (read_r_pair),
+        .read_x_even_index   (read_x_even_index),
+        .read_x_odd_index    (read_x_odd_index),
+        .read_x_pair         (read_x_pair),
+        .read_y_even_index   (read_y_even_index),
+        .read_y_odd_index    (read_y_odd_index),
+        .read_y_pair         (read_y_pair),
+        .probe_request       (probe_request),
+        .probe_index         (probe_address[csp_pkg::REGISTER_W-1:1]),
+        .write_even_enable   (write_even_enable),
+        .write_odd_enable    (write_odd_enable),
+        .write_index         (write_index),
+        .write_even_data     (write_even_data),
+        .write_odd_data      (write_odd_data),
+        .extra_write_enable  (pass_write_enable),
+        .extra_write_address (pass_write_address),
+        .extra_write_word    (pass_write_word),
+        .sink_write_enable   (sink_write_enable),
+        .sink_write_address  (sink_write_address),
+        .sink_write_data     (sink_write_data)
     );
-
-    // the pass: the window's writes and the counter's, and the probe's read
-    logic                            pass_write_enable, probe_read_enable;
-    logic [csp_pkg::REGISTER_W-1:0]  pass_write_address, probe_read_address;
-    logic [csp_pkg::WORD_W-1:0]      pass_write_word;
 
     csp_pass u_pass (
         .clk                (clk),
@@ -104,52 +108,29 @@ module csp (
         .dmem_write_enable  (pass_write_enable),
         .dmem_write_address (pass_write_address),
         .dmem_write_word    (pass_write_word),
-        .probe_address      (probe_address),
-        .dmem_read_enable   (probe_read_enable),
-        .dmem_read_address  (probe_read_address),
+        .probe_request      (probe_request),
         .dmem_read_pair     (read_r_pair),
         .probe_pair         (probe_pair)
     );
 
-    // the one write port, to every copy
-    wire                            write_enable  = core_write_enable | pass_write_enable;
-    wire                            write_wide    = core_write_enable & core_write_wide;
-    wire [csp_pkg::REGISTER_W-1:0]  write_address = core_write_enable ? core_write_address : pass_write_address;
-    wire [csp_pkg::WIDE_W-1:0]      write_data    = core_write_enable ? core_write_data : {{csp_pkg::WORD_W{1'b0}}, pass_write_word};
-
-    // the R copy is the probe's while the core is idle
+    // DMEM's three copies: every one takes every write; the R copy is the probe's while the core is idle
     csp_dmem u_dmem_r (
-        .clk           (clk),
-        .write_enable  (write_enable),
-        .write_address (write_address),
-        .write_wide    (write_wide),
-        .write_data    (write_data),
-        .read_enable   (core_read_r_enable | probe_read_enable),
-        .read_address  (probe_read_enable ? probe_read_address : core_read_r_address),
-        .read_wide     (core_read_r_wide | probe_read_enable),
-        .read_pair     (read_r_pair)
+        .clk (clk),
+        .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
+        .write_even_data (write_even_data), .write_odd_data (write_odd_data),
+        .read_even_index (read_r_even_index), .read_odd_index (read_r_odd_index), .read_pair (read_r_pair)
     );
     csp_dmem u_dmem_x (
-        .clk           (clk),
-        .write_enable  (write_enable),
-        .write_address (write_address),
-        .write_wide    (write_wide),
-        .write_data    (write_data),
-        .read_enable   (core_read_x_enable),
-        .read_address  (core_read_x_address),
-        .read_wide     (1'b0),
-        .read_pair     (read_x_pair)
+        .clk (clk),
+        .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
+        .write_even_data (write_even_data), .write_odd_data (write_odd_data),
+        .read_even_index (read_x_even_index), .read_odd_index (read_x_odd_index), .read_pair (read_x_pair)
     );
     csp_dmem u_dmem_y (
-        .clk           (clk),
-        .write_enable  (write_enable),
-        .write_address (write_address),
-        .write_wide    (write_wide),
-        .write_data    (write_data),
-        .read_enable   (core_read_y_enable),
-        .read_address  (core_read_y_address),
-        .read_wide     (core_read_y_wide),
-        .read_pair     (read_y_pair)
+        .clk (clk),
+        .write_even_enable (write_even_enable), .write_odd_enable (write_odd_enable), .write_index (write_index),
+        .write_even_data (write_even_data), .write_odd_data (write_odd_data),
+        .read_even_index (read_y_even_index), .read_odd_index (read_y_odd_index), .read_pair (read_y_pair)
     );
 
 endmodule

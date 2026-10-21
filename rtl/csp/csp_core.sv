@@ -56,24 +56,35 @@ module csp_core (
     output logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op,
     input  wire  [csp_pkg::ROM_W-1:0]        control_word,
 
-    // R1 and R2: DMEM's three read copies: R (the result, as the A operand), X and Y
-    output logic                             read_r_enable,
-    output logic                             read_r_wide,
-    output logic [csp_pkg::REGISTER_W-1:0]   read_r_address,
+    // R1 and R2: DMEM's three read copies — R (the result, as the A operand), X and Y. The pins are
+    // registers: each bank's row, the parked row when the bank is not read.
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_odd_index,
     input  wire  [csp_pkg::WIDE_W-1:0]       read_r_pair,
-    output logic                             read_x_enable,
-    output logic [csp_pkg::REGISTER_W-1:0]   read_x_address,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_odd_index,
     input  wire  [csp_pkg::WIDE_W-1:0]       read_x_pair,
-    output logic                             read_y_enable,
-    output logic                             read_y_wide,
-    output logic [csp_pkg::REGISTER_W-1:0]   read_y_address,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_odd_index,
     input  wire  [csp_pkg::WIDE_W-1:0]       read_y_pair,
 
-    // W: DMEM's write port, and the sink area's
-    output logic                             write_enable,
-    output logic                             write_wide,
-    output logic [csp_pkg::REGISTER_W-1:0]   write_address,
-    output logic [csp_pkg::WIDE_W-1:0]       write_data,
+    // the probe's read, through the R copy while the core is idle: asked a cycle ahead of the pins
+    input  wire                              probe_request,
+    input  wire  [csp_pkg::BANK_INDEX_W-1:0] probe_index,
+
+    // W: DMEM's write pins, registers too and decoded: a bank's enable, one row, a word for each bank
+    output logic                             write_even_enable,
+    output logic                             write_odd_enable,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] write_index,
+    output logic [csp_pkg::WORD_W-1:0]       write_even_data,
+    output logic [csp_pkg::WORD_W-1:0]       write_odd_data,
+    // the pass's own writes (the firmware's window, the pass counter), taken at the same registers
+    // when the core is idle
+    input  wire                              extra_write_enable,
+    input  wire  [csp_pkg::REGISTER_W-1:0]   extra_write_address,
+    input  wire  [csp_pkg::WORD_W-1:0]       extra_write_word,
+
+    // the sink area
     output logic                             sink_write_enable,
     output logic [csp_pkg::SINK_WORD_W-1:0]  sink_write_address,
     output logic [csp_pkg::WORD_W-1:0]       sink_write_data
@@ -271,18 +282,16 @@ module csp_core (
     logic               r1_r_wide, r1_y_wide, r1_x_immediate, r1_y_immediate, r1_r_none;
     logic [11:0]        r1_write_address;
 
+    // a bank's row for the read pins: the row of the address, or the parked row when the bank is not read
+    function automatic logic [csp_pkg::BANK_INDEX_W-1:0] bank_row(input logic read, input logic [AW-1:0] address);
+        bank_row = read ? address[AW-1:1] : csp_pkg::PARK_INDEX;
+    endfunction
+
+    logic r1_r_odd, r1_x_odd, r1_y_odd;
+
     always_ff @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
-            r1_live       <= 1'b0;
-            read_r_enable <= 1'b0;
-            read_x_enable <= 1'b0;
-            read_y_enable <= 1'b0;
-        end else begin
-            r1_live       <= a_live && !(skip_taken && skip_count >= 11'd2);
-            read_r_enable <= a_read_r;
-            read_x_enable <= a_read_x;
-            read_y_enable <= a_read_y;
-        end
+        if (!reset_n) r1_live <= 1'b0;
+        else          r1_live <= a_live && !(skip_taken && skip_count >= 11'd2);
     end
 
     always_ff @(posedge clk) begin
@@ -295,11 +304,16 @@ module csp_core (
         r1_y_immediate   <= a_y_immediate;
         r1_r_none        <= a_r_none;
         r1_write_address <= a_r_address;
-        read_r_address   <= a_r_address[AW-1:0];
-        read_x_address   <= a_x_address[AW-1:0];
-        read_y_address   <= a_y_address[AW-1:0];
-        read_r_wide      <= a_r_wide;
-        read_y_wide      <= a_wide_y;
+        r1_r_odd         <= a_r_address[0];
+        r1_x_odd         <= a_x_address[0];
+        r1_y_odd         <= a_y_address[0];
+        // the pins: a word read takes the bank of its address and parks the other; a wide read takes both
+        read_r_even_index <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide || !a_r_address[0]), a_r_address[AW-1:0]);
+        read_r_odd_index  <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide ||  a_r_address[0]), a_r_address[AW-1:0]);
+        read_x_even_index <= bank_row(a_read_x && !a_x_address[0], a_x_address[AW-1:0]);
+        read_x_odd_index  <= bank_row(a_read_x &&  a_x_address[0], a_x_address[AW-1:0]);
+        read_y_even_index <= bank_row(a_read_y && (a_wide_y || !a_y_address[0]), a_y_address[AW-1:0]);
+        read_y_odd_index  <= bank_row(a_read_y && (a_wide_y ||  a_y_address[0]), a_y_address[AW-1:0]);
     end
 
     // ---- R2: the words; a SKIP decides ---------------------------------------------------------
@@ -326,9 +340,9 @@ module csp_core (
         r2_y_immediate   <= r1_y_immediate;
         r2_r_none        <= r1_r_none;
         r2_write_address <= r1_write_address;
-        r2_r_odd         <= read_r_address[0];
-        r2_x_odd         <= read_x_address[0];
-        r2_y_odd         <= read_y_address[0];
+        r2_r_odd         <= r1_r_odd;
+        r2_x_odd         <= r1_x_odd;
+        r2_y_odd         <= r1_y_odd;
     end
 
     assign skip_taken = r2_live && r2_control[17:15] == csp_pkg::UNIT_SKIP
@@ -654,13 +668,26 @@ module csp_core (
     wire e4_is_sink     = e4_write_address[11:10] == 2'b10;
     wire e4_writes_dest = e4_live && !e4_r_none && (e4_writes == csp_pkg::WRITES_WORD || e4_writes == csp_pkg::WRITES_PAIR);
 
+    // DMEM's write pins, decoded here so that they come from registers: a bank's enable (a word write
+    // takes the bank of its address, a wide one both, register 0 neither), one row, a word for each bank
+    wire        e4_register_write = e4_writes_dest && e4_is_register && !e4_is_input;
+    wire [AW-1:0] e4_address      = e4_write_address[AW-1:0];
+    wire        e4_discard        = e4_address == '0;
+    wire        core_even_enable  = e4_register_write && !e4_discard && (e4_r_wide || !e4_address[0]);
+    wire        core_odd_enable   = e4_register_write && !e4_discard && (e4_r_wide ||  e4_address[0]);
+    // the pass's writes arrive while the core is idle: one word, never wide
+    wire        extra_discard     = extra_write_address == '0;
+    wire        extra_even_enable = extra_write_enable && !extra_discard && !extra_write_address[0];
+    wire        extra_odd_enable  = extra_write_enable && !extra_discard &&  extra_write_address[0];
+
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            accumulator    <= '0;
-            flag_negative  <= 1'b0;
-            flag_zero      <= 1'b0;
-            flag_overflow  <= 1'b0;
-            write_enable      <= 1'b0;
+            accumulator       <= '0;
+            flag_negative     <= 1'b0;
+            flag_zero         <= 1'b0;
+            flag_overflow     <= 1'b0;
+            write_even_enable <= 1'b0;
+            write_odd_enable  <= 1'b0;
             sink_write_enable <= 1'b0;
         end else begin
             if (e4_live && e4_cond_kind == csp_pkg::CONDITION_KIND_FLAGS) begin
@@ -669,16 +696,17 @@ module csp_core (
                 flag_overflow <= result_overflow;
             end
             if (e4_live && e4_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
-            write_enable      <= e4_writes_dest && e4_is_register && !e4_is_input;
+            write_even_enable <= extra_write_enable ? extra_even_enable : core_even_enable;
+            write_odd_enable  <= extra_write_enable ? extra_odd_enable  : core_odd_enable;
             sink_write_enable <= e4_writes_dest && e4_is_sink && e4_writes == csp_pkg::WRITES_WORD;
         end
     end
 
     // ---- W: the write pins ---------------------------------------------------------------------------------
     always_ff @(posedge clk) begin
-        write_wide         <= e4_r_wide;
-        write_address      <= e4_write_address[AW-1:0];
-        write_data         <= result;
+        write_index        <= extra_write_enable ? extra_write_address[AW-1:1] : e4_address[AW-1:1];
+        write_even_data    <= extra_write_enable ? extra_write_word : (e4_r_wide ? result[35:18] : result[17:0]);
+        write_odd_data     <= extra_write_enable ? extra_write_word : result[17:0];
         sink_write_address <= e4_write_address[csp_pkg::SINK_WORD_W-1:0];
         sink_write_data    <= result[17:0];
     end

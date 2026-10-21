@@ -156,8 +156,10 @@ module tb_csp_cosim (
             $display("rtl pc %0d cycle %0d i %0d j %0d live %0d", int'(u_csp.u_core.a_pc),
                      int'(cycle) - csp_pkg::FIRST_ISSUE_CYCLE, int'(u_csp.u_core.index_i), int'(u_csp.u_core.index_j),
                      u_csp.u_core.a_live);
-        if (trace_rows && u_csp.u_core.write_enable)
-            $display("rtl write %0d %0d", int'(u_csp.u_core.write_address), $signed(u_csp.u_core.write_data[17:0]));
+        if (trace_rows && u_csp.u_core.write_even_enable)
+            $display("rtl write even row %0d %0d", int'(u_csp.u_core.write_index), $signed(u_csp.u_core.write_even_data));
+        if (trace_rows && u_csp.u_core.write_odd_enable)
+            $display("rtl write odd row %0d %0d", int'(u_csp.u_core.write_index), $signed(u_csp.u_core.write_odd_data));
     end
 
 endmodule
