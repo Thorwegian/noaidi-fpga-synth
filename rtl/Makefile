@@ -88,9 +88,11 @@ dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 #
 # WIDELUT: the first revision synthesised with -nowidelut, because its
 # netlists hung nextpnr's legaliser on the MUX2_LUT5..8 clusters. This
-# revision starts without the flag and measures (docs/csp2_architecture.md
-# section 4): `make WIDELUT=-nowidelut` turns it on for a comparison.
-WIDELUT ?=
+# revision started without the flag and measured (docs/csp2_architecture.md
+# section 4): the CSP alone placed either way, and with the partial pipeline
+# back (776 wide-LUT cells) the legaliser gave up at 72 % of the flip-flops,
+# so the flag is the default again; `make WIDELUT=` builds without it.
+WIDELUT ?= -nowidelut
 # The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
 # `make pack.fs LAB_BUILD=1` builds the chains beside the CSP, `LAB_BUILD=1 LAB_BLOCKS=1` all
 # fifteen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.

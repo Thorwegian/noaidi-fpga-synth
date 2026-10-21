@@ -204,6 +204,16 @@ module top (
     logic [SINK_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
     assign sink_read_address[SINK_DEBUG] = probe_address_sync[csp_pkg::SINK_WORD_W-1:0];
 
+    // the partial pipeline's pointers from the bus (sclk domain, an entry at a time), its mix out
+    logic        pointer_write_enable;
+    logic [7:0]  pointer_write_index;
+    logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
+    logic signed [23:0] sample_left, sample_right;   // Q0.24
+    logic [18:0] master_gain_q;
+
+    // The audio path and the lab (#241) do not fit the chip together: the lab's build
+    // (`make pack.fs LAB_BUILD=1`) has the CSP beside the lab and no partials
+`ifndef LAB
     csp_sink_area #(.READ_PORTS (SINK_PORTS)) u_sink_area (
         .clk           (sysclk),
         .reset_n       (rst_n),
@@ -216,15 +226,9 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // The 256-partial pipeline: its pointers from the bus (sclk domain,
-    // an entry at a time), its words from the sink area, its mix out
+    // The 256-partial pipeline: its pointers from the bus, its words
+    // from the sink area, its mix out
     //----------------------------------------------------------------
-    logic        pointer_write_enable;
-    logic [7:0]  pointer_write_index;
-    logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
-    logic signed [23:0] sample_left, sample_right;   // Q0.24
-    logic [18:0] master_gain_q;
-
     partial_pipeline u_partial_pipeline (
         .clk                  (sysclk),
         .rst_n                (rst_n),
@@ -241,6 +245,13 @@ module top (
         .mix_right            (sample_right),
         .master_gain_q        (master_gain_q)
     );
+`else
+    assign sink_read_address[synth_pkg::SINK_READ_PORTS-1:0] = '0;
+    assign sink_read_data = '0;
+    assign sample_left    = '0;
+    assign sample_right   = '0;
+    assign master_gain_q  = '0;
+`endif
 
     // the lab (#241): devices under test with their mismatch counters, read through the link —
     // a build of its own (`make pack.fs LAB_BUILD=1`): its flip-flops do not fit beside the audio path
