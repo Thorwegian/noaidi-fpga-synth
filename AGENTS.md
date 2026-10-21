@@ -1,14 +1,12 @@
 # Rules
 
-- Agents have GitHub accounts and access tokens. They *always* poll their GitHub inboxes for new notifications every 5 minutes, in an infinite loop. GitHub *is* the chat.
+- Agents have GitHub accounts and access tokens. Claude Code *always* polls its GitHub inbox for new notifications every 5 minutes, in an infinite loop. GitHub *is* the chat for Claude Code.
 
 - Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Questions are directed to GitHub - not the chat.
 
 - Time-consuming tasks (builds, synthesis, simulations, PNR, recordings, etc.) are performed with `run_in_background=true`.
 
 - GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child). Agents *must* actively use it.
-
-- Agents provide unique hashes to reply to when asking for input from the user.
 
 - Agents write elegant and highly structured code at a senior developer level.
 
@@ -30,11 +28,11 @@
 
 - Variable names *must* be descriptive and use industry standard textbook terminology.
 
-- All source files (except libraries that we use) *must* carry the following copyright notice:
-
 - Raw values are raw values. There is no such unit as "LSB".
 
 - Before cloning SystemVerilog arrays for parallel access or implementing CDCs for memory access, remember that B-SRAM banks are dual-ported and dual-clocked.
+
+- For audio shared with the human for review, agents *must* encode as M4A at 192 kbps (AAC). Lossless audio (WAV, FLAC) is reserved for production and analysis, never for human feedback.
 
 - All source files shall carry the following copyright notice:
 
