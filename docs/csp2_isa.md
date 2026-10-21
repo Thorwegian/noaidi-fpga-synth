@@ -157,8 +157,8 @@ image is the assembler's, loaded with the program.
 *count* times, stepping `i` or `j` by *stride*; they nest one level,
 each with its own counter. The three numbers are in the word: the body's
 end in `imm`, the count in `x`'s immediate mode, the stride in `y`'s.
-A repeat costs two cycles (the two rows behind the last body row are in
-flight and are discarded). **A loop whose count is 0 is not assembled**:
+A repeat costs four cycles (the four rows behind the last body row are in
+flight, in the registered front end, and are discarded). **A loop whose count is 0 is not assembled**:
 neither its row nor its body is in the image, since the chip cannot skip
 a body for free and the count is a number the generator knows.
 
