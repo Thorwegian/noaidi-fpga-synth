@@ -231,6 +231,7 @@ void run_directed(VerilatedContext &context) {
         {"loop", program_file("checks/loop.s"), 24},
         {"vloop", program_file("checks/vloop.s"), 24},
         {"vector_flags", program_file("checks/vector_flags.s"), 24},
+        {"vector_back_to_back", program_file("checks/vector_back_to_back.s"), 24},
         {"pair", program_file("checks/pair.s"), 24},
         {"arithmetic", std::string(registers) + R"(
             MAC     A_, 0, B_, C_

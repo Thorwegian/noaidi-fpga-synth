@@ -266,6 +266,9 @@ void setup(Writes &writes) {
     put(writes, channel_register(cp::lfo1), cp::lfos);
     put(writes, channel_register(cp::lfo2), cp::lfos + cp::lfos_a_half * cp::lfo_size);
     put(writes, channel_register(cp::sink_block), cp::channel_sinks);
+    // the bend at its centre: a register the program reads is in the image,
+    // whatever the memory held before, and the boot's verify covers it
+    put(writes, channel_register(cp::bend), 0);
 
     for (int voice = 0; voice < voice_count; ++voice) {
         put(writes, voice_register(voice, cp::channel), channel_base);
