@@ -302,7 +302,11 @@ and the DSP. Issue #230 carries the patch work (fork
   run, freezes it and reads every register back (`csp-peek`); `csp match
   <program>.s -c <dump> -f <seed>` runs the model for the passes the dump
   counts and diffs every register but the inputs. 0 differences on every
-  program in `tools/csp/programs/checks/` is the acceptance. It starts
+  program in `tools/csp/programs/checks/` is the acceptance, and the control program
+  itself goes the same way (`tools/csp/control_check.py script|match`: the
+  pointer registers set from the program's layout, one sine fewer so the
+  pass count fits; it found the vector loop's copies read one pass stale
+  at one register of 2016). It starts
   from a state it chose, so a wrong state is seen too (its predecessor,
   step-and-replay, started from the chip's and could not).
 - **Bisect by words** when a program fails: `csp-hold` (clears the
