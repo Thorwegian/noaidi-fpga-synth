@@ -44,8 +44,8 @@ constexpr int vector_round   = 16;    // elements in flight in a vector loop
 // the assembler lays after it as three wait rows (the chip has no stall); a loop's repeat and a skip's jump
 // cost jump_penalty cycles over moving on to the next word.
 
-constexpr int result_latency = 9;
-constexpr int state_latency  = 7;
+constexpr int result_latency = 10;
+constexpr int state_latency  = 8;
 constexpr int index_latency  = 4;
 constexpr int jump_penalty   = 4;
 

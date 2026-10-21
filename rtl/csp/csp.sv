@@ -10,8 +10,8 @@
 // Y, each taking every write, so an instruction reads three words in a cycle),
 // and csp_pass for the cycle count, the firmware's write window and the
 // probe. The one write port and the one probe read are shared in time, not
-// in space: the core's writes end at cycle 1484 (the last row's A is at most
-// 1475, its W nine later) and the window's begin at 1485, and both go
+// in space: the core's writes end at cycle 1485 (the last row's A is at most
+// 1475, its W ten later) and the window's begin at 1485, and both go
 // through the core's own write registers, which take the pass's write when it
 // has one; likewise the probe asks for the R copy's read registers at the
 // pass's end, while the core is idle. DMEM's pins are all registers.

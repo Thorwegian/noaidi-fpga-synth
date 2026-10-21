@@ -68,8 +68,8 @@ package csp_pkg;
     // into the multiply-add's operand registers, E2 the block's own input registers, E3 its
     // compute, E4 the product out, E5 reduced and saturated, W the write pins.
     parameter int FIRST_ISSUE_CYCLE = 4;       // the address stage of the program's row 0
-    parameter int RESULT_LATENCY    = 9;       // A to the cycle a reader's A may follow a W
-    parameter int STATE_LATENCY     = 7;       // the flags and the accumulator, for a SKIP (a SEL and an A operand take 5)
+    parameter int RESULT_LATENCY    = 10;       // A to the cycle a reader's A may follow a W
+    parameter int STATE_LATENCY     = 8;       // the flags and the accumulator, for a SKIP (a SEL and an A operand take 5)
     parameter int INDEX_LATENCY     = 4;       // an IDX's index, in the register for the A stage
     parameter int JUMP_PENALTY      = 4;       // the rows in flight behind a loop's last row
 

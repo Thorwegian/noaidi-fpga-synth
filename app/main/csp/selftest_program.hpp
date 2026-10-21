@@ -21,12 +21,13 @@
 namespace csp::selftest {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 119;
+inline constexpr int cycles = 131;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 119> rows{{
+inline constexpr std::array<Row, 131> rows{{
     {0x010062040ull, 0xc00000001ull},
     {0x010064040ull, 0xc00000001ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -38,6 +39,7 @@ inline constexpr std::array<Row, 119> rows{{
     {0x020064000ull, 0xc00000003ull},
     {0x030063c00ull, 0x000004000ull},
     {0x03006bc00ull, 0x000000800ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -57,8 +59,10 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x030066064ull, 0x065000000ull},
     {0x060068c00ull, 0x000030000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -76,6 +80,7 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x03006c06aull, 0xc00030000ull},
     {0x070000c00ull, 0x000030000ull},
     {0x000000000ull, 0x000000000ull},
@@ -84,8 +89,10 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x08106e063ull, 0xc00000800ull},
     {0x030110c00ull, 0x000004000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -105,6 +112,7 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x0a0102108ull, 0x000000000ull},
     {0x03010a064ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -115,7 +123,9 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x02010a000ull, 0xc0003fffdull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -134,7 +144,9 @@ inline constexpr std::array<Row, 119> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x02010c000ull, 0xc0003fffdull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},

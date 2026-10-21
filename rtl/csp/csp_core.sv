@@ -29,12 +29,12 @@
 //              result, the shifter's count
 //   E2  +5     the multiply-add's own input registers sample those operand registers
 //              (nothing between them: the logic before a block's pin is untimed)
-//   E3  +6     the multiply-add computes (the block's own output register holds it);
-//              the shifter's coarse stage
-//   E4  +7     the product is out of the block, captured; the shifter's fine stage
-//   E5  +8     the sum reduced to its destination, saturated or wrapped, the flags
-//              and the accumulator written
-//   W   +9     the write pins of DMEM are driven from registers; the write lands
+//   E3  +6     the multiply-add multiplies, into the block's pipeline register
+//   E3b +7     the block adds, into its output register; the payload waits
+//   E4  +8     the product is out of the block, captured; the shifter's coarse stage
+//   E5  +9     the sum reduced to its destination, saturated or wrapped, the flags
+//              and the accumulator written; the shifter's fine stage
+//   W   +10    the write pins of DMEM are driven from registers; the write lands
 //              at the edge after, so an instruction issued RESULT_LATENCY cycles
 //              later reads it
 //
@@ -629,8 +629,35 @@ module csp_core (
         e3_shift_magnitude <= e2_shift_magnitude;
     end
 
-    wire signed [89:0] e3_shift_extended = {{36{e3_shift_value[53]}}, e3_shift_value};
-    wire        [5:0]  e3_coarse = {e3_shift_magnitude[5:3], 3'b000};
+    // ---- E3b: the block's pipeline register holds the product; the payload waits -----------------------
+    logic               e3b_live;
+    logic [17:0]        e3b_control;
+    logic               e3b_r_none;
+    logic [11:0]        e3b_write_address;
+    logic [17:0]        e3b_logic_result;
+    logic [2:0]         e3b_ma_flags;
+    logic signed [53:0] e3b_shift_value;
+    logic               e3b_shift_left;
+    logic [5:0]         e3b_shift_magnitude;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e3b_live <= 1'b0;
+        else          e3b_live <= e3_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e3b_control         <= e3_control;
+        e3b_r_none          <= e3_r_none;
+        e3b_write_address   <= e3_write_address;
+        e3b_logic_result    <= e3_logic_result;
+        e3b_ma_flags        <= e3_ma_flags;
+        e3b_shift_value     <= e3_shift_value;
+        e3b_shift_left      <= e3_shift_left;
+        e3b_shift_magnitude <= e3_shift_magnitude;
+    end
+
+    wire signed [89:0] e3b_shift_extended = {{36{e3b_shift_value[53]}}, e3b_shift_value};
+    wire        [5:0]  e3b_coarse = {e3b_shift_magnitude[5:3], 3'b000};
 
     // ---- E4: the product is out of the block, captured; the shifter's fine stage ----------------------------------
     logic               e4_live;
@@ -645,18 +672,18 @@ module csp_core (
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) e4_live <= 1'b0;
-        else          e4_live <= e3_live;
+        else          e4_live <= e3b_live;
     end
 
     always_ff @(posedge clk) begin
-        e4_control       <= e3_control;
-        e4_r_none        <= e3_r_none;
-        e4_write_address <= e3_write_address;
-        e4_logic_result  <= e3_logic_result;
-        e4_ma_flags      <= e3_ma_flags;
-        e4_shift_value   <= e3_shift_left ? (e3_shift_extended <<< e3_coarse) : (e3_shift_extended >>> e3_coarse);
-        e4_shift_left    <= e3_shift_left;
-        e4_shift_fine    <= e3_shift_magnitude[2:0];
+        e4_control       <= e3b_control;
+        e4_r_none        <= e3b_r_none;
+        e4_write_address <= e3b_write_address;
+        e4_logic_result  <= e3b_logic_result;
+        e4_ma_flags      <= e3b_ma_flags;
+        e4_shift_value   <= e3b_shift_left ? (e3b_shift_extended <<< e3b_coarse) : (e3b_shift_extended >>> e3b_coarse);
+        e4_shift_left    <= e3b_shift_left;
+        e4_shift_fine    <= e3b_shift_magnitude[2:0];
     end
 
     // ---- E5: reduced to the destination, saturated or wrapped, the flags --------------------------------
