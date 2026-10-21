@@ -89,32 +89,32 @@ module csp_core (
 
     // ---- helpers ----------------------------------------------------------------
     function automatic logic signed [53:0] word_to_accumulator(input logic [17:0] word);
-        return {{4{word[17]}}, word, 32'd0};            // Q4.14 into Q8.46
+        word_to_accumulator = {{4{word[17]}}, word, 32'd0};            // Q4.14 into Q8.46
     endfunction
 
     function automatic logic signed [53:0] wide_to_accumulator(input logic [35:0] wide);
-        return {{4{wide[35]}}, wide, 14'd0};            // Q4.32 into Q8.46
+        wide_to_accumulator = {{4{wide[35]}}, wide, 14'd0};            // Q4.32 into Q8.46
     endfunction
 
     // an operand's address: direct, or an index register's bits beside the offset's
     function automatic logic [11:0] operand_address(input logic [11:0] operand, input logic [11:0] i, input logic [11:0] j);
         case (operand[11:10])
-            csp_pkg::MODE_I:      return i | {2'b00, operand[9:0]};
-            csp_pkg::MODE_J:      return j | {2'b00, operand[9:0]};
-            csp_pkg::MODE_DIRECT: return {2'b00, operand[9:0]};
-            default:              return 12'd0;
+            csp_pkg::MODE_I:      operand_address = i | {2'b00, operand[9:0]};
+            csp_pkg::MODE_J:      operand_address = j | {2'b00, operand[9:0]};
+            csp_pkg::MODE_DIRECT: operand_address = {2'b00, operand[9:0]};
+            default:              operand_address = 12'd0;
         endcase
     endfunction
 
     function automatic logic condition_holds(input logic [3:0] condition, input logic negative, input logic zero, input logic overflow);
         case (condition)
-            csp_pkg::CONDITION_ALWAYS:   return 1'b1;
-            csp_pkg::CONDITION_NEGATIVE: return negative;
-            csp_pkg::CONDITION_POSITIVE: return !negative;
-            csp_pkg::CONDITION_ZERO:     return zero;
-            csp_pkg::CONDITION_NONZERO:  return !zero;
-            csp_pkg::CONDITION_OVERFLOW: return overflow;
-            default:                     return 1'b0;
+            csp_pkg::CONDITION_ALWAYS:   condition_holds = 1'b1;
+            csp_pkg::CONDITION_NEGATIVE: condition_holds = negative;
+            csp_pkg::CONDITION_POSITIVE: condition_holds = !negative;
+            csp_pkg::CONDITION_ZERO:     condition_holds = zero;
+            csp_pkg::CONDITION_NONZERO:  condition_holds = !zero;
+            csp_pkg::CONDITION_OVERFLOW: condition_holds = overflow;
+            default:                     condition_holds = 1'b0;
         endcase
     endfunction
 
