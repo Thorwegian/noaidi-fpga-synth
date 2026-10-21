@@ -21,10 +21,10 @@
 namespace csp::selftest {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 123;
+inline constexpr int cycles = 133;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 123> rows{{
+inline constexpr std::array<Row, 133> rows{{
     {0x010062040ull, 0xc00000001ull},
     {0x010064040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
@@ -148,6 +148,16 @@ inline constexpr std::array<Row, 123> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x0a010610cull, 0x000000000ull},
+    {0x0303fdc00ull, 0x000004000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x000000000ull, 0x000000000ull},
+    {0x0903fe3fdull, 0xc00000001ull},
 }};
 
 // The decode ROM: one control word a row, row 0 the NOP.
@@ -242,6 +252,8 @@ inline constexpr int res_half = 100;
 inline constexpr int res_mac = 106;
 inline constexpr int res_pass_bit = 98;
 inline constexpr int res_sel = 110;
+inline constexpr int run_count = 1022;
+inline constexpr int run_one = 1021;
 inline constexpr int segment_size = 4;
 inline constexpr int set_size = 8;
 inline constexpr int sink = 15;

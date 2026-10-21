@@ -11,7 +11,8 @@
 ; engine_selftest.cpp. The schedule the assembler lays out is part of what
 ; is tested: the chip runs the rows as placed, with no interlock, so a wrong
 ; latency shows as a wrong result. Only registers the control program does
-; not keep anything in are used (0x062 … 0x06F and 0x100 … 0x115).
+; not keep anything in are used (0x062 … 0x06F, 0x100 … 0x115 and the pass
+; count at 0x3FD, 0x3FE).
 
         .reg   RES_PASS_BIT, 0x062      ; the pass counter's low bit
         .reg   RES_HALF,     0x064      ; the half's choice, 0 or 8
@@ -83,3 +84,11 @@
         ANDXOR  TEST_CHAIN, 0, RES_CHAIN, =#8
         SHIFT   TEST_CHAIN, TEST_CHAIN, =#-3
         ADD3    COUNT_CHAIN_ODD, COUNT_CHAIN_ODD, TEST_CHAIN, ZERO
+
+; The passes this run made, for the chip check (tools/lab/chip_check.py and
+; `csp match`, as every program in programs/checks/): one a pass from the
+; fill's value, wrapping.
+        .reg   RUN_ONE,   0x3FD
+        .reg   RUN_COUNT, 0x3FE
+        ADD3    RUN_ONE, 0, =1.0, ZERO
+        MACW    RUN_COUNT, RUN_COUNT, RUN_ONE, =#1

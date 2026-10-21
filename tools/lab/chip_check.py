@@ -27,6 +27,7 @@ PORT = "/dev/ttyACM0"
 REGISTERS = 0x800              # DMEM: the registers csp-peek reads, 16 a line
 PEEK_WORDS = 16
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b[78]")
+PASS_REGISTER = re.compile(r"040: [0-9a-f]{5}")
 
 
 def command(port, line, wait):
@@ -43,20 +44,29 @@ def command(port, line, wait):
 
 
 def load(port, lines):
-    """Sends the script's lines; returns the ones the console refused."""
+    """Sends the script's lines; returns the ones the console refused, and the
+    pass counter's register (0x040) as the run's first pass will read it: the
+    number the run before left there, peeked just before csp-go."""
     refused = []
+    before = ""
     for line in lines:
+        if line.startswith("csp-go"):
+            match = PASS_REGISTER.search(command(port, "csp-peek 0x040 2", 0.25))
+            before = match.group(0) if match else ""
         # csp-hold clears the memories, which takes seconds; a row or a word is quick
         wait = 4.0 if line.startswith("csp-hold") else 0.03
         reply = command(port, line, wait)
         if "refused" in reply or "usage" in reply:
             refused.append((line, reply.strip()[:120]))
-    return refused
+    return refused, before
 
 
-def read_registers(port, out):
-    """Every register pair through the probe, csp-peek's lines as printed."""
+def read_registers(port, out, before):
+    """Every register pair through the probe, csp-peek's lines as printed,
+    after a line with the pass counter's register before the run (csp match
+    seeds the model's pass counter from the two)."""
     with open(out, "w") as file:
+        file.write("# before the run: %s\n" % before)
         for first in range(0, REGISTERS, PEEK_WORDS):
             file.write(command(port, "csp-peek 0x%03x %d" % (first, PEEK_WORDS), 0.25))
 
@@ -76,11 +86,12 @@ def main():
         if args.khz:
             board_clock.set_clock(args.khz)
             time.sleep(0.5)
-        for line, reply in load(port, lines):
+        refused, before = load(port, lines)
+        for line, reply in refused:
             print("the console refused:", line, reply)
         time.sleep(args.run)
         print(command(port, "csp-freeze", 0.5).strip())
-        read_registers(port, args.out)
+        read_registers(port, args.out, before)
         print("sent %d lines; %s holds the registers" % (len(lines), args.out))
     finally:
         if args.khz:

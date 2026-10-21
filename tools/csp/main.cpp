@@ -271,8 +271,20 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
     }
     std::vector<int32_t> chip(csp::register_count, 0);
     std::vector<bool> seen(csp::register_count, false);
+    // "# before the run: 040: hhhhh" (tools/lab/chip_check.py): the pass counter's register
+    // as the first pass read it, the number the run before this one left there.
+    constexpr int32_t no_value = -1;
+    int32_t pass_register_before = no_value;
     std::string line;
     while (std::getline(in, line)) {
+        if (line.rfind("# before the run:", 0) == 0) {
+            const size_t at = line.find("040: ");
+            if (at != std::string::npos) {
+                pass_register_before = static_cast<int32_t>(
+                        csp::sign_extend(std::strtol(line.c_str() + at + 5, nullptr, 16), csp::word_bits));
+            }
+            continue;
+        }
         size_t at = 0;
         while ((at = line.find(':', at)) != std::string::npos) {
             // "aaa: hhhhh" : the address is the hex word before the colon, the value the hex word after
@@ -314,6 +326,14 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
         return 2;
     }
     const int passes = static_cast<int>((static_cast<int64_t>(chip[run_count]) - model.read(run_count)) & 0x3FFFF);
+    // The pass counter: the chip's went on before this run. Its register in the dump is the
+    // number of the pass after the last one that ran (held, csp_pass keeps it), so the count
+    // when the run began follows, and the first pass read what the run before left there.
+    if (seen[csp::io_base] && pass_register_before != no_value) {
+        const int64_t last = static_cast<int64_t>(chip[csp::io_base]) & 0x3FFFF;
+        model.set_pass_count(last - passes - 1);
+        model.set_input(csp::io_base, pass_register_before);
+    }
     for (int pass = 0; pass < passes; ++pass) {
         const csp::PassReport report = model.pass();
         if (!report.errors.empty()) {

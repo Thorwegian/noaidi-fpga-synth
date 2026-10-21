@@ -89,6 +89,9 @@ public:
     Flags flags() const { return flags_; }
     size_t queued_writes() const { return queue_.size(); }
     int64_t pass_count() const { return pass_count_; }
+    // The pass counter's number, as a chip's whose passes went on before this
+    // run (csp match seeds it from the chip's register 0x040).
+    void set_pass_count(int64_t count) { pass_count_ = count; }
 
     // Print each row as it issues (row, cycle, i, j) to stderr.
     void trace(bool on) { trace_ = on; }
