@@ -117,9 +117,22 @@ double amp_amount(const patch_t &patch, uint8_t velocity) {
     return velocity_scale(velocity, patch.vel_amp_amt);
 }
 
+// Velocity scales the mod envelope's amount more deeply than the amp's (#244):
+// at vel_mod_amt 0 the mod env is at full whatever the velocity, at the centre
+// (CC 64) the velocity scales it once, and at the top (CC 127) twice -- so a
+// hard note opens the filter further. With a = vel_mod_amt/127 and
+// v = velocity/127, the three points (0, 1), (0.5, v), (1, 2v) are met by
+//   (1 - a)(1 - 2a) + 2 a v,
+// all products, no conditionals.
+double mod_velocity_scale(uint8_t velocity, uint8_t amount) {
+    const double a = amount / 127.0;
+    const double v = velocity_curve(velocity);
+    return (1.0 - a) * (1.0 - 2.0 * a) + 2.0 * a * v;
+}
+
 // The amount the mod envelope's depth is scaled by.
 double mod_amount(const patch_t &patch, uint8_t velocity) {
-    return velocity_scale(velocity, patch.vel_mod_amt);
+    return mod_velocity_scale(velocity, patch.vel_mod_amt);
 }
 
 // A MIDI note, in octaves from middle C.
