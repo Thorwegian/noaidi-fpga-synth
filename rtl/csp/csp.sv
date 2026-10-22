@@ -158,25 +158,39 @@ module csp (
     );
 
     // ---- the write trap -------------------------------------------------------------------------
-    logic [5:0]                 trap_hits;
-    logic [csp_pkg::CYCLE_W-1:0] trap_cycle;
-    logic [csp_pkg::WORD_W-1:0]  trap_word;
-    logic                       trap_from_pass;
+    logic [5:0]                    trap_hits;
+    logic [csp_pkg::CYCLE_W-1:0]    trap_cycle;
+    logic [csp_pkg::WORD_W-1:0]     trap_word;
+    logic                          trap_from_pass;
+    logic [csp_pkg::ADDRESS_W-1:0]  trap_address_prev;
+    // a new target clears the capture: the latch holds only on a match and resets only on reset_n,
+    // so without this a read of a register the program never writes returns the last matched
+    // register's capture, not zero (#238). Re-aim through 0 (off) to re-measure the same register.
+    wire trap_rearmed = trap_address != trap_address_prev;
     wire trap_armed = trap_address != '0;
     wire trap_even  = write_even_enable && !trap_address[11] && {write_index, 1'b0} == trap_address[csp_pkg::REGISTER_W-1:0];
     wire trap_odd   = write_odd_enable  && !trap_address[11] && {write_index, 1'b1} == trap_address[csp_pkg::REGISTER_W-1:0];
     wire trap_sink  = sink_write_enable &&  trap_address[11] && sink_write_address == trap_address[csp_pkg::SINK_WORD_W-1:0];
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            trap_hits      <= '0;
-            trap_cycle     <= '0;
-            trap_word      <= '0;
-            trap_from_pass <= 1'b0;
-        end else if (trap_armed && (trap_even || trap_odd || trap_sink)) begin
-            trap_hits      <= trap_hits + 1'b1;   // a count that wraps, not a total
-            trap_cycle     <= cycle;
-            trap_word      <= trap_sink ? sink_write_data : trap_even ? write_even_data : write_odd_data;
-            trap_from_pass <= trap_sink ? sink_write_both : pass_write_enable;
+            trap_address_prev <= '0;
+            trap_hits         <= '0;
+            trap_cycle        <= '0;
+            trap_word         <= '0;
+            trap_from_pass    <= 1'b0;
+        end else begin
+            trap_address_prev <= trap_address;
+            if (trap_rearmed) begin
+                trap_hits      <= '0;
+                trap_cycle     <= '0;
+                trap_word      <= '0;
+                trap_from_pass <= 1'b0;
+            end else if (trap_armed && (trap_even || trap_odd || trap_sink)) begin
+                trap_hits      <= trap_hits + 1'b1;   // a count that wraps, not a total
+                trap_cycle     <= cycle;
+                trap_word      <= trap_sink ? sink_write_data : trap_even ? write_even_data : write_odd_data;
+                trap_from_pass <= trap_sink ? sink_write_both : pass_write_enable;
+            end
         end
     end
     assign trap_capture = {trap_hits, trap_from_pass, 11'(trap_cycle), trap_word};

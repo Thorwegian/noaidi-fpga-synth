@@ -216,7 +216,7 @@ extern "C" int spi_link_boot_check(void) {
     };
 
     std::printf("=== the link in nines (rtl/spi/spi_bus.sv) ===\n");
-    constexpr uint32_t scratch = 0x00005;
+    constexpr uint32_t scratch = 0x00003;    // scratch is 0x3-0x6; 0x7 is the write trap (#238)
     constexpr dword_t whole     = 0xDEADBEEF5ull;             // all 36 bits
     spi_link::write_one(scratch, whole);
     check("1. a scratch dword written and read back whole", spi_link::read_one(scratch) == whole);
@@ -231,8 +231,8 @@ extern "C" int spi_link_boot_check(void) {
     spi_link::write_one(0x00008, spi_link::dword_mask);
     check("3. a status dword ignores a write", spi_link::read_one(0x00008) != spi_link::dword_mask);
 
-    spi_link::write_one(0x00805, 0xBAD0BAD05ull);            // aliases 0x005 if broken
-    check("4. an address outside every window reads zero", spi_link::read_one(0x00805) == 0);
+    spi_link::write_one(0x00803, 0xBAD0BAD03ull);            // aliases 0x003 if broken
+    check("4. an address outside every window reads zero", spi_link::read_one(0x00803) == 0);
     check("   and the scratch dword is unharmed", spi_link::read_one(scratch) == burst[0]);
 
     std::printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);

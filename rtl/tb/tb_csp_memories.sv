@@ -62,6 +62,8 @@ module tb_csp_memories;
 
     wire [WIDE_W-1:0]     probe_pair;
     logic [REGISTER_W-1:0] probe_address = REGISTER_W'(PARK_REGISTER);
+    logic [ADDRESS_W-1:0]  trap_address = '0;       // the write trap, driven in section 5
+    wire  [DWORD_W-1:0]    trap_capture;
     logic pass_start = 0;
     wire [CYCLE_W-1:0] cycle;
     wire [31:0] passes;
@@ -76,7 +78,7 @@ module tb_csp_memories;
         .clk(clk), .reset_n(reset_n), .pass_start(pass_start), .held(1'b1),
         .fetch_next(unused_fetch_address), .fetch_row(fetch_row), .rom_op(unused_rom_op), .control_word(control_word),
         .fifo_pop(pop), .fifo_committed(committed), .fifo_head_valid(head_valid), .fifo_head_dword(head_dword),
-        .probe_address(probe_address), .probe_sweep(1'b0), .probe_step(1'b0), .probe_pair(probe_pair), .probe_register(), .trap_address('0), .trap_capture(), .cycle(cycle), .pass_counter(passes),
+        .probe_address(probe_address), .probe_sweep(1'b0), .probe_step(1'b0), .probe_pair(probe_pair), .probe_register(), .trap_address(trap_address), .trap_capture(trap_capture), .cycle(cycle), .pass_counter(passes),
         .sink_write_enable(unused_sink_enable), .sink_write_both(), .sink_write_address(unused_sink_address), .sink_write_data(unused_sink_data)
     );
 
@@ -201,6 +203,30 @@ module tb_csp_memories;
         repeat (2 * CYCLES_PER_PASS) @(posedge clk);
         if (probe_pair != '0) begin $display("FAIL input pair: %09h", probe_pair); errors++; end
         else $display("pass: the inputs stay zero");
+
+        $display("--- 5. the write trap: it catches the watched register only, and clears on re-arm ---");
+        // arm on 0x120 (even), then push writes to 0x120, 0x121 (odd) and 0x130 (even) through the
+        // window: only 0x120's word must be caught, proving the address compare discriminates
+        trap_address = ADDRESS_W'('h120);
+        repeat (2) @(posedge clk);
+        fifo_dword = dword_of('h120, 'h1AAAA); fifo_write = 1; sclk_edge();
+        fifo_dword = dword_of('h121, 'h1BBBB); sclk_edge();
+        fifo_dword = dword_of('h130, 'h1CCCC); sclk_edge();
+        fifo_write = 0;
+        swap = 1; sclk_edge(); swap = 0;
+        repeat (CYCLES_PER_PASS + 10) @(posedge clk);
+        if (trap_capture[WORD_W-1:0] != WORD_W'('h1AAAA)) begin
+            $display("FAIL trap word %05h, want 1AAAA (caught the wrong register)", trap_capture[WORD_W-1:0]); errors++;
+        end else if (trap_capture[35:30] == '0) begin
+            $display("FAIL trap hits zero after a catch"); errors++;
+        end else $display("pass: the trap caught 0x120's write and no neighbour's");
+        // re-arm on a register nothing writes: the capture clears and stays zero
+        trap_address = ADDRESS_W'('h140);
+        repeat (CYCLES_PER_PASS) @(posedge clk);
+        if (trap_capture != '0) begin
+            $display("FAIL trap not clear after re-arm: %09h", trap_capture); errors++;
+        end else $display("pass: re-arming clears the capture, an unwritten register stays zero");
+        trap_address = '0;
 
         if (u_csp.u_dmem_r.row_rule_violations != 0) begin
             $display("FAIL row rule: DMEM counted %0d read-while-written rows", u_csp.u_dmem_r.row_rule_violations); errors++;
