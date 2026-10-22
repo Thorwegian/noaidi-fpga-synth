@@ -229,9 +229,9 @@ Register 0 reads zero and takes no write.
 The assembler knows, for every row, how many cycles after issue the
 result is in the file (the multiply-add's, the add's, the index's, the
 flags'), and places each instruction no earlier than its operands allow;
-an `IDX` is followed by three NOP rows, which the assembler lays itself
+an `IDX` is followed by four NOP rows, which the assembler lays itself
 (the chip has no stall to wait with), so that the index is in its register
-four cycles after the `IDX` issues. The numbers are the architecture's (`csp2_architecture.md`
+five cycles after the `IDX` issues (the sum is registered one stage, #238). The numbers are the architecture's (`csp2_architecture.md`
 gives them) and the reference model's; a program is scheduled against
 them once, at assembly, and runs identically on the model, in the
 cosim and on the chip — which is what the chip's self-test checks every

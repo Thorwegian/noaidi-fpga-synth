@@ -48,7 +48,7 @@ constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
 // instruction issued at cycle c has its result in DMEM for an instruction
 // issued at c + result_latency; its flags and the accumulator are readable
 // at c + state_latency; an IDX's index is used at c + index_latency, which
-// the assembler lays after it as three wait rows (the chip has no stall); a loop's repeat and a skip's jump
+// the assembler lays after it as four wait rows (the chip has no stall); a loop's repeat and a skip's jump
 // cost jump_penalty cycles over moving on to the next word. A vector loop
 // issues each body row once an element of the round, one cycle each, after
 // one bubble behind the first row's first element (the front end knows the
@@ -56,7 +56,7 @@ constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
 
 constexpr int result_latency = 9;
 constexpr int state_latency  = 7;
-constexpr int index_latency  = 4;
+constexpr int index_latency  = 5;   // the IDX sum is registered into E1b (#238); the assembler and the model follow this one constant
 constexpr int jump_penalty   = 4;
 
 // ---- number formats -------------------------------------------------------

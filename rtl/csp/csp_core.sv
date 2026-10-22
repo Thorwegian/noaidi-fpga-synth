@@ -22,11 +22,13 @@
 //   R2  +2     the words are in the blocks' output registers, captured as they come;
 //              a SKIP decides
 //   E1  +3     the words picked (the odd or even half, or the immediate), the
-//              operands formatted into registers; an IDX written; MIN, MAX, SEL
+//              operands formatted into registers; MIN, MAX, SEL
 //              and ANDXOR need no arithmetic and are done in the stage after
 //   E1b +4     the arithmetic: INTERP's difference and ADD3's sum saturated, the
 //              multiply-add's operands formed into registers, the logic unit's
-//              result, the shifter's count
+//              result, the shifter's count; an IDX's index written — the sum
+//              registered one stage (index_sum_q), into the index registers and
+//              the element copies, so a flop drives the LUT-RAM pins (#238)
 //   E2  +5     the multiply-add's own input registers sample those operand registers
 //              (nothing between them: the logic before a block's pin is untimed)
 //   E3  +6     the multiply-add computes (the block's own output register holds it);
@@ -39,7 +41,7 @@
 //              later reads it
 //
 // There is no interlock and no stall: the assembler places every row so that
-// what it reads has been written, and lays the IDX's three NOP rows itself.
+// what it reads has been written, and lays the IDX's four NOP rows itself.
 // The front end therefore has one rule of its own, the loop: a repeat is
 // decided in A and redirects the program counter, discarding the four rows in
 // flight behind the loop's last (csp_pkg::JUMP_PENALTY). A SKIP decides in R2
@@ -170,10 +172,11 @@ module csp_core (
     logic [PC_W-1:0]    va_last;                           // the body's last row
     // the other index and the flags, an element's own once its IDX or CMP has written them; until
     // then the registers' (which an IDX or CMP from before the loop may still be writing)
-    // LUT-RAM cells (RAM16SDP4), whose data pins take an IDX's sum straight from its adder: a
-    // route the tool does not time (the pin audit, #238). As flip-flops the design no longer
-    // places (the legaliser gives up at this utilisation); the sum cannot come from a register
-    // without a cycle on the IDX, which the control program's pass has no room for.
+    // LUT-RAM cells (RAM16SDP4), whose data pins take the IDX's sum from a register (index_sum_q,
+    // written in E1b) and no longer straight from the adder: the adder's path now ends at a flop
+    // the tool times, and only the trivial flop->DI net stays untimed (the pin audit, #238; the
+    // board's clock sweep found the old adder->DI route the Fmax limiter). The register costs the
+    // IDX one cycle — index_latency 4->5 — which the assembler lays as a fourth wait row.
     logic [11:0]        other_copy [16];
     logic [3:0]         other_generation [16];
     logic [15:0]        other_valid;
@@ -733,10 +736,16 @@ module csp_core (
     wire [5:0] shift_magnitude = shift_left ? (shift_total > 9'sd36 ? 6'd36 : shift_total[5:0])
                                             : (shift_right_amount > 9'sd54 ? 6'd54 : shift_right_amount[5:0]);
 
-    // IDX: the sum of X and Y, twelve bits
+    // IDX: the sum of X and Y, twelve bits, registered one stage into E1b so the adder sits in a
+    // timed flop->adder->flop span and the element-copy LUT-RAM (RAM16SDP4) data pins and the index
+    // registers are driven by a flop, not the raw adder — the untimed route nextpnr cannot see, the
+    // Fmax limiter the board's clock sweep found (#238). The extra cycle is index_latency 4->5
+    // (csp.hpp, csp_pkg::INDEX_LATENCY); the assembler's wait rows and the model's scoreboard read
+    // that constant, so they follow.
     wire [11:0] index_sum = e1_x[11:0] + e1_y[11:0];
-
-    wire e1_is_index = e1_live && e1_unit == csp_pkg::UNIT_INDEX;
+    logic [11:0] index_sum_q;
+    always_ff @(posedge clk) index_sum_q <= index_sum;
+    wire e1b_is_index = e1b_live && e1b_unit == csp_pkg::UNIT_INDEX;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
             index_i <= '0;
@@ -750,23 +759,25 @@ module csp_core (
                 if (va_own_is_j) index_j <= va_after + va_stride;
                 else             index_i <= va_after + va_stride;
             end
-            // an IDX: the register, or inside a vector loop the element's copy, and the register
-            // too for the last element, whose indexes the rows after the loop see
-            if (e1_is_index && (!e1_vector || e1_final)) begin
-                if (e1_writes == csp_pkg::WRITES_INDEX_J) index_j <= index_sum;
-                else                                      index_i <= index_sum;
+            // an IDX, a cycle later than the loop steps above (E1b, the registered sum): the
+            // register, or inside a vector loop the element's copy, and the register too for the
+            // last element, whose indexes the rows after the loop see. Last in the chain, so it
+            // keeps its priority on a same-cycle write to the index register.
+            if (e1b_is_index && (!e1b_vector || e1b_final)) begin
+                if (e1b_writes == csp_pkg::WRITES_INDEX_J) index_j <= index_sum_q;
+                else                                       index_i <= index_sum_q;
             end
         end
     end
 
     always_ff @(posedge clk or negedge reset_n) begin
-        if (!reset_n)                      other_valid <= '0;
-        else if (e1_is_index && e1_vector) other_valid[e1_element] <= 1'b1;
+        if (!reset_n)                        other_valid <= '0;
+        else if (e1b_is_index && e1b_vector) other_valid[e1b_element] <= 1'b1;
     end
     always_ff @(posedge clk) begin
-        if (e1_is_index && e1_vector) begin
-            other_copy[e1_element]       <= index_sum;
-            other_generation[e1_element] <= e1_generation;
+        if (e1b_is_index && e1b_vector) begin
+            other_copy[e1b_element]       <= index_sum_q;
+            other_generation[e1b_element] <= e1b_generation;
         end
     end
 

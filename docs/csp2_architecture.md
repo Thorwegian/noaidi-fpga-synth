@@ -68,8 +68,8 @@ flowchart LR
     D3 --> A[A: the control word in a register of ours<br/>operand addresses: index bits beside offset bits<br/>loops pushed and ended, indexes stepped]
     A --> R1[R1: DMEM's three copies<br/>read pins are registers<br/>idle ports and banks parked]
     R1 --> R2[R2: the words in the blocks' output registers<br/>a SKIP decides]
-    R2 --> E1[E1: the words picked and formatted<br/>IDX written]
-    E1 --> E1b[E1b: the arithmetic<br/>the DSP's operands into registers<br/>logic unit, shifter prepared]
+    R2 --> E1[E1: the words picked and formatted]
+    E1 --> E1b[E1b: the arithmetic<br/>the DSP's operands into registers<br/>logic unit, shifter prepared<br/>IDX written, the sum registered]
     E1b --> E2[E2: the DSP's own input registers sample<br/>the operand registers, nothing between]
     E2 --> E3[E3: the DSP computes<br/>the shifter's coarse stage]
     E3 --> E4[E4: the product captured<br/>the shifter's fine stage]
@@ -90,8 +90,8 @@ cycles below count from there.
 | A | 0 | the control word is out of the ROM's register; each operand's address is formed by mode (direct, the index's bits beside the offset's, the immediate); a `LOOP` is pushed, a loop's last row repeats or ends it and steps its index register; the read rows of DMEM's banks are chosen, the idle banks parked | the addresses, the control word, the row's fields, DMEM's read pins |
 | R1 | 1 | DMEM's three copies sample their pins | the blocks' own |
 | R2 | 2 | the words are in the blocks' output registers; registers take them as they come; a `SKIP` reads the flags and kills the two rows behind it | the words, captured |
-| E1 | 3 | the words picked (the odd or even half, or the immediate) and formatted; an `IDX` written | the operands |
-| E1b | 4 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; the shifter's count worked out | the multiply-add's operand registers; the logic result, the shifter's inputs |
+| E1 | 3 | the words picked (the odd or even half, or the immediate) and formatted | the operands |
+| E1b | 4 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; the shifter's count worked out; an `IDX` written (the sum registered one stage, so a flop drives the element-copy LUT-RAM, #238) | the multiply-add's operand registers; the logic result, the shifter's inputs; the index registers and copies |
 | E2 | 5 | the block's input registers sample the operand registers | the block's own input registers |
 | E3 | 6 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
 | E4 | 7 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
@@ -105,9 +105,10 @@ issue + 9 samples one edge later and never meets it on a row). The flags
 and the accumulator are in their registers from cycle 9, which a `SEL`
 reads in its E1b (4) and a `SKIP` in its R2 (2): a reader of either issues
 5 and **7** cycles after the writer; the assembler takes 7 for both. An
-`IDX` writes its index at the end of its E1; a row's A reads it **4**
-cycles after the `IDX` issues, the three rows between being NOPs the
-assembler lays itself. A loop's repeat is decided in A and redirects the
+`IDX` writes its index at the end of its E1b; a row's A reads it **5**
+cycles after the `IDX` issues, the four rows between being NOPs the
+assembler lays itself. The sum is registered one stage into E1b so a flop,
+not the raw adder, drives the element-copy LUT-RAM pins (#238). A loop's repeat is decided in A and redirects the
 program counter: the four rows behind the loop's last, in D3, D2, D1 and F,
 are discarded, so a repeat costs **4** cycles. A vector loop's row is known
 in D2, from the op field captured in D1 (the ROM's rows 1 and 2 are the
@@ -124,7 +125,7 @@ priority at the program counter's mux and the state keeps nothing from a
 row it kills (#238: with the repeat and the subtractions in the chain this
 path was the chip's longest, 11 levels). In A the loop's own index is the element's (the base stepped by the
 stride, by element); the other index and the flags are the element's
-private copies, sixteen of each, written by its own `IDX` (E1) and `CMP`
+private copies, sixteen of each, written by its own `IDX` (E1b) and `CMP`
 (E5) and read through to the registers until then; the last element's
 land in the registers too.
 

@@ -505,7 +505,7 @@ outer_end:
 }
 
 // The chip has no stall, so what the front end used to wait for is rows: an
-// IDX is followed by three NOPs, a loop of count 0 is not there at all, and
+// IDX is followed by four NOPs, a loop of count 0 is not there at all, and
 // a SKIP does not cross the end of its loop.
 void test_decisions() {
     const csp::Program idx = csp::assemble(std::string(registers) + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
