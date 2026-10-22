@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // The scheduler keeps a scoreboard: for every register the cycle from
-// which it may be read, and the same for the flags and the accumulator
+// which it may be read, and the same for the flags
 // together. An instruction issues at the first cycle at or after the
 // front end's next cycle when everything it reads is ready; the cycles
 // it waits become NOP rows before it. A scalar loop's body is laid out
@@ -68,10 +68,6 @@ bool reads_result(Op op, ASource a) {
     }
 }
 
-bool reads_accumulator(Op op, ASource a) {
-    if (a != ASource::accumulator) return false;
-    return reads_result(op, ASource::result) || op == Op::acc;
-}
 
 } // namespace
 
@@ -150,12 +146,6 @@ size_t ProgramBuilder::andxor(Operand r, ASource a, Source x, Source y) {
 }
 size_t ProgramBuilder::shift(Operand r, ASource a, Source y, bool wide) {
     return arithmetic(Op::shift, r, a, Source::reg(Operand::direct(0)), y, wide);
-}
-size_t ProgramBuilder::acc(ASource a, Source x, Source y) {
-    if (a == ASource::result) {
-        issue("ACC's A operand is 0 or acc");
-    }
-    return arithmetic(Op::acc, Operand::none(), a, x, y, false);
 }
 size_t ProgramBuilder::sel(Operand r, Condition cond, Source x, Source y) {
     const size_t at = arithmetic(Op::sel, r, ASource::zero, x, y, false);
@@ -251,11 +241,11 @@ void ProgramBuilder::close_skip(size_t at, size_t end) {
 
 namespace {
 
-// The scoreboard: when each register, and the flags with the accumulator,
+// The scoreboard: when each register, and the flags,
 // may next be read, as absolute cycles.
 struct Board {
     std::vector<int64_t> ready;      // a register's ready cycle
-    int64_t state   = 0;             // the flags and the accumulator
+    int64_t state   = 0;             // the flags
     int64_t unknown = 0;             // the latest write whose address is not known
 
     Board() : ready(register_count, 0) {}
@@ -355,16 +345,15 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         }
     }
     // Nesting: at most two, on different index registers, the inner inside the
-    // outer; a vector body holds no loop, no SKIP, no ACC and no accumulator.
+    // outer; a vector body holds no loop and no SKIP.
     for (size_t at = 0; at < instructions_.size(); ++at) {
         const Entry &outer = instructions_[at];
         if (outer.op != Op::loop && outer.op != Op::vloop) continue;
         for (size_t inner_at = at + 1; inner_at < outer.end && inner_at < instructions_.size(); ++inner_at) {
             const Entry &inner = instructions_[inner_at];
             if (outer.op == Op::vloop) {
-                if (inner.op == Op::loop || inner.op == Op::vloop || inner.op == Op::skip || inner.op == Op::acc
-                    || inner.a_source == ASource::accumulator) {
-                    built.issues.push_back({inner_at, true, "a vector body holds no loop, SKIP, ACC or acc operand"});
+                if (inner.op == Op::loop || inner.op == Op::vloop || inner.op == Op::skip) {
+                    built.issues.push_back({inner_at, true, "a vector body holds no loop or SKIP"});
                 }
                 if (inner.op == Op::idx && inner.which == outer.which) {
                     built.issues.push_back({inner_at, true, "a vector body cannot set the loop's own index register"});
@@ -424,7 +413,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         if (reads_result(entry.op, entry.a_source)) wait_for(access_of(entry.r, at_index), entry.wide);
         if (uses_x(entry.op)) wait_for(access_of(entry.x, at_index), false);
         if (uses_y(entry.op)) wait_for(access_of(entry.y, at_index), entry.wide && entry.op != Op::shift);
-        if (reads_flags(entry.op) || reads_accumulator(entry.op, entry.a_source)) {
+        if (reads_flags(entry.op)) {
             cycle = std::max(cycle, at_board.state);
         }
         return cycle;
@@ -445,7 +434,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                 }
             }
         }
-        if (sets_flags(entry.op) || entry.op == Op::acc) {
+        if (sets_flags(entry.op)) {
             at_board.state = std::max(at_board.state, cycle + state_latency);
         }
         if (entry.op == Op::idx) {

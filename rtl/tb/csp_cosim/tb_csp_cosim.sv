@@ -107,7 +107,6 @@ module tb_csp_cosim (
     export "DPI-C" function cosim_register;
     export "DPI-C" function cosim_sink;
     export "DPI-C" function cosim_index;
-    export "DPI-C" function cosim_accumulator;
     export "DPI-C" function cosim_flags;
     export "DPI-C" function cosim_cycles;
     export "DPI-C" function cosim_set_program_length;
@@ -126,10 +125,6 @@ module tb_csp_cosim (
 
     function int cosim_index(input int which);
         return which == 0 ? int'(u_csp.u_core.index_i) : int'(u_csp.u_core.index_j);
-    endfunction
-
-    function longint cosim_accumulator();
-        return longint'(u_csp.u_core.accumulator);
     endfunction
 
     function int cosim_flags();

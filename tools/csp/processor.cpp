@@ -83,7 +83,7 @@ Op op_of(const Control &control) {
     case Unit::multiply_add:
         switch (static_cast<MultiplyAddOp>(control.sub)) {
         case MultiplyAddOp::mac:
-            return control.writes == Writes::accumulator ? Op::acc : (control.wrap ? Op::macw : Op::mac);
+            return control.wrap ? Op::macw : Op::mac;
         case MultiplyAddOp::add3: return Op::add3;
         case MultiplyAddOp::cmp: return Op::cmp;
         case MultiplyAddOp::abs: return Op::abs;
@@ -328,7 +328,7 @@ void Processor::note_writes(const Decoded &decoded, PassState &state) {
             }
         }
     }
-    if (control.cond == ConditionKind::flags || control.writes == Writes::accumulator) {
+    if (control.cond == ConditionKind::flags) {
         state.scoreboard.state_ready = state.cycle + state_latency;
     }
     if (control.unit == Unit::index) {
@@ -359,11 +359,10 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     const auto immediate   = static_cast<int32_t>(sign_extend(word.imm & 0x3FFFF, word_bits));
     const auto condition   = static_cast<Condition>(word.cond);
 
-    // The flags and the accumulator: ready?
-    if (control.cond == ConditionKind::select || control.cond == ConditionKind::skip
-        || control.a_source == ASource::accumulator) {
+    // The flags: ready?
+    if (control.cond == ConditionKind::select || control.cond == ConditionKind::skip) {
         if (state.scoreboard.state_ready > state.cycle) {
-            state.report.errors.push_back("row " + std::to_string(state.pc) + " reads the flags or the accumulator "
+            state.report.errors.push_back("row " + std::to_string(state.pc) + " reads the flags "
                                           + std::to_string(state.scoreboard.state_ready - state.cycle)
                                           + " cycles early");
         }
@@ -374,7 +373,6 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
         case ASource::zero: return 0;
         case ASource::result:
             return is_wide ? from_wide(read_wide_operand(word.r, state)) : from_word(read_operand(word.r, 0, state, true));
-        case ASource::accumulator: return accumulator_;
         }
         return 0;
     };
@@ -403,12 +401,6 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     case Op::macw: {
         const int64_t x = x_word();
         store(a_value() + product(x, y_raw(), control.y_wide), op == Op::macw);
-        break;
-    }
-    case Op::acc: {
-        const int64_t x = x_word();
-        const Wide sum  = a_value() + product(x, y_word(), false);
-        accumulator_    = saturate(sum, accumulator_bits).value;
         break;
     }
     case Op::add3: {

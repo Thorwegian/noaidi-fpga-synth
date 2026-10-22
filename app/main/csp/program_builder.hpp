@@ -66,7 +66,7 @@ public:
 
     size_t nop();
 
-    // A is ASource::zero, ::result (A = R) or ::accumulator. With `wide`, R
+    // A is ASource::zero or ::result (A = R). With `wide`, R
     // and Y are pairs and X a word; A is then R (in place).
     size_t mac(Operand r, ASource a, Source x, Source y, bool wide = false);
     size_t macw(Operand r, ASource a, Source x, Source y, bool wide = false);
@@ -74,8 +74,6 @@ public:
     size_t andxor(Operand r, ASource a, Source x, Source y);
     size_t shift(Operand r, ASource a, Source y, bool wide = false);
 
-    // A is ASource::zero or ::accumulator.
-    size_t acc(ASource a, Source x, Source y);
 
     size_t sel(Operand r, Condition cond, Source x, Source y);
     size_t cmp(Operand r, Source x, Source y);

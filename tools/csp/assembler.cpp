@@ -325,15 +325,14 @@ std::optional<Source> Assembler::source(std::string_view text) {
     return Source::reg(Operand::direct(static_cast<int>(address)));
 }
 
-// The A operand: `0`, `acc`, or the R operand written again.
+// The A operand: `0`, or the R operand written again.
 std::optional<ASource> Assembler::a_operand(std::string_view text, const Operand &result) {
     text = trim(text);
     if (text == "0") return ASource::zero;
-    if (upper(text) == "ACC") return ASource::accumulator;
     const auto parsed = source(text);
     if (!parsed) return std::nullopt;
     if (!(parsed->operand == result)) {
-        error("the A operand must be 0, acc or the R operand: " + std::string(text));
+        error("the A operand must be 0 or the R operand: " + std::string(text));
         return std::nullopt;
     }
     return ASource::result;
@@ -511,17 +510,6 @@ void Assembler::instruction(const std::string &full_name, std::string_view text)
         }
     } else if (name == "NOP") {
         if (need(0)) builder_.nop();
-    } else if (name == "ACC") {
-        if (need(3)) {
-            const std::string a = upper(trim(operands[0]));
-            if (a != "0" && a != "ACC") {
-                error("ACC's A operand must be 0 or acc");
-            } else {
-                const auto x = source(operands[1]);
-                const auto y = x ? source(operands[2]) : std::nullopt;
-                if (y) builder_.acc(a == "0" ? ASource::zero : ASource::accumulator, *x, *y);
-            }
-        }
     } else if (name == "SHIFT") {
         if (is_wide) {
             if (need(2)) {

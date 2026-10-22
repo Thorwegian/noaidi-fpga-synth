@@ -216,22 +216,6 @@ void test_macw_and_wide() {
 }
 
 
-void test_acc() {
-    Machine m(std::string(registers) + R"(
-        ACC  0, B_, C_
-        ACC  acc, B_, C_
-        MAC  A_, acc, B_, C_
-        MAC  D_, 0, B_, C_
-        MAC  D_, D_, B_, C_
-        MAC  D_, D_, B_, C_
-)");
-    // 2⁻⁷ × 2⁻⁸ = 2⁻¹⁵: half a raw step each. Summed in the accumulator,
-    // three make 1.5 steps, truncated once to 1; rounded every time, 0.
-    m.set("B_", q(1.0 / 128)).set("C_", q(1.0 / 256)).start().run();
-    check_equal(m.get("A_"), 1, "ACC chain rounds once: three half steps make 1");
-    check_equal(m.get("D_"), 0, "separate MACs truncate each half step away");
-}
-
 void test_add3_sel_cmp_min_max() {
     Machine m(std::string(registers) + R"(
         ADD3  A_, 0, B_, C_
@@ -293,7 +277,7 @@ void test_skip() {
 
 // The schedule changes the cycle count, never the result: a dependent
 // instruction issues result_latency cycles after the one it reads, a
-// reader of the flags or the accumulator state_latency after, the one
+// reader of the flags state_latency after, the one
 // after IDX index_latency after, and independent ones every cycle. The
 // model runs the rows as placed and reports any read that comes early.
 void test_schedule() {
@@ -304,8 +288,6 @@ void test_schedule() {
     check_equal(cycles(".reg W_LOWER, 0x065\nMAC.w W_, =1.0, V_\nMAC B_, 0, W_LOWER, =1.0\n"), csp::result_latency + 1,
                 "a read of a pair's lower word waits for the wide write");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC C_, 0, B_, =1.0\n"), 2, "another register does not wait");
-    check_equal(cycles("ACC 0, =1.0, =1.0\nMAC A_, acc, =1.0, =1.0\n"), csp::state_latency + 1,
-                "a read of acc waits for ACC");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"), csp::state_latency + 1, "SEL waits for the flags");
     check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"), csp::index_latency + 1,
                 "the instruction after IDX comes index_latency cycles on");
@@ -421,7 +403,7 @@ void test_vector_loops() {
     shared.start();
     check(!shared.processor.pass().errors.empty(), "elements sharing a register are reported");
     check(has_diagnostic(csp::assemble(body + "LOOP.vi 2, =#8, =#8\nSKIP always, 1\nNOP\n"), true,
-                         "a vector body holds no loop, SKIP"),
+                         "a vector body holds no loop or SKIP"),
           "SKIP in a vector loop's body is rejected");
 }
 
@@ -617,8 +599,8 @@ void test_assembler() {
     check(has_diagnostic(csp::assemble("FOO r1, r2\n"), true, "unknown instruction"), "unknown instruction");
     check(has_diagnostic(csp::assemble("MAC r1100, 0, r1, r2\n"), true, "reaches 0–1023"), "direct operands reach 0–1023");
     check(has_diagnostic(csp::assemble("CMP.w r2, r4, r6\n"), true, "no wide form"), ".w on an instruction without one");
-    check(has_diagnostic(csp::assemble("MAC r1, r2, r3, r4\n"), true, "must be 0, acc or the R"),
-          "an A operand that is not 0, acc or R");
+    check(has_diagnostic(csp::assemble("MAC r1, r2, r3, r4\n"), true, "must be 0 or the R"),
+          "an A operand that is not 0 or R");
     check(has_diagnostic(csp::assemble("MAC r1, 0, =1.0, =2.0\n"), true, "one immediate a word"),
           "two different immediates in one word");
     check(csp::assemble("MAC r1, 0, =1.0, =1.0\n").ok, "the same immediate twice is one immediate");
@@ -1142,7 +1124,6 @@ int main() {
     test_encoding();
     test_mac();
     test_macw_and_wide();
-    test_acc();
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();
     test_skip();

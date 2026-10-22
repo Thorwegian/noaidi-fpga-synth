@@ -104,11 +104,11 @@ package csp_pkg;
     parameter logic [2:0] WRITES_PAIR        = 3'd2;
     parameter logic [2:0] WRITES_INDEX_I     = 3'd3;
     parameter logic [2:0] WRITES_INDEX_J     = 3'd4;
-    parameter logic [2:0] WRITES_ACCUMULATOR = 3'd5;
+    // 3'd5 was WRITES_ACCUMULATOR, dropped with ACC (#238)
 
     parameter logic [1:0] A_SOURCE_ZERO        = 2'd0;
     parameter logic [1:0] A_SOURCE_RESULT      = 2'd1;
-    parameter logic [1:0] A_SOURCE_ACCUMULATOR = 2'd2;
+    // 2'd2 was A_SOURCE_ACCUMULATOR, dropped with ACC (#238)
 
     parameter logic [1:0] CONDITION_KIND_NONE   = 2'd0;
     parameter logic [1:0] CONDITION_KIND_SELECT = 2'd1;
@@ -116,7 +116,7 @@ package csp_pkg;
     parameter logic [1:0] CONDITION_KIND_FLAGS  = 2'd3;
 
     // sub-operations
-    parameter logic [2:0] MULTIPLY_ADD_MAC    = 3'd0;     // also ACC
+    parameter logic [2:0] MULTIPLY_ADD_MAC    = 3'd0;
     // 3'd1 was INTERP, dropped (#238): the distance target - level is a CMP, so the fused subtract is not needed
     parameter logic [2:0] MULTIPLY_ADD_ADD3   = 3'd2;
     parameter logic [2:0] MULTIPLY_ADD_CMP    = 3'd3;

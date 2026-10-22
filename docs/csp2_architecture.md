@@ -73,7 +73,7 @@ flowchart LR
     E1b --> E2[E2: the DSP's own input registers sample<br/>the operand registers, nothing between]
     E2 --> E3[E3: the DSP computes<br/>the shifter's coarse stage]
     E3 --> E4[E4: the product captured<br/>the shifter's fine stage]
-    E4 --> E5[E5: reduced, saturated or wrapped<br/>flags and accumulator written]
+    E4 --> E5[E5: reduced, saturated or wrapped<br/>flags written]
     E5 --> W[W: write pins are registers<br/>the write lands at the next edge]
 ```
 
@@ -95,14 +95,14 @@ cycles below count from there.
 | E2 | 5 | the block's input registers sample the operand registers | the block's own input registers |
 | E3 | 6 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
 | E4 | 7 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
-| E5 | 8 | the sum reduced to its destination, saturated or wrapped; the flags and the accumulator written; DMEM's write enables, row and words decoded | the flags and the accumulator; the write registers |
+| E5 | 8 | the sum reduced to its destination, saturated or wrapped; the flags written; DMEM's write enables, row and words decoded | the flags; the write registers |
 | W | 9 | the write registers drive DMEM's write pins (or a sink word's); the write lands at the edge after | the registers on the pins |
 
 The numbers the assembler schedules by follow from the table. A result is
 readable by a row issued **9** cycles after the row that wrote it (its read
 pins are driven at 1, the write is sampled at the end of 9, so a reader at
 issue + 9 samples one edge later and never meets it on a row). The flags
-and the accumulator are in their registers from cycle 9, which a `SEL`
+are in their registers from cycle 9, which a `SEL`
 reads in its E1b (4) and a `SKIP` in its R2 (2): a reader of either issues
 5 and **7** cycles after the writer; the assembler takes 7 for both. An
 `IDX` writes its index at the end of its E1b; a row's A reads it **5**

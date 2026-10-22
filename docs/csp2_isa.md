@@ -10,7 +10,7 @@ is kept here for reference.*
 
 The second revision keeps what the first proved and drops what the chip
 measured as unaffordable: a fixed program per sample, three-operand
-arithmetic with an accumulator, wide pairs, sinks as stores, loops with
+saturating arithmetic, wide pairs, sinks as stores, loops with
 fixed counts — and in place of a decoder in logic, a decode read from a
 block RAM; in place of an adder on every operand, addresses made by
 putting bits side by side; in place of a hazard check in hardware, a
@@ -118,8 +118,8 @@ The control word:
 | bits | field | values |
 |---|---|---|
 | 17:15 | unit | none, multiply-add, logic, shift, loop, skip, index |
-| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j`, the accumulator |
-| 11:10 | accumulator source | zero, `r` (update in place), the accumulator |
+| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j` |
+| 11:10 | A source | zero, `r` (update in place) |
 | 9 | reads X | X is read: from DMEM, or the immediate |
 | 8 | wide Y | Y is a pair |
 | 7:6 | condition kind | none, select by `cond`, skip by `cond`, set the flags |
@@ -128,8 +128,8 @@ The control word:
 | 3 | wrap | the sum wraps instead of saturating (phase accumulators) |
 | 2:0 | sub-operation | the unit's operation: MAC, ADD3, CMP, ABS; MIN, MAX, SEL, ANDXOR; scalar or vector loop on `i` or `j`; `i` or `j` for `IDX` |
 
-The two reads bits and the accumulator source say which of DMEM's three
-read ports a row uses (R when the accumulator source is `r`, X, Y); the
+The two reads bits and the A source say which of DMEM's three
+read ports a row uses (R when the A source is `r`, X, Y); the
 ports it does not use are parked on a row nothing writes, so that an
 operand field the row ignores can never meet a write under the row rule.
 
@@ -138,7 +138,7 @@ the operation is the same):
 
 | family | rows | operation |
 |---|---|---|
-| multiply-add | `MAC`, `MAC` in place, `MAC.w`, `MACW` (wrapping), `ACC` (into the accumulator) | R = A + X × Y, A by the accumulator-source bits |
+| multiply-add | `MAC`, `MAC` in place, `MAC.w`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
 | add | `ADD3` | R = A + X + Y |
 | compare | `CMP` | R = X − Y, the flags set |
 | select | `SEL` | R = `cond` clear ? X : Y |
@@ -175,7 +175,7 @@ invisible to a correct program, because no element may read a register
 another element writes (the first revision's rule, kept; the assembler
 checks it).
 
-Inside a vector loop: no loop, no `SKIP`, no `ACC`; `SEL` for anything
+Inside a vector loop: no loop, no `SKIP`; `SEL` for anything
 conditional. A vector loop may be the inner loop of a scalar one.
 
 What a vector loop costs: its own row, one cycle; each body row once an

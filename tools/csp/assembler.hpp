@@ -14,7 +14,6 @@
 //              NAME             a .reg, .wide or .const name
 //              [i+NAME], [i+3]  i plus an offset; [i] is offset 0
 //              =0.5, =#3        an immediate: a Q4.14 value, or a raw integer
-//              acc, 0           the A operand: the accumulator, or zero
 //   directives .equ NAME, value           a name for a number
 //              .reg NAME, address          a register
 //              .wide NAME, address         a wide register (even)

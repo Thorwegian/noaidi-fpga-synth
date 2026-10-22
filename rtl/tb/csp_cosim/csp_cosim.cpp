@@ -6,7 +6,7 @@
 // Runs the same programs and firmware writes on the RTL (Verilated
 // tb_csp_cosim.sv) and on the reference model, and after every pass
 // compares everything a program can leave behind: all 2048 registers, the
-// published sink page, i, j, the accumulator, the flags, the cycles the
+// published sink page, i, j, the flags, the cycles the
 // pass took, and that DMEM's row rule held at every edge. Programs come from
 // two places: the boot self-test and some directed ones, assembled, and
 // random programs built with csp::ProgramBuilder as the firmware will build
@@ -129,7 +129,6 @@ private:
         }
         if (rtl_.index(0) != model_.index(csp::IndexRegister::i)) note("i", rtl_.index(0), model_.index(csp::IndexRegister::i));
         if (rtl_.index(1) != model_.index(csp::IndexRegister::j)) note("j", rtl_.index(1), model_.index(csp::IndexRegister::j));
-        if (rtl_.accumulator() != model_.accumulator()) note("accumulator", rtl_.accumulator(), model_.accumulator());
         const csp::Flags flags = model_.flags();
         const int model_flags  = (flags.negative ? 1 : 0) | (flags.zero ? 2 : 0) | (flags.overflow ? 4 : 0);
         if (rtl_.flags() != model_flags) note("flags", rtl_.flags(), model_flags);
@@ -240,9 +239,6 @@ void run_directed(VerilatedContext &context) {
             CMP     ZERO, S_, T_
             SEL     T_, A_, B_
             MACW    A_, A_, =3.0, B_
-            ACC     0, A_, B_
-            ACC     acc, C_, D_
-            MAC     B_, acc, =1.0, =1.0
             MIN     S_, A_, B_
             MAX     T_, C_, D_
             ABS     C_, D_
@@ -421,9 +417,8 @@ private:
     }
 
     csp::ASource a_source() {
-        switch (pick(0, 3)) {
+        switch (pick(0, 2)) {
         case 0: return csp::ASource::zero;
-        case 1: return csp::ASource::accumulator;
         default: return csp::ASource::result;
         }
     }
@@ -445,7 +440,6 @@ private:
         case 0: b.mac(r, a_source(), x, y); break;
         case 1: b.macw(r, a_source(), x, y); break;
         case 3: b.add3(r, a_source(), x, y); break;
-        case 4: b.acc(chance(2) ? csp::ASource::zero : csp::ASource::accumulator, x, y); break;
         case 5: b.sel(r, static_cast<csp::Condition>(pick(0, 5)), x, y); break;
         case 6: b.cmp(r, x, y); break;
         case 7: chance(2) ? b.min(r, x, y) : b.max(r, x, y); break;

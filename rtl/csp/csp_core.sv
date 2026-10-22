@@ -34,8 +34,8 @@
 //   E3  +6     the multiply-add computes (the block's own output register holds it);
 //              the shifter's coarse stage
 //   E4  +7     the product is out of the block, captured; the shifter's fine stage
-//   E5  +8     the sum reduced to its destination, saturated or wrapped, the flags
-//              and the accumulator written
+//   E5  +8     the sum reduced to its destination, saturated or wrapped, and the
+//              flags written
 //   W   +9     the write pins of DMEM are driven from registers; the write lands
 //              at the edge after, so an instruction issued RESULT_LATENCY cycles
 //              later reads it
@@ -160,7 +160,6 @@ module csp_core (
 
     // ---- architectural state ----------------------------------------------------
     logic [11:0]        index_i, index_j;
-    logic signed [53:0] accumulator;
     logic               flag_negative, flag_zero, flag_overflow;
 
     // ---- the vector loop's state in A and the elements' private copies ----------------------
@@ -649,13 +648,12 @@ module csp_core (
     wire [2:0] e1b_sub     = e1b_control[2:0];
     wire       e1b_r_wide  = e1b_writes == csp_pkg::WRITES_PAIR;
 
-    // A and Y in the accumulator's format
+    // A and Y in the accumulator's format (the arithmetic's internal Q8.46, not a persistent register)
     logic signed [53:0] e1b_a_value;
     always_comb begin
         case (e1b_source)
-            csp_pkg::A_SOURCE_RESULT:      e1b_a_value = e1b_r_wide ? wide_to_accumulator(e1b_r) : word_to_accumulator(e1b_r[17:0]);
-            csp_pkg::A_SOURCE_ACCUMULATOR: e1b_a_value = accumulator;
-            default:                       e1b_a_value = 54'sd0;
+            csp_pkg::A_SOURCE_RESULT: e1b_a_value = e1b_r_wide ? wide_to_accumulator(e1b_r) : word_to_accumulator(e1b_r[17:0]);
+            default:                  e1b_a_value = 54'sd0;
         endcase
     end
     wire signed [53:0] e1b_y_value = e1b_wide_y ? wide_to_accumulator(e1b_y) : word_to_accumulator(e1b_y[17:0]);
@@ -1019,7 +1017,6 @@ module csp_core (
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            accumulator       <= '0;
             flag_negative     <= 1'b0;
             flag_zero         <= 1'b0;
             flag_overflow     <= 1'b0;
@@ -1033,7 +1030,6 @@ module csp_core (
                 flag_zero     <= result_zero;
                 flag_overflow <= result_overflow;
             end
-            if (e5_live && e5_writes == csp_pkg::WRITES_ACCUMULATOR) accumulator <= product_saturated;
             // a sink word: the row's, or the pass's (the firmware's, into both pages)
             sink_write_enable <= extra_write_enable ? extra_is_sink : (e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD);
             sink_write_both   <= extra_write_enable && extra_is_sink;

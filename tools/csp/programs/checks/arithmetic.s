@@ -30,8 +30,6 @@
             CMP     ZERO, S_, T_
             SEL     T_, A_, B_
             MACW    A_, A_, =3.0, B_
-            ACC     0, A_, B_
-            ACC     acc, C_, D_
             MAC     B_, acc, =1.0, =1.0
             MIN     S_, A_, B_
             MAX     T_, C_, D_

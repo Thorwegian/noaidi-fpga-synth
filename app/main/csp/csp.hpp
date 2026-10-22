@@ -46,7 +46,7 @@ constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
 // The chip has no interlock: the assembler places every instruction so
 // that what it reads has been written (docs/csp2_isa.md section 8). An
 // instruction issued at cycle c has its result in DMEM for an instruction
-// issued at c + result_latency; its flags and the accumulator are readable
+// issued at c + result_latency; its flags are readable
 // at c + state_latency; an IDX's index is used at c + index_latency, which
 // the assembler lays after it as four wait rows (the chip has no stall); a loop's repeat and a skip's jump
 // cost jump_penalty cycles over moving on to the next word. A vector loop
@@ -94,13 +94,12 @@ constexpr int64_t smallest(int bits) {
 // ---- the operations -------------------------------------------------------
 //
 // What a program writes; each becomes one or more decode ROM rows by its
-// variant (in place, wide, from the accumulator).
+// variant (in place, wide).
 
 enum class Op : uint8_t {
     nop,
     mac,     // R = A + X × Y, saturating
     macw,    // R = A + X × Y, wrapping
-    acc,     // accumulator = A + X × Y
     add3,    // R = A + X + Y
     cmp,     // R = X − Y, the flags set
     abs,     // R = |X|
@@ -121,7 +120,7 @@ std::string_view mnemonic(Op op);
 enum class ASource : uint8_t {
     zero        = 0,
     result      = 1, // A = R: update in place
-    accumulator = 2,
+    // 2 was accumulator, dropped with ACC (#238): writes go straight to a register
 };
 
 // The flag a conditional tests (the word's `cond` field).
@@ -167,7 +166,7 @@ struct Operand {
 
 enum class Unit : uint8_t {
     none         = 0,
-    multiply_add = 1, // MAC, MACW, ACC, ADD3, CMP, ABS: through the DSP
+    multiply_add = 1, // MAC, MACW, ADD3, CMP, ABS: through the DSP
     logic        = 2, // MIN, MAX, SEL, ANDXOR
     shift        = 3,
     loop         = 4,
@@ -181,7 +180,7 @@ enum class Writes : uint8_t {
     pair        = 2, // a wide register
     index_i     = 3,
     index_j     = 4,
-    accumulator = 5,
+    // 5 was accumulator, dropped with ACC (#238)
 };
 
 enum class ConditionKind : uint8_t {

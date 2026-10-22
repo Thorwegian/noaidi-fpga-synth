@@ -93,7 +93,6 @@ public:
     int32_t reg(int address) const { return cosim_register(address); }
     int32_t sink(int offset) const { return cosim_sink(offset); }
     int index(int which) const { return cosim_index(which); }
-    int64_t accumulator() const { return cosim_accumulator(); }
     int flags() const { return cosim_flags(); }
     int cycles() const { return cosim_cycles(); }
     int row_rule_violations() const { return cosim_row_rule_violations(); }

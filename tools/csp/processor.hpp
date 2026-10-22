@@ -8,7 +8,7 @@
 // CSP programs. It runs an image — the rows and the decode ROM the
 // assembler made — and models what a program and the firmware can
 // observe: registers, the published sink page, the index registers, the
-// accumulator and flags, the write FIFO, the hold and the pass's limit.
+// flags, the write FIFO, the hold and the pass's limit.
 //
 // The chip has no interlock, so the model does not wait either: it counts
 // the cycle every row issues in, exactly as the front end does (one a
@@ -85,7 +85,6 @@ public:
     int64_t read_wide(int address) const; // a wide register pair, raw
     int32_t sink(int offset) const;       // the published sink page, raw
     int index(IndexRegister which) const;
-    int64_t accumulator() const { return accumulator_; }
     Flags flags() const { return flags_; }
     size_t queued_writes() const { return queue_.size(); }
     int64_t pass_count() const { return pass_count_; }
@@ -111,12 +110,12 @@ private:
         int stride;
     };
 
-    // When each value may next be read: the schedule's proof. The flags,
-    // the accumulator and the index registers are per element inside a
+    // When each value may next be read: the schedule's proof. The flags
+    // and the index registers are per element inside a
     // vector loop (run_vector swaps them with the element).
     struct Scoreboard {
         std::array<int64_t, register_count> register_ready{};
-        int64_t state_ready = 0;   // the flags and the accumulator
+        int64_t state_ready = 0;   // the flags
         std::array<int64_t, 2> index_ready{};
     };
 
@@ -168,7 +167,6 @@ private:
     int active_page_ = 0;
     std::set<int> owned_sinks_;
     std::array<int, 2> index_{};
-    int64_t accumulator_ = 0;
     Flags flags_;
     Image image_;
     std::deque<QueuedWrite> queue_;
