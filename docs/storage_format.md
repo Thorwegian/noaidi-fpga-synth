@@ -154,7 +154,7 @@ in a file is always one raw value written in a musical unit.
 - **Names:** keys that hold a name take a lowercase string from the
   list given for that key.
 
-Pitch and modulation amounts share one scale, the DMEM word's: a raw
+Pitch and modulation amounts share one scale, the CSP's octaves: a raw
 value of 1024 is one octave. Hence 12 semitones = 1024 raw, and one
 raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
 440 Hz.
@@ -310,7 +310,7 @@ Rate codes 0xF0–0xFF share one coefficient, and so do some slow codes.
 Of the 256 codes, 232 sound different.
 
 **Amp envelope sustain.** The amp envelope's level spans 60.206 dB of
-gain (10 octaves on the gain DMEM word). Sustain in dB is
+gain (10 octaves on the gain). Sustain in dB is
 −60.206 × (1 − level), at full velocity.
 
 ### `[[lfo]]` (twice: LFO 1, then LFO 2)
@@ -330,7 +330,7 @@ gain (10 octaves on the gain DMEM word). Sustain in dB is
 | `"cutoff"` | semitones | −129 … +129 | round(2 × value × 1024 / 12) |
 
 `depth` is the instruction's COEF. The LFO's wave swings ±0.5 in the
-CSP's Q2.16 scale, so a raw `depth` of `d` moves the DMEM word by
+CSP's Q2.16 scale, so a raw `depth` of `d` moves the destination by
 ±`d` / 2, hence the factor 2.
 
 - **Destinations:** both LFOs take any of the four (`dest` 0

@@ -1,54 +1,50 @@
 //------------------------------------------------------------------------
-// csp_multiply_add.sv — the CSP's multiply-add unit: product = a × b + c
+// csp_multiply_add.sv — the multiply-add unit: product = a × b + c
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// One MULTALU36X18 DSP block, the same primitive dsp/adsr.sv uses for
-// its RC step: an 18-bit × 36-bit signed product plus a 54-bit addend.
-// Combinational, with none of the block's registers: the CSP executes an
-// instruction within one clock, from register file read to result
-// register (rtl/csp/csp_core.sv).
+// One MULTALU36X18 DSP block: an 18-bit × 36-bit signed product plus a 54-bit
+// addend, with the block's own registers as the registers on its pins
+// (docs/csp2_architecture.md rule 1): the operands are sampled by AREG, BREG
+// and CREG at the end of the cycle the core forms them in (E1), the product and
+// sum settle in the next (E2) and OUT_REG holds them for the cycle after (E3),
+// when the core captures them in a fabric register. PIPE_REG stays off, as
+// the first revision ran it. UG287-1.4E p29 and p30 (figure 4-9) give the
+// registers; the macro's ports are figure 3-1 on p5.
 //
-// In the CSP's formats (docs/csp_manual.md section 3): a is a word
-// (Q4.14), b a wide value (Q4.32) and c the accumulator's format
-// (Q8.46); the product of the first two is Q8.46 already, so the sum
-// needs no shifting. The sum wraps at 54 bits inside the block; the
-// write-back stage detects that from the operands' signs.
+// In the CSP's formats (docs/csp2_isa.md): a is a word (Q4.14), b a wide
+// value (Q4.32) and c the accumulator's format (Q8.46); the product of the
+// first two is Q8.46 already, so the sum needs no shifting. The sum wraps at
+// 54 bits inside the block; the core's E4 detects that from the operands'
+// signs (the three bits csp_core carries beside the product).
 //
 // The block is instantiated by hand because yosys only maps bare
-// multiplies to DSPs (see dsp/adsr.sv): every parameter is spelled out,
-// for the same reason given there.
+// multiplies to DSPs: every parameter is spelled out. In simulation a
+// behavioural model with the same three clocks of latency stands in.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_multiply_add (
-    input  wire               clk,      // unused: the block is combinational
-    input  wire               reset_n,
-    input  wire signed [17:0] a,
-    input  wire signed [35:0] b,
-    input  wire signed [53:0] c,
-    output logic signed [53:0] product
+    input  wire                clk,
+    input  wire                reset_n,
+    input  wire signed [17:0]  a,
+    input  wire signed [35:0]  b,
+    input  wire signed [53:0]  c,
+    output logic signed [53:0] product      // a × b + c, two clocks after the operands
 );
 
-    // Gowin's behavioural model needs a GSR instance somewhere up the
-    // hierarchy; it lives here, as in dsp/adsr.sv, so no testbench has to
-    // know. Simulation only: in silicon the global set/reset network is
-    // device infrastructure.
-`ifdef SIM_GOWIN_PRIM
-    GSR GSR (.GSRI(1'b1));
-`endif
-
+`ifdef SYNTHESIS
     wire [54:0] cascade_unused;
 
     MULTALU36X18 #(
-        .AREG              (1'b0),
-        .BREG              (1'b0),
-        .CREG              (1'b0),
+        .AREG              (1'b1),
+        .BREG              (1'b1),
+        .CREG              (1'b1),
         .ASIGN_REG         (1'b0),
         .BSIGN_REG         (1'b0),
         .ACCLOAD_REG0      (1'b0),
         .ACCLOAD_REG1      (1'b0),
-        .OUT_REG           (1'b0),   // combinational: the core registers the result
+        .OUT_REG           (1'b1),
         .PIPE_REG          (1'b0),
         .C_ADD_SUB         (1'b0),   // add c
         .MULTALU36X18_MODE (0),      // a × b ± c
@@ -67,6 +63,17 @@ module csp_multiply_add (
         .DOUT    (product),
         .CASO    (cascade_unused)
     );
+`else
+    logic signed [17:0] a_q;
+    logic signed [35:0] b_q;
+    logic signed [53:0] c_q;
+    always_ff @(posedge clk) begin
+        a_q     <= a;
+        b_q     <= b;
+        c_q     <= c;
+        product <= (54'(a_q) * 54'(b_q)) + c_q;    // wraps at 54 bits, as the block does
+    end
+`endif
 
 endmodule
 `default_nettype wire

@@ -55,8 +55,8 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down (or held by the sustain pedal), gate DMEM word 1, envelope gated on |
-| `V_RELEASING` | key up, gate DMEM word 0, release tail still audible |
+| `V_HELD` | key down (or held by the sustain pedal), the voice's gate register open, envelope gated on |
+| `V_RELEASING` | key up, gate register closed, release tail still audible |
 | `V_IDLE` | tail finished — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
@@ -66,7 +66,9 @@ different facts:
   `esp_timer` passes that deadline it promotes the voice to IDLE and
   mutes its partials (GATE off). The check runs in the note-on
   allocation scan and in the voice task's periodic sweep — no timer
-  task. This estimate-and-mute is to be replaced by linear gain.
+  task. The sound's end is the pipeline's: the voice's gain word is the
+  envelope's level, and the pipeline silences a partial whose word has
+  fallen below 2^−10 (−60 dB); the estimate only frees the voice.
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
@@ -120,4 +122,4 @@ stays a dumb, fast executor. No special path.
   (`engine_link.h`); the engine link translates partial and word to
   addresses.
 - The command queue holds 1024 entries; on overflow
-  `engine_link_param_write()` drops the command.
+  `engine_link_write()` drops the command.

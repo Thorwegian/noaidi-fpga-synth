@@ -1,135 +1,139 @@
 //------------------------------------------------------------------------
-// csp_pkg.sv — the CSP's instruction word, operands and sizes
+// csp_pkg.sv — the CSP's sizes and the pass's shape (docs/csp2_architecture.md)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The hardware half of app/main/csp/csp.hpp: the same encoding, the
-// same sizes. docs/csp_manual.md is the specification (section 4 for
-// the instruction word and operands, section 9 for the opcodes), and
-// tools/csp's reference model is what the RTL is checked against.
+// The second revision's constants, as docs/csp2_isa.md and
+// docs/csp2_architecture.md give them; the firmware's side is
+// app/main/fpga_map.hpp and app/main/csp/csp.hpp (the assembler's, which these
+// mirror: the control word's fields and the operand modes).
 //------------------------------------------------------------------------
 package csp_pkg;
 
-    // ---- sizes --------------------------------------------------------------
-    parameter int REGISTER_COUNT = 2048;          // 0x000–0x7FF
-    parameter int REGISTER_W     = 11;            // $clog2(REGISTER_COUNT)
-    parameter int SINK_BASE      = 'h800;         // sink area 0x800–0xBFF
+    // ---- the memories -------------------------------------------------------
+    parameter int REGISTER_COUNT = 2048;          // DMEM: 0x000–0x7FF, 18-bit words
+    parameter int REGISTER_W     = 11;
+    parameter int SINK_BASE      = 'h800;         // the sink area: 0x800–0xBFF
     parameter int SINK_COUNT     = 1024;
-    parameter int ADDRESS_W      = 12;            // what i and j can address
-    parameter int IO_BASE        = 'h040;         // read-only inputs
-    parameter int IO_COUNT       = 32;
-    parameter int DIRECT_REACH   = 512;           // direct operands: 0–511
-    parameter int MAX_PROGRAM    = 1472;          // instructions per pass
-    parameter int PROGRAM_W      = 11;            // $clog2(MAX_PROGRAM)
-    parameter int WRITE_WINDOW   = 48;            // queued writes per pass
-    parameter int CYCLES_PER_PASS = 1536;         // two samples
-    parameter int MAX_VECTOR_LENGTH = 64;         // elements of a vector loop
+    parameter int ADDRESS_W      = 12;            // a register or a sink word
+    parameter int IO_BASE        = 'h040;         // read-only inputs, never written:
+    parameter int IO_COUNT       = 32;            //   the rows an idle read port parks on
+    parameter int PARK_REGISTER  = IO_BASE + IO_COUNT - 2;   // 0x05E, an aligned pair
+    parameter int BANK_INDEX_W   = REGISTER_W - 1;           // a row of an even or an odd bank
+    parameter logic [BANK_INDEX_W-1:0] PARK_INDEX = BANK_INDEX_W'(PARK_REGISTER >> 1);   // the row an idle read port sits on
 
-    // ---- number formats ---------------------------------------------------------
+    parameter int PROGRAM_ROWS   = 1472;          // instructions a pass
+    parameter int IMEM_ROWS      = 2048;          // a slice's depth
+    parameter int ROW_W          = 72;            // the instruction word: eight slices of nine
+    parameter int SLICE_W        = 9;
+    parameter int SLICES         = ROW_W / SLICE_W;
+    parameter int PROGRAM_W      = 11;            // $clog2(IMEM_ROWS)
+    parameter logic [PROGRAM_W-1:0] PROGRAM_PARK_ROW = '1;   // IMEM's fetch parks here while held: the row the load writes first, the run never reads
+
+    parameter int ROM_ROWS       = 1024;          // the decode ROM: one row an operation
+    parameter int ROM_W          = 18;
+    parameter int ROM_ADDRESS_W  = 10;
+    parameter logic [ROM_ADDRESS_W-1:0] ROM_PARK_ROW = '1;   // the decode parks here while held, likewise
+    // the vector loops' rows, the same in every program (csp.hpp): the front end knows a vector
+    // loop by its op field, one cycle after the row is captured, before the ROM has decoded it
+    parameter logic [7:0] OP_LOOP_VI = 8'd1;
+    parameter logic [7:0] OP_LOOP_VJ = 8'd2;
+
+    parameter int FIFO_DEPTH     = 512;           // the write FIFO: 36-bit dwords
+    parameter int FIFO_POINTER_W = 10;            // one more bit than the index: full from empty
+
+    // ---- number formats -----------------------------------------------------
     //   word         18 bits  Q4.14
     //   wide         36 bits  Q4.32  (an aligned pair, upper word even)
-    //   accumulator  54 bits  Q8.46
-    parameter int WORD_W        = 18;
-    parameter int WIDE_W        = 36;
-    parameter int ACCUMULATOR_W = 54;
+    parameter int WORD_W = 18;
+    parameter int WIDE_W = 36;
 
-    typedef logic signed [WORD_W-1:0]        word_t;
-    typedef logic signed [WIDE_W-1:0]        wide_t;
-    typedef logic signed [ACCUMULATOR_W-1:0] accumulator_t;
+    // A dword in the write FIFO: [35:24] the address, [23:6] the word, [5:0] spare.
+    parameter int DWORD_W          = 36;
+    parameter int DWORD_ADDRESS_LOW = 24;
+    parameter int DWORD_WORD_LOW   = 6;
 
-    // ---- the instruction word ---------------------------------------------------
-    //   [35:32] op  [31:30] a  [29:20] R  [19:10] X  [9:0] Y
-    typedef enum logic [3:0] {
-        OP_NOP    = 4'd0,
-        OP_LOOP   = 4'd1,
-        OP_MACW   = 4'd2,
-        OP_INTERP = 4'd3,
-        OP_ACC    = 4'd4,
-        OP_ADD3   = 4'd5,
-        OP_SEL    = 4'd6,
-        OP_CMP    = 4'd7,
-        OP_MIN    = 4'd8,
-        OP_MAX    = 4'd9,
-        OP_ANDXOR = 4'd10,
-        OP_SHIFT  = 4'd11,
-        OP_MAC    = 4'd12,
-        OP_ABS    = 4'd13,
-        OP_SKIP   = 4'd14,
-        OP_IDX    = 4'd15
-    } opcode_e;
+    // ---- the pass (docs/csp2_architecture.md section 5) -----------------------
+    parameter int CYCLES_PER_PASS = 1536;         // one 48 kHz sample
+    parameter int RUN_END         = 1472;         // instructions issue in 0 … RUN_END-1
+    parameter int WINDOW_START    = 1482;         // the write window: up to 48 of the FIFO's dwords
+    parameter int WINDOW_END      = 1530;         //   pops in WINDOW_START … WINDOW_END-1
+    parameter int WRITE_WINDOW    = WINDOW_END - WINDOW_START;
+    parameter int COUNTER_CYCLE   = 1533;         // the pass counter's write for the next pass, after the window's last lands (1531)
+    parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 2;   // the probe asks for its pair: the read pins are driven in the cycle after, its words are out in the next
+    parameter int CYCLE_W         = 11;
 
-    // The a field: which value is the A operand.
-    typedef enum logic [1:0] {
-        A_ZERO        = 2'd0,
-        A_RESULT      = 2'd1,     // A = R
-        A_ACCUMULATOR = 2'd2,
-        A_WIDE        = 2'd3      // A = R, and the instruction is wide
-    } a_select_e;
+    // ---- the core's pipeline (docs/csp2_architecture.md section 1) --------------
+    // A row presented to IMEM in cycle k is in IMEM's output register in k+1, in the
+    // ROM's address register in k+2, the control word is out of the ROM in k+3 and in A
+    // in k+4, the cycle the assembler calls its issue. From there: R1 the DMEM read
+    // pins, R2 the words captured, E1 the words picked and formatted, E1b the arithmetic
+    // into the multiply-add's operand registers, E2 the block's own input registers, E3 its
+    // compute, E4 the product out, E5 reduced and saturated, W the write pins.
+    parameter int FIRST_ISSUE_CYCLE = 4;       // the address stage of the program's row 0
+    parameter int RESULT_LATENCY    = 9;       // A to the cycle a reader's A may follow a W
+    parameter int STATE_LATENCY     = 5;       // the flags: a SEL reads them in E1b, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
+    parameter int INDEX_LATENCY     = 5;       // an IDX's index, in the register for the A stage (the sum registered into E1b, #238)
+    parameter int JUMP_PENALTY      = 4;       // the rows in flight behind a loop's last row
 
-    // SKIP conditions (the X field).
-    typedef enum logic [2:0] {
-        COND_ALWAYS   = 3'd0,
-        COND_NEGATIVE = 3'd1,
-        COND_POSITIVE = 3'd2,     // N clear
-        COND_ZERO     = 3'd3,
-        COND_NONZERO  = 3'd4,
-        COND_OVERFLOW = 3'd5
-    } condition_e;
+    // ---- the instruction word (docs/csp2_isa.md section 2) -----------------------
+    //   [71:64] op   [63:60] cond   [59:48] r   [47:36] x   [35:24] y   [23:0] imm
+    parameter int OPERAND_W   = 12;            // a mode (2) and ten bits
+    parameter int SINK_WORD_W = 10;            // an address in the sink area, below SINK_BASE
 
-    typedef logic [9:0] operand_field_t;
+    // operand modes (the top two bits of an operand)
+    parameter logic [1:0] MODE_DIRECT    = 2'd0;
+    parameter logic [1:0] MODE_I         = 2'd1;
+    parameter logic [1:0] MODE_J         = 2'd2;
+    parameter logic [1:0] MODE_IMMEDIATE = 2'd3;   // the immediate; for r, no result
 
-    typedef struct packed {
-        opcode_e        op;
-        a_select_e      a;
-        operand_field_t r;
-        operand_field_t x;
-        operand_field_t y;
-    } instruction_t;
+    // ---- the control word (docs/csp2_isa.md section 4) ------------------------------
+    //   [17:15] unit  [14:12] writes  [11:10] A source  [9] reads X  [8] wide Y
+    //   [7:6] condition kind  [5] reads Y  [3] wrap  [2:0] sub-operation
+    parameter logic [2:0] UNIT_NONE         = 3'd0;
+    parameter logic [2:0] UNIT_MULTIPLY_ADD = 3'd1;
+    parameter logic [2:0] UNIT_LOGIC        = 3'd2;
+    parameter logic [2:0] UNIT_SHIFT        = 3'd3;
+    parameter logic [2:0] UNIT_LOOP         = 3'd4;
+    // 3'd5 was UNIT_SKIP, dropped (#238): a signal graph has no control-flow skip
+    parameter logic [2:0] UNIT_INDEX        = 3'd6;
 
-    // ---- operands -----------------------------------------------------------------
-    //   0aaaaaaaaa  direct, register 0–511
-    //   10oooooooo  i + offset
-    //   11oooooooo  j + offset
-    //
-    // (yosys reads neither `return` nor a typedef as an argument type, so
-    // these functions assign their name and take plain bit vectors.)
-    function automatic logic operand_is_indexed(input logic [9:0] field);
-        operand_is_indexed = field[9];
-    endfunction
+    parameter logic [2:0] WRITES_NOTHING     = 3'd0;
+    parameter logic [2:0] WRITES_WORD        = 3'd1;
+    parameter logic [2:0] WRITES_PAIR        = 3'd2;
+    parameter logic [2:0] WRITES_INDEX_I     = 3'd3;
+    parameter logic [2:0] WRITES_INDEX_J     = 3'd4;
+    // 3'd5 was WRITES_ACCUMULATOR, dropped with ACC (#238)
 
-    function automatic logic operand_uses_j(input logic [9:0] field);
-        operand_uses_j = field[8];
-    endfunction
+    parameter logic [1:0] A_SOURCE_ZERO        = 2'd0;
+    parameter logic [1:0] A_SOURCE_RESULT      = 2'd1;
+    // 2'd2 was A_SOURCE_ACCUMULATOR, dropped with ACC (#238)
 
-    // The address an operand names, given the index registers' values.
-    function automatic logic [ADDRESS_W-1:0] operand_address(
-            input logic [9:0] field, input logic [ADDRESS_W-1:0] index_i,
-            input logic [ADDRESS_W-1:0] index_j);
-        if (!field[9]) begin
-            operand_address = csp_pkg::ADDRESS_W'(field[8:0]);
-        end else begin
-            operand_address = (field[8] ? index_j : index_i) + csp_pkg::ADDRESS_W'(field[7:0]);
-        end
-    endfunction
+    parameter logic [1:0] CONDITION_KIND_NONE   = 2'd0;
+    parameter logic [1:0] CONDITION_KIND_SELECT = 2'd1;
+    // 2'd2 was CONDITION_KIND_SKIP, dropped (#238)
+    parameter logic [1:0] CONDITION_KIND_FLAGS  = 2'd3;
 
-    // Whether an opcode has a wide form (a = 3).
-    function automatic logic has_wide_form(input logic [3:0] op);
-        has_wide_form = op == csp_pkg::OP_MAC || op == csp_pkg::OP_MACW
-                        || op == csp_pkg::OP_INTERP || op == csp_pkg::OP_ADD3
-                        || op == csp_pkg::OP_SHIFT;
-    endfunction
+    // sub-operations
+    parameter logic [2:0] MULTIPLY_ADD_MAC    = 3'd0;
+    // 3'd1 was INTERP, dropped (#238): the distance target - level is a CMP, so the fused subtract is not needed
+    parameter logic [2:0] MULTIPLY_ADD_ADD3   = 3'd2;
+    parameter logic [2:0] MULTIPLY_ADD_CMP    = 3'd3;
+    parameter logic [2:0] MULTIPLY_ADD_ABS    = 3'd4;
+    parameter logic [2:0] LOGIC_MIN    = 3'd0;
+    parameter logic [2:0] LOGIC_MAX    = 3'd1;
+    parameter logic [2:0] LOGIC_SEL    = 3'd2;
+    parameter logic [2:0] LOGIC_ANDXOR = 3'd3;
 
-    function automatic logic is_register(input logic [ADDRESS_W-1:0] address);
-        is_register = address < csp_pkg::REGISTER_COUNT;
-    endfunction
+    // the flag a conditional tests (the word's cond field)
+    parameter logic [3:0] CONDITION_ALWAYS   = 4'd0;
+    parameter logic [3:0] CONDITION_NEGATIVE = 4'd1;
+    parameter logic [3:0] CONDITION_POSITIVE = 4'd2;
+    parameter logic [3:0] CONDITION_ZERO     = 4'd3;
+    parameter logic [3:0] CONDITION_NONZERO  = 4'd4;
+    parameter logic [3:0] CONDITION_OVERFLOW = 4'd5;
 
-    function automatic logic is_input(input logic [ADDRESS_W-1:0] address);
-        is_input = address >= csp_pkg::IO_BASE && address < csp_pkg::IO_BASE + csp_pkg::IO_COUNT;
-    endfunction
-
-    function automatic logic is_sink(input logic [ADDRESS_W-1:0] address);
-        is_sink = address >= csp_pkg::SINK_BASE && address < csp_pkg::SINK_BASE + csp_pkg::SINK_COUNT;
-    endfunction
+    parameter int ACCUMULATOR_W = 54;          // Q8.46
 
 endpackage

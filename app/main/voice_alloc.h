@@ -26,7 +26,7 @@ extern "C" {
 void voice_alloc_init(void);
 
 // Make *p the active patch, as a full set of CC edits would: every
-// instruction, DMEM word and sounding voice follows it. Runs in the
+// register, sink word and sounding voice follows it. Runs in the
 // allocator task, in order with MIDI; waits until it is applied. False
 // if the allocator does not answer.
 bool voice_alloc_set_patch(const patch_t *p);
@@ -38,6 +38,20 @@ bool voice_alloc_get_patch(patch_t *p);
 // banks.toml (banks.hpp). listener, if set, is called from the allocator
 // task with the patch's path after each Program Change that loads one.
 void voice_alloc_set_patch_listener(void (*listener)(const char *name));
+
+// Diagnostics (#238): a snapshot of the voice table for the console, so a
+// stuck note can be read live without a reboot. A best-effort read across the
+// allocator task; a torn field now and then is harmless for a diagnostic.
+#include <stdint.h>
+typedef struct {
+    uint8_t  state;     // 0 idle, 1 held, 2 releasing
+    uint8_t  note;      // MIDI note
+    uint8_t  vel;
+    uint8_t  sustained; // 1: key up, held by the sustain pedal
+    uint32_t alloc_seq; // allocation order
+} voice_diag_t;
+int voice_alloc_diag(voice_diag_t *out, int max); // fills out[0..n), returns n (the voice count)
+bool voice_alloc_sustain_pedal(void);             // the CC 64 state the firmware believes
 
 #ifdef __cplusplus
 }

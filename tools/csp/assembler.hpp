@@ -3,42 +3,49 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Turns CSP assembly (docs/csp_manual.md section 6) into instruction
-// words plus the constant registers the firmware writes at start-up,
-// and checks what the hardware cannot: loop nesting,
-// SKIP ranges, direct operands beyond reach and `.w` where an
-// instruction has no wide form.
+// Turns CSP assembly (docs/csp2_isa.md; the syntax below) into an image —
+// the instruction rows and the decode ROM — through csp::ProgramBuilder,
+// which schedules and checks. Names, blocks and labels are for
+// the reader; the chip sees rows.
+//
+//   label:  MNEMONIC operand, operand, ...   ; comment
+//
+//   operands   r37, 0x25        a register, direct (0–1023)
+//              NAME             a .reg, .wide or .const name
+//              [i+NAME], [i+3]  i plus an offset; [i] is offset 0
+//              =0.5, =#3        an immediate: a Q4.14 value, or a raw integer
+//   directives .equ NAME, value           a name for a number
+//              .reg NAME, address          a register
+//              .wide NAME, address         a wide register (even)
+//              .const NAME, value          a named immediate
+//              .block NAME … .field NAME, words … .end   a block's layout
+//              .org address                the next instruction's row
 
 #pragma once
 
-#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "csp/csp.hpp"
+#include "csp/program_builder.hpp"
+
 namespace csp {
 
 struct Diagnostic {
-    int line   = 0;
-    bool error = true; // false: a warning
+    int line;
+    bool error;
     std::string message;
 };
 
-// A constant register and its value, for the firmware to write once.
-struct ConstantWrite {
-    int address = 0;
-    int32_t raw = 0;
-};
-
 struct Program {
-    std::vector<uint64_t> words;   // the instructions, 36 bits each
-    std::vector<int> source_lines; // the source line of each word (0: padding)
-    std::vector<ConstantWrite> constants;
-    std::map<std::string, int> symbols; // every name and its value
+    Image image;
+    bool ok = false;
+    int cycles = 0;                          // the pass's cycles as scheduled
     std::vector<Diagnostic> diagnostics;
-
-    bool ok() const;
+    std::map<std::string, int> symbols;      // every name and its value
+    std::vector<int> source_lines;           // each row's source line, 0 for a wait
 };
 
 Program assemble(std::string_view source);

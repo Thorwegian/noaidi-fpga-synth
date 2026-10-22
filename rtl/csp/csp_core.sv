@@ -1,1042 +1,1051 @@
 //------------------------------------------------------------------------
-// csp_core.sv — the CSP: an in-order pipeline with interlocks
+// csp_core.sv — the CSP's scalar core: fetch, decode, address, read, execute, write
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The classic in-order pipeline (Hennessy & Patterson) with full
-// interlocks and no forwarding (#220). A program means what it means on a
-// linear machine: every instruction sees everything the one before it
-// did. There are no delay slots. When an instruction needs a value that
-// is still in the pipeline, it waits in decode until that value has been
-// written.
+// docs/csp2_architecture.md section 1 is the pipeline, docs/csp2_isa.md the
+// instruction set; tools/csp/processor.cpp is the model this is checked
+// against, cycle for cycle. A row presented to IMEM in cycle k is
 //
-//   D   decode: operand addresses from i and j, the hazard check; the
-//       register file's read addresses go in as the instruction issues
-//   R   the register file's outputs → operands in the accumulator's
-//       format; SKIP decides; the SHIFT count, and LOOP's body end and
-//       whether its count is 0, are prepared
-//   E1  INTERP's Y − A and ADD3's A + Y (55 bits); MIN, MAX, SEL, ANDXOR;
-//       the SHIFT barrel shift; LOOP and IDX are resolved here
-//   E2  saturate Y − A to 36 bits and A + Y to 54; the multiply-add
-//       unit's operands; the SHIFT result saturated
-//   E3  the multiply-add unit (MULTALU36X18): a × b + c
-//   E4  overflow of the 54-bit sum, saturation or wrap to the
-//       destination, the flags
-//   W   write the register file or a sink, the accumulator, the flags
+//   F   k      the program counter, IMEM's pin register, drives its address pins
+//   D1  k+1    IMEM's output register holds the row: captured, its op field into
+//              the ROM's address register (parked while held)
+//   D2  k+2    the ROM's address pins are driven from that register
+//   D3  k+3    the control word is out of the ROM's output register: captured
+//   A   k+4    the control word is in a register of ours: operand addresses are
+//              formed (the index's bits beside the offset's), loops are pushed and
+//              ended, the index registers stepped. This is the cycle the assembler
+//              calls the row's issue (csp_pkg::FIRST_ISSUE_CYCLE is the A cycle of
+//              the program's row 0)
+//   R1  +1     the read pins of DMEM's three copies are driven from registers
+//   R2  +2     the words are in the blocks' output registers, captured as they come
+//   E1  +3     the words picked (the odd or even half, or the immediate), the
+//              operands formatted into registers; MIN, MAX, SEL
+//              and ANDXOR need no arithmetic and are done in the stage after
+//   E1b +4     the arithmetic: ADD3's sum saturated, the
+//              multiply-add's operands formed into registers, the logic unit's
+//              result, the shifter's count; an IDX's index written — the sum
+//              registered one stage (index_sum_q), into the index registers and
+//              the element copies, so a flop drives the LUT-RAM pins (#238)
+//   E2  +5     the multiply-add's own input registers sample those operand registers
+//              (nothing between them: the logic before a block's pin is untimed)
+//   E3  +6     the multiply-add computes (the block's own output register holds it);
+//              the shifter's coarse stage
+//   E4  +7     the product is out of the block, captured; the shifter's fine stage
+//   E5  +8     the sum reduced to its destination, saturated or wrapped, and the
+//              flags written
+//   W   +9     the write pins of DMEM are driven from registers; the write lands
+//              at the edge after, so an instruction issued RESULT_LATENCY cycles
+//              later reads it
 //
-// Timing rules (the reference model, tools/csp, counts them exactly):
+// There is no interlock and no stall: the assembler places every row so that
+// what it reads has been written, and lays the IDX's four NOP rows itself.
+// The front end therefore has one rule of its own, the loop: a repeat is
+// decided in A and redirects the program counter, discarding the four rows in
+// flight behind the loop's last (csp_pkg::JUMP_PENALTY).
 //
-// - An instruction issues from D at most once per cycle.
-// - It waits while an older instruction in R … W will write a register it
-//   reads, the accumulator it reads (ACC), or the flags it reads (SEL,
-//   SKIP). The register file returns old data in the cycle of a write,
-//   so it issues the cycle after that instruction leaves W: an issue at
-//   cycle c lets a dependent instruction issue at c + 7 at the earliest.
-//   Skipped instructions are no-ops, but they wait and are waited for
-//   all the same: a skip is decided after decode.
-// - LOOP and IDX hold the front end until they are resolved in E1: the
-//   next instruction issues three cycles after them at the earliest.
-//   The loop records and i/j then hold their new values for decode.
+// A vector loop (docs/csp2_isa.md section 5) is the front end's other rule:
+// each body row is fetched once for every element of a round of sixteen, the
+// element's number riding down the pipeline with the row. The loop's row is
+// known at D2, from the op field captured at D1 (the decode ROM's rows
+// csp_pkg::OP_LOOP_VI and OP_LOOP_VJ are the vector loops' and nothing
+// else's), one cycle after the body's first row went out for element 0: the
+// row fetched in that cycle is killed, and the first row is fetched again
+// for the elements after — a loop costs one bubble to enter and nothing to
+// leave. In A the loop's own index is the element's (the base stepped by the
+// stride, by element), and the other index and the flags are the element's
+// private copies, sixteen of each, read through to the registers until the
+// element's own IDX or CMP has written them in this loop and round (a
+// generation rides with every instance: a copy from an earlier loop, or from
+// an earlier round's element of the same number, is not this element's, and
+// the reads and writes still in flight when the next loop begins keep their
+// own); the last element's land in the registers too, for the rows after the loop.
 //
-// Vector loops (LOOP.vi, LOOP.vj; docs/csp_manual.md): once LOOP has
-// resolved, decode issues the body instruction by instruction, each for
-// every element in turn. Element k has the loop's index register at
-// base + k × stride, its own copy of the other index register and its own
-// flags, in small arrays; what is in flight carries its run and element, so
-// the hazard check lets a flag reader wait for its own element only, and an
-// operand indexed by the element's index register wait for its IDX. The
-// loop ends three cycles after the last issue, as a LOOP's resolution does.
-//
-// The pass (1536 clocks, 48 kHz): the pass start writes the pass counter
-// to register 0x040 and fetches instruction 0. Instructions issue before
-// cycle 1472, so the pipeline has drained by cycle 1478. The window from
-// cycle 1480 then applies up to 48 committed firmware writes from the
-// write queue (docs/csp_isa.md section 2). A pass that starts while the
-// CSP is held runs no program, and its window applies every committed
-// write.
+// A row that is not a real row (the bubble of a redirect or of a vector
+// loop's entry, a cycle before the pass's rows) is `present` = 0 and not
+// `live`: it still ends a loop, and reads, but writes nothing and changes
+// no state.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_core (
-    input  wire                                 clk,
-    input  wire                                 reset_n,
-    input  wire                                 pass_start,      // one clock, every 1536
-    input  wire                                 held,            // CSP held in reset
+    input  wire                              clk,
+    input  wire                              reset_n,
+    input  wire                              pass_start,     // the last cycle before a pass
+    input  wire                              held,
+    input  wire [csp_pkg::CYCLE_W-1:0]       cycle,          // 0 in a pass's first cycle
 
-    // instruction memory (csp_instruction_memory)
-    output logic [csp_pkg::PROGRAM_W-1:0]       fetch_address,
-    input  wire  [35:0]                         fetch_data,
+    // F and D: IMEM and the decode ROM
+    output logic [csp_pkg::PROGRAM_W-1:0]    fetch_next,        // the program counter's next value: IMEM's slices register it
+    input  wire  [csp_pkg::ROW_W-1:0]        fetch_row,
+    output logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op,
+    input  wire  [csp_pkg::ROM_W-1:0]        control_word,
 
-    // write queue (csp_write_queue)
-    output logic                                queue_pop,
-    input  wire                                 queue_committed,
-    input  wire  [csp_pkg::REGISTER_W-1:0]      queue_address,
-    input  wire  [csp_pkg::WORD_W-1:0]          queue_data,
+    // R1 and R2: DMEM's three read copies — R (the result, as the A operand), X and Y. The pins are
+    // registers: each bank's row, the parked row when the bank is not read.
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_odd_index,
+    input  wire  [csp_pkg::WIDE_W-1:0]       read_r_pair,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_odd_index,
+    input  wire  [csp_pkg::WIDE_W-1:0]       read_x_pair,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_even_index,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_odd_index,
+    input  wire  [csp_pkg::WIDE_W-1:0]       read_y_pair,
 
-    // the sink area's shadow page
-    output logic                                sink_write_enable,
-    output logic [9:0]                          sink_write_address,
-    output logic [csp_pkg::WORD_W-1:0]          sink_write_data,
-    output logic                                pass_done        // one clock: flip the sink pages
+    // the probe's read, through the R copy while the core is idle: asked a cycle ahead of the pins
+    input  wire                              probe_request,
+    input  wire  [csp_pkg::BANK_INDEX_W-1:0] probe_index,
+
+    // W: DMEM's write pins, registers too and decoded: a bank's enable, one row, a word for each bank
+    output logic                             write_even_enable,
+    output logic                             write_odd_enable,
+    output logic [csp_pkg::BANK_INDEX_W-1:0] write_index,
+    output logic [csp_pkg::WORD_W-1:0]       write_even_data,
+    output logic [csp_pkg::WORD_W-1:0]       write_odd_data,
+    // the pass's own writes (the firmware's window, the pass counter), taken at the same registers
+    // when the core is idle
+    input  wire                              extra_write_enable,
+    input  wire  [csp_pkg::ADDRESS_W-1:0]    extra_write_address,   // a register, or a sink word
+    input  wire  [csp_pkg::WORD_W-1:0]       extra_write_word,
+
+    // the sink area
+    output logic                             sink_write_enable,
+    output logic                             sink_write_both,    // the pass's word (the firmware's): both pages
+    output logic [csp_pkg::SINK_WORD_W-1:0]  sink_write_address,
+    output logic [csp_pkg::WORD_W-1:0]       sink_write_data
 );
 
-    // ---- constants --------------------------------------------------------------------
-    localparam int RUN_END    = 1472;                          // instructions issue before this
-    localparam int DRAIN_END  = RUN_END + 8;
-    localparam int WINDOW_END = DRAIN_END + csp_pkg::WRITE_WINDOW;
-    localparam int PC_W       = csp_pkg::PROGRAM_W;
-    localparam int AW         = csp_pkg::ADDRESS_W;
+    localparam int PC_W = csp_pkg::PROGRAM_W;
+    localparam int AW   = csp_pkg::REGISTER_W;
+    localparam int WORD = csp_pkg::WORD_W;
 
-    localparam logic signed [53:0] ACC_MAX  = {1'b0, {53{1'b1}}};
-    localparam logic signed [53:0] ACC_MIN  = {1'b1, {53{1'b0}}};
-    localparam logic signed [35:0] ONE_Q432 = 36'sd1 <<< 32;      // 1.0 in Q4.32
+    localparam logic signed [53:0] ACCUMULATOR_MAX = {1'b0, {53{1'b1}}};
+    localparam logic signed [53:0] ACCUMULATOR_MIN = {1'b1, {53{1'b0}}};
+    localparam logic signed [35:0] ONE_Q432        = 36'sd1 <<< 32;          // 1.0 in Q4.32
 
-    // ---- helpers ------------------------------------------------------------------------
-    function automatic logic uses_a(input logic [3:0] op, input logic [1:0] a);
-        uses_a = (a == csp_pkg::A_RESULT || a == csp_pkg::A_WIDE)
-                 && (op == csp_pkg::OP_MAC || op == csp_pkg::OP_MACW || op == csp_pkg::OP_INTERP
-                     || op == csp_pkg::OP_ADD3 || op == csp_pkg::OP_ANDXOR || op == csp_pkg::OP_SHIFT);
-    endfunction
-
-    function automatic logic uses_x(input logic [3:0] op);
-        uses_x = !(op == csp_pkg::OP_NOP || op == csp_pkg::OP_SKIP || op == csp_pkg::OP_SHIFT);
-    endfunction
-
-    function automatic logic uses_y(input logic [3:0] op);
-        uses_y = !(op == csp_pkg::OP_NOP || op == csp_pkg::OP_SKIP || op == csp_pkg::OP_ABS);
-    endfunction
-
-    // Whether an instruction reads the accumulator through its a field.
-    function automatic logic uses_accumulator(input logic [3:0] op, input logic [1:0] a);
-        uses_accumulator = a == csp_pkg::A_ACCUMULATOR
-                && (op == csp_pkg::OP_MAC || op == csp_pkg::OP_MACW || op == csp_pkg::OP_INTERP
-                    || op == csp_pkg::OP_ACC || op == csp_pkg::OP_ADD3 || op == csp_pkg::OP_ANDXOR
-                    || op == csp_pkg::OP_SHIFT);
-    endfunction
-
-    // Whether an instruction writes its R operand.
-    function automatic logic writes_result(input logic [3:0] op);
-        writes_result = !(op == csp_pkg::OP_NOP || op == csp_pkg::OP_LOOP || op == csp_pkg::OP_ACC
-                          || op == csp_pkg::OP_SKIP || op == csp_pkg::OP_IDX);
-    endfunction
-
-    // Whether a wide instruction reads Y as a pair (SHIFT.w's count is a word).
-    function automatic logic wide_y(input logic [3:0] op, input logic [1:0] a);
-        wide_y = a == csp_pkg::A_WIDE && csp_pkg::has_wide_form(op) && op != csp_pkg::OP_SHIFT;
-    endfunction
-
-    // Whether an access names registers: inside the file, a pair at an
-    // even address.
-    function automatic logic in_registers(input logic [AW-1:0] address, input logic wide);
-        in_registers = address < csp_pkg::REGISTER_COUNT && !(wide && address[0]);
-    endfunction
-
-    // The registers an access touches within its even/odd pair: bit 1 the
-    // even register, bit 0 the odd one.
-    function automatic logic [1:0] pair_mask(input logic [AW-1:0] address, input logic wide);
-        pair_mask = wide ? 2'b11 : (address[0] ? 2'b01 : 2'b10);
-    endfunction
-
+    // ---- helpers ----------------------------------------------------------------
     function automatic logic signed [53:0] word_to_accumulator(input logic [17:0] word);
-        word_to_accumulator = 54'($signed(word)) <<< 32;
+        word_to_accumulator = {{4{word[17]}}, word, 32'd0};            // Q4.14 into Q8.46
     endfunction
 
     function automatic logic signed [53:0] wide_to_accumulator(input logic [35:0] wide);
-        wide_to_accumulator = 54'($signed(wide)) <<< 14;
+        wide_to_accumulator = {{4{wide[35]}}, wide, 14'd0};            // Q4.32 into Q8.46
     endfunction
 
-    // ---- the pass ---------------------------------------------------------------------------
-    logic [10:0] pass_cycle;
-    logic        pass_held;          // held when this pass started: no program
-    logic [17:0] pass_count;
-    logic        in_pass;
-    logic        run_open;           // instructions may issue: pass_cycle < RUN_END
+    // an operand's address: direct, or an index register's bits beside the offset's
+    function automatic logic [11:0] operand_address(input logic [11:0] operand, input logic [11:0] i, input logic [11:0] j);
+        case (operand[11:10])
+            csp_pkg::MODE_I:      operand_address = i | {2'b00, operand[9:0]};
+            csp_pkg::MODE_J:      operand_address = j | {2'b00, operand[9:0]};
+            csp_pkg::MODE_DIRECT: operand_address = {2'b00, operand[9:0]};
+            default:              operand_address = 12'd0;
+        endcase
+    endfunction
+
+    function automatic logic condition_holds(input logic [3:0] condition, input logic negative, input logic zero, input logic overflow);
+        case (condition)
+            csp_pkg::CONDITION_ALWAYS:   condition_holds = 1'b1;
+            csp_pkg::CONDITION_NEGATIVE: condition_holds = negative;
+            csp_pkg::CONDITION_POSITIVE: condition_holds = !negative;
+            csp_pkg::CONDITION_ZERO:     condition_holds = zero;
+            csp_pkg::CONDITION_NONZERO:  condition_holds = !zero;
+            csp_pkg::CONDITION_OVERFLOW: condition_holds = overflow;
+            default:                     condition_holds = 1'b0;
+        endcase
+    endfunction
+
+    // ---- architectural state ----------------------------------------------------
+    logic [11:0]        index_i, index_j;
+    logic               flag_negative, flag_zero, flag_overflow;
+
+    // ---- the vector loop's state in A and the elements' private copies ----------------------
+    logic               va_own_is_j;                       // the loop steps j; i is the other index
+    logic [11:0]        va_stride;
+    logic [11:0]        va_round_base;                     // the own index of the round's element 0
+    logic [11:0]        va_element_index;                  // the own index of the instance in A
+    logic [11:0]        va_after;                          // the own index after the loop: the base stepped once an element
+    logic [PC_W-1:0]    va_last;                           // the body's last row
+    // the other index and the flags, an element's own once its IDX or CMP has written them; until
+    // then the registers' (which an IDX or CMP from before the loop may still be writing)
+    // LUT-RAM cells (RAM16SDP4), whose data pins take the IDX's sum from a register (index_sum_q,
+    // written in E1b) and no longer straight from the adder: the adder's path now ends at a flop
+    // the tool times, and only the trivial flop->DI net stays untimed (the pin audit, #238; the
+    // board's clock sweep found the old adder->DI route the Fmax limiter). The register costs the
+    // IDX one cycle — index_latency 4->5 — which the assembler lays as a fourth wait row.
+    logic [11:0]        other_copy [16];
+    logic [3:0]         other_generation [16];
+    logic [15:0]        other_valid;
+    logic [15:0]        copy_negative, copy_zero, copy_overflow, copy_valid;
+    logic [3:0]         copy_generation [16];
+
+    // ---- loop contexts: one for each index register, the later pushed the inner ------
+    logic               loop_active_i, loop_active_j;
+    logic [PC_W-1:0]    loop_start_i, loop_start_j;       // the first body row
+    logic [PC_W-1:0]    loop_last_i,  loop_last_j;        // the last body row
+    logic [9:0]         loop_remaining_i, loop_remaining_j;
+    logic [11:0]        loop_stride_i, loop_stride_j;
+    logic               loop_inner_is_j;
+
+    // ---- the front end ------------------------------------------------------------
+    logic               running;                           // this pass runs the program
+    logic [PC_W-1:0]    pc, decode_pc, rom_pc, capture_pc, a_pc;
+    logic               decode_valid, rom_valid, capture_valid, a_present, a_live;
+    logic [csp_pkg::ROW_W-1:0] rom_row, capture_row, a_row;
+    logic [csp_pkg::ROM_W-1:0] a_control;           // the control word, captured out of the ROM
+    logic               redirect;
+    logic [PC_W-1:0]    redirect_target;
+
+    // ---- the vector loop in the front end: each body row fetched once an element of the round ----
+    localparam int ELEMENT_W = 4;                          // a round: sixteen elements
+    localparam int ROUND     = 1 << ELEMENT_W;
+    logic               v_fetching;                        // the fetch is inside a vector body
+    logic [PC_W-1:0]    v_start, v_last;                   // the body's first and last row
+    logic [ELEMENT_W-1:0] v_element;                       // the element the next fetch is for
+    logic [ELEMENT_W-1:0] v_round_last;                    // the round's last element, 0 … 15
+    logic [9:0]         v_left;                            // elements in the rounds after this one
+    logic               v_left_zero;                       //   none: this round is the last
+    logic [PC_W-1:0]    rom_next_pc;                       // the row after the one at D2: the body's first at a detection
+    // the generation: one more for every loop and every round, with every instance down the
+    // pipeline; an element's private copy of the other index or the flags is its own only when
+    // its generation matches, so a copy written by an earlier loop (or round, whose element k
+    // is another element) reads through to the registers, and the reads and writes still in
+    // flight when the next loop begins keep their own generation
+    localparam int GENERATION_W = 4;
+    logic [GENERATION_W-1:0] v_generation;
+    // the row's tags, with it down the pipeline: a vector instance, its element, the element the
+    // last of its round (A resets the own index for the next row), the last element of the last
+    // round (the loop ends with its last row; its IDX and CMP land in the registers)
+    logic [ELEMENT_W-1:0] decode_element, rom_element, capture_element, a_element;
+    logic [GENERATION_W-1:0] decode_generation, rom_generation, capture_generation, a_generation;
+    logic               decode_vector, rom_vector, capture_vector, a_vector;
+    logic               decode_rowlast, rom_rowlast, capture_rowlast, a_rowlast;
+    logic               decode_final, rom_final, capture_final, a_final;
+
+    // running is the hold as sampled at the pass start: a pass that started runs its rows to the
+    // end whatever the hold does meanwhile, so that a pass is atomic and a frozen chip's registers
+    // are a whole number of passes (the chip check, tools/lab/chip_check.py)
+    wire fetch_valid = running && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
+
+    // IMEM's address pins have a register of their own in every slice, loaded with what the
+    // program counter loads: the next value goes out (csp_imem.sv)
+    assign fetch_next = pc_next;
+
+    wire arrive = capture_valid && !redirect;              // a real row enters A next cycle
+
+    // The vector loop's row at D2: its op field, captured at D1, is one of the two rows the ROM
+    // keeps for vector loops. The fetch now in flight is the body's second row for element 0,
+    // one too early: killed. The body's first row went out the cycle before, for element 0.
+    // The decision is compares and muxes on registered values: the row's numbers as the assembler
+    // laid them (the body's last row in imm, the count's first round from its high bits, the row
+    // after this one registered at D1), the round's last element kept instead of its size, and the
+    // scalar loops' repeat out of its head — a repeat has its priority at the program counter's mux
+    // and keeps the state from the row it kills (#238: this path was the chip's longest, 11 levels).
+    wire        v_detect_row   = rom_valid
+                                 && (rom_row[71:64] == csp_pkg::OP_LOOP_VI || rom_row[71:64] == csp_pkg::OP_LOOP_VJ);
+    wire        v_detect       = v_detect_row && !redirect; // the row stands
+    wire [9:0]  v_count        = rom_row[45:36];           // the loop's count, x's ten bits
+    wire        v_count_beyond_round = (|v_count[9:ELEMENT_W+1]) || (v_count[ELEMENT_W] && |v_count[ELEMENT_W-1:0]);  // > 16
+    wire [ELEMENT_W-1:0] v_first_round_last = v_count_beyond_round ? ELEMENT_W'(ROUND - 1)
+                                                                   : ELEMENT_W'(v_count[ELEMENT_W-1:0] - 1'b1);  // 16 → 15
+    wire [9:0]  v_first_left   = v_count_beyond_round ? v_count - 10'(ROUND) : '0;   // the elements after the first round
+    // this cycle's fetch as a vector instance — the registers' row and element, or at the detection
+    // the body's first row for element 0, which the cycle before fetched (the killed fetch stands
+    // in for it here, so that the next fetch follows the same rule as any other)
+    wire        v_now          = v_fetching || v_detect_row;
+    wire [ELEMENT_W-1:0] v_element_now    = v_detect_row ? '0 : v_element;
+    wire [ELEMENT_W-1:0] v_round_last_now = v_detect_row ? v_first_round_last : v_round_last;
+    wire [9:0]  v_left_now     = v_detect_row ? v_first_left : v_left;
+    wire        v_left_now_zero = v_detect_row ? !v_count_beyond_round : v_left_zero;
+    wire [PC_W-1:0] v_start_now = v_detect_row ? rom_next_pc : v_start;
+    wire [PC_W-1:0] v_last_now  = v_detect_row ? rom_row[PC_W-1:0] : v_last;
+    wire [PC_W-1:0] v_row_now   = v_detect_row ? rom_next_pc : pc;
+    wire        v_last_element = v_element_now == v_round_last_now;
+    wire        v_last_row     = v_row_now == v_last_now;
+    wire        v_round_done   = v_now && v_last_element && v_last_row;
+    wire        v_done         = v_round_done && v_left_now_zero;
+    wire [ELEMENT_W:0] v_next_round = v_left_now > 10'(ROUND) ? (ELEMENT_W + 1)'(ROUND) : v_left_now[ELEMENT_W:0];
+
+    // the next program counter: a pass that starts held parks IMEM's fetch on the row the load
+    // writes first and stays parked until a pass starts running; a repeat first, then the vector
+    // loop's next instance, round or row
+    wire [PC_W-1:0] pc_next = pass_start ? (held ? csp_pkg::PROGRAM_PARK_ROW : '0)
+                            : !running ? csp_pkg::PROGRAM_PARK_ROW
+                            : redirect ? redirect_target
+                            : (v_now && !v_last_element) ? v_row_now            // the same row, the next element
+                            : (v_round_done && !v_left_now_zero) ? v_start_now  // the next round
+                            : v_now ? v_row_now + 1'b1                          // the next row, or past the body
+                            : pc + 1'b1;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            pass_cycle <= '0;
-            pass_held  <= 1'b1;
-            pass_count <= '0;
-            in_pass    <= 1'b0;
-            run_open   <= 1'b0;
-        end else if (pass_start) begin
-            pass_cycle <= '0;
-            pass_held  <= held;
-            pass_count <= pass_count + 1'b1;
-            in_pass    <= 1'b1;
-            run_open   <= !held;
-        end else if (in_pass) begin
-            if (pass_cycle == 11'(RUN_END - 1)) begin
-                run_open <= 1'b0;
-            end
-            if (pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1)) begin
-                in_pass <= 1'b0;
-            end else begin
-                pass_cycle <= pass_cycle + 1'b1;
-            end
-        end
-    end
-
-    wire window_open = in_pass && (pass_held ? pass_cycle >= 11'd1
-                                             : (pass_cycle >= 11'(DRAIN_END)
-                                                && pass_cycle < 11'(WINDOW_END)));
-    assign pass_done = in_pass && pass_cycle == 11'(csp_pkg::CYCLES_PER_PASS - 1);
-
-    // ---- architectural state -------------------------------------------------------------
-    logic [AW-1:0]      index_i, index_j;
-    logic signed [53:0] accumulator;
-    logic               flag_negative, flag_zero, flag_overflow;
-    logic [9:0]         skip_remaining;
-
-    // The loop records: the outer one, and an inner one inside it. A
-    // record holds its body [start, end), how many passes remain, and
-    // which index register to step by how much.
-    typedef struct packed {
-        logic              active;
-        logic              on_j;
-        logic [PC_W-1:0]   start, last_pc;  // first and last body instruction
-        logic [17:0]       remaining;       // passes still to start, this one included
-        logic [AW-1:0]     stride;
-    } loop_t;
-    loop_t loop_outer, loop_inner;
-
-    // ---- vector loops ----------------------------------------------------------------------
-    // LOOP.vi issues its body instruction by instruction, each for every
-    // element in turn (docs/csp_manual.md, LOOP). Element k has the loop's
-    // index register at base + k × stride, a private copy of the other index
-    // register, and private flags. The elements' private values live in
-    // small arrays. The body runs instruction by instruction across the
-    // elements, so an element has written its private register (or its
-    // flags) exactly when an earlier body instruction that writes it has
-    // finished issuing for every element; until then every element sees the
-    // values the loop was entered with (private_written, flags_written).
-    // Everything issued
-    // in a vector loop carries its run (alternating, so the hazard check can
-    // tell this loop's instructions from an earlier loop's) and its element.
-    localparam int MAX_ELEMENTS = csp_pkg::MAX_VECTOR_LENGTH;
-
-    logic            vector_issuing;       // the body is being issued
-    logic [1:0]      vector_finish;        // cycles to the loop's end, after the last issue
-    logic            vector_run;
-    logic            vector_on_j;          // the loop steps j; the private register is i
-    logic [csp_pkg::PROGRAM_W-1:0] vector_end, vector_last_pc;   // one past the body, its last instruction
-    logic [6:0]      vector_count;
-    logic [5:0]      vector_element;       // the element decode is issuing
-    logic [5:0]      vector_last_element_number;   // count − 1
-    logic [csp_pkg::ADDRESS_W-1:0] last_private;   // the last element's private register
-    logic [csp_pkg::ADDRESS_W-1:0] vector_stride, vector_own;   // own: this element's index
-
-    logic [csp_pkg::ADDRESS_W-1:0] private_value [MAX_ELEMENTS];
-    logic [2:0]                    element_flags [MAX_ELEMENTS];   // {overflow, zero, negative}
-    logic                          private_written;
-    logic                          flags_written;
-
-    // ---- the pipeline's control: what each stage holds ---------------------------------------
-    // What a hazard check and the write-back need, decided in decode. The
-    // write flags are static (skip is decided later): a skipped
-    // instruction is waited for like any other.
-    typedef struct packed {
-        logic                  valid;               // an instruction, not a bubble
-        logic                  live;                // not skipped (decided in R)
-        csp_pkg::instruction_t instruction;
-        logic [PC_W-1:0]       pc;
-        logic [AW-1:0]         r_address;
-        logic                  r_wide;              // the result is a wide pair
-        logic                  writes_registers;
-        logic                  writes_sink;
-        logic                  writes_accumulator;
-        logic                  sets_flags;
-        logic                  vector;              // issued inside a vector loop
-        logic                  run;                 // which vector loop (alternates)
-        logic [5:0]            element;             // its element
-        logic                  entry_flags;         // vector: the flags are the loop's entry flags
-    } control_t;
-
-    control_t read_stage, execute1_stage, execute2_stage, execute3_stage, execute4_stage,
-              writeback_stage;
-
-    // ---- register file ---------------------------------------------------------------------
-    logic [2:0][csp_pkg::REGISTER_W-1:0] read_address;
-    logic [2:0]                          read_wide;
-    logic [2:0][35:0]                    read_data;
-    logic                                rf_write_enable;
-    logic [csp_pkg::REGISTER_W-1:0]      rf_write_address;
-    logic                                rf_write_wide;
-    logic [35:0]                         rf_write_data;
-
-    csp_register_file u_register_file (
-        .clk           (clk),
-        .read_address  (read_address),
-        .read_wide     (read_wide),
-        .read_data     (read_data),
-        .write_enable  (rf_write_enable),
-        .write_address (rf_write_address),
-        .write_wide    (rf_write_wide),
-        .write_data    (rf_write_data)
-    );
-
-    // ---- D: decode -----------------------------------------------------------------------------
-    // The instruction at decode_pc is on the instruction memory's output
-    // while decode_valid. Without an issue the fetch address stays on
-    // decode_pc, so it stays there.
-    logic            decode_valid;
-    logic [PC_W-1:0] decode_pc;
-
-    csp_pkg::instruction_t decoded;
-    assign decoded = csp_pkg::instruction_t'(fetch_data);
-
-    // The index registers decode sees: in a vector loop, the element's.
-    wire [AW-1:0] entry_private   = vector_on_j ? index_i : index_j;
-    wire [AW-1:0] private_current = private_written ? private_value[vector_element]
-                                                    : entry_private;
-    wire [AW-1:0] decode_index_i  = vector_issuing ? (vector_on_j ? private_current : vector_own)
-                                                   : index_i;
-    wire [AW-1:0] decode_index_j  = vector_issuing ? (vector_on_j ? vector_own : private_current)
-                                                   : index_j;
-
-    wire [3:0] decoded_op = decoded.op;
-    wire [AW-1:0] decode_r_address = csp_pkg::operand_address(decoded.r, decode_index_i, decode_index_j);
-    wire [AW-1:0] decode_x_address = csp_pkg::operand_address(decoded.x, decode_index_i, decode_index_j);
-    wire [AW-1:0] decode_y_address = csp_pkg::operand_address(decoded.y, decode_index_i, decode_index_j);
-    wire          decode_a_wide    = decoded.a == csp_pkg::A_WIDE;
-    wire          decode_y_wide    = wide_y(decoded_op, decoded.a);
-    wire          decode_r_wide    = decode_a_wide && csp_pkg::has_wide_form(decoded_op);
-
-    // The register file reads, as issued.
-    wire reads_a = uses_a(decoded_op, decoded.a) && in_registers(decode_r_address, decode_a_wide);
-    wire reads_x = uses_x(decoded_op) && in_registers(decode_x_address, 1'b0);
-    wire reads_y = uses_y(decoded_op) && in_registers(decode_y_address, decode_y_wide);
-    wire reads_accumulator = uses_accumulator(decoded_op, decoded.a);
-    wire reads_flags = decoded_op == csp_pkg::OP_SEL || decoded_op == csp_pkg::OP_SKIP;
-    // LOOP and IDX hold the front end, except an IDX in a vector loop, which
-    // only holds its own element's private index register.
-    wire is_barrier  = decoded_op == csp_pkg::OP_LOOP || (decoded_op == csp_pkg::OP_IDX && !vector_issuing);
-
-    always_comb begin
-        read_address[0] = csp_pkg::REGISTER_W'(decode_r_address);
-        read_wide[0]    = decode_a_wide;
-        read_address[1] = csp_pkg::REGISTER_W'(decode_x_address);
-        read_wide[1]    = 1'b0;
-        read_address[2] = csp_pkg::REGISTER_W'(decode_y_address);
-        read_wide[2]    = decode_y_wide;
-    end
-
-    // The hazard check: an older instruction in R … W writes something
-    // this one reads.
-    control_t [5:0] in_flight;
-    assign in_flight = {read_stage, execute1_stage, execute2_stage, execute3_stage,
-                        execute4_stage, writeback_stage};
-
-    logic hazard;
-    always_comb begin
-        logic [1:0] written;
-        hazard = 1'b0;
-        for (int stage = 0; stage < 6; stage++) begin
-            written = pair_mask(in_flight[stage].r_address, in_flight[stage].r_wide);
-            if (in_flight[stage].valid) begin
-                if (in_flight[stage].writes_registers) begin
-                    if (reads_a && in_flight[stage].r_address[AW-1:1] == decode_r_address[AW-1:1]
-                            && (written & pair_mask(decode_r_address, decode_a_wide)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                    if (reads_x && in_flight[stage].r_address[AW-1:1] == decode_x_address[AW-1:1]
-                            && (written & pair_mask(decode_x_address, 1'b0)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                    if (reads_y && in_flight[stage].r_address[AW-1:1] == decode_y_address[AW-1:1]
-                            && (written & pair_mask(decode_y_address, decode_y_wide)) != 2'b00) begin
-                        hazard = 1'b1;
-                    end
-                end
-                if (in_flight[stage].writes_accumulator && reads_accumulator) hazard = 1'b1;
-                // A flag reader in a vector loop waits for its own element's
-                // flag setter, and for any that is not of this loop.
-                if (in_flight[stage].sets_flags && reads_flags
-                        && (!vector_issuing || !in_flight[stage].vector
-                            || in_flight[stage].run != vector_run
-                            || in_flight[stage].element == vector_element)) begin
-                    hazard = 1'b1;
-                end
-            end
-        end
-    end
-
-    // An operand indexed by the element's private index register waits while
-    // that element's IDX is in R or E1: the register is written at the end
-    // of E1, three cycles after the IDX issues.
-    wire private_used = vector_issuing
-            && (((uses_a(decoded_op, decoded.a) || writes_result(decoded_op))
-                 && decoded.r[9] && decoded.r[8] == !vector_on_j)
-                || (uses_x(decoded_op) && decoded.x[9] && decoded.x[8] == !vector_on_j)
-                || (uses_y(decoded_op) && decoded.y[9] && decoded.y[8] == !vector_on_j));
-    wire private_pending =
-            (read_stage.valid && read_stage.vector && read_stage.run == vector_run
-             && read_stage.element == vector_element && read_stage.instruction.op == csp_pkg::OP_IDX)
-            || (execute1_stage.valid && execute1_stage.vector && execute1_stage.run == vector_run
-                && execute1_stage.element == vector_element
-                && execute1_stage.instruction.op == csp_pkg::OP_IDX);
-
-    wire issue = decode_valid && run_open && !hazard && !(private_used && private_pending);
-
-    control_t issued;
-    always_comb begin
-        issued.valid              = 1'b1;
-        issued.live               = 1'b1;
-        issued.instruction        = decoded;
-        issued.pc                 = decode_pc;
-        issued.r_address          = decode_r_address;
-        issued.r_wide             = decode_r_wide;
-        issued.writes_registers   = writes_result(decoded_op)
-                                    && in_registers(decode_r_address, decode_r_wide)
-                                    && decode_r_address != '0
-                                    && !csp_pkg::is_input(decode_r_address);
-        issued.writes_sink        = writes_result(decoded_op) && !decode_r_wide
-                                    && csp_pkg::is_sink(decode_r_address);
-        issued.writes_accumulator = decoded_op == csp_pkg::OP_ACC;
-        issued.sets_flags         = writes_result(decoded_op) && decoded_op != csp_pkg::OP_SEL;
-        issued.vector             = vector_issuing;
-        issued.run                = vector_run;
-        issued.element            = vector_element;
-        issued.entry_flags        = !flags_written;
-    end
-
-    // ---- R: operands ---------------------------------------------------------------------------
-    logic read_reads_a, read_reads_x, read_reads_y, read_y_wide;   // as issued
-
-    wire [3:0]  read_op       = read_stage.instruction.op;
-    wire        read_live     = read_stage.valid && skip_remaining == '0;
-    wire [35:0] a_operand     = read_reads_a ? read_data[0] : '0;
-    wire [17:0] x_operand     = read_reads_x ? read_data[1][17:0] : '0;
-    wire [35:0] y_operand     = read_reads_y ? read_data[2] : '0;
-
-    // A in the accumulator's format, from the a field; Y likewise.
-    logic signed [53:0] a_value, y_value;
-    always_comb begin
-        case (read_stage.instruction.a)
-            csp_pkg::A_RESULT:      a_value = word_to_accumulator(a_operand[17:0]);
-            csp_pkg::A_ACCUMULATOR: a_value = accumulator;
-            csp_pkg::A_WIDE:        a_value = wide_to_accumulator(a_operand);
-            default:                a_value = '0;
-        endcase
-        y_value = read_y_wide ? wide_to_accumulator(y_operand) : word_to_accumulator(y_operand[17:0]);
-    end
-
-    // What R hands to E1: the instruction, now known to be skipped or not.
-    control_t read_leaving;
-    always_comb begin
-        read_leaving      = read_stage;
-        read_leaving.live = read_live;
-    end
-
-    // SKIP.
-    wire [2:0] condition = read_stage.instruction.x[2:0];
-    wire skip_taken = read_live && read_op == csp_pkg::OP_SKIP && (
-            (condition == csp_pkg::COND_ALWAYS)
-         || (condition == csp_pkg::COND_NEGATIVE && flag_negative)
-         || (condition == csp_pkg::COND_POSITIVE && !flag_negative)
-         || (condition == csp_pkg::COND_ZERO && flag_zero)
-         || (condition == csp_pkg::COND_NONZERO && !flag_zero)
-         || (condition == csp_pkg::COND_OVERFLOW && flag_overflow));
-
-    // SHIFT: the shift relative to the destination's format, count − 32
-    // for a word and count − 14 for a wide value, the count clamped to ±63.
-    wire signed [17:0] shift_count = y_operand[17:0];
-    wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63
-                                     : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
-    wire signed [18:0] shift_total = 19'(shift_clamped) - (read_stage.r_wide ? 19'sd14 : 19'sd32);
-
-    // ---- E1 ------------------------------------------------------------------------------------
-    logic signed [53:0] e1_a_value, e1_y_value;
-    logic signed [17:0] e1_x_word, e1_y_word;
-    logic [35:0]        e1_y_operand;
-    logic               e1_y_wide;
-    logic signed [18:0] e1_shift_total;
-    logic [PC_W-1:0]    e1_body_end;        // LOOP: one past its body
-    logic [PC_W-1:0]    e1_body_last;       // LOOP: its last instruction
-    logic [PC_W-1:0]    e1_pc_plus_one;     // the pc after this instruction
-    logic               e1_skips_body;      // LOOP: a count of 0, or a vector loop over too many
-
-    wire [3:0] e1_op = execute1_stage.instruction.op;
-
-    // SEL's flags: in a vector loop an element's own, once the loop has
-    // written any, else the flags the loop was entered with, which no vector
-    // instruction has yet changed.
-    wire select_negative = (execute1_stage.vector && !execute1_stage.entry_flags)
-                           ? element_flags[execute1_stage.element][0] : flag_negative;
-
-    // INTERP: Y − A in Q4.32 (saturated in E2, decision 3a). ADD3: A + Y.
-    wire signed [54:0] difference_full = 55'(e1_y_value) - 55'(e1_a_value);
-    wire signed [54:0] sum_full        = 55'(e1_a_value) + 55'(e1_y_value);
-
-    // MIN, MAX, SEL, ANDXOR: one word, no overflow.
-    logic [17:0] logic_result;
-    always_comb begin
-        logic [17:0] a_bits;
-        logic signed [21:0] a_upper;
-        a_upper = 22'(e1_a_value >>> 32);
-        a_bits = execute1_stage.instruction.a == csp_pkg::A_ZERO ? 18'd0
-                 : (a_upper > 22'sd131071 ? 18'h1ffff
-                    : (a_upper < -22'sd131072 ? 18'h20000 : a_upper[17:0]));
-        case (e1_op)
-            csp_pkg::OP_MIN: logic_result = e1_x_word < e1_y_word ? e1_x_word : e1_y_word;
-            csp_pkg::OP_MAX: logic_result = e1_x_word > e1_y_word ? e1_x_word : e1_y_word;
-            csp_pkg::OP_SEL: logic_result = select_negative ? e1_y_word : e1_x_word;
-            default:         logic_result = (e1_x_word & e1_y_word) ^ a_bits;     // ANDXOR
-        endcase
-    end
-
-    // SHIFT: the barrel shift. Past 36 bits left, any nonzero value
-    // saturates (E2).
-    logic signed [89:0] shifted;
-    logic               shift_forced;
-    always_comb begin
-        if (e1_shift_total >= 0) begin
-            shifted = 90'(e1_a_value) <<< (e1_shift_total > 19'sd36 ? 36 : int'(e1_shift_total));
+            running        <= 1'b0;
+            pc             <= '0;
+            decode_valid   <= 1'b0;
+            rom_valid      <= 1'b0;
+            capture_valid  <= 1'b0;
+            a_present      <= 1'b0;
+            a_live         <= 1'b0;
+            v_fetching     <= 1'b0;
+            v_generation   <= '0;
         end else begin
-            shifted = 90'(e1_a_value) >>> (-e1_shift_total > 19'sd54 ? 54 : int'(-e1_shift_total));
+            if (pass_start) running <= !held;
+            pc <= pc_next;
+            // a row is in flight for four cycles between the program counter and A: a repeat
+            // discards the four behind the loop's last; a vector loop's detection kills the one row
+            decode_valid  <= fetch_valid && !redirect && !pass_start && !v_detect_row;
+            rom_valid     <= decode_valid && !redirect;
+            capture_valid <= rom_valid && !redirect;
+            a_present     <= arrive;
+            a_live        <= arrive;
+            // the vector fetch
+            if (pass_start || redirect || v_done) v_fetching <= 1'b0;
+            else if (v_detect)                     v_fetching <= 1'b1;
+            if (v_detect || (v_round_done && !v_left_now_zero && !redirect)) v_generation <= v_generation + 1'b1;
+            if (v_now) begin   // a detection a repeat kills loads what the next detection overwrites
+                v_element    <= v_last_element ? '0 : v_element_now + 1'b1;
+                v_round_last <= v_round_done ? ELEMENT_W'(v_next_round - 1'b1) : v_round_last_now;
+                v_left       <= v_round_done ? v_left_now - 10'(v_next_round) : v_left_now;
+                v_left_zero  <= v_round_done ? v_left_now == 10'(v_next_round) : v_left_now_zero;
+                v_start      <= v_start_now;
+                v_last       <= v_last_now;
+            end
         end
-        shift_forced = e1_shift_total > 19'sd36 && e1_a_value != 0;
     end
 
-    // ---- E1: LOOP and IDX resolve; the front end's next pc ----------------------------------------
-    // Decode asks for the pc after the instruction it issues; a LOOP or IDX
-    // in E1 asks for the pc after itself. A LOOP that runs opens its loop,
-    // or skips its body for a count of 0. Then, as tools/csp's model does,
-    // the loops whose end is the next pc step their index register and
-    // repeat or close: the inner one first, the outer one if the inner did
-    // not repeat (a skipped body may land on the outer loop's end).
-    //
-    // A vector loop is sequenced by the issue of its body (below); its end
-    // comes three cycles after the last issue, as a LOOP's resolution does:
-    // the loop's index register has stepped count × stride, the private
-    // register and the flags are the last element's, and the loops ending
-    // with the body step and repeat as they do after a LOOP.
-    wire e1_vector_idx = execute1_stage.valid && execute1_stage.vector && e1_op == csp_pkg::OP_IDX;
-    wire resolving = execute1_stage.valid
-                     && (e1_op == csp_pkg::OP_LOOP
-                         || (e1_op == csp_pkg::OP_IDX && !execute1_stage.vector));
-    wire vector_done = vector_finish == 2'd1;
-    wire [PC_W-1:0] sequence_pc = resolving ? execute1_stage.pc : decode_pc;
-    wire is_loop = resolving && execute1_stage.live && e1_op == csp_pkg::OP_LOOP;
-    // A vector loop over more than MAX_VECTOR_LENGTH elements is an error
-    // (the reference model reports it); the loop is skipped like one of
-    // count 0 (e1_skips_body, decided in R).
-    wire opens_vector = is_loop && execute1_stage.instruction.a[1] && !e1_skips_body;
-    wire [17:0]   loop_count  = e1_x_word;                       // unsigned
-    wire [AW-1:0] loop_stride = AW'(e1_y_word);                  // signed, mod 4096
+    // the tags, registered with the row they belong to: the row fetched this cycle is at D1 next
+    // cycle; at the detection the row at D1 is the body's first for element 0, tagged on its way to D2
+    always_ff @(posedge clk) begin
+        decode_vector   <= v_fetching;
+        decode_element  <= v_element;
+        decode_generation <= v_generation;
+        decode_rowlast  <= v_fetching && v_last_element;
+        decode_final    <= v_fetching && v_last_element && v_left_zero;
+        // a detection a repeat kills tags a row the repeat discards
+        rom_vector      <= v_detect_row ? 1'b1 : decode_vector;
+        rom_element     <= v_detect_row ? '0 : decode_element;
+        rom_generation  <= v_detect_row ? v_generation + 1'b1 : decode_generation;   // the new loop's
+        rom_rowlast     <= v_detect_row ? v_last_element : decode_rowlast;
+        rom_final       <= v_detect_row ? (v_last_element && v_left_now_zero) : decode_final;
+        capture_vector  <= rom_vector;
+        capture_element <= rom_element;
+        capture_generation <= rom_generation;
+        capture_rowlast <= rom_rowlast;
+        capture_final   <= rom_final;
+        a_vector        <= capture_vector;
+        a_element       <= capture_element;
+        a_generation    <= capture_generation;
+        a_rowlast       <= capture_rowlast;
+        a_final         <= capture_final;
+    end
 
-    loop_t           next_outer, next_inner;
-    logic [PC_W-1:0] next_pc;
-    logic            step_i, step_j;
-    logic [AW-1:0]   stride_i, stride_j;
+    // Nothing but a register between a block's output and the logic that uses it, and nothing
+    // but a register in front of its pins: IMEM's row is captured (its op field into the ROM's
+    // address register, parked while no pass runs), the ROM's control word is captured on its way to A.
+    always_ff @(posedge clk) begin
+        decode_pc   <= pc;
+        rom_pc      <= decode_pc;
+        rom_next_pc <= decode_pc + 1'b1;
+        rom_row     <= fetch_row;
+        rom_op      <= !running ? csp_pkg::ROM_PARK_ROW : csp_pkg::ROM_ADDRESS_W'(fetch_row[71:64]);
+        capture_pc  <= rom_pc;
+        capture_row <= rom_row;
+        a_pc        <= capture_pc;
+        a_row       <= capture_row;
+        a_control   <= control_word;
+    end
 
-    // The last pc this resolution consumes: the loops whose last pc it is
-    // end here. (Comparing last pcs instead of the pc after them keeps the
-    // increment out of the comparison.)
-    wire skips_loop = is_loop && e1_skips_body;
-    wire [PC_W-1:0] position = vector_done ? vector_last_pc
-                             : (skips_loop ? e1_body_last : sequence_pc);
-    wire [PC_W-1:0] following = skips_loop ? e1_body_end
-                              : (vector_done ? vector_end
-                                             : (resolving ? e1_pc_plus_one : decode_pc + 1'b1));
-    wire inner_ends = loop_inner.active && position == loop_inner.last_pc;
-    wire outer_ends = loop_outer.active && position == loop_outer.last_pc;
+    // ---- A: the row and its control word -----------------------------------------------
+    wire [2:0]  a_unit       = a_control[17:15];
+    wire [2:0]  a_writes     = a_control[14:12];
+    wire [1:0]  a_source     = a_control[11:10];
+    wire        a_reads_x    = a_control[9];
+    wire        a_wide_y     = a_control[8];
+    wire        a_reads_y    = a_control[5];
+    wire [2:0]  a_sub        = a_control[2:0];
 
+    wire [3:0]  a_cond       = a_row[63:60];
+    wire [11:0] a_r_operand  = a_row[59:48];
+    wire [11:0] a_x_operand  = a_row[47:36];
+    wire [11:0] a_y_operand  = a_row[35:24];
+    wire [23:0] a_imm        = a_row[23:0];
+
+    // the indexes an instance of a vector body addresses by: the loop's own is the element's, the
+    // other the element's copy when its own IDX has set it, else the register's
+    wire        a_own_other = other_valid[a_element] && other_generation[a_element] == a_generation;
+    wire [11:0] a_other = a_own_other ? other_copy[a_element] : (va_own_is_j ? index_i : index_j);
+    wire [11:0] a_i     = a_vector ? (va_own_is_j ? a_other : va_element_index) : index_i;
+    wire [11:0] a_j     = a_vector ? (va_own_is_j ? va_element_index : a_other) : index_j;
+    wire [11:0] a_r_address  = operand_address(a_r_operand, a_i, a_j);
+    wire [11:0] a_x_address  = operand_address(a_x_operand, a_i, a_j);
+    wire [11:0] a_y_address  = operand_address(a_y_operand, a_i, a_j);
+    wire        a_r_none     = a_r_operand[11:10] == csp_pkg::MODE_IMMEDIATE;   // no result
+    wire        a_x_immediate = a_x_operand[11:10] == csp_pkg::MODE_IMMEDIATE;
+    wire        a_y_immediate = a_y_operand[11:10] == csp_pkg::MODE_IMMEDIATE;
+    wire        a_r_wide     = a_writes == csp_pkg::WRITES_PAIR;
+
+    // which read ports this row uses; the others are parked (a real row only: a
+    // bubble's fields are anything, and a read of a row being written loses the write)
+    wire a_read_r = a_present && a_source == csp_pkg::A_SOURCE_RESULT && !a_r_none && !a_r_address[11];
+    wire a_read_x = a_present && a_reads_x && !a_x_immediate && !a_x_address[11];
+    wire a_read_y = a_present && a_reads_y && !a_y_immediate && !a_y_address[11];
+
+    // ---- A: loops ---------------------------------------------------------------------------
+    wire a_is_loop = a_present && a_live && a_unit == csp_pkg::UNIT_LOOP && !a_sub[1];   // scalar
+    wire a_loop_on_j = a_sub[0];
+
+    // a vector loop's row: the own index's base, the stride, the body's last row. Its instances: the own index stepped by element, reset for each row to
+    // the round's base, which the last row's last element moves on by a round; on the last
+    // element of the last round the own index register takes the index after the loop.
+    wire a_is_vector_loop = a_present && a_live && a_unit == csp_pkg::UNIT_LOOP && a_sub[1];
+    wire a_instance       = a_present && a_vector;
+    wire a_vector_exit    = a_instance && a_final && a_pc == va_last;
+    wire [11:0] a_own_index = a_loop_on_j ? index_j : index_i;
+    wire [11:0] va_next_base = va_round_base + {va_stride[7:0], 4'd0};   // a round on: sixteen strides
+
+    always_ff @(posedge clk) begin
+        if (a_is_vector_loop) begin
+            va_own_is_j      <= a_loop_on_j;
+            va_stride        <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
+            va_round_base    <= a_own_index;
+            va_element_index <= a_own_index;
+            va_after         <= a_own_index;
+            va_last          <= a_imm[PC_W-1:0];          // the body's last row, as the row names it
+        end else if (a_instance) begin
+            if (!a_rowlast)                 va_element_index <= va_element_index + va_stride;
+            else if (a_pc != va_last)       va_element_index <= va_round_base;
+            else begin                      va_element_index <= va_next_base; va_round_base <= va_next_base; end
+            if (a_pc == va_last)            va_after <= va_after + va_stride;
+        end
+    end
+
+    // a scalar loop whose last row is a vector loop's ends on the last element of the last round
+    wire hit_i = a_present && loop_active_i && a_pc == loop_last_i && (!a_vector || a_final);
+    wire hit_j = a_present && loop_active_j && a_pc == loop_last_j && (!a_vector || a_final);
+    wire exhausted_i = loop_remaining_i == 10'd1;
+    wire exhausted_j = loop_remaining_j == 10'd1;
+    // a row that ends two loops ends the inner first, and the outer only if the inner is exhausted
+    wire process_i = hit_i && (!hit_j || !loop_inner_is_j || exhausted_j);
+    wire process_j = hit_j && (!hit_i ||  loop_inner_is_j || exhausted_i);
+    wire repeat_i  = process_i && !exhausted_i;
+    wire repeat_j  = process_j && !exhausted_j;
+
+    assign redirect        = repeat_i || repeat_j;
+    assign redirect_target = repeat_i ? loop_start_i : loop_start_j;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            loop_active_i   <= 1'b0;
+            loop_active_j   <= 1'b0;
+            loop_inner_is_j <= 1'b0;
+        end else if (pass_start) begin
+            loop_active_i   <= 1'b0;
+            loop_active_j   <= 1'b0;
+        end else begin
+            if (process_i && exhausted_i) begin loop_active_i <= 1'b0; loop_inner_is_j <= 1'b1; end
+            if (process_j && exhausted_j) begin loop_active_j <= 1'b0; loop_inner_is_j <= 1'b0; end
+            if (a_is_loop) begin
+                if (a_loop_on_j) begin loop_active_j <= 1'b1; loop_inner_is_j <= 1'b1; end
+                else             begin loop_active_i <= 1'b1; loop_inner_is_j <= 1'b0; end
+            end
+        end
+    end
+
+    always_ff @(posedge clk) begin
+        if (process_i && !exhausted_i) loop_remaining_i <= loop_remaining_i - 10'd1;
+        if (process_j && !exhausted_j) loop_remaining_j <= loop_remaining_j - 10'd1;
+        if (a_is_loop) begin
+            if (a_loop_on_j) begin
+                loop_remaining_j <= a_x_operand[9:0];
+                loop_stride_j    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
+                loop_start_j     <= a_pc + 1'b1;
+                loop_last_j      <= a_imm[PC_W-1:0];
+            end else begin
+                loop_remaining_i <= a_x_operand[9:0];
+                loop_stride_i    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
+                loop_start_i     <= a_pc + 1'b1;
+                loop_last_i      <= a_imm[PC_W-1:0];
+            end
+        end
+    end
+
+    // ---- R1: the read pins -------------------------------------------------------------------
+    logic               r1_live;
+    logic [17:0]        r1_control;
+    // the vector tags, with the row to the stages that use them: the element (E1's IDX, E1b's
+    // SEL, E5's flags), the instance (the same), the last element of the last round (E1, E5)
+    logic [ELEMENT_W-1:0] r1_element, r2_element, e1_element, e1b_element, e2_element, e3_element, e4_element, e5_element;
+    logic [GENERATION_W-1:0] r1_generation, r2_generation, e1_generation, e1b_generation, e2_generation, e3_generation, e4_generation, e5_generation;
+    logic               r1_vector, r2_vector, e1_vector, e1b_vector, e2_vector, e3_vector, e4_vector, e5_vector;
+    logic               r1_final, r2_final, e1_final, e1b_final, e2_final, e3_final, e4_final, e5_final;
+    logic [3:0]         r1_cond;
+    logic [23:0]        r1_imm;
+    logic               r1_r_wide, r1_y_wide, r1_x_immediate, r1_y_immediate, r1_r_none;
+    logic [11:0]        r1_write_address;
+
+    // a bank's row for the read pins: the row of the address, or the parked row when the bank is not read
+    function automatic logic [csp_pkg::BANK_INDEX_W-1:0] bank_row(input logic read, input logic [AW-1:0] address);
+        bank_row = read ? address[AW-1:1] : csp_pkg::PARK_INDEX;
+    endfunction
+
+    logic r1_r_odd, r1_x_odd, r1_y_odd;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) r1_live <= 1'b0;
+        else          r1_live <= a_live;
+    end
+
+    always_ff @(posedge clk) begin
+        r1_control       <= a_control;
+        {r1_element, r1_vector, r1_final, r1_generation} <= {a_element, a_vector, a_final, a_generation};
+        r1_cond          <= a_cond;
+        r1_imm           <= a_imm;
+        r1_r_wide        <= a_r_wide;
+        r1_y_wide        <= a_wide_y;
+        r1_x_immediate   <= a_x_immediate;
+        r1_y_immediate   <= a_y_immediate;
+        r1_r_none        <= a_r_none;
+        r1_write_address <= a_r_address;
+        r1_r_odd         <= a_r_address[0];
+        r1_x_odd         <= a_x_address[0];
+        r1_y_odd         <= a_y_address[0];
+        // the pins: a word read takes the bank of its address and parks the other; a wide read takes both
+        read_r_even_index <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide || !a_r_address[0]), a_r_address[AW-1:0]);
+        read_r_odd_index  <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide ||  a_r_address[0]), a_r_address[AW-1:0]);
+        read_x_even_index <= bank_row(a_read_x && !a_x_address[0], a_x_address[AW-1:0]);
+        read_x_odd_index  <= bank_row(a_read_x &&  a_x_address[0], a_x_address[AW-1:0]);
+        read_y_even_index <= bank_row(a_read_y && (a_wide_y || !a_y_address[0]), a_y_address[AW-1:0]);
+        read_y_odd_index  <= bank_row(a_read_y && (a_wide_y ||  a_y_address[0]), a_y_address[AW-1:0]);
+    end
+
+    // ---- R2: the words -------------------------------------------------------------------------
+    logic               r2_live;
+    logic [17:0]        r2_control;
+    logic [3:0]         r2_cond;
+    logic [23:0]        r2_imm;
+    logic               r2_r_wide, r2_y_wide, r2_x_immediate, r2_y_immediate, r2_r_none;
+    logic               r2_r_odd, r2_x_odd, r2_y_odd;
+    logic [11:0]        r2_write_address;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) r2_live <= 1'b0;
+        else          r2_live <= r1_live;
+    end
+
+    always_ff @(posedge clk) begin
+        r2_control       <= r1_control;
+        {r2_element, r2_vector, r2_final, r2_generation} <= {r1_element, r1_vector, r1_final, r1_generation};
+        r2_cond          <= r1_cond;
+        r2_imm           <= r1_imm;
+        r2_r_wide        <= r1_r_wide;
+        r2_y_wide        <= r1_y_wide;
+        r2_x_immediate   <= r1_x_immediate;
+        r2_y_immediate   <= r1_y_immediate;
+        r2_r_none        <= r1_r_none;
+        r2_write_address <= r1_write_address;
+        r2_r_odd         <= r1_r_odd;
+        r2_x_odd         <= r1_x_odd;
+        r2_y_odd         <= r1_y_odd;
+    end
+
+    // ---- E1: the operands, formatted --------------------------------------------------------------
+    logic               e1_live;
+    logic [17:0]        e1_control;
+    logic [3:0]         e1_cond;
+    logic               e1_r_none;
+    logic [11:0]        e1_write_address;
+    logic [35:0]        e1_r_pair, e1_x_pair, e1_y_pair;      // DMEM's words, captured as they came
+    logic               e1_r_odd, e1_x_odd, e1_y_odd, e1_x_immediate, e1_y_immediate;
+    logic [17:0]        e1_imm;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e1_live <= 1'b0;
+        else          e1_live <= r2_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e1_control       <= r2_control;
+        {e1_element, e1_vector, e1_final, e1_generation} <= {r2_element, r2_vector, r2_final, r2_generation};
+        e1_cond          <= r2_cond;
+        e1_r_none        <= r2_r_none;
+        e1_write_address <= r2_write_address;
+        e1_r_pair        <= read_r_pair;
+        e1_x_pair        <= read_x_pair;
+        e1_y_pair        <= read_y_pair;
+        e1_r_odd         <= r2_r_odd;
+        e1_x_odd         <= r2_x_odd;
+        e1_y_odd         <= r2_y_odd;
+        e1_x_immediate   <= r2_x_immediate;
+        e1_y_immediate   <= r2_y_immediate;
+        e1_imm           <= r2_imm[17:0];
+    end
+
+    wire [2:0] e1_unit    = e1_control[17:15];
+    wire [2:0] e1_writes  = e1_control[14:12];
+    wire [1:0] e1_source  = e1_control[11:10];
+    wire       e1_wide_y  = e1_control[8];
+    wire [2:0] e1_sub     = e1_control[2:0];
+    wire       e1_r_wide  = e1_writes == csp_pkg::WRITES_PAIR;
+
+    // the operands, picked out of the words: a word by its address's low bit, or the immediate
+    wire [17:0] e1_x_word = e1_x_immediate ? e1_imm : (e1_x_odd ? e1_x_pair[17:0] : e1_x_pair[35:18]);
+    wire [17:0] e1_y_word = e1_y_immediate ? e1_imm : (e1_y_odd ? e1_y_pair[17:0] : e1_y_pair[35:18]);
+    wire [17:0] e1_r_word = e1_r_odd ? e1_r_pair[17:0] : e1_r_pair[35:18];
+    wire [17:0] e1_x      = e1_x_word;
+    wire [35:0] e1_y      = e1_wide_y ? e1_y_pair : {18'd0, e1_y_word};
+    wire [35:0] e1_r      = e1_r_wide ? e1_r_pair : {18'd0, e1_r_word};
+
+    // ---- E1b: the arithmetic on the picked operands ----------------------------------------------------
+    // The pick above (the odd or even half, or the immediate) and the formatting are one stage;
+    // the 55-bit subtract and add with their saturation are the next, so that neither sits in
+    // front of the other: with both in one stage the report fell from 160 to 90 MHz.
+    logic               e1b_live;
+    logic [17:0]        e1b_control;
+    logic [3:0]         e1b_cond;
+    logic               e1b_r_none;
+    logic [11:0]        e1b_write_address;
+    logic [17:0]        e1b_x;
+    logic [35:0]        e1b_y, e1b_r;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e1b_live <= 1'b0;
+        else          e1b_live <= e1_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e1b_control       <= e1_control;
+        {e1b_element, e1b_vector, e1b_final, e1b_generation} <= {e1_element, e1_vector, e1_final, e1_generation};
+        e1b_cond          <= e1_cond;
+        e1b_r_none        <= e1_r_none;
+        e1b_write_address <= e1_write_address;
+        e1b_x             <= e1_x;
+        e1b_y             <= e1_y;
+        e1b_r             <= e1_r;
+    end
+
+    wire [2:0] e1b_unit    = e1b_control[17:15];
+    wire [2:0] e1b_writes  = e1b_control[14:12];
+    wire [1:0] e1b_source  = e1b_control[11:10];
+    wire       e1b_wide_y  = e1b_control[8];
+    wire [2:0] e1b_sub     = e1b_control[2:0];
+    wire       e1b_r_wide  = e1b_writes == csp_pkg::WRITES_PAIR;
+
+    // A and Y in the accumulator's format (the arithmetic's internal Q8.46, not a persistent register)
+    logic signed [53:0] e1b_a_value;
     always_comb begin
-        logic   inner_repeats;
-        loop_t  opened;
-        next_outer    = loop_outer;
-        next_inner    = loop_inner;
-        next_pc       = following;
-        step_i        = 1'b0;
-        step_j        = 1'b0;
-        stride_i      = '0;
-        stride_j      = '0;
-        inner_repeats = 1'b0;
-
-        opened.active    = 1'b1;
-        opened.on_j      = execute1_stage.instruction.a[0];
-        opened.start     = e1_pc_plus_one;
-        opened.last_pc   = e1_body_last;
-        opened.remaining = loop_count;
-        opened.stride    = loop_stride;
-
-        // A LOOP that runs opens a record (a vector loop none: its body is
-        // issued element by element). Its body has at least one instruction,
-        // so it cannot end where it opens.
-        if (is_loop && !e1_skips_body && !execute1_stage.instruction.a[1]) begin
-            if (!loop_outer.active) begin
-                next_outer = opened;
-            end else begin
-                next_inner = opened;
-            end
-        end
-
-        if (inner_ends) begin
-            if (loop_inner.on_j) begin
-                step_j = 1'b1;
-                stride_j = loop_inner.stride;
-            end else begin
-                step_i = 1'b1;
-                stride_i = loop_inner.stride;
-            end
-            if (loop_inner.remaining > 18'd1) begin
-                next_inner.remaining = loop_inner.remaining - 1'b1;
-                next_pc = loop_inner.start;
-                inner_repeats = 1'b1;
-            end else begin
-                next_inner.active = 1'b0;
-            end
-        end
-        if (!inner_repeats && outer_ends) begin
-            if (loop_outer.on_j) begin
-                step_j = 1'b1;
-                stride_j = loop_outer.stride;
-            end else begin
-                step_i = 1'b1;
-                stride_i = loop_outer.stride;
-            end
-            if (loop_outer.remaining > 18'd1) begin
-                next_outer.remaining = loop_outer.remaining - 1'b1;
-                next_pc = loop_outer.start;
-            end else begin
-                next_outer.active = 1'b0;
-            end
-        end
+        case (e1b_source)
+            csp_pkg::A_SOURCE_RESULT: e1b_a_value = e1b_r_wide ? wide_to_accumulator(e1b_r) : word_to_accumulator(e1b_r[17:0]);
+            default:                  e1b_a_value = 54'sd0;
+        endcase
     end
+    wire signed [53:0] e1b_y_value = e1b_wide_y ? wide_to_accumulator(e1b_y) : word_to_accumulator(e1b_y[17:0]);
 
-    // IDX, then the loop steps on top (as the model: the instruction runs,
-    // then the loop ends are handled).
-    wire writes_index = resolving && execute1_stage.live && e1_op == csp_pkg::OP_IDX;
-    wire index_on_j   = execute1_stage.instruction.r[0];
-    wire [AW-1:0] index_value  = AW'(e1_x_word) + AW'(e1_y_word);
+    // ADD3: A + Y, saturated to the accumulator. (The distance a program needs, target - level,
+    // is a CMP, so INTERP's fused subtract is gone, #238.)
+    wire signed [54:0] sum_full        = 55'(e1b_a_value) + 55'(e1b_y_value);
+    // Saturated by the bits above the result: a value fits when they are all its sign. No
+    // comparator chain behind the adder's (#238: with the comparators and the operand's zero test,
+    // this was the chip's longest path once the front end's was cut).
+    wire sum_fits = sum_full[54] == sum_full[53];
+    wire signed [53:0] sum_saturated = sum_fits ? sum_full[53:0] : (sum_full[54] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX);
 
-    // At a vector loop's end: the last element's private register, which
-    // may be written by the IDX in E1 this very cycle.
-    // (In the cycle the loop ends, E1 holds the instruction issued last: if it
-    // is an IDX, it is the last element's.)
-    wire [AW-1:0] vector_final_private = e1_vector_idx ? index_value : last_private;
-    wire [AW-1:0] base_index_i = vector_done ? (vector_on_j ? vector_final_private : vector_own)
-                                             : ((writes_index && !index_on_j) ? index_value : index_i);
-    wire [AW-1:0] base_index_j = vector_done ? (vector_on_j ? vector_own : vector_final_private)
-                                             : ((writes_index && index_on_j) ? index_value : index_j);
-    wire [AW-1:0] next_index_i = base_index_i + (step_i ? stride_i : AW'(0));
-    wire [AW-1:0] next_index_j = base_index_j + (step_j ? stride_j : AW'(0));
-
-    // Issuing a vector loop's body: the next element, or when the last
-    // element has issued, the next instruction; after the last instruction's
-    // last element the loop is finished.
-    wire vector_issue            = vector_issuing && issue;
-    wire vector_last_element     = vector_element == vector_last_element_number;
-    wire vector_last_instruction = decode_pc == vector_last_pc;
-    wire vector_next_instruction = vector_issue && vector_last_element && !vector_last_instruction;
-
-    // Whether the front end moves on: past a resolved LOOP or IDX, past a
-    // finished vector loop, or past an issued instruction that is neither.
-    wire advance = resolving || vector_done || (issue && !is_barrier && !vector_issuing);
-
-    assign fetch_address = pass_start ? '0
-                         : (advance ? next_pc
-                                    : (vector_next_instruction ? decode_pc + 1'b1 : decode_pc));
-
-    // ---- E2 ------------------------------------------------------------------------------------
-    logic signed [54:0] e2_difference_full, e2_sum_full;
-    logic signed [53:0] e2_a_value;
-    logic signed [17:0] e2_x_word, e2_y_word;
-    logic [35:0]        e2_y_operand;
-    logic               e2_y_wide;
-    logic [17:0]        e2_logic_result;
-    logic signed [89:0] e2_shifted;
-    logic               e2_shift_forced;
-
-    wire [3:0] e2_op = execute2_stage.instruction.op;
-
-    wire signed [40:0] difference_q432 = 41'(e2_difference_full >>> 14);
-    wire signed [35:0] difference =
-            difference_q432 > 41'sd34359738367  ? 36'sd34359738367 :
-            difference_q432 < -41'sd34359738368 ? -36'sd34359738368 : difference_q432[35:0];
-    wire signed [53:0] sum = e2_sum_full > 55'(ACC_MAX) ? ACC_MAX
-                           : e2_sum_full < 55'(ACC_MIN) ? ACC_MIN : e2_sum_full[53:0];
-
-    // The multiply-add unit's operands: a × b + c.
+    // the multiply-add's operands: a × b + c
     logic signed [17:0] multiply_a;
     logic signed [35:0] multiply_b;
     logic signed [53:0] multiply_c;
     always_comb begin
-        multiply_a = e2_x_word;
-        multiply_b = e2_y_wide ? $signed(e2_y_operand) : 36'(e2_y_word) <<< 18;
-        multiply_c = e2_a_value;
-        case (e2_op)
-            csp_pkg::OP_INTERP: multiply_b = difference;
-            csp_pkg::OP_ADD3: begin
+        multiply_a = e1b_x;
+        multiply_b = e1b_wide_y ? e1b_y : {e1b_y[17:0], 18'd0};            // a word's Q4.14 is Q4.32 shifted by 18
+        multiply_c = e1b_a_value;
+        case (e1b_sub)
+            csp_pkg::MULTIPLY_ADD_ADD3: begin
                 multiply_b = ONE_Q432;
-                multiply_c = sum;
+                multiply_c = sum_saturated;
             end
-            csp_pkg::OP_CMP: begin
+            csp_pkg::MULTIPLY_ADD_CMP: begin
                 multiply_b = ONE_Q432;
-                multiply_c = -word_to_accumulator(e2_y_word);
+                multiply_c = -word_to_accumulator(e1b_y[17:0]);
             end
-            csp_pkg::OP_ABS: begin
-                multiply_b = e2_x_word < 0 ? -ONE_Q432 : ONE_Q432;
-                multiply_c = '0;
+            csp_pkg::MULTIPLY_ADD_ABS: begin
+                multiply_b = e1b_x[17] ? -ONE_Q432 : ONE_Q432;
+                multiply_c = 54'sd0;
             end
             default: ;
         endcase
     end
 
-    // SHIFT: saturate to the destination.
-    logic [35:0] shift_result;
-    logic        shift_saturated;
+    // (what E5 needs to see whether the 54-bit sum wrapped inside the block is taken at E3, from
+    // the operand registers the block samples)
+
+    // the flags a SEL chooses by: inside a vector loop the element's own once its CMP has landed
+    wire e1b_own_flags = e1b_vector && copy_valid[e1b_element] && copy_generation[e1b_element] == e1b_generation;
+    wire e1b_negative  = e1b_own_flags ? copy_negative[e1b_element] : flag_negative;
+    wire e1b_zero      = e1b_own_flags ? copy_zero[e1b_element]     : flag_zero;
+    wire e1b_overflow  = e1b_own_flags ? copy_overflow[e1b_element] : flag_overflow;
+
+    // MIN, MAX, SEL, ANDXOR: one word, no overflow
+    logic [17:0] e1b_logic_result;
     always_comb begin
-        logic signed [89:0] limit_high, limit_low;
-        if (execute2_stage.r_wide) begin
-            limit_high = (90'sd1 <<< 35) - 1;
-            limit_low  = -(90'sd1 <<< 35);
-        end else begin
-            limit_high = (90'sd1 <<< 17) - 1;
-            limit_low  = -(90'sd1 <<< 17);
-        end
-        shift_saturated = 1'b1;
-        if (e2_shift_forced) begin
-            shift_result = e2_a_value < 0 ? 36'(limit_low) : 36'(limit_high);
-        end else if (e2_shifted > limit_high) begin
-            shift_result = 36'(limit_high);
-        end else if (e2_shifted < limit_low) begin
-            shift_result = 36'(limit_low);
-        end else begin
-            shift_result = 36'(e2_shifted);
-            shift_saturated = 1'b0;
-        end
-        if (!execute2_stage.r_wide) shift_result[35:18] = '0;
+        logic [17:0] a_bits;
+        logic signed [21:0] a_upper;
+        a_upper = 22'(e1b_a_value >>> 32);
+        a_bits  = e1b_source == csp_pkg::A_SOURCE_ZERO ? 18'd0
+                : (a_upper > 22'sd131071 ? 18'h1ffff : (a_upper < -22'sd131072 ? 18'h20000 : a_upper[17:0]));
+        case (e1b_sub)
+            csp_pkg::LOGIC_MIN: e1b_logic_result = $signed(e1b_x) < $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
+            csp_pkg::LOGIC_MAX: e1b_logic_result = $signed(e1b_x) > $signed(e1b_y[17:0]) ? e1b_x : e1b_y[17:0];
+            csp_pkg::LOGIC_SEL: e1b_logic_result = condition_holds(e1b_cond, e1b_negative, e1b_zero, e1b_overflow) ? e1b_y[17:0] : e1b_x;
+            default:            e1b_logic_result = (e1b_x & e1b_y[17:0]) ^ a_bits;
+        endcase
     end
 
-    // ---- E3: the multiply-add unit ---------------------------------------------------------------
-    logic signed [17:0] e3_multiply_a;
-    logic signed [35:0] e3_multiply_b;
-    logic signed [53:0] e3_multiply_c;
-    logic [17:0]        e3_logic_result;
-    logic [35:0]        e3_shift_result;
-    logic               e3_shift_saturated;
+    // SHIFT: the count is Y; the shift is relative to the destination's format (the count less 32
+    // for a word, less 14 for a wide value), the count clamped to +-63. Left past 36 bits any
+    // nonzero value saturates anyway, and right past 54 bits a value is its sign: both clamp.
+    wire signed [17:0] shift_count   = e1b_y[17:0];
+    wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63 : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
+    wire signed [8:0]  shift_total   = 9'(shift_clamped) - (e1b_r_wide ? 9'sd14 : 9'sd32);
+    wire               shift_left    = shift_total >= 0;
+    wire signed [8:0]  shift_right_amount = -shift_total;
+    wire [5:0] shift_magnitude = shift_left ? (shift_total > 9'sd36 ? 6'd36 : shift_total[5:0])
+                                            : (shift_right_amount > 9'sd54 ? 6'd54 : shift_right_amount[5:0]);
 
-    logic signed [53:0] product;
+    // IDX: the sum of X and Y, twelve bits, registered one stage into E1b so the adder sits in a
+    // timed flop->adder->flop span and the element-copy LUT-RAM (RAM16SDP4) data pins and the index
+    // registers are driven by a flop, not the raw adder — the untimed route nextpnr cannot see, the
+    // Fmax limiter the board's clock sweep found (#238). The extra cycle is index_latency 4->5
+    // (csp.hpp, csp_pkg::INDEX_LATENCY); the assembler's wait rows and the model's scoreboard read
+    // that constant, so they follow.
+    wire [11:0] index_sum = e1_x[11:0] + e1_y[11:0];
+    logic [11:0] index_sum_q;
+    always_ff @(posedge clk) index_sum_q <= index_sum;
+    wire e1b_is_index = e1b_live && e1b_unit == csp_pkg::UNIT_INDEX;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            index_i <= '0;
+            index_j <= '0;
+        end else begin
+            // a loop's step at its last row's A: the index register, stepped by the stride, whether the
+            // loop repeats or ends; a vector loop's own index after the loop, on its last instance
+            if (process_i) index_i <= index_i + loop_stride_i;
+            if (process_j) index_j <= index_j + loop_stride_j;
+            if (a_vector_exit) begin
+                if (va_own_is_j) index_j <= va_after + va_stride;
+                else             index_i <= va_after + va_stride;
+            end
+            // an IDX, a cycle later than the loop steps above (E1b, the registered sum): the
+            // register, or inside a vector loop the element's copy, and the register too for the
+            // last element, whose indexes the rows after the loop see. Last in the chain, so it
+            // keeps its priority on a same-cycle write to the index register.
+            if (e1b_is_index && (!e1b_vector || e1b_final)) begin
+                if (e1b_writes == csp_pkg::WRITES_INDEX_J) index_j <= index_sum_q;
+                else                                       index_i <= index_sum_q;
+            end
+        end
+    end
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)                        other_valid <= '0;
+        else if (e1b_is_index && e1b_vector) other_valid[e1b_element] <= 1'b1;
+    end
+    always_ff @(posedge clk) begin
+        if (e1b_is_index && e1b_vector) begin
+            other_copy[e1b_element]       <= index_sum_q;
+            other_generation[e1b_element] <= e1b_generation;
+        end
+    end
+
+    // ---- E2: the block's input registers sample the operand registers; the payload waits -----------------------------
+    logic               e2_live;
+    logic [17:0]        e2_control;
+    logic               e2_r_none;
+    logic [11:0]        e2_write_address;
+    logic [17:0]        e2_logic_result;
+    logic signed [53:0] e2_shift_value;
+    logic               e2_shift_left;
+    logic [5:0]         e2_shift_magnitude;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e2_live <= 1'b0;
+        else          e2_live <= e1b_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e2_control         <= e1b_control;
+        {e2_element, e2_vector, e2_final, e2_generation} <= {e1b_element, e1b_vector, e1b_final, e1b_generation};
+        e2_r_none          <= e1b_r_none;
+        e2_write_address   <= e1b_write_address;
+        e2_logic_result    <= e1b_logic_result;
+        e2_shift_value     <= e1b_a_value;
+        e2_shift_left      <= shift_left;
+        e2_shift_magnitude <= shift_magnitude;
+    end
+
+    // The multiply-add's operands are registers of the fabric's, with no logic between them and the
+    // block's input pins (docs/csp2_architecture.md rule 1): E1's logic ends in these registers, and
+    // the block's own input registers sample them a cycle later.
+    logic signed [17:0] multiply_a_q;
+    logic signed [35:0] multiply_b_q;
+    logic signed [53:0] multiply_c_q;
+    always_ff @(posedge clk) begin
+        multiply_a_q <= multiply_a;
+        multiply_b_q <= multiply_b;
+        multiply_c_q <= multiply_c;
+    end
+
+    logic signed [53:0] product;                      // E4: out of the block
     csp_multiply_add u_multiply_add (
         .clk     (clk),
         .reset_n (reset_n),
-        .a       (e3_multiply_a),
-        .b       (e3_multiply_b),
-        .c       (e3_multiply_c),
+        .a       (multiply_a_q),
+        .b       (multiply_b_q),
+        .c       (multiply_c_q),
         .product (product)
     );
 
-    // What E4 needs to see whether the 54-bit sum wrapped inside the block:
-    // a nonzero product, and whether product and c share a sign.
-    wire e3_product_nonzero = e3_multiply_a != '0 && e3_multiply_b != '0;
-    wire e3_signs_agree     = (e3_multiply_a[17] ^ e3_multiply_b[35]) == e3_multiply_c[53];
+    // ---- E3: the block computes; the shifter's coarse stage ---------------------------------------------------------
+    logic               e3_live;
+    logic [17:0]        e3_control;
+    logic               e3_r_none;
+    logic [11:0]        e3_write_address;
+    logic [17:0]        e3_logic_result;
+    logic [2:0]         e3_ma_flags;                 // {product nonzero, signs agree, c negative}
+    logic signed [53:0] e3_shift_value;
+    logic               e3_shift_left;
+    logic [5:0]         e3_shift_magnitude;
 
-    // ---- E4: reduce to the destination; the flags ----------------------------------------------------
-    logic signed [53:0] e4_product;
-    logic               e4_product_nonzero, e4_signs_agree, e4_c_negative;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e3_live <= 1'b0;
+        else          e3_live <= e2_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e3_control         <= e2_control;
+        {e3_element, e3_vector, e3_final, e3_generation} <= {e2_element, e2_vector, e2_final, e2_generation};
+        e3_r_none          <= e2_r_none;
+        e3_write_address   <= e2_write_address;
+        e3_logic_result    <= e2_logic_result;
+        // what E5 needs to see whether the 54-bit sum wrapped inside the block: from the operand
+        // registers the block samples, a cycle after E1b's logic ended in them (the same arrival
+        // at E5 as from E1b, and E1b's adder no longer feeds a zero test)
+        e3_ma_flags        <= {multiply_a_q != '0 && multiply_b_q != '0,
+                               (multiply_a_q[17] ^ multiply_b_q[35]) == multiply_c_q[53],
+                               multiply_c_q[53]};
+        e3_shift_value     <= e2_shift_value;
+        e3_shift_left      <= e2_shift_left;
+        e3_shift_magnitude <= e2_shift_magnitude;
+    end
+
+    wire signed [89:0] e3_shift_extended = {{36{e3_shift_value[53]}}, e3_shift_value};
+    wire        [5:0]  e3_coarse = {e3_shift_magnitude[5:3], 3'b000};
+
+    // ---- E4: the product is out of the block, captured; the shifter's fine stage ----------------------------------
+    logic               e4_live;
+    logic [17:0]        e4_control;
+    logic               e4_r_none;
+    logic [11:0]        e4_write_address;
     logic [17:0]        e4_logic_result;
-    logic [35:0]        e4_shift_result;
-    logic               e4_shift_saturated;
+    logic [2:0]         e4_ma_flags;
+    logic signed [89:0] e4_shift_value;
+    logic               e4_shift_left;
+    logic [2:0]         e4_shift_fine;
 
-    wire [3:0] e4_op = execute4_stage.instruction.op;
-    wire       wraps = e4_op == csp_pkg::OP_MACW;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e4_live <= 1'b0;
+        else          e4_live <= e3_live;
+    end
 
-    // The sum wraps inside the block when the product and c share a sign
-    // the sum does not have; then it saturates (or, for MACW, wraps).
-    wire sum_wrapped = e4_product_nonzero && e4_signs_agree && e4_product[53] != e4_c_negative;
-    wire signed [53:0] product_saturated = sum_wrapped ? (e4_c_negative ? ACC_MIN : ACC_MAX)
-                                                       : e4_product;
+    always_ff @(posedge clk) begin
+        e4_control       <= e3_control;
+        {e4_element, e4_vector, e4_final, e4_generation} <= {e3_element, e3_vector, e3_final, e3_generation};
+        e4_r_none        <= e3_r_none;
+        e4_write_address <= e3_write_address;
+        e4_logic_result  <= e3_logic_result;
+        e4_ma_flags      <= e3_ma_flags;
+        e4_shift_value   <= e3_shift_left ? (e3_shift_extended <<< e3_coarse) : (e3_shift_extended >>> e3_coarse);
+        e4_shift_left    <= e3_shift_left;
+        e4_shift_fine    <= e3_shift_magnitude[2:0];
+    end
 
+    // ---- E5: reduced to the destination, saturated or wrapped, the flags --------------------------------
+    logic               e5_live;
+    logic [17:0]        e5_control;
+    logic               e5_r_none;
+    logic [11:0]        e5_write_address;
+    logic [17:0]        e5_logic_result;
+    logic [2:0]         e5_ma_flags;
+    logic signed [53:0] e5_product;
+    logic signed [89:0] e5_shift_value;
+
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) e5_live <= 1'b0;
+        else          e5_live <= e4_live;
+    end
+
+    always_ff @(posedge clk) begin
+        e5_control       <= e4_control;
+        {e5_element, e5_vector, e5_final, e5_generation} <= {e4_element, e4_vector, e4_final, e4_generation};
+        e5_r_none        <= e4_r_none;
+        e5_write_address <= e4_write_address;
+        e5_logic_result  <= e4_logic_result;
+        e5_ma_flags      <= e4_ma_flags;
+        e5_product       <= product;
+        e5_shift_value   <= e4_shift_left ? (e4_shift_value <<< e4_shift_fine) : (e4_shift_value >>> e4_shift_fine);
+    end
+
+    wire [2:0] e5_unit      = e5_control[17:15];
+    wire [2:0] e5_writes    = e5_control[14:12];
+    wire [1:0] e5_cond_kind = e5_control[7:6];
+    wire       e5_wraps     = e5_control[3];
+    wire       e5_r_wide    = e5_writes == csp_pkg::WRITES_PAIR;
+
+    // The sum wraps inside the block when the product and c share a sign the sum does not have;
+    // then it saturates (or, for MACW, wraps).
+    wire e5_sum_wrapped = e5_ma_flags[2] && e5_ma_flags[1] && e5_product[53] != e5_ma_flags[0];
+    wire signed [53:0] product_saturated = e5_sum_wrapped ? (e5_ma_flags[0] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX) : e5_product;
+
+    // The result in the destination's format, saturated to its width by the bits above it: a
+    // value fits when they are all its sign (no comparator chain, #238: E5's was the chip's longest
+    // path once E1b's was cut).
     logic [35:0] arithmetic_result;
     logic        arithmetic_saturated;
     always_comb begin
+        logic signed [53:0] chosen;
         logic signed [21:0] word_part;
         logic signed [39:0] wide_part;
-        word_part = 22'((wraps ? e4_product : product_saturated) >>> 32);
-        wide_part = 40'((wraps ? e4_product : product_saturated) >>> 14);
-        arithmetic_result = '0;
-        arithmetic_saturated = sum_wrapped && !wraps;
-        if (execute4_stage.r_wide) begin
-            if (wraps) begin
+        logic               word_fits, wide_fits;
+        chosen    = e5_wraps ? e5_product : product_saturated;
+        word_part = 22'(chosen >>> 32);
+        wide_part = 40'(chosen >>> 14);
+        word_fits = word_part[21:17] == {5{word_part[17]}};
+        wide_fits = wide_part[39:35] == {5{wide_part[35]}};
+        arithmetic_result    = '0;
+        arithmetic_saturated = e5_sum_wrapped && !e5_wraps;
+        if (e5_r_wide) begin
+            if (e5_wraps || wide_fits) begin
                 arithmetic_result = wide_part[35:0];
-            end else if (wide_part > 40'sd34359738367) begin
-                arithmetic_result = 36'h7_ffff_ffff;
-                arithmetic_saturated = 1'b1;
-            end else if (wide_part < -40'sd34359738368) begin
-                arithmetic_result = 36'h8_0000_0000;
-                arithmetic_saturated = 1'b1;
             end else begin
-                arithmetic_result = wide_part[35:0];
+                arithmetic_result    = wide_part[39] ? 36'h8_0000_0000 : 36'h7_ffff_ffff;
+                arithmetic_saturated = 1'b1;
             end
         end else begin
-            if (wraps) begin
+            if (e5_wraps || word_fits) begin
                 arithmetic_result = {18'd0, word_part[17:0]};
-            end else if (word_part > 22'sd131071) begin
-                arithmetic_result = {18'd0, 18'h1ffff};
-                arithmetic_saturated = 1'b1;
-            end else if (word_part < -22'sd131072) begin
-                arithmetic_result = {18'd0, 18'h20000};
-                arithmetic_saturated = 1'b1;
             end else begin
-                arithmetic_result = {18'd0, word_part[17:0]};
+                arithmetic_result    = {18'd0, word_part[21] ? 18'h20000 : 18'h1ffff};
+                arithmetic_saturated = 1'b1;
             end
         end
     end
 
-    // The result and its overflow flag, by opcode.
+    // SHIFT: the value is in the destination's raw units; saturate to its range, by the bits
+    // above it (the value is 90 bits wide: a comparator chain here was 41 carry cells)
+    logic [35:0] shift_result;
+    logic        shift_saturated;
+    wire shift_fits_wide = e5_shift_value[89:35] == {55{e5_shift_value[35]}};
+    wire shift_fits_word = e5_shift_value[89:17] == {73{e5_shift_value[17]}};
+    always_comb begin
+        if (e5_r_wide) begin
+            shift_saturated = !shift_fits_wide;
+            shift_result    = shift_fits_wide ? e5_shift_value[35:0]
+                                              : (e5_shift_value[89] ? 36'h8_0000_0000 : 36'h7_ffff_ffff);
+        end else begin
+            shift_saturated = !shift_fits_word;
+            shift_result    = {18'd0, shift_fits_word ? e5_shift_value[17:0]
+                                                      : (e5_shift_value[89] ? 18'h20000 : 18'h1ffff)};
+        end
+    end
+
+    // the result and its overflow flag, by unit
     logic [35:0] result;
     logic        result_overflow;
     always_comb begin
         result          = arithmetic_result;
         result_overflow = arithmetic_saturated;
-        case (e4_op)
-            csp_pkg::OP_MIN, csp_pkg::OP_MAX, csp_pkg::OP_SEL, csp_pkg::OP_ANDXOR: begin
-                result          = {18'd0, e4_logic_result};
+        case (e5_unit)
+            csp_pkg::UNIT_LOGIC: begin
+                result          = {18'd0, e5_logic_result};
                 result_overflow = 1'b0;
             end
-            csp_pkg::OP_SHIFT: begin
-                result          = e4_shift_result;
-                result_overflow = e4_shift_saturated;
+            csp_pkg::UNIT_SHIFT: begin
+                result          = shift_result;
+                result_overflow = shift_saturated;
             end
             default: ;
         endcase
     end
 
-    wire result_negative = execute4_stage.r_wide ? result[35] : result[17];
-    wire result_zero     = execute4_stage.r_wide ? result == '0 : result[17:0] == '0;
+    wire result_negative = e5_r_wide ? result[35] : result[17];
+    wire result_zero     = e5_r_wide ? result == '0 : result[17:0] == '0;
 
-    // ---- W -------------------------------------------------------------------------------------
-    logic [35:0]        w_result;
-    logic               w_negative, w_zero, w_overflow;
-    logic signed [53:0] w_accumulator;
+    // where the write goes: a register (not an input, which the program never writes), or a sink word
+    wire e5_is_register = !e5_write_address[11];
+    wire e5_is_input    = e5_write_address[10:0] >= 11'(csp_pkg::IO_BASE) && e5_write_address[10:0] < 11'(csp_pkg::IO_BASE + csp_pkg::IO_COUNT);
+    wire e5_is_sink     = e5_write_address[11:10] == 2'b10;
+    wire e5_writes_dest = e5_live && !e5_r_none && (e5_writes == csp_pkg::WRITES_WORD || e5_writes == csp_pkg::WRITES_PAIR);
 
-    wire writing = writeback_stage.valid && writeback_stage.live;
-    wire element_flags_write = writing && writeback_stage.sets_flags && writeback_stage.vector;
-
-    // ---- the stage registers -------------------------------------------------------------------
-    localparam control_t BUBBLE = '0;
+    // DMEM's write pins, decoded here so that they come from registers: a bank's enable (a word write
+    // takes the bank of its address, a wide one both, register 0 neither), one row, a word for each bank
+    wire        e5_register_write = e5_writes_dest && e5_is_register && !e5_is_input;
+    wire [AW-1:0] e5_address      = e5_write_address[AW-1:0];
+    wire        e5_discard        = e5_address == '0;
+    wire        core_even_enable  = e5_register_write && !e5_discard && (e5_r_wide || !e5_address[0]);
+    wire        core_odd_enable   = e5_register_write && !e5_discard && (e5_r_wide ||  e5_address[0]);
+    // the pass's writes arrive while the core is idle: one word, never wide
+    wire        extra_is_sink     = extra_write_address[11:10] == 2'b10;     // 0x800 … 0xBFF
+    wire        extra_discard     = extra_write_address == '0;
+    wire        extra_even_enable = extra_write_enable && !extra_is_sink && !extra_discard && !extra_write_address[0];
+    wire        extra_odd_enable  = extra_write_enable && !extra_is_sink && !extra_discard &&  extra_write_address[0];
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
-            decode_valid    <= 1'b0;
-            decode_pc       <= '0;
-            read_stage      <= BUBBLE;
-            execute1_stage  <= BUBBLE;
-            execute2_stage  <= BUBBLE;
-            execute3_stage  <= BUBBLE;
-            execute4_stage  <= BUBBLE;
-            writeback_stage <= BUBBLE;
-            index_i <= '0; index_j <= '0;
-            accumulator <= '0;
-            flag_negative <= 1'b0; flag_zero <= 1'b0; flag_overflow <= 1'b0;
-            skip_remaining <= '0;
-            loop_outer <= '0; loop_inner <= '0;
-            vector_issuing <= 1'b0; vector_finish <= '0; vector_run <= 1'b0;
-            vector_on_j <= 1'b0; vector_end <= '0; vector_last_pc <= '0; vector_count <= '0; vector_element <= '0;
-            vector_last_element_number <= '0; last_private <= '0;
-            vector_stride <= '0; vector_own <= '0;
-            private_written <= 1'b0; flags_written <= 1'b0;
-        end else if (pass_start) begin
-            decode_valid    <= !held;
-            decode_pc       <= '0;
-            read_stage      <= BUBBLE;
-            execute1_stage  <= BUBBLE;
-            execute2_stage  <= BUBBLE;
-            execute3_stage  <= BUBBLE;
-            execute4_stage  <= BUBBLE;
-            writeback_stage <= BUBBLE;
-            skip_remaining  <= '0;
-            loop_outer      <= '0;
-            loop_inner      <= '0;
-            vector_issuing  <= 1'b0;
-            vector_finish   <= '0;
+            flag_negative     <= 1'b0;
+            flag_zero         <= 1'b0;
+            flag_overflow     <= 1'b0;
+            sink_write_enable <= 1'b0;
+            sink_write_both   <= 1'b0;
         end else begin
-            // D: issue, or wait; a LOOP or IDX empties decode until it resolves.
-            if (advance) begin
-                decode_valid <= 1'b1;
-                decode_pc    <= next_pc;
-                index_i      <= next_index_i;
-                index_j      <= next_index_j;
-                loop_outer   <= next_outer;
-                loop_inner   <= next_inner;
-            end else if (vector_issue) begin
-                if (vector_next_instruction) begin
-                    decode_pc <= decode_pc + 1'b1;
-                end else if (vector_last_element) begin
-                    decode_valid <= 1'b0;
-                end
-            end else if (issue) begin
-                decode_valid <= 1'b0;
+            // the flags: the registers', or inside a vector loop the element's copy, and the
+            // registers' too for the last element, whose flags the rows after the loop see
+            if (e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS && (!e5_vector || e5_final)) begin
+                flag_negative <= result_negative;
+                flag_zero     <= result_zero;
+                flag_overflow <= result_overflow;
             end
-
-            // Vector loops: open at LOOP.vi's resolution, step through the
-            // elements as the body issues, end three cycles after the last.
-            if (opens_vector) begin
-                vector_issuing       <= 1'b1;
-                vector_on_j          <= execute1_stage.instruction.a[0];
-                vector_end           <= e1_body_end;
-                vector_last_pc       <= e1_body_last;
-                vector_count         <= loop_count[6:0];
-                vector_last_element_number <= 6'(loop_count[5:0] - 6'd1);
-                last_private         <= execute1_stage.instruction.a[0] ? index_i : index_j;
-                vector_element       <= '0;
-                vector_stride        <= loop_stride;
-                vector_own           <= execute1_stage.instruction.a[0] ? index_j : index_i;
-                vector_run           <= !vector_run;
-                private_written      <= 1'b0;
-                flags_written        <= 1'b0;
-            end else if (vector_issue) begin
-                if (vector_last_element) begin
-                    // every element has issued this instruction
-                    private_written <= private_written || decoded_op == csp_pkg::OP_IDX;
-                    flags_written   <= flags_written || issued.sets_flags;
-                end
-                if (!vector_last_element) begin
-                    vector_element <= vector_element + 1'b1;
-                    vector_own     <= vector_own + vector_stride;
-                end else if (!vector_last_instruction) begin
-                    vector_element <= '0;
-                    vector_own     <= vector_on_j ? index_j : index_i;
-                end else begin
-                    vector_issuing <= 1'b0;
-                    vector_own     <= vector_own + vector_stride;
-                    vector_finish  <= 2'd2;
-                end
-            end
-            if (vector_finish != 2'd0 && !vector_issue) begin
-                vector_finish <= vector_finish - 1'b1;
-            end
-            if (e1_vector_idx && execute1_stage.live
-                    && execute1_stage.element == vector_last_element_number) begin
-                last_private <= index_value;
-            end
-
-            read_stage <= issue ? issued : BUBBLE;
-
-            // R: SKIP counts instructions as they leave R.
-            if (read_stage.valid) begin
-                if (skip_taken) begin
-                    skip_remaining <= read_stage.instruction.y;
-                end else if (skip_remaining != '0) begin
-                    skip_remaining <= skip_remaining - 1'b1;
-                end
-            end
-            execute1_stage <= read_leaving;
-
-            execute2_stage  <= execute1_stage;
-            execute3_stage  <= execute2_stage;
-            execute4_stage  <= execute3_stage;
-            writeback_stage <= execute4_stage;
-
-            // W
-            if (writing && writeback_stage.writes_accumulator) begin
-                accumulator <= w_accumulator;
-            end
-            if (writing && writeback_stage.sets_flags) begin
-                flag_negative <= w_negative;
-                flag_zero     <= w_zero;
-                flag_overflow <= w_overflow;
-            end
-
+            // a sink word: the row's, or the pass's (the firmware's, into both pages)
+            sink_write_enable <= extra_write_enable ? extra_is_sink : (e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD);
+            sink_write_both   <= extra_write_enable && extra_is_sink;
         end
     end
 
-    // The elements' private values: no reset, valid only once written.
+    wire e5_sets_copy = e5_live && e5_vector && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)          copy_valid <= '0;
+        else if (e5_sets_copy) copy_valid[e5_element] <= 1'b1;
+    end
     always_ff @(posedge clk) begin
-        if (e1_vector_idx && execute1_stage.live) begin
-            private_value[execute1_stage.element] <= index_value;
-        end
-        if (element_flags_write) begin
-            element_flags[writeback_stage.element] <= {w_overflow, w_zero, w_negative};
+        if (e5_sets_copy) begin
+            copy_negative[e5_element]   <= result_negative;
+            copy_zero[e5_element]       <= result_zero;
+            copy_overflow[e5_element]   <= result_overflow;
+            copy_generation[e5_element] <= e5_generation;
         end
     end
 
-    // The data path's registers: no reset, a bubble's values are never used.
+    // ---- W: the write pins ---------------------------------------------------------------------------------
+    // The register file's write: the next values, which every bank of every copy registers for
+    // itself beside its pins (csp_dmem.sv) — one register driving six blocks' pins across the chip
+    // dropped an address bit on some boots (#238, as in the first revision).
+    assign write_even_enable = extra_write_enable ? extra_even_enable : core_even_enable;
+    assign write_odd_enable  = extra_write_enable ? extra_odd_enable  : core_odd_enable;
+    assign write_index       = extra_write_enable ? extra_write_address[AW-1:1] : e5_address[AW-1:1];
+    assign write_even_data   = extra_write_enable ? extra_write_word : (e5_r_wide ? result[35:18] : result[17:0]);
+    assign write_odd_data    = extra_write_enable ? extra_write_word : result[17:0];
+    // the sink area's write: the core's register, then a register of every page's own (csp_sink_area.sv)
     always_ff @(posedge clk) begin
-        read_reads_a <= reads_a;
-        read_reads_x <= reads_x;
-        read_reads_y <= reads_y;
-        read_y_wide  <= decode_y_wide;
-
-        e1_a_value     <= a_value;
-        e1_y_value     <= y_value;
-        e1_x_word      <= x_operand;
-        e1_y_word      <= y_operand[17:0];
-        e1_y_operand   <= y_operand;
-        e1_y_wide      <= read_y_wide;
-        e1_shift_total <= shift_total;
-        e1_body_end    <= read_stage.pc + PC_W'(read_stage.instruction.r) + 1'b1;
-        e1_body_last   <= read_stage.pc + PC_W'(read_stage.instruction.r);
-        e1_pc_plus_one <= read_stage.pc + 1'b1;
-        e1_skips_body  <= x_operand == '0
-                          || (read_stage.instruction.a[1]
-                              && x_operand > 18'(csp_pkg::MAX_VECTOR_LENGTH));
-
-        e2_difference_full <= difference_full;
-        e2_sum_full        <= sum_full;
-        e2_a_value         <= e1_a_value;
-        e2_x_word          <= e1_x_word;
-        e2_y_word          <= e1_y_word;
-        e2_y_operand       <= e1_y_operand;
-        e2_y_wide          <= e1_y_wide;
-        e2_logic_result    <= logic_result;
-        e2_shifted         <= shifted;
-        e2_shift_forced    <= shift_forced;
-
-        e3_multiply_a      <= multiply_a;
-        e3_multiply_b      <= multiply_b;
-        e3_multiply_c      <= multiply_c;
-        e3_logic_result    <= e2_logic_result;
-        e3_shift_result    <= shift_result;
-        e3_shift_saturated <= shift_saturated;
-
-        e4_product         <= product;
-        e4_product_nonzero <= e3_product_nonzero;
-        e4_signs_agree     <= e3_signs_agree;
-        e4_c_negative      <= e3_multiply_c[53];
-        e4_logic_result    <= e3_logic_result;
-        e4_shift_result    <= e3_shift_result;
-        e4_shift_saturated <= e3_shift_saturated;
-
-        w_result      <= result;
-        w_negative    <= result_negative;
-        w_zero        <= result_zero;
-        w_overflow    <= result_overflow;
-        w_accumulator <= product_saturated;
+        sink_write_address <= extra_write_enable ? extra_write_address[csp_pkg::SINK_WORD_W-1:0] : e5_write_address[csp_pkg::SINK_WORD_W-1:0];
+        sink_write_data    <= extra_write_enable ? extra_write_word : result[17:0];
     end
-
-    // ---- the register file's write port and the sinks ----------------------------------------------------
-    wire write_counter  = pass_start;          // pass counter → 0x040, before any instruction
-    wire writes_result_now = writing && writeback_stage.writes_registers;
-    assign queue_pop    = window_open && queue_committed && !write_counter && !writes_result_now;
-    wire queue_writable = queue_address != '0 && !csp_pkg::is_input(AW'(queue_address));
-
-    always_comb begin
-        rf_write_enable  = 1'b0;
-        rf_write_address = '0;
-        rf_write_wide    = 1'b0;
-        rf_write_data    = '0;
-        if (write_counter) begin
-            rf_write_enable  = 1'b1;
-            rf_write_address = csp_pkg::REGISTER_W'(csp_pkg::IO_BASE);
-            rf_write_data    = {18'd0, pass_count + 1'b1};
-        end else if (writes_result_now) begin
-            rf_write_enable  = 1'b1;
-            rf_write_address = csp_pkg::REGISTER_W'(writeback_stage.r_address);
-            rf_write_wide    = writeback_stage.r_wide;
-            rf_write_data    = w_result;
-        end else if (queue_pop) begin
-            rf_write_enable  = queue_writable;
-            rf_write_address = queue_address;
-            rf_write_data    = {18'd0, queue_data};
-        end
-    end
-
-    assign sink_write_enable  = writing && writeback_stage.writes_sink;
-    assign sink_write_address = 10'(writeback_stage.r_address - AW'(csp_pkg::SINK_BASE));
-    assign sink_write_data    = w_result[17:0];
 
 endmodule
 `default_nettype wire

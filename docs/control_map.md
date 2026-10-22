@@ -74,9 +74,9 @@ Prophet-capable engine:
    gives multi-timbral layering and key splits — each channel is a
    "part" that holds its own patch.
 6. **Active-patch data structure**: the in-RAM `patch_t` `g_patch`
-   (`app/main/patch.h`/`patch.c`) holds the whole currently-active
+   (`app/main/patch.h`/`patch.cpp`) holds the whole currently-active
    sound — the single source of truth the CC handlers MUTATE and
-   voice_alloc/engine_link RENDER to DMEM words and partial words.
+   voice_alloc/render.cpp/engine_link RENDER to the CSP's registers and sink words.
    Stored patches are TOML files in the format of
    [storage_format.md](storage_format.md); Bank Select and
    Program Change load them through `banks.toml` into `patch_t`; multi-timbral layering
@@ -97,7 +97,7 @@ The list fits the engine as built:
   64–127 the MOD-env / fan-out MAC pairs — 98 of the 256-entry
   instruction table. 2 LFOs × 16 channels would need 30 more.
 - Arp/sequencer, bend range, key tracking, pedals, aftertouch: pure
-  firmware (event bus → synth model → DMEM writes), as the
+  firmware (event bus → synth model → register writes), as the
   architecture intends.
 
 ## Arp / sequencer mechanics

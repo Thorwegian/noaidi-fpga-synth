@@ -28,23 +28,28 @@ are small mapping choices, not architecture.
 | Knob→time law | equal time RATIO per step (SF2 timecents; every classic's knob feel) | 8-bit log₂ ladder, `cc<<1` → 128 equal-ratio steps (the fastest 8 CC values saturate at the ceiling) | ✓ exactly conventional |
 | Range | ~1 ms – 10..20 s (Juno/JP class) | 0.7 ms – 44 s | ✓ generous, fine |
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
-| **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | linear in **dB** like every other segment | ✗ **F1 — the likely main "feels wrong"** |
+| **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | an RC charge toward 1.3 × full scale, in amplitude (the gain is linear since #222) | ✓ **F1 fixed** (it was linear in dB, the likely main "feels wrong") |
 | Decay/release curve | exponential amplitude = linear dB (SF2 centibel ramps; analog RC discharge) | linear in dB | ✓ exactly conventional |
-| Sustain | a level, linear-ish dB | a linear envelope level over the 60 dB envelope span (`ENV_SPAN`, raw value 0x2800 on the log gain DMEM word): a fraction of the span, ≈0.47 dB per CC step at full depth | ✓ |
+| Sustain | a level, linear-ish dB | a fraction of a 60 dB span (≈0.47 dB per CC step at full depth), turned into a linear target by the firmware | ✓ |
 
-**F1 explained**: a linear-dB attack spends most of its wall-clock
+**F1 explained** (fixed by the linear gain, #222): a linear-dB attack spends most of its wall-clock
 time below audibility and then arrives all at once — short attacks
 click, long attacks feel like "nothing… nothing… POP". Convention
 splits the domains: attack in amplitude, decay/release in dB. Our
 decay/release are right; only the attack segment deviates.
 
-The amp envelope's level is linear, yet it moves volume in dB because
-the gain DMEM word it drives is logarithmic; that holds until gain is
-linear.
+The amp envelope's level used to move volume in dB, because the gain it
+drove was logarithmic. The gain is linear since #222 (a partial's gain is its
+voice's word times its channel's), so the level now moves the amplitude: the
+attack is the first 77 % of an RC charge toward 1.3 times full scale
+(convex in amplitude, F1 below fixed), and the decay and release are RC
+falls (exponential amplitude, as every classic). The patch's sustain stays a
+fraction of the old 60 dB span (`render.cpp` turns it into the same loudness).
+The amp envelope's level is the voice's gain word, the fraction of a span of 60 dB that the partial pipeline turns into a linear gain (`2^(10 × (level − 1))`, silent below 2^−10): a fall is an RC in dB, as `adsr.sv`'s was, at the patch's rate, and the velocity's amount and the sustain are fractions of the span. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our
-MOD envelope does on the log-domain cutoff DMEM word. **The MOD envelope
+MOD envelope does on the cutoff, in octaves. **The MOD envelope
 conforms natively; F1's deviation is the AMP envelope's attack
 only.**
 

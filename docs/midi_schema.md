@@ -53,10 +53,10 @@ units live in patch.h).
 | 0 / 32 | Bank Select MSB / LSB | sets the channel's bank, MSB × 128 + LSB, for its next Program Change; no sound changes until then ([storage_format.md](storage_format.md) "Banks") |
 | Program Change | load a program | loads the channel's current bank's program from `banks.toml`; sounding notes switch at once. A missing bank, program or file is logged and changes nothing |
 | 64 | sustain (damper) pedal | ≥64 = down. A note-off while the pedal is down keeps the voice sounding (gate on); pedal up releases every voice the pedal was holding. A key struck again while sustained gets a new voice. Omni for now |
-| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel cutoff DMEM word) |
+| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel's cutoff register) |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
-| 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; the per-voice cutoff DMEM base is zero |
+| 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; a voice has no cutoff offset of its own |
 | 120/123 | all sound off / all notes off | panic: 123 releases every held voice (sustained ones included) and lifts the sustain pedal, 120 hard-mutes immediately |
 | 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
 
@@ -81,7 +81,7 @@ units live in patch.h).
 |---|---|---|
 | 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
 | 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing); optional |
-| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel resonance DMEM word (DMEM word 3) |
+| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel's resonance register |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete: single section (12 dB/oct) / cascade (two 2-pole sections, 24 dB/oct) |
 | 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention). Tracks the FINAL pitch: note, oscillator tune, unison detune, pitch bend and pitch LFOs, so at 100 % an octave of pitch is an octave of cutoff |
@@ -112,7 +112,7 @@ equal-ratio ladder.
 | 110 | LFO 2 depth, coarse | as CC 77: whole semitones of span on pitch, `val<<2` elsewhere; worked out again on a CC 112 change |
 | 116 | LFO 2 depth, fine | as CC 115 |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
-| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH / **CUTOFF** (channel cutoff DMEM word → per-voice MAC instructions). Both LFOs on one destination sum (dual vibrato on pitch) |
+| 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH / **CUTOFF** (the channel's cutoff, which the control program adds to every voice's). Both LFOs on one destination sum (dual vibrato on pitch) |
 
 **Arp / step sequencer**
 | CC | Target | Notes |
@@ -150,8 +150,8 @@ engine link can do, addressable from a sequencer):
 | op | Payload | Meaning |
 |---|---|---|
 | 0x01 | partial, word, w32 | partial parameter write (rides the page swap) |
-| 0x02 | dmem14, w32 | live DMEM-base write |
-| 0x03 | entry, word, w32 | instruction table write (rides the page swap) |
+| 0x02 | register, w32 | register or sink-word write (queued, applied at the swap) |
+| 0x03 | pc, w36 | CSP program word write (while the CSP is held) |
 | 0x7F | — | identity request → reply with git describe of firmware |
 
 The raw ops reach everything the engine link can write. Structured

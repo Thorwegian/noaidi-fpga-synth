@@ -11,7 +11,7 @@
 #include "esp_system.h"
 #include "esp_app_desc.h"
 
-#include "spi_regs.h"
+#include "spi_link.h"
 #include "midi_in.h"
 #include "midi_log.h"
 #include "event_bus.h"
@@ -82,54 +82,17 @@ void app_main(void) {
     midi_panel_init(2);
 
     // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
-    // 32 words (~60 us each) would blow the engine's 1 ms tick.
-    fpga_spi_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
+    // 32 dwords (~130 us each) would blow the engine's 1 ms tick.
+    spi_link_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
 
-    // Word-protocol self-test (spi_bus.sv / docs/memory_map.md format).
-    // Mirrors tb_spi_bus.sv's cases so firmware and RTL agree on the
-    // same evidence.
-    int fails = 0;
-
-    printf("=== 1. single word write/read ===\n");
-    fpga_word_write(0x0005, 0xDEADBEEF);
-    uint32_t v = fpga_word_read(0x0005);
-    printf("word[0x0005] = %08lX %s\n", (unsigned long) v,
-           v == 0xDEADBEEF ? "OK" : "FAIL");
-    fails += (v != 0xDEADBEEF);
-
-    printf("=== 2. burst auto-increment (LFO region) ===\n");
-    uint32_t wq[4] = {0x11111111, 0x22222222, 0x33333333, 0x44444444};
-    uint32_t rq[4] = {0};
-    fpga_word_write_burst(0x0100, wq, 4);
-    bool id_ok = fpga_word_read_burst(0x0100, rq, 4);
-    for (int i = 0; i < 4; i++) {
-        printf("word[0x%04X] = %08lX %s\n", 0x0100 + i, (unsigned long) rq[i],
-               rq[i] == wq[i] ? "OK" : "FAIL");
-        fails += (rq[i] != wq[i]);
-    }
-    printf("ID byte on read frame: %s\n", id_ok ? "OK (A5)" : "FAIL");
-    fails += !id_ok;
-
-    printf("=== 3. out-of-window: dropped and zero, no alias ===\n");
-    // 0x1005 aliases 0x0005 under the 11-bit backed mask AND decodes
-    // to nothing else. Probe addresses must miss EVERY decode window
-    // (an address inside DMEM would fire the DMEM mailbox and move a
-    // live value at every boot):
-    // backed 0x0000-0x07FF, DMEM 0x0800-0x0BFF, partials 0x2000-0x5FFF.
-    fpga_word_write(0x1005, 0xBAD0BAD0); // would alias 0x0005 if broken
-    uint32_t z    = fpga_word_read(0x1005);
-    uint32_t keep = fpga_word_read(0x0005);
-    printf("word[0x1005] = %08lX %s, word[0x0005] = %08lX %s\n",
-           (unsigned long) z, z == 0 ? "OK" : "FAIL", (unsigned long) keep,
-           keep == 0xDEADBEEF ? "OK" : "FAIL");
-    fails += (z != 0) + (keep != 0xDEADBEEF);
-
-    printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK", fails);
+    // The link in nines, checked as tb_spi_bus.sv checks the slave, so that
+    // firmware and RTL agree on the same evidence.
+    spi_link_boot_check();
 
     // ── The synth proper ────────────────────────────────────────────
     // engine_link takes sole ownership of the SPI link from here on
-    // (mutes both pages at init — the boot organ goes silent), then
-    // voice_alloc turns MIDI into voices of 8 partials.
+    // (it loads the CSP's control program), then voice_alloc turns MIDI into
+    // voices of 8 partials.
     printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
     engine_link_init();
     voice_alloc_init();

@@ -16,12 +16,16 @@
 #                   everything is logged to app/build/console.log,
 #                   overwritten on every run
 #   make fw-test    host test: every patch-file value loads back exactly,
-#                   banks.toml reads and writes back, and the factory
-#                   patches and banks read back exactly (a warning, not a
-#                   failure, where only their formatting differs)
+#                   banks.toml reads and writes back, the factory patches
+#                   and banks read back exactly (a warning, not a failure,
+#                   where only their formatting differs), and the writes a
+#                   patch renders to the CSP are the arithmetic they should be
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim program.s)
-#   make csp-test   host tests of the CSP reference model and assembler
+#   make csp-test   host tests of the CSP reference model and assembler, and
+#                   that the firmware's control_program.hpp is current
+#   make csp-header regenerate app/main/csp/control_program.hpp from
+#                   tools/csp/programs (the firmware's copy of the program)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  list the sources that are not formatted — a
@@ -35,6 +39,16 @@
 # image generator loses the case of file names), which finds ESP-IDF
 # through the firmware build: run "make fw" once first. ESPPORT picks the
 # serial port.
+#   make tools      fetch the OSS CAD Suite releases pinned in
+#                   tools/oss-cad-suite.version (the flow) and
+#                   tools/oss-cad-suite-pack.version (its gowin_pack alone
+#                   writes the bitstream) into .tools/ (the gateware
+#                   targets use them when they are there)
+#   make tools-check   is there a newer release of either?
+#   make tools-upgrade pin the newest release for the flow; then make
+#                   tools, make sim-lockstep, and re-check SEED in
+#                   rtl/Makefile. tools-upgrade-pack does the same for the
+#                   bitstream generator; then the clock sweep on the board
 #   make all        gateware bitstream + firmware build
 #
 # After ANY gateware load (sram/flash) the FPGA's parameter RAM is
@@ -71,8 +85,10 @@ HOST_CC  ?= cc
 HOST_CXX ?= c++
 HOST_DIR  = app/build/host
 FW_TEST   = $(HOST_DIR)/patch_units_test
-FW_TEST_C   = app/main/patch_units.c app/main/patch.c app/lib/tomlc17/src/tomlc17.c
-FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+FW_TEST_C   = app/main/patch_units.c app/lib/tomlc17/src/tomlc17.c
+FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+RENDER_TEST = $(HOST_DIR)/render_test
+RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/patch.cpp app/main/csp/envelope.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
@@ -97,6 +113,20 @@ sram:
 
 flash:
 	$(MAKE) -C rtl flash
+
+tools:
+	scripts/tools.sh install
+	scripts/tools.sh install pack
+
+tools-check:
+	scripts/tools.sh check
+	scripts/tools.sh check pack
+
+tools-upgrade:
+	scripts/tools.sh upgrade
+
+tools-upgrade-pack:
+	scripts/tools.sh upgrade pack
 
 fw:
 	cd app && $(IDF) build
@@ -124,6 +154,8 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
 	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(RENDER_TEST) $(RENDER_TEST_CXX)
+	$(RENDER_TEST)
 
 # Our own C and C++ sources; the libraries in app/lib keep their style.
 # .clang-format is written for clang-format 21.1.8 (pip install
@@ -153,10 +185,26 @@ $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
 
 csp: $(CSP_TOOL)
 
-csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp
+# The control program, in the order its parts are joined (map.s first).
+CSP_PROGRAM_FILES = $(addprefix $(CSP_DIR)/programs/,map.s counts.s lfo.s channel.s envelope.s voice.s)
+CSP_CONTROL_HEADER = app/main/csp/control_program.hpp
+
+CSP_SELFTEST_FILES = $(addprefix $(CSP_DIR)/programs/,map.s selftest.s)
+CSP_SELFTEST_HEADER = app/main/csp/selftest_program.hpp
+
+csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
+	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
+	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
+
+csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
+	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
+	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
+	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
+	    || { echo "FAIL $(CSP_SELFTEST_HEADER) is stale: make csp-header"; exit 1; }
+	@echo "$(CSP_CONTROL_HEADER) is current"
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
@@ -172,4 +220,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all tools tools-check tools-upgrade sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-header csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean

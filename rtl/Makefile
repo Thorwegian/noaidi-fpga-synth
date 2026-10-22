@@ -1,43 +1,60 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 
-export PATH := /opt/oss-cad-suite/bin:$(PATH)
+# The OSS CAD Suite pinned by tools/oss-cad-suite.version, fetched by `make
+# tools` into .tools/; a machine without it falls back to /opt/oss-cad-suite
+# (override with CAD_SUITE=...). The bitstream is written by the gowin_pack
+# of a second, newer release, pinned by tools/oss-cad-suite-pack.version
+# (PACK_SUITE=...; without it, the flow's own): its Apicula ties off the
+# unused wires of used logic tiles, which on the board is the difference
+# between a bitstream that fails at 70 MHz and one that runs at 73.728
+# (docs/gowin_oss_notes.md), while its nextpnr cannot place the first
+# revision's design.
+CAD_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite)) /opt/oss-cad-suite)
+PACK_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite-pack)) $(CAD_SUITE))
+export CAD_SUITE
+export PATH := $(CAD_SUITE)/bin:$(PATH)
 
 # bash, because the yosys recipe needs `set -o pipefail` to notice a
 # failed synthesis instead of silently routing a stale netlist.
 SHELL := /bin/bash
 
-# Mainline: 256-partial pipeline → SPDIF + I2S at 73.728 MHz (pin 10).
+# The second revision's top (docs/csp2_architecture.md): the link and the
+# pipe (#233), the CSP (#234, #235), and the sink area with the partial
+# pipeline and the output from the first revision (#236).
 TOP = top
 PKG = synth_pkg.sv
+CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
+      csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
+SINK = csp/csp_sink_area.sv
+AUDIO = dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
+LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/lab.sv
 MOD = \
+	$(CSP) \
+	$(SINK) \
+	$(AUDIO) \
+	$(LAB) \
 	$(TOP).sv \
 	dsp/timebase.sv \
-	dsp/output_lpf.sv \
-	dsp/limiter.sv \
-	dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv \
-	dsp/svf_tpt.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
+	spdif/spdif_stream.sv \
 	i2s/i2s_tx.sv
 
 SRC = $(PKG) $(MOD) constraints.cst
 
-# Generated LUTs / boot image
+# Generated LUTs
 LUTS = \
 	dsp/phase_lut.hex \
 	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
 	dsp/att_lut.hex \
+	dsp/gain_lut.hex \
 	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
-	dsp/sine_lut.hex \
-	dsp/boot_p0.hex \
-	dsp/boot_p1.hex \
-	dsp/boot_p2.hex \
-	dsp/boot_p3.hex
+	dsp/sine_lut.hex
 
 all: pack.fs
 
@@ -56,6 +73,9 @@ dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
 dsp/att_lut.hex: ../scripts/gen_att_lut.py
 	python3 $<
 
+dsp/gain_lut.hex: ../scripts/gen_gain_lut.py
+	python3 $<
+
 dsp/log_lut.hex: ../scripts/gen_log_lut.py
 	python3 $<
 
@@ -65,79 +85,87 @@ dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 	python3 $<
 
-dsp/boot_p%.hex: ../scripts/gen_boot_image.py
-	python3 $<
-
+# Synthesis. pipefail matters: without it this recipe's status is tee's, so
+# a FAILED yosys leaves the PREVIOUS $@ in place, nextpnr routes that stale
+# netlist, and pack.fs is produced and PASSES the timing gate. yosys writes
+# errors to stderr, hence 2>&1.
+#
+# WIDELUT: the first revision synthesised with -nowidelut, because its
+# netlists hung nextpnr's legaliser on the MUX2_LUT5..8 clusters. This
+# revision started without the flag and measured (docs/csp2_architecture.md
+# section 4): the CSP alone placed either way, and with the partial pipeline
+# back (776 wide-LUT cells) the legaliser gave up at 72 % of the flip-flops,
+# so the flag is the default again; `make WIDELUT=` builds without it.
+WIDELUT ?= -nowidelut
+# The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
+# `make pack.fs LAB_BUILD=1` builds the chains beside the CSP, `LAB_BUILD=1 LAB_BLOCKS=1` all
+# fifteen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
+# (LAB above is the lab's file list.)
+LAB_BUILD ?=
+LAB_BLOCKS ?=
+LAB_DEFINES = $(if $(LAB_BUILD),-DLAB,) $(if $(LAB_BLOCKS),-DLAB_BLOCKS,)
 yosys.json: $(SRC) $(LUTS) Makefile
-	# pipefail matters: without it this recipe's status is tee's, so a FAILED
-	# yosys leaves the PREVIOUS $@ in place, nextpnr routes that stale
-	# netlist, and pack.fs is produced and PASSES the timing gate.
-	# A wrong port name in top.sv yields a byte-identical bitstream with
-	# identical Fmax. yosys writes errors to
-	# stderr, which tee never received, so yosys.log looked clean too --
-	# hence 2>&1.
-	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) -json $@' 2>&1 | tee yosys.log
+	set -o pipefail; yosys -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
+	# every block's pins from a flip-flop of their own, none shared: the untimed routes (#238).
+	# The verdict is printed; the build goes on while the partial pipeline's own pins (its LUT
+	# ROMs' addresses, the sink area's read addresses, the pointer blocks' writes) are on the list.
+	python3 ../tools/lab/pin_audit.py $@ || echo "PIN AUDIT: findings above (#238)"
 
-# Placement seed is PINNED: nextpnr's router is seed-sensitive. Some
-# placements cannot route the ADSR's DSP output fabric ("Found two arcs
-# with same sink wire"), others fail with "Failed to find a route".
-# Bump SEED when a netlist change hits either — it is placement luck,
-# not (necessarily) real congestion. `make timing-sweep` compares seeds.
-SEED ?= 7
+# The placement seed. Seeds are probes, not a lottery (docs/gowin_oss_notes.md):
+# every seed must meet the clock, and `make timing-sweep` says whether they do.
+SEED ?= 1
 
-# ----------------------------------------------------------------
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
-# "met the constraint on this placement, with this seed", and placement
-# moves. Measured on unchanged RTL over 11 seeds (main @ 00471db):
-# min 74.26, max 80.38, mean 77.46, sigma 1.98 -- a 6.12 MHz spread, with
-# seed 5 landing 0.53 MHz above the constraint. Every RTL edit redraws
-# from that distribution, and a timing failure here is not a build error,
-# it is audible corruption on the bench (six times so far, all of which
-# passed STA). So require headroom, not a pass.
-# Both numbers are RATCHETS: raise them as paths are fixed. Never lower
-# one to make a build go green -- fix the path.
+# "met the constraint on this placement, with this seed", and the silicon
+# takes about 0.82 of what the tool reports for the fabric. Both numbers
+# are RATCHETS: raise them as paths are fixed, never lower one to make a
+# build go green.
 TIMING_MIN_MHZ  ?= 2.0
 TIMING_WARN_MHZ ?= 8.0
 
+# The placer's density: at the default (0.9) the first revision's legaliser
+# gave up on its flip-flops; 0.75 placed. Kept until this revision's netlist
+# says otherwise.
+PLACER_BETA ?= 0.75
 
+# Place and route, with the report tools/lab/synth_report.py reads: the
+# frequency per clock, the cell counts, the worst path per clock pair.
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
+		--placer-heap-beta $(PLACER_BETA) \
+		--report pnr_report.json \
 		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
-	gowin_pack -d GW2A-18C -o $@ $<
+	$(PACK_SUITE)/bin/gowin_pack -d GW2A-18C -o $@ $<
 	@python3 ../scripts/check_timing.py pnr.log \
 		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
-		{ echo "*** timing gate FAILED -- bitstream discarded ***"; \
-		  rm -f $@; exit 1; }
+		{ rm -f $@; echo '*** timing gate FAILED: bitstream deleted ***'; exit 1; }
 
-# Strict check: demands the TARGET headroom, not just the floor. Use it
-# to see whether a fix has actually bought margin.
+report: pnr.json
+	python3 ../tools/lab/synth_report.py pnr_report.json --paths 6
+
 timing-check: pnr.log
 	python3 ../scripts/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)
 
-# Placement is a lottery (sigma ~2 MHz): build N seeds, keep the best.
-# Same wall-clock as one build on four cores, and takes the best draw
-# instead of a random one.
-SEEDS ?= 2 3 4 7
+# The sweep: place and route on every seed in SEEDS, one report each
+# (obj_dir/sweep/report_<seed>.json), then the worst of each column.
+SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
-	@rm -rf /tmp/tsweep && mkdir -p /tmp/tsweep
+	@mkdir -p obj_dir/sweep
 	@for s in $(SEEDS); do \
 		nextpnr-himbaechel --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
-			--vopt cst=constraints.cst --freq 73.728 --seed $$s \
-			> /tmp/tsweep/$$s.log 2>&1 & \
-	done; wait
-	@for s in $(SEEDS); do \
-		printf "seed %-4s " $$s; \
-		awk '/Routing complete/{r=1} r && /Max frequency for clock/ {match($$0, /: [0-9.]+ MHz/); \
-			print substr($$0, RSTART+2, RLENGTH-6), $$0}' /tmp/tsweep/$$s.log | sort -n | head -1 | \
-			cut -d' ' -f2- | grep . || echo "(no result)"; \
+			--vopt cst=constraints.cst --placer-heap-beta $(PLACER_BETA) \
+			--report obj_dir/sweep/report_$$s.json \
+			--freq 73.728 --seed $$s > obj_dir/sweep/pnr_$$s.log 2>&1 \
+			|| echo "seed $$s: place and route failed (obj_dir/sweep/pnr_$$s.log)"; \
 	done
+	python3 ../tools/lab/synth_report.py $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<
@@ -148,15 +176,6 @@ flash: pack.fs
 #----------------------------------------------------------------------
 # Simulation (Verilator)
 #----------------------------------------------------------------------
-# Gowin's behavioural models for the DSP primitives adsr.sv instantiates
-# explicitly (yosys cannot infer a fused DSP cell, so they are written out
-# by hand). Vendor code, so it is referenced where the toolchain installs it
-# rather than vendored into this CERN-OHL-S tree. Override on the command line
-# if your copy lives somewhere else. -DSIM_GOWIN_PRIM turns on the GSR
-# instance inside adsr.sv, which the models need somewhere up the hierarchy.
-GOWIN_SIM ?= /opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v
-VL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
-
 # Each bench is compiled into its own executable, obj_dir/<bench>/sim, and
 # --timing runs the benches' delays and event controls as written.
 #
@@ -166,13 +185,11 @@ VL_DSP = -DSIM_GOWIN_PRIM $(GOWIN_SIM)
 # changes between runs. Each `make` picks a fresh seed and writes it as the
 # first line of every .out; reproduce a run with `make sim SIM_SEED=<n>`.
 #
-# Warnings are fatal except: lint and style, IEEEMAYDEPRECATE (Gowin's
-# prim_sim.v), TIMESCALEMOD (the benches set a `timescale, the RTL does not),
-# MULTIDRIVEN (initial values in spi_bus.sv) and ZERODLY (tb_spi_bus's
-# variable delays).
+# Warnings are fatal except: lint and style, TIMESCALEMOD (the benches set
+# a `timescale, the RTL does not), MULTIDRIVEN (initial values in
+# spi_bus.sv) and ZERODLY (tb_spi_bus's variable delays).
 VL_FLAGS = --binary --timing -O3 --x-assign unique --x-initial unique -I. \
-           -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD \
-           -Wno-MULTIDRIVEN -Wno-ZERODLY
+           -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-ZERODLY -Wno-SELRANGE
 VERILATE = mkdir -p $(@D) && verilator $(VL_FLAGS) --top-module $(notdir $(@D)) --Mdir $(@D) -o sim
 
 ifeq ($(origin SIM_SEED),undefined)
@@ -181,225 +198,134 @@ endif
 # $(call run_sim,<executable>,<log>)
 run_sim = { echo "SIM_SEED=$(SIM_SEED)"; $(1) +verilator+rand+reset+2 +verilator+seed+$(SIM_SEED); } > $(2) 2>&1
 
-SIM_MOD = $(PKG) dsp/timebase.sv dsp/limiter.sv dsp/partial_pipeline.sv dsp/csp.sv dsp/adsr.sv dsp/svf_tpt.sv dsp/osc_core.sv
-TB_PARTIAL = tb/tb_partial_pipeline.sv
+# The wire in nines, with the regions behind it modelled in the bench.
+obj_dir/tb_spi_bus/sim: $(PKG) csp/csp_pkg.sv spi/spi_bus.sv tb/tb_spi_bus.sv Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv spi/spi_bus.sv tb/tb_spi_bus.sv
 
-obj_dir/tb_partial_pipeline/sim: $(SIM_MOD) $(TB_PARTIAL) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_PARTIAL) $(VL_DSP)
+# The write FIFO across its two clocks, and the row rule at every edge.
+obj_dir/tb_csp_write_fifo/sim: csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo.sv Makefile
+	$(VERILATE) csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo.sv
 
-# Each bench logs to its own file so `make -j4 sim` can run them in
-# parallel without interleaving output; `sim` prints the logs in a
-# fixed order afterwards. Suite wall-clock collapses to the longest
-# bench. Read a single bench with: make sim-prog-boot && cat tb/sim-prog-boot.out
-sim-partial: obj_dir/tb_partial_pipeline/sim
-	$(call run_sim,$<,tb/sim-partial.out)
+sim-fifo: obj_dir/tb_csp_write_fifo/sim
+	$(call run_sim,$<,tb/sim-fifo.out)
 
-TB_SPDIF = tb/tb_spdif_block.sv
-obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF) Makefile
-	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF)
+# The same FIFO under randomised input timing (#237): writes, swaps and
+# windowed pop-bursts interleaved at every sclk/clk alignment, checking no
+# committed write is silently lost. Run many seeds with SIM_SEED=<n>.
+obj_dir/tb_csp_write_fifo_random/sim: csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo_random.sv Makefile
+	$(VERILATE) csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo_random.sv
 
-sim-spdif: obj_dir/tb_spdif_block/sim
-	$(call run_sim,$<,tb/sim-spdif.out)
+sim-fifo-random: obj_dir/tb_csp_write_fifo_random/sim
+	$(call run_sim,$<,tb/sim-fifo-random.out)
 
-# 48 kHz (primary) transmitter: timebase's half-rate ticks + CS_FREQ
-# override, decoded with the same block checker.
-TB_SPDIF48 = tb/tb_spdif48_block.sv
-obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48) Makefile
-	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv $(TB_SPDIF48)
+# IMEM, the ROM, DMEM and the pass together: the boot's loads and
+# read-backs, the window, the probe, the row rule.
+obj_dir/tb_csp_memories/sim: $(CSP) tb/tb_csp_memories.sv Makefile
+	$(VERILATE) $(CSP) tb/tb_csp_memories.sv
 
-sim-spdif48: obj_dir/tb_spdif48_block/sim
-	$(call run_sim,$<,tb/sim-spdif48.out)
+sim-memories: obj_dir/tb_csp_memories/sim
+	$(call run_sim,$<,tb/sim-memories.out)
 
-PROG_COMMON = tb/partial_prog_common.svh
-
-obj_dir/tb_prog_%/sim: tb/tb_prog_%.sv $(PROG_COMMON) $(SIM_MOD) spi/spi_bus.sv $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) spi/spi_bus.sv $< $(VL_DSP)
-
-sim-prog-boot: obj_dir/tb_prog_boot/sim
-	$(call run_sim,$<,tb/sim-prog-boot.out)
-
-sim-prog-sweep: obj_dir/tb_prog_sweep/sim
-	$(call run_sim,$<,tb/sim-prog-sweep.out)
-
-sim-prog-bus: obj_dir/tb_prog_bus/sim
-	$(call run_sim,$<,tb/sim-prog-bus.out)
-
-sim-prog-sources: obj_dir/tb_prog_sources/sim
-	$(call run_sim,$<,tb/sim-prog-sources.out)
-
-# The ping-pong DMEM page. Timing and resource numbers
-# cannot tell a right-page read from a wrong one, and hardware
-# cannot see DMEM at all -- these invariants only exist in sim.
-sim-prog-pingpong: obj_dir/tb_prog_pingpong/sim
-	$(call run_sim,$<,tb/sim-prog-pingpong.out)
-
-# Active master limiter in situ: hot chord must not rail, must not
-# go near-silent, and 10 ms windowed RMS must not jump > 3 dB.
-sim-prog-limiter: obj_dir/tb_prog_limiter/sim
-	$(call run_sim,$<,tb/sim-prog-limiter.out)
-
-# All of these elaborate the CSP alone -- without the SVF, the
-# oscillators' audio path or the limiter.
-CSP_SIM = $(PKG) dsp/csp.sv dsp/adsr.sv dsp/osc_core.sv
-
-obj_dir/tb_csp/sim: $(CSP_SIM) tb/tb_csp.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_csp.sv $(VL_DSP)
-
-sim-csp: obj_dir/tb_csp/sim
-	$(call run_sim,$<,tb/sim-csp.out)
-
-# ---- the new CSP (rtl/csp, #184): unit benches and the co-simulation ----
-CSP_NEW = csp/csp_pkg.sv csp/csp_register_file.sv csp/csp_multiply_add.sv \
-          csp/csp_instruction_memory.sv csp/csp_write_queue.sv csp/csp_core.sv
-
-obj_dir/tb_csp_register_file/sim: csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv Makefile
-	$(VERILATE) csp/csp_pkg.sv csp/csp_register_file.sv tb/tb_csp_register_file.sv
-
-sim-csp-register-file: obj_dir/tb_csp_register_file/sim
-	$(call run_sim,$<,tb/sim-csp-register-file.out)
-
-obj_dir/tb_csp_write_queue/sim: csp/csp_pkg.sv csp/csp_write_queue.sv tb/tb_csp_write_queue.sv Makefile
-	$(VERILATE) csp/csp_pkg.sv csp/csp_write_queue.sv tb/tb_csp_write_queue.sv
-
-sim-csp-write-queue: obj_dir/tb_csp_write_queue/sim
-	$(call run_sim,$<,tb/sim-csp-write-queue.out)
-
-# The co-simulation: the RTL, Verilated to C++, against tools/csp's
-# reference model in one executable (tb/csp_cosim/csp_cosim.cpp). It runs
-# the manual's programs (the envelope as LOOP.i and as LOOP.vi), the whole
-# control program (tools/csp/programs) and 200 random ones, vector loops
-# among them, comparing every register, the
-# published sinks, i, j, the accumulator, the flags and the cycles after
-# every pass. (A pass the model stops at the pass limit is compared on
-# registers and sinks only.) `sim +rtltrace` prints the RTL's issues and
-# register writes in the format of the model's trace (CSP_TRACE_PROGRAM=n).
+# The co-simulation: the RTL, Verilated to C++, against tools/csp's reference model in one executable
+# (tb/csp_cosim/csp_cosim.cpp). It runs the boot self-test and some directed programs, and random scalar
+# ones built with csp::ProgramBuilder, comparing every register, the published sinks, i, j, the
+# accumulator, the flags and the cycles after every pass, and DMEM's row rule at every edge.
+# `sim +rtltrace` prints the rows entering the address stage.
 CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
-                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
-CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp \
-                ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp
-obj_dir/csp_cosim/sim: $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
-                       ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp $(wildcard ../tools/csp/programs/*.s) Makefile
+                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp
+CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp
+obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
+                       $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
-	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN \
+	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-SELRANGE \
 	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
 	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
-	    $(CSP_NEW) tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_COSIM_CPP))
+	    $(CSP) tb/csp_cosim/tb_csp_cosim.sv $(abspath $(CSP_COSIM_CPP))
 
 sim-csp-cosim: obj_dir/csp_cosim/sim
 	$(call run_sim,$<,tb/sim-csp-cosim.out)
 
-# The program benches: the CSP's programs (../tools/csp/programs) next to the
-# fixed-function units they replace, driven by the same gates and settings,
-# compared once per 48 kHz pass (tb/csp_cosim/csp_bench.cpp). The Verilated
-# bench is the co-simulation's, with REF_VOICES adsr.sv references added.
-CSP_BENCH_CPP = tb/csp_cosim/csp_bench.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.cpp \
-                ../app/main/csp/program_builder.cpp ../app/main/csp/envelope.cpp
-obj_dir/csp_bench/sim: $(CSP_NEW) dsp/adsr.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp \
-                       $(CSP_BENCH_CPP) $(CSP_COSIM_HPP) ../app/main/csp/envelope.hpp \
-                       $(wildcard ../tools/csp/programs/*.s) Makefile
-	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
-	    -Wno-lint -Wno-style -Wno-IEEEMAYDEPRECATE -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -GREF_VOICES=16 \
-	    --top-module tb_csp_cosim --Mdir $(@D) -o sim \
-	    -CFLAGS "-std=c++20 -O2 -I$(abspath ../tools/csp) -I$(abspath ../app/main) -I$(abspath tb/csp_cosim) -DCSP_PROGRAMS_DIR='\"$(abspath ../tools/csp/programs)\"'" \
-	    $(CSP_NEW) dsp/adsr.sv dsp/osc_core.sv tb/csp_cosim/tb_csp_cosim.sv $(VL_DSP) $(abspath $(CSP_BENCH_CPP))
+# The sink area: the pages flip with the pass, every port reads the page the pass before wrote.
+obj_dir/tb_sink_area/sim: $(PKG) csp/csp_pkg.sv $(SINK) tb/tb_sink_area.sv Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) tb/tb_sink_area.sv
 
-sim-csp-bench: obj_dir/csp_bench/sim
-	$(call run_sim,$<,tb/sim-csp-bench.out)
+sim-sink: obj_dir/tb_sink_area/sim
+	$(call run_sim,$<,tb/sim-sink.out)
 
-# The new CSP alone on the chip (csp/fit/csp_fit.sv): its BSRAM, DSP and
-# logic, and its timing at 73.728 MHz. A check, not a bitstream.
-csp-fit: $(CSP_NEW) csp/fit/csp_fit.sv csp/fit/csp_fit.cst Makefile
-	mkdir -p obj_dir/csp_fit
-	set -o pipefail; yosys -p 'read_verilog -sv $(CSP_NEW) csp/fit/csp_fit.sv; synth_gowin -family gw2a -top csp_fit -json obj_dir/csp_fit/yosys.json' > obj_dir/csp_fit/yosys.log 2>&1
-	nextpnr-himbaechel --json obj_dir/csp_fit/yosys.json --write obj_dir/csp_fit/pnr.json \
-		--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C --vopt cst=csp/fit/csp_fit.cst \
-		--freq 73.728 --seed 1 > obj_dir/csp_fit/pnr.log 2>&1 || true
-	@grep -E 'BSRAM|MULTALU|LUT4:|DFF:|Max frequency' obj_dir/csp_fit/pnr.log | grep -v ': *0/'
+# The partial pipeline: every stage against the bench's model of the sink words it reads,
+# the voice gain's decode included
+obj_dir/tb_partial_pipeline/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_partial_pipeline.sv $(LUTS) Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_partial_pipeline.sv
 
-obj_dir/tb_pitch_track/sim: $(CSP_SIM) tb/tb_pitch_track.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_pitch_track.sv $(VL_DSP)
+sim-partial: obj_dir/tb_partial_pipeline/sim
+	$(call run_sim,$<,tb/sim-partial.out)
 
-sim-pitch-track: obj_dir/tb_pitch_track/sim
-	$(call run_sim,$<,tb/sim-pitch-track.out)
+# The lab: every device's reference agrees with it, and an injected fault is counted (all fifteen devices).
+obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
+	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
 
-# The mailbox's two-take commit under back-to-back traffic.
-obj_dir/tb_mbox_burst/sim: $(CSP_SIM) tb/tb_mbox_burst.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_mbox_burst.sv $(VL_DSP)
-
-sim-mbox-burst: obj_dir/tb_mbox_burst/sim
-	$(call run_sim,$<,tb/sim-mbox-burst.out)
-
-# The real program mix under constant mailbox rewrites. Not in the
-# default gate.
-obj_dir/tb_prog_soak/sim: $(CSP_SIM) tb/tb_prog_soak.sv Makefile
-	$(VERILATE) $(CSP_SIM) tb/tb_prog_soak.sv $(VL_DSP)
-
-sim-prog-soak: obj_dir/tb_prog_soak/sim
-	$(call run_sim,$<,/dev/stdout)
-
-TB_BUS = tb/tb_spi_bus.sv
-obj_dir/tb_spi_bus/sim: $(PKG) spi/spi_bus.sv $(TB_BUS) Makefile
-	$(VERILATE) $(PKG) spi/spi_bus.sv $(TB_BUS)
+sim-lab: obj_dir/tb_lab/sim
+	$(call run_sim,$<,tb/sim-lab.out)
 
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
 
-# SVF stability spot-check at the FC_MAX clamp corner.
-TB_STAB = tb/tb_svf_stability.sv
-obj_dir/tb_svf_stability/sim: $(SIM_MOD) $(TB_STAB) $(LUTS) Makefile
-	$(VERILATE) $(SIM_MOD) $(TB_STAB) $(VL_DSP)
+# The data stream through the 48 kHz transmitter, decoded as the dev box
+# decodes it.
+obj_dir/tb_spdif_stream/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv spdif/spdif_stream.sv tb/tb_spdif_stream.sv Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv spdif/spdif_stream.sv tb/tb_spdif_stream.sv
 
-sim-stab: obj_dir/tb_svf_stability/sim
-	$(call run_sim,$<,tb/sim-stab.out)
+sim-stream: obj_dir/tb_spdif_stream/sim
+	$(call run_sim,$<,tb/sim-stream.out)
 
-# Output low-pass error feedback: exact-zero convergence on
-# silence, exact-value convergence on DC, both polarities.
-TB_OUTPUT_LPF = tb/tb_output_lpf.sv
-obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv $(TB_OUTPUT_LPF) Makefile
-	$(VERILATE) dsp/output_lpf.sv $(TB_OUTPUT_LPF)
+# The S/PDIF transmitters: the 96 kHz one with the bench's own cell counter,
+# the 48 kHz one from the timebase's half-rate ticks.
+obj_dir/tb_spdif_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv tb/tb_spdif_block.sv Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv tb/tb_spdif_block.sv
 
-sim-output-lpf: obj_dir/tb_output_lpf/sim
-	$(call run_sim,$<,tb/sim-output-lpf.out)
+sim-spdif: obj_dir/tb_spdif_block/sim
+	$(call run_sim,$<,tb/sim-spdif.out)
 
-# The pulse oscillator must average to ZERO at every duty. A bare
-# comparator is only centred at 50%: with phase sweeping the full signed range
-# the comparator is true for (duty + 2^23)/2^24 of the cycle, so the mean of a
-# +-2^23 square is exactly `duty` -- at CC 25 = 127 (duty 7549747) the oscillator
-# carried a raw value of 29491 of pure DC, scaled on its way out by the amp envelope.
-# Without the fix this bench reports 8 failures, which is the only reason its
-# passing means anything.
+obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv tb/tb_spdif48_block.sv Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv spdif/spdif_tx.sv tb/tb_spdif48_block.sv
+
+sim-spdif48: obj_dir/tb_spdif48_block/sim
+	$(call run_sim,$<,tb/sim-spdif48.out)
+
+# The pulse oscillator must average to ZERO at every duty (the comparator
+# alone is centred at 50 % only). Without the fix this bench reports 8
+# failures, which is the only reason its passing means anything.
 obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
 	$(VERILATE) $(PKG) dsp/osc_core.sv tb/tb_pulse_dc.sv
 
 sim-pulse-dc: obj_dir/tb_pulse_dc/sim
 	$(call run_sim,$<,tb/sim-pulse-dc.out)
 
-# Log-domain limiter unit bench: the per-step function in
-# isolation -- transparency, proportional attack, release, saturation.
-TB_LIM = tb/tb_limiter.sv
-obj_dir/tb_limiter/sim: dsp/limiter.sv $(TB_LIM) dsp/log_lut.hex dsp/att_lut.hex Makefile
-	$(VERILATE) dsp/limiter.sv $(TB_LIM)
+# Output low-pass error feedback: exact-zero convergence on silence,
+# exact-value convergence on DC, both polarities.
+obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv tb/tb_output_lpf.sv Makefile
+	$(VERILATE) dsp/output_lpf.sv tb/tb_output_lpf.sv
+
+sim-output-lpf: obj_dir/tb_output_lpf/sim
+	$(call run_sim,$<,tb/sim-output-lpf.out)
+
+# Log-domain limiter unit bench: transparency, proportional attack,
+# release, saturation.
+obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_lut.hex Makefile
+	$(VERILATE) dsp/limiter.sv tb/tb_limiter.sv
 
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-sim: sim-pulse-dc sim-csp sim-pitch-track sim-csp-register-file sim-csp-write-queue sim-csp-cosim sim-csp-bench \
-     sim-mbox-burst sim-prog-pingpong sim-partial sim-spdif sim-spdif48 sim-bus \
-     sim-prog-boot sim-prog-sweep sim-prog-bus sim-prog-sources sim-prog-limiter \
-     sim-stab sim-output-lpf sim-limiter
-	@cat tb/sim-pulse-dc.out tb/sim-csp.out tb/sim-pitch-track.out tb/sim-csp-register-file.out \
-	     tb/sim-csp-write-queue.out tb/sim-csp-cosim.out tb/sim-csp-bench.out tb/sim-mbox-burst.out tb/sim-prog-pingpong.out \
-	     tb/sim-partial.out tb/sim-spdif.out \
-	     tb/sim-spdif48.out \
-	     tb/sim-bus.out \
-	     tb/sim-prog-boot.out tb/sim-prog-sweep.out \
-	     tb/sim-prog-bus.out tb/sim-prog-sources.out tb/sim-prog-limiter.out \
-	     tb/sim-stab.out tb/sim-output-lpf.out tb/sim-limiter.out
-	@# A bench that FAILS must fail the build. Before this, `make sim`
-	@# printed "3 FAILURE(S)" and still exited 0, because this target only
-	@# cats the output -- the same shape as a failed yosys still producing a
-	@# bitstream. Checked here rather than per-target so one grep covers all.
-	@if grep -qE 'FAILURE|^FAIL' tb/sim-*.out; then \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+          tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
+
+# Each bench logs to its own file so `make -j4 sim` can run them in
+# parallel; `sim` prints the logs in a fixed order afterwards. A bench that
+# FAILS must fail the build: one grep covers all.
+sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+	@cat $(SIM_OUT)
+	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \
 	    exit 1; \
 	fi

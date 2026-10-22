@@ -29,67 +29,95 @@ package synth_pkg;
     parameter int UNISON       = 8;      // firmware convention only
     parameter int POLYPHONY    = 32;     // firmware convention only
 
-    // Time slot where partial 0 enters the pipeline
-    parameter int FIRST_ISSUE_SLOT    = 0;
-    // Time slot where a pending ping-pong page swap executes: the
-    // partial pipeline (a 281-slot span, see partial_pipeline.sv) is
-    // drained there, so every
-    // sample reads one consistent page.
-    parameter int SWAP_SLOT    = 512;
+    //--- The wire (docs/memory_map.md, conventions) ------------------
+    // Every block RAM on the chip is 9, 18 or 36 bits wide, so the SPI
+    // link is too: a 9-bit command nonet, an 18-bit address in 36-bit
+    // dwords, and 36-bit payload dwords. Nothing straddles a boundary.
+    parameter int SPI_NONET_W  = 9;
+    parameter int SPI_ADDRESS_W = 18;
+    parameter int SPI_DWORD_W    = 36;
+    parameter int SPI_NONETS_PER_DWORD = SPI_DWORD_W / SPI_NONET_W;   // 4
+    parameter logic [SPI_NONET_W-1:0] SPI_ID_NONET = 9'h0A5;      // MISO's first nonet, every frame
 
-    //--- SPI memory map (docs/memory_map.md) ------------------------
-    parameter int          MAP_AW_BACKED   = 11;       // 2048-word window
-    parameter logic [7:0]  SPI_ID_BYTE     = 8'hA5;
-    parameter logic [15:0] MAP_CTRL_ADDR   = 16'h0002; // bit 0: swap request
-    parameter logic [15:0] MAP_PARTIAL_BASE   = 16'h2000; // per-partial params
-    parameter int          MAP_PARTIAL_STRIDE = 64;       // words per partial
+    // The system registers: sixteen dwords at the bottom of the map.
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_CTRL = 18'h00002;
+    // CTRL's bits: [0] commit the write FIFO (an event), [1] hold the CSP,
+    // [2] the test tone on the outputs, [3] the data stream on the 48 kHz
+    // S/PDIF output, [5:4] the stream's source.
+    parameter int CTRL_SWAP        = 0;
+    parameter int CTRL_HOLD        = 1;
+    parameter int CTRL_TEST_TONE   = 2;
+    parameter int CTRL_DATA_STREAM = 3;
+    parameter int CTRL_SOURCE_LOW  = 4;
+    parameter int CTRL_SOURCE_HIGH = 6;
+    parameter int MAP_SYSTEM_DWORDS = 16;
+    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back (0x7 reads the trap's capture); 0x8–0xF are status
+    parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset
+    parameter int MAP_DIAG_QUEUE   = 9;         // status dword: the FIFO's Gray read pointer, [10] full
+    parameter int MAP_DIAG_LIMITER = 10;        // status dword: the master limiter (with the output, #236)
+    parameter int MAP_DIAG_DROPPED = 11;        // status dword: writes dropped at a full FIFO
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_TRAP = 18'h00007;   // written: the register a write trap watches (0: none,
+                                                               //   bit 11: a sink word); read: the trap's capture (#238)
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_PROBE_ADDRESS = 18'h0000C;   // the pair the probe reads
+    parameter int MAP_PROBE_EVEN   = 13;        // status dword: the pair's even register
+    parameter int MAP_PROBE_ODD    = 14;        //   and its odd one
+    parameter int MAP_DIAG_STREAM  = 15;        // status dword: the stream's frames sent since reset
 
-    //--- DMEM (docs/dmem_architecture.md) ---------------------------
-    parameter logic [15:0] MAP_DMEM_BASE = 16'h0800;    // DMEM base registers
-    parameter int          DMEM_WORDS    = 512;         // uniform pool
-    parameter int          DMEM_W        = 18;          // signed Q8.10
+    // The regions beyond the system dwords (docs/memory_map.md, the map).
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_PARTIAL_BASE = 18'h02000;   // a partial's pointers: four dwords at base + 64 p
+    parameter int MAP_PARTIAL_STRIDE = 64;
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_FIFO_DOOR = 18'h06000;   // the write FIFO's door
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_IMEM_BASE = 18'h08000;   // IMEM: two dwords a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_ROM_BASE  = 18'h09000;   // the decode ROM: one dword a row
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_LAB_BASE  = 18'h0A000;   // the lab's counters (#241): read-only, one dword each
+    parameter int MAP_LAB_DWORDS = 64;
 
-    //--- Instruction table (B4/B5) -------------------------------------
-    // 256 entries x 4 words, stride 4, at 0x0100-0x04FF. Config is
-    // wiring, so it rides the ping-pong pages (law 4).
-    //   +0 OP:   [3:0] opcode bitmask (0x0 off, 0xE LFO, 0xF ADSR,
-    //             0xD MAC — OPC_* below), [5:4] LFO shape
-    //             (osc_core: saw/pulse/tri/sine), [15:6] target DMEM word,
-    //             LFO: [31:16] rate, added to the 25-bit phase
-    //                  accumulator (2.86 mHz steps, 187.5 Hz max)
-    //             ADSR: [25:16] gate DMEM word (watched, level-sensitive:
-    //                   value > 0 = held)
-    //             MAC: [25:16] source DMEM word
-    //   +1 RATE_AD (ADSR): [17:0] kA, [31:18] kD[13:0] — linear
-    //             coefficients (dsp/adsr.sv)
-    //   +2 COEF:  [17:0] signed Q2.16 coefficient, 0x10000 = unity
-    //   +3 RATE_DSR (ADSR): [3:0] kD[17:14], [21:4] kR, [31:22] sustain
-    // An instruction's OUTPUT uses the previous sample's state (the
-    // one-sample lag keeps every multiply's operands registered).
-    // Pool 256, FULL RATE: the CSP retires one instruction per
-    // cycle, so all 256 entries execute every sample — 256 of the
-    // sample's 768 cycles — and every source updates at 96 kHz.
-    // A chain (sources plus the MAC instructions sharing their target) may be
-    // placed anywhere in the table and tolerates gaps of up to three
-    // slots, the depth of the accumulator's forwarding history.
-    // Region 0x0100..0x04FF (stride 4); a pass is the whole table.
-    parameter logic [15:0] MAP_IMEM_BASE = 16'h0100;
-    parameter int          NUM_INSTR = 256;
+    //--- The S/PDIF data stream (rtl/spdif/spdif_stream.sv) -----------
+    // A frame is 64 samples of 32 bits: the sync word, the sequence word,
+    // 61 payload words, the CRC of the first 63.
+    parameter int STREAM_FRAME_WORDS = 64;
+    parameter logic [31:0] STREAM_SYNC = 32'hB7E1_5A3C;
+    parameter logic [31:0] STREAM_CRC_POLYNOMIAL = 32'h04C1_1DB7;  // IEEE 802.3, MSB first, no final inversion
+    parameter logic [31:0] STREAM_LFSR_SEED = 32'h0000_0001;
+    // The payload sources, chosen by CTRL[5:4].
+    parameter int STREAM_SOURCE_W = CTRL_SOURCE_HIGH - CTRL_SOURCE_LOW + 1;
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_LFSR    = 3'd0;   // a 32-bit maximal LFSR, 32 steps a word
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_COUNTER = 3'd1;   // the pass counter
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_PROBE   = 3'd2;   // the probe's pair: even and odd words alternating
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_ENGINE  = 3'd3;   // the sink word at the probe's address, and the mix (left, right alternating)
+    parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_DUMP    = 3'd4;   // the register file, one register a pass: its index and its word
 
-    // CSP opcode = a bitmask of enables, not an enum. Each bit turns
-    // on one part of the datapath, so decode is enables rather than a mux
-    // tree and a new instruction is an encoding rather than a new case.
-    parameter int OPC_SOURCE = 0;   // reads a source operand (MAC, ADSR gate)
-    parameter int OPC_STATE  = 1;   // has persistent state (LFO, ADSR)
-    parameter int OPC_MUL    = 2;   // multiplies the operand by COEF
-    parameter int OPC_ACCUM  = 3;   // accumulates onto the target, vs load init
-    // An envelope is the instruction that watches a gate, so STATE+SOURCE
-    // means envelope and STATE alone means phase accumulator -- no fifth bit
-    // is needed and the opcode still fits OP[3:0].
-    parameter logic [3:0] OPC_OFF  = 4'h0;
-    parameter logic [3:0] OPC_LFO  = 4'hE;  // state + mul + accum
-    parameter logic [3:0] OPC_ADSR = 4'hF;  // source + state + mul + accum
-    parameter logic [3:0] OPC_MAC = 4'hD;  // source + mul + accum
+    //--- Partial sinks (docs/csp2_architecture.md, the sink area) ------
+    // A partial reads ten sink words, named by ten pointers into the sink
+    // area, over two cycles. Words are Q4.14; pitch and cutoff are
+    // octaves from the reference below; the voice's gain is the fraction
+    // of a span of GAIN_SPAN_OCTAVES (the envelope's level, 0 … 1), which
+    // the pipeline decodes to 2^(span × (word − 1)) — unity at 1, silent
+    // below GAIN_MUTE — as the old engine's attenuation LUT did; the
+    // channel's left and right gains are linear.
+    parameter int GAIN_SPAN_OCTAVES    = 10;    // 60 dB; 8 + 2, the shifts of the decode
+    parameter logic [17:0] GAIN_MUTE   = 18'd16; // 2^-10: a word below it is silence
+    parameter int POINTER_W            = 10;    // $clog2(sink words)
+    parameter int POINTERS_PER_PARTIAL = 10;
+    // The last word of the sink area, which nobody writes: always zero.
+    parameter logic [9:0] POINTER_ZERO = 10'h3FF;
+    parameter int POINTER_ENTRY_W      = POINTER_W * POINTERS_PER_PARTIAL;
+    parameter int CYCLES_PER_PARTIAL   = 2;
+    parameter int SINK_READ_PORTS      = 6;     // a cycle's worth of the sink area
+    // The pointers of a partial, by position in its entry.
+    parameter int POINTER_PITCH_VOICE   = 0;    // the voice's pitch
+    parameter int POINTER_PITCH_CHANNEL = 1;    //   and the oscillator's detune
+    parameter int POINTER_CUTOFF_VOICE  = 2;
+    parameter int POINTER_CUTOFF_CHANNEL = 3;   // the tracking of tune and detune
+    parameter int POINTER_GAIN_VOICE    = 4;    // envelope × velocity
+    parameter int POINTER_GAIN_LEFT     = 5;    // the channel's side of it
+    parameter int POINTER_GAIN_RIGHT    = 6;
+    parameter int POINTER_DUTY          = 7;
+    parameter int POINTER_RESONANCE     = 8;
+    parameter int POINTER_MODE          = 9;    // waveform, cascade, filter type
+    // Octave zero of the pitch and cutoff sinks: middle C (MIDI note 60),
+    // in the pipeline's UQ4.10 log2 pitch.
+    parameter logic [13:0] PITCH_REFERENCE = 14'h1400;
 
     //--- Filter stability clamp --------------------------------------
     // Instability comes from HEAVY DAMPING (low Q = high q1), not

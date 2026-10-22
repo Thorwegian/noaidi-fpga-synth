@@ -1,4 +1,4 @@
-// csp_cosim.cpp — the new CSP's RTL against tools/csp's reference model
+// csp_cosim.cpp — the CSP's RTL against tools/csp's reference model
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -6,19 +6,20 @@
 // Runs the same programs and firmware writes on the RTL (Verilated
 // tb_csp_cosim.sv) and on the reference model, and after every pass
 // compares everything a program can leave behind: all 2048 registers, the
-// published sink page, i, j, the accumulator and the flags. Programs come
-// from two places: the manual's examples, assembled, and random programs
-// built with csp::ProgramBuilder, as the firmware will build them.
+// published sink page, i, j, the flags, the cycles the
+// pass took, and that DMEM's row rule held at every edge. Programs come from
+// two places: the boot self-test and some directed ones, assembled, and
+// random programs built with csp::ProgramBuilder as the firmware will build
+// them — scalar ones; vector loops are #236's.
 //
 //   make sim-csp-cosim            (rtl/Makefile)
 //   obj_dir/csp_cosim/sim [seed] [programs]     (default: seed 1, 200 programs)
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstdio>
-#include <algorithm>
 #include <cstdlib>
 #include <fstream>
-#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -27,8 +28,6 @@
 #include "Vtb_csp_cosim.h"
 #include "Vtb_csp_cosim__Dpi.h"
 #include "assembler.hpp"
-#include "csp/envelope.hpp"
-#include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
 #include "processor.hpp"
 #include "svdpi.h"
@@ -38,28 +37,30 @@
 
 namespace {
 
-// ---- one run: a program on both, pass by pass ----------------------------------------------
-
 struct FirmwareWrite {
     int address;
     int32_t raw;
 };
 
+int failures = 0;
+
+// ---- one run: a program on both, pass by pass ----------------------------------------------
+
 class CoSim {
 public:
     explicit CoSim(VerilatedContext &context) : rtl_(context) {}
 
-    // Load the program and apply the setup while held, then release. The write
-    // queue holds 512 writes, so a large setup goes in chunks, a swap and a
-    // held pass for each.
-    void start(const std::vector<uint64_t> &words,
-               const std::vector<FirmwareWrite> &setup) {
-        constexpr size_t chunk = 256;
+    // Load the program and apply the setup while held, then release. The FIFO
+    // holds 511 and the window takes 48 a pass, so the setup goes in chunks,
+    // a swap and enough held passes to land each.
+    void start(const csp::Image &image, const std::vector<FirmwareWrite> &setup) {
+        constexpr size_t chunk = 96;
         rtl_.hold(true);
-        rtl_.load(words);
-        model_.load(words);
+        rtl_.load(image);
+        model_.load(image);
+        run_pass({}, "the first pass");
         size_t done = 0;
-        do {
+        while (done < setup.size()) {
             const size_t end = std::min(setup.size(), done + chunk);
             for (; done < end; ++done) {
                 rtl_.write(setup[done].address, setup[done].raw);
@@ -67,17 +68,15 @@ public:
             }
             rtl_.swap();
             model_.swap();
-            rtl_.pass();
-            model_.pass(); // held: applies the chunk
-        } while (done < setup.size());
+            for (size_t landing = 0; landing <= chunk / csp::write_window + 1; ++landing) run_pass({}, "setup");
+        }
         rtl_.hold(false);
         model_.release();
     }
 
     // One pass, after queueing writes and swapping (if any). Returns the
     // number of differences, printing the first few.
-    int pass(const std::vector<FirmwareWrite> &writes,
-             const std::string &what) {
+    int run_pass(const std::vector<FirmwareWrite> &writes, const std::string &what) {
         for (const FirmwareWrite &write : writes) {
             rtl_.write(write.address, write.raw);
             model_.write(write.address, write.raw);
@@ -88,61 +87,29 @@ public:
         }
         rtl_.pass();
         const csp::PassReport report = model_.pass();
-        if (!report.errors.empty() && verbose_) {
-            std::printf("  (model: %s)\n", report.errors.front().c_str());
-        }
-        // A pass the model stopped at the limit ends in a state the
-        // hardware has no way to match: the model finishes the loop it was
-        // in, the RTL stops issuing. Registers and sinks still have to agree.
-        bool stopped_at_limit = false;
-        for (const std::string &error : report.errors) {
-            stopped_at_limit |= error.rfind("pass longer", 0) == 0;
-        }
         ++passes_run;
-        passes_at_limit += stopped_at_limit;
-        int differences = compare(what, !stopped_at_limit);
-        // The interlocks' timing: the RTL issues its last instruction in the
-        // cycle the model counts. (A pass the model stopped at the limit
-        // ends differently: the RTL runs on through memory past the
-        // program, which may hold anything.)
-        if (report.errors.empty() && rtl_.cycles() != report.cycles) {
-            std::printf("  %s: cycles rtl %d model %d\n", what.c_str(),
-                        rtl_.cycles(), report.cycles);
-            ++differences;
+        for (const std::string &error : report.errors) {
+            std::printf("  %s: the model reports: %s\n", what.c_str(), error.c_str());
+            ++model_errors;
+            return 1;
         }
-        return differences;
+        return compare(what, report);
     }
 
-    // How many passes ran, and how many of those the model stopped at the
-    // pass limit (their end state is not compared).
-    static inline int passes_run      = 0;
-    static inline int passes_at_limit = 0;
+    static inline int passes_run   = 0;
+    static inline int model_errors = 0;
 
-    // What the RTL has published and how long its last pass took, for a
-    // case to say it did something.
-    int sink(int offset) const {
-        return rtl_.sink(offset);
-    }
-    int cycles() const {
-        return rtl_.cycles();
-    }
-
-    void verbose(bool on) {
-        verbose_ = on;
-    }
-
-    void trace(bool on) {
-        model_.trace(on);
-    }
+    void trace(bool on) { model_.trace(on); }
+    int32_t reg(int address) const { return rtl_.reg(address); }
+    int sink(int offset) const { return rtl_.sink(offset); }
+    int cycles() const { return rtl_.cycles(); }
 
 private:
-    int compare(const std::string &what, bool compare_control_state) {
+    int compare(const std::string &what, const csp::PassReport &report) {
         int differences = 0;
-        auto report     = [&](const std::string &where, int64_t rtl,
-                          int64_t model) {
+        auto note       = [&](const std::string &where, int64_t rtl, int64_t model) {
             if (differences < 8) {
-                std::printf("  %s: %s rtl %" PRId64 " model %" PRId64 "\n",
-                                what.c_str(), where.c_str(), rtl, model);
+                std::printf("  %s: %s rtl %" PRId64 " model %" PRId64 "\n", what.c_str(), where.c_str(), rtl, model);
             }
             ++differences;
         };
@@ -150,866 +117,451 @@ private:
             if (rtl_.reg(address) != model_.read(address)) {
                 char where[32];
                 std::snprintf(where, sizeof where, "register 0x%03x", address);
-                report(where, rtl_.reg(address), model_.read(address));
+                note(where, rtl_.reg(address), model_.read(address));
             }
         }
         for (int offset = 0; offset < csp::sink_count; ++offset) {
             if (rtl_.sink(offset) != model_.sink(offset)) {
                 char where[32];
                 std::snprintf(where, sizeof where, "sink 0x%03x", offset);
-                report(where, rtl_.sink(offset), model_.sink(offset));
+                note(where, rtl_.sink(offset), model_.sink(offset));
             }
         }
-        if (!compare_control_state) {
-            return differences;
-        }
-        if (rtl_.index(0) != model_.index(csp::IndexRegister::i)) {
-            report("i", rtl_.index(0), model_.index(csp::IndexRegister::i));
-        }
-        if (rtl_.index(1) != model_.index(csp::IndexRegister::j)) {
-            report("j", rtl_.index(1), model_.index(csp::IndexRegister::j));
-        }
-        if (rtl_.accumulator() != model_.accumulator()) {
-            report("accumulator", rtl_.accumulator(), model_.accumulator());
-        }
+        if (rtl_.index(0) != model_.index(csp::IndexRegister::i)) note("i", rtl_.index(0), model_.index(csp::IndexRegister::i));
+        if (rtl_.index(1) != model_.index(csp::IndexRegister::j)) note("j", rtl_.index(1), model_.index(csp::IndexRegister::j));
         const csp::Flags flags = model_.flags();
-        const int model_flags  = (flags.negative ? 1 : 0) | (flags.zero ? 2 : 0)
-                                | (flags.overflow ? 4 : 0);
-        if (rtl_.flags() != model_flags) {
-            report("flags", rtl_.flags(), model_flags);
-        }
+        const int model_flags  = (flags.negative ? 1 : 0) | (flags.zero ? 2 : 0) | (flags.overflow ? 4 : 0);
+        if (rtl_.flags() != model_flags) note("flags", rtl_.flags(), model_flags);
+        if (rtl_.cycles() != report.cycles) note("cycles", rtl_.cycles(), report.cycles);
+        if (rtl_.row_rule_violations() != 0) note("row rule violations", rtl_.row_rule_violations(), 0);
+        if (rtl_.fifo_dropped() != 0) note("FIFO drops", rtl_.fifo_dropped(), 0);
         return differences;
     }
 
     Rtl rtl_;
     csp::Processor model_;
-    bool verbose_ = false;
 };
 
-// ---- directed programs: the manual's examples ------------------------------------------------
-// The envelope, as LOOP.i and as LOOP.vi (U becomes a voice field).
-
-const char *envelope_program = R"(
-        .block VOICE
-        .field LEVEL, 2
-        .field STAGE, 1
-        .field GATE, 1
-        .field VELOCITY, 1
-        .field OUT, 1
-        .end
-        .block SEGMENT
-        .field TARGET, 2
-        .field RATE, 1
-        .field SPARE, 1
-        .end
-        .equ   VOICES, 0x600
-        .const FULL, 1.0
-        .reg   ENV_TABLE, 0x060
-        .reg   U, 0x061
-
-        IDX     i, =#VOICES, 0
-        NOP
-        NOP
-        NOP
-        LOOP.i  done, =#4, =#16
-        IDX     j, ENV_TABLE, [i+STAGE]
-        MAX     U, [i+STAGE], =#4
-        CMP     ZERO, [i+LEVEL], FULL
-        SEL     [i+STAGE], U, [i+STAGE]
-        ANDXOR  U, 0, [i+STAGE], =#4
-        CMP     ZERO, [i+GATE], FULL
-        SEL     [i+STAGE], U, =#8
-        INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
-        MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
-done:
-        IDX     j, =#0x800, 0
-        NOP
-        NOP
-        NOP
-        MAC     [j+0], 0, [i+0], =1.0       ; i is past the voices: a sink write
-)";
-
-const char *envelope_vector_program = R"(
-        .block VOICE
-        .field LEVEL, 2
-        .field STAGE, 1
-        .field GATE, 1
-        .field VELOCITY, 1
-        .field OUT, 1
-        .field U, 1
-        .end
-        .block SEGMENT
-        .field TARGET, 2
-        .field RATE, 1
-        .field SPARE, 1
-        .end
-        .equ   VOICES, 0x600
-        .const FULL, 1.0
-        .reg   ENV_TABLE, 0x060
-
-        IDX     i, =#VOICES, 0
-        NOP
-        NOP
-        NOP
-        LOOP.vi done, =#4, =#16
-        IDX     j, ENV_TABLE, [i+STAGE]
-        MAX     [i+U], [i+STAGE], =#4
-        CMP     ZERO, [i+LEVEL], FULL
-        SEL     [i+STAGE], [i+U], [i+STAGE]
-        ANDXOR  [i+U], 0, [i+STAGE], =#4
-        CMP     ZERO, [i+GATE], FULL
-        SEL     [i+STAGE], [i+U], =#8
-        INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
-        MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
-done:
-        IDX     j, =#0x800, 0
-        NOP
-        NOP
-        NOP
-        MAC     [j+0], 0, [i+0], =1.0       ; i is past the voices: a sink write
-)";
-
-const char *lfo_program = R"(
-        .wide  PHASE, 0x060
-        .wide  RATE, 0x062
-        .reg   SAW, 0x064
-        .reg   SQUARE, 0x065
-        .reg   T, 0x066
-        .reg   TRI, 0x067
-        .const ONE, 1.0
-        .const DEPTH, 1.0
-        .const NEG_DEPTH, -1.0
-        .const DEPTH_8, 0.125
-        .const DEPTH_4, 0.25
-
-        MACW.w  PHASE, ONE, RATE
-        MAC     SAW, 0, PHASE, DEPTH_8
-        CMP     ZERO, PHASE, ZERO
-        SEL     SQUARE, NEG_DEPTH, DEPTH
-        ABS     T, PHASE
-        MAC     TRI, 0, T, DEPTH_4
-        ADD3    TRI, TRI, NEG_DEPTH, ZERO
-        SHIFT   T, T, =#-3
-        ACC     0, SAW, =0.5
-        ACC     acc, SQUARE, =0.5
-        MAC     0x068, acc, TRI, =0.5
-)";
-
-std::vector<FirmwareWrite> constants_of(const csp::Program &program) {
-    std::vector<FirmwareWrite> writes;
-    for (const csp::ConstantWrite &constant : program.constants) {
-        writes.push_back({constant.address, constant.raw});
-    }
-    return writes;
-}
-
-// ---- the control program ------------------------------------------------------------------
-//
-// tools/csp/programs, the whole of it on the RTL and the model: 16 channels,
-// 32 voices with both envelopes, 32 LFOs of every shape, notes struck and
-// released while it runs.
+// ---- directed programs: assembled ------------------------------------------------------------
 
 #ifndef CSP_PROGRAMS_DIR
 #define CSP_PROGRAMS_DIR "../tools/csp/programs"
 #endif
 
-std::string control_program_text() {
-    std::string source;
-    for (const char *part :
-         {"map.s", "lfo.s", "channel.s", "envelope.s", "voice.s"}) {
-        std::ifstream file(std::string(CSP_PROGRAMS_DIR) + "/" + part);
-        if (!file) {
-            std::printf("cannot read %s\n", part);
-            std::exit(2);
-        }
-        std::stringstream text;
-        text << file.rdbuf();
-        source += text.str() + "\n";
+std::string program_file(const char *part) {
+    std::ifstream file(std::string(CSP_PROGRAMS_DIR) + "/" + part);
+    if (!file) {
+        std::printf("cannot read %s\n", part);
+        std::exit(2);
     }
-    return source;
-}
-
-void write_wide_words(std::vector<FirmwareWrite> &writes, int address,
-                      int64_t raw36) {
-    writes.push_back({address, static_cast<int32_t>((raw36 >> 18) & 0x3FFFF)});
-    writes.push_back({address + 1, static_cast<int32_t>(raw36 & 0x3FFFF)});
+    std::stringstream text;
+    text << file.rdbuf();
+    return text.str() + "\n";
 }
 
 int word_of(double value) {
     return static_cast<int>(std::lround(value * 16384.0));
 }
 
-int run_control_program(VerilatedContext &context) {
-    const csp::Program program = csp::assemble(control_program_text());
+const char *registers = R"(
+        .reg A_, 0x060
+        .reg B_, 0x061
+        .reg C_, 0x062
+        .reg D_, 0x063
+        .wide W_, 0x064
+        .wide V_, 0x066
+        .reg S_, 0x068
+        .reg T_, 0x069
+        .block ITEM
+        .field X, 1
+        .field Y, 1
+        .field Z, 1
+        .field SPARE, 5
+        .end
+)";
+
+struct Directed {
+    const char *name;
+    std::string source;
+    int passes;
+};
+
+// The setup every program starts from: modest words in the registers it may read.
+std::vector<FirmwareWrite> directed_setup() {
+    std::vector<FirmwareWrite> setup;
+    std::mt19937 random(11);
+    for (int address = 0x001; address < 0x100; ++address) {
+        setup.push_back({address, static_cast<int32_t>(random() % 60000) - 30000});
+    }
+    for (int item = 0; item < 16; ++item) {
+        setup.push_back({0x200 + 8 * item, word_of(0.125 * (item - 8))});
+        setup.push_back({0x200 + 8 * item + 1, word_of(0.0625 * item)});
+    }
+    return setup;
+}
+
+int run_image(VerilatedContext &context, const char *name, const csp::Program &program, int passes,
+              const std::vector<FirmwareWrite> &setup, bool trace = false) {
     for (const csp::Diagnostic &d : program.diagnostics) {
-        std::printf("control program, line %d: %s\n", d.line,
-                    d.message.c_str());
         if (d.error) {
+            std::printf("%s, line %d: %s\n", name, d.line, d.message.c_str());
             return 1;
         }
     }
-    auto symbol = [&](const char *name) {
-        return program.symbols.at(name);
-    };
-    const int channels     = symbol("CHANNELS"),
-              channel_size = symbol("CHANNEL_SIZE");
-    const int voices = symbol("VOICES"), voice_size = symbol("VOICE_SIZE");
-    const int lfos = symbol("LFOS"), lfo_size = symbol("LFO_SIZE");
-    const int sinks = symbol("SINKS");
-
-    std::vector<FirmwareWrite> setup = constants_of(program);
-    std::mt19937 random(7);
-    auto pick = [&](int low, int high) {
-        return std::uniform_int_distribution<int>(low, high)(random);
-    };
-
-    // The LFOs: each half of the pool sorted by shape (3 saws, 4 squares,
-    // 4 triangles, 5 sines), two sets
-    const int counts[4] = {3, 4, 4, 5};
-    for (int half = 0; half < 2; ++half) {
-        const int set = symbol("LFO_SETS") + half * symbol("SET_SIZE");
-        setup.push_back({set + symbol("BASE"), lfos + half * 16 * lfo_size});
-        for (int shape = 0; shape < 4; ++shape) {
-            setup.push_back({set + symbol("N_SAW") + shape, counts[shape]});
-        }
-        int slot = half * 16;
-        for (int shape = 0; shape < 4; ++shape) {
-            for (int n = 0; n < counts[shape]; ++n, ++slot) {
-                const int record   = lfos + slot * lfo_size;
-                const double depth = 0.25 * pick(1, 8);
-                write_wide_words(setup, record + symbol("PHASE"),
-                                 int64_t{pick(0, 1 << 30)} << 6);
-                write_wide_words(setup, record + symbol("PHASE_STEP"),
-                                 csp::lfo_rate(pick(30, 12000), 2));
-                setup.push_back({record + symbol("DEPTH"), word_of(depth)});
-                setup.push_back(
-                        {record + symbol("NEG_DEPTH"), word_of(-depth)});
-                setup.push_back({record + symbol("GAIN"),
-                                 shape == 0   ? word_of(depth / 8)
-                                 : shape == 2 ? word_of(depth / 4)
-                                              : 0});
-            }
-        }
-    }
-    // The channels: envelope tables, routing, depths
-    for (int channel = 0; channel < 16; ++channel) {
-        const int base = channels + channel * channel_size;
-        auto table     = [&](int row, int64_t target22, uint32_t coefficient) {
-            write_wide_words(setup, base + row, target22 << 10);
-            write_wide_words(setup, base + row + 2,
-                                 csp::envelope_rate(coefficient));
-        };
-        for (int kind = 0; kind < 2; ++kind) {
-            const int row = 16 * kind;
-            table(row + 0, 0x533333, pick(500, 60000));
-            table(row + 4, int64_t{pick(100, 1000)} << 12, pick(100, 20000));
-            table(row + 8, 0, pick(60, 8000));
-        }
-        auto field = [&](const char *name, int raw) {
-            setup.push_back({base + symbol(name), raw});
-        };
-        field("BEND", word_of(0.01 * pick(-12, 12)));
-        field("LFO1_PITCH", word_of(0.01 * pick(0, 30)));
-        field("LFO1_CUTOFF", word_of(0.1 * pick(-10, 10)));
-        field("LFO2_PITCH", word_of(0.01 * pick(0, 30)));
-        field("LFO2_CUTOFF", word_of(0.1 * pick(-10, 10)));
-        field("LFO1", lfos + pick(0, 31) * lfo_size);
-        field("LFO2", lfos + pick(0, 31) * lfo_size);
-        field("CUTOFF_BASE", word_of(0.1 * pick(0, 40)));
-        field("KEY_TRACK", word_of(0.25 * pick(0, 6)));
-        field("MOD_AMOUNT", word_of(0.1 * pick(-30, 30)));
-        field("VOLUME", word_of(0.1 * pick(2, 10)));
-    }
-    // The voices: idle, in release
-    for (int voice = 0; voice < 32; ++voice) {
-        const int base = voices + voice * voice_size;
-        setup.push_back({base + symbol("STAGE_A"), 8});
-        setup.push_back({base + symbol("STAGE_M"), 24});
-        setup.push_back(
-                {base + symbol("VELOCITY"), word_of(0.1 * pick(3, 10))});
-        setup.push_back({base + symbol("CHANNEL"),
-                         channels + pick(0, 15) * channel_size});
-        setup.push_back({base + symbol("NOTE"), word_of(0.1 * pick(-20, 20))});
-        setup.push_back({base + symbol("SINK"), sinks + 8 * voice});
-    }
-
     CoSim cosim(context);
-    cosim.start(program.words, setup);
-    int differences      = 0;
-    constexpr int passes = 400;
-    int most_cycles      = 0;
-    for (int pass = 0; pass < passes && differences == 0; ++pass) {
-        std::vector<FirmwareWrite> writes;
-        for (int voice = 0; voice < 32; ++voice) {
-            const int base = voices + voice * voice_size;
-            if (pass == 3 + 5 * voice) { // struck
-                write_wide_words(writes, base + symbol("LEVEL_A"), 0);
-                write_wide_words(writes, base + symbol("LEVEL_M"), 0);
-                writes.push_back({base + symbol("GATE"), 16384});
-            } else if (pass == 190 + 4 * voice) { // released
-                writes.push_back({base + symbol("GATE"), 0});
-            }
-        }
-        differences = cosim.pass(writes, "control program pass "
-                                                 + std::to_string(pass));
-        most_cycles = std::max(most_cycles, cosim.cycles());
+    cosim.start(program.image, setup);
+    cosim.trace(trace);
+    int differences = 0;
+    for (int pass = 1; pass <= passes && differences == 0; ++pass) {
+        differences += cosim.run_pass({}, std::string(name) + " pass " + std::to_string(pass));
     }
-    int live = 0; // sink words that are not 0 at the end
-    for (int voice = 0; voice < 32; ++voice) {
-        for (int word = 0; word < 3; ++word) {
-            live += cosim.sink((sinks - csp::sink_base) + 8 * voice + word)
-                    != 0;
-        }
-    }
-    std::printf("control program: %d passes, at most %d cycles a pass, "
-                "%d of 96 voice sinks live\n",
-                passes, most_cycles, live);
+    std::printf("%s: %s (%d rows, %d cycles a pass)\n", name, differences == 0 ? "ok" : "DIFFERS", program.image.length,
+                program.cycles);
     return differences;
 }
 
-// ---- random programs ---------------------------------------------------------------------------
-//
-// Register plan: constants 0x001–0x03F (random values, set by the
-// firmware), with loop counts and strides at fixed places; work words
-// 0x060–0x0DF; wide pairs 0x0E0–0x0FF; i starts at 0x200, j at 0x300
-// (blocks the programs index into), or at 0x800 for sink writes.
+void run_directed(VerilatedContext &context) {
+    const std::vector<FirmwareWrite> setup = directed_setup();
+    const std::string map = program_file("map.s");
+    const std::vector<Directed> programs = {
+        {"selftest", map + program_file("selftest.s"), 24},
+        // the chip check's one-path programs (tools/csp/programs/checks, #235): the scalar loops'
+        // repeat, one vector loop, the wide pair's write and read
+        {"loop", program_file("checks/loop.s"), 24},
+        {"vloop", program_file("checks/vloop.s"), 24},
+        {"vector_flags", program_file("checks/vector_flags.s"), 24},
+        {"vector_back_to_back", program_file("checks/vector_back_to_back.s"), 24},
+        {"pair", program_file("checks/pair.s"), 24},
+        {"arithmetic", std::string(registers) + R"(
+            MAC     A_, 0, B_, C_
+            MAC     D_, D_, A_, =0.5
+            ADD3    S_, 0, A_, D_
+            CMP     ZERO, S_, T_
+            SEL     T_, A_, B_
+            MACW    A_, A_, =3.0, B_
+            MIN     S_, A_, B_
+            MAX     T_, C_, D_
+            ABS     C_, D_
+            ANDXOR  D_, D_, A_, B_
+            SHIFT   S_, S_, C_
+            SHIFT   T_, 0, =#-3
+)", 4},
+        {"wide", std::string(registers) + R"(
+            MAC.w    W_, A_, V_
+            MACW.w   V_, B_, W_
+            ADD3.w   V_, D_, W_
+            SHIFT.w  W_, =#2
+            MAC      A_, 0, W_, =0.25
+)", 4},
+        {"loops and index", std::string(registers) + R"(
+            IDX    i, =#0x200, 0
+            LOOP.i end_a, =#4, =#8
+            MAC    [i+Z], 0, [i+Y], =0.5
+            ADD3   [i+X], [i+X], =0.125, ZERO
+end_a:
+            IDX    j, =#0x240, 0
+            IDX    i, =#0x200, 0
+            LOOP.i end_b, =#3, =#8
+            MAC    A_, A_, [i+Z], =0.25
+            LOOP.j end_c, =#2, =#1
+            ADD3   [j+0], [j+0], =0.5, ZERO
+end_c:
+end_b:
+            MAC    B_, 0, A_, =2.0
+            LOOP.i end_d, =#0, =#8
+            MAC    C_, 0, =1.0, =1.0
+end_d:
+            MAC    D_, 0, B_, =1.0
+)", 4},
+        {"select", std::string(registers) + R"(
+            CMP    ZERO, A_, B_
+            MAC    C_, 0, =1.0, A_
+            MAC    D_, 0, =2.0, B_
+            MAC    S_, S_, =0.5, C_
+            CMP    ZERO, B_, A_
+            SEL    T_, C_, D_
+            IDX    i, =#0x200, 0
+            LOOP.i end, =#4, =#8
+            CMP    ZERO, [i+X], [i+Y]
+            ADD3   [i+Z], [i+Z], =0.25, ZERO
+            MAC    A_, A_, =0.0625, S_
+end:
+)", 4},
+        {"sinks", std::string(registers) + R"(
+            IDX    j, =#0x800, 0
+            MAC    [j+0], 0, A_, =1.0
+            ADD3   [j+1], 0, B_, C_
+            CMP    [j+2], A_, B_
+)", 4},
+    };
+    for (const Directed &directed : programs) {
+        const csp::Program program = csp::assemble(directed.source);
+        failures += run_image(context, directed.name, program, directed.passes, setup) != 0;
+    }
+}
 
-constexpr int count_base  = 0x030; // 0x030–0x033: loop counts 1–4
-constexpr int stride_base = 0x034; // 0x034–0x037: strides 2, 4, −2, 16
-constexpr int base_i      = 0x038; // holds 0x200
-constexpr int base_j      = 0x039; // holds 0x300
-constexpr int base_sink   = 0x03A; // holds 0x800
-constexpr int count_nine =
-        0x03B; // holds 9: more elements than a wait takes cycles
-constexpr int count_zero = 0x03C; // holds 0: a loop that runs its body no times
+// ---- random programs ----------------------------------------------------------------------------
+//
+// Built with csp::ProgramBuilder, as the firmware builds. The rules a program must keep to be valid
+// (the model reports what it breaks): index registers point at 64-aligned blocks of the register
+// file and a word is read at an offset below 32, so that the chip's OR is the sum; i and j are set
+// before use and again after a loop steps them; nothing is written to an input;
+// and no row sets the index register of the loop it is in.
 
 class Generator {
 public:
     explicit Generator(uint32_t seed) : random_(seed) {}
 
+    csp::ProgramBuilder::Built build() {
+        csp::ProgramBuilder b;
+        point(b, csp::IndexRegister::i);
+        point(b, csp::IndexRegister::j);
+        const int units = pick(4, 10);
+        for (int unit = 0; unit < units; ++unit) {
+            switch (pick(0, 9)) {
+            case 0:
+            case 1:
+                loop(b, chance(2) ? csp::IndexRegister::i : csp::IndexRegister::j, 0);
+                break;
+            case 2:
+                instruction(b);
+                break;
+            case 3:
+                sink_group(b);
+                break;
+            case 4:
+                point(b, chance(2) ? csp::IndexRegister::i : csp::IndexRegister::j);
+                break;
+            default:
+                instruction(b);
+                break;
+            }
+        }
+        return b.build();
+    }
+
     std::vector<FirmwareWrite> setup() {
         std::vector<FirmwareWrite> writes;
-        for (int address = 0x001; address < count_base; ++address) {
-            writes.push_back({address, word()});
-        }
-        for (int count = 0; count < 4; ++count) {
-            writes.push_back({count_base + count, count + 1});
-        }
-        const int strides[] = {2, 4, -2, 16};
-        for (int n = 0; n < 4; ++n) {
-            writes.push_back({stride_base + n, strides[n]});
-        }
-        writes.push_back({base_i, 0x200});
-        writes.push_back({base_j, 0x300});
-        writes.push_back({base_sink, 0x800});
-        writes.push_back({count_nine, 9});
-        writes.push_back({count_zero, 0});
-        for (int address = 0x060; address < 0x100; ++address) {
+        for (int address = 0x001; address < 0x800; ++address) {
+            if (address >= csp::io_base && address < csp::io_base + csp::io_count) continue;
             writes.push_back({address, word()});
         }
         return writes;
     }
 
-    // A few writes, or now and then a burst past the 48-write window that
-    // includes writes the window must drop (register 0, the inputs).
-    std::vector<FirmwareWrite> writes_between_passes() {
+    std::vector<FirmwareWrite> firmware_writes() {
         std::vector<FirmwareWrite> writes;
-        const bool burst = chance(6);
-        const int count  = burst ? pick(50, 70) : pick(0, 6);
-        for (int n = 0; n < count; ++n) {
-            int address = pick(0x060, 0x0FF);
-            if (burst && chance(8)) {
-                address = chance(2) ? 0 : pick(0x040, 0x05F);
-            }
-            writes.push_back({address, word()});
-        }
+        for (int n = pick(0, 6); n > 0; --n) writes.push_back({pick(0x060, 0x0FF), word()});
         return writes;
-    }
-
-    std::vector<uint64_t> program() {
-        csp::ProgramBuilder b;
-        b.idx(csp::IndexRegister::i, direct(base_i), direct(0));
-        b.idx(csp::IndexRegister::j, direct(chance(4) ? base_sink : base_j),
-              direct(0));
-        const int items = pick(10, 60);
-        for (int item = 0; item < items; ++item) {
-            const int kind = pick(0, 21);
-            if (kind == 0) {
-                loop(b, true);
-            } else if (kind == 20 || kind == 21) {
-                vector_loop(b);
-            } else if (kind == 1) {
-                skip(b);
-            } else {
-                instruction(b, false);
-            }
-        }
-        return b.words();
     }
 
 private:
-    int pick(int low, int high) {
-        return std::uniform_int_distribution<int>(low, high)(random_);
-    }
-    bool chance(int one_in) {
-        return pick(1, one_in) == 1;
-    }
+    int pick(int low, int high) { return std::uniform_int_distribution<int>(low, high)(random_); }
+    bool chance(int one_in) { return pick(1, one_in) == 1; }
+
     int32_t word() {
-        // mostly modest values, sometimes the extremes
         switch (pick(0, 7)) {
-        case 0:
-            return pick(-131072, 131071);
-        case 1:
-            return chance(2) ? 131071 : -131072;
-        default:
-            return pick(-40000, 40000);
+        case 0: return pick(-131072, 131071);
+        case 1: return chance(2) ? 131071 : -131072;
+        default: return pick(-40000, 40000);
         }
     }
 
-    static csp::Operand direct(int address) {
-        return csp::Operand::direct(address);
+    using Index = csp::IndexRegister;
+    bool &valid(Index which) { return which == Index::i ? i_valid_ : j_valid_; }
+
+    // IDX to a 64-aligned block of registers (or of sinks, for a sink group)
+    void point(csp::ProgramBuilder &b, Index which, int base = -1) {
+        if (base < 0) base = 0x100 + 64 * pick(0, 9);
+        b.idx(which, csp::Source::imm(base), csp::Source::reg(csp::Operand::direct(0)));
+        valid(which) = true;
     }
 
-    csp::Operand word_operand() {
-        switch (pick(0, 9)) {
-        case 0:
-            return direct(0);
+    csp::Operand direct(int address) { return csp::Operand::direct(address); }
+
+    csp::Source word_source() {
+        switch (pick(0, 11)) {
+        case 0: return csp::Source::reg(direct(0));
         case 1:
-        case 2:
-            return direct(pick(0x001, 0x02F)); // constants
+        case 2: return csp::Source::reg(direct(pick(0x001, 0x02F)));
         case 3:
-            return csp::Operand::indexed(csp::IndexRegister::i, pick(0, 31));
-        case 4:
-            return csp::Operand::indexed(csp::IndexRegister::j, pick(0, 31));
-        default:
-            return direct(pick(0x060, 0x0DF));
+        case 4: return csp::Source::reg(indexed_or_direct(Index::i, 31));
+        case 5:
+        case 6: return csp::Source::reg(indexed_or_direct(Index::j, 31));
+        case 7: return csp::Source::imm(word());
+        default: return csp::Source::reg(direct(pick(0x060, 0x0DF)));
         }
+    }
+
+    csp::Operand indexed_or_direct(Index which, int span) {
+        if (valid(which) && !sink_group_) return csp::Operand::indexed(which, pick(0, span));
+        return direct(pick(0x060, 0x0DF));
     }
 
     csp::Operand result_operand() {
         switch (pick(0, 9)) {
-        case 0:
-            return direct(0); // discarded
+        case 0: return direct(0);   // discarded
         case 1:
-            return csp::Operand::indexed(csp::IndexRegister::i, pick(0, 31));
-        case 2:
+        case 2: return indexed_or_direct(Index::i, 31);
         case 3:
-            return csp::Operand::indexed(csp::IndexRegister::j, pick(0, 31));
-        default:
-            return direct(pick(0x060, 0x0DF));
+        case 4: return sink_group_ ? csp::Operand::indexed(Index::j, pick(0, 31)) : indexed_or_direct(Index::j, 31);
+        default: return direct(pick(0x060, 0x0DF));
         }
     }
 
     csp::Operand wide_operand() {
-        switch (pick(0, 5)) {
-        case 0:
-            return csp::Operand::indexed(csp::IndexRegister::i,
-                                         2 * pick(0, 15));
-        default:
-            return direct(0x0E0 + 2 * pick(0, 15));
+        if (chance(4) && valid(Index::i) && !sink_group_) return csp::Operand::indexed(Index::i, 2 * pick(0, 15));
+        return direct(0x0E0 + 2 * pick(0, 15));
+    }
+
+    csp::ASource a_source() {
+        switch (pick(0, 2)) {
+        case 0: return csp::ASource::zero;
+        default: return csp::ASource::result;
         }
     }
 
-    csp::ASelect a_select() {
-        switch (pick(0, 3)) {
-        case 0:
-            return csp::ASelect::zero;
-        case 1:
-            return csp::ASelect::accumulator;
-        default:
-            return csp::ASelect::result;
+    // two sources, at most one of them an immediate
+    void sources(csp::Source &x, csp::Source &y) {
+        x = word_source();
+        y = word_source();
+        if (x.operand.mode == csp::Operand::Mode::immediate && y.operand.mode == csp::Operand::Mode::immediate) {
+            y = csp::Source::reg(direct(pick(0x060, 0x0DF)));
         }
     }
 
-    void instruction(csp::ProgramBuilder &b, bool in_loop) {
-        const csp::Operand x = word_operand();
-        const csp::Operand y = word_operand();
-        switch (pick(0, 15)) {
-        case 0:
-            b.mac(result_operand(), a_select(), x, y);
-            break;
-        case 1:
-            b.macw(result_operand(), a_select(), x, y);
-            break;
-        case 2:
-            b.interp(result_operand(), a_select(), x, y);
-            break;
-        case 3:
-            b.add3(result_operand(), a_select(), x, y);
-            break;
-        case 4:
-            b.acc(chance(2) ? csp::ASelect::zero : csp::ASelect::accumulator, x,
-                  y);
-            break;
-        case 5:
-            b.sel(result_operand(), x, y);
-            break;
-        case 6:
-            b.cmp(result_operand(), x, y);
-            break;
-        case 7:
-            chance(2) ? b.min(result_operand(), x, y)
-                      : b.max(result_operand(), x, y);
-            break;
-        case 8:
-            b.andxor(result_operand(),
-                     chance(2) ? csp::ASelect::zero : a_select(), x, y);
-            break;
-        case 9:
-            b.shift(result_operand(), a_select(), direct(pick(0x001, 0x02F)));
-            break;
-        case 10:
-            b.abs(result_operand(), x);
-            break;
-        case 11: {
-            const csp::Operand wide = wide_operand();
-            switch (pick(0, 4)) {
-            case 0:
-                b.mac_wide(wide, x, wide_operand());
-                break;
-            case 1:
-                b.macw_wide(wide, x, wide_operand());
-                break;
-            case 2:
-                b.interp_wide(wide, x, wide_operand());
-                break;
-            case 3:
-                b.add3_wide(wide, x, wide_operand());
-                break;
-            default:
-                b.shift_wide(wide, direct(pick(0x001, 0x02F)));
-                break;
-            }
-            break;
-        }
-        case 12:
-            if (!in_loop) {
-                // re-point i or j at its block, or somewhere random
-                const bool on_j = chance(2);
-                b.idx(on_j ? csp::IndexRegister::j : csp::IndexRegister::i,
-                      direct(chance(3) ? pick(0x060, 0x0DF)
-                                       : (on_j ? base_j : base_i)),
-                      y);
+    void instruction(csp::ProgramBuilder &b) {
+        csp::Source x, y;
+        sources(x, y);
+        const csp::Operand r = result_operand();
+        switch (pick(0, 14)) {
+        case 0: b.mac(r, a_source(), x, y); break;
+        case 1: b.macw(r, a_source(), x, y); break;
+        case 3: b.add3(r, a_source(), x, y); break;
+        case 5: b.sel(r, static_cast<csp::Condition>(pick(0, 5)), x, y); break;
+        case 6: b.cmp(r, x, y); break;
+        case 7: chance(2) ? b.min(r, x, y) : b.max(r, x, y); break;
+        case 8: b.andxor(r, chance(2) ? csp::ASource::zero : a_source(), x, y); break;
+        case 9: b.shift(r, a_source(), y); break;
+        case 10: b.abs(r, x); break;
+        case 11:
+            if (!sink_group_) {
+                const csp::Operand wide = wide_operand();
+                const csp::Source y_wide = csp::Source::reg(wide_operand());
+                switch (pick(0, 4)) {
+                case 0: b.mac(wide, csp::ASource::result, x, y_wide, true); break;
+                case 1: b.macw(wide, csp::ASource::result, x, y_wide, true); break;
+                case 3: b.add3(wide, csp::ASource::result, x, y_wide, true); break;
+                default: b.shift(wide, csp::ASource::result, y, true); break;
+                }
                 break;
             }
             [[fallthrough]];
-        default:
-            b.mac(result_operand(), a_select(), x, y);
-            break;
+        default: b.mac(r, a_source(), x, y); break;
         }
     }
 
-    void skip(csp::ProgramBuilder &b) {
-        const auto condition = static_cast<csp::Condition>(pick(0, 5));
-        const int count      = pick(1, 3);
-        b.skip(condition, static_cast<size_t>(count));
-        for (int n = 0; n < count; ++n) {
-            instruction(b, false);
-        }
-    }
-
-    // ---- vector loops ---------------------------------------------------------------------
-    // A vector loop's iterations must not share registers, so a body writes
-    // only the element's own block ([own+k], k < 16, a stride of 16) and
-    // reads constants, registers nothing in the body writes, that block, and
-    // the table the element's private index register points at.
-    static csp::IndexRegister other_index(csp::IndexRegister own) {
-        return own == csp::IndexRegister::i ? csp::IndexRegister::j
-                                            : csp::IndexRegister::i;
-    }
-
-    csp::Operand block_operand(csp::IndexRegister own) {
-        return csp::Operand::indexed(own, pick(0, 15));
-    }
-
-    csp::Operand vector_read(csp::IndexRegister own) {
-        switch (pick(0, 8)) {
-        case 0:
-            return direct(0);
-        case 1:
-        case 2:
-            return direct(pick(0x001, 0x02F));
-        case 3:
-            return direct(pick(0x060, 0x0DF));
-        case 4:
-        case 5:
-            return csp::Operand::indexed(other_index(own), pick(0, 15));
-        default:
-            return block_operand(own);
-        }
-    }
-
-    csp::ASelect vector_a_select() {
-        return chance(2) ? csp::ASelect::zero : csp::ASelect::result;
-    }
-
-    void vector_instruction(csp::ProgramBuilder &b, csp::IndexRegister own) {
-        const csp::Operand r = chance(8) ? direct(0) : block_operand(own);
-        const csp::Operand x = vector_read(own);
-        const csp::Operand y = vector_read(own);
-        switch (pick(0, 13)) {
-        case 0:
-            b.mac(r, vector_a_select(), x, y);
-            break;
-        case 1:
-            b.macw(r, vector_a_select(), x, y);
-            break;
-        case 2:
-            b.interp(r, vector_a_select(), x, y);
-            break;
-        case 3:
-            b.add3(r, vector_a_select(), x, y);
-            break;
-        case 4:
-        case 5:
-            b.cmp(r, x, y);
-            break;
-        case 6:
-        case 7:
-            b.sel(r, x, y);
-            break;
-        case 8:
-            chance(2) ? b.min(r, x, y) : b.max(r, x, y);
-            break;
-        case 9:
-            b.andxor(r, vector_a_select(), x, y);
-            break;
-        case 10:
-            b.shift(r, vector_a_select(), direct(pick(0x001, 0x02F)));
-            break;
-        case 11:
-            b.abs(r, x);
-            break;
-        case 12: {
-            // the element's private index register, from a constant or from
-            // a value of the element's own
-            b.idx(other_index(own), direct(chance(2) ? base_j : base_i),
-                  chance(2) ? direct(0) : block_operand(own));
-            break;
-        }
-        default: {
-            const csp::Operand wide =
-                    csp::Operand::indexed(own, 2 * pick(0, 7));
+    // sinks are written through j, which points into the sink area for the group and reads nothing through it
+    void sink_group(csp::ProgramBuilder &b) {
+        point(b, Index::j, 0x800 + 64 * pick(0, 15));
+        sink_group_ = true;
+        for (int n = pick(1, 3); n > 0; --n) {
+            csp::Source x, y;
+            sources(x, y);
+            const csp::Operand r = csp::Operand::indexed(Index::j, pick(0, 31));
             switch (pick(0, 3)) {
-            case 0:
-                b.mac_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
-                break;
-            case 1:
-                b.macw_wide(wide, x, wide);
-                break;
-            case 2:
-                b.interp_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
-                break;
-            default:
-                b.add3_wide(wide, x, direct(0x0E0 + 2 * pick(0, 15)));
-                break;
+            case 0: b.mac(r, csp::ASource::zero, x, y); break;
+            case 1: b.add3(r, csp::ASource::zero, x, y); break;
+            case 2: b.cmp(r, x, y); break;
+            default: b.max(r, x, y); break;
             }
-            break;
         }
-        }
+        sink_group_ = false;
+        point(b, Index::j);
     }
 
-    // A vector loop on `own`, which must not be the index register of an
-    // enclosing loop.
-    void vector_loop(csp::ProgramBuilder &b,
-                     std::optional<csp::IndexRegister> enclosing = {}) {
-        const csp::IndexRegister own =
-                enclosing ? other_index(*enclosing)
-                          : (chance(2) ? csp::IndexRegister::i
-                                       : csp::IndexRegister::j);
-        const int counts[] = {count_base + 0, count_base + 1, count_base + 2,
-                              count_base + 3, count_nine,     count_nine,
-                              count_zero};
-        const size_t at    = b.open_loop(own, direct(counts[pick(0, 6)]),
-                                         direct(stride_base + 3), true);
-        const int body     = pick(1, 6);
+    // a loop on `which`, its register pointed at a block beforehand, and its body free of IDX on that register;
+    // an outer loop may hold an inner one on the other register
+    void loop(csp::ProgramBuilder &b, Index which, int depth) {
+        const int count  = chance(6) ? 0 : pick(1, 4);
+        const int stride = pick(0, 2) == 0 ? 0 : (chance(2) ? 64 : -64);
+        int base;
+        if (stride >= 0) base = 0x100 + 64 * pick(0, 9 - std::max(count - 1, 0));
+        else             base = 0x100 + 64 * (std::max(count - 1, 0) + pick(0, 9 - std::max(count - 1, 0)));
+        if (depth == 0 || !loop_on_other_) point(b, which, base);
+        const size_t at = b.open_loop(which, count, stride);
+        const Index other = which == Index::i ? Index::j : Index::i;
+        const int body = pick(1, 4);
         for (int n = 0; n < body; ++n) {
-            vector_instruction(b, own);
-        }
-        b.close_loop(at);
-    }
-
-    void loop(csp::ProgramBuilder &b, bool may_nest) {
-        const bool on_j = chance(2);
-        const size_t at = b.open_loop(on_j ? csp::IndexRegister::j
-                                           : csp::IndexRegister::i,
-                                      direct(count_base + pick(0, 3)),
-                                      direct(stride_base + pick(0, 3)));
-        const int body = pick(1, 5);
-        for (int n = 0; n < body; ++n) {
-            if (may_nest && chance(7)) {
-                vector_loop(b, on_j ? csp::IndexRegister::j
-                                    : csp::IndexRegister::i);
-            } else if (may_nest && chance(5)) {
-                // the inner loop steps the other index register
-                const size_t inner = b.open_loop(
-                        on_j ? csp::IndexRegister::i : csp::IndexRegister::j,
-                        direct(count_base + pick(0, 2)),
-                        direct(stride_base + pick(0, 3)));
-                const int inner_body = pick(1, 3);
-                for (int m = 0; m < inner_body; ++m) {
-                    instruction(b, true);
-                }
+            if (depth == 0 && chance(6) && n + 1 < body) {
+                // an inner loop on the other register, its block pointed inside this body
+                const bool saved = valid(other);
+                point(b, other);
+                loop_on_other_ = true;
+                const int inner_count = chance(6) ? 0 : pick(1, 3);
+                const size_t inner = b.open_loop(other, inner_count, 0);
+                for (int m = pick(1, 2); m > 0; --m) instruction(b);
                 b.close_loop(inner);
+                loop_on_other_ = false;
+                valid(other) = false;   // stepped by the loop (stride 0 keeps it, but be strict)
+                (void) saved;
             } else {
-                instruction(b, true);
+                instruction(b);
             }
         }
         b.close_loop(at);
+        valid(which) = false;           // stepped past its block
+        point(b, which);
+        if (valid(other) && depth == 0) { /* unchanged */ }
     }
 
     std::mt19937 random_;
+    bool i_valid_ = false, j_valid_ = false;
+    bool sink_group_ = false, loop_on_other_ = false;
 };
+
+void run_random(VerilatedContext &context, uint32_t seed, int programs) {
+    int built = 0, differing = 0, rejected = 0;
+    for (int program = 0; program < programs; ++program) {
+        Generator generator(seed * 100003u + static_cast<uint32_t>(program));
+        const csp::ProgramBuilder::Built result = generator.build();
+        if (!result.ok) {
+            ++rejected;   // too long for a pass, or a rule the generator broke: not a case
+            continue;
+        }
+        ++built;
+        CoSim cosim(context);
+        csp::Image image = result.image;
+        cosim.start(image, generator.setup());
+        int differences = 0;
+        for (int pass = 1; pass <= 4 && differences == 0; ++pass) {
+            differences += cosim.run_pass(pass == 1 ? std::vector<FirmwareWrite>{} : generator.firmware_writes(),
+                                          "random " + std::to_string(program) + " pass " + std::to_string(pass));
+        }
+        if (differences != 0) {
+            ++differing;
+            ++failures;
+            std::printf("random program %d (seed %u) DIFFERS: %d rows, %d cycles\n", program, seed, image.length, result.cycles);
+            if (differing >= 5) break;
+        }
+    }
+    std::printf("random: %d programs built, %d rejected by the builder, %d differ\n", built, rejected, differing);
+}
 
 } // namespace
 
 int main(int argc, char **argv) {
     VerilatedContext context;
     context.commandArgs(argc, argv);
-    // The seed: `+verilator+seed+N` as `make sim` passes it, or a plain
-    // first number; a plain second number is how many random programs.
-    uint32_t seed = 1;
-    int programs  = 200;
-    std::vector<std::string> numbers;
-    for (int arg = 1; arg < argc; ++arg) {
-        const std::string text      = argv[arg];
-        const std::string seed_flag = "+verilator+seed+";
-        if (text.rfind(seed_flag, 0) == 0) {
-            seed = static_cast<uint32_t>(
-                    std::strtoul(text.c_str() + seed_flag.size(), nullptr, 10));
-        } else if (!text.empty() && text[0] != '+') {
-            numbers.push_back(text);
-        }
-    }
-    if (!numbers.empty()) {
-        seed = static_cast<uint32_t>(
-                std::strtoul(numbers[0].c_str(), nullptr, 10));
-    }
-    if (numbers.size() > 1) {
-        programs = std::atoi(numbers[1].c_str());
-    }
-    std::printf("SIM_SEED=%u\n", seed);
-
-    int failures = 0;
-
-    // The manual's programs, with firmware writes to drive them. The
-    // envelope runs as LOOP.i and as LOOP.vi, for voice counts below and
-    // above the 7 elements that hide an instruction's wait.
-    struct EnvelopeCase {
-        const char *name;
-        const char *program;
-        int voices;
-    };
-    const EnvelopeCase envelope_cases[] = {
-            {"envelope", envelope_program, 4},
-            {"envelope vector", envelope_vector_program, 4},
-            {"envelope vector of 1", envelope_vector_program, 1},
-            {"envelope vector of 9", envelope_vector_program, 9},
-            {"envelope vector of 32", envelope_vector_program, 32},
-    };
-    for (const EnvelopeCase &variant : envelope_cases) {
-        std::string source           = variant.program;
-        const std::string count_text = "=#4, =#16";
-        source.replace(source.find(count_text), count_text.size(),
-                       "=#" + std::to_string(variant.voices) + ", =#16");
-        const csp::Program envelope      = csp::assemble(source);
-        std::vector<FirmwareWrite> setup = constants_of(envelope);
-        setup.push_back({0x060, 0x200}); // ENV_TABLE
-        // Rows of the envelope table: target (wide: upper, lower), rate.
-        const int table[][2] = {
-                {0x200, 21299}, {0x201, 0}, {0x202, 1638}, // attack: 1.3, 0.1
-                {0x204, 8192},  {0x205, 0}, {0x206, 819},  // decay: 0.5, 0.05
-                {0x208, 0},     {0x209, 0}, {0x20a, 819}}; // release: 0, 0.05
-        for (const auto &entry : table) {
-            setup.push_back({entry[0], entry[1]});
-        }
-        for (int voice = 0; voice < variant.voices; ++voice) {
-            const int stage =
-                    voice < 4 ? (voice == 3 ? 8 : 0) : 4 * (voice % 3);
-            const int gate     = voice < 4 ? (voice < 2 ? 16384 : 0)
-                                           : (voice % 2 ? 16384 : 0);
-            const int velocity = 8192 * (voice < 4 ? voice + 1 : voice % 5 + 1);
-            setup.push_back({0x600 + 16 * voice + 2, stage});
-            setup.push_back({0x600 + 16 * voice + 3, gate});
-            setup.push_back({0x600 + 16 * voice + 4, velocity});
-        }
-        CoSim cosim(context);
-        cosim.start(envelope.words, setup);
-        int differences = 0;
-        for (int pass = 0; pass < 60 && differences == 0; ++pass) {
-            std::vector<FirmwareWrite> writes;
-            if (pass == 30) {
-                writes.push_back({0x600 + 3, 0}); // voice 0: gate off
-            }
-            differences =
-                    cosim.pass(writes, std::string(variant.name) + " pass "
-                                               + std::to_string(pass));
-        }
-        std::printf("%s: %s\n", variant.name, differences ? "FAIL" : "match");
-        failures += differences != 0;
-    }
-    {
-        const csp::Program lfo           = csp::assemble(lfo_program);
-        std::vector<FirmwareWrite> setup = constants_of(lfo);
-        setup.push_back({0x062, 1});      // RATE, wide: upper word
-        setup.push_back({0x063, 0x1234}); //   lower word
-        CoSim cosim(context);
-        cosim.start(lfo.words, setup);
-        int differences = 0;
-        for (int pass = 0; pass < 20 && differences == 0; ++pass) {
-            differences = cosim.pass({}, "lfo pass " + std::to_string(pass));
-        }
-        std::printf("lfo: %s\n", differences ? "FAIL" : "match");
-        failures += differences != 0;
-    }
-
-    {
-        const int differences = run_control_program(context);
-        std::printf("control program: %s\n", differences ? "FAIL" : "match");
-        failures += differences != 0;
-    }
-
-    // Random programs.
-    int matched = 0;
-    for (int n = 0; n < programs; ++n) {
-        Generator generator(seed * 7919u + static_cast<uint32_t>(n));
-        const std::vector<uint64_t> words = generator.program();
-        CoSim cosim(context);
-        const char *trace = std::getenv("CSP_TRACE_PROGRAM");
-        cosim.trace(trace != nullptr && std::atoi(trace) == n);
-        cosim.verbose(std::getenv("CSP_VERBOSE") != nullptr);
-        cosim.start(words, generator.setup());
-        int differences = 0;
-        for (int pass = 0; pass < 4 && differences == 0; ++pass) {
-            differences = cosim.pass(generator.writes_between_passes(),
-                                     "program " + std::to_string(n) + " pass "
-                                             + std::to_string(pass));
-        }
-        if (differences == 0) {
-            ++matched;
-        } else {
-            std::printf("  program %d:\n", n);
-            for (size_t at = 0; at < words.size(); ++at) {
-                const csp::Instruction ins =
-                        csp::Instruction::decode(words[at]);
-                std::printf("    %3zu %-6s a=%d r=%03x x=%03x y=%03x\n", at,
-                            std::string(csp::mnemonic(ins.op)).c_str(),
-                            static_cast<int>(ins.a), ins.r, ins.x, ins.y);
-            }
-            ++failures;
-            if (failures > 5) {
-                break;
-            }
-        }
-    }
-    std::printf("random programs: %d of %d match (%d of %d passes ran into the "
-                "pass limit)\n",
-                matched, programs, CoSim::passes_at_limit, CoSim::passes_run);
-
-    if (failures) {
-        std::printf("%d FAILURE(S)\n", failures);
-    } else {
+    const uint32_t seed = argc > 1 && argv[1][0] != '+' ? static_cast<uint32_t>(std::atoi(argv[1])) : 1;
+    const int programs  = argc > 2 && argv[2][0] != '+' ? std::atoi(argv[2]) : 200;
+    run_directed(context);
+    run_random(context, seed, programs);
+    std::printf("\n%d passes compared on both\n", CoSim::passes_run);
+    if (failures == 0 && CoSim::model_errors == 0) {
         std::printf("ALL PASS\n");
+        return 0;
     }
-    return failures ? 1 : 0;
+    std::printf("%d FAILURE(S), %d model errors\n", failures, CoSim::model_errors);
+    return 1;
 }

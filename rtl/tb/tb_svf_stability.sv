@@ -7,7 +7,7 @@
 // The FC_MAX clamp (synth_pkg) holds the effective cutoff at 14.4 kHz,
 // one measured-clean step below the ~16 kHz bloom at the heaviest
 // decodable damping (q1 = sqrt2). Resonance is log2-encoded:
-// FILTER[27:14] = r, octaves of Q above Butterworth,
+// the resonance sink = r, octaves of Q above Butterworth,
 // q1 = sqrt2 * 2^-r via LUT — so r = 0 IS the heaviest decodable
 // damping, structurally rather than by a clamp, and the top of the
 // range underflows to q1 = 0 (self-oscillation, a feature). Corners:
@@ -40,46 +40,96 @@ module tb_svf_stability;
         .cell_tick(), .slot(slot)
     );
 
+    // The sink area, and partial 0 pointed at six words of it: its pitch,
+    // its cutoff, its resonance, the voice gain and the left gain (the
+    // right gain, the duty and the mode are the zero word, so the right
+    // side is silent). Every other partial points at the zero word.
+    localparam int WORD_PITCH = 0, WORD_CUTOFF = 1, WORD_RESONANCE = 2,
+                   WORD_VOICE_GAIN = 3, WORD_LEFT_GAIN = 4;
+    logic                          sink_write_enable = 1'b0;
+    logic [9:0]                    sink_write_address = '0;
+    logic [17:0]                   sink_write_data = '0;
+    logic [5:0][9:0]               sink_read_address;
+    logic [5:0][17:0]              sink_read_data;
+    csp_sink_area u_sink (
+        .clk(clk), .reset_n(rst_n),
+        .write_enable(sink_write_enable), .write_both(1'b1),
+        .write_address(sink_write_address), .write_data(sink_write_data),
+        .pass_done(1'b0),
+        .read_address(sink_read_address), .read_data(sink_read_data)
+    );
+
+    logic                                  pointer_write_enable = 1'b0;
+    logic [7:0]                            pointer_write_index  = '0;
+    logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data   = '0;
+    logic sclk = 1'b0;
+    always #25 sclk = ~sclk;
+
     logic signed [23:0] ml, mr;
     partial_pipeline u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .slot_issue(slot_issue), .sample_tick(sample_tick),
-        .sclk(1'b0), .partial_write_enable(1'b0), .partial_write_word(3'b0),
-        .partial_write_index(8'b0), .partial_write_data(32'b0),
-        .swap_toggle(1'b0),
-        .dmem_wr_addr(10'b0), .dmem_wr_data(18'b0),
-        .dmem_wr_toggle(1'b0),
-        .imem_write_enable(1'b0), .imem_write_addr(10'b0),
-        .imem_write_data(32'b0),
+        .sclk(sclk),
+        .pointer_write_enable(pointer_write_enable),
+        .pointer_write_index(pointer_write_index),
+        .pointer_write_data(pointer_write_data),
+        .sink_read_address(sink_read_address),
+        .sink_read_data(sink_read_data),
         .mix_left(ml), .mix_right(mr)
     );
 
-    // ---- fixture: partial 0 = saw @ 375 Hz, all others muted --------
-    integer e;
-    initial begin
-        #1;
-        for (e = 0; e < 512; e = e + 1) begin
-            u_pipe.osc_param_ram[e] = 36'h0;
-            u_pipe.duty_param_ram[e] = 36'h0;
-            u_pipe.filter_param_ram[e] = 36'h0;
-            u_pipe.gain_param_ram[e] = 36'h000000000;      // mute L+R
-                                                           // (volume 0)
-            u_pipe.gate_param_ram[e] = 2'b01;              // gate on
-            u_pipe.ptrs0_param_ram[e] = 30'd0;
-            u_pipe.ptrs1_param_ram[e] = 30'd0;
+    task automatic write_word(input integer address, input integer value);
+        begin
+            @(negedge clk);     // not on the edge where the pipeline reads it
+            sink_write_enable  = 1'b1;
+            sink_write_address = address[9:0];
+            sink_write_data    = value[17:0];
+            @(negedge clk);
+            sink_write_enable  = 1'b0;
         end
-        u_pipe.osc_param_ram[0]   = 36'h000001614;        // saw, 375.03 Hz
-        u_pipe.osc_param_ram[256] = 36'h000001614;
-        u_pipe.gain_param_ram[0]   = 36'h0000000DF;        // L -12 dB, R mute
-        u_pipe.gain_param_ram[256] = 36'h0000000DF;        // (volume)
+    endtask
+
+    // A Q4.14 octave word for a UQ4.10 code, the zero point being middle C
+    // (0x1400), saturated into the 18 bits.
+    function automatic integer octave_word(input integer code);
+        integer word;
+        begin
+            word = (code - 14'h1400) <<< 4;
+            octave_word = (word > 131071) ? 131071 : word;
+        end
+    endfunction
+
+    // ---- fixture: partial 0 = saw @ 375 Hz, all others the zero word ----
+    bit fixture_done = 1'b0;
+    initial begin
+        logic [synth_pkg::POINTER_ENTRY_W-1:0] entry;
+        #1;
+        entry = '0;
+        for (int k = 0; k < synth_pkg::POINTERS_PER_PARTIAL; k++) begin
+            entry[k * synth_pkg::POINTER_W +: synth_pkg::POINTER_W] = synth_pkg::POINTER_ZERO;
+        end
+        entry[synth_pkg::POINTER_PITCH_VOICE * 10 +: 10]  = WORD_PITCH;
+        entry[synth_pkg::POINTER_CUTOFF_VOICE * 10 +: 10] = WORD_CUTOFF;
+        entry[synth_pkg::POINTER_RESONANCE * 10 +: 10]    = WORD_RESONANCE;
+        entry[synth_pkg::POINTER_GAIN_VOICE * 10 +: 10]   = WORD_VOICE_GAIN;
+        entry[synth_pkg::POINTER_GAIN_LEFT * 10 +: 10]    = WORD_LEFT_GAIN;
+        @(posedge sclk);
+        pointer_write_enable <= 1'b1;
+        pointer_write_index  <= 8'd0;
+        pointer_write_data   <= entry;
+        @(posedge sclk);
+        pointer_write_enable <= 1'b0;
+        write_word(WORD_PITCH, octave_word(14'h1614));     // 375.03 Hz
+        write_word(WORD_VOICE_GAIN, 4096);                 // 0.25
+        write_word(WORD_LEFT_GAIN, 16384);                 // 1.0 (saw is waveform 0)
+        fixture_done = 1'b1;
     end
 
     // r = log2 resonance code, UQ4.10 octaves of Q above Butterworth
     task automatic set_filter(input [13:0] fc, input [13:0] r);
         begin
-            @(negedge clk);     // not on the edge where the pipeline reads it
-            u_pipe.filter_param_ram[0]   = {8'b0, r[13:0], fc};
-            u_pipe.filter_param_ram[256] = {8'b0, r[13:0], fc};
+            write_word(WORD_CUTOFF, octave_word(fc));
+            write_word(WORD_RESONANCE, (r > 14'h1FFF ? 131071 : r <<< 4));
         end
     endtask
 
@@ -128,11 +178,13 @@ module tb_svf_stability;
 
     integer errors = 0;
     longint r, peak;
+
     initial begin
         rst_n = 0;
         repeat (8) @(posedge clk);
         @(negedge clk);
         rst_n = 1;
+        wait (fixture_done);
 
         // baseline: moderate cutoff, r = 0x200 (q1 = 1.0, today's
         // timbre) — guards the metric
