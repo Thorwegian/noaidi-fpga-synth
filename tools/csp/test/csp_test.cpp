@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // Every instruction at its edges (formats, truncation, saturation, wrap,
-// flags), the rules a program can see (the index registers, loops, SKIP,
+// flags), the rules a program can see (the index registers, loops,
 // the write queue and swap, the hold, pass limits, sink pages), the
 // schedule the builder lays out (checked by the model's scoreboard), the
 // assembler's checks, and the programs in tools/csp/programs.
@@ -163,7 +163,6 @@ void test_encoding() {
     check_equal(reads(csp::Op::shift), 2, "SHIFT reads Y only (X is not read)");
     check_equal(reads(csp::Op::idx), 3, "IDX reads X and Y");
     check_equal(reads(csp::Op::loop), 0, "LOOP reads nothing: its numbers are in the word");
-    check_equal(reads(csp::Op::skip), 0, "SKIP reads nothing");
     check_equal(reads(csp::Op::nop), 0, "NOP reads nothing");
 }
 
@@ -257,23 +256,6 @@ void test_andxor_shift_abs_nop() {
 }
 
 // ---- rules a program can see ----------------------------------------------------
-
-void test_skip() {
-    Machine m(std::string(registers) + R"(
-        CMP   ZERO, B_, C_          ; 1 − 2: negative
-        SKIP  neg, 2
-        ADD3  A_, 0, =1.0, ZERO
-        ADD3  A_, 0, =2.0, ZERO
-        ADD3  D_, 0, =3.0, ZERO
-)");
-    m.set("B_", q(1.0)).set("C_", q(2.0)).start();
-    const csp::PassReport report = m.run();
-    check_equal(m.get("A_"), 0, "SKIP neg skips the next two");
-    check_equal(m.get("D_"), q(3.0), "the instruction after them runs");
-    // SKIP waits for CMP's flags; the rest issue one per cycle.
-    check_equal(report.cycles, csp::state_latency + 4, "skipped instructions still take their cycles");
-    check(report.errors.empty(), "without an early read");
-}
 
 // The schedule changes the cycle count, never the result: a dependent
 // instruction issues result_latency cycles after the one it reads, a
@@ -402,9 +384,6 @@ void test_vector_loops() {
                      "        MAC [i+PICK], 0, T, =1.0\n");
     shared.start();
     check(!shared.processor.pass().errors.empty(), "elements sharing a register are reported");
-    check(has_diagnostic(csp::assemble(body + "LOOP.vi 2, =#8, =#8\nSKIP always, 1\nNOP\n"), true,
-                         "a vector body holds no loop or SKIP"),
-          "SKIP in a vector loop's body is rejected");
 }
 
 void test_loops() {
@@ -474,8 +453,7 @@ outer_end:
 }
 
 // The chip has no stall, so what the front end used to wait for is rows: an
-// IDX is followed by four NOPs, a loop of count 0 is not there at all, and
-// a SKIP does not cross the end of its loop.
+// IDX is followed by four NOPs, and a loop of count 0 is not there at all.
 void test_decisions() {
     const csp::Program idx = csp::assemble(std::string(registers) + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
     check(idx.ok, "IDX assembles");
@@ -498,15 +476,6 @@ void test_decisions() {
     check(csp::assemble(std::string(registers) + "LOOP.i end, =#2, =#1\nIDX j, =#0x200, 0\nend:\nNOP\n").ok,
           "but it may set the other");
 
-    const csp::Program skip_ok = csp::assemble(std::string(registers) +
-            "LOOP.i end, =#2, =#1\nCMP ZERO, B_, C_\nSKIP neg, 1\nMAC A_, 0, =1.0, =1.0\nend:\nNOP\n");
-    check(skip_ok.ok, "a SKIP that ends at its loop's end assembles");
-    check(has_diagnostic(csp::assemble(std::string(registers) +
-                          "LOOP.i end, =#2, =#1\nCMP ZERO, B_, C_\nSKIP neg, 3\nMAC A_, 0, =1.0, =1.0\nend:\nNOP\nNOP\n"),
-                         true, "does not cross the end of its loop"),
-          "a SKIP past its loop's end is rejected");
-    check(csp::assemble(std::string(registers) + "CMP ZERO, B_, C_\nSKIP neg, 2\nNOP\nNOP\nNOP\n").ok,
-          "a SKIP outside any loop is free to skip");
 }
 
 void test_queue_and_swap() {
@@ -562,19 +531,12 @@ void test_sinks() {
     Machine m(std::string(registers) + R"(
         IDX    i, =#0x800, 0
         MAC    [i+0], 0, A_, =1.0
-        CMP    ZERO, B_, ZERO
-        SKIP   neg, 1
         MAC    [i+1], 0, =1.0, =1.0
 )");
     m.set("A_", q(0.5)).start();
     const csp::PassReport first = m.run();
     check_equal(m.processor.sink(0), q(0.5), "a sink written in a pass is published at its end");
     check(first.stale_sinks.empty(), "every owned sink written: none stale");
-    m.processor.write(m.address("B_"), q(-1.0));
-    m.processor.swap();
-    m.run(); // the window applies B_ = −1 at its end
-    const csp::PassReport third = m.run();
-    check(third.stale_sinks.size() == 1 && third.stale_sinks[0] == 1, "a sink word skipped in a pass is reported stale");
 }
 
 void test_firmware_sinks() {
@@ -611,8 +573,6 @@ void test_assembler() {
           "an inner loop past its outer loop's end");
     check(has_diagnostic(csp::assemble("LOOP.i 1, =#2, =#1\n"), true, "past the program's end"),
           "a loop past the end of the program");
-    check(has_diagnostic(csp::assemble("SKIP always, 2\nNOP\nLOOP.i 1, =#2, =#1\nNOP\n"), true, "cross a LOOP"),
-          "SKIP over a LOOP");
     check(has_diagnostic(csp::assemble(".wide W, 0x061\n"), true, "even"), "a wide register at an odd address");
     check(has_diagnostic(csp::assemble("MAC r64, 0, r1, r2\n"), true, "input"), "no result into an input register");
 
@@ -627,22 +587,17 @@ void test_assembler() {
 }
 
 void test_labels_and_count() {
-    // A LOOP and a SKIP closed by labels further on, as firmware authors
-    // would write them: nobody counts body lengths by hand.
+    // A LOOP closed by a label further on, as firmware authors
+    // would write it: nobody counts body lengths by hand.
     Machine m(std::string(registers) + R"(
         LOOP.i done, =#3, =#0
         ADD3   A_, A_, =1.0, ZERO
         ADD3   B_, B_, =1.0, ZERO
-done:   CMP    ZERO, ZERO, =1.0         ; negative
-        SKIP   neg, after
-        ADD3   C_, 0, =1.0, ZERO
-        ADD3   C_, 0, =2.0, ZERO
-after:  ADD3   D_, 0, =3.0, ZERO
+done:   ADD3   D_, 0, =3.0, ZERO
 )");
     m.start().run();
     check_equal(m.get("A_"), q(3.0), "LOOP closed by a label runs its whole body");
     check_equal(m.get("B_"), q(3.0), "both body instructions, three times");
-    check_equal(m.get("C_"), 0, "SKIP closed by a label skips up to it");
     check_equal(m.get("D_"), q(3.0), "and the labelled instruction runs");
     check(has_diagnostic(csp::assemble("LOOP.i nowhere, =#2, =#1\nNOP\n"), true, "unknown label"),
           "a LOOP naming an unknown label");
@@ -1126,7 +1081,6 @@ int main() {
     test_macw_and_wide();
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();
-    test_skip();
     test_schedule();
     test_index();
     test_loops();

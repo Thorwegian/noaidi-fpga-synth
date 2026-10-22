@@ -6,7 +6,7 @@
 // A text front end to csp::ProgramBuilder (app/main/csp), which the
 // firmware's generator uses directly: this file parses and names, the
 // builder checks, schedules and encodes. One pass over the source; names
-// must be defined before use, except labels, which a LOOP or SKIP may
+// must be defined before use, except labels, which a LOOP may
 // name before they appear.
 
 #include "assembler.hpp"
@@ -92,11 +92,10 @@ struct Symbol {
     int64_t value;
 };
 
-// A LOOP or SKIP whose end is a label further on.
+// A LOOP whose end is a label further on.
 struct ForwardEnd {
     size_t at;
     std::string label;
-    bool is_loop;
     int line;
 };
 
@@ -116,7 +115,7 @@ private:
     std::optional<Operand> result(std::string_view text);
     std::optional<ASource> a_operand(std::string_view text, const Operand &result);
     bool define(const std::string &name, SymbolKind kind, int64_t value);
-    void close_at_end(size_t at, std::string_view end, bool is_loop);
+    void close_at_end(size_t at, std::string_view end);
 
     void error(std::string message) {
         program_.diagnostics.push_back({line_, true, std::move(message)});
@@ -153,8 +152,7 @@ Program Assembler::run(std::string_view source) {
             continue;
         }
         const auto end = static_cast<size_t>(label->second.value);
-        if (forward.is_loop) builder_.close_loop(forward.at, end);
-        else builder_.close_skip(forward.at, end);
+        builder_.close_loop(forward.at, end);
     }
 
     const ProgramBuilder::Built built = builder_.build();
@@ -338,9 +336,9 @@ std::optional<ASource> Assembler::a_operand(std::string_view text, const Operand
     return ASource::result;
 }
 
-// A LOOP's length or a SKIP's count: a number, or a label naming the
-// first instruction after the body or the skipped run.
-void Assembler::close_at_end(size_t at, std::string_view end, bool is_loop) {
+// A LOOP's length: a number, or a label naming the
+// first instruction after the body.
+void Assembler::close_at_end(size_t at, std::string_view end) {
     end             = trim(end);
     size_t position = 0;
     if (const auto value = parse_integer(end)) {
@@ -349,14 +347,13 @@ void Assembler::close_at_end(size_t at, std::string_view end, bool is_loop) {
                symbol != symbols_.end() && symbol->second.kind == SymbolKind::number) {
         position = at + 1 + static_cast<size_t>(std::max<int64_t>(symbol->second.value, 0));
     } else if (is_identifier(end)) {
-        forward_ends_.push_back({at, std::string(end), is_loop, line_});
+        forward_ends_.push_back({at, std::string(end), line_});
         return;
     } else {
         error("not a count or a label: " + std::string(end));
         return;
     }
-    if (is_loop) builder_.close_loop(at, position);
-    else builder_.close_skip(at, position);
+    builder_.close_loop(at, position);
 }
 
 // ---- directives -------------------------------------------------------------
@@ -540,16 +537,6 @@ void Assembler::instruction(const std::string &full_name, std::string_view text)
                 if (y) builder_.idx(which == "J" ? IndexRegister::j : IndexRegister::i, *x, *y);
             }
         }
-    } else if (name == "SKIP") {
-        if (need(2)) {
-            const auto condition = conditions.find(upper(trim(operands[0])));
-            if (condition == conditions.end()) {
-                error("unknown SKIP condition " + std::string(operands[0]));
-            } else {
-                const size_t at = builder_.open_skip(condition->second);
-                close_at_end(at, operands[1], false);
-            }
-        }
     } else if (name == "LOOP") {
         // LOOP.i, LOOP.j; LOOP.vi, LOOP.vj for a vector loop. The count and
         // the stride are immediates: =#n, or a number.
@@ -569,7 +556,7 @@ void Assembler::instruction(const std::string &full_name, std::string_view text)
             if (stride) {
                 const size_t at = builder_.open_loop(which == 'J' ? IndexRegister::j : IndexRegister::i,
                                                      static_cast<int>(*count), static_cast<int>(*stride), vector);
-                close_at_end(at, operands[0], true);
+                close_at_end(at, operands[0]);
             }
         }
     } else {

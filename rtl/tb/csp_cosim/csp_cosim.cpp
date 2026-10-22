@@ -273,9 +273,8 @@ end_b:
 end_d:
             MAC    D_, 0, B_, =1.0
 )", 4},
-        {"skip and select", std::string(registers) + R"(
+        {"select", std::string(registers) + R"(
             CMP    ZERO, A_, B_
-            SKIP   neg, 2
             MAC    C_, 0, =1.0, A_
             MAC    D_, 0, =2.0, B_
             MAC    S_, S_, =0.5, C_
@@ -284,7 +283,6 @@ end_d:
             IDX    i, =#0x200, 0
             LOOP.i end, =#4, =#8
             CMP    ZERO, [i+X], [i+Y]
-            SKIP   pos, 1
             ADD3   [i+Z], [i+Z], =0.25, ZERO
             MAC    A_, A_, =0.0625, S_
 end:
@@ -307,8 +305,8 @@ end:
 // Built with csp::ProgramBuilder, as the firmware builds. The rules a program must keep to be valid
 // (the model reports what it breaks): index registers point at 64-aligned blocks of the register
 // file and a word is read at an offset below 32, so that the chip's OR is the sum; i and j are set
-// before use and again after a loop steps them; nothing is written to an input; a SKIP and the rows
-// it skips lie inside one loop body; and no row sets the index register of the loop it is in.
+// before use and again after a loop steps them; nothing is written to an input;
+// and no row sets the index register of the loop it is in.
 
 class Generator {
 public:
@@ -326,7 +324,7 @@ public:
                 loop(b, chance(2) ? csp::IndexRegister::i : csp::IndexRegister::j, 0);
                 break;
             case 2:
-                skip(b);
+                instruction(b);
                 break;
             case 3:
                 sink_group(b);
@@ -463,13 +461,6 @@ private:
         }
     }
 
-    // a SKIP and the rows it skips, whole
-    void skip(csp::ProgramBuilder &b) {
-        const int count = pick(1, 3);
-        b.skip(static_cast<csp::Condition>(pick(0, 5)), static_cast<size_t>(count));
-        for (int n = 0; n < count; ++n) instruction(b);
-    }
-
     // sinks are written through j, which points into the sink area for the group and reads nothing through it
     void sink_group(csp::ProgramBuilder &b) {
         point(b, Index::j, 0x800 + 64 * pick(0, 15));
@@ -514,8 +505,6 @@ private:
                 loop_on_other_ = false;
                 valid(other) = false;   // stepped by the loop (stride 0 keeps it, but be strict)
                 (void) saved;
-            } else if (chance(8)) {
-                skip(b);
             } else {
                 instruction(b);
             }

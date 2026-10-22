@@ -19,8 +19,7 @@
 //              calls the row's issue (csp_pkg::FIRST_ISSUE_CYCLE is the A cycle of
 //              the program's row 0)
 //   R1  +1     the read pins of DMEM's three copies are driven from registers
-//   R2  +2     the words are in the blocks' output registers, captured as they come;
-//              a SKIP decides
+//   R2  +2     the words are in the blocks' output registers, captured as they come
 //   E1  +3     the words picked (the odd or even half, or the immediate), the
 //              operands formatted into registers; MIN, MAX, SEL
 //              and ANDXOR need no arithmetic and are done in the stage after
@@ -44,9 +43,7 @@
 // what it reads has been written, and lays the IDX's four NOP rows itself.
 // The front end therefore has one rule of its own, the loop: a repeat is
 // decided in A and redirects the program counter, discarding the four rows in
-// flight behind the loop's last (csp_pkg::JUMP_PENALTY). A SKIP decides in R2
-// and kills the two rows already behind it, then counts the rest as they
-// arrive; it never crosses a LOOP or the end of its loop (the assembler checks).
+// flight behind the loop's last (csp_pkg::JUMP_PENALTY).
 //
 // A vector loop (docs/csp2_isa.md section 5) is the front end's other rule:
 // each body row is fetched once for every element of a round of sixteen, the
@@ -66,9 +63,9 @@
 // own); the last element's land in the registers too, for the rows after the loop.
 //
 // A row that is not a real row (the bubble of a redirect or of a vector
-// loop's entry, a cycle before the pass's rows) is `present` = 0; a row a
-// SKIP killed is present but not `live`: it still ends a loop, and reads,
-// but writes nothing and changes no state.
+// loop's entry, a cycle before the pass's rows) is `present` = 0 and not
+// `live`: it still ends a loop, and reads, but writes nothing and changes
+// no state.
 //------------------------------------------------------------------------
 `default_nettype none
 module csp_core (
@@ -198,7 +195,6 @@ module csp_core (
     logic [csp_pkg::ROM_W-1:0] a_control;           // the control word, captured out of the ROM
     logic               redirect;
     logic [PC_W-1:0]    redirect_target;
-    logic [10:0]        skip_remaining;
 
     // ---- the vector loop in the front end: each body row fetched once an element of the round ----
     localparam int ELEMENT_W = 4;                          // a round: sixteen elements
@@ -236,12 +232,6 @@ module csp_core (
     assign fetch_next = pc_next;
 
     wire arrive = capture_valid && !redirect;              // a real row enters A next cycle
-
-    // SKIP: decided in R2, below
-    logic        skip_taken;
-    logic [10:0] skip_count;
-    wire  [10:0] skip_after_inflight = skip_count > 11'd2 ? skip_count - 11'd2 : 11'd0;
-    wire  [10:0] skip_remaining_now  = skip_taken ? skip_after_inflight : skip_remaining;
 
     // The vector loop's row at D2: its op field, captured at D1, is one of the two rows the ROM
     // keeps for vector loops. The fetch now in flight is the body's second row for element 0,
@@ -296,7 +286,6 @@ module csp_core (
             capture_valid  <= 1'b0;
             a_present      <= 1'b0;
             a_live         <= 1'b0;
-            skip_remaining <= '0;
             v_fetching     <= 1'b0;
             v_generation   <= '0;
         end else begin
@@ -308,10 +297,7 @@ module csp_core (
             rom_valid     <= decode_valid && !redirect;
             capture_valid <= rom_valid && !redirect;
             a_present     <= arrive;
-            a_live        <= arrive && skip_remaining_now == '0;
-            if (pass_start)                                  skip_remaining <= '0;
-            else if (arrive && skip_remaining_now != '0)     skip_remaining <= skip_remaining_now - 11'd1;
-            else                                             skip_remaining <= skip_remaining_now;
+            a_live        <= arrive;
             // the vector fetch
             if (pass_start || redirect || v_done) v_fetching <= 1'b0;
             else if (v_detect)                     v_fetching <= 1'b1;
@@ -506,7 +492,7 @@ module csp_core (
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) r1_live <= 1'b0;
-        else          r1_live <= a_live && !(skip_taken && skip_count >= 11'd2);
+        else          r1_live <= a_live;
     end
 
     always_ff @(posedge clk) begin
@@ -532,7 +518,7 @@ module csp_core (
         read_y_odd_index  <= bank_row(a_read_y && (a_wide_y ||  a_y_address[0]), a_y_address[AW-1:0]);
     end
 
-    // ---- R2: the words; a SKIP decides ---------------------------------------------------------
+    // ---- R2: the words -------------------------------------------------------------------------
     logic               r2_live;
     logic [17:0]        r2_control;
     logic [3:0]         r2_cond;
@@ -543,7 +529,7 @@ module csp_core (
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) r2_live <= 1'b0;
-        else          r2_live <= r1_live && !(skip_taken && skip_count >= 11'd1);
+        else          r2_live <= r1_live;
     end
 
     always_ff @(posedge clk) begin
@@ -561,10 +547,6 @@ module csp_core (
         r2_x_odd         <= r1_x_odd;
         r2_y_odd         <= r1_y_odd;
     end
-
-    assign skip_taken = r2_live && r2_control[17:15] == csp_pkg::UNIT_SKIP
-                        && condition_holds(r2_cond, flag_negative, flag_zero, flag_overflow);
-    assign skip_count = r2_imm[10:0];
 
     // ---- E1: the operands, formatted --------------------------------------------------------------
     logic               e1_live;

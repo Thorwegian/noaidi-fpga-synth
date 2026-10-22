@@ -94,10 +94,6 @@ public:
     void close_loop(size_t at, size_t end);
 
     // The same for SKIP: `count` instructions, or up to an end set later.
-    size_t skip(Condition cond, size_t count);
-    size_t open_skip(Condition cond);
-    void close_skip(size_t at);
-    void close_skip(size_t at, size_t end);
 
     size_t size() const { return instructions_.size(); }
 
@@ -123,7 +119,7 @@ private:
         int32_t immediate = 0;    // x's or y's, or the loop's stride
         int count = 0;            // a loop's count
         IndexRegister which = IndexRegister::i;
-        size_t end = 0;           // a loop's or skip's end, one past; 0 while open
+        size_t end = 0;           // a loop's end, one past; 0 while open
         bool open = false;
     };
 

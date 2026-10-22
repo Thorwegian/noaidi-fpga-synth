@@ -22,7 +22,6 @@ std::string_view mnemonic(Op op) {
     case Op::shift: return "SHIFT";
     case Op::loop: return "LOOP";
     case Op::vloop: return "LOOP.v";
-    case Op::skip: return "SKIP";
     case Op::idx: return "IDX";
     }
     return "?";
@@ -101,8 +100,6 @@ Control control_of(Op op, bool wide, ASource a_source) {
         // count, the stride and the end are in the word, not read from DMEM
         return {Unit::loop, Writes::nothing, ASource::zero, false, false, ConditionKind::none, false, false,
                 static_cast<uint8_t>(op == Op::vloop ? LoopOp::vector_i : LoopOp::scalar_i)};
-    case Op::skip:
-        return {Unit::skip, Writes::nothing, ASource::zero, false, false, ConditionKind::skip, false, false, 0};
     case Op::idx:
         return {Unit::index, Writes::index_i, ASource::zero, true, false, ConditionKind::none, true, false, 0};
     }

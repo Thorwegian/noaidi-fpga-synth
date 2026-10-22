@@ -48,14 +48,14 @@ constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
 // instruction issued at cycle c has its result in DMEM for an instruction
 // issued at c + result_latency; its flags are readable
 // at c + state_latency; an IDX's index is used at c + index_latency, which
-// the assembler lays after it as four wait rows (the chip has no stall); a loop's repeat and a skip's jump
+// the assembler lays after it as four wait rows (the chip has no stall); a loop's repeat
 // cost jump_penalty cycles over moving on to the next word. A vector loop
 // issues each body row once an element of the round, one cycle each, after
 // one bubble behind the first row's first element (the front end knows the
 // loop one cycle late), and costs nothing to leave.
 
 constexpr int result_latency = 9;
-constexpr int state_latency  = 7;
+constexpr int state_latency  = 5;   // the flags for a SEL, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
 constexpr int index_latency  = 5;   // the IDX sum is registered into E1b (#238); the assembler and the model follow this one constant
 constexpr int jump_penalty   = 4;
 
@@ -110,7 +110,6 @@ enum class Op : uint8_t {
     shift,   // R = A × 2^Y
     loop,    // a scalar loop on i or j
     vloop,   // a vector loop on i or j
-    skip,    // the next n instructions are no-ops when cond holds
     idx,     // i or j = X + Y
 };
 
@@ -170,7 +169,7 @@ enum class Unit : uint8_t {
     logic        = 2, // MIN, MAX, SEL, ANDXOR
     shift        = 3,
     loop         = 4,
-    skip         = 5,
+    // 5 was skip, dropped (#238)
     index        = 6,
 };
 
@@ -186,7 +185,7 @@ enum class Writes : uint8_t {
 enum class ConditionKind : uint8_t {
     none   = 0,
     select = 1, // SEL chooses by cond
-    skip   = 2, // SKIP skips by cond
+    // 2 was skip, dropped (#238)
     flags  = 3, // the result sets the flags
 };
 
@@ -222,7 +221,7 @@ Control control_of(Op op, bool wide, ASource a_source);
 //   [71:64] op   the decode ROM row
 //   [63:60] cond
 //   [59:48] r    [47:36] x   [35:24] y
-//   [23:0]  imm  an 18-bit immediate; a loop's or a skip's end
+//   [23:0]  imm  an 18-bit immediate; a loop's end
 
 struct Row {
     uint64_t high = 0; // bits 71:36, the first dword on the wire
@@ -242,7 +241,7 @@ struct Word {
 };
 
 // A loop's numbers: its body's last row in imm, its count in x's ten bits
-// and its stride in y's (docs/csp2_isa.md section 5). A skip's count in imm.
+// and its stride in y's (docs/csp2_isa.md section 5).
 constexpr int loop_count_max  = 1023;
 constexpr int loop_stride_max = 511;   // signed, ten bits
 

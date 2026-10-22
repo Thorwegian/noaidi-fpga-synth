@@ -73,7 +73,7 @@ package csp_pkg;
     // compute, E4 the product out, E5 reduced and saturated, W the write pins.
     parameter int FIRST_ISSUE_CYCLE = 4;       // the address stage of the program's row 0
     parameter int RESULT_LATENCY    = 9;       // A to the cycle a reader's A may follow a W
-    parameter int STATE_LATENCY     = 7;       // the flags and the accumulator, for a SKIP (a SEL and an A operand take 5)
+    parameter int STATE_LATENCY     = 5;       // the flags: a SEL reads them in E1b, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
     parameter int INDEX_LATENCY     = 5;       // an IDX's index, in the register for the A stage (the sum registered into E1b, #238)
     parameter int JUMP_PENALTY      = 4;       // the rows in flight behind a loop's last row
 
@@ -96,7 +96,7 @@ package csp_pkg;
     parameter logic [2:0] UNIT_LOGIC        = 3'd2;
     parameter logic [2:0] UNIT_SHIFT        = 3'd3;
     parameter logic [2:0] UNIT_LOOP         = 3'd4;
-    parameter logic [2:0] UNIT_SKIP         = 3'd5;
+    // 3'd5 was UNIT_SKIP, dropped (#238): a signal graph has no control-flow skip
     parameter logic [2:0] UNIT_INDEX        = 3'd6;
 
     parameter logic [2:0] WRITES_NOTHING     = 3'd0;
@@ -112,7 +112,7 @@ package csp_pkg;
 
     parameter logic [1:0] CONDITION_KIND_NONE   = 2'd0;
     parameter logic [1:0] CONDITION_KIND_SELECT = 2'd1;
-    parameter logic [1:0] CONDITION_KIND_SKIP   = 2'd2;
+    // 2'd2 was CONDITION_KIND_SKIP, dropped (#238)
     parameter logic [1:0] CONDITION_KIND_FLAGS  = 2'd3;
 
     // sub-operations

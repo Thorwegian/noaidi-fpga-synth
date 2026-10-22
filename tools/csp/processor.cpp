@@ -99,7 +99,6 @@ Op op_of(const Control &control) {
         return Op::nop;
     case Unit::shift: return Op::shift;
     case Unit::loop: return (control.sub & 2) ? Op::vloop : Op::loop;
-    case Unit::skip: return Op::skip;
     case Unit::index: return Op::idx;
     }
     return Op::nop;
@@ -360,7 +359,7 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     const auto condition   = static_cast<Condition>(word.cond);
 
     // The flags: ready?
-    if (control.cond == ConditionKind::select || control.cond == ConditionKind::skip) {
+    if (control.cond == ConditionKind::select) {
         if (state.scoreboard.state_ready > state.cycle) {
             state.report.errors.push_back("row " + std::to_string(state.pc) + " reads the flags "
                                           + std::to_string(state.scoreboard.state_ready - state.cycle)
@@ -439,9 +438,6 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
         store(x < 0 ? -x : x, false);
         break;
     }
-    case Op::skip:
-        if (condition_holds(condition, flags_)) state.skip = static_cast<int>(word.imm & 0x7FF);
-        break;
     case Op::idx: {
         const int64_t sum = x_word() + y_word();
         const auto which  = static_cast<size_t>(control.sub & 1);
@@ -604,10 +600,7 @@ PassReport Processor::pass() {
         }
         const size_t at     = state.pc;
         ++state.pc;
-        if (state.skip > 0) {
-            --state.skip;
-            ++state.cycle;
-        } else if (decoded.op == Op::vloop) {
+        if (decoded.op == Op::vloop) {
             ++state.cycle;
             run_vector(decoded, at, state);
         } else {

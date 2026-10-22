@@ -34,8 +34,7 @@ Taken on issue #231; the text below is written to them.
 - **One pass per sample at 48 kHz.** A pass is 1536 cycles; instructions
   issue in the first 1472, one per cycle at most, from the top of the
   program every pass. There are no branches: conditional work is a
-  select (`SEL`) or, at the scalar level, a skip (`SKIP`) that still
-  takes its cycle, and every loop has a fixed count. Every pass runs the
+  select (`SEL`), and every loop has a fixed count. Every pass runs the
   same instructions in the same cycles.
 - **The schedule is static.** Every operation has a fixed latency
   (section 8), and the assembler places each instruction so that its
@@ -117,12 +116,12 @@ The control word:
 
 | bits | field | values |
 |---|---|---|
-| 17:15 | unit | none, multiply-add, logic, shift, loop, skip, index |
+| 17:15 | unit | none, multiply-add, logic, shift, loop, index |
 | 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j` |
 | 11:10 | A source | zero, `r` (update in place) |
 | 9 | reads X | X is read: from DMEM, or the immediate |
 | 8 | wide Y | Y is a pair |
-| 7:6 | condition kind | none, select by `cond`, skip by `cond`, set the flags |
+| 7:6 | condition kind | none, select by `cond`, set the flags |
 | 5 | reads Y | Y is read |
 | 4 | spare | |
 | 3 | wrap | the sum wraps instead of saturating (phase accumulators) |
@@ -145,7 +144,7 @@ the operation is the same):
 | min, max, abs | `MIN`, `MAX`, `ABS` | as named |
 | logic | `ANDXOR` | R = (X & Y) ^ A |
 | shift | `SHIFT` | R = A × 2^Y |
-| front end | `LOOP`, `LOOP.v`, `SKIP`, `IDX`, `NOP` | section 5, section 6 |
+| front end | `LOOP`, `LOOP.v`, `IDX`, `NOP` | section 5, section 6 |
 
 A row the program never uses is a row the ROM never holds; the ROM's
 image is the assembler's, loaded with the program. Three rows are fixed in
@@ -175,7 +174,7 @@ invisible to a correct program, because no element may read a register
 another element writes (the first revision's rule, kept; the assembler
 checks it).
 
-Inside a vector loop: no loop, no `SKIP`; `SEL` for anything
+Inside a vector loop: no loop; `SEL` for anything
 conditional. A vector loop may be the inner loop of a scalar one.
 
 What a vector loop costs: its own row, one cycle; each body row once an
@@ -194,16 +193,8 @@ loop still in flight lands where the first elements read it.
 
 `CMP` (and any row with *set the flags*) sets negative, zero and
 overflow. `SEL` chooses between its sources by the flag named in
-`cond`; `SKIP` makes the next *n* instructions no-ops when the flag
-named in `cond` is set, at the scalar level only, and a skipped
-instruction still takes its cycle. There is no other control flow.
-
-A `SKIP` decides in its third cycle, from the flags register: it kills the
-two rows behind it, which are already in the pipeline, and counts the
-rest as they arrive. So it may not cross a `LOOP`, and may not cross the
-end of the loop it is in (the repeat discards the rows behind the loop's
-last, which would take the skipped count with them): the assembler
-rejects both. It ends at the loop's end, or anywhere short of it.
+`cond`. There is no other conditional: a signal graph needs a value
+chosen, not control flow, so there is no skip.
 
 ## 7. The register map
 
@@ -254,5 +245,5 @@ cheaper proof than a check in logic.
 | vector loops | up to 64 elements interleaved | rounds of 16 | a 64-way select on the issue decision was the critical path's end; 16 is two LUT levels from a register, and nine in flight hide the latency |
 | hazards | checked in hardware | scheduled by the assembler | the check and its consumers are the depth the chip cannot afford; the model already knows every latency |
 | immediates | constant registers written at boot | in the word | the constant pool was where the boot image lost its words |
-| conditionality in loops | `SKIP` and `SEL` | `SEL` | a skip counter per interleaved element is front-end state again |
+| conditionality | `SEL` (and, rev 1, a scalar `SKIP`) | `SEL` only | a skip counter per interleaved element would be front-end state again; a signal graph needs no control-flow skip (#238) |
 | acceptance | added at the end | in the design | the self-test's changing-operand checks, `csp-verify` and the baseline with the valley floor found what the report never showed |

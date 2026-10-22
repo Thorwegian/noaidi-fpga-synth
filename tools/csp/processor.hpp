@@ -133,7 +133,6 @@ private:
         int64_t cycle = 0;
         Scoreboard scoreboard;
         std::vector<Loop> loops;
-        int skip = 0;
         std::set<int> sinks_written;
         std::optional<VectorRun> vector;
         bool stopped = false;

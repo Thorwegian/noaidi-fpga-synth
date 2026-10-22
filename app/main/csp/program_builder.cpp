@@ -32,7 +32,7 @@ bool is_input(int address) {
 }
 
 bool reads_flags(Op op) {
-    return op == Op::sel || op == Op::skip;
+    return op == Op::sel;
 }
 
 bool sets_flags(Op op) {
@@ -50,11 +50,11 @@ bool writes_register(Op op) {
 }
 
 bool uses_x(Op op) {
-    return op != Op::nop && op != Op::skip && op != Op::shift && op != Op::loop && op != Op::vloop;
+    return op != Op::nop && op != Op::shift && op != Op::loop && op != Op::vloop;
 }
 
 bool uses_y(Op op) {
-    return op != Op::nop && op != Op::skip && op != Op::abs && op != Op::loop && op != Op::vloop;
+    return op != Op::nop && op != Op::abs && op != Op::loop && op != Op::vloop;
 }
 
 // Whether an operation reads R as its A operand.
@@ -210,33 +210,6 @@ void ProgramBuilder::close_loop(size_t at, size_t end) {
     instructions_[at].open = false;
 }
 
-size_t ProgramBuilder::open_skip(Condition cond) {
-    Entry entry;
-    entry.op   = Op::skip;
-    entry.cond = cond;
-    entry.open = true;
-    return emit(entry);
-}
-
-size_t ProgramBuilder::skip(Condition cond, size_t count) {
-    const size_t at = open_skip(cond);
-    close_skip(at, at + 1 + count);
-    return at;
-}
-
-void ProgramBuilder::close_skip(size_t at) {
-    close_skip(at, instructions_.size());
-}
-
-void ProgramBuilder::close_skip(size_t at, size_t end) {
-    if (at >= instructions_.size() || instructions_[at].op != Op::skip) {
-        issue("close_skip at a position that is not a SKIP");
-        return;
-    }
-    instructions_[at].end  = end;
-    instructions_[at].open = false;
-}
-
 // ---- building: checks, the schedule, the rows ----------------------------------------
 
 namespace {
@@ -322,38 +295,17 @@ ProgramBuilder::Built ProgramBuilder::build() const {
             }
             loop_end[at] = entry.end;
         }
-        if (entry.op == Op::skip && entry.end > instructions_.size()) {
-            built.issues.push_back({at, true, "SKIP past the program's end"});
-        }
-        if (entry.op == Op::skip) {
-            for (size_t inner = at + 1; inner < entry.end && inner < instructions_.size(); ++inner) {
-                const Op op = instructions_[inner].op;
-                if (op == Op::loop || op == Op::vloop) {
-                    built.issues.push_back({at, true, "a SKIP does not cross a LOOP"});
-                    break;
-                }
-            }
-            // nor the end of the loop it is in: the repeat discards the rows behind the loop's
-            // last, which would take the skipped count with them
-            for (size_t outer_at = 0; outer_at < at; ++outer_at) {
-                const Entry &outer = instructions_[outer_at];
-                if ((outer.op == Op::loop || outer.op == Op::vloop) && at < outer.end && entry.end > outer.end) {
-                    built.issues.push_back({at, true, "a SKIP does not cross the end of its loop"});
-                    break;
-                }
-            }
-        }
     }
     // Nesting: at most two, on different index registers, the inner inside the
-    // outer; a vector body holds no loop and no SKIP.
+    // outer; a vector body holds no loop.
     for (size_t at = 0; at < instructions_.size(); ++at) {
         const Entry &outer = instructions_[at];
         if (outer.op != Op::loop && outer.op != Op::vloop) continue;
         for (size_t inner_at = at + 1; inner_at < outer.end && inner_at < instructions_.size(); ++inner_at) {
             const Entry &inner = instructions_[inner_at];
             if (outer.op == Op::vloop) {
-                if (inner.op == Op::loop || inner.op == Op::vloop || inner.op == Op::skip) {
-                    built.issues.push_back({inner_at, true, "a vector body holds no loop or SKIP"});
+                if (inner.op == Op::loop || inner.op == Op::vloop) {
+                    built.issues.push_back({inner_at, true, "a vector body holds no loop"});
                 }
                 if (inner.op == Op::idx && inner.which == outer.which) {
                     built.issues.push_back({inner_at, true, "a vector body cannot set the loop's own index register"});
@@ -735,12 +687,6 @@ ProgramBuilder::Built ProgramBuilder::build() const {
             // the body's last row: the chip compares, it does not subtract (#238)
             word.imm    = static_cast<uint32_t>(loop_end_row[placed[row].source] - 1);
             break;
-        case Op::skip: {
-            word.cond = static_cast<uint8_t>(entry.cond);
-            const size_t end_row = first_row[std::min(entry.end, instructions_.size())];
-            word.imm = static_cast<uint32_t>(end_row - row - 1);   // the rows skipped
-            break;
-        }
         case Op::idx:
             control.writes = entry.which == IndexRegister::j ? Writes::index_j : Writes::index_i;
             control.sub    = entry.which == IndexRegister::j ? 1 : 0;
