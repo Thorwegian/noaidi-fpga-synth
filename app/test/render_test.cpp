@@ -227,23 +227,63 @@ void test_controllers() {
 }
 
 void test_lfo() {
+    // A record's shape is its place in the half's pool: the saw at the start,
+    // then the square, triangle and sine (counts.s, lfo.s). The firmware
+    // places an LFO on the record of the patch's shape and points the channel
+    // there, so the shape the patch asks for is the one the channel hears
+    // (issue #237). BASE stays the half's first record, where the program's
+    // walk begins. The record's GAIN scales its wave: the saw's phase runs ±8
+    // so depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
+    // does; the square and sine carry the depth itself, not a gain.
+    const int channel_lfo[2] = {cp::lfo1, cp::lfo2};
+    struct Case {
+        uint8_t     shape;
+        int         offset; // records into the half
+        int32_t     gain;
+        const char *name;
+    };
+    const Case cases[] = {
+            {WAVE_SAW, 0, 2048, "saw"},
+            {WAVE_PULSE, cp::saws_a_half, 0, "square"},
+            {WAVE_TRI, cp::saws_a_half + cp::squares_a_half, 4096, "triangle"},
+            {WAVE_SINE,
+             cp::saws_a_half + cp::squares_a_half + cp::triangles_a_half, 0,
+             "sine"},
+    };
+    for (int i = 0; i < 2; ++i) {
+        const int base = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
+        const int set  = cp::lfo_sets + i * cp::set_size;
+        for (const Case &shape : cases) {
+            patch_t patch;
+            patch_init(&patch);
+            patch.lfo[i].shape = shape.shape;
+            patch.lfo[i].rate  = 1000;
+            patch.lfo[i].depth = 512;
+            patch.lfo[i].dest  = LFO_DEST_RESONANCE;
+            render::Writes writes;
+            render::lfo(patch, i, writes);
+            const auto state  = state_of(writes);
+            const int  record = base + shape.offset * cp::lfo_size;
+            check(state.at(set + cp::base) == base,
+                  "the set points at the half's first record");
+            check(state.at(channel + channel_lfo[i]) == record,
+                  "the channel reads the record of the patch's shape");
+            check(state.at(record + cp::gain) == shape.gain, shape.name);
+            check(wide_at(state, record + cp::phase_step)
+                          == csp::lfo_rate(1000, 2),
+                  "the rate, at the record");
+        }
+    }
+
+    // the depth reaches its one destination and nothing else
     patch_t patch;
     patch_init(&patch);
-    patch.lfo[1].shape = 0; // saw
-    patch.lfo[1].rate  = 1000;
+    patch.lfo[1].shape = WAVE_SAW;
     patch.lfo[1].depth = 512; // ±256 raw: a quarter octave
     patch.lfo[1].dest  = LFO_DEST_RESONANCE;
     render::Writes writes;
     render::lfo(patch, 1, writes);
     const auto state = state_of(writes);
-    const int record = cp::lfos + cp::lfos_a_half * cp::lfo_size;
-    const int set    = cp::lfo_sets + cp::set_size;
-    check(state.at(set + cp::base) == record, "the set points at the record");
-    check(state.at(set + cp::n_saw) == 1 && state.at(set + cp::n_sine) == 0,
-          "one saw, nothing else");
-    check(state.at(record + cp::gain) == 2048, "a saw's gain is depth/8");
-    check(wide_at(state, record + cp::phase_step) == csp::lfo_rate(1000, 2),
-          "the rate");
     check(std::fabs(octaves_at(state, channel + cp::lfo2_resonance) - 0.25)
                   < 1e-4,
           "the depth swings ±depth/2 raw on the resonance");

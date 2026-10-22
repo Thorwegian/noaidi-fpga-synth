@@ -13,9 +13,8 @@ records, its own sink block and its bend, each voice's channel and sinks —
 as the firmware's image wires them (render.cpp), so that nothing the check
 leaves in the chip can alias what the firmware uses; the firmware's boot
 zeroes every register anyway. The program is assembled with
-checks/control_counts.s (one sine fewer than the firmware's layout, which
-sits at the pass's cycle limit) and checks/run_count.s (the pass count csp
-match needs).
+checks/control_counts.s (the firmware's own layout) and checks/run_count.s
+(the pass count csp match needs).
 
 usage: control_check.py writes            the `-w address=raw` flags
        control_check.py script [-f SEED]  the console lines, as `csp script` prints them

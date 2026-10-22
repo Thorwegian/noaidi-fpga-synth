@@ -335,26 +335,37 @@ void pitch_bend(const patch_t &patch, const Controllers &controllers,
 }
 
 void lfo(const patch_t &patch, int i, Writes &writes) {
-    const lfo_t &l         = patch.lfo[i];
-    const int record       = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
-    const int set          = cp::lfo_sets + i * cp::set_size;
-    const int shape        = l.shape & 3;
-    constexpr int saw      = 0;
-    constexpr int triangle = 2;
+    const lfo_t &l    = patch.lfo[i];
+    const int set     = cp::lfo_sets + i * cp::set_size;
+    const int shape   = l.shape & 3;
 
-    // the record: one LFO of the half's pool, of this shape; the program's
-    // output is ±depth, which the channel scales by the destination's depth
+    // The half's pool, and where in it a record of this shape sits. The
+    // program (lfo.s) walks the half from BASE in shape order — saws, then
+    // squares, triangles, sines, each as many as counts.s fixes — so a
+    // record's shape is its place in that order. One of each shape a half
+    // (counts.s): the saw at the pool's start, the square after the saws, and
+    // so on. The channel reads the record of the patch's shape, below.
+    const int base   = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
+    const int offset = shape == WAVE_SAW   ? 0
+                     : shape == WAVE_PULSE ? cp::saws_a_half
+                     : shape == WAVE_TRI   ? cp::saws_a_half + cp::squares_a_half
+                                           : cp::saws_a_half + cp::squares_a_half
+                                                 + cp::triangles_a_half;
+    const int record = base + offset * cp::lfo_size;
+
+    // the record: the half's LFO of this shape; the program's output is
+    // ±depth, which the channel scales by the destination's depth
     wide(writes, record + cp::phase_step, csp::lfo_rate(l.rate, 2));
     put(writes, record + cp::depth, word_one);
     put(writes, record + cp::neg_depth, -word_one);
     put(writes, record + cp::gain,
-        shape == saw        ? word_one / 8
-        : shape == triangle ? word_one / 4
+        shape == WAVE_SAW   ? word_one / 8
+        : shape == WAVE_TRI ? word_one / 4
                             : 0);
-    put(writes, set + cp::base, record);
-    for (int kind = 0; kind < 4; ++kind) {
-        put(writes, set + cp::n_saw + kind, kind == shape ? 1 : 0);
-    }
+    put(writes, set + cp::base, base); // the program walks the half from here
+
+    // the channel reads its LFO from the record of the patch's shape
+    put(writes, channel_register(i == 0 ? cp::lfo1 : cp::lfo2), record);
 
     // The depth swings the destination by ±depth/2 of the patch's raw
     // units (1024 to the octave, or to 1.0 of a pulse width): a word of

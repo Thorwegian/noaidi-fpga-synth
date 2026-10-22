@@ -18,21 +18,23 @@
         .equ   CHANNEL_COUNT, 16
         .equ   VOICE_COUNT, 32
 
-        .equ   SAWS_A_HALF, 0
-        .equ   SQUARES_A_HALF, 6
-        .equ   TRIANGLES_A_HALF, 0
-        .equ   SINES_A_HALF, 6
+        .equ   SAWS_A_HALF, 1
+        .equ   SQUARES_A_HALF, 1
+        .equ   TRIANGLES_A_HALF, 1
+        .equ   SINES_A_HALF, 1
 
-; Six squares and six sines, because the Galaxy patch the sound is judged by
-; (tools/lab/benchmark, #238) runs its two LFOs as pulses: LFO 1 on the pitch,
-; LFO 2 on the pulse width. Why not three of each shape: a vector loop of n elements
-; keeps a dependent pair of rows ceil(latency / n) rows apart, so four loops of
-; three pay three rows for every dependency where one loop of twelve pays one.
-; Measured at a result latency of 9 with 16 channels and 32 voices:
-;   12 sines                   1433 cycles    fits (the limit is 1472)
-;   6 squares and 6 sines      1467           fits
-;   6 saws and 6 sines         1455           fits
-;   3 of each shape            1487           does not
-;   4 saws, 4 triangles, 4 sines   1497       does not
-; The generator (#237) chooses the layout; the shapes it merges into one loop
-; are its business, and SEL on a per-record shape word is one way to do it.
+; One of each shape a half, so a half holds every waveform and the firmware
+; places an LFO on the record of the patch's shape (app/main/render.cpp lfo():
+; the saw at the pool's start, the square after the saws, and so on, and the
+; channel reads that record). A half carries two LFOs at most — the synth is
+; omni, one channel, two LFOs — so one slot of a shape is enough.
+;
+; How few records a half holds matters more than how the shapes are split into
+; loops. A vector loop of n elements keeps a dependent pair of rows
+; ceil(latency / n) rows apart, so short loops stall more per dependency; but
+; four records stall far less in total than twelve do, however they are
+; grouped. Measured at a result latency of 9 with 16 channels and 32 voices:
+;   one of each shape (four a half)    1446 cycles    fits (the limit is 1472)
+;   6 squares and 6 sines              1467           fits
+;   3 of each shape (twelve a half)    1487           does not
+; Issue #237 moved the per-patch shape into the firmware; this is its layout.
