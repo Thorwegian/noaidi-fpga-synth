@@ -932,6 +932,24 @@ void voice_alloc_set_patch_listener(void (*listener)(const char *name)) {
     s_patch_listener = listener;
 }
 
+// A snapshot of the voice table for the console (#238). Best-effort across the
+// allocator task — no lock; a diagnostic read tolerates a rare torn field.
+int voice_alloc_diag(voice_diag_t *out, int max) {
+    const int n = max < voice_count ? max : voice_count;
+    for (int v = 0; v < n; ++v) {
+        out[v].state     = static_cast<uint8_t>(s_voices[v].state);
+        out[v].note      = s_voices[v].note;
+        out[v].vel       = s_voices[v].vel;
+        out[v].sustained = s_voices[v].sustained ? 1 : 0;
+        out[v].alloc_seq = s_voices[v].alloc_seq;
+    }
+    return n;
+}
+
+bool voice_alloc_sustain_pedal(void) {
+    return s_sustain_pedal;
+}
+
 void voice_alloc_init(void) {
     s_queue = xQueueCreate(queue_length, sizeof(evt_t));
     if (s_queue == nullptr) {

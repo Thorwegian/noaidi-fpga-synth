@@ -22,6 +22,7 @@
 #include "engine_link.h"
 #include "fpga_map.hpp"
 #include "spi_link.hpp"
+#include "voice_alloc.h"
 
 namespace {
 
@@ -228,6 +229,33 @@ int cmd_trap(int argc, char **argv) {
     const unsigned word      = static_cast<unsigned>(capture) & 0x3FFFF;
     std::printf("  hits %u (mod 64)  last: cycle %u  word 0x%05x  by the %s\n", hits, cycle,
                 word, from_pass ? "pass (the window or the sink area)" : "core");
+    return 0;
+}
+
+// The voice table, live (#238): the firmware's view of each sounding voice —
+// a stuck note shows as HELD (or sustained) that the player has let go. Read
+// alongside csp-peek of the voice's gate (0x600 + 16*v + 3) to see whether the
+// gate-off never issued (firmware bug) or issued but did not land (link).
+int cmd_voices(int, char **) {
+    voice_diag_t v[32];
+    const int n = voice_alloc_diag(v, 32);
+    static const char *const state_name[] = {"idle", "HELD", "releasing"};
+    std::printf("  sustain pedal: %s\n", voice_alloc_sustain_pedal() ? "DOWN" : "up");
+    std::printf("   v  state      note  vel  sustained  seq\n");
+    int shown = 0;
+    for (int i = 0; i < n; ++i) {
+        if (v[i].state == 0) {
+            continue; // idle voices omitted — only what is (or should not be) sounding
+        }
+        ++shown;
+        std::printf("  %2d  %-9s  %3d  %3d  %-9s  %lu\n", i,
+                    v[i].state <= 2 ? state_name[v[i].state] : "?", v[i].note,
+                    v[i].vel, v[i].sustained ? "yes" : "no",
+                    static_cast<unsigned long>(v[i].alloc_seq));
+    }
+    if (shown == 0) {
+        std::printf("  (all 32 voices idle)\n");
+    }
     return 0;
 }
 
@@ -546,6 +574,7 @@ const console_cmd_t commands[] = {
         {"csp-resend", "", "send the whole register image again", cmd_resend,
          nullptr},
         {"csp-diag", "", "the gateware's diagnostic words", cmd_diag, nullptr},
+        {"csp-voices", "", "the firmware's voice table, live (a stuck note shows as HELD, #238)", cmd_voices, nullptr},
         {"csp-trap", "[<register>|0x800+<sink>|off]",
          "arm the write trap on a register or a sink word, or read what it caught", cmd_trap, nullptr},
 };
