@@ -91,7 +91,7 @@ cycles below count from there.
 | R1 | 1 | DMEM's three copies sample their pins | the blocks' own |
 | R2 | 2 | the words are in the blocks' output registers; registers take them as they come; a `SKIP` reads the flags and kills the two rows behind it | the words, captured |
 | E1 | 3 | the words picked (the odd or even half, or the immediate) and formatted | the operands |
-| E1b | 4 | A and Y in the accumulator's format; the multiply-add's operands formed (INTERP's difference and ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; the shifter's count worked out; an `IDX` written (the sum registered one stage, so a flop drives the element-copy LUT-RAM, #238) | the multiply-add's operand registers; the logic result, the shifter's inputs; the index registers and copies |
+| E1b | 4 | A and Y in the accumulator's format; the multiply-add's operands formed (ADD3's sum saturated here); MIN, MAX, SEL and ANDXOR; the shifter's count worked out; an `IDX` written (the sum registered one stage, so a flop drives the element-copy LUT-RAM, #238) | the multiply-add's operand registers; the logic result, the shifter's inputs; the index registers and copies |
 | E2 | 5 | the block's input registers sample the operand registers | the block's own input registers |
 | E3 | 6 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
 | E4 | 7 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
@@ -141,8 +141,8 @@ pins across the chip dropped an address bit on some boots (#238: a voice's
 level written 0x400 low; the first revision's fault, met again).
 
 E2 exists so that nothing but a register is in front of the DSP's input pins:
-the logic before a block's pin is not timed (rule 1), and E1b's operand logic, the
-55-bit subtract of INTERP among it, is the longest in the core (with the operand
+the logic before a block's pin is not timed (rule 1), and E1b's operand logic
+is the longest in the core (with the operand
 pick in the same stage the report fell from 160 to 90 MHz, which is why E1 and
 E1b are two). The first version of
 this core formed the operands in E1 straight into the pins; what the board made of

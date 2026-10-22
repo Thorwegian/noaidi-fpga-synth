@@ -126,7 +126,7 @@ The control word:
 | 5 | reads Y | Y is read |
 | 4 | spare | |
 | 3 | wrap | the sum wraps instead of saturating (phase accumulators) |
-| 2:0 | sub-operation | the unit's operation: MAC, INTERP, ADD3, CMP, ABS; MIN, MAX, SEL, ANDXOR; scalar or vector loop on `i` or `j`; `i` or `j` for `IDX` |
+| 2:0 | sub-operation | the unit's operation: MAC, ADD3, CMP, ABS; MIN, MAX, SEL, ANDXOR; scalar or vector loop on `i` or `j`; `i` or `j` for `IDX` |
 
 The two reads bits and the accumulator source say which of DMEM's three
 read ports a row uses (R when the accumulator source is `r`, X, Y); the
@@ -139,7 +139,6 @@ the operation is the same):
 | family | rows | operation |
 |---|---|---|
 | multiply-add | `MAC`, `MAC` in place, `MAC.w`, `MACW` (wrapping), `ACC` (into the accumulator) | R = A + X × Y, A by the accumulator-source bits |
-| interpolate | `INTERP` | R = A + X × (Y − A) |
 | add | `ADD3` | R = A + X + Y |
 | compare | `CMP` | R = X − Y, the flags set |
 | select | `SEL` | R = `cond` clear ? X : Y |

@@ -37,7 +37,7 @@ bool reads_flags(Op op) {
 
 bool sets_flags(Op op) {
     switch (op) {
-    case Op::mac: case Op::macw: case Op::interp: case Op::add3: case Op::cmp: case Op::abs:
+    case Op::mac: case Op::macw: case Op::add3: case Op::cmp: case Op::abs:
     case Op::min: case Op::max: case Op::andxor: case Op::shift:
         return true;
     default:
@@ -61,7 +61,7 @@ bool uses_y(Op op) {
 bool reads_result(Op op, ASource a) {
     if (a != ASource::result) return false;
     switch (op) {
-    case Op::mac: case Op::macw: case Op::interp: case Op::add3: case Op::andxor: case Op::shift:
+    case Op::mac: case Op::macw: case Op::add3: case Op::andxor: case Op::shift:
         return true;
     default:
         return false;
@@ -141,9 +141,6 @@ size_t ProgramBuilder::mac(Operand r, ASource a, Source x, Source y, bool wide) 
 }
 size_t ProgramBuilder::macw(Operand r, ASource a, Source x, Source y, bool wide) {
     return arithmetic(Op::macw, r, a, x, y, wide);
-}
-size_t ProgramBuilder::interp(Operand r, ASource a, Source x, Source y, bool wide) {
-    return arithmetic(Op::interp, r, a, x, y, wide);
 }
 size_t ProgramBuilder::add3(Operand r, ASource a, Source x, Source y, bool wide) {
     return arithmetic(Op::add3, r, a, x, y, wide);

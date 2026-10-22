@@ -24,7 +24,7 @@
 //   E1  +3     the words picked (the odd or even half, or the immediate), the
 //              operands formatted into registers; MIN, MAX, SEL
 //              and ANDXOR need no arithmetic and are done in the stage after
-//   E1b +4     the arithmetic: INTERP's difference and ADD3's sum saturated, the
+//   E1b +4     the arithmetic: ADD3's sum saturated, the
 //              multiply-add's operands formed into registers, the logic unit's
 //              result, the shifter's count; an IDX's index written — the sum
 //              registered one stage (index_sum_q), into the index registers and
@@ -660,17 +660,12 @@ module csp_core (
     end
     wire signed [53:0] e1b_y_value = e1b_wide_y ? wide_to_accumulator(e1b_y) : word_to_accumulator(e1b_y[17:0]);
 
-    // INTERP: Y - A in Q4.32, saturated. ADD3: A + Y, saturated to the accumulator.
-    wire signed [54:0] difference_full = 55'(e1b_y_value) - 55'(e1b_a_value);
+    // ADD3: A + Y, saturated to the accumulator. (The distance a program needs, target - level,
+    // is a CMP, so INTERP's fused subtract is gone, #238.)
     wire signed [54:0] sum_full        = 55'(e1b_a_value) + 55'(e1b_y_value);
     // Saturated by the bits above the result: a value fits when they are all its sign. No
     // comparator chain behind the adder's (#238: with the comparators and the operand's zero test,
     // this was the chip's longest path once the front end's was cut).
-    wire signed [40:0] difference_q432 = 41'(difference_full >>> 14);
-    wire difference_fits = difference_q432[40:35] == {6{difference_q432[35]}};
-    wire signed [35:0] difference_saturated =
-            difference_fits ? difference_q432[35:0]
-                            : (difference_q432[40] ? -36'sd34359738368 : 36'sd34359738367);
     wire sum_fits = sum_full[54] == sum_full[53];
     wire signed [53:0] sum_saturated = sum_fits ? sum_full[53:0] : (sum_full[54] ? ACCUMULATOR_MIN : ACCUMULATOR_MAX);
 
@@ -683,7 +678,6 @@ module csp_core (
         multiply_b = e1b_wide_y ? e1b_y : {e1b_y[17:0], 18'd0};            // a word's Q4.14 is Q4.32 shifted by 18
         multiply_c = e1b_a_value;
         case (e1b_sub)
-            csp_pkg::MULTIPLY_ADD_INTERP: multiply_b = difference_saturated;
             csp_pkg::MULTIPLY_ADD_ADD3: begin
                 multiply_b = ONE_Q432;
                 multiply_c = sum_saturated;
@@ -808,8 +802,8 @@ module csp_core (
     end
 
     // The multiply-add's operands are registers of the fabric's, with no logic between them and the
-    // block's input pins (docs/csp2_architecture.md rule 1): E1's logic, the 55-bit subtract of INTERP
-    // among it, ends in these registers, and the block's own input registers sample them a cycle later.
+    // block's input pins (docs/csp2_architecture.md rule 1): E1's logic ends in these registers, and
+    // the block's own input registers sample them a cycle later.
     logic signed [17:0] multiply_a_q;
     logic signed [35:0] multiply_b_q;
     logic signed [53:0] multiply_c_q;

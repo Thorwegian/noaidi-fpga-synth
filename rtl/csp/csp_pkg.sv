@@ -117,7 +117,7 @@ package csp_pkg;
 
     // sub-operations
     parameter logic [2:0] MULTIPLY_ADD_MAC    = 3'd0;     // also ACC
-    parameter logic [2:0] MULTIPLY_ADD_INTERP = 3'd1;
+    // 3'd1 was INTERP, dropped (#238): the distance target - level is a CMP, so the fused subtract is not needed
     parameter logic [2:0] MULTIPLY_ADD_ADD3   = 3'd2;
     parameter logic [2:0] MULTIPLY_ADD_CMP    = 3'd3;
     parameter logic [2:0] MULTIPLY_ADD_ABS    = 3'd4;

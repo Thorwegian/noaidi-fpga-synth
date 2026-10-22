@@ -101,7 +101,6 @@ enum class Op : uint8_t {
     mac,     // R = A + X × Y, saturating
     macw,    // R = A + X × Y, wrapping
     acc,     // accumulator = A + X × Y
-    interp,  // R = A + X × (Y − A)
     add3,    // R = A + X + Y
     cmp,     // R = X − Y, the flags set
     abs,     // R = |X|
@@ -168,7 +167,7 @@ struct Operand {
 
 enum class Unit : uint8_t {
     none         = 0,
-    multiply_add = 1, // MAC, MACW, ACC, INTERP, ADD3, CMP, ABS: through the DSP
+    multiply_add = 1, // MAC, MACW, ACC, ADD3, CMP, ABS: through the DSP
     logic        = 2, // MIN, MAX, SEL, ANDXOR
     shift        = 3,
     loop         = 4,
@@ -193,7 +192,7 @@ enum class ConditionKind : uint8_t {
 };
 
 // The multiply-add unit's sub-operations.
-enum class MultiplyAddOp : uint8_t { mac = 0, interp = 1, add3 = 2, cmp = 3, abs = 4 };
+enum class MultiplyAddOp : uint8_t { mac = 0, add3 = 2, cmp = 3, abs = 4 };   // 1 was INTERP, dropped (#238)
 // The logic unit's.
 enum class LogicOp : uint8_t { min = 0, max = 1, sel = 2, andxor = 3 };
 // The loop unit's.

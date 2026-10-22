@@ -236,7 +236,6 @@ void run_directed(VerilatedContext &context) {
         {"arithmetic", std::string(registers) + R"(
             MAC     A_, 0, B_, C_
             MAC     D_, D_, A_, =0.5
-            INTERP  C_, C_, B_, D_
             ADD3    S_, 0, A_, D_
             CMP     ZERO, S_, T_
             SEL     T_, A_, B_
@@ -254,7 +253,6 @@ void run_directed(VerilatedContext &context) {
         {"wide", std::string(registers) + R"(
             MAC.w    W_, A_, V_
             MACW.w   V_, B_, W_
-            INTERP.w W_, C_, V_
             ADD3.w   V_, D_, W_
             SHIFT.w  W_, =#2
             MAC      A_, 0, W_, =0.25
@@ -446,7 +444,6 @@ private:
         switch (pick(0, 14)) {
         case 0: b.mac(r, a_source(), x, y); break;
         case 1: b.macw(r, a_source(), x, y); break;
-        case 2: b.interp(r, a_source(), x, y); break;
         case 3: b.add3(r, a_source(), x, y); break;
         case 4: b.acc(chance(2) ? csp::ASource::zero : csp::ASource::accumulator, x, y); break;
         case 5: b.sel(r, static_cast<csp::Condition>(pick(0, 5)), x, y); break;
@@ -462,7 +459,6 @@ private:
                 switch (pick(0, 4)) {
                 case 0: b.mac(wide, csp::ASource::result, x, y_wide, true); break;
                 case 1: b.macw(wide, csp::ASource::result, x, y_wide, true); break;
-                case 2: b.interp(wide, csp::ASource::result, x, y_wide, true); break;
                 case 3: b.add3(wide, csp::ASource::result, x, y_wide, true); break;
                 default: b.shift(wide, csp::ASource::result, y, true); break;
                 }

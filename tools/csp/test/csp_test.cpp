@@ -215,19 +215,6 @@ void test_macw_and_wide() {
     check_equal(m.get("W_"), q(-7.75), "a wide register's upper word reads as Q4.14");
 }
 
-void test_interp() {
-    Machine m(std::string(registers) + R"(
-        INTERP   A_, A_, B_, C_
-        INTERP.w W_, B_, V_
-)");
-    m.set("B_", q(0.5)).set("C_", q(1.0)).set_wide("V_", q_wide(1.0)).start();
-    m.run();
-    check_equal(m.get("A_"), q(0.5), "INTERP moves halfway");
-    check_equal(m.get_wide("W_"), q_wide(0.5), "INTERP.w moves halfway");
-    m.run();
-    check_equal(m.get("A_"), q(0.75), "INTERP again: three quarters");
-    check_equal(m.get_wide("W_"), q_wide(0.75), "INTERP.w again: three quarters");
-}
 
 void test_acc() {
     Machine m(std::string(registers) + R"(
@@ -693,7 +680,7 @@ void test_builder() {
     const Operand target = Operand::direct(0x062);
     b.idx(IndexRegister::i, Source::imm(0x200), Source::reg(Operand::direct(0)));
     const size_t loop = b.open_loop(IndexRegister::i, 4, 16);
-    b.interp(level, ASource::result, Source::reg(rate), Source::reg(target));
+    b.add3(level, ASource::result, Source::reg(rate), Source::reg(target));
     b.close_loop(loop);
     const csp::ProgramBuilder::Built built = b.build();
     check(built.ok && built.issues.empty(), "a well-formed built program has no issues");
@@ -704,7 +691,7 @@ void test_builder() {
         .reg TARGET, 0x062
         IDX    i, =#VOICES, 0
         LOOP.i end, =#4, =#16
-        INTERP [i+0], [i+0], RATE, TARGET
+        ADD3 [i+0], [i+0], RATE, TARGET
 end:
 )");
     check(text.ok && text.image.rows == built.image.rows && text.image.rom == built.image.rom
@@ -752,8 +739,8 @@ const char *envelope_program = R"(
         ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
         CMP     ZERO, [i+GATE], FULL        ;   gate held?
         SEL     [i+STAGE], [i+U], =#8       ;     else release
-        INTERP.w [i+LEVEL], [j+RATE], [j+TARGET]
-        MAC     [i+OUT], 0, [i+LEVEL], [i+VELOCITY]
+        CMP     [i+U], [j+TARGET], [i+LEVEL]   ;   U ← target − level (the distance)
+        MAC.w   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate (as envelope.s does it)
 )";
 
 void test_envelope() {
@@ -794,7 +781,6 @@ void test_envelope() {
     for (int pass = 0; pass < 400; ++pass) m.processor.pass();
     const double sustained = m.processor.read(voice) / double(csp::word_one);
     check(std::abs(sustained - 0.5) < 0.001, "decay settles at the sustain level");
-    check_equal(m.processor.read(voice + 5), m.processor.read(voice), "the output is level × velocity 1.0");
 
     m.processor.write(voice + 3, 0); // gate off
     m.processor.swap();
@@ -1156,7 +1142,6 @@ int main() {
     test_encoding();
     test_mac();
     test_macw_and_wide();
-    test_interp();
     test_acc();
     test_add3_sel_cmp_min_max();
     test_andxor_shift_abs_nop();

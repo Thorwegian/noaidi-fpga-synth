@@ -13,7 +13,6 @@ std::string_view mnemonic(Op op) {
     case Op::mac: return "MAC";
     case Op::macw: return "MACW";
     case Op::acc: return "ACC";
-    case Op::interp: return "INTERP";
     case Op::add3: return "ADD3";
     case Op::cmp: return "CMP";
     case Op::abs: return "ABS";
@@ -76,9 +75,6 @@ Control control_of(Op op, bool wide, ASource a_source) {
     case Op::acc:
         return {Unit::multiply_add, Writes::accumulator, a_source, true, false, ConditionKind::none, true, false,
                 static_cast<uint8_t>(MultiplyAddOp::mac)};
-    case Op::interp:
-        return {Unit::multiply_add, result, a_source, true, wide, ConditionKind::flags, true, false,
-                static_cast<uint8_t>(MultiplyAddOp::interp)};
     case Op::add3:
         return {Unit::multiply_add, result, a_source, true, wide, ConditionKind::flags, true, false,
                 static_cast<uint8_t>(MultiplyAddOp::add3)};

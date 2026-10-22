@@ -453,7 +453,6 @@ void Assembler::instruction(const std::string &full_name, std::string_view text)
     static const std::map<std::string, std::pair<Arithmetic, bool>> arithmetic = {
             {"MAC", {&ProgramBuilder::mac, true}},
             {"MACW", {&ProgramBuilder::macw, true}},
-            {"INTERP", {&ProgramBuilder::interp, true}},
             {"ADD3", {&ProgramBuilder::add3, true}}};
     using ThreeOperand = size_t (ProgramBuilder::*)(Operand, Source, Source);
     static const std::map<std::string, ThreeOperand> three_operand = {

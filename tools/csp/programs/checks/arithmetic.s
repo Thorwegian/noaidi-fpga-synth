@@ -26,7 +26,6 @@
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
             MAC     A_, 0, B_, C_
             MAC     D_, D_, A_, =0.5
-            INTERP  C_, C_, B_, D_
             ADD3    S_, 0, A_, D_
             CMP     ZERO, S_, T_
             SEL     T_, A_, B_

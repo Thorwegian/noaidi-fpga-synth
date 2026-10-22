@@ -70,7 +70,6 @@ public:
     // and Y are pairs and X a word; A is then R (in place).
     size_t mac(Operand r, ASource a, Source x, Source y, bool wide = false);
     size_t macw(Operand r, ASource a, Source x, Source y, bool wide = false);
-    size_t interp(Operand r, ASource a, Source x, Source y, bool wide = false);
     size_t add3(Operand r, ASource a, Source x, Source y, bool wide = false);
     size_t andxor(Operand r, ASource a, Source x, Source y);
     size_t shift(Operand r, ASource a, Source y, bool wide = false);

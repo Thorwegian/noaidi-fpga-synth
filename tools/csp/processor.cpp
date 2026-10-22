@@ -84,7 +84,6 @@ Op op_of(const Control &control) {
         switch (static_cast<MultiplyAddOp>(control.sub)) {
         case MultiplyAddOp::mac:
             return control.writes == Writes::accumulator ? Op::acc : (control.wrap ? Op::macw : Op::mac);
-        case MultiplyAddOp::interp: return Op::interp;
         case MultiplyAddOp::add3: return Op::add3;
         case MultiplyAddOp::cmp: return Op::cmp;
         case MultiplyAddOp::abs: return Op::abs;
@@ -404,13 +403,6 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     case Op::macw: {
         const int64_t x = x_word();
         store(a_value() + product(x, y_raw(), control.y_wide), op == Op::macw);
-        break;
-    }
-    case Op::interp: {
-        const Wide a        = a_value();
-        const int64_t x     = x_word();
-        const Reduced delta = saturate((y_value() - a) >> wide_to_accumulator, wide_bits);
-        store(a + Wide{delta.value} * x, false);
         break;
     }
     case Op::acc: {

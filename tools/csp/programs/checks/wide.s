@@ -26,7 +26,6 @@
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
             MAC.w    W_, A_, V_
             MACW.w   V_, B_, W_
-            INTERP.w W_, C_, V_
             ADD3.w   V_, D_, W_
             SHIFT.w  W_, =#2
             MAC      A_, 0, W_, =0.25
