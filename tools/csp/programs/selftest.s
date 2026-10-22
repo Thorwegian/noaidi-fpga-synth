@@ -11,7 +11,7 @@
 ; engine_selftest.cpp. The schedule the assembler lays out is part of what
 ; is tested: the chip runs the rows as placed, with no interlock, so a wrong
 ; latency shows as a wrong result. Only registers the control program does
-; not keep anything in are used (0x062 … 0x06F, 0x100 … 0x115 and the pass
+; not keep anything in are used (0x062 … 0x06F, 0x100 … 0x119 and the pass
 ; count at 0x3FD, 0x3FE).
 
         .reg   RES_PASS_BIT, 0x062      ; the pass counter's low bit
@@ -21,6 +21,8 @@
         .reg   RES_MAC,      0x06A      ; 4.0 × 0.125 = 0.5
         .reg   RES_ADD3,     0x06C      ; 0.5 − 4.0 = −3.5
         .reg   RES_SEL,      0x06E      ; the select after a compare
+        .reg   RES_MAX,      0x116      ; max(4.0, −4.0) = 4.0
+        .reg   RES_MIN,      0x118      ; min(4.0, −4.0) = −4.0
         .reg   TABLE_0,      0x063      ; two words, eight apart, as the LFOs' two sets
         .reg   TABLE_1,      0x06B
         .equ   TABLE,        0x063
@@ -39,6 +41,8 @@
         ADD3    RES_ADD3, 0, RES_MAC, MINUS_FOUR
         CMP     ZERO, MINUS_FOUR, ZERO
         SEL     RES_SEL, TABLE_0, EIGHTH    ; negative: Y, 0.125
+        MAX     RES_MAX, RES_ABS, MINUS_FOUR ; max(4.0, −4.0) = 4.0
+        MIN     RES_MIN, RES_ABS, MINUS_FOUR ; min(4.0, −4.0) = −4.0
 
 ; Counts that do not depend on when the firmware looks: over every pass the
 ; test runs, how many passes there were, how many had the pass counter's low

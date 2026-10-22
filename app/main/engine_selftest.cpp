@@ -86,10 +86,14 @@ private:
         const long mac  = signed_word(port_.probe(st::res_mac) >> 18);
         const long add3 = signed_word(port_.probe(st::res_add3) >> 18);
         const long sel  = signed_word(port_.probe(st::res_sel) >> 18);
+        const long max  = signed_word(port_.probe(st::res_max) >> 18);
+        const long min  = signed_word(port_.probe(st::res_min) >> 18);
         note(abs == 65536, "ABS of -4.0", abs, 65536);
         note(mac == 8192, "MAC after it, 4.0 x 0.125", mac, 8192);
         note(add3 == -57344, "ADD3 after that, 0.5 - 4.0", add3, -57344);
         note(sel == 2048, "SEL after a CMP", sel, 2048);
+        note(max == 65536, "MAX of 4.0 and -4.0", max, 65536);
+        note(min == -65536, "MIN of 4.0 and -4.0", min, -65536);
     }
 
     // A counter of the self-test program (an even register, an 18-bit word).

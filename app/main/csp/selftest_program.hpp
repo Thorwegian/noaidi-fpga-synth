@@ -21,10 +21,10 @@
 namespace csp::selftest {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 132;
+inline constexpr int cycles = 134;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 132> rows{{
+inline constexpr std::array<Row, 134> rows{{
     {0x030062040ull, 0xc00000001ull},
     {0x030064040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
@@ -84,6 +84,8 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x0a106e063ull, 0xc00000800ull},
+    {0x0b0116068ull, 0xc00030000ull},
+    {0x0c0118068ull, 0xc00030000ull},
     {0x050110c00ull, 0x000004000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -93,12 +95,12 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x0b010e110ull, 0xc00000001ull},
+    {0x0d010e110ull, 0xc00000001ull},
     {0x030112040ull, 0xc0003ffffull},
     {0x070113040ull, 0xc00004000ull},
     {0x030114040ull, 0xc0003ffffull},
     {0x030115040ull, 0xc0003ffffull},
-    {0x0c0100c00ull, 0x000000001ull},
+    {0x0e0100c00ull, 0x000000001ull},
     {0x030108040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -108,7 +110,7 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x0c0102108ull, 0x000000000ull},
+    {0x0e0102108ull, 0x000000000ull},
     {0x05010a064ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -127,7 +129,7 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x0c010410aull, 0x000000000ull},
+    {0x0e010410aull, 0x000000000ull},
     {0x03010c066ull, 0xc00000008ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -146,7 +148,7 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x0c010610cull, 0x000000000ull},
+    {0x0e010610cull, 0x000000000ull},
     {0x0503fdc00ull, 0x000004000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -156,13 +158,13 @@ inline constexpr std::array<Row, 132> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
-    {0x0b03fe3fdull, 0xc00000001ull},
+    {0x0d03fe3fdull, 0xc00000001ull},
 }};
 
 // The decode ROM: one control word a row, row 0 the NOP.
-inline constexpr std::array<uint32_t, 13> rom{
+inline constexpr std::array<uint32_t, 15> rom{
     0x00000, 0x20002, 0x20003, 0x112e3, 0x194e0, 0x092e2, 0x34221, 0x092e0,
-    0x092c4, 0x092e3, 0x11262, 0x096e8, 0x096e2,
+    0x092c4, 0x092e3, 0x11262, 0x112e1, 0x112e0, 0x096e8, 0x096e2,
 };
 
 // Registers, blocks and fields.
@@ -249,6 +251,8 @@ inline constexpr int res_add3 = 108;
 inline constexpr int res_chain = 102;
 inline constexpr int res_half = 100;
 inline constexpr int res_mac = 106;
+inline constexpr int res_max = 278;
+inline constexpr int res_min = 280;
 inline constexpr int res_pass_bit = 98;
 inline constexpr int res_sel = 110;
 inline constexpr int run_count = 1022;
