@@ -962,7 +962,9 @@ void test_control_program() {
         const Voice &a         = voice[v];
         const Channel &c       = channel[a.channel];
         const double ch_pitch  = c.bend + lfo_out[c.lfo1] * c.p1 + lfo_out[c.lfo2] * c.p2;
-        const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1 + lfo_out[c.lfo2] * c.c2 + c.track * ch_pitch;
+        // the cutoff key-tracks the bend, not the pitch LFO: an LFO on pitch
+        // must not also sweep the filter, or the two routings are not independent
+        const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1 + lfo_out[c.lfo2] * c.c2 + c.track * c.bend;
         // the gain sink is the amp envelope's level × velocity, the fraction of
         // the pipeline's span: the pipeline takes the exponential
         const double want[3]   = {a.note + ch_pitch, 4 * a.level_m * c.amount + a.note * c.track + ch_cutoff,
