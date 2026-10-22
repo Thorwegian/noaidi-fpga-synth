@@ -174,12 +174,22 @@ of 46.
 
 ## 3. The budget
 
-| resource | first revision (parked seed 4) | of | the second revision's direction |
+| resource | first revision (parked seed 4) | second revision, measured (`2611b2b`) | of |
 |---|---|---|---|
-| flip-flops | 12193 | 15552 (78 %) | the limit that bites first: the SVF's ~6000 reset flops serve nothing and go; the front end's per-element state shrinks by four |
-| LUT4 | 10906 | 20736 (52 %) | the decoder's and the hazard check's LUTs go; the 16-way selects replace the 64-way |
-| block RAM | 35 | 46 | +5 (four IMEM slices, the ROM): 40, or 38 with a two-port DMEM |
-| DSP | the multiply-add | | as is |
+| flip-flops | 12193 | 11920 | 15552 (77 %) |
+| LUT4 | 10906 | 9053 | 20736 (44 %) |
+| block RAM | 35 | 43 | 46 (93 %) |
+| LUT-RAM (RAM16SDP4) | — | 17 | 648 (3 %) |
+| DSP (MULT) | the multiply-add | 6 × 36, 13 × 18, 4 × 9 | 156 |
+
+The second revision came in where it aimed. The SVF's ~6000 reset flops
+and the front end's per-element state brought the flip-flops down; the
+decoder's and the hazard check's LUTs and the 16-way selects (not the
+64-way) cut the LUT4, and dropping INTERP, ACC and SKIP (#238) took it
+from 10906 to **9053 (52 % → 44 %)**. **Block RAM is now the tightest
+resource at 93 %** — the four IMEM slices, the decode ROM, the six DMEM
+copies, the sink double-buffer and the lab's counters (#241) — and the
+flip-flops follow at 77 %, the fabric's packing limit described below.
 
 A slice is one LUT4 and one flip-flop, and the chip has six usable
 flip-flops for every eight LUTs: the fourth slice pair of each unit has
