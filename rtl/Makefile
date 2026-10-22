@@ -209,6 +209,15 @@ obj_dir/tb_csp_write_fifo/sim: csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_wr
 sim-fifo: obj_dir/tb_csp_write_fifo/sim
 	$(call run_sim,$<,tb/sim-fifo.out)
 
+# The same FIFO under randomised input timing (#237): writes, swaps and
+# windowed pop-bursts interleaved at every sclk/clk alignment, checking no
+# committed write is silently lost. Run many seeds with SIM_SEED=<n>.
+obj_dir/tb_csp_write_fifo_random/sim: csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo_random.sv Makefile
+	$(VERILATE) csp/csp_pkg.sv csp/csp_write_fifo.sv tb/tb_csp_write_fifo_random.sv
+
+sim-fifo-random: obj_dir/tb_csp_write_fifo_random/sim
+	$(call run_sim,$<,tb/sim-fifo-random.out)
+
 # IMEM, the ROM, DMEM and the pass together: the boot's loads and
 # read-backs, the window, the probe, the row rule.
 obj_dir/tb_csp_memories/sim: $(CSP) tb/tb_csp_memories.sv Makefile
@@ -308,13 +317,13 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
           tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \

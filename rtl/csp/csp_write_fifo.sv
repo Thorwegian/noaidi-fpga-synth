@@ -23,6 +23,11 @@
 //    last row consumed — not the row the next write takes. The first
 //    revision parked on the head and lost a batch's first word to that
 //    row until a decoy write covered it; the decoy is gone.
+// Coming out of empty, the first pop waits one system clock (`reading`): the
+// cycle a refill makes entries committed the parked address moves onto the
+// head, and only the next cycle may a pop take it. Without the wait that first
+// pop reads the stale parked row and the head is skipped — a committed write
+// silently lost whenever a commit crosses during a pop window (#237).
 //
 // The crossings are single bits: the commit is a toggle, with the commit
 // pointer stable since before it; the read pointer goes back Gray-coded,
@@ -117,9 +122,15 @@ module csp_write_fifo (
     logic [POINTER_W-1:0] read_gray;
     logic [POINTER_W-1:0] committed_pointer;
     logic                 toggle_meta, toggle_sync, toggle_seen;
+    logic                 reading; // committed has held a cycle, so read_index is on the head
 
     assign committed = read_pointer != committed_pointer;
-    wire pointer_step = pop && committed;
+    // The first pop after a refill waits one cycle. While the FIFO is empty the
+    // read index parks one row behind the head; the cycle `committed` rises it
+    // moves onto the head, and only then (`reading`) is a pop allowed to take
+    // it. Without the wait that first pop reads the stale parked row and the
+    // head is skipped — a committed write silently lost (#237).
+    wire pointer_step = pop && committed && reading;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
@@ -129,9 +140,11 @@ module csp_write_fifo (
             toggle_meta       <= 1'b0;
             toggle_sync       <= 1'b0;
             toggle_seen       <= 1'b0;
+            reading           <= 1'b0;
         end else begin
             toggle_meta <= commit_toggle;
             toggle_sync <= toggle_meta;
+            reading     <= committed;
             if (toggle_sync != toggle_seen) begin
                 toggle_seen       <= toggle_sync;
                 committed_pointer <= commit_pointer;   // stable since before the toggle
