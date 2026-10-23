@@ -108,28 +108,56 @@ class Runner:
             if self.noaidi is not None and self.noaidi_port() is None:
                 self.unlinked()
 
-    def relay(self, ev):
-        """O.S.C.'s events to the synth, the synth's to O.S.C. MIDI messages
-        only: the sequencer also delivers its own notices (a client
-        subscribing to a port) to the port, and those must not be re-sent. A
-        received event keeps the address it arrived at, so it is re-sent to
-        the port's subscribers explicitly."""
-        from alsa_midi import (ALL_SUBSCRIBERS, ChannelPressureEvent, ControlChangeEvent, KeyPressureEvent,
-                               NoteOffEvent, NoteOnEvent, PitchBendEvent, ProgramChangeEvent, SysExEvent)
+    @staticmethod
+    def fresh(ev):
+        """A new event with the received one's musical content and nothing
+        else: a received event carries the sender's flags, queue and time, and
+        O.S.C.'s (RtMidi's) re-sent as they are are refused by the sequencer
+        with EINVAL."""
+        from alsa_midi import (ChannelPressureEvent, ControlChangeEvent, KeyPressureEvent, NoteOffEvent,
+                               NoteOnEvent, PitchBendEvent, ProgramChangeEvent, SysExEvent)
 
-        if not isinstance(ev, (NoteOnEvent, NoteOffEvent, ControlChangeEvent, ProgramChangeEvent, PitchBendEvent,
-                               ChannelPressureEvent, KeyPressureEvent, SysExEvent)):
-            return
+        if isinstance(ev, NoteOnEvent):
+            return NoteOnEvent(note=ev.note, channel=ev.channel, velocity=ev.velocity)
+        if isinstance(ev, NoteOffEvent):
+            return NoteOffEvent(note=ev.note, channel=ev.channel, velocity=ev.velocity)
+        if isinstance(ev, ControlChangeEvent):
+            return ControlChangeEvent(channel=ev.channel, param=ev.param, value=ev.value)
+        if isinstance(ev, ProgramChangeEvent):
+            return ProgramChangeEvent(channel=ev.channel, value=ev.value)
+        if isinstance(ev, PitchBendEvent):
+            return PitchBendEvent(channel=ev.channel, value=ev.value)
+        if isinstance(ev, ChannelPressureEvent):
+            return ChannelPressureEvent(channel=ev.channel, value=ev.value)
+        if isinstance(ev, KeyPressureEvent):
+            return KeyPressureEvent(note=ev.note, channel=ev.channel, value=ev.value)
+        if isinstance(ev, SysExEvent):
+            return SysExEvent(data=bytes(ev.data))
+        return None  # the sequencer's own notices (a client subscribing) are not relayed
+
+    def relay(self, ev):
+        """O.S.C.'s events to the synth, the synth's to O.S.C., MIDI messages
+        only, as fresh events to the port's subscribers. A refusal is logged,
+        never fatal: the link outlives one bad event."""
+        from alsa_midi import ALL_SUBSCRIBERS, ALSAError
+
         dest = getattr(ev, "dest", None)
-        if dest is None:
+        out = self.fresh(ev)
+        if dest is None or out is None:
             return
         if dest.port_id == self.surface.port_id:
-            if self.noaidi is not None:
-                self.client.event_output(ev, port=self.to_synth, dest=ALL_SUBSCRIBERS)
-                self.client.drain_output()
+            port = self.to_synth if self.noaidi is not None else None
         elif dest.port_id == self.from_synth.port_id:
-            self.client.event_output(ev, port=self.surface, dest=ALL_SUBSCRIBERS)
+            port = self.surface
+        else:
+            return
+        if port is None:
+            return
+        try:
+            self.client.event_output(out, port=port, dest=ALL_SUBSCRIBERS)
             self.client.drain_output()
+        except ALSAError as error:
+            log(f"relay refused {type(ev).__name__}: {error}")
 
     def run(self):
         log(f"'Noaidi O.S.C.:surface' is the panel's port; the Noaidi is {self.mac}")
