@@ -23,8 +23,6 @@
 #define CUTOFF_PITCH_MAX  0x2B20           // the gateware's FC_MAX clamp
 #define RESO_STABLE_MAX   5632             // Q 32, CC 71's top
 #define RESO_SELF_OSC     0x3FFF           // self-oscillation
-#define ENV_FULL          4194304.0        // 2^22, the envelope's full scale
-#define ENV_SUSTAIN_SHIFT 12               // 10-bit sustain → 22-bit level
 
 static int32_t clamp_i(int32_t v, int32_t lo, int32_t hi) {
     return v < lo ? lo : v > hi ? hi : v;
@@ -50,56 +48,45 @@ static int32_t nearest_by_ratio(double value, double step, int32_t lo_raw,
 }
 
 // ── Envelope times ──────────────────────────────────────────────────
-// The gateware's rounded one-pole recurrence (adsr.sv), in samples, as
-// derived in docs/storage_format.md "Envelope times".
+// The CSP's envelope (envelope.s) is a one-pole RC with a wide level: each
+// pass moves the level toward its target by the fraction RATE of the
+// distance left, RATE being the per-sample coefficient's share of two
+// samples (csp::envelope_rate), with no floor — the step is D × RATE in
+// 2^-32, so a segment is the exponential and nothing else. The times are
+// the exponential's, in samples at 96 kHz (docs/storage_format.md
+// "Envelope times"). The old adsr.sv stepped at least one raw unit a
+// sample and so ended linearly; its law, kept here into revision 2, made a
+// "9.9 s" release a 21 s fall once the gain was linear (#176).
 static double env_alpha(uint8_t code) {
     return patch_adsr_rate_coeff(patch_adsr_rate_byte(code)) / 16777216.0;
 }
 
-// A fall over the distance d to 0.1 % of it (60 dB).
-static double fall_samples(uint8_t code, double d) {
-    double a  = env_alpha(code);
-    double g  = -log1p(-a);
-    double y1 = 1.0 / (2.0 * a); // closer than this: one raw step per sample
-    double e  = d / 1000.0;
-    if (d <= y1) {
-        return d - e;
-    }
-    double lo = y1 > e ? y1 : e;
-    return log((a * d + 0.5) / (a * lo + 0.5)) / g + (y1 > e ? y1 - e : 0.0);
+static double env_g(uint8_t code) {
+    return -log1p(-env_alpha(code)); // the exponential's rate per sample
 }
 
-// Zero to full scale, charging toward 1.3 × full scale.
+// A fall to 0.1 % of the distance to the target (60 dB), whatever the
+// distance: an RC's time to a fraction of the way is the fraction's alone.
+static double fall_samples(uint8_t code) {
+    return log(1000.0) / env_g(code);
+}
+
+// Zero to full scale, charging toward 1.3 × full scale: the fraction left
+// of the drive when full scale is reached is 0.3 / 1.3.
 static double attack_samples(uint8_t code) {
-    double a  = env_alpha(code);
-    double g  = -log1p(-a);
-    double t  = 1.3 * ENV_FULL;
-    double ys = t - 3.0 / (2.0 * a);
-    if (ys > ENV_FULL) {
-        ys = ENV_FULL;
-    }
-    if (ys <= 0.0) {
-        return ENV_FULL;
-    }
-    return log((a * t - 0.5) / (a * (t - ys) - 0.5)) / g + (ENV_FULL - ys);
-}
-
-static const adsr_t *env_of(const patch_t *p, const char *table) {
-    return &p->env[strcmp(table, "amp_env") == 0 ? 0 : 1];
+    return log(1.3 / 0.3) / env_g(code);
 }
 
 static double env_time(const patch_t *p, const char *table, const char *key,
                        uint8_t code) {
+    (void) p;
+    (void) table;
     if (key[0] == 'a') {
         return attack_samples(code) / SAMPLE_RATE;
     }
-    if (key[0] == 'r') {
-        return fall_samples(code, ENV_FULL) / SAMPLE_RATE;
-    }
-    // decay: to this envelope's own sustain, in whole samples
-    double sus = (double) ((uint32_t) env_of(p, table)->sustain
-                           << ENV_SUSTAIN_SHIFT);
-    return round(fall_samples(code, ENV_FULL - sus)) / SAMPLE_RATE;
+    // decay and release: a fall of 60 dB of the distance, the same time
+    // from any level (an RC's), so the decay no longer depends on the sustain
+    return fall_samples(code) / SAMPLE_RATE;
 }
 
 // The rate code whose time is nearest by ratio; the lowest code wins a

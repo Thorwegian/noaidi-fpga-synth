@@ -239,11 +239,11 @@ the filter is barely damped, are left out.
 
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
-| `attack` | seconds | 0.001 … 35.9 | rate code, see below |
-| `decay` | seconds, to reach this envelope's sustain | 0.0031 … 30.9, depending on sustain (see below) | rate code |
+| `attack` | seconds, zero to full scale | 0.001 … 32 | rate code, see below |
+| `decay` | seconds, for 60 dB of the way to the sustain | 0.0047 … 151 | rate code |
 | `sustain` (`amp_env`) | dB, relative to the peak | −60.2 … −0.06 | `sustain` = round(1024 × (1 + value / 60.206)) |
 | `sustain` (`mod_env`) | percent of the depth | 0 … 99.9 | `sustain` = round(value × 1024 / 100) |
-| `release` | seconds, for a fall from full scale | 0.0047 … 30.9 | rate code |
+| `release` | seconds, for a fall of 60 dB | 0.0047 … 151 | rate code |
 | `velocity` | percent: how far a soft note scales the envelope's amount | 0 … 100 | `vel_amp_amt` / `vel_mod_amt` = round(value × 127 / 100) |
 
 `[mod_env]` also has:
@@ -253,58 +253,40 @@ the filter is barely damped, are left out.
 | `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
 | `depth` | semitones of cutoff | −129 … +129 | `mod_env_depth` = round(value × 1024 / 12) |
 
-**Envelope times.** Once per sample at 96 kHz, a segment follows
-
-    y += floor((target − y) × k / 2²⁴)
-
-with a step of at least 1 toward the target. The rate code sets `k`.
-This is a one-pole low-pass, rounded: the rounding adds about half a
-raw step to every step and makes the last part of a slow segment a
-straight line of one raw step per sample. The times below include
-both effects. All quantities are raw levels and samples, and
+**Envelope times.** The CSP's envelope (`envelope.s`) is a one-pole RC
+with a wide level: once a pass, at 48 kHz, a segment moves its level
+toward the target by the fraction `RATE` of the distance left, and
+`RATE` is the per-sample coefficient's share of two samples
+(`csp::envelope_rate`: 1 − (1 − α)²), so the curve is the same
+exponential per 96 kHz sample. The step is `D × RATE` in 2⁻³² — there
+is no floor, no rounding worth a word: a segment is the exponential and
+nothing else. The rate code sets `k`; with
 `seconds = samples / 96000`:
 
-    α = k / 2²⁴        g = −ln(1 − α)        F = 2²² (full scale)
+    α = k / 2²⁴        g = −ln(1 − α)
 
 **Decay and release** end when the remaining distance to the target
-is 60 dB below where it started (0.1 %). For a segment that covers
-the distance `D`:
+is 60 dB below where it started (0.1 %), which for an exponential is
+the same time from any distance:
 
-    y₁ = 1 / (2α)                  (closer than this: one raw step per sample)
-    E  = D / 1000
-    D ≤ y₁:  samples = D − E
-    D > y₁:  samples = ln((α·D + ½) / (α·max(y₁, E) + ½)) / g + max(0, y₁ − E)
+    samples = ln(1000) / g
 
-- `decay` covers `D = F − sustain level`, the distance to this
-  envelope's own sustain (sustain level = `sustain` × 2¹², a 10-bit
-  `sustain`). Its range therefore depends on the sustain: 0.0047 …
-  30.9 s at sustain 0, down to 0.0031 … 0.043 s at the highest
-  sustain, where the distance is a single sustain step. The loader
-  reads `sustain` before `decay`. Decay samples are rounded
-  to a whole number before conversion. Neighbouring codes whose decays
-  differ by less than that are, at high sustain levels, codes that
-  decay identically in the gateware.
-- `release` covers `D = F`, a fall from full scale. A release usually
-  starts lower, from the sustain level or mid-attack, and then ends
-  sooner.
+so a `decay` no longer depends on the sustain it falls to, and a
+`release` means 60 dB down in that many seconds from wherever it
+starts. The amp envelope's level is the voice's linear gain, so a
+release is a straight line in dB: −60 dB over its time. (The old
+`adsr.sv` stepped at least one raw unit a sample and ended linearly;
+its law, kept into revision 2, made a "9.9 s" release a 21 s fall once
+the gain was linear — #176.)
 
-**Attack** charges toward `T = 1.3 × F` and ends at full scale. The
-step is about half a raw step short of the exponential until the
-drive falls to 1, then one raw step per sample:
+**Attack** charges toward `T = 1.3 × F` and ends at full scale, with
+0.3 / 1.3 of the drive left:
 
-    y_s = min(F, T − 3 / (2α))
-    y_s ≤ 0:  samples = F
-    y_s > 0:  samples = ln((α·T − ½) / (α·(T − y_s) − ½)) / g + (F − y_s)
-
-Against a bit-exact run of `adsr.sv`, for times up to 10 s, these
-formulas are within:
-- 1.2 % for attack;
-- 2.3 % for a full-scale fall;
-- 3.8 % for decays to sustain levels of 25–75 %;
-- 9.5 % for the shortest distances.
+    samples = ln(1.3 / 0.3) / g
 
 A time converts to the rate code whose time is nearest by ratio, and
-the lowest code wins a tie.
+the lowest code wins a tie. The codes span 0.0047 … 151 s for a fall
+and 0.0010 … 32 s for an attack.
 
 Rate codes 0xF0–0xFF share one coefficient, and so do some slow codes.
 Of the 256 codes, 232 sound different.
