@@ -31,10 +31,10 @@ release = 9.9
 velocity = 50
 
 [mod_env]
-attack = 0.9
+attack = 0.8898
 sustain = 0
-decay = 14.4
-release = 11
+decay = 37.73
+release = 25.15
 velocity = 50
 destination = "cutoff"
 depth = 34.17
