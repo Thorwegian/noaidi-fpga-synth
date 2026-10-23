@@ -90,7 +90,7 @@ constexpr dword_t fifo_dword(int address, uint32_t raw) {
 // held, which a load must not write (a write meeting a read of the same row can
 // be lost), as IMEM's last row, where the fetch parks, lies past the program's.
 constexpr uint32_t program_base = 0x08000;
-constexpr size_t program_rows   = 1472;
+constexpr size_t program_rows   = 2048; // IMEM's rows; a program sends only its own, END included (#271)
 constexpr uint32_t rom_base     = 0x09000;
 constexpr size_t rom_rows       = 256;
 

@@ -34,7 +34,10 @@ Taken on issue #231; the text below is written to them.
 - **One pass every fourth sample, 24 kHz** (#268; it was every second,
   48 kHz, with half the budget). A pass is 3072 cycles; instructions
   issue in the first 3008, one per cycle at most, from the top of the
-  program every pass. There are no branches: conditional work is a
+  program every pass to its `END` row — the assembler's last row, where
+  the fetch parks until the next pass (#271): IMEM's 2048 rows hold the
+  program and whatever an earlier one left past it, and only the program
+  runs. There are no branches: conditional work is a
   select (`SEL`), and every loop has a fixed count. Every pass runs the
   same instructions in the same cycles.
 - **The schedule is static.** Every operation has a fixed latency
@@ -145,7 +148,7 @@ the operation is the same):
 | min, max, abs | `MIN`, `MAX`, `ABS` | as named |
 | logic | `ANDXOR` | R = (X & Y) ^ A |
 | shift | `SHIFT` | R = A × 2^Y |
-| front end | `LOOP`, `LOOP.v`, `IDX`, `NOP` | section 5, section 6 |
+| front end | `LOOP`, `LOOP.v`, `IDX`, `NOP`, `END` | section 5, section 6; `END` closes every image: the assembler's last row, where the pass's instructions stop (#271) |
 
 A row the program never uses is a row the ROM never holds; the ROM's
 image is the assembler's, loaded with the program. Three rows are fixed in

@@ -41,7 +41,7 @@ flowchart TD
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
         BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
-        BUS --> PGM["IMEM: 1472 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
+        BUS --> PGM["IMEM: 2048 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
         Q --> CSP["CSP: the control program,<br/>once per 3072 cycles"]
         PGM --> CSP
@@ -98,7 +98,7 @@ Addresses are in 36-bit dwords.
 | `0x00000–0x0000F` | System registers (read back) | 16 dwords |
 | `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K dwords |
 | `0x06000` | The CSP's write FIFO's door: a dword carries its own register or sink address | 1 dword |
-| `0x08000–0x08B7F` | IMEM: 1472 instruction rows, two dwords a row | 2944 dwords |
+| `0x08000–0x08FFF` | IMEM: 2048 instruction rows, two dwords a row; a program loads only its own rows, which end with `END` (#271) | 4096 dwords |
 | `0x09000–0x090FF` | The decode ROM: the 256 rows an op can name, one dword a row (the block has 1024; the last is where the decode parks) | 256 dwords |
 
 Everything else is reserved. The regions' bases are the first revision's,

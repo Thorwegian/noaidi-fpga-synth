@@ -12,11 +12,13 @@ The sequence (Thor, issue #222, 2026-10-17), at 60 BPM:
   - a C major triad an octave below, C4 E4 G4, held four beats and released;
   - the recording runs on while the envelope fades.
 
-usage: baseline_recording.py <out.wav> [--program N] [--port CLIENT:PORT]
+usage: baseline_recording.py <out.wav> [--program N[,N...]] [--port CLIENT:PORT]
                              [--device hw:1,0] [--tail SECONDS]
 
 The patch is chosen by a MIDI Program Change (the Factory bank: 0 Supersaw,
-1 Galaxy — app/storage/banks.toml); the MIDI goes out through `aseqsend` to
+1 Galaxy — app/storage/banks.toml); several programs, comma-separated, play
+the sequence once each in one recording, a Program Change before each walk
+(a listening test of the patch change itself); the MIDI goes out through `aseqsend` to
 the ALSA sequencer port the synth's USB MIDI interface has, the audio comes
 in through `arecord` from the ALSA capture device the S/PDIF receiver has.
 The file is 48 kHz, 16-bit, stereo; the summary printed at the end gives the
@@ -41,8 +43,9 @@ VELOCITY = 0x64
 def main():
     parser = argparse.ArgumentParser(description="the baseline recording")
     parser.add_argument("out", help="the WAV file to write")
-    parser.add_argument("--program", type=int, default=1,
-                        help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy); negative sends no Program Change (the patch loaded already, e.g. by the console's `load`)")
+    parser.add_argument("--program", default="1",
+                        help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
+                             "negative sends no Program Change (the patch loaded already, e.g. by the console's `load`)")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
@@ -64,23 +67,26 @@ def main():
             stop.wait(0.25)
     if not args.no_keepalive:
         threading.Thread(target=keepalive, daemon=True).start()
+    # The first message after a silence can be lost (the panel input's
+    # silence reset flushes the UART; tools/lab/README.md), and the keepalive
+    # thread's first FE races the first message below: send one FE now and
+    # let it land before anything that matters.
+    midi("FE")
+    time.sleep(0.3)
 
-    # The whole sequence: 8 beats of scale, the last note held (3 more beats),
-    # a bar of silence, 4 beats of triad, the tail; plus a beat of lead-in.
-    length = BEAT * (1 + 8 + 3 + 4 + 4) + args.tail
-    if args.program >= 0:
-        midi("C0 %02X" % args.program)
-        time.sleep(2.0)                           # a Program Change reloads the patch; let it settle
+    # One walk: 8 beats of scale, the last note held (3 more beats), a bar of
+    # silence, 4 beats of triad, the tail; plus a beat of lead-in. Several
+    # programs walk in turn, each after its Program Change and a settle.
+    programs = [int(p) for p in args.program.split(",")]
+    walk     = BEAT * (1 + 8 + 3 + 4 + 4) + args.tail
+    settle   = 2.0                                # a Program Change reloads the patch; let it settle
+    length   = len(programs) * walk + (len(programs) - 1) * settle
+    if programs[0] >= 0:
+        midi("C0 %02X" % programs[0])
+        time.sleep(settle)
     recorder = subprocess.Popen(["arecord", "-q", "-D", args.device, "-f", "S16_LE", "-r", "48000", "-c", "2",
                                  "-d", str(int(round(length)) + 1), args.out])
     t0 = time.monotonic()
-
-    def at(beat):
-        """Wait until the given beat of the sequence (beat 0 = one second in)."""
-        target = t0 + BEAT * (1 + beat)
-        delay = target - time.monotonic()
-        if delay > 0:
-            time.sleep(delay)
 
     events = []                                   # (beat, [notes on], [notes off])
     for i, note in enumerate(SCALE[:-1]):
@@ -89,9 +95,15 @@ def main():
     events.append((11, [], [SCALE[-1]]))           # released at the end of its bar; a bar of silence follows
     events.append((15, TRIAD, []))                 # the triad, four beats
     events.append((19, [], TRIAD))                 # released; the envelope fades
-    for beat, on, off in events:
-        at(beat)
-        midi(*["80 %02X 00" % n for n in off], *["90 %02X %02X" % (n, VELOCITY) for n in on])
+    for n, program in enumerate(programs):
+        base = t0 + n * (walk + settle)
+        if n and program >= 0:
+            midi("C0 %02X" % program)           # the change itself is in the take, in the tail before
+        for beat, on, off in events:
+            delay = base + BEAT * (1 + beat) - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            midi(*["80 %02X 00" % k for k in off], *["90 %02X %02X" % (k, VELOCITY) for k in on])
     recorder.wait()
     stop.set()
 
@@ -99,7 +111,7 @@ def main():
     x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).reshape(-1, 2) / 32768.0
     level = lambda a: 20 * np.log10(np.sqrt(np.mean(a ** 2)) + 1e-12)
     second = lambda s: x[int(s * 48000):int((s + 0.8) * 48000), 0]
-    print("baseline %s: program %d, %.1f s" % (args.out, args.program, len(x) / 48000.0))
+    print("baseline %s: program(s) %s, %.1f s" % (args.out, args.program, len(x) / 48000.0))
     print("  lead-in        %6.1f dBFS" % level(second(0.1)))
     for i, note in enumerate(SCALE):
         print("  note %3d       %6.1f dBFS" % (note, level(second(1 + BEAT * i + 0.1))))

@@ -23,7 +23,8 @@ package csp_pkg;
     parameter int BANK_INDEX_W   = REGISTER_W - 1;           // a row of an even or an odd bank
     parameter logic [BANK_INDEX_W-1:0] PARK_INDEX = BANK_INDEX_W'(PARK_REGISTER >> 1);   // the row an idle read port sits on
 
-    parameter int PROGRAM_ROWS   = 1472;          // instructions a pass
+    parameter int PROGRAM_ROWS   = 2048;          // IMEM's rows, eight blocks of 2048 × 9 (#271); a program ends
+                                                  // with an END row and may fill all but the last, the fetch's park
     parameter int IMEM_ROWS      = 2048;          // a slice's depth
     parameter int ROW_W          = 72;            // the instruction word: eight slices of nine
     parameter int SLICE_W        = 9;
@@ -97,6 +98,7 @@ package csp_pkg;
     //   [17:15] unit  [14:12] writes  [11:10] A source  [9] reads X  [8] wide Y
     //   [7:6] condition kind  [5] reads Y  [3] wrap  [2:0] sub-operation
     parameter logic [2:0] UNIT_NONE         = 3'd0;
+    parameter logic [2:0] SUB_END           = 3'd1;   // unit none, sub-operation 1: the program's END row (NOP is 0), #271
     parameter logic [2:0] UNIT_MULTIPLY_ADD = 3'd1;
     parameter logic [2:0] UNIT_LOGIC        = 3'd2;
     parameter logic [2:0] UNIT_SHIFT        = 3'd3;

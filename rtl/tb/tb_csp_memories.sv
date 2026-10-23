@@ -122,8 +122,11 @@ module tb_csp_memories;
         reset_n = 1;
         #100;
 
-        $display("--- 1. IMEM: every row loaded as two dwords while held, read back, fetched ---");
-        for (int row = 0; row < PROGRAM_ROWS; row++) begin
+        $display("--- 1. IMEM: every program row loaded as two dwords while held, read back, fetched ---");
+        // every row but the last: a program ends with END and never reaches the
+        // park row (#271), which the fetch holds while the CSP is held -- a load
+        // of it here would meet the fetch on one row (the row rule)
+        for (int row = 0; row < PROGRAM_ROWS - 1; row++) begin
             want_row = row_pattern(row);
             imem_row = PROGRAM_W'(row); imem_upper = 1; imem_dword = want_row[ROW_W-1:ROW_W/2]; imem_load = 1; sclk_edge();
             imem_upper = 0; imem_dword = want_row[ROW_W/2-1:0]; sclk_edge();

@@ -42,15 +42,14 @@ private:
     }
 
     // The program: its rows into IMEM (two dwords a row, bits 71:36 first),
-    // its control words into the decode ROM, and NOP rows past both, since
-    // what an earlier program left there would run after it on a chip that
-    // has not been reset. The program's constants are immediates in its rows.
+    // END included, and its control words into the decode ROM. What an
+    // earlier program left past the rows never runs: the fetch parks on END
+    // (#271). The program's constants are immediates in its rows.
     void load() {
         port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
-        for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
-            const csp::Row row = pc < st::rows.size() ? st::rows[pc] : csp::Row{};
-            port_.write_dword(fpga_map::program_base + 2 * pc, row.high);
-            port_.write_dword(fpga_map::program_base + 2 * pc + 1, row.low);
+        for (size_t pc = 0; pc < st::rows.size(); ++pc) {
+            port_.write_dword(fpga_map::program_base + 2 * pc, st::rows[pc].high);
+            port_.write_dword(fpga_map::program_base + 2 * pc + 1, st::rows[pc].low);
         }
         for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
             port_.write_dword(fpga_map::rom_base + row, row < st::rom.size() ? st::rom[row] : 0);

@@ -44,10 +44,10 @@ public:
 
     void hold(bool held) { top_.held = held ? 1 : 0; }
 
-    // The program: every row (the unused ones are NOPs, so nothing an earlier
-    // program left runs) and the decode ROM.
+    // The program: its rows, END included — what an earlier, longer program
+    // left past them stays in IMEM and never runs (#271) — and the decode ROM.
     void load(const csp::Image &image) {
-        for (size_t row = 0; row < csp::program_rows; ++row) {
+        for (size_t row = 0; row < static_cast<size_t>(image.length); ++row) {
             top_.imem_load  = 1;
             top_.imem_row   = static_cast<uint32_t>(row);
             top_.imem_upper = 1;

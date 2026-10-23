@@ -21,10 +21,10 @@
 namespace csp::selftest {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 134;
+inline constexpr int cycles = 135;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 134> rows{{
+inline constexpr std::array<Row, 135> rows{{
     {0x030062040ull, 0xc00000001ull},
     {0x030064040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
@@ -159,12 +159,13 @@ inline constexpr std::array<Row, 134> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x0d03fe3fdull, 0xc00000001ull},
+    {0x0f0000000ull, 0x000000000ull},
 }};
 
 // The decode ROM: one control word a row, row 0 the NOP.
-inline constexpr std::array<uint32_t, 15> rom{
+inline constexpr std::array<uint32_t, 16> rom{
     0x00000, 0x20002, 0x20003, 0x112e3, 0x194e0, 0x092e2, 0x34221, 0x092e0,
-    0x092c4, 0x092e3, 0x11262, 0x112e1, 0x112e0, 0x096e8, 0x096e2,
+    0x092c4, 0x092e3, 0x11262, 0x112e1, 0x112e0, 0x096e8, 0x096e2, 0x00001,
 };
 
 // Registers, blocks and fields.

@@ -618,7 +618,8 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         return next;
     };
 
-    const int64_t cycles = place(0, instructions_.size(), board, index, 0, &placed);
+    // The END row the image closes with (#271) issues after the last placed row.
+    const int64_t cycles = place(0, instructions_.size(), board, index, 0, &placed) + 1;
     built.cycles = static_cast<int>(cycles);
     if (cycles > pass_cycle_limit) {
         built.issues.push_back({instructions_.size(), true,
@@ -626,10 +627,10 @@ ProgramBuilder::Built ProgramBuilder::build() const {
                                         + std::to_string(pass_cycle_limit)});
         built.ok = false;
     }
-    if (placed.size() > static_cast<size_t>(program_rows)) {
+    if (placed.size() + 1 > static_cast<size_t>(program_limit)) {
         built.issues.push_back({instructions_.size(), true,
-                                "the program has " + std::to_string(placed.size()) + " rows, IMEM holds "
-                                        + std::to_string(program_rows)});
+                                "the program has " + std::to_string(placed.size() + 1) + " rows with its END, IMEM holds "
+                                        + std::to_string(program_limit) + " for a program"});
         built.ok = false;
     }
     if (!built.ok) {
@@ -705,7 +706,13 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         word.op = rom_row(control);
         built.image.rows[row] = word.encode();
     }
-    built.image.length = static_cast<int>(placed.size());
+    // The image ends with END: the chip's fetch parks on it, so the rows after
+    // it in IMEM — an earlier, longer program's — never run, and the loader
+    // sends only the program's rows (#271).
+    Word end;
+    end.op                             = rom_row(control_of(Op::end, false, ASource::zero));
+    built.image.rows[placed.size()]    = end.encode();
+    built.image.length                 = static_cast<int>(placed.size()) + 1;
     return built;
 }
 

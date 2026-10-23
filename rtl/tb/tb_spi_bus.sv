@@ -265,12 +265,15 @@ module tb_spi_bus;
         read_burst(MAP_IMEM_BASE + 18'd20, 4, 1);
         for (j = 0; j < 4; j = j + 1)
             check36($sformatf("IMEM dword %0d read back", 20 + j), read_dwords[j], 36'h8_0000_0000 | 36'(j * 'h11111));
-        write_dwords[0] = '1;
-        write_burst(MAP_IMEM_BASE + 18'(2 * csp_pkg::PROGRAM_ROWS), 1, 1);   // past the last row
-        read_burst(MAP_IMEM_BASE + 18'(2 * csp_pkg::PROGRAM_ROWS), 1, 1);
-        check36("past IMEM reads zero", read_dwords[0], '0);
+        // IMEM fills its region exactly (2048 rows, #271): the last row, the
+        // fetch's park row, is reachable like any other
+        write_dwords[0] = 36'h8_0000_0000; write_dwords[1] = 36'h0_1234_5678;
+        write_burst(MAP_IMEM_BASE + 18'(2 * csp_pkg::PROGRAM_ROWS - 2), 2, 1);
+        read_burst(MAP_IMEM_BASE + 18'(2 * csp_pkg::PROGRAM_ROWS - 2), 2, 1);
+        check36("IMEM's last row, upper", read_dwords[0], 36'h8_0000_0000);
+        check36("IMEM's last row, lower", read_dwords[1], 36'h0_1234_5678);
         read_burst(MAP_IMEM_BASE + 18'd20, 1, 1);
-        check36("IMEM's last row unharmed by the write past it", read_dwords[0], 36'h8_0000_0000);
+        check36("row 10 unharmed", read_dwords[0], 36'h8_0000_0000);
 
         $display("--- 10. the ROM: a row a dword, the low 18 bits ---");
         write_dwords[0] = 36'hF_FFF2_1234; write_dwords[1] = 36'h0_0000_5678;
