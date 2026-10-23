@@ -1,12 +1,8 @@
 # Rules
 
-- Agents have GitHub accounts and access tokens. Claude Code *always* polls its GitHub inbox for new notifications every 5 minutes, in an infinite loop. GitHub *is* the chat for Claude Code.
-
-- Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Questions are directed to GitHub - not the chat.
+  - Git policies: Agents have GitHub accounts. `gh` access tokens and SSH keys are set up in their home directories. Agents continuously watch for activity on GitHub with `tools/agent/gh_watch.sh --interval 60` running in the background (`run_in_background=true`): it is silent while nothing is new and exits — waking the agent — the moment GitHub has a comment or notification, so waiting costs no model turns; never poll with a model-turn loop. Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child) and agents *must* actively use it. Agents must also actively use labels when creating GitHub issues.
 
 - Time-consuming tasks (builds, synthesis, simulations, PNR, recordings, etc.) are performed with `run_in_background=true`.
-
-- GitHub has an API for issue ticket relationships (relates-to, blocked-by, parent-child). Agents *must* actively use it.
 
 - Agents write elegant and highly structured code at a senior developer level.
 
@@ -30,9 +26,11 @@
 
 - Raw values are raw values. There is no such unit as "LSB".
 
-- Before cloning SystemVerilog arrays for parallel access or implementing CDCs for memory access, remember that B-SRAM banks are dual-ported and dual-clocked.
+- Before cloning SystemVerilog arrays for parallel access, remember that B-SRAM banks are dual-ported and dual-clocked.
 
-- For audio shared with the human for review, agents *must* encode as M4A at 192 kbps (AAC). Lossless audio (WAV, FLAC) is reserved for production and analysis, never for human feedback.
+- B-SRAM blocks can be used as a large LUT with 10 inputs and 18 outputs to replace complex logic.
+
+- For audio shared with humans for review, agents *must* encode as MP3 at 320 kbps (using libmp3lame). Lossless audio (WAV, FLAC) is reserved for production and analysis, never for human feedback.
 
 - All source files shall carry the following copyright notice:
 
