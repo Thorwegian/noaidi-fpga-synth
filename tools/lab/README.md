@@ -89,7 +89,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
-| `publish_capture.sh` | publish a capture to the rolling GitHub release, for listening review on a phone |
+| `publish_capture.sh` | encode a capture as MP3 into the repo's `public_html/` on the cloud box, served at `https://thj.no/synth-claude-uploads/` — the link for listening review on a phone (run it on the cloud box; copy a lab take over first) |
 
 The netlist gates and inspections (`pin_audit`, `check_timing`,
 `synth_report`, `pin_distance`, `placement_check`) are not lab tools and live

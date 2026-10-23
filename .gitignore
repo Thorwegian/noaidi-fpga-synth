@@ -14,3 +14,6 @@ sdkconfig.old
 .tools/
 .tools.*/
 node_modules/
+
+# the review audio nginx serves at https://thj.no/synth-claude-uploads/ (tools/lab/publish_capture.sh)
+public_html/

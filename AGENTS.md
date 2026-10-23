@@ -30,7 +30,7 @@
 
 - B-SRAM blocks can be used as a large LUT with 10 inputs and 18 outputs to replace complex logic.
 
-- For audio shared with humans for review, agents *must* encode as MP3 at 320 kbps (using libmp3lame). Lossless audio (WAV, FLAC) is reserved for production and analysis, never for human feedback.
+- For audio shared with humans for review, agents *must* encode as MP3 at 320 kbps (using libmp3lame). Lossless audio (WAV, FLAC) is reserved for production and analysis, never for human feedback. Review audio goes into the repo's `public_html/` on the cloud box (`tools/lab/publish_capture.sh`), which is served at `https://thj.no/synth-claude-uploads/` — link that URL from the issue; never GitHub release assets.
 
 - All source files shall carry the following copyright notice:
 
