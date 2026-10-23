@@ -37,9 +37,20 @@ namespace {
 constexpr const char *tag = "voice_alloc";
 
 constexpr int queue_length = 64;
-constexpr int task_stack =
-        6144; // Program Change reads banks.toml and a patch file here
+constexpr int task_stack    = 6144;
 constexpr int task_priority = 5;
+
+// The patch loader (#247): a Program Change's two storage reads -- banks.toml
+// and the patch file, tens of milliseconds from SPI flash -- run on their own
+// task, below the voice task, which only posts the request and later applies
+// the finished patch between two MIDI events through patch_request, as the
+// console's `load` does. On the voice task those reads held every note-off
+// behind them while the event bus dropped what the queue could not take: a
+// stuck note on a patch change under held keys. A short queue, coalesced:
+// of a storm of changes only the last matters.
+constexpr int loader_stack          = 6144; // a patch_t and the TOML parse live on it
+constexpr int loader_priority       = 3;
+constexpr int program_queue_length  = 4;
 
 constexpr int voice_count        = render::voice_count;
 constexpr int partials_per_voice = render::partials_per_voice;
@@ -865,24 +876,55 @@ void handle_patch_request(const patch_request_t *r, int64_t now) {
 // but the bank is kept per channel so parts can follow.
 void (*s_patch_listener)(const char *name);
 
+bool patch_request(bool set, patch_t *p); // below: the hand-off to the voice task
+
+// A Program Change as the loader task receives it: the channel's bank at the
+// moment of the change, and the program.
+struct ProgramRequest {
+    int bank;
+    uint8_t program;
+};
+QueueHandle_t s_program_queue;
+
+// The loader: reads the bank's entry and the patch file, then hands the patch
+// to the voice task, which applies it between two MIDI events. Blocks on the
+// storage and on the hand-off; the voice task never does.
+void patch_loader_task(void *) {
+    ProgramRequest request{};
+    while (true) {
+        if (xQueueReceive(s_program_queue, &request, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        while (xQueueReceive(s_program_queue, &request, 0) == pdTRUE) {
+            // a storm of changes: only the last one is the sound wanted
+        }
+        char rel[256], path[320], err[160];
+        if (!banks_program_path(STORAGE_ROOT "/banks.toml", request.bank, request.program, rel, sizeof rel)) {
+            ESP_LOGW(tag, "bank %d program %d: no such program", request.bank, request.program);
+            continue;
+        }
+        snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
+        patch_t p;
+        if (!patch_file_read(path, &p, err, sizeof err)) {
+            ESP_LOGW(tag, "bank %d program %d: %s", request.bank, request.program, err);
+            continue;
+        }
+        if (!patch_request(true, &p)) {
+            ESP_LOGW(tag, "bank %d program %d: the voice task did not take the patch", request.bank, request.program);
+            continue;
+        }
+        ESP_LOGI(tag, "bank %d program %d: %s", request.bank, request.program, rel);
+        if (s_patch_listener) {
+            s_patch_listener(rel);
+        }
+    }
+}
+
+// On the voice task: post the change and go on to the next event.
 void program_change(uint8_t channel, uint8_t program) {
-    const int bank = s_bank_msb[channel] * 128 + s_bank_lsb[channel];
-    char rel[256], path[320], err[160];
-    if (!banks_program_path(STORAGE_ROOT "/banks.toml", bank, program, rel,
-                            sizeof rel)) {
-        ESP_LOGW(tag, "bank %d program %d: no such program", bank, program);
-        return;
-    }
-    snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
-    patch_t p;
-    if (!patch_file_read(path, &p, err, sizeof err)) {
-        ESP_LOGW(tag, "bank %d program %d: %s", bank, program, err);
-        return;
-    }
-    apply_patch(&p, esp_timer_get_time());
-    ESP_LOGI(tag, "bank %d program %d: %s", bank, program, rel);
-    if (s_patch_listener) {
-        s_patch_listener(rel);
+    const ProgramRequest request{s_bank_msb[channel] * 128 + s_bank_lsb[channel], program};
+    if (s_program_queue == nullptr || xQueueSend(s_program_queue, &request, 0) != pdTRUE) {
+        ESP_LOGW(tag, "program %d: the loader's queue is full, change dropped", program);
     }
 }
 
@@ -994,6 +1036,13 @@ void voice_alloc_init(void) {
                 | dirty_lfo2 | dirty_volume | dirty_voices;
     s_last_flush = 0;
     flush_pending_edits(esp_timer_get_time());
+
+    s_program_queue = xQueueCreate(program_queue_length, sizeof(ProgramRequest));
+    if (s_program_queue == nullptr
+        || xTaskCreate(patch_loader_task, "patch_loader", loader_stack, nullptr, loader_priority, nullptr)
+                   != pdPASS) {
+        ESP_LOGE(tag, "failed to create the patch loader");
+    }
 
     s_sub_id = event_bus_subscribe(s_queue);
     if (s_sub_id < 0) {

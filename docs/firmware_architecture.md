@@ -99,7 +99,13 @@ different facts:
 read, write and save patch files ([storage_format.md](storage_format.md)).
 `banks` maps Bank Select and Program Change onto patch files through
 `banks.toml`; `voice_alloc` keeps each channel's bank and loads the
-program at Program Change.
+program at Program Change. The two storage reads a Program Change needs run on
+the **patch loader** task (#247), not the voice task: the voice task posts
+`{bank, program}` to a short queue and goes on to the next event; the loader
+reads banks.toml and the patch file (tens of milliseconds from SPI flash),
+coalesces a storm of changes to the last one, and hands the finished patch
+back through `patch_request`, applied between two MIDI events — so a change
+under held keys never delays their note-offs or overflows the event queue.
 A patch reaches the synth model through `voice_alloc_set_patch()`,
 which queues it with the MIDI events, so a load lands between two
 events, never in the middle of one; `voice_alloc_get_patch()` copies the
