@@ -11,6 +11,10 @@ One rule decides the folder: what the thing needs.
   `pin_audit.py` and `check_timing.py` run inside `make pack.fs` (`rtl/Makefile`);
   `synth_report.py` reads the place-and-route report; `pin_distance.py` and
   `placement_check.py` are run by hand on a routed nextpnr JSON.
+- **`tools/esp_idf.sh`** — the firmware's toolchain, found without a wrapper:
+  `tools/esp_idf.sh idf.py build` runs any `idf.py` command with ESP-IDF
+  activated, `--where` says which ESP-IDF it found. The Makefile's `fw*`
+  targets go through it; nobody sources `export.sh` by hand.
 - **`tools/csp/`** — the CSP's assembler, reference model and host tests.
   **`tools/storage/`** — the storage partition image, for the Makefile.
   **`tools/docs/`** — `mermaid_check.mjs`, which parses every Mermaid graph in
