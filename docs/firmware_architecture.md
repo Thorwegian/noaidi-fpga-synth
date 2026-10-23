@@ -15,7 +15,16 @@ UART1 ──► midi_in ──event bus──► synth model ──cmd queue─�
 ## midi_in
 
 Parses the UART byte stream into MIDI events and publishes them on the
-event bus. Knows nothing about voices or the FPGA.
+event bus. Knows nothing about voices or the FPGA. Two UART ports (DIN,
+the panel), each with its own parser and its own silence rule: a message
+half-received before a 50 ms gap is dropped; and once a port has seen
+Active Sensing (FE), 500 ms without a byte — the standard's 300 plus 200 of
+tolerance — is a broken link, so that port's notes come off through the
+CC 123 path, its running status is cancelled, and silence is harmless
+again until the next FE. A source that never sends FE is never judged by
+silence, and the UART is never flushed (#276: a flush dropped the first
+message after a pause). BLE MIDI has its own parser and no silence rule;
+the link's disconnect is its equivalent.
 
 ## synth model
 

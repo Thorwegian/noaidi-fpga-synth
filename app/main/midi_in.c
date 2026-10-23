@@ -34,9 +34,16 @@
 #define MIDI_TASK_STACK  2048
 #define MIDI_TASK_PRIO   5
 
-// Silence thresholds: one MIDI byte is 320 µs at 31250 baud, so 50 ms
-// is far beyond any legal inter-byte gap, and 500 ms of total silence
-// means the source is gone (Active Sensing, when present, is ~200 ms).
+// Silence thresholds. One MIDI byte is 320 µs at 31250 baud, so 50 ms is
+// far beyond any legal inter-byte gap: a message half-received before such
+// a gap is dropped. 500 ms is the Active Sensing rule (MIDI 1.0: a sender
+// using it sends FE at least every 300 ms; a receiver that has seen FE and
+// then nothing for 300 ms assumes the link broken and turns its notes off)
+// with 200 ms of tolerance, which belongs on the receiver: USB adapters
+// batch, and a receiver cut at exactly 300 would trip on a sender keeping
+// to its word, while the price of the tolerance is a stuck note that lasts
+// 200 ms longer in the one case the rule is for, a cable pulled under a
+// held key. A source that never sends FE is never judged by silence (#276).
 #define MIDI_PARTIAL_TIMEOUT_MS 50
 #define MIDI_SOURCE_TIMEOUT_MS  500
 
@@ -47,6 +54,7 @@ typedef struct {
     midi_parser_t parser;
     uint8_t hexdump_budget; // first-bytes hex log budget (bring-up aid)
     bool ready;             // UART configured, RX task not yet started
+    bool sensing;           // Active Sensing seen on this port: silence now means a broken link
 } midi_port_t;
 
 static midi_port_t s_din_port   = {.uart = UART_NUM_1, .name = "midi_in"};
@@ -82,6 +90,9 @@ static void midi_in_task(void *arg) {
                 p->hexdump_budget++;
                 ESP_LOGI(p->name, "rx byte %02X", byte);
             }
+            if (byte == 0xFE) {
+                p->sensing = true; // from here on, this port's silence is a broken link
+            }
             midi_parser_feed(&p->parser, byte);
             idle_ms     = 0;
             had_traffic = true;
@@ -95,21 +106,31 @@ static void midi_in_task(void *arg) {
 
         idle_ms += MIDI_PARTIAL_TIMEOUT_MS;
         if (idle_ms >= MIDI_SOURCE_TIMEOUT_MS) {
-            // Source silent: full transport reset and dump whatever the
-            // line glitch may have left in the FIFO.
-            //
-            // Note panic belongs here too (not yet wired) — but only
-            // if Active Sensing had been observed: a source that never
-            // sends 0xFE must never be silenced by silence alone. Further,
-            // after such a silence, Active Sensing must be observed again
-            // before panic is re-enabled.
-            midi_parser_reset(&p->parser);
-            uart_flush_input(p->uart);
             idle_ms = 0;
-            if (had_traffic) {
-                ESP_LOGW(p->name, "MIDI source silent, parser reset");
-                had_traffic = false;
+            if (p->sensing) {
+                // The Active Sensing rule: this source promised a byte every
+                // 300 ms and has been silent for 500. Its link is broken:
+                // every note it holds comes off through the same path as a
+                // player's CC 123, its running status is cancelled, and
+                // silence is harmless again until it sends FE once more.
+                const midi_message_t notes_off = {.status = 0xB0, .len = 2, .data = {123, 0}};
+                midi_msg_to_bus(&notes_off, NULL);
+                midi_parser_reset(&p->parser);
+                p->sensing = false;
+                ESP_LOGW(p->name, "Active Sensing lost: %d ms without a byte, notes off", MIDI_SOURCE_TIMEOUT_MS);
+            } else if (had_traffic) {
+                // A source that never sent FE has simply stopped; nothing is
+                // assumed and nothing is reset beyond the partial message
+                // above. The UART is NOT flushed (#276): uart_flush_input()
+                // discards the receive FIFO as well as the driver's buffer,
+                // and a message's first byte waits in the FIFO for the
+                // UART's receive-timeout interrupt (ten symbol times, ~3 ms
+                // at 31 250 baud) before the read above can see it -- a
+                // flush in that window dumped the first message after a
+                // silence (a Program Change; a note-off, a stuck note).
+                ESP_LOGI(p->name, "MIDI source quiet");
             }
+            had_traffic = false;
         }
     }
 }
