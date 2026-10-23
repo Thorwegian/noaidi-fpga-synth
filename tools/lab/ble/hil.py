@@ -14,10 +14,10 @@ the same RTL glitched audibly, every build passed STA and the headroom gate
 comfortably, and no simulation reproduced it. The board found it in an
 afternoon.
 
-    ~/.noaidi-blenv/bin/python3 tools/hil.py probe
-    ~/.noaidi-blenv/bin/python3 tools/hil.py probe --load rtl/pack.fs
-    ~/.noaidi-blenv/bin/python3 tools/hil.py seeds 2 3 4 5
-    ~/.noaidi-blenv/bin/python3 tools/hil.py selftest ref_clean.wav ref_bad.wav
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil.py probe
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil.py probe --load rtl/pack.fs
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil.py seeds 2 3 4 5
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil.py selftest ref_clean.wav ref_bad.wav
 
 THREE RULES THIS ENCODES, each learned the hard way:
 

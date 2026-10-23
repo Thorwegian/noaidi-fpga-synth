@@ -18,7 +18,7 @@ This sweeps CC 71 at both slopes and measures, per step:
   the fraction jumps. DC is removed, and CC 120 goes out between
   steps, per the capture-hygiene rule.
 
-    ~/.noaidi-blenv/bin/python3 tools/filter_pain_check.py [cutoff_cc]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/filter_pain_check.py [cutoff_cc]
 
 cutoff_cc overrides CC 74 (default 52 = the recipe above, corner ~1
 oct below the fundamental). Run with e.g. 96 to probe the BRIGHT

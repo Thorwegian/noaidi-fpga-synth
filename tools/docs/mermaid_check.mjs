@@ -9,7 +9,7 @@
 //
 //     npm install --no-save mermaid jsdom     (once, in the repository's root:
 //                                              node_modules there is ignored)
-//     node tools/lab/mermaid_check.mjs docs/*.md
+//     node tools/docs/mermaid_check.mjs docs/*.md
 //
 // Exit status is the number of graphs that failed; each failure prints
 // the file, the graph's ordinal in it and the parser's first lines.

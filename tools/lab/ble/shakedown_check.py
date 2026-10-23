@@ -10,7 +10,7 @@ watch the ESP console for ingress and crashes, and MEASURE the pan
 implementation on the analog capture chain: stereo RMS at pan
 hard-left / center / hard-right.
 
-    ~/.noaidi-blenv/bin/python3 tools/shakedown_check.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/shakedown_check.py
 
 Reuses ble_midi_fuzz.py's helpers (persistent bluetoothctl session,
 ALSA port wait, serial capture, disconnect+untrust discipline).
@@ -66,7 +66,7 @@ def main():
     if not port_dev:
         print("FAIL: no ESP console port found")
         return 2
-    # The polite console logger (tools/console_logger.sh) may hold the
+    # The polite console logger (tools/lab/console_logger.sh) may hold the
     # port - pause it for the duration and hand the port back at exit.
     subprocess.run(["pkill", "-f", "console_logger"], capture_output=True)
     subprocess.run(["fuser", "-k", port_dev], capture_output=True)
@@ -155,9 +155,9 @@ def main():
 
     # hand the console back to the crash witness
     import os
-    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tools/lab/ble -> the repo
     subprocess.Popen(
-        ["setsid", "nohup", "bash", "tools/console_logger.sh"],
+        ["setsid", "nohup", "bash", "tools/lab/console_logger.sh"],
         cwd=repo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL, start_new_session=True)
     print("[logger] console_logger restarted")

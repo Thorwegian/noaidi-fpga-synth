@@ -109,7 +109,7 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	# every block's pins from a flip-flop of their own, none shared: the untimed routes (#238).
 	# The verdict is printed; the build goes on while the partial pipeline's own pins (its LUT
 	# ROMs' addresses, the sink area's read addresses, the pointer blocks' writes) are on the list.
-	python3 ../tools/lab/pin_audit.py $@ || echo "PIN AUDIT: findings above (#238)"
+	python3 ../tools/netlist/pin_audit.py $@ || echo "PIN AUDIT: findings above (#238)"
 
 # The placement seed. Seeds are probes, not a lottery (docs/gowin_oss_notes.md):
 # every seed must meet the clock, and `make timing-sweep` says whether they do.
@@ -128,7 +128,7 @@ TIMING_WARN_MHZ ?= 8.0
 # says otherwise.
 PLACER_BETA ?= 0.75
 
-# Place and route, with the report tools/lab/synth_report.py reads: the
+# Place and route, with the report tools/netlist/synth_report.py reads: the
 # frequency per clock, the cell counts, the worst path per clock pair.
 pnr.json: yosys.json
 	nextpnr-himbaechel --json $< \
@@ -142,15 +142,15 @@ pnr.json: yosys.json
 
 pack.fs: pnr.json
 	$(PACK_SUITE)/bin/gowin_pack -d GW2A-18C -o $@ $<
-	@python3 ../scripts/check_timing.py pnr.log \
+	@python3 ../tools/netlist/check_timing.py pnr.log \
 		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
 		{ rm -f $@; echo '*** timing gate FAILED: bitstream deleted ***'; exit 1; }
 
 report: pnr.json
-	python3 ../tools/lab/synth_report.py pnr_report.json --paths 6
+	python3 ../tools/netlist/synth_report.py pnr_report.json --paths 6
 
 timing-check: pnr.log
-	python3 ../scripts/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)
+	python3 ../tools/netlist/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)
 
 # The sweep: place and route on every seed in SEEDS, one report each
 # (obj_dir/sweep/report_<seed>.json), then the worst of each column.
@@ -165,7 +165,7 @@ timing-sweep: yosys.json
 			--freq 73.728 --seed $$s > obj_dir/sweep/pnr_$$s.log 2>&1 \
 			|| echo "seed $$s: place and route failed (obj_dir/sweep/pnr_$$s.log)"; \
 	done
-	python3 ../tools/lab/synth_report.py $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
+	python3 ../tools/netlist/synth_report.py $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<

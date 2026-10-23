@@ -16,7 +16,7 @@ difference emphasizes HF, so an open filter scores several times a
 closed one. PASS: bright index >= 2x dark index, and both captures
 carry real signal.
 
-    ~/.noaidi-blenv/bin/python3 tools/bus_source_check.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/bus_source_check.py
 """
 import math
 import struct

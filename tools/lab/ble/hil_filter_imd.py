@@ -4,7 +4,7 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-WHY NOT flat-top: tools/filter_pain_check.py measures the share of samples
+WHY NOT flat-top: tools/lab/ble/filter_pain_check.py measures the share of samples
 at the output rails. That detects clipping of the MASTER bus -- but the
 partial's internal sat_q414 clip is attenuated downstream by the per-partial
 gain and the master limiter, so it never reaches the rails. With the master
@@ -29,7 +29,7 @@ ONLY and is calibrated where the peak caught the 11th harmonic, so it
 under-attenuates by ~20 dB here. CC74 = 64 with 100% key tracking puts the
 cutoff on the key-tracked base, i.e. on the fundamental.
 
-    ~/.noaidi-blenv/bin/python3 tools/hil_filter_imd.py [slope]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil_filter_imd.py [slope]
 
 slope: 24 (default) or 12. Capture hygiene: CC 120 between
 steps, every CC the measurement depends on is set explicitly, BLE is

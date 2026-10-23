@@ -17,7 +17,7 @@ and slice the capture into 100 ms windows. With LFO2 -> cutoff at
 with depth 0 it must sit still (<= 3 dB). Both sides asserted, so a
 stuck-open or stuck-closed filter cannot fake a pass.
 
-    ~/.noaidi-blenv/bin/python3 tools/lfo_cutoff_check.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/lfo_cutoff_check.py
 """
 import math
 import struct

@@ -19,7 +19,7 @@ A stale-long voice decays slower = higher late/early ratio.
 
 PASS: decay-ratio spread across the pool <= 6 dB.
 
-    ~/.noaidi-blenv/bin/python3 tools/modenv_uniformity_check.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/modenv_uniformity_check.py
 """
 import math
 import struct

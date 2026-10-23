@@ -15,7 +15,7 @@ measures each one's level, and asserts the spread stays inside 8 dB -
 a dead or floor-gained voice shows up as a 20+ dB dropout. Also
 watches the console for the init-drop tripwire.
 
-    ~/.noaidi-blenv/bin/python3 tools/voice_cycle_check.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/voice_cycle_check.py
 """
 import math
 import struct
