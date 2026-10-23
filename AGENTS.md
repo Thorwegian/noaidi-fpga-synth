@@ -38,3 +38,8 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 ```
+# Finding your feet
+
+- **The instrument:** `README.md` (what it is, wiring, build, console, patch storage); `docs/design.md` is the single architecture reference and links the rest — `memory_map.md` (control plane, sink words), `csp2_isa.md` / `csp2_architecture.md` (the CSP), `firmware_architecture.md`, `midi_schema.md` / `param_conventions.md` / `control_map.md` (the player's surface), `storage_format.md` (patch files).
+- **The tools:** `tools/README.md` says what lives where by what it needs; `tools/lab/README.md` is the guide to driving the board. The build finds ESP-IDF and the CAD suite itself — never source `export.sh`; `tools/esp_idf.sh idf.py …` runs any idf.py command.
+- **Two machines:** the cloud box (thj.no, this repo, builds, no board) and the lab box (`ssh -p 23000 thor@home.thj.no`, the same repo under `~/Documents/Code/noaidi-fpga-synth`, the boards, the audio capture). Scratch goes under `~/.local/tmp/claude` on either; both checkouts rest on `main`.
