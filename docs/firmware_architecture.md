@@ -67,8 +67,9 @@ different facts:
   mutes its partials (GATE off). The check runs in the note-on
   allocation scan and in the voice task's periodic sweep — no timer
   task. The sound's end is the pipeline's: the voice's gain word is the
-  envelope's level, and the pipeline silences a partial whose word has
-  fallen below 2^−10 (−60 dB); the estimate only frees the voice.
+  envelope's level, a linear gain (#176) that falls at a constant number
+  of dB a second and is silent at zero and below; the estimate only frees
+  the voice (and is on its way out: #264).
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.

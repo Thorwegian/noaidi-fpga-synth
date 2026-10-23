@@ -51,7 +51,6 @@ LUTS = \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
 	dsp/att_lut.hex \
-	dsp/gain_lut.hex \
 	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
 	dsp/sine_lut.hex
@@ -71,9 +70,6 @@ dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
 	python3 $<
 
 dsp/att_lut.hex: ../scripts/gen_att_lut.py
-	python3 $<
-
-dsp/gain_lut.hex: ../scripts/gen_gain_lut.py
 	python3 $<
 
 dsp/log_lut.hex: ../scripts/gen_log_lut.py

@@ -112,10 +112,13 @@ void test_envelope() {
     const int base   = channel + cp::envelopes;
     check(wide_at(state, base + 0 + cp::target) == int64_t{0x533333} << 10,
           "attack aims at 1.3");
-    // the level is the fraction of the gain's 60 dB span: half of it is 30 dB
-    // down, and the sustain goes in as it is
-    check(wide_at(state, base + 4 + cp::target) == int64_t{0x200} << 22,
-          "decay aims at the sustain level, a fraction of the span");
+    // the gain is linear (#176): the sustain knob, a fraction of the 60 dB
+    // span, aims the decay at that loudness as an amplitude — half the span
+    // is 30 dB down, 2^-5 of full scale
+    const double half_span = std::exp2(10.0 * (0x200 / 1023.0 - 1.0));
+    check(wide_at(state, base + 4 + cp::target)
+                  == std::lround(half_span * 4194304.0) << 10,
+          "decay aims at the sustain's loudness, as an amplitude");
     check(wide_at(state, base + 8 + cp::target) == 0, "release aims at zero");
     const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(0x80));
     check(wide_at(state, base + 0 + cp::rate) == csp::envelope_rate(k),
@@ -123,7 +126,7 @@ void test_envelope() {
     check(wide_at(state, base + 8 + cp::rate)
                   == csp::envelope_rate(
                           patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
-          "release rate: the patch's, the level being the gain in dB");
+          "release rate: the patch's, the level being the linear gain");
     // faster codes are faster
     check(csp::envelope_rate(patch_adsr_rate_coeff(patch_adsr_rate_byte(0xF0)))
                   > csp::envelope_rate(
@@ -168,9 +171,11 @@ void test_notes() {
     check(full_state.at(base + cp::velocity) == 16384,
           "full velocity, full amount");
     check(full_state.at(base + cp::gate) == 16384, "note-on opens the gate");
+    // the velocity's fraction of the 60 dB span, as an amplitude (#176): a
+    // velocity of 64 at full sensitivity is 2^(10 × (64/127 − 1)), about −30 dB
     const double amp = soft_state.at(base + cp::velocity) / 16384.0;
-    check(std::fabs(amp - 64.0 / 127.0) < 1e-3,
-          "a soft note's amp amount is the velocity's fraction of the span");
+    check(std::fabs(amp - std::exp2(10.0 * (64.0 / 127.0 - 1.0))) < 1e-3,
+          "a soft note's amp amount is the velocity's loudness, as an amplitude");
     // The mod env's velocity sensitivity is deeper (#244): CC 127 scales by
     // twice the velocity, CC 64 by the velocity once, CC 0 not at all.
     const double v_soft = 64.0 / 127.0;

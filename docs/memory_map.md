@@ -234,7 +234,7 @@ The ten words, as the partial pipeline reads them (all Q4.14):
 | cutoff | voice + channel | likewise, clamped to the flat `FC_MAX` |
 | resonance | one | octaves of Q above Butterworth, never below zero |
 | duty | one | pulse width, 1.0 being the rail (`2^23`) |
-| gain | voice × (left, right) | the voice's word is the fraction of a span of 60 dB (the envelope's level × velocity, 0 … 1): the pipeline takes 2^(10 × (word − 1)), unity at 1 and above, silence below 2^−10; the channel's left and right are linear; the product signed, clamped to ±8.0 |
+| gain | voice × (left, right) | all linear (#176): the voice's word is the gain itself (the envelope's level × the velocity's amount), clamped at unity, silent at zero and below; the channel's left and right are linear; the product signed, clamped to ±8.0. Loudness laws (velocity, sustain) are the firmware's, computed once |
 | mode | one | `[1:0]` waveform (0 saw, 1 pulse, 2 triangle, 3 sine), `[2]` cascade (24 dB/oct), `[4:3]` filter type (0 LP, 1 BP, 2 HP) |
 
 The partial pipeline takes two cycles a partial (512 of the sample's 768
@@ -258,7 +258,8 @@ ports.
   (`patch_adsr_rate_coeff`) the envelope program's rate is made from
   (`csp::envelope_rate`).
 - Velocity scales the amp envelope's amount in dB (a soft note is as many dB
-  down as the patch's sensitivity says: the old 60 dB span) and the mod
+  down as the patch's sensitivity says: the old 60 dB span, taken as an
+  amplitude by the firmware since the gain is linear) and the mod
   envelope's depth linearly. Key tracking follows each partial's own pitch
   (note, tune, unison detune) and the channel's bend and pitch LFOs.
 - Controllers are one register write per event; a "global" control is a
