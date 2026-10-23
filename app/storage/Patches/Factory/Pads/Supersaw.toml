@@ -23,7 +23,7 @@ pulse_width = 50
 [filter]
 type = "lowpass"
 slope = 24
-cutoff = 370
+cutoff = 261.6
 resonance = 1
 key_track = 100
 
@@ -32,14 +32,14 @@ attack = 0.042
 sustain = -3.76
 decay = 3
 release = 11
-velocity = 50
+velocity = 61.4
 
 [mod_env]
 attack = 0.042
 sustain = 93.75
 decay = 3
 release = 11
-velocity = 50
+velocity = 100
 destination = "cutoff"
 depth = 24
 
