@@ -240,9 +240,9 @@ root_widgets = [
         # does nothing erodes trust in the panel.
     ]),
     section("LFOs", [
-        knob(76, "Vibrato Rate", 64),
-        knob(77, "Vibrato Coarse", 0),       # pitch: whole semitones of span, 4 steps each
-        knob(115, "Vibrato Fine", 24),       # + fine/128 semitone; startup
+        knob(76, "LFO1 Rate", 64),
+        knob(77, "LFO1 Coarse", 0),          # pitch: whole semitones of span, 4 steps each
+        knob(115, "LFO1 Fine", 24),          # + fine/128 semitone; startup
                                              # depth 16 = span 0.1875 = 0 + 24
         switch(113, "LFO1 Shape", WAVES, 64),
         switch(114, "LFO1 Dest",
