@@ -31,7 +31,9 @@ a MIDI-to-CV converter). Consequences:
   side, pulse width, resonance, mode). Which sink a partial reads is wiring,
   set when the voice layout changes.
 - Note-on/off is a handful of writes to a voice's registers (its note, the
-  amounts its velocity sets, the gate); the envelopes watch the gate.
+  amounts its velocity sets, its envelopes' stages: attack at note-on,
+  release at note-off); the CSP steps the envelopes and ends an attack at
+  full scale.
 
 ## Block diagram
 

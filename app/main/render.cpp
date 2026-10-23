@@ -37,7 +37,7 @@ constexpr int amp_release  = 8;
 constexpr int mod_attack   = 16;
 constexpr int mod_decay    = 20;
 constexpr int mod_release  = 24;
-constexpr int idle_amp     = amp_release; // a voice with no gate is in release
+constexpr int idle_amp     = amp_release; // a voice with no note is in release
 constexpr int idle_mod     = mod_release;
 constexpr int level_22_one = 0x400000; // full scale of the 22-bit level
 constexpr int attack_target =
@@ -307,7 +307,6 @@ void setup(Writes &writes) {
             cp::sinks + voice * cp::voice_sinks_size);
         put(writes, voice_register(voice, cp::stage_a), idle_amp);
         put(writes, voice_register(voice, cp::stage_m), idle_mod);
-        put(writes, voice_register(voice, cp::gate), 0);
         put(writes, voice_register(voice, cp::note), 0);
         put(writes, voice_register(voice, cp::velocity), 0);
         put(writes, voice_register(voice, cp::velocity_m), 0);
@@ -447,28 +446,35 @@ void channel_sound(const patch_t &patch, Writes &writes) {
         octaves(patch.filter.resonance));
 }
 
-void note_on(const patch_t &patch, int voice, uint8_t note, uint8_t velocity,
-             Writes &writes) {
-    put(writes, voice_register(voice, cp::note), note_word(note));
+void velocity_amounts(const patch_t &patch, int voice, uint8_t velocity,
+                      Writes &writes) {
     put(writes, voice_register(voice, cp::velocity),
         fraction(amp_amount(patch, velocity)));
     put(writes, voice_register(voice, cp::velocity_m),
         fraction(mod_amount(patch, velocity)));
-    put(writes, voice_register(voice, cp::gate), word_one);
 }
 
-void gate(int voice, bool open, Writes &writes) {
-    put(writes, voice_register(voice, cp::gate), open ? word_one : 0);
+// The stages are the CSP's to change (an attack ends in decay at full
+// scale), so every stage write is forced: the chip may hold decay where the
+// firmware last wrote attack, and a retrigger must still go out.
+void note_on(const patch_t &patch, int voice, uint8_t note, uint8_t velocity,
+             Writes &writes) {
+    put(writes, voice_register(voice, cp::note), note_word(note));
+    velocity_amounts(patch, voice, velocity, writes);
+    put(writes, voice_register(voice, cp::stage_a), amp_attack, true);
+    put(writes, voice_register(voice, cp::stage_m), mod_attack, true);
+}
+
+void release(int voice, Writes &writes) {
+    put(writes, voice_register(voice, cp::stage_a), amp_release, true);
+    put(writes, voice_register(voice, cp::stage_m), mod_release, true);
 }
 
 void silence(int voice, Writes &writes) {
-    // the levels and stages are the CSP's to change: send them whatever the
-    // image says
-    put(writes, voice_register(voice, cp::gate), 0, true);
+    // the levels too are the CSP's: send them whatever the image says
     wide(writes, voice_register(voice, cp::level_a), 0, true);
     wide(writes, voice_register(voice, cp::level_m), 0, true);
-    put(writes, voice_register(voice, cp::stage_a), idle_amp, true);
-    put(writes, voice_register(voice, cp::stage_m), idle_mod, true);
+    release(voice, writes);
 }
 
 

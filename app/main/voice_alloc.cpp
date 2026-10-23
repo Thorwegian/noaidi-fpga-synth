@@ -76,7 +76,7 @@ int32_t raw_to_semis(int32_t raw) {
 //               available again, the longest released first
 //   V_IDLE      never struck, or silenced (CC 120) — free for allocation
 // A V_HELD voice whose key came up while the sustain pedal is down is
-// marked `sustained`: it keeps its gate on until the pedal comes up.
+// marked `sustained`: its envelopes are not released until the pedal comes up.
 // The firmware never guesses when a tail has gone quiet (#264): the gain
 // is linear and the chip is silent when the level is, so a released voice
 // simply ranks by how long ago its key came up — a fact, not an estimate.
@@ -148,8 +148,7 @@ void refresh_velocities() {
     render::Writes writes;
     for (int v = 0; v < voice_count; ++v) {
         if (s_voices[v].state == V_HELD) {
-            render::note_on(g_patch, v, s_voices[v].note, s_voices[v].vel,
-                            writes);
+            render::velocity_amounts(g_patch, v, s_voices[v].vel, writes);
         }
     }
     send(writes);
@@ -342,9 +341,9 @@ void set_lfo_dest_cc(int i, uint8_t val) {
 // Every note-on gets a FRESH voice — allocation never matches on the note.
 // Preference: least-recently-used IDLE voice; else the most-decayed RELEASING
 // voice (earliest tail end — the least audible casualty); else steal the
-// oldest HELD voice. Only the steal cases start their attack from a non-silent
-// level (the gate is level-sensitive), and they only happen when all 32
-// voices are genuinely in use.
+// oldest HELD voice. A stolen voice starts its new attack from the level its
+// tail is at (#267); stealing only happens when all 32 voices are genuinely
+// in use.
 void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     int pick = -1;
 
@@ -383,8 +382,8 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     voice.channel   = channel;
     voice.alloc_seq = ++s_alloc_seq;
 
-    // The pitch and the velocity's amounts go in with the gate, in one swap,
-    // so the first pass that sees the gate already has them.
+    // The pitch and the velocity's amounts go in with the attack, in one
+    // swap, so the attack's first pass already has them.
     render::Writes writes;
     render::note_on(g_patch, pick, note, vel, writes);
     send(writes);
@@ -405,13 +404,13 @@ void pitch_bend_update(uint16_t bend14) {
     send(writes);
 }
 
-// Release one voice: the gate closes, the envelope sees it and releases.
+// Release one voice: both its envelopes go to their release segment.
 void release_voice(int v) {
     s_voices[v].state       = V_RELEASING;
     s_voices[v].sustained   = false;
     s_voices[v].released_at = esp_timer_get_time();
     render::Writes writes;
-    render::gate(v, false, writes);
+    render::release(v, writes);
     send(writes);
 }
 

@@ -234,8 +234,9 @@ int cmd_trap(int argc, char **argv) {
 
 // The voice table, live (#238): the firmware's view of each sounding voice —
 // a stuck note shows as HELD (or sustained) that the player has let go. Read
-// alongside csp-peek of the voice's gate (0x600 + 16*v + 3) to see whether the
-// gate-off never issued (firmware bug) or issued but did not land (link).
+// alongside csp-peek of the voice's stage words (0x600 + 16*v + 2 and + 10;
+// 8 and 24 are release) to see whether the release never issued (firmware
+// bug) or issued but did not land (link).
 int cmd_voices(int, char **) {
     voice_diag_t v[32];
     const int n = voice_alloc_diag(v, 32);
