@@ -396,11 +396,13 @@ int send_and_verify(uint32_t base, size_t count, Dword dword_at) {
 // against what was sent, so the program image is verified the way the
 // register image is.
 void load_program() {
-    const int rows_differing = send_and_verify(fpga_map::program_base, 2 * fpga_map::program_rows, program_dword);
+    // the program's rows only, END included: the chip's fetch parks on END, so
+    // what IMEM holds past them never runs (#271)
+    const int rows_differing = send_and_verify(fpga_map::program_base, 2 * csp::control::rows.size(), program_dword);
     const int rom_differing  = send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_dword);
     if (rows_differing == 0 && rom_differing == 0) {
         ESP_LOGI(tag, "program image: every dword as sent (%u rows, %u decode rows)",
-                 static_cast<unsigned>(fpga_map::program_rows), static_cast<unsigned>(fpga_map::rom_rows));
+                 static_cast<unsigned>(csp::control::rows.size()), static_cast<unsigned>(fpga_map::rom_rows));
     } else {
         ESP_LOGE(tag, "program image: %d row dword(s) and %d decode dword(s) not as sent", rows_differing,
                  rom_differing);

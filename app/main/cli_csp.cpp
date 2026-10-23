@@ -283,7 +283,10 @@ int cmd_hold(int, char **) {
     engine_link_raw_write(fpga_map::ctrl,
                           fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
-    for (size_t pc = 0; pc < fpga_map::program_rows; ++pc) {
+    // every program row, not the last: that is the fetch's park row while
+    // the CSP is held, and a write would meet the fetch on it (the row rule;
+    // a program ends with END and never reaches it, #271)
+    for (size_t pc = 0; pc + 1 < fpga_map::program_rows; ++pc) {
         const uint64_t row[2] = {0, 0};
         engine_link_raw_write_burst(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row, 2, true);
     }
@@ -304,8 +307,8 @@ int cmd_row(int argc, char **argv) {
     const unsigned pc    = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const uint64_t row[2] = {std::strtoull(argv[2], nullptr, 16) & spi_link::dword_mask,
                              std::strtoull(argv[3], nullptr, 16) & spi_link::dword_mask};
-    if (pc >= fpga_map::program_rows) {
-        std::printf("  the program has %u rows\n", static_cast<unsigned>(fpga_map::program_rows));
+    if (pc + 1 >= fpga_map::program_rows) {   // the last row is the fetch's park, never a program's
+        std::printf("  a program has at most %u rows\n", static_cast<unsigned>(fpga_map::program_rows - 1));
         return 1;
     }
     engine_link_raw_write_burst(fpga_map::program_base + 2 * pc, row, 2, true);

@@ -23,6 +23,7 @@ std::string_view mnemonic(Op op) {
     case Op::loop: return "LOOP";
     case Op::vloop: return "LOOP.v";
     case Op::idx: return "IDX";
+    case Op::end: return "END";
     }
     return "?";
 }
@@ -102,6 +103,11 @@ Control control_of(Op op, bool wide, ASource a_source) {
                 static_cast<uint8_t>(op == Op::vloop ? LoopOp::vector_i : LoopOp::scalar_i)};
     case Op::idx:
         return {Unit::index, Writes::index_i, ASource::zero, true, false, ConditionKind::none, true, false, 0};
+    case Op::end:
+        // the front end's: no unit, nothing read or written, sub-operation 1 of
+        // "none" (NOP is 0) — the row the fetch stops at
+        return {Unit::none, Writes::nothing, ASource::zero, false, false, ConditionKind::none, false, false,
+                end_sub_operation};
     }
     return {};
 }

@@ -79,7 +79,7 @@ std::string hex(int address) {
 Op op_of(const Control &control) {
     switch (control.unit) {
     case Unit::none:
-        return Op::nop;
+        return control.sub == end_sub_operation ? Op::end : Op::nop;
     case Unit::multiply_add:
         switch (static_cast<MultiplyAddOp>(control.sub)) {
         case MultiplyAddOp::mac:
@@ -395,6 +395,9 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
 
     switch (op) {
     case Op::nop:
+        break;
+    case Op::end:
+        state.stopped = true;   // the pass's instructions end here; the row costs its issue cycle, as on the chip
         break;
     case Op::mac:
     case Op::macw: {

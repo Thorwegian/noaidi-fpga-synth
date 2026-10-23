@@ -26,7 +26,8 @@ constexpr int address_space  = 4096;  // what i and j can address
 constexpr int io_base        = 0x040; // read-only inputs
 constexpr int io_count       = 32;
 constexpr int direct_reach   = 1024;  // a direct operand: 0–1023
-constexpr int program_rows   = 1472;  // instructions a pass
+constexpr int program_rows   = 2048;  // IMEM's rows: eight blocks of 2048 × 9 (#271)
+constexpr int program_limit  = program_rows - 1; // a program's most rows, END included: the last row is the fetch's park
 constexpr int rom_rows       = 1024;  // the decode ROM's block: 1024 × 18
 constexpr int op_count       = 256;   // the rows the word's 8-bit op reaches
 constexpr int write_window   = 48;    // queued writes a pass
@@ -112,6 +113,7 @@ enum class Op : uint8_t {
     loop,    // a scalar loop on i or j
     vloop,   // a vector loop on i or j
     idx,     // i or j = X + Y
+    end,     // the program's end: the builder's last row, where the pass's instructions stop (#271)
 };
 
 std::string_view mnemonic(Op op);
@@ -196,6 +198,8 @@ enum class MultiplyAddOp : uint8_t { mac = 0, add3 = 2, cmp = 3, abs = 4 };   //
 enum class LogicOp : uint8_t { min = 0, max = 1, sel = 2, andxor = 3 };
 // The loop unit's.
 enum class LoopOp : uint8_t { scalar_i = 0, scalar_j = 1, vector_i = 2, vector_j = 3 };
+// Unit none's sub-operation that is the program's end (NOP is 0): csp_pkg::SUB_END.
+constexpr uint8_t end_sub_operation = 1;
 
 struct Control {
     Unit unit             = Unit::none;    // [17:15]

@@ -25,10 +25,10 @@
 namespace csp::control {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 1619;
+inline constexpr int cycles = 1620;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 454> rows{{
+inline constexpr std::array<Row, 455> rows{{
     {0x030000c00ull, 0x000000070ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
@@ -483,13 +483,14 @@ inline constexpr std::array<Row, 454> rows{{
     {0x060800406ull, 0xc00004000ull},
     {0x060801407ull, 0xc00004000ull},
     {0x06080240bull, 0xc00004000ull},
+    {0x110000000ull, 0x000000000ull},
 }};
 
 // The decode ROM: one control word a row, row 0 the NOP.
-inline constexpr std::array<uint32_t, 17> rom{
+inline constexpr std::array<uint32_t, 18> rom{
     0x00000, 0x20002, 0x20003, 0x34221, 0x33220, 0x0a7e8, 0x092e0, 0x092e3,
     0x11262, 0x092c4, 0x092e2, 0x096e0, 0x112e1, 0x112e3, 0x0a7e0, 0x194e0,
-    0x096e2,
+    0x096e2, 0x00001,
 };
 
 // Registers, blocks and fields.

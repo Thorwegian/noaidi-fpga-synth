@@ -126,7 +126,7 @@ int cycles_of(const std::string &source) {
     const csp::PassReport report = m.run();
     check(report.errors.empty(), "the schedule runs without an early read");
     check_equal(report.cycles, m.program.cycles, "the model counts the cycles the assembler scheduled");
-    return report.cycles;
+    return report.cycles - 1;   // the instructions' own cycles: the END row's issue (#271) left out
 }
 
 // ---- encoding ---------------------------------------------------------------
@@ -164,6 +164,10 @@ void test_encoding() {
     check_equal(reads(csp::Op::idx), 3, "IDX reads X and Y");
     check_equal(reads(csp::Op::loop), 0, "LOOP reads nothing: its numbers are in the word");
     check_equal(reads(csp::Op::nop), 0, "NOP reads nothing");
+    check_equal(reads(csp::Op::end), 0, "END reads nothing");
+    check(csp::control_of(csp::Op::end, false, csp::ASource::zero).encode() != 0,
+          "END's control word is not NOP's: the fetch tells them apart");
+    check(csp::mnemonic(csp::Op::end) == "END", "END has its mnemonic");
 }
 
 // ---- arithmetic ---------------------------------------------------------------
@@ -363,7 +367,7 @@ void test_vector_loops() {
     // vector loop the index's base is unknown, so an indexed read waits for every earlier
     // indexed write).
     const int spacing_8 = (csp::result_latency + 7) / 8;
-    check_equal(vector_report.cycles, csp::index_latency + 1 + 1 + (5 + 2 * (spacing_8 - 1)) * 8,
+    check_equal(vector_report.cycles, csp::index_latency + 1 + 1 + (5 + 2 * (spacing_8 - 1)) * 8 + 1, // + END's issue
                 "a vector loop of 8 elements: dependent rows ceil(latency / 8) apart, one bubble to enter, nothing else");
     check(scalar_report.cycles > vector_report.cycles, "the scalar loop waits inside each iteration");
 
@@ -374,7 +378,7 @@ void test_vector_loops() {
     const csp::PassReport two_report = two.run();
     check(two_report.errors.empty(), "a two-element loop is spaced by the latency");
     const int spacing_2 = (csp::result_latency + 1) / 2;
-    check_equal(two_report.cycles, csp::index_latency + 1 + 1 + (2 + (spacing_2 - 1)) * 2,
+    check_equal(two_report.cycles, csp::index_latency + 1 + 1 + (2 + (spacing_2 - 1)) * 2 + 1, // + END's issue
                 "ceil(latency / 2) - 1 wait rows between the dependent pair");
 
     Machine shared(body
@@ -457,7 +461,7 @@ outer_end:
 void test_decisions() {
     const csp::Program idx = csp::assemble(std::string(registers) + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
     check(idx.ok, "IDX assembles");
-    check_equal(idx.image.length, 1 + (csp::index_latency - 1) + 1, "an IDX is followed by index_latency - 1 NOP rows");
+    check_equal(idx.image.length, 1 + (csp::index_latency - 1) + 1 + 1, "an IDX is followed by index_latency - 1 NOP rows (and the image by END)");
     for (int row = 1; row < csp::index_latency; ++row) {
         check(csp::Word::decode(idx.image.rows[static_cast<size_t>(row)]).op == 0, "the row after an IDX is a NOP");
     }
@@ -524,7 +528,7 @@ void test_limits() {
     // field reaches; the program's variants come to a handful
     const csp::Program program = csp::assemble(std::string(registers) + "MAC A_, 0, B_, C_\nMAC.w W_, B_, V_\n"
                                                + "SEL A_, B_, C_\nIDX i, =#0x100, 0\nIDX j, =#0x100, 0\n");
-    check_equal(program.image.rom_used, csp::rom_reserved + 5, "distinct control words get a decode row each, after the NOP's and the vector loops' (IDX i and IDX j differ)");
+    check_equal(program.image.rom_used, csp::rom_reserved + 5 + 1, "distinct control words get a decode row each, after the NOP's and the vector loops' (IDX i and IDX j differ; END's row is the sixth)");
 }
 
 void test_sinks() {

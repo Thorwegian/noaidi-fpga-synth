@@ -225,12 +225,14 @@ module csp_core (
     // running is the hold as sampled at the pass start: a pass that started runs its rows to the
     // end whatever the hold does meanwhile, so that a pass is atomic and a frozen chip's registers
     // are a whole number of passes (the chip check, tools/lab/chip_check.py)
-    // The image ends at PROGRAM_ROWS; IMEM goes on to 2047 and the counter
-    // would wrap to 0 and run the program again inside a pass longer than
-    // the image (#268: 3008 issue cycles, 1472 rows). Past the image the
-    // counter parks until the next pass starts.
-    wire program_done = pc >= PC_W'(csp_pkg::PROGRAM_ROWS);
-    wire fetch_valid  = running && !program_done && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
+    // The program ends at its END row (#271): when it reaches A the counter
+    // is redirected to the park row, the four rows behind it are discarded
+    // as a loop's repeat discards them, and program_done keeps the fetch off
+    // until the next pass starts — so whatever IMEM holds past the image (an
+    // earlier, longer program) never runs, and a pass longer than the image
+    // (#268) idles instead of wrapping the counter and running it again.
+    logic program_done;
+    wire fetch_valid = running && !program_done && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
 
     // IMEM's address pins have a register of their own in every slice, loaded with what the
     // program counter loads: the next value goes out (csp_imem.sv)
@@ -276,7 +278,7 @@ module csp_core (
     // loop's next instance, round or row
     wire [PC_W-1:0] pc_next = pass_start ? (held ? csp_pkg::PROGRAM_PARK_ROW : '0)
                             : !running ? csp_pkg::PROGRAM_PARK_ROW
-                            : program_done ? csp_pkg::PROGRAM_PARK_ROW             // the image's end: park
+                            : program_done ? csp_pkg::PROGRAM_PARK_ROW             // past END: parked
                             : redirect ? redirect_target
                             : (v_now && !v_last_element) ? v_row_now            // the same row, the next element
                             : (v_round_done && !v_left_now_zero) ? v_start_now  // the next round
@@ -436,8 +438,17 @@ module csp_core (
     wire repeat_i  = process_i && !exhausted_i;
     wire repeat_j  = process_j && !exhausted_j;
 
-    assign redirect        = repeat_i || repeat_j;
-    assign redirect_target = repeat_i ? loop_start_i : loop_start_j;
+    // The END row at A: a redirect to the park row, and the fetch stays off
+    // (program_done) until the pass ends.
+    wire a_is_end = a_present && a_live && a_unit == csp_pkg::UNIT_NONE && a_sub == csp_pkg::SUB_END;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n)        program_done <= 1'b0;
+        else if (pass_start) program_done <= 1'b0;
+        else if (a_is_end)   program_done <= 1'b1;
+    end
+
+    assign redirect        = repeat_i || repeat_j || a_is_end;
+    assign redirect_target = a_is_end ? csp_pkg::PROGRAM_PARK_ROW : repeat_i ? loop_start_i : loop_start_j;
 
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n) begin
