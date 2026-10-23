@@ -13,13 +13,17 @@
 # run of this script exiting is what wakes the agent.
 #
 #     gh_watch.sh [--interval SECONDS] [--repo OWNER/NAME] [--me LOGIN]
-#                 [--since ISO8601] [--state FILE] [--once]
+#                 [--branch main] [--since ISO8601] [--state FILE] [--once]
 #
 # The watermark is kept in --state (default ~/.local/tmp/claude/gh_watch.since)
 # and advances to the newest item seen, so a restart neither replays nor skips.
 # Comments come from the repository-wide endpoint with ?since=, one call for
 # every issue and pull request at once: there is no per-issue first page to
 # fall off, which is how an earlier silent watch missed a comment (#237).
+# A push to the default branch is news too -- new rules or code landing on
+# main, which no comment or notification announces -- so the branch's head
+# is watched beside the watermark (its last SHA in --state's sibling
+# .<branch>.head; the first sight only seeds it).
 # --once checks a single time, for scripts: exit 0 is news, exit 1 is quiet.
 # GH_CONFIG_DIR is honoured as gh honours it.
 set -u
@@ -27,6 +31,7 @@ set -u
 INTERVAL=300
 REPO="Thorwegian/noaidi-fpga-synth"
 ME="noaidi-claude"
+BRANCH="main"
 STATE="${HOME}/.local/tmp/claude/gh_watch.since"
 SINCE=""
 ONCE=0
@@ -36,14 +41,16 @@ while [ $# -gt 0 ]; do
         --interval) INTERVAL="$2"; shift 2 ;;
         --repo)     REPO="$2";     shift 2 ;;
         --me)       ME="$2";       shift 2 ;;
+        --branch)   BRANCH="$2";   shift 2 ;;
         --since)    SINCE="$2";    shift 2 ;;
         --state)    STATE="$2";    shift 2 ;;
         --once)     ONCE=1;        shift ;;
-        *) echo "usage: gh_watch.sh [--interval S] [--repo O/N] [--me LOGIN] [--since ISO] [--state FILE] [--once]" >&2; exit 2 ;;
+        *) echo "usage: gh_watch.sh [--interval S] [--repo O/N] [--me LOGIN] [--branch NAME] [--since ISO] [--state FILE] [--once]" >&2; exit 2 ;;
     esac
 done
 
 mkdir -p "$(dirname "$STATE")"
+HEADFILE="${STATE}.${BRANCH//\//_}.head"      # the default branch's last seen SHA
 if [ -n "$SINCE" ]; then
     WATERMARK="$SINCE"
 elif [ -s "$STATE" ]; then
@@ -77,13 +84,39 @@ check() {
     return 0
 }
 
+# The default branch's head: a push to it is news. The first sight only seeds
+# the remembered SHA (no wake); from then on any new head is reported.
+check_push() {
+    local head seen
+    head="$(gh api "repos/${REPO}/branches/${BRANCH}" \
+        --jq '.commit.sha + " " + (.commit.commit.message | split("\n")[0] | .[0:100])' 2>/dev/null)"
+    [ -z "$head" ] && return 1
+    seen="$(cat "$HEADFILE" 2>/dev/null || true)"
+    if [ -z "$seen" ]; then
+        echo "${head%% *}" > "$HEADFILE"
+        return 1
+    fi
+    [ "${head%% *}" = "$seen" ] && return 1
+    echo "NEWS push ${BRANCH} ${head:0:9} ${head#* }"
+    echo "${head%% *}" > "$HEADFILE"
+    return 0
+}
+
+# Both checks run each round, so a tick with a comment and a push reports both.
+round() {
+    local news=1
+    check && news=0
+    check_push && news=0
+    return $news
+}
+
 if [ "$ONCE" -eq 1 ]; then
-    check && exit 0 || exit 1
+    round && exit 0 || exit 1
 fi
 
-echo "watching ${REPO} since ${WATERMARK}, every ${INTERVAL}s (quiet until there is news)"
+echo "watching ${REPO} since ${WATERMARK} and ${BRANCH}'s head, every ${INTERVAL}s (quiet until there is news)"
 while true; do
-    if check; then
+    if round; then
         exit 0
     fi
     sleep "$INTERVAL"
