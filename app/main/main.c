@@ -14,6 +14,7 @@
 #include "spi_link.h"
 #include "midi_in.h"
 #include "midi_log.h"
+#include "midi_out.h"
 #include "event_bus.h"
 #include "engine_link.h"
 #include "voice_alloc.h"
@@ -69,8 +70,10 @@ void app_main(void) {
     // Patch storage: mount before anything loads a patch.
     storage_init();
 
-    // Event bus first, then the consumers that subscribe to it.
+    // Event bus first, then the consumers that subscribe to it; the outputs
+    // (parameter feedback, #279) before anything can ask them to send.
     event_bus_init();
+    midi_out_init();
     midi_log_init();
 
     // UART1 RX must init before SPI: UART1's default TX pin (GPIO7) is

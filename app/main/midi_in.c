@@ -50,25 +50,30 @@
 // ── Per-port context ───────────────────────────────────────────────
 typedef struct {
     uart_port_t uart;
-    const char *name; // task name + log tag
+    const char *name;     // task name + log tag
+    midi_source_t source; // what the port's events carry on the bus
     midi_parser_t parser;
     uint8_t hexdump_budget; // first-bytes hex log budget (bring-up aid)
     bool ready;             // UART configured, RX task not yet started
     bool sensing;           // Active Sensing seen on this port: silence now means a broken link
 } midi_port_t;
 
-static midi_port_t s_din_port   = {.uart = UART_NUM_1, .name = "midi_in"};
-static midi_port_t s_panel_port = {.uart = UART_NUM_0, .name = "midi_pnl"};
+static midi_port_t s_din_port   = {.uart = UART_NUM_1, .name = "midi_in", .source = MIDI_SOURCE_DIN};
+static midi_port_t s_panel_port = {.uart = UART_NUM_0, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
 // happens through the event bus (non-blocking), so a slow consumer
 // can never stall MIDI reception.
 
+// user is the port, or NULL for a message the firmware makes on its behalf
+// (the Active Sensing rule's notes-off).
 static void midi_msg_to_bus(const midi_message_t *m, void *user) {
-    evt_t evt = {
-            .kind = EVT_MIDI,
-            .midi = *m,
+    const midi_port_t *port = (const midi_port_t *) user;
+    evt_t evt               = {
+                          .kind   = EVT_MIDI,
+                          .source = port != NULL ? port->source : MIDI_SOURCE_INTERNAL,
+                          .midi   = *m,
     };
     event_bus_publish(&evt);
 }
@@ -136,7 +141,7 @@ static void midi_in_task(void *arg) {
 }
 
 static void port_init(midi_port_t *p, int rx_pin) {
-    midi_parser_init(&p->parser, midi_msg_to_bus, NULL);
+    midi_parser_init(&p->parser, midi_msg_to_bus, p);
 
     uart_config_t cfg = {
             .baud_rate  = MIDI_BAUD,

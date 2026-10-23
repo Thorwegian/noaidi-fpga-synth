@@ -37,6 +37,15 @@ typedef enum {
     EVT_PATCH, // a patch request to voice_alloc (voice_alloc.h)
 } evt_kind_t;
 
+// Where a MIDI event came from. The outputs send a state change to every
+// other source's surface (parameter feedback, #279), never back to its own.
+typedef enum {
+    MIDI_SOURCE_INTERNAL = 0, // the firmware itself: the console, a rule
+    MIDI_SOURCE_DIN,          // UART1, the DIN jack
+    MIDI_SOURCE_PANEL,        // UART0, the dev host's panel port
+    MIDI_SOURCE_BLE,          // MIDI over Bluetooth LE
+} midi_source_t;
+
 // A patch request: replace the active patch, or copy it out. Sent
 // straight to voice_alloc's queue, so it stays in order with MIDI; the
 // sender waits on done.
@@ -50,6 +59,7 @@ typedef struct {
 // Tagged union: extend with new kinds and members as the system grows.
 typedef struct {
     evt_kind_t kind;
+    uint8_t source; // midi_source_t, with EVT_MIDI
     union {
         midi_message_t midi;
         patch_request_t patch;

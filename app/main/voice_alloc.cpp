@@ -27,6 +27,7 @@
 #include "banks.hpp"
 #include "engine_link.h"
 #include "event_bus.h"
+#include "midi_out.h"
 #include "patch.h"
 #include "patch_file.h"
 #include "render.hpp"
@@ -781,7 +782,28 @@ uint8_t s_bank_msb[16],
         s_bank_lsb[16]; // each channel's bank (see program_change)
 void program_change(uint8_t channel, uint8_t program);
 
-void handle_midi(const midi_message_t *m) {
+// The CCs that edit the patch (docs/midi_schema.md): a change one surface
+// makes is sent to every other surface (parameter feedback, #284, #279).
+// Performance controls (the wheel, the pedal), the RPN mechanism, panic and
+// the test tone are not state and stay where they came from.
+bool patch_cc(uint8_t num) {
+    switch (num) {
+    case 7:   case 10:  case 31:                                  // volume, pan, key tracking
+    case 20:  case 21:  case 14:  case 15:  case 22:  case 23:    // the oscillators
+    case 24:  case 25:  case 85:  case 26:  case 27:  case 28:
+    case 29:  case 30:  case 71:  case 74:  case 106:             // the filter
+    case 73:  case 75:  case 79:  case 72:  case 86:              // the amp envelope
+    case 102: case 103: case 104: case 105: case 107: case 108: case 87: // the mod envelope
+    case 76:  case 77:  case 115: case 113: case 114:             // LFO 1
+    case 109: case 110: case 116: case 111: case 112:             // LFO 2
+        return true;
+    default:
+        return false;
+    }
+}
+
+// source: where the message came from (midi_source_t), for the feedback.
+void handle_midi(const midi_message_t *m, uint8_t source) {
     const uint8_t type = m->status & 0xF0;
     const uint8_t ch   = m->status & 0x0F;
 
@@ -799,6 +821,9 @@ void handle_midi(const midi_message_t *m) {
             s_bank_lsb[ch] = m->data[1];
         } else {
             handle_cc(m->data[0], m->data[1]);
+            if (patch_cc(m->data[0])) {
+                midi_out_send(m, source);
+            }
         }
         break;
     case 0xC0:
@@ -963,7 +988,7 @@ void voice_alloc_task(void *) {
         // when the next note_on happens to scan.
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(poll_ms)) == pdTRUE) {
             if (evt.kind == EVT_MIDI) {
-                handle_midi(&evt.midi);
+                handle_midi(&evt.midi, evt.source);
             } else if (evt.kind == EVT_PATCH) {
                 handle_patch_request(&evt.patch, esp_timer_get_time());
             }

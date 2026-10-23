@@ -7,8 +7,10 @@
 // primary service 03B80E5A-EDE8-4B33-A751-6CE34EC4C700 carrying one
 // "MIDI data I/O" characteristic 7772E5DB-3868-4112-A1A9-F2669D106BF3
 // (read, write, write-without-response, notify). Centrals with BLE
-// MIDI support — macOS Audio MIDI Setup, Android 13+, iOS — discover
-// "Noaidi" and treat it like any wired MIDI port.
+// MIDI support — macOS Audio MIDI Setup, Android 13+, iOS, BlueZ —
+// discover "Noaidi" and treat it like any wired MIDI port, both ways:
+// their writes are the synth's input, its notifications their input
+// (parameter feedback, #279; midi_out.cpp frames them).
 //
 // Packet format: two header bytes holding a 13-bit millisecond
 // timestamp; bit 7 of the second header byte set means a status byte
@@ -79,6 +81,12 @@ static uint16_t gatt_svr_chr_midi_io_handle;
 static bool s_advertising;
 static int s_conn_count;
 
+// The one connection's handle, its negotiated MTU, and whether the central
+// subscribed to notifications (its CCCD write), for the output direction.
+static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t s_mtu         = BLE_ATT_MTU_DFLT;
+static bool s_notify_subscribed;
+
 static midi_parser_t s_ble_parser;
 
 // Ingress ring buffer: NOSPLIT keeps packet boundaries, which
@@ -95,8 +103,9 @@ static uint32_t s_rx_drops;
 // happens through the event bus (non-blocking).
 static void ble_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
-            .kind = EVT_MIDI,
-            .midi = *m,
+            .kind   = EVT_MIDI,
+            .source = MIDI_SOURCE_BLE,
+            .midi   = *m,
     };
     event_bus_publish(&evt);
 }
@@ -293,6 +302,9 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
             ble_midi_advertise();
         } else {
             s_conn_count++;
+            s_conn_handle       = event->connect.conn_handle;
+            s_mtu               = BLE_ATT_MTU_DFLT;
+            s_notify_subscribed = false;
             ESP_LOGI(TAG, "MIDI connection established");
             log_conn_params(event->connect.conn_handle);
             // params requested AFTER encryption (see ENC_CHANGE) to
@@ -305,6 +317,8 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
         if (s_conn_count > 0) {
             s_conn_count--;
         }
+        s_conn_handle       = BLE_HS_CONN_HANDLE_NONE;
+        s_notify_subscribed = false;
         // reason = 512 + HCI code; 531 = 0x13 remote user terminated
         ESP_LOGI(TAG, "disconnected (reason=%d / HCI 0x%02x), advertising",
                  event->disconnect.reason, event->disconnect.reason - 512);
@@ -340,12 +354,46 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
         return 0;
 
     case BLE_GAP_EVENT_MTU:
+        s_mtu = event->mtu.value;
         ESP_LOGI(TAG, "MTU %u", event->mtu.value);
+        return 0;
+
+    // The central's CCCD write for our characteristic: from here on the
+    // synth's state goes out to it as notifications.
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        if (event->subscribe.attr_handle == gatt_svr_chr_midi_io_handle) {
+            s_notify_subscribed = event->subscribe.cur_notify;
+            ESP_LOGI(TAG, "notifications %s", s_notify_subscribed ? "on: parameter feedback flows" : "off");
+        }
         return 0;
 
     default:
         return 0;
     }
+}
+
+// ── The output direction (#279) ─────────────────────────────────────
+// NimBLE's calls are safe from any task; a notification is a copy into
+// an mbuf the host task sends on the next connection event.
+
+bool ble_midi_can_notify(void) {
+    return s_conn_handle != BLE_HS_CONN_HANDLE_NONE && s_notify_subscribed;
+}
+
+size_t ble_midi_packet_max(void) {
+    const size_t payload = s_mtu > 3 ? (size_t) s_mtu - 3 : 0;
+    return payload < BLE_MIDI_MAX_PKT ? payload : BLE_MIDI_MAX_PKT;
+}
+
+bool ble_midi_notify(const uint8_t *packet, size_t length) {
+    if (!ble_midi_can_notify()) {
+        return false;
+    }
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(packet, (uint16_t) length);
+    if (om == NULL) {
+        return false; // no buffer now; the caller waits and tries again
+    }
+    return ble_gatts_notify_custom(s_conn_handle, gatt_svr_chr_midi_io_handle, om) == 0;
 }
 
 // ── Host lifecycle ─────────────────────────────────────────────────

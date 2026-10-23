@@ -4,13 +4,22 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 Three modules on the existing event bus;
-one owner for SPI and the page-swap discipline.
+one owner for SPI and the page-swap discipline; one output back to the
+surfaces.
 
 ```
 UART1 ──► midi_in ──event bus──► synth model ──cmd queue──► engine link ──SPI──► FPGA
-          (parse)                (musical state)            (transport + swap)
+BLE   ──► ble_midi               (musical state)            (transport + swap)
                      └──► midi_log, display, ... (other subscribers)
+                                 └──► midi_out ──► BLE notifications (the surfaces)
 ```
+
+Every event on the bus carries its **source** (the DIN jack, the panel
+port, BLE, the firmware itself). The synth model sends a CC that edited
+the patch back out through `midi_out` to every surface but the one it
+came from, so a knob moved on one surface moves on the others and none
+hears itself (#284, the transport; #279, the whole patch on a Program
+Change). Notes are never sent on: no THRU.
 
 ## midi_in
 
@@ -25,6 +34,17 @@ again until the next FE. A source that never sends FE is never judged by
 silence, and the UART is never flushed (#276: a flush dropped the first
 message after a pause). BLE MIDI has its own parser and no silence rule;
 the link's disconnect is its equivalent.
+
+## midi_out
+
+The outputs. One queue and a task at priority 3 (below the inputs and
+the synth model, above the console): what the model queues is framed as
+MIDI 1.0 over BLE, as many messages a packet as the negotiated MTU
+holds, and sent as a notification on the MIDI characteristic once a
+central has subscribed; without one the messages are consumed, not
+kept. A producer never blocks: a full queue drops and counts. UART0's
+free TX pin is the wired MIDI OUT when the board has the driver, a
+second output on the same queue.
 
 ## synth model
 
