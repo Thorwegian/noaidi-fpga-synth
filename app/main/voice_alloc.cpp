@@ -905,7 +905,8 @@ void voice_alloc_task(void *) {
         } else {
             busy_since = esp_timer_get_time(); // queue empty → we blocked
         }
-        flush_pending_edits(esp_timer_get_time()); // coalesced CC edits
+        const int64_t now = esp_timer_get_time();
+        flush_pending_edits(now); // coalesced CC edits
 
         // Single-core backpressure. The ESP32-C3 has one core; a sustained MIDI
         // flood keeps this queue non-empty, so the receive above never blocks
