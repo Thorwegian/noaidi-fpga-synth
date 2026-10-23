@@ -55,6 +55,7 @@ void ble_store_config_init(void);
 
 #include "event_bus.h"
 #include "midi_parser.h"
+#include "midi_sysex.h"
 
 #define TAG "ble_midi"
 
@@ -101,6 +102,10 @@ static uint32_t s_rx_drops;
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
+static void ble_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+    midi_sysex_received(payload, length, MIDI_SOURCE_BLE);
+}
+
 static void ble_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
             .kind   = EVT_MIDI,
@@ -433,6 +438,7 @@ void ble_midi_console_status(void) {
 
 void ble_midi_init(void) {
     midi_parser_init(&s_ble_parser, ble_msg_to_bus, NULL);
+    midi_parser_on_sysex(&s_ble_parser, ble_sysex_to_synth);
 
     // Ingress decoupling: ring buffer + drain task, so the
     // NimBLE host task never parses or publishes.

@@ -3,7 +3,7 @@
 
 idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        "midi_parser.c" "spi_link.cpp" "engine_link.cpp" "engine_image.cpp" "engine_selftest.cpp" "render.cpp"
-                       "voice_alloc.cpp" "cc_map.cpp" "midi_out.cpp" "ble_midi.c" "console.c" "cli.cpp" "cli_banks.cpp" "cli_system.c" "cli_csp.cpp"
+                       "voice_alloc.cpp" "cc_map.cpp" "midi_out.cpp" "midi_sysex.cpp" "ble_midi.c" "console.c" "cli.cpp" "cli_banks.cpp" "cli_system.c" "cli_csp.cpp"
                        "stress_test.c" "storage.c" "patch_units.c" "patch.cpp" "patch_file.cpp" "safe_file.cpp" "banks.cpp"
                        "csp/csp.cpp" "csp/program_builder.cpp" "csp/envelope.cpp"
                        "../lib/tomlc17/src/tomlc17.c"

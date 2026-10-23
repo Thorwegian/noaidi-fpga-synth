@@ -105,6 +105,22 @@ def button(cc, label, value):
         "expand": True,
     }
 
+def sysex_button(label, hex_bytes):
+    # a SysEx frame (docs/midi_schema.md "SysEx"), o-s-c's /sysex address
+    # with the bytes as a hex string
+    return {
+        "type": "button",
+        "id": f"sysex_{label.lower()}",
+        "label": label,
+        "mode": "push",
+        "address": "/sysex",
+        "preArgs": [],
+        "target": TARGET,
+        "on": hex_bytes,
+        "off": None,
+        "expand": True,
+    }
+
 def number_input(widget_id, caption):
     # a typed number, sent by the Select button rather than on its own
     w = {
@@ -265,6 +281,7 @@ root_widgets = [
         knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
                                         # 0 = velocity OFF, full patch amount
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
+        sysex_button("SYNC", "f0 7d 4e 4f 10 f7"),   # the state request: the synth sends the whole patch (#287)
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
     ] + program_select()),
