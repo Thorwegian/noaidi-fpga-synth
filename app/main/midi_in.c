@@ -28,6 +28,7 @@
 
 #include "event_bus.h"
 #include "midi_parser.h"
+#include "midi_sysex.h"
 
 #define MIDI_BAUD        31250
 #define MIDI_RX_BUF_SIZE 256
@@ -76,6 +77,13 @@ static void midi_msg_to_bus(const midi_message_t *m, void *user) {
                           .midi   = *m,
     };
     event_bus_publish(&evt);
+}
+
+// A complete SysEx frame: the synth's own ops (midi_sysex.h), with the port
+// as the source.
+static void midi_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+    const midi_port_t *port = (const midi_port_t *) user;
+    midi_sysex_received(payload, length, port != NULL ? port->source : MIDI_SOURCE_INTERNAL);
 }
 
 static void midi_in_task(void *arg) {
@@ -142,6 +150,7 @@ static void midi_in_task(void *arg) {
 
 static void port_init(midi_port_t *p, int rx_pin) {
     midi_parser_init(&p->parser, midi_msg_to_bus, p);
+    midi_parser_on_sysex(&p->parser, midi_sysex_to_synth);
 
     uart_config_t cfg = {
             .baud_rate  = MIDI_BAUD,
