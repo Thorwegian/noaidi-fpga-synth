@@ -245,8 +245,31 @@ uint16_t lfo_rate_from_cc(uint8_t val) {
 // The knob positions are kept so a destination change can work the depth out
 // again. A loaded patch makes them unknown; the first depth knob moved after
 // that takes the other one's position from the patch's depth.
-constexpr int lfo_pitch_coarse_shift = 2;   // Coarse steps per semitone: 4
-constexpr int lfo_pitch_fine_steps   = 128; // Fine steps per semitone
+// The depth knobs. Coarse (CC 77 / 110) and Fine (CC 115 / 116) make one
+// depth: Coarse counts whole units of span, several knob steps a unit, and
+// Fine the 128ths of a unit between them. The unit is the destination's --
+// on pitch a semitone, four Coarse steps each (vibrato lives on Fine,
+// intervals and FX on Coarse); on the cutoff and the resonance an octave
+// (of cutoff, of Q), sixteen Coarse steps each, so a span reaches eight
+// octaves, as far as the cutoff knob itself (#256: the raw law both had
+// before topped out at half an octave of span, inaudible on either). The
+// pulse width keeps the raw law, 1024 raw being the whole width.
+struct SpanLaw {
+    int coarse_shift;    // log2 of the Coarse steps a unit
+    int units_an_octave; // the unit, as a fraction of the octave's 1024 raw
+};
+constexpr SpanLaw lfo_semitone_law{2, 12};
+constexpr SpanLaw lfo_octave_law{4, 1};
+constexpr int lfo_fine_steps = 128; // Fine steps a unit
+
+const SpanLaw *lfo_span_law(uint8_t dest) {
+    switch (dest) {
+    case LFO_DEST_PITCH:     return &lfo_semitone_law;
+    case LFO_DEST_CUTOFF:
+    case LFO_DEST_RESONANCE: return &lfo_octave_law;
+    default:                 return nullptr; // the pulse width: raw
+    }
+}
 
 struct LfoDepthKnobs {
     uint8_t coarse = 0;
@@ -256,15 +279,15 @@ struct LfoDepthKnobs {
 std::array<LfoDepthKnobs, PATCH_NUM_LFO> s_lfo_depth_knobs;
 
 int16_t lfo_depth_from_knobs(uint8_t dest, const LfoDepthKnobs &k) {
-    if (dest == LFO_DEST_PITCH) {
-        const int32_t fine_steps =
-                (k.coarse >> lfo_pitch_coarse_shift) * lfo_pitch_fine_steps
-                + k.fine;
-        return static_cast<int16_t>(
-                (fine_steps * 1024 + 12 * lfo_pitch_fine_steps / 2)
-                / (12 * lfo_pitch_fine_steps));
+    const SpanLaw *law = lfo_span_law(dest);
+    if (law == nullptr) {
+        return static_cast<int16_t>((k.coarse << 2) + (k.fine >> 5));
     }
-    return static_cast<int16_t>((k.coarse << 2) + (k.fine >> 5));
+    const int32_t fine_steps =
+            (k.coarse >> law->coarse_shift) * lfo_fine_steps + k.fine;
+    const int32_t steps_an_octave = law->units_an_octave * lfo_fine_steps;
+    return static_cast<int16_t>(
+            (fine_steps * 1024 + steps_an_octave / 2) / steps_an_octave);
 }
 
 // The knob positions nearest a patch's depth (its size: the knobs have no
@@ -272,22 +295,22 @@ int16_t lfo_depth_from_knobs(uint8_t dest, const LfoDepthKnobs &k) {
 LfoDepthKnobs lfo_knobs_from_depth(uint8_t dest, int16_t depth) {
     const int32_t size = depth < 0 ? -depth : depth;
     LfoDepthKnobs k;
-    k.known = true;
-    if (dest == LFO_DEST_PITCH) {
-        const int32_t fine_steps =
-                (size * 12 * lfo_pitch_fine_steps + 512) / 1024;
-        const int32_t semitones = fine_steps / lfo_pitch_fine_steps;
-        if (semitones > (127 >> lfo_pitch_coarse_shift)) {
-            k.coarse = 127;
-            k.fine   = lfo_pitch_fine_steps - 1;
-        } else {
-            k.coarse =
-                    static_cast<uint8_t>(semitones << lfo_pitch_coarse_shift);
-            k.fine = static_cast<uint8_t>(fine_steps % lfo_pitch_fine_steps);
-        }
-    } else {
+    k.known            = true;
+    const SpanLaw *law = lfo_span_law(dest);
+    if (law == nullptr) {
         k.coarse = static_cast<uint8_t>(size >> 2 < 127 ? size >> 2 : 127);
         k.fine   = static_cast<uint8_t>((size & 3) << 5);
+        return k;
+    }
+    const int32_t steps_an_octave = law->units_an_octave * lfo_fine_steps;
+    const int32_t fine_steps      = (size * steps_an_octave + 512) / 1024;
+    const int32_t units           = fine_steps / lfo_fine_steps;
+    if (units > (127 >> law->coarse_shift)) {
+        k.coarse = 127;
+        k.fine   = lfo_fine_steps - 1;
+    } else {
+        k.coarse = static_cast<uint8_t>(units << law->coarse_shift);
+        k.fine   = static_cast<uint8_t>(fine_steps % lfo_fine_steps);
     }
     return k;
 }
