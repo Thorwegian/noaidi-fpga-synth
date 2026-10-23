@@ -170,11 +170,24 @@ void test_notes() {
     check(full_state.at(base + cp::gate) == 16384, "note-on opens the gate");
     const double amp = soft_state.at(base + cp::velocity) / 16384.0;
     check(std::fabs(amp - 64.0 / 127.0) < 1e-3,
-          "a soft note's amount is the velocity's fraction of the span");
-    check(std::fabs(soft_state.at(base + cp::velocity_m) / 16384.0
-                    - 64.0 / 127.0)
-                  < 1e-3,
-          "the mod envelope's amount is linear in the velocity curve");
+          "a soft note's amp amount is the velocity's fraction of the span");
+    // The mod env's velocity sensitivity is deeper (#244): CC 127 scales by
+    // twice the velocity, CC 64 by the velocity once, CC 0 not at all.
+    const double v_soft = 64.0 / 127.0;
+    check(std::fabs(full_state.at(base + cp::velocity_m) / 16384.0 - 2.0) < 1e-3,
+          "mod env, CC 127, full velocity: twice");
+    check(std::fabs(soft_state.at(base + cp::velocity_m) / 16384.0 - 2.0 * v_soft) < 1e-3,
+          "mod env, CC 127, soft note: twice the velocity");
+    patch.vel_mod_amt = 64;
+    render::Writes mid;
+    render::note_on(patch, 0, 60, 64, mid);
+    check(std::fabs(state_of(mid).at(base + cp::velocity_m) / 16384.0 - v_soft) < 0.01,
+          "mod env, CC 64: the velocity once");
+    patch.vel_mod_amt = 0;
+    render::Writes modflat;
+    render::note_on(patch, 0, 60, 64, modflat);
+    check(std::fabs(state_of(modflat).at(base + cp::velocity_m) / 16384.0 - 1.0) < 1e-3,
+          "mod env, CC 0: full regardless of velocity");
     patch.vel_amp_amt = 0;
     render::Writes off;
     render::note_on(patch, 0, 1, 1, off);
