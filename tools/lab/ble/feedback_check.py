@@ -15,12 +15,6 @@ Bluetooth"), with the CH345 into the panel port as the keyboard's side:
      from the program's .toml and compared.
   3. A patch CC sent into the panel port comes back out on BLE (feedback to
      the other surface); one sent over BLE does not (no echo).
-  4. A surface that subscribes to the notifications is sent the whole patch
-     (a reconnected surface sees the state): the firmware's trace shows the
-     sync at the subscription. Over this host path nothing can receive that
-     first dump (BlueZ creates the ALSA port and subscribes before any client
-     can hold the port), so it is traced, not counted; a native BLE MIDI
-     client receives it.
 
 The dump's CC list below is cc_map::dump()'s order; the test reports what is
 missing or doubled by number.
@@ -107,9 +101,7 @@ def main():
             client.event_output(ev, port=port)
             client.drain_output()
 
-        # the subscription itself brings a dump (a surface that joins): drain it
-        joined = received(client, 2.0)
-        print(f"[join] {len(joined)} messages on subscribing (the patch as the surface joins)")
+        received(client, 1.0)  # nothing is sent on connect; drain what BlueZ's setup left
 
         # 1. the Program Change into the panel port: the whole patch on BLE
         send(panel, ProgramChangeEvent(channel=0, value=args.program))
@@ -151,17 +143,6 @@ def main():
         if echo:
             failures.append(f"the BLE surface heard itself: {echo}")
 
-        # 4. a surface that subscribes gets the patch. BlueZ's plugin subscribed
-        #    0.9 s after the connection, before any ALSA client could hold the
-        #    port it had just created, so that dump had no receiver here (a
-        #    native BLE MIDI client receives it), and BlueZ keeps the CCCD set
-        #    while its plugin is registered, so no second subscription can be
-        #    provoked through D-Bus. The firmware's trace is the evidence this
-        #    path gives: the sync it ran at the subscription, source "ble".
-        synced = [ln.strip() for ln in cap.lines if "sync " in ln and "ble" in ln]
-        print(f"[subscribe] the firmware traced {len(synced)} sync at the subscription: {synced[:1] or 'none'}")
-        if not synced:
-            failures.append("the firmware did not send the patch when the central subscribed")
     finally:
         if client is not None:
             client.close()

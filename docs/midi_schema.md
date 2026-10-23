@@ -140,9 +140,10 @@ The schema reads both ways (#279, `app/main/cc_map.cpp`): the synth
 sends its own state as these CCs, so a surface follows the instrument
 the way a hardware synth's panel does.
 
-- **When.** The whole patch on a Program Change and on a console `load`
-  or `sync`, and when a BLE central subscribes (a surface that joins, or
-  comes back after a board reset, sees the state). A patch CC that
+- **When.** The whole patch on a Program Change, on a console `load` or
+  `sync`, and when a surface asks for it (the SysEx state request, below;
+  #287: a surface that joins or comes back after a board reset asks).
+  Nothing is sent on connect. A patch CC that
   arrived from one surface goes out to every other surface after it was
   applied; the wheel, the pedal, notes and panic are performance, not
   state, and are never sent on (no THRU, and a surface never hears
