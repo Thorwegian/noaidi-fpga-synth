@@ -107,15 +107,12 @@ module partial_pipeline #(
                                        // LUTs, no BSRAM block
     reg [15:0] reso_att_lut [0:63];    // resonance-indexed input
                                        // attenuation, UQ0.16 (cascade)
-    reg [15:0] gain_lut [0:1023];      // the voice gain's octave fraction,
-                                       // 2^(-f/1024), UQ0.16
 
     initial begin
         $readmemh("dsp/phase_lut.hex", phase_lut);
         $readmemh("dsp/svf_fc_lut.hex", svf_fc_lut);
         $readmemh("dsp/q1_lut.hex", q1_lut);
         $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
-        $readmemh("dsp/gain_lut.hex", gain_lut);
     end
 
     //----------------------------------------------------------------
@@ -389,20 +386,15 @@ module partial_pipeline #(
         (duty_scaled >  27'sd8388607) ? 24'sd8388607  :
         (duty_scaled < -27'sd8388608) ? -24'sd8388608 : duty_scaled[23:0];
 
-    // The voice's gain: the word is the fraction of a span of
-    // synth_pkg::GAIN_SPAN_OCTAVES, its attenuation span × (1 − word)
-    // octaves — ten by two shifts and an add — the octave's fraction read
-    // from gain_lut here, the whole octaves a shift at S3B, and the result
-    // the linear voice gain the channel's gains multiply: the old engine's
-    // attenuation LUT, so the envelope's level moves the gain in dB. Unity
-    // at 1.0 and above; silence below GAIN_MUTE (2^-10: a released voice's
-    // level lingers a step above zero, and −60 dB is where the old engine
-    // muted a tail).
-    wire signed [18:0] gain_distance = 19'sd16384 - 19'(s2_gain_voice);        // 1 − word, Q4.14
-    wire [18:0] gain_below_one = gain_distance[18] ? 19'd0 : gain_distance;    // 0 at unity and above
-    wire [21:0] gain_attenuation = ({3'b0, gain_below_one} << 3)
-                                 + ({3'b0, gain_below_one} << 1);              // × 10: Q4.14 octaves
-    wire gain_mute = s2_gain_voice < $signed(synth_pkg::GAIN_MUTE);
+    // The voice's gain: the word IS the linear gain (#176) — Q4.14, the
+    // envelope's level × the velocity's amount as the control program
+    // leaves it — clamped at unity, silent at zero and below (a released
+    // level parks a step under zero). Every gain path is a multiply: this
+    // word × the channel's left and right gains at S3C. No curve lives
+    // here; a loudness law is the firmware's to compute, once, host-side.
+    wire signed [17:0] gain_unity_clamped =
+        (s2_gain_voice > 18'sd16384) ? 18'sd16384 : s2_gain_voice;
+    wire gain_mute = s2_gain_voice <= 18'sd0;
 
     //----------------------------------------------------------------
     // S3 — LUT data, phase_inc/K, phase_next, oscillator waveform
@@ -419,8 +411,7 @@ module partial_pipeline #(
     logic [3:0]  s3_fc_oct;
     logic [1:0]  s3_wave;
     logic signed [23:0] s3_duty;
-    logic [15:0] s3_gain_mantissa;   // the voice gain's octave fraction (gain_lut)
-    logic [3:0]  s3_gain_octaves;    //   and its whole octaves of attenuation
+    logic signed [17:0] s3_gain_voice; // the voice's linear gain, clamped at unity
     logic        s3_gain_mute;
     logic signed [17:0] s3_gain_left, s3_gain_right;
     logic        s3_cascade;
@@ -441,8 +432,7 @@ module partial_pipeline #(
             s3_fc_oct    <= '0;
             s3_wave  <= '0;
             s3_duty  <= '0;
-            s3_gain_mantissa <= '0;
-            s3_gain_octaves  <= '0;
+            s3_gain_voice    <= '0;
             s3_gain_mute     <= 1'b1;
             s3_gain_left  <= '0;
             s3_gain_right <= '0;
@@ -465,8 +455,7 @@ module partial_pipeline #(
             s3_fc_oct    <= eff_fc[13:10];
             s3_wave  <= s2_wave;
             s3_duty  <= eff_duty;
-            s3_gain_mantissa <= gain_lut[gain_attenuation[13:4]];
-            s3_gain_octaves  <= gain_attenuation[17:14];
+            s3_gain_voice    <= gain_unity_clamped;
             s3_gain_mute     <= gain_mute;
             s3_gain_left  <= s2_gain_left;
             s3_gain_right <= s2_gain_right;
@@ -506,12 +495,9 @@ module partial_pipeline #(
     // That was the critical path of the whole design.
     wire signed [23:0] phase_next = s3_phase + phase_inc;
 
-    // The voice gain decoded: the octave's fraction shifted by the whole
-    // octaves, Q4.14 (0xFFFF >> 2 = 0x3FFF, unity less a step); a barrel
-    // shift beside K's, registered into S3B for the S3C multiply.
-    wire signed [17:0] gain_decoded =
-        s3_gain_mute ? 18'sd0
-                     : $signed({2'b0, s3_gain_mantissa} >> (3'd2 + s3_gain_octaves));
+    // The voice gain as the S3C multiply takes it: the clamped word, or
+    // zero for a silent voice; registered into S3B.
+    wire signed [17:0] gain_decoded = s3_gain_mute ? 18'sd0 : s3_gain_voice;
 
     //----------------------------------------------------------------
     // S3B/S3C -- resonance-dependent INPUT attenuation. Scale the

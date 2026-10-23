@@ -121,9 +121,9 @@ module tb_partial_pipeline;
                 word_of_kind = (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : (r % 65537) - 32768;
             synth_pkg::POINTER_CUTOFF_CHANNEL:
                 word_of_kind = (r % 4097) - 2048;
-            synth_pkg::POINTER_GAIN_VOICE:     // the fraction of the span: 0 … 0.6 (−24 dB and
-                                               // down), the mute's edge (15, 16), unity, the rails
-                word_of_kind = (j == 0) ? 0 : (j == 1) ? 15 : (j == 2) ? 16 : (j == 13) ? 16384
+            synth_pkg::POINTER_GAIN_VOICE:     // the linear gain: 0 … 0.6, the silence's edge
+                                               // (0, −1, 1), unity, the rails (clamped, silent)
+                word_of_kind = (j == 0) ? 0 : (j == 1) ? -1 : (j == 2) ? 1 : (j == 13) ? 16384
                              : (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : r % 9831;
             synth_pkg::POINTER_GAIN_LEFT:      // 0 … 0.5 (and the pan law's far side: 0)
                 word_of_kind = (j < 3) ? 0 : (r % 8193);
@@ -183,11 +183,9 @@ module tb_partial_pipeline;
     //----------------------------------------------------------------
     reg [23:0] pl [0:1023];
     reg [15:0] fl [0:1023];
-    reg [15:0] gl [0:1023];     // the voice gain's octave fraction
     initial begin
         $readmemh("dsp/phase_lut.hex", pl);
         $readmemh("dsp/svf_fc_lut.hex", fl);
-        $readmemh("dsp/gain_lut.hex", gl);
     end
 
     localparam integer PITCH_REFERENCE = 5120;                       // synth_pkg's 14'h1400, signed
@@ -213,17 +211,12 @@ module tb_partial_pipeline;
     function automatic integer exp_duty(input integer p);
         exp_duty = clamp(sink_word(p, 7) <<< 9, -8388608, 8388607);
     endfunction
-    // the voice's gain word decoded as the pipeline does: the span's attenuation
-    // in octaves, the fraction through gain_lut, the whole octaves a shift;
-    // silence below GAIN_MUTE, unity (less a step) at 1.0 and above
+    // the voice's gain word as the pipeline takes it (#176): the linear gain
+    // itself, silent at zero and below, clamped at unity
     function automatic integer exp_voice_gain(input integer p);
-        integer w, attenuation;
+        integer w;
         w = sink_word(p, 4);
-        if (w < integer'(synth_pkg::GAIN_MUTE)) exp_voice_gain = 0;
-        else begin
-            attenuation    = (w >= 16384) ? 0 : (16384 - w) * synth_pkg::GAIN_SPAN_OCTAVES;
-            exp_voice_gain = gl[(attenuation >> 4) & 1023] >> (2 + (attenuation >> 14));
-        end
+        exp_voice_gain = (w <= 0) ? 0 : (w >= 16384) ? 16384 : w;
     endfunction
     function automatic integer exp_gain(input integer p, input integer k);
         exp_gain = clamp((exp_voice_gain(p) * sink_word(p, k)) >>> 14, -131072, 131071);

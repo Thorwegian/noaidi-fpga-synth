@@ -30,7 +30,7 @@ are small mapping choices, not architecture.
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
 | **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | an RC charge toward 1.3 × full scale, in amplitude (the gain is linear since #222) | ✓ **F1 fixed** (it was linear in dB, the likely main "feels wrong") |
 | Decay/release curve | exponential amplitude = linear dB (SF2 centibel ramps; analog RC discharge) | linear in dB | ✓ exactly conventional |
-| Sustain | a level, linear-ish dB | a fraction of a 60 dB span (≈0.47 dB per CC step at full depth), turned into a linear target by the firmware | ✓ |
+| Sustain | a level, linear-ish dB | a fraction of a 60 dB span (≈0.47 dB per CC step at full depth), turned into a linear amplitude target by the firmware (`amplitude_of_fraction`) | ✓ |
 
 **F1 explained** (fixed by the linear gain, #222): a linear-dB attack spends most of its wall-clock
 time below audibility and then arrives all at once — short attacks
@@ -45,7 +45,7 @@ attack is the first 77 % of an RC charge toward 1.3 times full scale
 (convex in amplitude, F1 below fixed), and the decay and release are RC
 falls (exponential amplitude, as every classic). The patch's sustain stays a
 fraction of the old 60 dB span (`render.cpp` turns it into the same loudness).
-The amp envelope's level is the voice's gain word, the fraction of a span of 60 dB that the partial pipeline turns into a linear gain (`2^(10 × (level − 1))`, silent below 2^−10): a fall is an RC in dB, as `adsr.sv`'s was, at the patch's rate, and the velocity's amount and the sustain are fractions of the span. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
+The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain stay fractions of the old 60 dB span by loudness: the firmware takes the exponential once (`amplitude_of_fraction`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our

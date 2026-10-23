@@ -109,12 +109,23 @@ double velocity_scale(uint8_t velocity, uint8_t amount) {
     return 1.0 - (amount / 127.0) * (1.0 - velocity_curve(velocity));
 }
 
-// The amp envelope's amount for a note: the velocity scales the envelope's
-// span of 60 dB (the partial pipeline's, synth_pkg.sv GAIN_SPAN_OCTAVES, which
-// takes the exponential of the voice's gain word), so a soft note rises to a
-// lower peak from the same floor, as it always did.
+// The loudness span the amp envelope's static amounts are laid out over: the
+// velocity's amount and the sustain are fractions of 60 dB (the old engine's
+// span; `param_conventions.md`), and since the pipeline's gain is linear
+// (#176) the exponential is taken here, once per note or per patch, not
+// in gateware. A fraction f is 2^(span × (f − 1)) of amplitude: 0 is −60 dB,
+// 1 is unity.
+constexpr double loudness_span_octaves = 10.0;
+
+double amplitude_of_fraction(double fraction) {
+    return std::exp2(loudness_span_octaves * (fraction - 1.0));
+}
+
+// The amp envelope's amount for a note, as the amplitude the level is
+// multiplied by: a soft note rises to a lower peak from the same floor, as
+// it always did.
 double amp_amount(const patch_t &patch, uint8_t velocity) {
-    return velocity_scale(velocity, patch.vel_amp_amt);
+    return amplitude_of_fraction(velocity_scale(velocity, patch.vel_amp_amt));
 }
 
 // Velocity scales the mod envelope's amount more deeply than the amp's (#244):
@@ -142,11 +153,13 @@ int32_t note_word(uint8_t note) {
 }
 
 // An envelope's rows: attack aims past full scale, decay at the sustain level,
-// release at zero; each with the patch's rate, as adsr.sv had it — the amp
-// envelope's level is the gain in dB (the pipeline's exponential), the mod
-// envelope's the cutoff in octaves, so a fall is the patch's. `sustain` is
-// the level the decay aims at, in the 22-bit scale of the level (0x400000 is
-// full scale).
+// release at zero; each with the patch's rate. The amp envelope's level is
+// the voice's linear gain (#176), so a decay or a release is an RC fall in
+// amplitude — a constant number of dB a second, the analog envelope — and a
+// released tail reaches the floor in the segment's time (60 dB down,
+// `storage_format.md`); the mod envelope's level is the cutoff in octaves.
+// `sustain` is the level the decay aims at, in the 22-bit scale of the level
+// (0x400000 is full scale).
 void envelope(const adsr_t &env, int sustain, int attack, int decay,
               int release, Writes &writes) {
     auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
@@ -306,10 +319,13 @@ void setup(Writes &writes) {
 }
 
 void amp_envelope(const patch_t &patch, Writes &writes) {
-    // the sustain is a fraction of the gain's span of 60 dB, the level's
+    // the sustain knob is a fraction of the 60 dB span, as it always was; the
+    // level it aims at is that loudness as an amplitude, the gain being linear
+    const double sustain =
+            std::min<uint16_t>(patch.env[0].sustain, 0x3FF) / double{0x3FF};
     envelope(patch.env[0],
-             std::min<uint16_t>(patch.env[0].sustain, 0x3FF) << 12, amp_attack,
-             amp_decay, amp_release, writes);
+             std::lround(amplitude_of_fraction(sustain) * double{0x400000}),
+             amp_attack, amp_decay, amp_release, writes);
 }
 
 void mod_envelope(const patch_t &patch, Writes &writes) {
@@ -456,11 +472,12 @@ void silence(int voice, Writes &writes) {
 }
 
 int64_t release_tail_us(const patch_t &patch) {
-    // The level falls by k / 2^24 of what is left each 96 kHz sample, and the
-    // partial pipeline silences the voice once its level is below 2^-10 (the
-    // gain word's mute, synth_pkg.sv GAIN_MUTE: 60 dB down); plus the link's
-    // latency.
-    constexpr double mute_level = 1.0 / 1024.0;
+    // The level falls by k / 2^24 of what is left each 96 kHz sample; the
+    // gain is linear (#176), so the tail is below hearing once the level is
+    // under a step of the word (2^-14, −84 dB) — the pipeline is silent at
+    // zero and below, where the RC parks; plus the link's latency. (The
+    // estimate itself is on its way out: #264.)
+    constexpr double mute_level = 1.0 / 16384.0;
     constexpr double latency    = 25000.0; // µs
     const uint32_t k =
             patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release));
