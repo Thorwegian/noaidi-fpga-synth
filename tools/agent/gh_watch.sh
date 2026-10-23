@@ -12,8 +12,16 @@
 # newer than the watermark, it prints what it found and exits 0. A background
 # run of this script exiting is what wakes the agent.
 #
-#     gh_watch.sh [--interval SECONDS] [--repo OWNER/NAME] [--me LOGIN]
-#                 [--branch main] [--since ISO8601] [--state FILE] [--once]
+#     gh_watch.sh [--interval SECONDS] [--settle SECONDS] [--repo OWNER/NAME]
+#                 [--me LOGIN] [--branch main] [--since ISO8601] [--state FILE]
+#                 [--once]
+#
+# News settles before the exit: one event shows up in GitHub's views at
+# different times (a comment, then its inbox notification some twenty seconds
+# on; a merge, then the push, then the "author" notification), so after the
+# first news the script keeps checking every --settle seconds (45) and exits
+# on the first quiet check, with everything gathered -- one wake an event,
+# not one a view.
 #
 # The watermark is kept in --state (default ~/.local/tmp/claude/gh_watch.since)
 # and advances to the newest item seen, so a restart neither replays nor skips.
@@ -33,6 +41,7 @@
 set -u
 
 INTERVAL=300
+SETTLE=45            # after news, the quiet this long that ends the run (GitHub's echoes of one event arrive within it)
 REPO="Thorwegian/noaidi-fpga-synth"
 ME="noaidi-claude"
 BRANCH="main"
@@ -43,13 +52,14 @@ ONCE=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --interval) INTERVAL="$2"; shift 2 ;;
+        --settle)   SETTLE="$2";   shift 2 ;;
         --repo)     REPO="$2";     shift 2 ;;
         --me)       ME="$2";       shift 2 ;;
         --branch)   BRANCH="$2";   shift 2 ;;
         --since)    SINCE="$2";    shift 2 ;;
         --state)    STATE="$2";    shift 2 ;;
         --once)     ONCE=1;        shift ;;
-        *) echo "usage: gh_watch.sh [--interval S] [--repo O/N] [--me LOGIN] [--branch NAME] [--since ISO] [--state FILE] [--once]" >&2; exit 2 ;;
+        *) echo "usage: gh_watch.sh [--interval S] [--settle S] [--repo O/N] [--me LOGIN] [--branch NAME] [--since ISO] [--state FILE] [--once]" >&2; exit 2 ;;
     esac
 done
 
@@ -94,6 +104,7 @@ check() {
     newest="$(printf '%s\n' "$found" | awk -F'\t' '{print $NF}' | sort | tail -1)"
     printf '%s\n' "$found" | cut -f1
     echo "$newest" > "$STATE"
+    WATERMARK="$newest"           # the settle's next check starts here, not at the old mark
     echo "WATERMARK $newest"
     return 0
 }
@@ -131,6 +142,12 @@ fi
 echo "watching ${REPO} since ${WATERMARK} and ${BRANCH}'s head, every ${INTERVAL}s (quiet until there is news)"
 while true; do
     if round; then
+        # One event reaches GitHub's views at different times -- a comment,
+        # then its inbox notification twenty-odd seconds later; a merge, then
+        # the push, then the "author" notification -- and each would be a
+        # wake of its own. So the news settles: keep checking at the settle
+        # interval, gathering what arrives, and exit on the first quiet check.
+        while sleep "$SETTLE"; round; do :; done
         exit 0
     fi
     sleep "$INTERVAL"
