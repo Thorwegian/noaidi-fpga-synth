@@ -76,6 +76,7 @@ only.**
 |---|---|---|---|
 | LFO rate law | exponential, ~0.03–30 Hz (JP class; Nord Lead reaches audio-rate) | exponential 0.03–30 Hz | ✓ |
 | Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | Coarse/Fine, linear: Coarse (CC 77/110) = span in whole semitones, four knob steps each (96 = two octaves), Fine (CC 115/116) = 1/128 semitone steps in between | ✓ — vibrato on Fine, intervals and FX on Coarse |
+| LFO→cutoff / resonance depth | LFO sweeps the filter's full range (JP-8000: ±63 ≈ the whole cutoff travel); resonance LFO rarer, same span | the same Coarse/Fine law in octaves: Coarse = span in whole octaves (of cutoff, of Q), sixteen knob steps each, Fine = 1/128 octave between; the top is an eight-octave span, ±4 octaves of swing — the cutoff knob's own reach (#256) | ✓ |
 | Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | fixed route → cutoff | ~ |
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct, square-law taper (fine near centre) | ✓ |
 | LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | ✗ |
