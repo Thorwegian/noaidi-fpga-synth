@@ -225,7 +225,12 @@ module csp_core (
     // running is the hold as sampled at the pass start: a pass that started runs its rows to the
     // end whatever the hold does meanwhile, so that a pass is atomic and a frozen chip's registers
     // are a whole number of passes (the chip check, tools/lab/chip_check.py)
-    wire fetch_valid = running && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
+    // The image ends at PROGRAM_ROWS; IMEM goes on to 2047 and the counter
+    // would wrap to 0 and run the program again inside a pass longer than
+    // the image (#268: 3008 issue cycles, 1472 rows). Past the image the
+    // counter parks until the next pass starts.
+    wire program_done = pc >= PC_W'(csp_pkg::PROGRAM_ROWS);
+    wire fetch_valid  = running && !program_done && cycle < csp_pkg::CYCLE_W'(csp_pkg::RUN_END);
 
     // IMEM's address pins have a register of their own in every slice, loaded with what the
     // program counter loads: the next value goes out (csp_imem.sv)
@@ -271,6 +276,7 @@ module csp_core (
     // loop's next instance, round or row
     wire [PC_W-1:0] pc_next = pass_start ? (held ? csp_pkg::PROGRAM_PARK_ROW : '0)
                             : !running ? csp_pkg::PROGRAM_PARK_ROW
+                            : program_done ? csp_pkg::PROGRAM_PARK_ROW             // the image's end: park
                             : redirect ? redirect_target
                             : (v_now && !v_last_element) ? v_row_now            // the same row, the next element
                             : (v_round_done && !v_left_now_zero) ? v_start_now  // the next round

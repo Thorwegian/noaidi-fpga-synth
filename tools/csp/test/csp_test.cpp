@@ -777,13 +777,13 @@ void test_lfo() {
     check(lowest == q(-1.0) && highest >= q(0.75), "the triangle spans ±depth");
 }
 
-// An envelope coefficient (adsr.sv's k, per 96 kHz sample) as a wide rate for a
-// 48 kHz pass: the same fraction of the distance in two samples.
+// An envelope coefficient (per 96 kHz sample) as a wide rate for a pass: the
+// same fraction of the distance in the pass's samples (four, #268).
 void test_envelope_rates() {
     const uint32_t coefficients[] = {1, 7, 100, 250, 1000, 4096, 16384, 65535, 131071, 262143};
     for (const uint32_t k : coefficients) {
         const double sample    = static_cast<double>(k) / (1 << 24);
-        const double want      = 1.0 - (1.0 - sample) * (1.0 - sample);
+        const double want      = 1.0 - std::pow(1.0 - sample, csp::samples_per_pass);
         const double got       = static_cast<double>(csp::envelope_rate(k)) / static_cast<double>(int64_t{1} << 32);
         const std::string name = "k=" + std::to_string(k);
         // within a unit of the rate's last place, 2^-32
@@ -800,7 +800,8 @@ void test_lfo_rate() {
     const double old_hertz = 1000.0 * 96000.0 / (1 << 25);
     for (const int passes : {1, 2}) {
         const int64_t rate = csp::lfo_rate(1000, passes);
-        const double hertz = static_cast<double>(rate) / static_cast<double>(int64_t{1} << 36) * (48000.0 / passes);
+        const double passes_a_second = 96000.0 / csp::samples_per_pass; // 24 kHz (#268)
+        const double hertz = static_cast<double>(rate) / static_cast<double>(int64_t{1} << 36) * (passes_a_second / passes);
         check(std::fabs(hertz / old_hertz - 1.0) < 1e-12, "lfo_rate: " + std::to_string(passes) + " pass(es) an update");
     }
     check_equal(csp::lfo_rate(0, 2), 0, "lfo_rate: a stopped LFO");
@@ -1000,7 +1001,7 @@ void test_control_program() {
 
 // The LFOs in their worst case, all sines, as many a half as fit a pass
 // beside 16 channels and 32 voices (the budget #237's generator works to;
-// the full half is reported): each LFO updates once in two passes.
+// the full half is reported): both halves every pass (#268).
 constexpr int sines_that_fit = 12;
 void test_control_program_lfos() {
     {
@@ -1063,15 +1064,11 @@ void test_control_program_lfos() {
                 m.program.image.length);
     check(worst <= csp::pass_cycle_limit, "the control program with the sines fits a pass: " + std::to_string(worst));
     check_equal(worst, m.program.cycles, "the model counts the cycles the assembler scheduled");
-    // each half updates in the passes whose pass counter has its parity: the counter's register
-    // reads 0 in the first pass after reset and the pass's number from then on (0, 2, 3, 4), so
-    // the even half updated three times and the odd half once
-    int updates[2] = {0, 0};
-    for (int pass = 1; pass <= 4; ++pass) updates[(pass == 1 ? 0 : pass) & 1]++;
+    // both halves update every pass (#268: the pass is 24 kHz, so the halves
+    // no longer take turns): four passes, four steps on every record
     for (int k = 0; k < 2 * a_half; ++k) {
         const int64_t phase = cpu.read_wide(at(record_of(k), "PHASE"));
-        check_equal(phase, updates[k / a_half] * q_wide(step * 16.0),
-                    "LFO " + std::to_string(k) + " updated " + std::to_string(updates[k / a_half]) + " times");
+        check_equal(phase, 4 * q_wide(step * 16.0), "LFO " + std::to_string(k) + " updated every pass");
     }
 }
 

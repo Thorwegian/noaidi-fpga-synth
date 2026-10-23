@@ -40,11 +40,11 @@
 
 ; ---- globals --------------------------------------------------------------
         .reg   PASS, 0x040          ; the pass counter
-        .reg   PARITY, 0x060        ; scratch for the LFOs' half
         .reg   CHANNELS_IN_USE, 0x061   ; how many channels the firmware uses (the firmware's; the loop runs CHANNEL_COUNT, counts.s)
         .equ   LFO_SETS, 0x070
+        .equ   LFO_SET_1, 0x078     ; the second half's set: LFO_SETS + a set's 8 words
 
-; the LFOs update every other pass, half of them each time (24 kHz): a set
+; the LFOs update every pass, both halves (24 kHz, the pass rate since #268): a set
 ; says where a half's records start. The counts of each shape are fixed in
 ; the program (counts.s, the generator's parameters); the N_ fields stay for
 ; the firmware that still writes them.

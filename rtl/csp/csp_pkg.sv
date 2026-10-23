@@ -55,14 +55,19 @@ package csp_pkg;
     parameter int DWORD_WORD_LOW   = 6;
 
     // ---- the pass (docs/csp2_architecture.md section 5) -----------------------
-    parameter int CYCLES_PER_PASS = 1536;         // one 48 kHz sample
-    parameter int RUN_END         = 1472;         // instructions issue in 0 … RUN_END-1
-    parameter int WINDOW_START    = 1482;         // the write window: up to 48 of the FIFO's dwords
-    parameter int WINDOW_END      = 1530;         //   pops in WINDOW_START … WINDOW_END-1
+    // A pass is four 96 kHz samples, 24 kHz (#268: the budget doubled at the
+    // price of every control stepping every fourth sample instead of every
+    // second — measured on the board before it stays). The 64 cycles after
+    // the instructions are the pipeline's drain, the write window, the pass
+    // counter's write and the probe, as before, at the pass's end.
+    parameter int CYCLES_PER_PASS = 3072;         // four 96 kHz samples
+    parameter int RUN_END         = 3008;         // instructions issue in 0 … RUN_END-1
+    parameter int WINDOW_START    = 3018;         // the write window: up to 48 of the FIFO's dwords
+    parameter int WINDOW_END      = 3066;         //   pops in WINDOW_START … WINDOW_END-1
     parameter int WRITE_WINDOW    = WINDOW_END - WINDOW_START;
-    parameter int COUNTER_CYCLE   = 1533;         // the pass counter's write for the next pass, after the window's last lands (1531)
+    parameter int COUNTER_CYCLE   = 3069;         // the pass counter's write for the next pass, after the window's last lands (3067)
     parameter int PROBE_CYCLE     = CYCLES_PER_PASS - 2;   // the probe asks for its pair: the read pins are driven in the cycle after, its words are out in the next
-    parameter int CYCLE_W         = 11;
+    parameter int CYCLE_W         = 12;
 
     // ---- the core's pipeline (docs/csp2_architecture.md section 1) --------------
     // A row presented to IMEM in cycle k is in IMEM's output register in k+1, in the

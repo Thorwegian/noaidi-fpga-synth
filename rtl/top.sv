@@ -18,7 +18,7 @@
 //         counterparts — all counted from one reset.
 // Clock:  sysclk = MS5351 CLK0 on pkg pin 10, 73.728 MHz = 768×96 kHz
 //         (per-board setup: pll_clk O0=73728K -s on the BL616). The
-//         clock is the audio timebase: 1536 cycles a 48 kHz sample, and
+//         clock is the audio timebase: 1536 cycles a 48 kHz sample (the CSP's pass is two of them, 3072, #268), and
 //         the S/PDIF bit clock is sysclk / 6.
 //--------------------------------------------------------------------
 `default_nettype none
@@ -48,6 +48,7 @@ module top (
     //----------------------------------------------------------------
     logic       sample_tick, slot_issue, cell_tick;
     logic       sample_tick48, cell_tick48;
+    logic       sample_tick24;                  // the CSP's pass: every fourth sample (#268)
     logic [9:0] slot;
 
     timebase u_timebase (
@@ -58,6 +59,7 @@ module top (
         .cell_tick     (cell_tick),
         .sample_tick48 (sample_tick48),
         .cell_tick48   (cell_tick48),
+        .sample_tick24 (sample_tick24),
         .slot          (slot)
     );
 
@@ -178,7 +180,7 @@ module top (
     csp u_csp (
         .clk                (sysclk),
         .reset_n            (rst_n),
-        .pass_start         (sample_tick48),
+        .pass_start         (sample_tick24),
         .held               (csp_held_sync),
         .fetch_next      (fetch_next),
         .fetch_row          (fetch_row),
@@ -232,7 +234,7 @@ module top (
         .write_both    (sink_write_both),
         .write_address (sink_write_address),
         .write_data    (sink_write_data),
-        .pass_start    (sample_tick48),
+        .pass_start    (sample_tick24),
         .read_address  (sink_read_address),
         .read_data     (sink_read_data)
     );

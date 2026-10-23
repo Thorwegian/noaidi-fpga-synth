@@ -251,7 +251,7 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 [csp2_architecture.md](csp2_architecture.md) (the machine). In brief:
 partials are dumb sinks — a waveform, a filter type and ten pointers into the
 sink area. Every dynamic value is computed by the CSP, a processor with 2048
-registers running a fixed program once per pass (1536 cycles, 48 kHz): the
+registers running a fixed program once per pass (3072 cycles, 24 kHz since #268): the
 envelopes (RC, one step a pass), the LFOs (four shapes), and each voice's
 pitch (note + bend + pitch LFOs + tune), cutoff (envelope + key tracking +
 cutoff knob) and gain (envelope × velocity × volume). A partial's effective

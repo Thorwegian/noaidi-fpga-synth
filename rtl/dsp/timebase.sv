@@ -22,6 +22,8 @@
 //                 sample_tick by construction; this module really is the
 //                 sole timebase, output stages included.
 //   slot        : current time slot (scheduling / debug).
+//   sample_tick24 : the sample tick at QUARTER rate, the CSP's pass (#268):
+//                 one pass every four samples, 3072 cycles.
 //   sample_tick48 / cell_tick48 : the same pair at HALF rate for the
 //                 48 kHz (primary) S/PDIF output: sample boundary
 //                 every second wrap (1536 sysclk), cell boundary every
@@ -44,6 +46,7 @@ module timebase #(
     output logic                   cell_tick,
     output logic                   sample_tick48,
     output logic                   cell_tick48,
+    output logic                   sample_tick24,
     output logic [$clog2(CYCLES)-1:0] slot
 );
 
@@ -93,11 +96,24 @@ module timebase #(
             odd_cell48 <= ~odd_cell48;
     end
 
+    // ── 24 kHz derivation: one more half toggle, on the 48 kHz tick ──
+    // The CSP's pass (#268): every fourth sample. odd_sample24 is which
+    // 48 kHz period of the 24 kHz frame this is (0 = first).
+    logic odd_sample24;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            odd_sample24 <= 1'b0;
+        else if (slot_r == CYCLES - 1 && odd_sample48)
+            odd_sample24 <= ~odd_sample24;
+    end
+
     assign slot          = slot_r;
     assign sample_tick   = (slot_r == '0);
     assign slot_issue    = (slot_r < NUM_ISSUE_SLOTS);
     assign cell_tick     = (cell_cnt == '0);
     assign sample_tick48 = sample_tick && !odd_sample48;
     assign cell_tick48   = cell_tick   && !odd_cell48;
+    assign sample_tick24 = sample_tick48 && !odd_sample24;
 
 endmodule
