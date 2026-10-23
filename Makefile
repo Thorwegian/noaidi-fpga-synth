@@ -56,28 +56,13 @@
 # image is current — restart the ESP32 (make fw-flash, or its reset
 # button) so the full image is rewritten. Board must match tree.
 
-# ESP-IDF, found without a wrapper (README.md "Build requirements"), in this
-# order: idf.py on the PATH (an activated shell); the newest activation script
-# of an Espressif Installation Manager install, under $IDF_TOOLS_PATH or
-# ~/.espressif/tools; $IDF_PATH's export.sh; the newest classic checkout, under
-# ~/.espressif/v*/esp-idf or ~/esp/esp-idf*. The script is sourced in a
-# subshell of its own, so the environment stays out of this one. That subshell
-# is named bash: the activation scripts tell "sourced" from "executed" by $0
-# being a shell's name, and exit silently otherwise. Override with
-# IDF=<command that runs idf.py>.
-IDF_ACTIVATE ?= $(firstword \
-    $(lastword $(sort $(wildcard $(IDF_TOOLS_PATH)/activate_idf_*.sh))) \
-    $(lastword $(sort $(wildcard $(HOME)/.espressif/tools/activate_idf_*.sh))) \
-    $(wildcard $(IDF_PATH)/export.sh) \
-    $(lastword $(sort $(wildcard $(HOME)/.espressif/v*/esp-idf/export.sh))) \
-    $(lastword $(sort $(wildcard $(HOME)/esp/esp-idf*/export.sh))))
-ifneq ($(shell command -v idf.py 2>/dev/null),)
-IDF ?= idf.py
-else ifneq ($(IDF_ACTIVATE),)
-IDF ?= IDF_ACTIVATE="$(IDF_ACTIVATE)" bash -c '. "$$IDF_ACTIVATE" >/dev/null; command -v idf.py >/dev/null || { echo "make: $$IDF_ACTIVATE did not provide idf.py" >&2; exit 1; }; idf.py "$$@"' bash
-else
-IDF ?= sh -c 'echo "make: no ESP-IDF found: activate one, install it under ~/.espressif or ~/esp, or set IDF=" >&2; exit 1' --
-endif
+# ESP-IDF is found by tools/esp_idf.sh (README.md "Build requirements"):
+# idf.py on the PATH if the shell is activated, otherwise the newest
+# activation script it knows of, sourced in a subshell of its own so nothing
+# reaches this environment; with none found it says so and stops. Agents run
+# idf.py the same way: `tools/esp_idf.sh idf.py ...`, `--where` tells which.
+# Override with IDF=<command that runs idf.py>.
+IDF ?= $(CURDIR)/tools/esp_idf.sh idf.py
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
 # The ESP32's USB serial port: Linux names it ttyACM, macOS cu.usbmodem.
 ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))

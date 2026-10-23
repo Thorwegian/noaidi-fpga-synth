@@ -134,13 +134,17 @@ pll_clk O0=73728K -s
   after a plain clone run `git submodule update --init`; `make fw` needs
   its headers and fails without it.
 
-The top-level Makefile finds ESP-IDF itself: `idf.py` on the `PATH` if the
-shell is activated, otherwise the newest Espressif activation script under
-`$IDF_TOOLS_PATH` or `~/.espressif/tools`, `$IDF_PATH/export.sh`, or the newest
-checkout under `~/.espressif/v*/esp-idf` or `~/esp/esp-idf*`. It sources the
-script in a subshell of its own, so nothing leaks into your shell. `IDF=...`
-overrides the detection with any command that runs `idf.py`; with no ESP-IDF
-found, the firmware targets say so and stop.
+**Never source `export.sh` by hand.** `tools/esp_idf.sh` finds ESP-IDF
+itself — `idf.py` on the `PATH` if the shell is activated, otherwise the
+newest Espressif activation script under `$IDF_TOOLS_PATH` or
+`~/.espressif/tools`, `$IDF_PATH/export.sh`, or the newest checkout under
+`~/.espressif/v*/esp-idf` or `~/esp/esp-idf*` — and sources it in a subshell
+of its own, so nothing leaks into your shell. The firmware targets (`make fw`,
+`fw-flash`, `fw-monitor`) run `idf.py` through it; so can you:
+`tools/esp_idf.sh idf.py menuconfig`, `tools/esp_idf.sh --where` to see which
+ESP-IDF it found, `tools/esp_idf.sh --shell` for an activated shell.
+`IDF=...` overrides the detection with any command that runs `idf.py`; with
+no ESP-IDF found, the script says so and stops.
 
 ## Build & run
 
