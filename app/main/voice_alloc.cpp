@@ -25,6 +25,7 @@
 #include "freertos/task.h"
 
 #include "banks.hpp"
+#include "cc_map.hpp"
 #include "engine_link.h"
 #include "event_bus.h"
 #include "midi_out.h"
@@ -55,16 +56,6 @@ constexpr int program_queue_length  = 4;
 
 constexpr int voice_count        = render::voice_count;
 constexpr int partials_per_voice = render::partials_per_voice;
-
-// Whole semitones ⇄ raw pitch (1024 per octave), rounded to the nearest
-// raw step, ties away from zero: one semitone is 85⅓ raw steps, so
-// truncating would leave every interval slightly flat.
-int32_t semis_to_raw(int32_t semis) {
-    return (semis * 1024 + (semis >= 0 ? 6 : -6)) / 12;
-}
-int32_t raw_to_semis(int32_t raw) {
-    return (raw * 12 + (raw >= 0 ? 512 : -512)) / 1024;
-}
 
 // Voice lifecycle. A voice is an instance of a KEYSTROKE: every
 // note-on allocates a
@@ -201,141 +192,34 @@ void update_voices() {
     }
 }
 
-// ---- knobs → patch values ---------------------------------------------------------
+// ---- knobs ⇄ patch values -----------------------------------------------------------
+//
+// The CC laws, both ways, are cc_map's (cc_map.hpp). The knob positions that
+// are not patch fields (the cutoff's coarse and fine, each LFO's depth
+// knobs) live here beside the patch, and a loaded patch implies them.
+cc_map::Knobs s_knobs;
 
-// CC → pulse-width duty offset, Q0.24. The pulse's low time is
-// 0.5·10^(−v), v = val/127: equal ratio per step, 50% down to 5%, so
-// its high time rises from 50% to 95%, never the degenerate 0%/100%.
-// The offset from square is 0.5 − low time.
-int32_t duty_from_cc(uint8_t val) {
-    const float duty = 0.5f * powf(10.0f, -static_cast<float>(val) / 127.0f);
-    return static_cast<int32_t>((0.5f - duty) * 16777216.0f);
-}
-
-// CC → the amp envelope's decay or release rate code: the attack's law,
-// (127 − cc) << 1, plus 25 codes — three times faster at 16 codes an octave.
-// With the gain linear (#176) a fall is a straight line in dB over 6.9 time
-// constants; the old dB decode's fall at the same code ran through the
-// audible band (to −45 dB) in about two, so the knob keeps its sound by
-// picking the faster code. Saturates at the fastest code.
-constexpr int amp_fall_shift = 25;
-uint8_t amp_fall_code(uint8_t val) {
-    const int code = ((127 - val) << 1) + amp_fall_shift;
-    return static_cast<uint8_t>(code > 255 ? 255 : code);
-}
-
-// CC → LFO phase increment, 2^-25 of a cycle every 96 kHz sample, so linear
-// in frequency (freq = inc × 96000 / 2^25) and an even-sounding control needs
-// the log2 mapping here: exponential 0.03 Hz … 30 Hz across the CC, one equal
-// frequency ratio per step.
-constexpr float sample_rate_hz  = 96000.0f;
-constexpr float lfo_phase_cycle = 33554432.0f; // 2^25
-uint16_t lfo_rate_from_cc(uint8_t val) {
-    const float freq = 0.03f * powf(1000.0f, static_cast<float>(val) / 127.0f);
-    const float inc  = std::clamp(freq * (lfo_phase_cycle / sample_rate_hz),
-                                  1.0f, 65535.0f);
-    return static_cast<uint16_t>(inc + 0.5f);
-}
-
-// Depth knobs: Coarse (CC 77, CC 110) and Fine (CC 115, CC 116), both linear
-// in the raw depth. The LFO swings its destination by ±depth/2
-// (docs/storage_format.md), so on pitch a raw depth of 1024/12 is a span of
-// one semitone from the low note to the high one.
-//   pitch:  Coarse = span in whole semitones, four knob steps per semitone
-//           (coarse >> 2: 48 = one octave, 96 = two, 127 = 31 semitones),
-//           Fine adds fine/128 of a semitone.
-//   others: Coarse = val << 2, Fine adds fine >> 5 (0..3), the steps in
-//           between.
-// The knob positions are kept so a destination change can work the depth out
-// again. A loaded patch makes them unknown; the first depth knob moved after
-// that takes the other one's position from the patch's depth.
-// The depth knobs. Coarse (CC 77 / 110) and Fine (CC 115 / 116) make one
-// depth: Coarse counts whole units of span, several knob steps a unit, and
-// Fine the 128ths of a unit between them. The unit is the destination's --
-// on pitch a semitone, four Coarse steps each (vibrato lives on Fine,
-// intervals and FX on Coarse); on the cutoff and the resonance an octave
-// (of cutoff, of Q), sixteen Coarse steps each, so a span reaches eight
-// octaves, as far as the cutoff knob itself (#256: the raw law both had
-// before topped out at half an octave of span, inaudible on either). The
-// pulse width keeps the raw law, 1024 raw being the whole width.
-struct SpanLaw {
-    int coarse_shift;    // log2 of the Coarse steps a unit
-    int units_an_octave; // the unit, as a fraction of the octave's 1024 raw
-};
-constexpr SpanLaw lfo_semitone_law{2, 12};
-constexpr SpanLaw lfo_octave_law{4, 1};
-constexpr int lfo_fine_steps = 128; // Fine steps a unit
-
-const SpanLaw *lfo_span_law(uint8_t dest) {
-    switch (dest) {
-    case LFO_DEST_PITCH:     return &lfo_semitone_law;
-    case LFO_DEST_CUTOFF:
-    case LFO_DEST_RESONANCE: return &lfo_octave_law;
-    default:                 return nullptr; // the pulse width: raw
+uint32_t dirty_of(cc_map::Part part) {
+    switch (part) {
+    case cc_map::Part::voices:  return dirty_voices;
+    case cc_map::Part::amp_env: return dirty_amp_env;
+    case cc_map::Part::mod_env: return dirty_mod_env;
+    case cc_map::Part::cutoff:  return dirty_cutoff;
+    case cc_map::Part::lfo1:    return dirty_lfo1;
+    case cc_map::Part::lfo2:    return dirty_lfo2;
+    case cc_map::Part::volume:  return dirty_volume;
+    default:                    return 0;
     }
 }
 
-struct LfoDepthKnobs {
-    uint8_t coarse = 0;
-    uint8_t fine   = 0;
-    bool known     = false;
-};
-std::array<LfoDepthKnobs, PATCH_NUM_LFO> s_lfo_depth_knobs;
-
-int16_t lfo_depth_from_knobs(uint8_t dest, const LfoDepthKnobs &k) {
-    const SpanLaw *law = lfo_span_law(dest);
-    if (law == nullptr) {
-        return static_cast<int16_t>((k.coarse << 2) + (k.fine >> 5));
-    }
-    const int32_t fine_steps =
-            (k.coarse >> law->coarse_shift) * lfo_fine_steps + k.fine;
-    const int32_t steps_an_octave = law->units_an_octave * lfo_fine_steps;
-    return static_cast<int16_t>(
-            (fine_steps * 1024 + steps_an_octave / 2) / steps_an_octave);
+// Parameter feedback (#279): the patch as the CCs a surface shows, to every
+// output but the one `except` came through.
+void emit_cc(uint8_t cc, uint8_t value, void *user) {
+    const midi_message_t message = {.status = 0xB0, .len = 2, .data = {cc, value}};
+    midi_out_send(&message, *static_cast<uint8_t *>(user));
 }
-
-// The knob positions nearest a patch's depth (its size: the knobs have no
-// sign; past the knobs' top, the top).
-LfoDepthKnobs lfo_knobs_from_depth(uint8_t dest, int16_t depth) {
-    const int32_t size = depth < 0 ? -depth : depth;
-    LfoDepthKnobs k;
-    k.known            = true;
-    const SpanLaw *law = lfo_span_law(dest);
-    if (law == nullptr) {
-        k.coarse = static_cast<uint8_t>(size >> 2 < 127 ? size >> 2 : 127);
-        k.fine   = static_cast<uint8_t>((size & 3) << 5);
-        return k;
-    }
-    const int32_t steps_an_octave = law->units_an_octave * lfo_fine_steps;
-    const int32_t fine_steps      = (size * steps_an_octave + 512) / 1024;
-    const int32_t units           = fine_steps / lfo_fine_steps;
-    if (units > (127 >> law->coarse_shift)) {
-        k.coarse = 127;
-        k.fine   = lfo_fine_steps - 1;
-    } else {
-        k.coarse = static_cast<uint8_t>(units << law->coarse_shift);
-        k.fine   = static_cast<uint8_t>(fine_steps % lfo_fine_steps);
-    }
-    return k;
-}
-
-void set_lfo_depth_cc(int i, uint8_t val, bool fine) {
-    lfo_t &lfo       = g_patch.lfo[i];
-    LfoDepthKnobs &k = s_lfo_depth_knobs[i];
-    if (!k.known) {
-        k = lfo_knobs_from_depth(lfo.dest, lfo.depth);
-    }
-    (fine ? k.fine : k.coarse) = val;
-    lfo.depth                  = lfo_depth_from_knobs(lfo.dest, k);
-}
-
-// Destination knob (CC 114, CC 112): four equal bands, see handle_cc.
-void set_lfo_dest_cc(int i, uint8_t val) {
-    lfo_t &lfo = g_patch.lfo[i];
-    lfo.dest   = static_cast<uint8_t>((val * 4) >> 7);
-    if (s_lfo_depth_knobs[i].known) {
-        lfo.depth = lfo_depth_from_knobs(lfo.dest, s_lfo_depth_knobs[i]);
-    }
+void sync_surfaces(uint8_t except) {
+    cc_map::dump(g_patch, s_knobs, emit_cc, &except);
 }
 
 // ---- notes --------------------------------------------------------------------------------------
@@ -458,40 +342,18 @@ void sustain_pedal_update(bool down) {
 
 // ---- CCs --------------------------------------------------------------------------------------------
 
-// g_patch.filter.cutoff carries the CC74/106 cutoff brightness; env inversions
-// follow the schema ((127-cc)<<1, panel convention).
-//
-// STORED-but-not-yet-rendered: mod_env_dest (CC 108; cutoff is the only live
-// MOD-env destination). The arp has no CC yet.
-uint8_t s_cutoff_msb, s_cutoff_lsb; // CC74 / CC106
-
-// Set the CC 74/106 pair from the patch's cutoff, so a lone CC 106 after a
-// patch load moves the fine part of that cutoff.
-void sync_cutoff_cc() {
-    const int32_t v14 =
-            std::clamp<int32_t>(g_patch.filter.cutoff + 8192, 0, 16383);
-    s_cutoff_msb = static_cast<uint8_t>(v14 >> 7);
-    s_cutoff_lsb = static_cast<uint8_t>(v14 & 0x7F);
-}
-
-void apply_cutoff() {
-    // 14-bit brightness centred at coarse 64: (val-8192) scaled so coarse
-    // spans a few octaves, fine interpolates.
-    const int32_t v14 =
-            (static_cast<int32_t>(s_cutoff_msb) << 7) | s_cutoff_lsb;
-    g_patch.filter.cutoff =
-            static_cast<int16_t>(v14 - 8192); // ±8 octaves — authority
-                                              // rule: full deflection
-                                              // must reach the rails
-    s_pending |= dirty_cutoff;
-}
+// The patch's CCs are cc_map's; what is handled here is performance (the
+// wheel, the pedal), the RPN mechanism, panic and the test tone. STORED but
+// not yet rendered: mod_env_dest (CC 108; cutoff is the only live MOD-env
+// destination). The arp has no CC yet.
 
 // RPN state: CC 101/100 select an RPN, CC 6 (data entry MSB) writes it. RPN
 // 0/0 = pitch-bend range, the standard mechanism. 127/127 is RPN null; an
 // NRPN select (99/98) also deselects.
 uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
 
-void handle_cc(uint8_t num, uint8_t val) {
+// True when the CC edited the patch: the surfaces are told (handle_midi).
+bool handle_cc(uint8_t num, uint8_t val) {
     switch (num) {
     // ---- the wheel and the pedal ----
     case 1:
@@ -499,223 +361,37 @@ void handle_cc(uint8_t num, uint8_t val) {
             s_controllers.wheel = val;
             s_pending |= dirty_cutoff; // mod wheel → cutoff
         }
-        break;
+        return false;
     case 64:
         sustain_pedal_update(val >= 64);
-        break;
-    // Resonance: code = cc·5632/127 — 0 = Butterworth, 127 = 5.5 octaves of
-    // Q (Q≈32). A plain cc<<7 would run Q to ~15.9 octaves at the top, a
-    // hair-trigger into the undamped zone; this is a sharp but stable peak,
-    // linear in log2(Q) so each step is an equal Q ratio.
-    case 71:
-        g_patch.filter.resonance =
-                static_cast<uint16_t>((static_cast<int32_t>(val) * 5632) / 127);
-        s_pending |= dirty_voices;
-        break;
-    case 74:
-        s_cutoff_msb = val;
-        apply_cutoff();
-        break;
-    case 106:
-        s_cutoff_lsb = val;
-        apply_cutoff();
-        break;
+        return false;
 
     // ---- RPN 0: pitch-bend range ----
     case 101:
         s_rpn_msb = val;
-        break;
+        return false;
     case 100:
         s_rpn_lsb = val;
-        break;
+        return false;
     case 99:
     case 98:
-        s_rpn_msb = s_rpn_lsb = 127;
-        break; // NRPN deselects
+        s_rpn_msb = s_rpn_lsb = 127; // NRPN deselects
+        return false;
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
             g_patch.bend_range = std::clamp<uint8_t>(
                     val, 1, 12); // takes effect on the next bend
         }
-        break;
+        return false;
     case 38:
-        break; // data entry LSB: cents, ignored
-
-    // ---- the amp envelope ----
-    // A/D/R are log2 RATES (higher byte = faster), so invert → knob up =
-    // longer. Sustain is a LEVEL (higher byte = louder), so it is NOT
-    // inverted → knob up = louder. The decay and the release pick a code
-    // three times faster than the attack's law (amp_fall_code): the gain is
-    // linear (#176), so a fall is a straight line in dB, and the old dB
-    // decode's fall at the same code was a line of about two time constants
-    // through the audible band (to −45 dB) against the straight line's 6.9 —
-    // the shift keeps the knob's position sounding as it did. The attack's
-    // time to full scale is the same under both laws.
-    case 73:
-        g_patch.env[0].attack = static_cast<uint8_t>((127 - val) << 1);
-        s_pending |= dirty_amp_env;
-        break;
-    case 75:
-        g_patch.env[0].decay = amp_fall_code(val);
-        s_pending |= dirty_amp_env;
-        break;
-    case 79:
-        g_patch.env[0].sustain = static_cast<uint16_t>(val << 3);
-        s_pending |= dirty_amp_env;
-        break;
-    case 72:
-        g_patch.env[0].release = amp_fall_code(val);
-        s_pending |= dirty_amp_env;
-        break;
-
-    // ---- LFO 1 ----
-    case 76:
-        g_patch.lfo[0].rate = lfo_rate_from_cc(val);
-        s_pending |= dirty_lfo1;
-        break;
-    case 77:
-        set_lfo_depth_cc(0, val, false);
-        s_pending |= dirty_lfo1;
-        break;
-    case 115:
-        set_lfo_depth_cc(0, val, true);
-        s_pending |= dirty_lfo1;
-        break;
-    case 113:
-        g_patch.lfo[0].shape = static_cast<uint8_t>(val >> 5);
-        s_pending |= dirty_lfo1;
-        break;
-    case 114:
-        set_lfo_dest_cc(0, val);
-        s_pending |= dirty_lfo1;
-        break;
-
-    // ---- LFO 2 ----
-    case 109:
-        g_patch.lfo[1].rate = lfo_rate_from_cc(val);
-        s_pending |= dirty_lfo2;
-        break;
-    case 110:
-        set_lfo_depth_cc(1, val, false);
-        s_pending |= dirty_lfo2;
-        break;
-    case 116:
-        set_lfo_depth_cc(1, val, true);
-        s_pending |= dirty_lfo2;
-        break;
-    case 111:
-        g_patch.lfo[1].shape = static_cast<uint8_t>(val >> 5);
-        s_pending |= dirty_lfo2;
-        break;
-    // Four destinations, for either LFO (CC 114 for LFO 1, CC 112 for LFO 2):
-    // 0..31 duty/PWM, 32..63 resonance, 64..95 pitch, 96..127 cutoff. Both
-    // LFOs on one destination sum.
-    case 112:
-        set_lfo_dest_cc(1, val);
-        s_pending |= dirty_lfo2;
-        break;
-
-    // ---- master volume, pan, key track ----
-    case 7:
-        g_patch.volume = static_cast<uint8_t>(val < 127 ? val << 1 : 0xFE);
-        s_pending |= dirty_volume;
-        break;
-    case 10:
-        g_patch.pan = static_cast<int8_t>(static_cast<int>(val) - 64);
-        s_pending |= dirty_voices;
-        break;
-    case 31:
-        g_patch.filter.key_track = static_cast<int16_t>(val);
-        s_pending |= dirty_voices;
-        break;
-
-    // ---- the oscillators and the voice structure ----
-    case 20:
-        g_patch.osc[0].wave = static_cast<waveform_t>(val >> 5); // 0..3
-        s_pending |= dirty_voices;
-        break;
-    case 21:
-        g_patch.osc[1].wave = static_cast<waveform_t>(val >> 5);
-        s_pending |= dirty_voices;
-        break;
-    // Coarse and fine both edit the oscillator's one pitch offset, tune.
-    // Coarse sets the whole semitones: ±12 in WHOLE semitone steps, ~5 CC steps
-    // per semitone, center = 64 — fine enough to hand-tune an interval. Fine
-    // sets the rest: full travel = ±0.5 semitone; 0.5 semi = 1024/24 ≈ raw
-    // 42.7 → (val−64)*2/3 spans ±42. Same mapping on both oscillators.
-    case 14:
-    case 22:
-    case 15:
-    case 23: {
-        osc_t &osc    = g_patch.osc[(num == 14 || num == 15) ? 0 : 1];
-        int32_t semis = raw_to_semis(osc.tune);
-        int32_t fine  = osc.tune - semis_to_raw(semis);
-        if (num == 14 || num == 22) {
-            semis = (val * 25) / 128 - 12;
-        } else {
-            fine = ((static_cast<int>(val) - 64) * 2) / 3;
-        }
-        osc.tune = static_cast<int16_t>(semis_to_raw(semis) + fine);
-        s_pending |= dirty_voices;
-    } break;
-    case 24:
-        g_patch.osc_mix =
-                static_cast<int8_t>(static_cast<int>(val) - 64); // osc balance
-        s_pending |= dirty_voices;
-        break;
-    // Pulse width: UNIPOLAR, because duty d and 1−d are the same spectrum
-    // inverted, and a bipolar range would reach silent 0%/100% at the rails. 0
-    // = square (50%), 127 = 5% pulse, EQUAL-RATIO duty steps (log taper:
-    // duty = 0.5·10^(−val/127)) — fine resolution at the thin end where the
-    // effect is dramatic, never degenerate.
-    case 25:
-        g_patch.osc[0].duty = duty_from_cc(val);
-        s_pending |= dirty_voices;
-        break;
-    case 85:
-        g_patch.osc[1].duty = duty_from_cc(val);
-        s_pending |= dirty_voices;
-        break;
-    // Velocity sensitivity: amounts. A live edit re-pushes the held voices'.
-    case 86:
-        g_patch.vel_amp_amt = val;
-        s_pending |= dirty_amp_env;
-        break;
-    case 87:
-        g_patch.vel_mod_amt = val;
-        s_pending |= dirty_mod_env;
-        break;
-    case 26: {
-        const uint8_t m = static_cast<uint8_t>((val * 3) >> 7); // 3 voice modes
-        g_patch.voice_struct = static_cast<voice_struct_t>(m > 2 ? 2 : m);
-        s_pending |= dirty_voices;
-    } break;
-    case 27:
-        g_patch.unison_detune =
-                static_cast<int16_t>(val >> 2); // 0..31 raw per step
-        s_pending |= dirty_voices;
-        break;
-    case 28:
-        g_patch.unison_stereo = static_cast<int16_t>(val); // stereo spread
-        s_pending |= dirty_voices;
-        break;
-    // Three filter types only (0=LP, 1=BP, 2=HP). Map the CC across exactly
-    // those three so the top of travel is HP, not a second LP.
-    case 29:
-        g_patch.filter.type = static_cast<uint8_t>((val * 3) >> 7); // 0..2
-        s_pending |= dirty_voices;
-        break;
-    case 30:
-        g_patch.filter.cascade = val >= 64;
-        s_pending |= dirty_voices;
-        break;
+        return false; // data entry LSB: cents, ignored
 
     // ---- test tone: ≥64 replaces BOTH outputs with the gateware's
     // full-scale 1500 Hz sine — the audio-chain purity reference, remotely
     // switchable so the test suite needs no console. ----
     case 119:
         engine_link_test_tone(val >= 64);
-        break;
+        return false;
 
     // ---- panic (found via the BLE fuzzer's stuck notes: its final CC 123 was
     // a no-op, so note-offs dropped under flood backpressure left voices
@@ -727,7 +403,7 @@ void handle_cc(uint8_t num, uint8_t val) {
                 release_voice(v);
             }
         }
-        break;
+        return false;
     case 120: { // all sound off: immediate silence
         s_sustain_pedal = false;
         render::Writes writes;
@@ -739,42 +415,16 @@ void handle_cc(uint8_t num, uint8_t val) {
             }
         }
         send(writes);
-    } break;
+        return false;
+    }
 
-    // ---- the mod envelope ----
-    case 102:
-        g_patch.env[1].attack = static_cast<uint8_t>((127 - val) << 1);
-        s_pending |= dirty_mod_env;
-        break;
-    case 103:
-        g_patch.env[1].decay = static_cast<uint8_t>((127 - val) << 1);
-        s_pending |= dirty_mod_env;
-        break;
-    case 104:
-        g_patch.env[1].sustain = static_cast<uint16_t>(val << 3);
-        s_pending |= dirty_mod_env;
-        break;
-    case 105:
-        g_patch.env[1].release = static_cast<uint8_t>((127 - val) << 1);
-        s_pending |= dirty_mod_env;
-        break;
-    // Depth: BIPOLAR, centre 64 = off. Square-law taper (linear over ±16 oct
-    // would be 3 semitones per click — overly sensitive): d·|d|·4 gives ~±1
-    // oct at a quarter turn, ±4 oct at half, ±16 oct at the rails — fine near
-    // centre, full authority at the ends (the CSP's word holds ±8).
-    case 107: {
-        const int d = static_cast<int>(val) - 64;
-        g_patch.mod_env_depth =
-                static_cast<int16_t>((d * (d < 0 ? -d : d)) << 2);
-        s_pending |= dirty_mod_env;
-    } break;
-    case 108:
-        g_patch.mod_env_dest =
-                static_cast<uint8_t>(val >> 5); // stored; cutoff live
-        break;
-
-    default:
-        break; // unmapped / deferred CCs ignored
+    // ---- the patch: cc_map's laws; a live edit of a velocity amount
+    // re-pushes the held voices' (the envelope's dirty bit) ----
+    default: {
+        const cc_map::Part part = cc_map::apply(g_patch, s_knobs, num, val);
+        s_pending |= dirty_of(part);
+        return part != cc_map::Part::none;
+    }
     }
 }
 
@@ -782,27 +432,8 @@ uint8_t s_bank_msb[16],
         s_bank_lsb[16]; // each channel's bank (see program_change)
 void program_change(uint8_t channel, uint8_t program);
 
-// The CCs that edit the patch (docs/midi_schema.md): a change one surface
-// makes is sent to every other surface (parameter feedback, #284, #279).
-// Performance controls (the wheel, the pedal), the RPN mechanism, panic and
-// the test tone are not state and stay where they came from.
-bool patch_cc(uint8_t num) {
-    switch (num) {
-    case 7:   case 10:  case 31:                                  // volume, pan, key tracking
-    case 20:  case 21:  case 14:  case 15:  case 22:  case 23:    // the oscillators
-    case 24:  case 25:  case 85:  case 26:  case 27:  case 28:
-    case 29:  case 30:  case 71:  case 74:  case 106:             // the filter
-    case 73:  case 75:  case 79:  case 72:  case 86:              // the amp envelope
-    case 102: case 103: case 104: case 105: case 107: case 108: case 87: // the mod envelope
-    case 76:  case 77:  case 115: case 113: case 114:             // LFO 1
-    case 109: case 110: case 116: case 111: case 112:             // LFO 2
-        return true;
-    default:
-        return false;
-    }
-}
-
-// source: where the message came from (midi_source_t), for the feedback.
+// source: where the message came from (midi_source_t). A CC that edited the
+// patch goes out to every other surface (#279); notes never do.
 void handle_midi(const midi_message_t *m, uint8_t source) {
     const uint8_t type = m->status & 0xF0;
     const uint8_t ch   = m->status & 0x0F;
@@ -819,11 +450,8 @@ void handle_midi(const midi_message_t *m, uint8_t source) {
             s_bank_msb[ch] = m->data[1];
         } else if (m->data[0] == 32) { // Bank Select LSB
             s_bank_lsb[ch] = m->data[1];
-        } else {
-            handle_cc(m->data[0], m->data[1]);
-            if (patch_cc(m->data[0])) {
-                midi_out_send(m, source);
-            }
+        } else if (handle_cc(m->data[0], m->data[1])) {
+            midi_out_send(m, source);
         }
         break;
     case 0xC0:
@@ -875,14 +503,12 @@ void flush_pending_edits(int64_t now) {
 // pitch is theirs, but the sound around it is the channel's.
 void apply_patch(const patch_t *p, int64_t now) {
     g_patch = *p;
-    sync_cutoff_cc();
-    for (LfoDepthKnobs &knobs : s_lfo_depth_knobs) {
-        knobs.known = false; // the patch's depths stand
-    }
+    s_knobs = cc_map::knobs_of(g_patch); // the patch's values stand; the knobs follow them
     s_pending |= dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
                  | dirty_lfo2 | dirty_volume | dirty_voices;
     s_last_flush = 0;
     flush_pending_edits(now);
+    sync_surfaces(MIDI_SOURCE_INTERNAL); // every surface follows the change
 }
 
 void handle_patch_request(const patch_request_t *r, int64_t now) {
@@ -953,6 +579,20 @@ void program_change(uint8_t channel, uint8_t program) {
     }
 }
 
+} // namespace
+
+// The console's `sync`: the voice task sends the patch to the surfaces, in
+// order with the MIDI it is handling. On the bus like a surface's own
+// request (ble_midi publishes the same when a central subscribes).
+void voice_alloc_sync(void) {
+    evt_t evt{};
+    evt.kind   = EVT_SYNC;
+    evt.source = MIDI_SOURCE_INTERNAL;
+    event_bus_publish(&evt);
+}
+
+namespace {
+
 bool patch_request(bool set, patch_t *p) {
     if (s_queue == nullptr) {
         return false;
@@ -991,6 +631,8 @@ void voice_alloc_task(void *) {
                 handle_midi(&evt.midi, evt.source);
             } else if (evt.kind == EVT_PATCH) {
                 handle_patch_request(&evt.patch, esp_timer_get_time());
+            } else if (evt.kind == EVT_SYNC) {
+                sync_surfaces(MIDI_SOURCE_INTERNAL);
             }
         } else {
             busy_since = esp_timer_get_time(); // queue empty → we blocked
@@ -1053,7 +695,7 @@ void voice_alloc_init(void) {
     }
     patch_init(&g_patch);           // the active sound, in one struct
     storage_load_startup(&g_patch); // system.toml's startup patch, if any
-    sync_cutoff_cc();
+    s_knobs = cc_map::knobs_of(g_patch);
 
     // The sound: every part of the patch to the CSP, once, and the pointers.
     point_partials();

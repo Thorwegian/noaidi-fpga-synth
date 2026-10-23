@@ -76,6 +76,8 @@ RENDER_TEST = $(HOST_DIR)/render_test
 RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/patch.cpp app/main/csp/envelope.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
+CC_MAP_TEST = $(HOST_DIR)/cc_map_test
+CC_MAP_TEST_CXX = app/test/cc_map_test.cpp app/main/cc_map.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 CSP_DIR     = tools/csp
 CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp app/main/csp/envelope.cpp
@@ -141,6 +143,9 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(BANKS_TEST) app/storage/banks.toml
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(RENDER_TEST) $(RENDER_TEST_CXX)
 	$(RENDER_TEST)
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(CC_MAP_TEST) $(CC_MAP_TEST_CXX) \
+	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
+	$(CC_MAP_TEST) $(shell find app/storage/Patches -name '*.toml')
 
 # Our own C and C++ sources; the libraries in app/lib keep their style.
 # .clang-format is written for clang-format 21.1.8 (pip install

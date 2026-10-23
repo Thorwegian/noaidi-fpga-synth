@@ -134,6 +134,34 @@ optional — coarse alone (≈1/8 octave steps) is already musical, and
 a controller that only sends 74 still works. Rates and sustain stay
 7-bit by construction.
 
+## Parameter feedback
+
+The schema reads both ways (#279, `app/main/cc_map.cpp`): the synth
+sends its own state as these CCs, so a surface follows the instrument
+the way a hardware synth's panel does.
+
+- **When.** The whole patch on a Program Change and on a console `load`
+  or `sync`, and when a BLE central subscribes (a surface that joins, or
+  comes back after a board reset, sees the state). A patch CC that
+  arrived from one surface goes out to every other surface after it was
+  applied; the wheel, the pedal, notes and panic are performance, not
+  state, and are never sent on (no THRU, and a surface never hears
+  itself).
+- **Where.** Every MIDI output the synth has: MIDI over BLE today, the
+  wired MIDI OUT on UART0's TX pin when the board has it.
+- **What a value reads back as.** Each CC's law inverted: the knob value
+  whose law lands nearest the field, the exact one where it exists (a
+  7-bit knob into a 4-way switch reads back as the switch's position,
+  0/32/64/96; a three-way as 0/64/127). The coarse and fine pairs (cutoff
+  CC 74/106, each LFO's depth 77/115 and 110/116) read back as the knob
+  positions last moved, or the ones the patch implies. The bend range
+  goes as its RPN sequence (101 = 0, 100 = 0, 6 = range, then 101 = 127,
+  100 = 127). Coarse before fine, a destination before the depth it
+  scales. `app/test/cc_map_test.cpp` round-trips all 128 values of every
+  patch CC: apply, dump, apply, the same patch.
+- **Not sent.** Bank Select, `mod_env_dest` is sent but stored only,
+  arp CCs (not implemented).
+
 ## SysEx
 
 Decided, not implemented: `midi_parser` discards SysEx.

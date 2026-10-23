@@ -364,6 +364,12 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
         if (event->subscribe.attr_handle == gatt_svr_chr_midi_io_handle) {
             s_notify_subscribed = event->subscribe.cur_notify;
             ESP_LOGI(TAG, "notifications %s", s_notify_subscribed ? "on: parameter feedback flows" : "off");
+            if (s_notify_subscribed) {
+                // A surface joined (or came back after a reset): it is told
+                // the whole patch, as a Program Change would (#279).
+                const evt_t sync = {.kind = EVT_SYNC, .source = MIDI_SOURCE_BLE};
+                event_bus_publish(&sync);
+            }
         }
         return 0;
 

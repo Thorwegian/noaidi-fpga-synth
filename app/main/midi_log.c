@@ -104,6 +104,10 @@ static void midi_log_task(void *arg) {
         case EVT_MIDI:
             log_midi_event(&evt.midi, evt.source);
             break;
+        case EVT_SYNC:
+            printf("sync      the patch goes out as CCs  %s\n",
+                   source_name(evt.source));
+            break;
         default:
             ESP_LOGW("midi_log", "unknown event kind %d", evt.kind);
             break;
