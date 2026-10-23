@@ -106,6 +106,11 @@ check() {
     echo "$newest" > "$STATE"
     WATERMARK="$newest"           # the settle's next check starts here, not at the old mark
     echo "WATERMARK $newest"
+    # The inbox threads reported are marked read. An unread thread is bumped
+    # by the agent's own reply on it, which would wake the agent on itself;
+    # a read thread comes back only when someone else acts on it.
+    gh api "notifications?per_page=50" --jq '.[].id' 2>/dev/null \
+        | while read -r thread; do gh api -X PATCH "notifications/threads/${thread}" >/dev/null 2>&1; done
     return 0
 }
 
