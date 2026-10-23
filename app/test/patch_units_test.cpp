@@ -10,9 +10,9 @@
 //   - the loaded raw value is the canonical form of the written one, and
 //   - the canonical form is stable (writing and loading it again changes
 //     nothing),
-// which together make load → save → load exact. Keys whose conversion
-// depends on another key (decay on sustain, LFO depth on destination)
-// are checked across that key's values.
+// which together make load → save → load exact. A key whose conversion
+// depends on another key (the LFO depth on its destination) is checked
+// across that key's values.
 //
 // Then it writes the init patch (patch_init) as a patch file and reads it
 // back, which must give the init patch. Each factory file given as an
@@ -257,14 +257,7 @@ int main(int argc, char **argv) {
         const patch_field_t *f = &fields[k];
         for (int i = 0; i < f->count; i++) {
             patch_init(&p);
-            if (!strcmp(f->key, "decay")) {
-                // decay depends on its envelope's sustain
-                int env = !strcmp(f->table, "amp_env") ? 0 : 1;
-                for (int s = 0; s <= 1023; s += (s < 960 ? 64 : 1)) {
-                    p.env[env].sustain = (uint16_t) s;
-                    check_field(f, i, &p);
-                }
-            } else if (!strcmp(f->table, "lfo") && !strcmp(f->key, "depth")) {
+            if (!strcmp(f->table, "lfo") && !strcmp(f->key, "depth")) {
                 for (uint8_t d = 0; d < 4; d++) {
                     p.lfo[i].dest = d;
                     check_field(f, i, &p);

@@ -432,7 +432,8 @@ static const patch_field_t s_fields[] = {
         NUM("filter", "resonance", 1, resonance, resonance),
         NUM("filter", "key_track", 1, key_track, key_track),
 
-        // sustain before decay: decay's time depends on it
+        // sustain before decay, as the files were written (a decay's time no
+        // longer depends on it: the CSP's RC takes the same time from any level)
         NUM("amp_env", "attack", 1, amp_attack, amp_attack),
         NUM("amp_env", "sustain", 1, amp_sustain, amp_sus),
         NUM("amp_env", "decay", 1, amp_decay, amp_decay),
