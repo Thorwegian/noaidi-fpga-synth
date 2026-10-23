@@ -56,20 +56,18 @@ different facts:
 | State | Meaning |
 |---|---|
 | `V_HELD` | key down (or held by the sustain pedal), the voice's gate register open, envelope gated on |
-| `V_RELEASING` | key up, gate register closed, release tail still audible |
-| `V_IDLE` | tail finished — free for allocation |
+| `V_RELEASING` | key up, gate register closed; available again, the longest released first |
+| `V_IDLE` | never struck, or silenced (CC 120) — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
-  RELEASING with the earliest-ending tail → steal oldest HELD.
-- **Tail end**: at note-off the firmware estimates when the release
-  tail ends, from the amp envelope's release rate, and once
-  `esp_timer` passes that deadline it promotes the voice to IDLE and
-  mutes its partials (GATE off). The check runs in the note-on
-  allocation scan and in the voice task's periodic sweep — no timer
-  task. The sound's end is the pipeline's: the voice's gain word is the
-  envelope's level, a linear gain (#176) that falls at a constant number
-  of dB a second and is silent at zero and below; the estimate only frees
-  the voice (and is on its way out: #264).
+  the RELEASING voice whose key came up earliest → steal oldest HELD.
+- **Tail end**: the firmware does not estimate it (#264). The sound's
+  end is the pipeline's: the voice's gain word is the envelope's level,
+  a linear gain (#176) that falls at a constant number of dB a second
+  and is silent at zero and below. A released voice is simply ranked by
+  the time of its key-up, a fact; when all 32 are in use the one
+  released longest ago is reused, and its new attack starts from
+  whatever level its tail is at — the normal poly-synth steal.
 - **Note-off pairing**: FIFO — release the oldest HELD voice carrying
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
