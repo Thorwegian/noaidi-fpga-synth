@@ -107,17 +107,18 @@ def button(cc, label, value):
 
 def sysex_button(label, hex_bytes):
     # a SysEx frame (docs/midi_schema.md "SysEx"), o-s-c's /sysex address
-    # with the bytes as a hex string
+    # with the bytes as a hex string. "tap": the press only — a "push"
+    # button also sends its off value on release, and for /sysex that is an
+    # empty frame o-s-c's MIDI bridge refuses ("'message' must not be empty")
     return {
         "type": "button",
         "id": f"sysex_{label.lower()}",
         "label": label,
-        "mode": "push",
+        "mode": "tap",
         "address": "/sysex",
         "preArgs": [],
         "target": TARGET,
         "on": hex_bytes,
-        "off": None,
         "expand": True,
     }
 
