@@ -391,17 +391,6 @@ void test_pointers() {
           "the resonance is the channel's");
 }
 
-void test_release() {
-    patch_t patch;
-    patch_init(&patch);
-    patch.env[0].release = 0xE0;
-    const int64_t fast   = render::release_tail_us(patch);
-    patch.env[0].release = 0x60;
-    const int64_t slow   = render::release_tail_us(patch);
-    check(slow > fast * 10, "a slower release is a longer tail");
-    check(fast > 25000, "the tail includes the link's latency");
-}
-
 } // namespace
 
 int main() {
@@ -412,7 +401,6 @@ int main() {
     test_lfo();
     test_sound();
     test_pointers();
-    test_release();
     if (failures == 0) {
         std::printf("render: ALL PASS\n");
     }

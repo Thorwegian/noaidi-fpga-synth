@@ -124,9 +124,8 @@ equal-ratio ladder.
 Not mapped: source→destination routing beyond the wheel and the
 env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 
-Amp-envelope CCs re-push RATE_AD and the velocity-scaled COEF to all
-32 amp-ADSR instructions (paged, riding one page swap); `release_tail_us()`
-reads the live release rate.
+Amp-envelope CCs re-render the channel's envelope rows (one page swap);
+nothing in the firmware times a tail from them (#264).
 
 **Cutoff resolution.** Cutoff base is UQ4.10; CC 74 (coarse, high 7
 bits) + CC 106 (fine, low 7 bits) give the full 14 bits, per the MIDI

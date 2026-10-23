@@ -61,22 +61,24 @@ int32_t raw_to_semis(int32_t raw) {
 // "voice in use" are different facts:
 //   V_HELD      key is down (or held by the sustain pedal), envelope
 //               gated on
-//   V_RELEASING key is up, release tail still audible
-//   V_IDLE      tail done (or never started) — free for allocation
+//   V_RELEASING key is up; the tail is the chip's business, the voice is
+//               available again, the longest released first
+//   V_IDLE      never struck, or silenced (CC 120) — free for allocation
 // A V_HELD voice whose key came up while the sustain pedal is down is
 // marked `sustained`: it keeps its gate on until the pedal comes up.
-// RELEASING promotes to IDLE lazily during allocation scans, once
-// esp_timer says the tail has run out — no timer task.
+// The firmware never guesses when a tail has gone quiet (#264): the gain
+// is linear and the chip is silent when the level is, so a released voice
+// simply ranks by how long ago its key came up — a fact, not an estimate.
 enum VoiceState { V_IDLE = 0, V_HELD, V_RELEASING };
 
 struct Voice {
-    VoiceState state      = V_IDLE;
-    uint8_t note          = 0;
-    uint8_t vel           = 0;     // stored so a live CC edit can re-render
-    uint8_t channel       = 0;     // stored for later multi-timbrality; omni
-    uint32_t alloc_seq    = 0;     // allocation order, for oldest-steal
-    int64_t release_until = 0;     // esp_timer µs when the release tail is done
-    bool sustained        = false; // key up, held by the sustain pedal
+    VoiceState state     = V_IDLE;
+    uint8_t note         = 0;
+    uint8_t vel          = 0;     // stored so a live CC edit can re-render
+    uint8_t channel      = 0;     // stored for later multi-timbrality; omni
+    uint32_t alloc_seq   = 0;     // allocation order, for oldest-steal
+    int64_t released_at  = 0;     // esp_timer µs of the key-up, while RELEASING
+    bool sustained       = false; // key up, held by the sustain pedal
 };
 
 std::array<Voice, voice_count> s_voices;
@@ -128,16 +130,6 @@ void point_partials() {
     s_pointed_struct = g_patch.voice_struct;
 }
 
-
-// Retire release tails that have run out: RELEASING → IDLE. Called both from
-// the note_on allocation scan and the task's periodic sweep.
-void promote_idle(int64_t now) {
-    for (Voice &voice : s_voices) {
-        if (voice.state == V_RELEASING && now >= voice.release_until) {
-            voice.state = V_IDLE;
-        }
-    }
-}
 
 // The velocity-dependent amounts of the voices that sound, after the patch's
 // sensitivities changed (a held note keeps the velocity it was struck with).
@@ -320,10 +312,7 @@ void set_lfo_dest_cc(int i, uint8_t val) {
 // level (the gate is level-sensitive), and they only happen when all 32
 // voices are genuinely in use.
 void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
-    const int64_t now = esp_timer_get_time();
-    int pick          = -1;
-
-    promote_idle(now);
+    int pick = -1;
 
     uint32_t best = UINT32_MAX;
     for (int v = 0; v < voice_count; ++v) {
@@ -333,12 +322,12 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
         }
     }
     if (pick < 0) {
-        int64_t soonest = INT64_MAX;
+        int64_t earliest = INT64_MAX;
         for (int v = 0; v < voice_count; ++v) {
             if (s_voices[v].state == V_RELEASING
-                && s_voices[v].release_until < soonest) {
-                soonest = s_voices[v].release_until;
-                pick    = v;
+                && s_voices[v].released_at < earliest) {
+                earliest = s_voices[v].released_at;
+                pick     = v;
             }
         }
     }
@@ -384,10 +373,9 @@ void pitch_bend_update(uint16_t bend14) {
 
 // Release one voice: the gate closes, the envelope sees it and releases.
 void release_voice(int v) {
-    s_voices[v].state     = V_RELEASING;
-    s_voices[v].sustained = false;
-    s_voices[v].release_until =
-            esp_timer_get_time() + render::release_tail_us(g_patch);
+    s_voices[v].state       = V_RELEASING;
+    s_voices[v].sustained   = false;
+    s_voices[v].released_at = esp_timer_get_time();
     render::Writes writes;
     render::gate(v, false, writes);
     send(writes);
@@ -917,9 +905,7 @@ void voice_alloc_task(void *) {
         } else {
             busy_since = esp_timer_get_time(); // queue empty → we blocked
         }
-        const int64_t now = esp_timer_get_time();
-        promote_idle(now);        // retire tails
-        flush_pending_edits(now); // coalesced CC edits
+        flush_pending_edits(esp_timer_get_time()); // coalesced CC edits
 
         // Single-core backpressure. The ESP32-C3 has one core; a sustained MIDI
         // flood keeps this queue non-empty, so the receive above never blocks

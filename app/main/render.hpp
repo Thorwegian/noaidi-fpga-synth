@@ -106,7 +106,4 @@ void gate(int voice, bool open, Writes &writes);
 // At once: gate closed, both envelopes at zero.
 void silence(int voice, Writes &writes);
 
-// How long a release tail stays audible, in microseconds.
-int64_t release_tail_us(const patch_t &patch);
-
 } // namespace render

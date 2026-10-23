@@ -471,19 +471,5 @@ void silence(int voice, Writes &writes) {
     put(writes, voice_register(voice, cp::stage_m), idle_mod, true);
 }
 
-int64_t release_tail_us(const patch_t &patch) {
-    // The level falls by k / 2^24 of what is left each 96 kHz sample; the
-    // gain is linear (#176), so the tail is below hearing once the level is
-    // under a step of the word (2^-14, −84 dB) — the pipeline is silent at
-    // zero and below, where the RC parks; plus the link's latency. (The
-    // estimate itself is on its way out: #264.)
-    constexpr double mute_level = 1.0 / 16384.0;
-    constexpr double latency    = 25000.0; // µs
-    const uint32_t k =
-            patch_adsr_rate_coeff(patch_adsr_rate_byte(patch.env[0].release));
-    const double per_sample = k / 16777216.0;
-    const double samples    = -std::log(mute_level) / per_sample;
-    return static_cast<int64_t>(samples * 1.0e6 / 96000.0 + latency);
-}
 
 } // namespace render
