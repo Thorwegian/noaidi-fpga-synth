@@ -51,6 +51,12 @@ def main():
             stop.wait(0.25)
 
     threading.Thread(target=keepalive, daemon=True).start()
+    # The first message after a silence can be lost (the panel input's
+    # silence reset flushes the UART; tools/lab/README.md), and the keepalive
+    # thread's first FE races the first message below: send one FE now and
+    # let it land before anything that matters.
+    midi("FE")
+    time.sleep(0.3)
 
     midi("C0 %02X" % args.program)
     time.sleep(1.0)

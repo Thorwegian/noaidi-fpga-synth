@@ -67,6 +67,12 @@ def main():
             stop.wait(0.25)
     if not args.no_keepalive:
         threading.Thread(target=keepalive, daemon=True).start()
+    # The first message after a silence can be lost (the panel input's
+    # silence reset flushes the UART; tools/lab/README.md), and the keepalive
+    # thread's first FE races the first message below: send one FE now and
+    # let it land before anything that matters.
+    midi("FE")
+    time.sleep(0.3)
 
     # One walk: 8 beats of scale, the last note held (3 more beats), a bar of
     # silence, 4 beats of triad, the tail; plus a beat of lead-in. Several
