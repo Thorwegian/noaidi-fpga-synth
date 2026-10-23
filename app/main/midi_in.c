@@ -95,8 +95,16 @@ static void midi_in_task(void *arg) {
 
         idle_ms += MIDI_PARTIAL_TIMEOUT_MS;
         if (idle_ms >= MIDI_SOURCE_TIMEOUT_MS) {
-            // Source silent: full transport reset and dump whatever the
-            // line glitch may have left in the FIFO.
+            // Source silent: full transport reset. The UART is NOT flushed
+            // (#276): uart_flush_input() discards the receive FIFO as well
+            // as the driver's buffer, and a message's first byte waits in
+            // the FIFO for the UART's receive-timeout interrupt (ten symbol
+            // times, ~3 ms at 31 250 baud) before the read below can see
+            // it — a flush in that window dumped the first message after
+            // a silence (a Program Change, a note-off: a stuck note). A
+            // glitch byte the flush was meant for is harmless to the parser:
+            // an orphan data byte is ignored, a stray status is replaced by
+            // the next one.
             //
             // Note panic belongs here too (not yet wired) — but only
             // if Active Sensing had been observed: a source that never
@@ -104,7 +112,6 @@ static void midi_in_task(void *arg) {
             // after such a silence, Active Sensing must be observed again
             // before panic is re-enabled.
             midi_parser_reset(&p->parser);
-            uart_flush_input(p->uart);
             idle_ms = 0;
             if (had_traffic) {
                 ESP_LOGW(p->name, "MIDI source silent, parser reset");
