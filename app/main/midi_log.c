@@ -29,39 +29,51 @@
 static QueueHandle_t s_queue;
 static int s_sub_id = -1;
 
-static void log_midi_event(const midi_message_t *m) {
-    uint8_t type = m->status & 0xF0;
-    uint8_t ch   = (m->status & 0x0F) + 1;
+// The source closes the line, after the fields, so a reader of the fields
+// (the lab's scripts) is not moved by it.
+static const char *source_name(uint8_t source) {
+    switch (source) {
+    case MIDI_SOURCE_DIN:   return "din";
+    case MIDI_SOURCE_PANEL: return "panel";
+    case MIDI_SOURCE_BLE:   return "ble";
+    default:                return "firmware";
+    }
+}
+
+static void log_midi_event(const midi_message_t *m, uint8_t source) {
+    uint8_t type     = m->status & 0xF0;
+    uint8_t ch       = (m->status & 0x0F) + 1;
+    const char *from = source_name(source);
 
     switch (type) {
     case 0x80:
-        printf("note_off  ch=%2d note=%3d vel=%3d\n", ch, m->data[0],
-               m->data[1]);
+        printf("note_off  ch=%2d note=%3d vel=%3d  %s\n", ch, m->data[0],
+               m->data[1], from);
         break;
     case 0x90:
-        printf("note_on   ch=%2d note=%3d vel=%3d\n", ch, m->data[0],
-               m->data[1]);
+        printf("note_on   ch=%2d note=%3d vel=%3d  %s\n", ch, m->data[0],
+               m->data[1], from);
         break;
     case 0xA0:
-        printf("poly_at   ch=%2d note=%3d val=%3d\n", ch, m->data[0],
-               m->data[1]);
+        printf("poly_at   ch=%2d note=%3d val=%3d  %s\n", ch, m->data[0],
+               m->data[1], from);
         break;
     case 0xB0:
-        printf("cc        ch=%2d num=%3d val=%3d\n", ch, m->data[0],
-               m->data[1]);
+        printf("cc        ch=%2d num=%3d val=%3d  %s\n", ch, m->data[0],
+               m->data[1], from);
         break;
     case 0xC0:
-        printf("program   ch=%2d num=%3d\n", ch, m->data[0]);
+        printf("program   ch=%2d num=%3d  %s\n", ch, m->data[0], from);
         break;
     case 0xD0:
-        printf("ch_at     ch=%2d val=%3d\n", ch, m->data[0]);
+        printf("ch_at     ch=%2d val=%3d  %s\n", ch, m->data[0], from);
         break;
     case 0xE0:
-        printf("pitch     ch=%2d val=%5d\n", ch,
-               (m->data[1] << 7) | m->data[0]);
+        printf("pitch     ch=%2d val=%5d  %s\n", ch,
+               (m->data[1] << 7) | m->data[0], from);
         break;
     default:
-        printf("unknown   status=0x%02X\n", m->status);
+        printf("unknown   status=0x%02X  %s\n", m->status, from);
         break;
     }
 }
@@ -90,7 +102,11 @@ static void midi_log_task(void *arg) {
 
         switch (evt.kind) {
         case EVT_MIDI:
-            log_midi_event(&evt.midi);
+            log_midi_event(&evt.midi, evt.source);
+            break;
+        case EVT_SYNC:
+            printf("sync      the patch goes out as CCs  %s\n",
+                   source_name(evt.source));
             break;
         default:
             ESP_LOGW("midi_log", "unknown event kind %d", evt.kind);

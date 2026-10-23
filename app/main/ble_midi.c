@@ -7,8 +7,10 @@
 // primary service 03B80E5A-EDE8-4B33-A751-6CE34EC4C700 carrying one
 // "MIDI data I/O" characteristic 7772E5DB-3868-4112-A1A9-F2669D106BF3
 // (read, write, write-without-response, notify). Centrals with BLE
-// MIDI support — macOS Audio MIDI Setup, Android 13+, iOS — discover
-// "Noaidi" and treat it like any wired MIDI port.
+// MIDI support — macOS Audio MIDI Setup, Android 13+, iOS, BlueZ —
+// discover "Noaidi" and treat it like any wired MIDI port, both ways:
+// their writes are the synth's input, its notifications their input
+// (parameter feedback, #279; midi_out.cpp frames them).
 //
 // Packet format: two header bytes holding a 13-bit millisecond
 // timestamp; bit 7 of the second header byte set means a status byte
@@ -53,6 +55,7 @@ void ble_store_config_init(void);
 
 #include "event_bus.h"
 #include "midi_parser.h"
+#include "midi_sysex.h"
 
 #define TAG "ble_midi"
 
@@ -79,6 +82,12 @@ static uint16_t gatt_svr_chr_midi_io_handle;
 static bool s_advertising;
 static int s_conn_count;
 
+// The one connection's handle, its negotiated MTU, and whether the central
+// subscribed to notifications (its CCCD write), for the output direction.
+static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t s_mtu         = BLE_ATT_MTU_DFLT;
+static bool s_notify_subscribed;
+
 static midi_parser_t s_ble_parser;
 
 // Ingress ring buffer: NOSPLIT keeps packet boundaries, which
@@ -93,28 +102,44 @@ static uint32_t s_rx_drops;
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
+static void ble_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+    midi_sysex_received(payload, length, MIDI_SOURCE_BLE);
+}
+
 static void ble_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
-            .kind = EVT_MIDI,
-            .midi = *m,
+            .kind   = EVT_MIDI,
+            .source = MIDI_SOURCE_BLE,
+            .midi   = *m,
     };
     event_bus_publish(&evt);
 }
 
 // ── Packet processing (ble_rx task context) ────────────────────────
-// Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
-// set = timestamp present and a status byte follows; clear =
-// running status continues.
+// After the header byte the packet alternates: a timestamp byte (bit 7
+// set) immediately before every status byte (bit 7 set too: channel
+// status, F0, F7, real-time), and data bytes (bit 7 clear) as they are,
+// under running status when no status precedes them. So a byte with
+// bit 7 set is a timestamp unless the byte before it was one, in which
+// case it is the status it stamps. The parser gets the MIDI bytes only;
+// the timestamps are discarded (nothing here is scheduled). This holds
+// for several messages in one packet and for a SysEx frame, whose F7
+// carries its own timestamp (#287).
 static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n) {
-    int idx = 2;
-    if (pkt[1] & 0x80) {
-        if (idx >= n) {
-            return; // status promised, absent — drop the runt
+    bool after_timestamp = false;
+    for (int idx = 1; idx < n; idx++) {
+        const uint8_t byte = pkt[idx];
+        if (byte & 0x80) {
+            if (after_timestamp) {
+                midi_parser_feed(&s_ble_parser, byte); // the status the timestamp stamps
+                after_timestamp = false;
+            } else {
+                after_timestamp = true; // a timestamp: discarded
+            }
+        } else {
+            midi_parser_feed(&s_ble_parser, byte); // data, SysEx payload included
+            after_timestamp = false;
         }
-        midi_parser_feed(&s_ble_parser, pkt[idx++]);
-    }
-    while (idx < n) {
-        midi_parser_feed(&s_ble_parser, pkt[idx++]);
     }
 }
 
@@ -293,6 +318,9 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
             ble_midi_advertise();
         } else {
             s_conn_count++;
+            s_conn_handle       = event->connect.conn_handle;
+            s_mtu               = BLE_ATT_MTU_DFLT;
+            s_notify_subscribed = false;
             ESP_LOGI(TAG, "MIDI connection established");
             log_conn_params(event->connect.conn_handle);
             // params requested AFTER encryption (see ENC_CHANGE) to
@@ -305,6 +333,8 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
         if (s_conn_count > 0) {
             s_conn_count--;
         }
+        s_conn_handle       = BLE_HS_CONN_HANDLE_NONE;
+        s_notify_subscribed = false;
         // reason = 512 + HCI code; 531 = 0x13 remote user terminated
         ESP_LOGI(TAG, "disconnected (reason=%d / HCI 0x%02x), advertising",
                  event->disconnect.reason, event->disconnect.reason - 512);
@@ -340,12 +370,46 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
         return 0;
 
     case BLE_GAP_EVENT_MTU:
+        s_mtu = event->mtu.value;
         ESP_LOGI(TAG, "MTU %u", event->mtu.value);
+        return 0;
+
+    // The central's CCCD write for our characteristic: from here on the
+    // synth's state goes out to it as notifications.
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        if (event->subscribe.attr_handle == gatt_svr_chr_midi_io_handle) {
+            s_notify_subscribed = event->subscribe.cur_notify;
+            ESP_LOGI(TAG, "notifications %s", s_notify_subscribed ? "on: parameter feedback flows" : "off");
+        }
         return 0;
 
     default:
         return 0;
     }
+}
+
+// ── The output direction (#279) ─────────────────────────────────────
+// NimBLE's calls are safe from any task; a notification is a copy into
+// an mbuf the host task sends on the next connection event.
+
+bool ble_midi_can_notify(void) {
+    return s_conn_handle != BLE_HS_CONN_HANDLE_NONE && s_notify_subscribed;
+}
+
+size_t ble_midi_packet_max(void) {
+    const size_t payload = s_mtu > 3 ? (size_t) s_mtu - 3 : 0;
+    return payload < BLE_MIDI_MAX_PKT ? payload : BLE_MIDI_MAX_PKT;
+}
+
+bool ble_midi_notify(const uint8_t *packet, size_t length) {
+    if (!ble_midi_can_notify()) {
+        return false;
+    }
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(packet, (uint16_t) length);
+    if (om == NULL) {
+        return false; // no buffer now; the caller waits and tries again
+    }
+    return ble_gatts_notify_custom(s_conn_handle, gatt_svr_chr_midi_io_handle, om) == 0;
 }
 
 // ── Host lifecycle ─────────────────────────────────────────────────
@@ -385,6 +449,7 @@ void ble_midi_console_status(void) {
 
 void ble_midi_init(void) {
     midi_parser_init(&s_ble_parser, ble_msg_to_bus, NULL);
+    midi_parser_on_sysex(&s_ble_parser, ble_sysex_to_synth);
 
     // Ingress decoupling: ring buffer + drain task, so the
     // NimBLE host task never parses or publishes.

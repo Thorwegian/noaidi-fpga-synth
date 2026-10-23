@@ -134,9 +134,39 @@ optional — coarse alone (≈1/8 octave steps) is already musical, and
 a controller that only sends 74 still works. Rates and sustain stay
 7-bit by construction.
 
+## Parameter feedback
+
+The schema reads both ways (#279, `app/main/cc_map.cpp`): the synth
+sends its own state as these CCs, so a surface follows the instrument
+the way a hardware synth's panel does.
+
+- **When.** The whole patch on a Program Change, on a console `load` or
+  `sync`, and when a surface asks for it (the SysEx state request, op `0x10`
+  below; #287: a surface that joins or comes back after a board reset asks).
+  Nothing is sent on connect. A patch CC that
+  arrived from one surface goes out to every other surface after it was
+  applied; the wheel, the pedal, notes and panic are performance, not
+  state, and are never sent on (no THRU, and a surface never hears
+  itself).
+- **Where.** Every MIDI output the synth has: MIDI over BLE today, the
+  wired MIDI OUT on UART0's TX pin when the board has it.
+- **What a value reads back as.** Each CC's law inverted: the knob value
+  whose law lands nearest the field, the exact one where it exists (a
+  7-bit knob into a 4-way switch reads back as the switch's position,
+  0/32/64/96; a three-way as 0/64/127). The coarse and fine pairs (cutoff
+  CC 74/106, each LFO's depth 77/115 and 110/116) read back as the knob
+  positions last moved, or the ones the patch implies. The bend range
+  goes as its RPN sequence (101 = 0, 100 = 0, 6 = range, then 101 = 127,
+  100 = 127). Coarse before fine, a destination before the depth it
+  scales. `app/test/cc_map_test.cpp` round-trips all 128 values of every
+  patch CC: apply, dump, apply, the same patch.
+- **Not sent.** Bank Select, `mod_env_dest` is sent but stored only,
+  arp CCs (not implemented).
+
 ## SysEx
 
-Decided, not implemented: `midi_parser` discards SysEx.
+The frame and the state request are implemented (#287); the raw ops are
+decided, not implemented.
 
 Frame: `F0 7D 4E 4F <op> <payload…> F7` — `7D` is the
 educational/non-commercial manufacturer ID, `4E 4F` = "NO" as a
@@ -151,6 +181,7 @@ engine link can do, addressable from a sequencer):
 | 0x01 | partial, word, w32 | partial parameter write (rides the page swap) |
 | 0x02 | register, w32 | register or sink-word write (queued, applied at the swap) |
 | 0x03 | pc, w36 | CSP program word write (while the CSP is held) |
+| 0x10 | — | **state request** (implemented): the synth sends the whole patch as CCs to every output, the asker's included ("Parameter feedback" above); the O.S.C. runner sends it after it links, the panel's SYNC button too |
 | 0x7F | — | identity request → reply with git describe of firmware |
 
 The raw ops reach everything the engine link can write. Structured
@@ -161,10 +192,10 @@ designed together with the sequencer and the stored-configuration
 structure.
 
 SysEx parsing lives in `midi_parser` (shared by UART `midi_in` and
-`ble_midi`): a bounded buffer, with streaming ops preferred over big
-dumps given the 31250 baud wire.
-
-Undecided: the SysEx payload cap (e.g. 64 bytes).
+`ble_midi`): a frame is collected into a 64-byte buffer and delivered
+whole at F7 (`midi_sysex.cpp` checks the signature and runs the op); a
+frame that outgrows the buffer, or is cut short by another status byte,
+is dropped. Streaming ops over big dumps, given the 31250 baud wire.
 
 ## Out of scope
 

@@ -54,8 +54,18 @@ port. The synth's own patch saves are bare TOML without the copyright header
 
 ## MIDI into the synth
 
-- **USB → DIN (use this).** The CH345 adapter is ALSA `16:0`, cabled into the
-  DIN jack. `aseqsend -p 16:0 "90 3C 64"` — the hex bytes are the
+- **USB → the panel port (use this).** The CH345 adapter is ALSA `16:0`,
+  cabled into the panel port (UART0; the trace names its source `panel`);
+  the keyboard is on the DIN jack. **The adapter drops what a one-shot sender
+  queues:** the kernel bridge opens the USB device only while a client is
+  subscribed to the port, and `aseqsend` subscribes, writes and unsubscribes
+  within a millisecond, so its bytes die with the close and nothing reaches
+  the synth. A script sends through an ALSA port of its own that stays
+  connected to the CH345 (`alsa_midi`, `port.connect_to(...)`, as
+  `midi_tx_check.py` does); for an ad-hoc `aseqsend` session first
+  `aconnect 14:0 16:0` (Midi Through → CH345) and `aconnect -d 14:0 16:0`
+  after. O.S.C.'s standing subscription used to hide this.
+  `aseqsend -p 16:0 "90 3C 64"` — the hex bytes are the
   **positional** argument; `-s` means "send this *file*". Several messages may
   go in one call as one byte stream. Send Active Sensing (`FE`) every quarter
   second during a session, as a keyboard does. Once the synth has seen `FE`
