@@ -115,7 +115,7 @@
         .block VOICE
         .field LEVEL_A, 2           ; 0: the amp envelope's level
         .field STAGE_A, 1           ; 2: its row's offset in the channel's table
-        .field GATE, 1              ; 3
+        .field SPARE_VOICE, 1       ; 3: a voice is 16 words
         .field VELOCITY, 1          ; 4: the amp envelope's amount (the firmware's)
         .field CHANNEL, 1           ; 5: the address of the voice's channel
         .field U_A, 1               ; 6: scratch; the voice's pitch

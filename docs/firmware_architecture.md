@@ -64,8 +64,8 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down (or held by the sustain pedal), the voice's gate register open, envelope gated on |
-| `V_RELEASING` | key up, gate register closed; available again, the longest released first |
+| `V_HELD` | key down (or held by the sustain pedal), the voice's envelopes started and not yet released |
+| `V_RELEASING` | key up, the envelopes in their release segment; available again, the longest released first |
 | `V_IDLE` | never struck, or silenced (CC 120) — free for allocation |
 
 - **Allocation preference** (note-on): least-recently-used IDLE →
@@ -81,16 +81,16 @@ different facts:
   that note. A stolen voice carries a new note and is skipped; its
   orphaned note-off is ignored.
 - **Sustain pedal** (CC 64): while it is down, a note-off marks the
-  voice `sustained` instead of releasing it, so it stays HELD with its
-  gate on. Note-off pairing skips sustained voices, so a key struck
-  again pairs with its new voice. Pedal up releases every sustained
-  voice. For stealing, sustained voices count as HELD.
-- **Known limitation**: the ADSR gate is level-sensitive, so a voice
-  stolen while HELD keeps its envelope stage (no fresh attack); one
-  stolen while RELEASING restarts from silence (`adsr.sv` treats a
-  re-gated release as a new note). It only occurs with all 32 voices
-  in use; a true retrigger of a HELD voice needs a gateware
-  edge/pulse mechanism (GATE bit 1, retrig, is reserved for it).
+  voice `sustained` instead of releasing it, so it stays HELD, its
+  envelopes where they are. Note-off pairing skips sustained voices, so
+  a key struck again pairs with its new voice. Pedal up releases every
+  sustained voice. For stealing, sustained voices count as HELD.
+- **The envelopes' stages are the firmware's** (#267): a note-on writes
+  attack to both of a voice's envelopes, a note-off writes release, and
+  the CSP owns only the attack's end at full scale. There is no
+  level-sensitive gate, so a voice stolen while HELD gets a new attack
+  like any other, from the level it is at, whichever patch or channel
+  takes it.
 
 ## Patch storage
 

@@ -33,8 +33,10 @@
 ; loops. A vector loop of n elements keeps a dependent pair of rows
 ; ceil(latency / n) rows apart, so short loops stall more per dependency; but
 ; four records stall far less in total than twelve do, however they are
-; grouped. Measured at a result latency of 9 with 16 channels and 32 voices:
-;   one of each shape (four a half)    1446 cycles    fits (the limit was 1472; 3008 since the 24 kHz pass, #268)
-;   6 squares and 6 sines              1467           fits
-;   3 of each shape (twelve a half)    1487           does not
+; grouped. Measured at a result latency of 9 with 16 channels and 32 voices,
+; both halves every pass (#268), the envelopes' stages the firmware's (#267);
+; the pass is 3008 cycles since the 24 kHz pass (#268), 1472 before it:
+;   one of each shape (four a half)    1460 cycles
+;   6 squares and 6 sines              1446
+;   3 of each shape (twelve a half)    1490
 ; Issue #237 moved the per-patch shape into the firmware; this is its layout.

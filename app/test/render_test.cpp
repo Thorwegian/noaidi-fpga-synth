@@ -170,7 +170,17 @@ void test_notes() {
     const int base = cp::voices;
     check(full_state.at(base + cp::velocity) == 16384,
           "full velocity, full amount");
-    check(full_state.at(base + cp::gate) == 16384, "note-on opens the gate");
+    check(full_state.at(base + cp::stage_a) == 0
+                  && full_state.at(base + cp::stage_m) == 16,
+          "note-on starts both attacks");
+    // the CSP ends an attack itself, so the firmware's shadow of a stage word
+    // is not what the chip holds: the writes must go out regardless (#267)
+    for (const render::Write &write : full) {
+        if (write.address == base + cp::stage_a
+            || write.address == base + cp::stage_m) {
+            check(write.force, "a stage write is forced");
+        }
+    }
     // the velocity's fraction of the 60 dB span, as an amplitude (#176): a
     // velocity of 64 at full sensitivity is 2^(10 × (64/127 − 1)), about −30 dB
     const double amp = soft_state.at(base + cp::velocity) / 16384.0;
@@ -199,10 +209,23 @@ void test_notes() {
     check(state_of(off).at(base + cp::velocity) == 16384,
           "velocity sensitivity 0 is every note at full");
 
-    render::Writes gate;
-    render::gate(5, false, gate);
-    check(state_of(gate).at(cp::voices + 5 * cp::voice_size + cp::gate) == 0,
-          "the gate closes");
+    render::Writes let_go;
+    render::release(5, let_go);
+    const auto let_go_state = state_of(let_go);
+    check(let_go_state.at(cp::voices + 5 * cp::voice_size + cp::stage_a) == 8
+                  && let_go_state.at(cp::voices + 5 * cp::voice_size
+                                     + cp::stage_m)
+                             == 24,
+          "a note let go puts both envelopes in release");
+
+    // a sounding voice's amounts follow the patch without a new attack
+    render::Writes refresh;
+    render::velocity_amounts(patch, 0, 64, refresh);
+    const auto refresh_state = state_of(refresh);
+    check(refresh_state.count(base + cp::velocity) == 1
+                  && refresh_state.count(base + cp::stage_a) == 0
+                  && refresh_state.count(base + cp::stage_m) == 0,
+          "refreshing the amounts does not retrigger");
 }
 
 void test_controllers() {

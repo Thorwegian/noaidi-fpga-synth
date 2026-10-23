@@ -3,9 +3,9 @@
 ; Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 ; License: CERN-OHL-S v2
 ;
-; After map.s. A voice has two envelopes, amp (A) and mod (M), which share
-; its gate. Each channel keeps an envelope table at the address its voices'
-; CHANNEL field holds: three rows of four words for the amp envelope's attack (+0), decay
+; After map.s. A voice has two envelopes, amp (A) and mod (M). Each channel
+; keeps an envelope table at the address its voices' CHANNEL field holds:
+; three rows of four words for the amp envelope's attack (+0), decay
 ; (+4) and release (+8), and three for the mod envelope's (+16, +20, +24). A
 ; row is two wide registers: the segment's target (1.3 for the attack, the
 ; sustain level, 0) and its rate. A segment moves the level toward its
@@ -17,19 +17,22 @@
 ; The level stops within a word's step (2^-14) of its target.
 ;
 ; A voice holds, for each envelope, its level (wide) and stage (the row's
-; offset in the table: 0, 4 or 8, and 16, 20 or 24), and the voice's gate,
-; velocity and the mod envelope's (the amounts a note's velocity sets), the
-; outputs, and scratch fields (U per envelope, D), per voice
-; because a vector loop's iterations must not share registers. The
-; firmware starts an idle voice in release (8 and 24), and sets its levels
-; to 0 at a note-on.
+; offset in the table: 0, 4 or 8, and 16, 20 or 24), its velocity and the
+; mod envelope's (the amounts a note's velocity sets), the outputs, and
+; scratch fields (U per envelope, D), per voice because a vector loop's
+; iterations must not share registers.
 ;
-; The stage is worked out first, from the gate and from the level the
-; previous pass left, and j is set from it, so a stage change takes effect in
-; the same pass, as in adsr.sv (the attack ends in the pass after the level
-; reaches full scale). SEL reads the flags of the CMP before it, so the MAX
-; of a stage comes ahead of the CMP of its level. The gate is compared once,
-; for both envelopes.
+; The stages are the firmware's to start and to end (#267): a note-on
+; writes attack (0 and 16) to both envelopes, from whatever level the voice
+; is at, so a stolen voice retriggers; a note-off writes release (8 and
+; 24); an idle voice sits in release at level 0. The program owns the one
+; transition that depends on the level: attack → decay when the level
+; reaches full scale. It is worked out first, from the level the previous
+; pass left, and j is set from it, so the change takes effect in the same
+; pass, as in adsr.sv (the attack ends in the pass after the level reaches
+; full scale). SEL reads the flags of the CMP before it, so the MAX of a
+; stage comes ahead of the CMP of its level; MAX leaves decay and release
+; where they are (4 and 8 are at least 4, 20 and 24 at least 20).
 ;
 ; The loop is a vector loop (LOOP.vi): the body runs instruction by
 ; instruction across the voices, so nothing waits for a result. (The voice
@@ -43,11 +46,6 @@
         SEL     [i+STAGE_A], [i+U_A], [i+STAGE_A]   ; (SEL reads the CMP's flags)
         CMP     ZERO, [i+LEVEL_M], FULL
         SEL     [i+STAGE_M], [i+U_M], [i+STAGE_M]
-        ANDXOR  [i+U_A], 0, [i+STAGE_A], =#4    ; release → attack: 0/4/8 → 0/4/0
-        ANDXOR  [i+U_M], 0, [i+STAGE_M], =#20   ;   and 16/20/24 → 16/20/16
-        CMP     ZERO, [i+GATE], FULL        ;   gate held?
-        SEL     [i+STAGE_A], [i+U_A], =#8   ;     else release
-        SEL     [i+STAGE_M], [i+U_M], =#24
 
         IDX     j, [i+CHANNEL], [i+STAGE_A] ;   the amp envelope: j → its row
         CMP     [i+D], [j+TARGET], [i+LEVEL_A]  ; D ← target − level

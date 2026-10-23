@@ -656,8 +656,8 @@ end:
 const char *envelope_program = R"(
         .block VOICE
         .field LEVEL, 2                     ; wide
-        .field STAGE, 1                     ; 0 attack, 4 decay, 8 release
-        .field GATE, 1
+        .field STAGE, 1                     ; 0 attack, 4 decay, 8 release: the firmware's to start and end
+        .field SPARE_VOICE, 1
         .field VELOCITY, 1
         .field OUT, 1
         .field U, 1                         ; scratch
@@ -672,16 +672,14 @@ const char *envelope_program = R"(
         .reg   ENV_TABLE, 0x060             ; the table's address, raw
 
         IDX     i, =#VOICES, 0              ; i → voice 0
-        LOOP.vi 9, =#2, =#16                ; every voice
+        LOOP.vi done, =#2, =#16             ; every voice
         IDX     j, ENV_TABLE, [i+STAGE]     ;   j → this segment's row
         MAX     [i+U], [i+STAGE], =#4       ;   attack → decay, if…
         CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
         SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
-        ANDXOR  [i+U], 0, [i+STAGE], =#4    ;   release → attack: 0/4/8 → 0/4/0
-        CMP     ZERO, [i+GATE], FULL        ;   gate held?
-        SEL     [i+STAGE], [i+U], =#8       ;     else release
         CMP     [i+U], [j+TARGET], [i+LEVEL]   ;   U ← target − level (the distance)
         MAC.w   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate (as envelope.s does it)
+done:
 )";
 
 void test_envelope() {
@@ -695,7 +693,7 @@ void test_envelope() {
     m.processor.write(table + 6, q(0.05));
     m.processor.write_wide(table + 8, 0); // release → 0
     m.processor.write(table + 10, q(0.05));
-    m.processor.write(voice + 3, q(1.0)); // voice 0: gate on
+    m.processor.write(voice + 2, 0);      // voice 0: struck, in attack
     m.processor.write(voice + 4, q(1.0)); //          velocity 1
     m.processor.write(voice + 16 + 2, 8); // voice 1: idle, in release
     m.start();
@@ -716,26 +714,33 @@ void test_envelope() {
     check_equal(m.processor.read(voice + 2), 4, "the attack ends in decay");
     check(passes_to_decay > 5 && passes_to_decay < 30, "the attack takes a plausible number of passes");
     check(previous >= 1.0, "the level reached full scale");
-    check_equal(m.processor.read(0x600 + 16 + 2), 8, "voice 1, gate off, sits in release");
+    check_equal(m.processor.read(0x600 + 16 + 2), 8, "voice 1, never struck, sits in release");
     check_equal(m.processor.read(0x600 + 16), 0, "at zero");
 
     for (int pass = 0; pass < 400; ++pass) m.processor.pass();
     const double sustained = m.processor.read(voice) / double(csp::word_one);
     check(std::abs(sustained - 0.5) < 0.001, "decay settles at the sustain level");
 
-    m.processor.write(voice + 3, 0); // gate off
+    // stolen while held (#267): the firmware writes attack again, and the
+    // level climbs on from where it is, not from zero
+    m.processor.write(voice + 2, 0);
     m.processor.swap();
     m.run();
     m.run();
-    check_equal(m.processor.read(voice + 2), 8, "gate off: release");
+    check_equal(m.processor.read(voice + 2), 0, "a voice struck again is in attack");
+    const double retriggered = m.processor.read(voice) / double(csp::word_one);
+    check(retriggered > sustained && retriggered < 1.0,
+          "the retrigger climbs on from the sustain level: " + std::to_string(retriggered));
+    for (int pass = 0; pass < 100 && m.processor.read(voice + 2) == 0; ++pass) m.processor.pass();
+    check_equal(m.processor.read(voice + 2), 4, "and ends in decay at full scale");
+
+    m.processor.write(voice + 2, 8); // let go: the firmware writes release
+    m.processor.swap();
+    m.run();
+    m.run();
+    check_equal(m.processor.read(voice + 2), 8, "let go: the program leaves release alone");
     for (int pass = 0; pass < 400; ++pass) m.processor.pass();
     check(m.processor.read(voice) < q(0.001), "release falls toward zero");
-
-    m.processor.write(voice + 3, q(1.0)); // gate on again
-    m.processor.swap();
-    m.run();
-    m.run();
-    check_equal(m.processor.read(voice + 2), 0, "a new gate restarts the attack");
 }
 
 void test_lfo() {
@@ -943,7 +948,6 @@ void test_control_program() {
         cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
         cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
         cpu.write(at(base, "VELOCITY_M"), q(1.0));
-        cpu.write(at(base, "GATE"), q(1.0));
         cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
         cpu.write(at(base, "STAGE_M"), 20);
         cpu.write(at(base, "CHANNEL"), channels + voice[v].channel * channel_size);

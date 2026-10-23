@@ -96,14 +96,20 @@ void lfo(const patch_t &patch, int i, Writes &writes);
 // widths, the resonance.
 void channel_sound(const patch_t &patch, Writes &writes);
 
-// A note struck on a voice: its pitch, its velocity's amounts, the gate.
+// A note struck on a voice: its pitch, its velocity's amounts, and both
+// envelopes in attack from the level they are at (a stolen voice retriggers).
 void note_on(const patch_t &patch, int voice, uint8_t note, uint8_t velocity,
              Writes &writes);
 
-// The gate, and so the release.
-void gate(int voice, bool open, Writes &writes);
+// The velocity's amounts alone, for a voice that sounds on after the patch's
+// sensitivities changed.
+void velocity_amounts(const patch_t &patch, int voice, uint8_t velocity,
+                      Writes &writes);
 
-// At once: gate closed, both envelopes at zero.
+// A note let go: both envelopes in release.
+void release(int voice, Writes &writes);
+
+// At once: both envelopes at zero, in release.
 void silence(int voice, Writes &writes);
 
 } // namespace render
