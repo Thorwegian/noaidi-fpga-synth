@@ -34,7 +34,7 @@
 ; ceil(latency / n) rows apart, so short loops stall more per dependency; but
 ; four records stall far less in total than twelve do, however they are
 ; grouped. Measured at a result latency of 9 with 16 channels and 32 voices:
-;   one of each shape (four a half)    1446 cycles    fits (the limit is 1472)
+;   one of each shape (four a half)    1446 cycles    fits (the limit was 1472; 3008 since the 24 kHz pass, #268)
 ;   6 squares and 6 sines              1467           fits
 ;   3 of each shape (twelve a half)    1487           does not
 ; Issue #237 moved the per-patch shape into the firmware; this is its layout.

@@ -212,24 +212,18 @@ void probe_task(void *) {
         const unsigned long pass =
                 static_cast<unsigned long>(probe_pair(0x040) >> 18);
         ESP_LOGI(tag, "probe: pass %lu", pass);
-        // PARITY (which half of the LFOs this pass works) and the pass
-        // counter's low bit, sampled eight times: each should show both.
-        std::array<unsigned, 8> parity{};
+        // the pass counter's low bit, sampled eight times: it should show
+        // both values (the LFO pool's PARITY went with #268: both halves run
+        // every pass)
         std::array<unsigned, 8> pass_low_bit{};
-        for (size_t sample = 0; sample < parity.size(); ++sample) {
-            parity[sample] = static_cast<unsigned>(
-                    (probe_pair(cp::parity) >> 18) & 0x3FFFF);
+        for (size_t sample = 0; sample < pass_low_bit.size(); ++sample) {
             pass_low_bit[sample] =
                     static_cast<unsigned>((probe_pair(0x040) >> 18) & 1);
         }
-        ESP_LOGI(
-                tag,
-                "probe: PARITY %u %u %u %u %u %u %u %u, PASS bit 0 %u %u %u %u %u %u %u %u",
-                parity[0], parity[1], parity[2], parity[3], parity[4],
-                parity[5], parity[6], parity[7], pass_low_bit[0],
-                pass_low_bit[1], pass_low_bit[2], pass_low_bit[3],
-                pass_low_bit[4], pass_low_bit[5], pass_low_bit[6],
-                pass_low_bit[7]);
+        ESP_LOGI(tag, "probe: PASS bit 0 %u %u %u %u %u %u %u %u", pass_low_bit[0],
+                 pass_low_bit[1], pass_low_bit[2], pass_low_bit[3],
+                 pass_low_bit[4], pass_low_bit[5], pass_low_bit[6],
+                 pass_low_bit[7]);
         for (int lfo = 0; lfo < 2; ++lfo) {
             const int record           = cp::lfos + lfo * 16 * cp::lfo_size;
             const int set              = cp::lfo_sets + lfo * cp::set_size;

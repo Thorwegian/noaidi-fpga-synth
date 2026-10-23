@@ -30,8 +30,9 @@ constexpr int program_rows   = 1472;  // instructions a pass
 constexpr int rom_rows       = 1024;  // the decode ROM's block: 1024 × 18
 constexpr int op_count       = 256;   // the rows the word's 8-bit op reaches
 constexpr int write_window   = 48;    // queued writes a pass
-constexpr int cycles_per_pass = 1536; // one 48 kHz sample
-constexpr int pass_cycle_limit = 1472; // instructions issue before this
+constexpr int cycles_per_pass = 3072; // four 96 kHz samples: a 24 kHz pass (#268)
+constexpr int samples_per_pass = 4;   //   (the firmware's rate conversions count them)
+constexpr int pass_cycle_limit = 3008; // instructions issue before this
 constexpr int vector_round   = 16;    // elements in flight in a vector loop
 
 // The decode ROM's rows for the vector loops, the same in every program: the

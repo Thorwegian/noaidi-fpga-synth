@@ -20,7 +20,7 @@ a MIDI-to-CV converter). Consequences:
   velocity scaling, and expresses the results as **register and sink-word
   writes** to the CSP (`app/main/render.cpp`).
 - **Envelopes, LFOs, pitch and cutoff arithmetic run in the FPGA**, as the
-  control program the CSP executes once per pass (two samples, 48 kHz):
+  control program the CSP executes once per pass (four samples, 24 kHz — #268):
   `tools/csp/programs`, in the firmware as
   `app/main/csp/control_program.hpp`. The instruction set is
   [csp2_isa.md](csp2_isa.md), the machine
@@ -43,7 +43,7 @@ flowchart TD
         BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
         BUS --> PGM["IMEM: 1472 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
-        Q --> CSP["CSP: the control program,<br/>once per 1536 cycles"]
+        Q --> CSP["CSP: the control program,<br/>once per 3072 cycles"]
         PGM --> CSP
         CSP --> SINKS["sink area<br/>1024 words × 2 pages"]
         PTR --> PIPE["Partial pipeline — 256 partials,<br/>one per two cycles:<br/>osc → SVF → SVF → gain → mix"]

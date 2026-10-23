@@ -31,8 +31,9 @@ Taken on issue #231; the text below is written to them.
 
 ## 1. A program
 
-- **One pass per sample at 48 kHz.** A pass is 1536 cycles; instructions
-  issue in the first 1472, one per cycle at most, from the top of the
+- **One pass every fourth sample, 24 kHz** (#268; it was every second,
+  48 kHz, with half the budget). A pass is 3072 cycles; instructions
+  issue in the first 3008, one per cycle at most, from the top of the
   program every pass. There are no branches: conditional work is a
   select (`SEL`), and every loop has a fixed count. Every pass runs the
   same instructions in the same cycles.

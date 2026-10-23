@@ -384,7 +384,7 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
 
     // the record: the half's LFO of this shape; the program's output is
     // ±depth, which the channel scales by the destination's depth
-    wide(writes, record + cp::phase_step, csp::lfo_rate(l.rate, 2));
+    wide(writes, record + cp::phase_step, csp::lfo_rate(l.rate, 1)); // every pass (#268)
     put(writes, record + cp::depth, word_one);
     put(writes, record + cp::neg_depth, -word_one);
     put(writes, record + cp::gain,

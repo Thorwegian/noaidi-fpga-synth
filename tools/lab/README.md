@@ -86,6 +86,8 @@ Board, acceptance and measurement (`tools/lab/`):
 | `baseline_check.py` | that recording against what it should hold, with Essentia |
 | `benchmark_compare.py` | a baseline recording against the benchmark take |
 | `release_tail.py` | the triad's release tail from a recording's envelope CSV: held level, levels after the release, slopes, time to 60 dB down — the shape that tells a dB release from a linear one (#176) |
+| `zipper_take.py` | the control-stepping stimulus (#268): fast attack and release, resonant sweep, five notes, recorded over S/PDIF |
+| `zipper_compare.py` | two takes of that stimulus against each other: the energy and flatness above 10 kHz and in 4–10 kHz, the loudest high-band frame — step noise, if any |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |

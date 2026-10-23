@@ -82,7 +82,7 @@ public:
         top_.swap = 0;
     }
 
-    // A pass: its start, then its 1536 cycles.
+    // A pass: its start, then its csp::cycles_per_pass cycles.
     void pass() {
         top_.pass_start = 1;
         tick();

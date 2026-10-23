@@ -288,7 +288,7 @@ void test_lfo() {
                   "the channel reads the record of the patch's shape");
             check(state.at(record + cp::gain) == shape.gain, shape.name);
             check(wide_at(state, record + cp::phase_step)
-                          == csp::lfo_rate(1000, 2),
+                          == csp::lfo_rate(1000, 1), // every pass (#268)
                   "the rate, at the record");
         }
     }

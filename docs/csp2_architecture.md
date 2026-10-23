@@ -221,14 +221,16 @@ hangs — measured, not inherited.
 
 ## 5. The pass
 
+A pass is every fourth 96 kHz sample, 24 kHz, 3072 cycles (#268: it was every second, 1536; the 64 cycles after the instructions are the same).
+
 | cycles | what |
 |---|---|
-| 0 … 1471 | instructions issue, one a cycle at most, in the assembler's schedule |
-| 1472 … 1481 | the pipeline drains |
-| 1482 … 1529 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (1484 … 1531), a register of `csp_pass` takes it, the core's write registers the cycle after, and DMEM samples it one cycle on, 1486 … 1533 |
-| 1533 | the pass counter, for the next pass, is asked for through the same registers (sampled at 1534) into input register 0x040 — while the CSP runs; held, the register keeps the number of the pass after the last one that ran, so a frozen chip's state matches the model's |
-| 1534 | the probe asks for its pair: the R copy's read registers take the probe's row |
-| 1535 | the probe's read pins are driven from those registers; its words are out in the cycle after, the next pass's first |
+| 0 … 3007 | instructions issue, one a cycle at most, in the assembler's schedule |
+| 3008 … 3017 | the pipeline drains |
+| 3018 … 3065 | the write window: up to 48 of the firmware's writes popped from the FIFO; each is on the FIFO's head two cycles after its pop (3020 … 3067), a register of `csp_pass` takes it, the core's write registers the cycle after, and DMEM samples it one cycle on, 1486 … 1533 |
+| 3069 | the pass counter, for the next pass, is asked for through the same registers (sampled at 3070) into input register 0x040 — while the CSP runs; held, the register keeps the number of the pass after the last one that ran, so a frozen chip's state matches the model's |
+| 3070 | the probe asks for its pair: the R copy's read registers take the probe's row |
+| 3071 | the probe's read pins are driven from those registers; its words are out in the cycle after, the next pass's first |
 
 Every DMEM pin, read and write, is a register of the core's: the rows with the
 parked ones already chosen, the banks' enables already decoded (a word write takes one

@@ -4,18 +4,19 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// A pass is one 48 kHz sample, 1536 cycles (docs/csp2_architecture.md
-// section 5). This module keeps the cycle count and does the three things
-// a pass does around its program: in the write window (cycles 1482 to
-// 1529) it pops up to 48 of the firmware's committed dwords from the FIFO
+// A pass is four 96 kHz samples, 24 kHz, 3072 cycles (#268; the numbers
+// below are csp_pkg's, docs/csp2_architecture.md section 5). This module
+// keeps the cycle count and does the three things a pass does around its
+// program: in the write window (cycles WINDOW_START to WINDOW_END − 1,
+// 3018 to 3065) it pops up to 48 of the firmware's committed dwords from the FIFO
 // and writes each word into DMEM where the dword's address says; after the
 // window's last write has landed it writes the next pass's number, the pass
-// counter's low word, into the input register 0x040 (cycle 1533, in a pass
+// counter's low word, into the input register 0x040 (cycle 3069, in a pass
 // that ran its program: a pass that starts held leaves the register at the
 // number of the pass after the last one that ran, so that a frozen chip's
 // state can be matched to the model's); and on
 // the last cycles it reads the probe's pair out of DMEM for the firmware.
-// The instructions' cycles (0 to 1471) are the core's (csp_core.sv), and the
+// The instructions' cycles (0 to 3007) are the core's (csp_core.sv), and the
 // hold changes nothing here: a held chip still takes the firmware's committed
 // writes (the FIFO holds 511, committed a chunk at a time by the CTRL swap),
 // so its image can be loaded and verified before anything runs.
@@ -23,9 +24,9 @@
 // Timing against the row rule: a pop at cycle t puts its dword on the FIFO's
 // head two cycles later, a register here takes it, the core's write registers
 // the cycle after, and DMEM's pins are driven the cycle after that, so the 48
-// pops of 1482 to 1529 are sampled by DMEM at 1486 to 1533. The pass counter's
-// write is asked at 1533 and sampled at 1534. The probe is asked at 1534, its
-// read pins are driven in 1535 and its words are out in the cycle after, the
+// pops of 3018 to 3065 are sampled by DMEM at 3022 to 3069. The pass counter's
+// write is asked at 3069 and sampled at 3070. The probe is asked at 3070, its
+// read pins are driven in 3071 and its words are out in the cycle after, the
 // pass's first: its read follows the counter's write by one clock and the
 // window's last write by two.
 //------------------------------------------------------------------------
