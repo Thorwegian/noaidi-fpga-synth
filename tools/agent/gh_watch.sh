@@ -20,6 +20,10 @@
 # Comments come from the repository-wide endpoint with ?since=, one call for
 # every issue and pull request at once: there is no per-issue first page to
 # fall off, which is how an earlier silent watch missed a comment (#237).
+# Issues and pull requests opened or changed by others are news as well (a new
+# ticket is activity no comment announces, and whether GitHub notifies the
+# agent of it depends on a subscription that is not to be relied on), so the
+# repository's issues updated since the watermark are read too.
 # A push to the default branch is news too -- new rules or code landing on
 # main, which no comment or notification announces -- so the branch's head
 # is watched beside the watermark (its last SHA in --state's sibling
@@ -75,6 +79,16 @@ check() {
         gh api "notifications?since=${WATERMARK}&per_page=50" \
             --jq ".[] | select(.updated_at > \"${WATERMARK}\")
                   | \"NEWS notification \" + .reason + \" \" + (.subject.url // \"\" | split(\"/\") | last) + \" \" + .updated_at + \" \" + (.subject.title | .[0:120]) + \"\\t\" + .updated_at" 2>/dev/null
+        # issues and pull requests OPENED by others since the watermark: a new
+        # ticket is activity no comment announces, and whether GitHub notifies
+        # the agent of it depends on a subscription not to be relied on. Opened,
+        # not updated: the endpoint cannot say who made a change, so an update
+        # test would wake the agent on its own comments and labels on others'
+        # tickets. Later changes to a ticket reach the agent as comments or
+        # notifications anyway.
+        gh api --paginate "repos/${REPO}/issues?state=all&since=${WATERMARK}&sort=created&direction=asc&per_page=100" \
+            --jq ".[] | select(.user.login != \"${ME}\") | select(.created_at > \"${WATERMARK}\")
+                  | \"NEWS \" + (if .pull_request then \"pull\" else \"issue\" end) + \" #\" + (.number | tostring) + \" \" + .created_at + \" \" + .user.login + \": \" + (.title | .[0:120]) + \"\\t\" + .created_at" 2>/dev/null
     )"
     [ -z "$found" ] && return 1
     newest="$(printf '%s\n' "$found" | awk -F'\t' '{print $NF}' | sort | tail -1)"
