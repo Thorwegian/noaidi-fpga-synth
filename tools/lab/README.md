@@ -61,8 +61,9 @@ port. The synth's own patch saves are bare TOML without the copyright header
   second during a session, as a keyboard does, or the parser declares the
   line silent after 500 ms and resets. `baseline_recording.py` is the model.
 - **BLE is Open Stage Control's.** The synth accepts one BLE connection; the
-  BLE scripts (`ble_midi_fuzz.py`, `hil.py`, the `*_check.py` tests that
-  import it) take it over and must disconnect *and untrust* afterwards. Do not
+  BLE-era scripts in `tools/lab/ble/` (`ble_midi_fuzz.py`, `hil.py`, the
+  `*_check.py` tests that import it) take it over and must disconnect *and
+  untrust* afterwards. Do not
   use them while OSC is connected. They need `alsa_midi`, which on the lab box
   lives in `~/.noaidi-blenv` (`~/.noaidi-blenv/bin/python`); the system python
   does not have it.
@@ -86,7 +87,12 @@ Board, acceptance and measurement (`tools/lab/`):
 | `benchmark_compare.py` | a baseline recording against the benchmark take |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
-| `pin_audit.py`, `pin_distance.py`, `placement_check.py`, `synth_report.py` | the netlist side: pins from registers, placement distances, BEL requests honoured, the gate report |
+| `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
+| `publish_capture.sh` | publish a capture to the rolling GitHub release, for listening review on a phone |
+
+The netlist gates and inspections (`pin_audit`, `check_timing`,
+`synth_report`, `pin_distance`, `placement_check`) are not lab tools and live
+in `tools/netlist/`; `tools/README.md` has the rule that decides a folder.
 
 Hunting a silent write loss (#248):
 
@@ -96,8 +102,9 @@ Hunting a silent write loss (#248):
 | `midi_soak.py` | random chords and knob walks with ~150-CC sweep bursts over USB→DIN, every delay jittered (a fixed-timing bench hides timing faults), seed printed to replay; `--program N` restores the patch |
 | `monitor.sh` | `verify_filter.py` on a loop while a soak plays, re-reading any real hit |
 
-Hardware checks over BLE and the audio captures (`tools/`): `hil.py` (the
-harness), `ble_midi_fuzz.py`, `shakedown_check.py`, `voice_cycle_check.py`,
+Hardware checks over BLE and the audio captures (`tools/lab/ble/` — written
+during BLE development, dormant since, kept for when they are useful again):
+`hil.py` (the harness), `ble_midi_fuzz.py`, `shakedown_check.py`, `voice_cycle_check.py`,
 `lfo_cutoff_check.py`, `vel_amount_check.py`, `vel_modenv_check.py`,
 `modenv_uniformity_check.py`, `bus_source_check.py`, `mash_check.py`,
 `filter_pain_check.py`, `pain_capture.py`, `hil_filter_imd.py`,

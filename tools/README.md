@@ -1,0 +1,24 @@
+# The tools: what lives where
+
+Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+License: CERN-OHL-S v2
+
+One rule decides the folder: what the thing needs.
+
+- **`scripts/`** — build-time generators, invoked by `make`: the LUTs, the
+  boot image, `tools.sh`. Nothing here is run by hand.
+- **`tools/netlist/`** — gates and inspection of the *routed* design.
+  `pin_audit.py` and `check_timing.py` run inside `make pack.fs` (`rtl/Makefile`);
+  `synth_report.py` reads the place-and-route report; `pin_distance.py` and
+  `placement_check.py` are run by hand on a routed nextpnr JSON.
+- **`tools/csp/`** — the CSP's assembler, reference model and host tests.
+  **`tools/storage/`** — the storage partition image, for the Makefile.
+  **`tools/docs/`** — `mermaid_check.mjs`, which parses every Mermaid graph in
+  the Markdown. **`tools/osc_panel/`** — the Open Stage Control surface.
+- **`tools/lab/`** — everything that needs the board or the lab computer:
+  driving the console and MIDI, the acceptances, the recordings and their
+  Essentia analysis (the recordings only exist because of the lab), the
+  console logger and the capture publisher. **`tools/lab/ble/`** holds the
+  checks written during BLE development — dormant since, kept for when they
+  are useful again; every one drives the synth over its single BLE
+  connection. `tools/lab/README.md` is the guide to driving the board.

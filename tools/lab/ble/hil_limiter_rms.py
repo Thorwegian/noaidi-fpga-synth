@@ -14,7 +14,7 @@ background noise on a vinyl record" while the sim bench
 disagreement between board and simulation is the whole point of
 measuring it here.
 
-    ~/.noaidi-blenv/bin/python3 tools/hil_limiter_rms.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil_limiter_rms.py
 
 Capture hygiene: CC 120 between steps, every CC the
 measurement depends on is set explicitly, BLE disconnected + untrusted on

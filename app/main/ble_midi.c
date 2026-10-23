@@ -24,7 +24,7 @@
 // drains it, strips the BLE-MIDI framing, feeds the shared parser and
 // publishes to the event bus. Parsing in the host task starved IDLE
 // under a sustained ~1 kHz BLE flood (task watchdog with btController
-// running — found by tools/ble_midi_fuzz.py). Overflow drops packets
+// running — found by tools/lab/ble/ble_midi_fuzz.py). Overflow drops packets
 // at the ring buffer, counted — the same backpressure philosophy as
 // the event bus. The parser instance stays single-threaded (ble_rx
 // only). On connect/disconnect the parser resets: running status dies

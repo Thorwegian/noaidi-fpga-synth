@@ -28,7 +28,7 @@ CCs excluded from randomization - each would MASK a stuck voice:
   7 (volume could land at 0), 119 (test tone replaces the mix),
   120 (all sound off), 123 (all notes off).
 
-    ~/.noaidi-blenv/bin/python3 tools/mash_check.py [--mash SECS]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/mash_check.py [--mash SECS]
         [--settle SECS] [--seed N] [--skip-reset]
 """
 import argparse
@@ -45,7 +45,7 @@ import numpy as np
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tools/lab/ble -> the repo
 AUDIO_DEV = "hw:1,0"
 RATE = 48000
 EXCLUDED_CCS = {7, 119, 120, 123}
@@ -94,7 +94,7 @@ def reset_boards():
         if "noaidi fw" in line:
             print("[reset]", line.strip())
     subprocess.Popen(
-        ["setsid", "nohup", "bash", os.path.join(REPO, "tools",
+        ["setsid", "nohup", "bash", os.path.join(REPO, "tools", "lab",
                                                  "console_logger.sh")],
         stdout=open("/tmp/console_logger.err", "w"),
         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
@@ -128,7 +128,7 @@ def reboot_esp_clean():
             break
     p.close()
     subprocess.Popen(
-        ["setsid", "nohup", "bash", os.path.join(REPO, "tools",
+        ["setsid", "nohup", "bash", os.path.join(REPO, "tools", "lab",
                                                  "console_logger.sh")],
         stdout=open("/tmp/console_logger.err", "w"),
         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,

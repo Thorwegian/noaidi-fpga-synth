@@ -23,7 +23,7 @@ case "$IN" in
   *)     ffmpeg -loglevel error -i "$IN" "$OUT" ;;
 esac
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."   # tools/lab -> the repo
 gh release view "$TAG" > /dev/null 2>&1 || \
     gh release create "$TAG" --title "Audio captures (test pipeline)" \
         --notes "Rolling release holding audio captures from the automated test pipeline, for listening review. Lossless FLAC, 48 kHz. Newest assets at the top of the asset list."

@@ -112,7 +112,7 @@ and the DSP. Issue #230 carries the patch work (fork
     silent while the running program replayed exactly; fixed by the
     pointer's register on the pin, the entry two clocks after its pop
     (three, since the queue's registers were placed beside its block).
-  - and, from the first audit of every pin (`tools/lab/pin_audit.py`,
+  - and, from the first audit of every pin (`tools/netlist/pin_audit.py`,
     which should have come first): the MAC's operand muxes on the DSP's
     B and C pins, the sink area's write decode and its read/write address
     mux on the blocks' pins, the private index's LUT-RAM (`RAM16SDP4`)
@@ -174,7 +174,7 @@ and the DSP. Issue #230 carries the patch work (fork
   block's pins have no timing, so a block goes wherever a site is free
   (35 of the 46 BSRAM sites in use on this design) and the flops that
   drive its pins stay with their logic. Measured on the routed netlist
-  (`tools/lab/pin_distance.py`): the register file's copy-0 banks at
+  (`tools/netlist/pin_distance.py`): the register file's copy-0 banks at
   (4..7, 9), the flops driving their address pins 47–50 tiles away, their
   write pins 35–47; the sink area's replicas 26–56 tiles from their write
   registers. A fifty-tile route is of the order of the period at 73.728,

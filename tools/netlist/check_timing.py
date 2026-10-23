@@ -24,7 +24,7 @@ So the gate wants HEADROOM, not a pass:
 Both are ratchets: raise them as paths get fixed, never lower them to
 make a build go green.
 
-    python3 scripts/check_timing.py rtl/pnr.log [--min-mhz 2] [--warn-mhz 8]
+    python3 tools/netlist/check_timing.py rtl/pnr.log [--min-mhz 2] [--warn-mhz 8]
 
 Exit 0 = every clock above --min-mhz. Exit 1 = at least one below.
 """

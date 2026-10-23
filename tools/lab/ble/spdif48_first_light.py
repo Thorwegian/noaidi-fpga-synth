@@ -23,7 +23,7 @@ receiver locks and the path is digital end to end:
 PASS = tone on bin 32 at better than -6 dBFS. The off-bin floor and
 the silence capture are printed for the record.
 
-    ~/.noaidi-blenv/bin/python3 tools/spdif48_first_light.py
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/spdif48_first_light.py
 
 Lock-probe mode (no Bluetooth, no tone): the S/PDIF carrier runs
 continuously whatever the audio content, and the CM106 returns
@@ -32,7 +32,7 @@ lock - so a short capture that RETURNS DATA is itself the lock proof.
 Polls until lock or the deadline; meant to run while the LED is being
 seated and adjusted in the optical port:
 
-    ~/.noaidi-blenv/bin/python3 tools/spdif48_first_light.py --lock-probe 600
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/spdif48_first_light.py --lock-probe 600
 """
 import subprocess
 import sys

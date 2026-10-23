@@ -7,7 +7,7 @@
 # panics/reboots (WDT panic + frame pointers are enabled, so a crash
 # prints a real backtrace; this catches it when no monitor is open).
 #
-# Run on the dev host:  nohup tools/console_logger.sh &
+# Run on the dev host:  nohup tools/lab/console_logger.sh &
 # Follow live:          tail -f /tmp/noaidi_console.log
 #
 # POLITE MODE: the logger only attaches when the port is FREE, backs
