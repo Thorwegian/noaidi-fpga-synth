@@ -13,12 +13,12 @@
 usage: acceptance.py --out DIR [--label NAME] [--fs BITSTREAM] [--loader PATH]
                      [--console /dev/ttyACM0] [--port 16:0] [--device hw:1,0]
                      [--patch /Patches/Factory/Pads/Galaxy.toml] [--boot-seconds 16]
-                     [--tail 24] [--no-m4a]
+                     [--tail 24] [--no-mp3]
 
 With --fs the bitstream is loaded first (openFPGALoader, SRAM). The ESP32 is
 reset through the console's RTS and its boot log read; then the patch is
 loaded, the sequence recorded (baseline_recording.py), checked and compared,
-and the recording encoded as M4A at 192 kbps for the ticket. DIR gets the
+and the recording encoded as MP3 at 320 kbps (libmp3lame) for the ticket. DIR gets the
 recording, the tables, the plot, the boot log and verdict.json; the exit
 status is 0 when all three pass. Run it with the interpreter Essentia is
 installed in.
@@ -83,7 +83,7 @@ def main():
     parser.add_argument("--patch", default="/Patches/Factory/Pads/Galaxy.toml", help="the patch, on the firmware's storage")
     parser.add_argument("--boot-seconds", type=float, default=16.0, help="how long the boot log is read")
     parser.add_argument("--tail", type=float, default=24.0, help="seconds recorded after the triad's release")
-    parser.add_argument("--no-m4a", action="store_true", help="no M4A for the ticket")
+    parser.add_argument("--no-mp3", action="store_true", help="no MP3 for the ticket")
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -155,8 +155,11 @@ def main():
     except (OSError, ValueError):
         verdict["check_failures"] = verdict["compare_failures"] = None
     verdict["audio"] = {"passed": check_rc == 0 and compare_rc == 0}
-    if not args.no_m4a:
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", wav, "-c:a", "aac", "-b:a", "192k", base + ".m4a"])
+    if not args.no_mp3:
+        # review audio is MP3 at 320 kbps (AGENTS.md); the WAV stays for the analysis
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", wav,
+                        "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "48000", "-id3v2_version", "3",
+                        base + ".mp3"])
 
     passed = self_test_passed and differing == 0 and verdict["audio"]["passed"]
     verdict["passed"] = passed
