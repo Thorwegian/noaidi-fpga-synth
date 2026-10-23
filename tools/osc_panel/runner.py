@@ -108,6 +108,16 @@ class Runner:
             if self.noaidi is not None and self.noaidi_port() is None:
                 self.unlinked()
 
+    def surface_got_reader(self, ev):
+        """The sequencer's notice that a client subscribed to read from the
+        surface port (O.S.C. opening its input), delivered to the port."""
+        from alsa_midi import PortSubscribedEvent
+
+        if not isinstance(ev, PortSubscribedEvent):
+            return False
+        sender = getattr(ev, "connect_sender", None)
+        return sender is not None and sender.client_id == self.client.client_id and sender.port_id == self.surface.port_id
+
     @staticmethod
     def fresh(ev):
         """A new event with the received one's musical content and nothing
@@ -173,6 +183,12 @@ class Runner:
                 dest = getattr(ev, "dest", None)
                 if dest is not None and dest.port_id == self.announce.port_id:
                     self.on_announce(ev)
+                elif self.surface_got_reader(ev):
+                    # O.S.C. (a reader) subscribed to the surface port, maybe
+                    # seconds after the link: it is the one to be told the state
+                    if self.noaidi is not None:
+                        log("a surface subscribed; asking for the state")
+                        self.request_state()
                 else:
                     self.relay(ev)
             if self.link_at is not None and now >= self.link_at:
