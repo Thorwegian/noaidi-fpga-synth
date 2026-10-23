@@ -37,6 +37,7 @@ import time
 NOAIDI_MAC = "10:00:3B:B0:4D:A6"
 LINK_DELAY = 3.0      # seconds after the Noaidi's ALSA port appears, before linking to it
 RECONNECT_EVERY = 5.0 # seconds between connect attempts while the port is gone
+ASK_DELAY = 2.0       # seconds after both the link and a surface are there, before asking: O.S.C. opens its port before its server routes what arrives
 STATE_REQUEST = bytes([0xF0, 0x7D, 0x4E, 0x4F, 0x10, 0xF7])  # SysEx op 0x10 (docs/midi_schema.md): the synth answers with the whole patch
 
 
@@ -56,6 +57,8 @@ class Runner:
         self.announce = self.client.create_port("announce", caps=PortCaps.WRITE | PortCaps.SUBS_WRITE | PortCaps.NO_EXPORT)
         self.announce.connect_from(SYSTEM_ANNOUNCE)
         self.noaidi = None        # the Noaidi's ALSA port while linked
+        self.readers = 0          # clients subscribed to read from the surface port (O.S.C.)
+        self.ask_at = None        # when to ask for the state: both sides there, ASK_DELAY later
         self.link_at = None       # when to link, after the port appeared
         self.gone_since = None    # when the port vanished (for the reconnect timing)
         self.next_connect = 0.0
@@ -78,9 +81,17 @@ class Runner:
         self.from_synth.connect_from(port)
         self.noaidi = port
         took = f" after {time.time() - self.gone_since:.1f} s" if self.gone_since else ""
-        log(f"linked to '{port.client_name}:{port.name}'{took}; asking for the state")
+        log(f"linked to '{port.client_name}:{port.name}'{took}")
         self.gone_since = None
-        self.request_state()
+        self.schedule_ask()
+
+    def schedule_ask(self):
+        """Ask for the state only when the synth is linked AND a surface reads
+        the port, ASK_DELAY after the second of the two arrived."""
+        if self.noaidi is not None and self.readers > 0:
+            self.ask_at = time.time() + ASK_DELAY
+        else:
+            self.ask_at = None
 
     def request_state(self):
         from alsa_midi import SysExEvent
@@ -93,6 +104,7 @@ class Runner:
             log("the Noaidi's port is gone: reconnecting")
         self.noaidi = None
         self.link_at = None
+        self.ask_at = None
         self.gone_since = self.gone_since or time.time()
         self.next_connect = time.time()  # try at once, then every RECONNECT_EVERY
 
@@ -108,15 +120,21 @@ class Runner:
             if self.noaidi is not None and self.noaidi_port() is None:
                 self.unlinked()
 
-    def surface_got_reader(self, ev):
-        """The sequencer's notice that a client subscribed to read from the
-        surface port (O.S.C. opening its input), delivered to the port."""
-        from alsa_midi import PortSubscribedEvent
+    def surface_reader_changed(self, ev):
+        """The sequencer's notices that a client subscribed to, or unsubscribed
+        from, reading the surface port (O.S.C. opening or closing its input):
+        the readers counted, the request scheduled or dropped."""
+        from alsa_midi import PortSubscribedEvent, PortUnsubscribedEvent
 
-        if not isinstance(ev, PortSubscribedEvent):
+        if not isinstance(ev, (PortSubscribedEvent, PortUnsubscribedEvent)):
             return False
         sender = getattr(ev, "connect_sender", None)
-        return sender is not None and sender.client_id == self.client.client_id and sender.port_id == self.surface.port_id
+        if sender is None or sender.client_id != self.client.client_id or sender.port_id != self.surface.port_id:
+            return True  # a notice about another port: not relayed either
+        self.readers = max(0, self.readers + (1 if isinstance(ev, PortSubscribedEvent) else -1))
+        log(f"a surface {'subscribed' if isinstance(ev, PortSubscribedEvent) else 'left'}: {self.readers} reading")
+        self.schedule_ask()
+        return True
 
     @staticmethod
     def fresh(ev):
@@ -183,14 +201,15 @@ class Runner:
                 dest = getattr(ev, "dest", None)
                 if dest is not None and dest.port_id == self.announce.port_id:
                     self.on_announce(ev)
-                elif self.surface_got_reader(ev):
-                    # O.S.C. (a reader) subscribed to the surface port, maybe
-                    # seconds after the link: it is the one to be told the state
-                    if self.noaidi is not None:
-                        log("a surface subscribed; asking for the state")
-                        self.request_state()
+                elif self.surface_reader_changed(ev):
+                    pass
                 else:
                     self.relay(ev)
+            if self.ask_at is not None and now >= self.ask_at:
+                self.ask_at = None
+                if self.noaidi is not None and self.readers > 0:
+                    log("asking for the state")
+                    self.request_state()
             if self.link_at is not None and now >= self.link_at:
                 self.link_at = None
                 port = self.noaidi_port()
