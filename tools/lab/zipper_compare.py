@@ -32,7 +32,8 @@ import numpy as np
 
 RATE = 48000
 FRAME = 2400          # 50 ms
-GATE_DB = -45.0       # frames quieter than this (full band, dBFS) are left out
+GATE_DB = -70.0       # frames quieter than this (full band, dBFS) are left out: the
+                      # stimulus sits near -50 dBFS (the resonance's input attenuation)
 
 
 def read(path):
