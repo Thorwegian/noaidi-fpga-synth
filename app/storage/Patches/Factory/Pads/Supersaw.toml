@@ -31,7 +31,7 @@ key_track = 100
 attack = 0.042
 sustain = -3.76
 decay = 3
-release = 11
+release = 8.88
 velocity = 61.4
 
 [mod_env]

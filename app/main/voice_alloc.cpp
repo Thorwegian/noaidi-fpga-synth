@@ -208,6 +208,18 @@ int32_t duty_from_cc(uint8_t val) {
     return static_cast<int32_t>((0.5f - duty) * 16777216.0f);
 }
 
+// CC → the amp envelope's decay or release rate code: the attack's law,
+// (127 − cc) << 1, plus 25 codes — three times faster at 16 codes an octave.
+// With the gain linear (#176) a fall is a straight line in dB over 6.9 time
+// constants; the old dB decode's fall at the same code ran through the
+// audible band (to −45 dB) in about two, so the knob keeps its sound by
+// picking the faster code. Saturates at the fastest code.
+constexpr int amp_fall_shift = 25;
+uint8_t amp_fall_code(uint8_t val) {
+    const int code = ((127 - val) << 1) + amp_fall_shift;
+    return static_cast<uint8_t>(code > 255 ? 255 : code);
+}
+
 // CC → LFO phase increment, 2^-25 of a cycle every 96 kHz sample, so linear
 // in frequency (freq = inc × 96000 / 2^25) and an even-sounding control needs
 // the log2 mapping here: exponential 0.03 Hz … 30 Hz across the CC, one equal
@@ -509,13 +521,19 @@ void handle_cc(uint8_t num, uint8_t val) {
     // ---- the amp envelope ----
     // A/D/R are log2 RATES (higher byte = faster), so invert → knob up =
     // longer. Sustain is a LEVEL (higher byte = louder), so it is NOT
-    // inverted → knob up = louder.
+    // inverted → knob up = louder. The decay and the release pick a code
+    // three times faster than the attack's law (amp_fall_code): the gain is
+    // linear (#176), so a fall is a straight line in dB, and the old dB
+    // decode's fall at the same code was a line of about two time constants
+    // through the audible band (to −45 dB) against the straight line's 6.9 —
+    // the shift keeps the knob's position sounding as it did. The attack's
+    // time to full scale is the same under both laws.
     case 73:
         g_patch.env[0].attack = static_cast<uint8_t>((127 - val) << 1);
         s_pending |= dirty_amp_env;
         break;
     case 75:
-        g_patch.env[0].decay = static_cast<uint8_t>((127 - val) << 1);
+        g_patch.env[0].decay = amp_fall_code(val);
         s_pending |= dirty_amp_env;
         break;
     case 79:
@@ -523,7 +541,7 @@ void handle_cc(uint8_t num, uint8_t val) {
         s_pending |= dirty_amp_env;
         break;
     case 72:
-        g_patch.env[0].release = static_cast<uint8_t>((127 - val) << 1);
+        g_patch.env[0].release = amp_fall_code(val);
         s_pending |= dirty_amp_env;
         break;
 

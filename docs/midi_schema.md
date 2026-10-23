@@ -93,7 +93,7 @@ All four ADSR CCs per envelope invert — knob up = longer/louder
 equal-ratio ladder.
 | CC | Target | Notes |
 |---|---|---|
-| 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer |
+| 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer; D and R add 25 codes (3× faster, #176): the gain is linear, so a fall is a straight line in dB and the knob's position gives the shape it gave under the old dB decode down to −45 dB |
 | 79 | amp env S | `cc << 3` into the 10-bit sustain — sustain is a LEVEL (higher = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
 | 104 | MOD env S | `cc << 3` (10-bit level, not inverted) |
