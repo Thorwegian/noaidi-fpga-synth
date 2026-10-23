@@ -12,8 +12,8 @@ Starts tools/osc_panel/runner.py, plays Open Stage Control's part on its port
   2. resets the board through the console's RTS and waits for the runner to
      reconnect, re-link and ask again: the whole patch arrives once more,
      within RESET_BUDGET seconds, with nothing done on O.S.C.'s side;
-  3. sends a CC from the surface port and reads it in the firmware's trace
-     (the relay's other direction).
+  3. sends a Program Change from the surface port: the synth's dump comes
+     back, which proves the relay's other direction without the console.
 
 Always stops the runner, disconnects and untrusts at the end.
 
@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
     args = ap.parse_args()
 
-    from alsa_midi import ControlChangeEvent, PortCaps, SequencerClient
+    from alsa_midi import PortCaps, ProgramChangeEvent, SequencerClient
 
     cap = Console(args.port, reset=False)
     cap.start()
@@ -100,15 +100,16 @@ def main():
         if [cc for cc, _ in got] != DUMP:
             failures.append(f"after the reset the state was {len(got)} CCs within {RESET_BUDGET:.0f} s, not the patch")
 
-        # 3. the relay's other direction: a CC from O.S.C. reaches the firmware
-        before = len(cap.lines)
-        client.event_output(ControlChangeEvent(channel=0, param=74, value=77), port=out)
+        # 3. the relay's other direction, observed through MIDI: a Program
+        #    Change from O.S.C.'s side reaches the synth, which dumps the patch
+        #    back to the surface port
+        received(client, 0.5)
+        client.event_output(ProgramChangeEvent(channel=0, value=1), port=out)
         client.drain_output()
-        time.sleep(1.0)
-        traced = any("num= 74 val= 77" in ln and "ble" in ln for ln in cap.lines[before:])
-        print(f"[relay] CC 74=77 from the surface port traced by the firmware over BLE: {traced}")
-        if not traced:
-            failures.append("a CC from the surface port did not reach the firmware")
+        got = wait_for_dump(client, 5.0)
+        print(f"[relay] a Program Change from the surface port brought {len(got)} CCs back (want {len(DUMP)})")
+        if [cc for cc, _ in got] != DUMP:
+            failures.append("a Program Change from the surface port did not reach the synth, or its dump did not come back")
     finally:
         if client is not None:
             client.close()
