@@ -96,13 +96,18 @@ schema, so the panel file doubles as living documentation of
 `midi_schema.md` and becomes the spec the motorized-fader panel
 later implements. Context: modern DAWs/plugin formats have largely
 dropped external-MIDI-out (the DAW and hardware ecosystems split), so
-development knobs come from our own panel. **Transport**: a dedicated
-wired MIDI IN. The console lives wholly on the USB-Serial/JTAG
-controller, which frees UART0; a second MIDI-IN circuit on GPIO2
-connects to the dev host via a CH345 USB-MIDI adapter. Firmware ingests it as UART0 (`midi_panel_init(2)`), a
-second parser instance on the same event bus. **The port is for
-Open Stage Control exclusively** — test scripts stay on BLE/DIN, so
-panel traffic and test traffic never contend.
+development knobs come from our own panel. **Transport**: MIDI over
+BLE, both ways (#279, #284): the panel's knobs go to the synth and the
+synth's state comes back as the same CCs (parameter feedback, so a
+Program Change moves the knobs; `midi_schema.md` "Parameter
+feedback"). BlueZ's MIDI plugin on the dev host exposes the connected
+Noaidi as one ALSA port, which `tools/osc_panel/run.sh` gives Open
+Stage Control as input and output. The second wired MIDI IN (UART0 on
+GPIO2, the console having moved wholly to the USB-Serial/JTAG
+controller; `midi_panel_init(2)`, a second parser instance on the same
+event bus) is fed by a CH345 USB-MIDI adapter and belongs to the test
+scripts, the keyboard being on the DIN jack, so panel traffic and test
+traffic never contend.
 
 ### Default voice
 

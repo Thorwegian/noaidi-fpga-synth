@@ -241,6 +241,12 @@ int cmd_ble(int, char **) {
     return 0;
 }
 
+int cmd_sync(int, char **) {
+    voice_alloc_sync();
+    std::printf("the patch goes out as CCs to every surface\n");
+    return 0;
+}
+
 const console_cmd_t commands[] = {
         {"help", "", "list the commands", cmd_help, nullptr},
         {"cd", "[folder]", "change folder (default /Patches)", cmd_cd,
@@ -258,6 +264,8 @@ const console_cmd_t commands[] = {
         {"patch", "", "print the active patch as a patch file", cmd_patch,
          nullptr},
         {"ble", "", "BLE MIDI status; re-advertise if needed", cmd_ble,
+         nullptr},
+        {"sync", "", "send the patch as CCs to the surfaces", cmd_sync,
          nullptr},
 };
 

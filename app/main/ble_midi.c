@@ -55,6 +55,7 @@ void ble_store_config_init(void);
 
 #include "event_bus.h"
 #include "midi_parser.h"
+#include "midi_sysex.h"
 
 #define TAG "ble_midi"
 
@@ -101,6 +102,10 @@ static uint32_t s_rx_drops;
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
+static void ble_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+    midi_sysex_received(payload, length, MIDI_SOURCE_BLE);
+}
+
 static void ble_msg_to_bus(const midi_message_t *m, void *user) {
     evt_t evt = {
             .kind   = EVT_MIDI,
@@ -111,19 +116,30 @@ static void ble_msg_to_bus(const midi_message_t *m, void *user) {
 }
 
 // ── Packet processing (ble_rx task context) ────────────────────────
-// Header: 13-bit timestamp in two bytes. Bit 7 of the second byte
-// set = timestamp present and a status byte follows; clear =
-// running status continues.
+// After the header byte the packet alternates: a timestamp byte (bit 7
+// set) immediately before every status byte (bit 7 set too: channel
+// status, F0, F7, real-time), and data bytes (bit 7 clear) as they are,
+// under running status when no status precedes them. So a byte with
+// bit 7 set is a timestamp unless the byte before it was one, in which
+// case it is the status it stamps. The parser gets the MIDI bytes only;
+// the timestamps are discarded (nothing here is scheduled). This holds
+// for several messages in one packet and for a SysEx frame, whose F7
+// carries its own timestamp (#287).
 static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n) {
-    int idx = 2;
-    if (pkt[1] & 0x80) {
-        if (idx >= n) {
-            return; // status promised, absent — drop the runt
+    bool after_timestamp = false;
+    for (int idx = 1; idx < n; idx++) {
+        const uint8_t byte = pkt[idx];
+        if (byte & 0x80) {
+            if (after_timestamp) {
+                midi_parser_feed(&s_ble_parser, byte); // the status the timestamp stamps
+                after_timestamp = false;
+            } else {
+                after_timestamp = true; // a timestamp: discarded
+            }
+        } else {
+            midi_parser_feed(&s_ble_parser, byte); // data, SysEx payload included
+            after_timestamp = false;
         }
-        midi_parser_feed(&s_ble_parser, pkt[idx++]);
-    }
-    while (idx < n) {
-        midi_parser_feed(&s_ble_parser, pkt[idx++]);
     }
 }
 
@@ -433,6 +449,7 @@ void ble_midi_console_status(void) {
 
 void ble_midi_init(void) {
     midi_parser_init(&s_ble_parser, ble_msg_to_bus, NULL);
+    midi_parser_on_sysex(&s_ble_parser, ble_sysex_to_synth);
 
     // Ingress decoupling: ring buffer + drain task, so the
     // NimBLE host task never parses or publishes.

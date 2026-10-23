@@ -39,6 +39,10 @@ bool voice_alloc_get_patch(patch_t *p);
 // task with the patch's path after each Program Change that loads one.
 void voice_alloc_set_patch_listener(void (*listener)(const char *name));
 
+// Send the active patch to the surfaces as CCs (parameter feedback, #279),
+// as a Program Change does; the console's `sync`.
+void voice_alloc_sync(void);
+
 // Diagnostics (#238): a snapshot of the voice table for the console, so a
 // stuck note can be read live without a reboot. A best-effort read across the
 // allocator task; a torn field now and then is harmless for a diagnostic.

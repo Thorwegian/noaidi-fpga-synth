@@ -35,6 +35,7 @@ extern "C" {
 typedef enum {
     EVT_MIDI = 1,
     EVT_PATCH, // a patch request to voice_alloc (voice_alloc.h)
+    EVT_SYNC,  // the console asks voice_alloc to send the patch to the surfaces (#279)
 } evt_kind_t;
 
 // Where a MIDI event came from. The outputs send a state change to every

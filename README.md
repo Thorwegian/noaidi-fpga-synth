@@ -195,7 +195,8 @@ saved /Patches/User/Pads/Arctic Ice.toml
 - **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
   `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
   `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
-  `ble`, `help`.
+  `ble`, `sync` (send the patch as CCs to the surfaces, as a Program
+  Change does), `help`.
 - **Paths:** absolute from the storage root (`/Patches/User`) or
   relative to the working folder in the prompt, with `.` and `..`,
   taken literally (extensions included). Quote names with spaces, or let
