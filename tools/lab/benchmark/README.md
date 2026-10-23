@@ -15,7 +15,8 @@ silence, C4 E4 G4 held four beats and released, the release recorded to
 its end — from the S/PDIF output, 48 kHz, 16-bit, stereo.
 
 - the recording: `baseline_galaxy_7c959b4.wav` and `.m4a` on the GitHub
-  pre-release `baseline-20261017` (8.6 MB, kept out of the tree);
+  pre-release `baseline-20261017` (8.6 MB, kept out of the tree; that take
+  predates the rule — new takes are published as `.mp3` at 320 kbps);
 - `baseline_galaxy_7c959b4.essentia.txt` — `tools/lab/baseline_check.py`'s
   table: per beat the level and the pitch clusters, the bar of silence,
   the triad's peaks, the release;
