@@ -88,7 +88,8 @@ int32_t fine_raw(int value) {
 // low time 0.5 · 10^(−value/127)); the field is the offset from square in
 // Q0.24.
 int32_t duty_of(int value) {
-    const float low_time = 0.5f * powf(10.0f, -static_cast<float>(value) / 127.0f);
+    const float low_time =
+            0.5f * powf(10.0f, -static_cast<float>(value) / 127.0f);
     return static_cast<int32_t>((0.5f - low_time) * 16777216.0f);
 }
 
@@ -126,8 +127,10 @@ int32_t mod_depth_of(int value) {
 constexpr float sample_rate_hz  = 96000.0f;
 constexpr float lfo_phase_cycle = 33554432.0f; // 2^25
 int32_t lfo_rate_of(int value) {
-    const float freq = 0.03f * powf(1000.0f, static_cast<float>(value) / 127.0f);
-    const float inc  = std::clamp(freq * (lfo_phase_cycle / sample_rate_hz), 1.0f, 65535.0f);
+    const float freq =
+            0.03f * powf(1000.0f, static_cast<float>(value) / 127.0f);
+    const float inc = std::clamp(freq * (lfo_phase_cycle / sample_rate_hz),
+                                 1.0f, 65535.0f);
     return static_cast<int32_t>(inc + 0.5f);
 }
 
@@ -152,10 +155,13 @@ constexpr int lfo_fine_steps = 128; // Fine steps a unit
 
 const SpanLaw *lfo_span_law(uint8_t dest) {
     switch (dest) {
-    case LFO_DEST_PITCH:     return &lfo_semitone_law;
+    case LFO_DEST_PITCH:
+        return &lfo_semitone_law;
     case LFO_DEST_CUTOFF:
-    case LFO_DEST_RESONANCE: return &lfo_octave_law;
-    default:                 return nullptr; // the pulse width: raw
+    case LFO_DEST_RESONANCE:
+        return &lfo_octave_law;
+    default:
+        return nullptr; // the pulse width: raw
     }
 }
 
@@ -164,9 +170,11 @@ int16_t lfo_depth_of(uint8_t dest, const DepthKnobs &k) {
     if (law == nullptr) {
         return static_cast<int16_t>((k.coarse << 2) + (k.fine >> 5));
     }
-    const int32_t fine_steps      = (k.coarse >> law->coarse_shift) * lfo_fine_steps + k.fine;
+    const int32_t fine_steps =
+            (k.coarse >> law->coarse_shift) * lfo_fine_steps + k.fine;
     const int32_t steps_an_octave = law->units_an_octave * lfo_fine_steps;
-    return static_cast<int16_t>((fine_steps * 1024 + steps_an_octave / 2) / steps_an_octave);
+    return static_cast<int16_t>((fine_steps * 1024 + steps_an_octave / 2)
+                                / steps_an_octave);
 }
 
 // The knob positions nearest a depth (its size: the knobs have no sign;
@@ -194,11 +202,13 @@ DepthKnobs lfo_knobs_of(uint8_t dest, int16_t depth) {
     return k;
 }
 
-void set_lfo_depth(patch_t &patch, Knobs &knobs, int i, uint8_t value, bool fine) {
-    lfo_t &lfo     = patch.lfo[i];
-    DepthKnobs &k  = knobs.lfo_depth[i];
+void set_lfo_depth(patch_t &patch, Knobs &knobs, int i, uint8_t value,
+                   bool fine) {
+    lfo_t &lfo    = patch.lfo[i];
+    DepthKnobs &k = knobs.lfo_depth[i];
     if (!k.known) {
-        k = lfo_knobs_of(lfo.dest, lfo.depth); // the other knob's part: the patch's
+        k = lfo_knobs_of(lfo.dest,
+                         lfo.depth); // the other knob's part: the patch's
     }
     (fine ? k.fine : k.coarse) = value;
     lfo.depth                  = lfo_depth_of(lfo.dest, k);
@@ -221,13 +231,14 @@ void set_lfo_dest(patch_t &patch, const Knobs &knobs, int i, uint8_t value) {
 // coarse 64: the offset from the key-tracked base, ±8 octaves (1024 raw an
 // octave) — the authority rule, full deflection reaches the rails.
 void set_cutoff(patch_t &patch, const Knobs &knobs) {
-    const int32_t v14   = (static_cast<int32_t>(knobs.cutoff_msb) << 7) | knobs.cutoff_lsb;
+    const int32_t v14 =
+            (static_cast<int32_t>(knobs.cutoff_msb) << 7) | knobs.cutoff_lsb;
     patch.filter.cutoff = static_cast<int16_t>(v14 - 8192);
 }
 
 void set_tune(osc_t &osc, uint8_t value, bool fine) {
-    int32_t semis = raw_to_semis(osc.tune);
-    int32_t rest  = osc.tune - semis_to_raw(semis);
+    int32_t semis         = raw_to_semis(osc.tune);
+    int32_t rest          = osc.tune - semis_to_raw(semis);
     (fine ? rest : semis) = fine ? fine_raw(value) : coarse_semis(value);
     osc.tune              = static_cast<int16_t>(semis_to_raw(semis) + rest);
 }
@@ -290,7 +301,8 @@ Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
 
     // ---- the filter ----
     case 29:
-        patch.filter.type = static_cast<uint8_t>((value * 3) >> 7); // LP, BP, HP
+        patch.filter.type =
+                static_cast<uint8_t>((value * 3) >> 7); // LP, BP, HP
         return Part::voices;
     case 30:
         patch.filter.cascade = value >= 64;
@@ -341,7 +353,8 @@ Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
         patch.mod_env_depth = static_cast<int16_t>(mod_depth_of(value));
         return Part::mod_env;
     case 108:
-        patch.mod_env_dest = static_cast<uint8_t>(value >> 5); // stored; cutoff is live
+        patch.mod_env_dest =
+                static_cast<uint8_t>(value >> 5); // stored; cutoff is live
         return Part::mod_env;
     case 87:
         patch.vel_mod_amt = value;
@@ -350,7 +363,8 @@ Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
     // ---- the LFOs ----
     case 76:
     case 109:
-        patch.lfo[cc == 76 ? 0 : 1].rate = static_cast<uint16_t>(lfo_rate_of(value));
+        patch.lfo[cc == 76 ? 0 : 1].rate =
+                static_cast<uint16_t>(lfo_rate_of(value));
         return cc == 76 ? Part::lfo1 : Part::lfo2;
     case 77:
     case 110:
@@ -376,11 +390,13 @@ Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
 
 Knobs knobs_of(const patch_t &patch) {
     Knobs knobs;
-    const int32_t v14 = std::clamp<int32_t>(patch.filter.cutoff + 8192, 0, 16383);
-    knobs.cutoff_msb  = static_cast<uint8_t>(v14 >> 7);
-    knobs.cutoff_lsb  = static_cast<uint8_t>(v14 & 0x7F);
+    const int32_t v14 =
+            std::clamp<int32_t>(patch.filter.cutoff + 8192, 0, 16383);
+    knobs.cutoff_msb = static_cast<uint8_t>(v14 >> 7);
+    knobs.cutoff_lsb = static_cast<uint8_t>(v14 & 0x7F);
     for (int i = 0; i < PATCH_NUM_LFO; ++i) {
-        knobs.lfo_depth[i] = lfo_knobs_of(patch.lfo[i].dest, patch.lfo[i].depth);
+        knobs.lfo_depth[i] =
+                lfo_knobs_of(patch.lfo[i].dest, patch.lfo[i].depth);
     }
     return knobs;
 }
@@ -390,10 +406,12 @@ namespace {
 // The RPN for the pitch-bend range: select 0/0, data entry, deselect.
 constexpr int rpn_messages = 5;
 
-void dump_lfo(const patch_t &patch, const Knobs &knobs, int i, Emit emit, void *user) {
-    const lfo_t &lfo        = patch.lfo[i];
-    const DepthKnobs knobs_i = knobs.lfo_depth[i].known ? knobs.lfo_depth[i]
-                                                        : lfo_knobs_of(lfo.dest, lfo.depth);
+void dump_lfo(const patch_t &patch, const Knobs &knobs, int i, Emit emit,
+              void *user) {
+    const lfo_t &lfo         = patch.lfo[i];
+    const DepthKnobs knobs_i = knobs.lfo_depth[i].known
+                                       ? knobs.lfo_depth[i]
+                                       : lfo_knobs_of(lfo.dest, lfo.depth);
     emit(i == 0 ? 113 : 111, four_way(lfo.shape), user);
     emit(i == 0 ? 114 : 112, four_way(lfo.dest), user);
     emit(i == 0 ? 76 : 109, nearest(lfo_rate_of, lfo.rate), user);

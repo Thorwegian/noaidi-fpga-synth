@@ -23,7 +23,8 @@ extern "C" {
 
 // A complete SysEx frame's payload (the bytes between F0 and F7), from the
 // source it came through (midi_source_t).
-void midi_sysex_received(const uint8_t *payload, uint8_t length, uint8_t source);
+void midi_sysex_received(const uint8_t *payload, uint8_t length,
+                         uint8_t source);
 
 #ifdef __cplusplus
 }

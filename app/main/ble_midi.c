@@ -102,7 +102,8 @@ static uint32_t s_rx_drops;
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the ble_rx task. Fan-out to consumers
 // happens through the event bus (non-blocking).
-static void ble_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+static void ble_sysex_to_synth(const uint8_t *payload, uint8_t length,
+                               void *user) {
     midi_sysex_received(payload, length, MIDI_SOURCE_BLE);
 }
 
@@ -131,13 +132,15 @@ static void process_ble_midi_pkt(const uint8_t *pkt, uint16_t n) {
         const uint8_t byte = pkt[idx];
         if (byte & 0x80) {
             if (after_timestamp) {
-                midi_parser_feed(&s_ble_parser, byte); // the status the timestamp stamps
+                midi_parser_feed(&s_ble_parser,
+                                 byte); // the status the timestamp stamps
                 after_timestamp = false;
             } else {
                 after_timestamp = true; // a timestamp: discarded
             }
         } else {
-            midi_parser_feed(&s_ble_parser, byte); // data, SysEx payload included
+            midi_parser_feed(&s_ble_parser,
+                             byte); // data, SysEx payload included
             after_timestamp = false;
         }
     }
@@ -379,7 +382,9 @@ static int ble_midi_gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == gatt_svr_chr_midi_io_handle) {
             s_notify_subscribed = event->subscribe.cur_notify;
-            ESP_LOGI(TAG, "notifications %s", s_notify_subscribed ? "on: parameter feedback flows" : "off");
+            ESP_LOGI(TAG, "notifications %s",
+                     s_notify_subscribed ? "on: parameter feedback flows"
+                                         : "off");
         }
         return 0;
 
@@ -409,7 +414,9 @@ bool ble_midi_notify(const uint8_t *packet, size_t length) {
     if (om == NULL) {
         return false; // no buffer now; the caller waits and tries again
     }
-    return ble_gatts_notify_custom(s_conn_handle, gatt_svr_chr_midi_io_handle, om) == 0;
+    return ble_gatts_notify_custom(s_conn_handle, gatt_svr_chr_midi_io_handle,
+                                   om)
+           == 0;
 }
 
 // ── Host lifecycle ─────────────────────────────────────────────────

@@ -41,11 +41,11 @@ struct Diagnostic {
 
 struct Program {
     Image image;
-    bool ok = false;
-    int cycles = 0;                          // the pass's cycles as scheduled
+    bool ok    = false;
+    int cycles = 0; // the pass's cycles as scheduled
     std::vector<Diagnostic> diagnostics;
-    std::map<std::string, int> symbols;      // every name and its value
-    std::vector<int> source_lines;           // each row's source line, 0 for a wait
+    std::map<std::string, int> symbols; // every name and its value
+    std::vector<int> source_lines;      // each row's source line, 0 for a wait
 };
 
 Program assemble(std::string_view source);

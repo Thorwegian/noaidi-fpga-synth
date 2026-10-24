@@ -28,8 +28,8 @@
 #                   tools/csp/programs (the firmware's copy of the program)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
-#   make format-check  list the sources that are not formatted — a
-#                   warning, not a failure
+#   make format-check  fail on any source that is not formatted; fw,
+#                   fw-test and csp-test run it first
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
@@ -56,7 +56,7 @@
 # image is current — restart the ESP32 (make fw-flash, or its reset
 # button) so the full image is rewritten. Board must match tree.
 
-# ESP-IDF is found by tools/esp_idf.sh (README.md "Build requirements"):
+# ESP-IDF is found by tools/esp_idf.sh (README.md "External dependencies"):
 # idf.py on the PATH if the shell is activated, otherwise the newest
 # activation script it knows of, sourced in a subshell of its own so nothing
 # reaches this environment; with none found it says so and stops. Agents run
@@ -117,7 +117,7 @@ tools-upgrade:
 tools-upgrade-pack:
 	scripts/tools.sh upgrade pack
 
-fw:
+fw: format-check
 	cd app && $(IDF) build
 
 fw-flash:
@@ -134,7 +134,7 @@ fw-console:
 	printf 'logfile $(CURDIR)/$(CONSOLE_LOG)\nlogfile flush 1\ndeflog on\n' > app/build/screenrc
 	screen -c app/build/screenrc $(ESPPORT) 115200
 
-fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
+fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	mkdir -p $(HOST_DIR)
 	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(addprefix $(CURDIR)/,$(FW_TEST_C))
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
@@ -153,25 +153,25 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(PARSER_TEST)
 
 # Our own C and C++ sources; the libraries in app/lib keep their style.
-# .clang-format is written for clang-format 21.1.8 (pip install
-# clang-format==21.1.8); other versions format some constructs
-# differently, so the check names the version it ran.
-CLANG_FORMAT ?= clang-format
-CLANG_FORMAT_VERSION = 21.1.8
+# .clang-format is written for clang-format 18, the clang-format-18 system
+# package (README.md, External dependencies); other major versions format
+# some constructs differently, so the check names the version it ran.
+CLANG_FORMAT ?= clang-format-18
+CLANG_FORMAT_VERSION = 18
 FORMAT_SOURCES = $(shell git ls-files '*.c' '*.h' '*.cpp' '*.hpp' | grep -v '^app/lib/')
 
 format:
 	$(CLANG_FORMAT) -i $(FORMAT_SOURCES)
 
 format-check:
-	@$(CLANG_FORMAT) --version | grep -q ' $(CLANG_FORMAT_VERSION)' \
-	    || echo "WARN clang-format is not $(CLANG_FORMAT_VERSION): results may differ"
+	@command -v $(CLANG_FORMAT) >/dev/null \
+	    || { echo "FAIL $(CLANG_FORMAT) not found: apt install clang-format-$(CLANG_FORMAT_VERSION)"; exit 1; }
+	@$(CLANG_FORMAT) --version | grep -q ' version $(CLANG_FORMAT_VERSION)\.' \
+	    || { echo "FAIL $(CLANG_FORMAT) is not clang-format $(CLANG_FORMAT_VERSION)"; exit 1; }
 	@unformatted=$$(for f in $(FORMAT_SOURCES); do \
 	    $(CLANG_FORMAT) --dry-run --Werror "$$f" 2>/dev/null || echo "$$f"; done); \
 	if [ -n "$$unformatted" ]; then \
-	    echo "WARN not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; \
-	else \
-	    echo "all sources formatted"; \
+	    echo "FAIL not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
 	fi
 
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
@@ -191,7 +191,7 @@ csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
 	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
 	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
 
-csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)

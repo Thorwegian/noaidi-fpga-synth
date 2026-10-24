@@ -12,17 +12,17 @@
 #include <string.h>
 
 // ── Scales ──────────────────────────────────────────────────────────
-#define RAW_PER_SEMI      (1024.0 / 12.0)   // pitch, cutoff: 1024 per octave
-#define DB_PER_OCTAVE     6.020599913279624 // 20·log10(2): a gain octave
-#define ENV_SPAN_DB       (10.0 * DB_PER_OCTAVE) // amp envelope: 10 octaves
-#define VOL_STEP_DB       (64.0 / 1024.0 * DB_PER_OCTAVE) // one UQ4.4 volume step
-#define VOL_UNITY         0xCF // volume raw value of 0 dB
-#define SAMPLE_RATE       96000.0
-#define LFO_PHASE_CYCLE   33554432.0       // 2^25: one LFO cycle
-#define C4_CUTOFF_PITCH   (5 * 1024 + 512) // note 60's key-tracked base
-#define CUTOFF_PITCH_MAX  0x2B20           // the gateware's FC_MAX clamp
-#define RESO_STABLE_MAX   5632             // Q 32, CC 71's top
-#define RESO_SELF_OSC     0x3FFF           // self-oscillation
+#define RAW_PER_SEMI     (1024.0 / 12.0)   // pitch, cutoff: 1024 per octave
+#define DB_PER_OCTAVE    6.020599913279624 // 20·log10(2): a gain octave
+#define ENV_SPAN_DB      (10.0 * DB_PER_OCTAVE) // amp envelope: 10 octaves
+#define VOL_STEP_DB      (64.0 / 1024.0 * DB_PER_OCTAVE) // one UQ4.4 volume step
+#define VOL_UNITY        0xCF // volume raw value of 0 dB
+#define SAMPLE_RATE      96000.0
+#define LFO_PHASE_CYCLE  33554432.0       // 2^25: one LFO cycle
+#define C4_CUTOFF_PITCH  (5 * 1024 + 512) // note 60's key-tracked base
+#define CUTOFF_PITCH_MAX 0x2B20           // the gateware's FC_MAX clamp
+#define RESO_STABLE_MAX  5632             // Q 32, CC 71's top
+#define RESO_SELF_OSC    0x3FFF           // self-oscillation
 
 static int32_t clamp_i(int32_t v, int32_t lo, int32_t hi) {
     return v < lo ? lo : v > hi ? hi : v;
@@ -408,13 +408,17 @@ static const char *const s_lfo_dests[] = {"pulse_width", "resonance", "pitch",
 
 // ── The table, in the order the loader applies it ───────────────────
 #define NUM(tbl, k, n, acc, conv)                                              \
-    {tbl,  k,         PF_NUMBER, n,          false,                            \
-     NULL, get_##acc, set_##acc, val_##conv, raw_##conv}
+    {                                                                          \
+        tbl, k, PF_NUMBER, n, false, NULL, get_##acc, set_##acc, val_##conv,   \
+                raw_##conv                                                     \
+    }
 #define INT(tbl, k, n, acc, conv)                                              \
-    {tbl,  k,         PF_NUMBER, n,          true,                             \
-     NULL, get_##acc, set_##acc, val_##conv, raw_##conv}
+    {                                                                          \
+        tbl, k, PF_NUMBER, n, true, NULL, get_##acc, set_##acc, val_##conv,    \
+                raw_##conv                                                     \
+    }
 #define NAME(tbl, k, n, acc, list)                                             \
-    {tbl, k, PF_NAME, n, false, list, get_##acc, set_##acc, NULL, NULL}
+    { tbl, k, PF_NAME, n, false, list, get_##acc, set_##acc, NULL, NULL }
 
 static const patch_field_t s_fields[] = {
         NAME("voice", "structure", 1, structure, s_structures),

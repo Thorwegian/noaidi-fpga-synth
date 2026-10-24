@@ -38,7 +38,7 @@ namespace {
 
 constexpr const char *tag = "voice_alloc";
 
-constexpr int queue_length = 64;
+constexpr int queue_length  = 64;
 constexpr int task_stack    = 6144;
 constexpr int task_priority = 5;
 
@@ -50,9 +50,9 @@ constexpr int task_priority = 5;
 // behind them while the event bus dropped what the queue could not take: a
 // stuck note on a patch change under held keys. A short queue, coalesced:
 // of a storm of changes only the last matters.
-constexpr int loader_stack          = 6144; // a patch_t and the TOML parse live on it
-constexpr int loader_priority       = 3;
-constexpr int program_queue_length  = 4;
+constexpr int loader_stack    = 6144; // a patch_t and the TOML parse live on it
+constexpr int loader_priority = 3;
+constexpr int program_queue_length = 4;
 
 constexpr int voice_count        = render::voice_count;
 constexpr int partials_per_voice = render::partials_per_voice;
@@ -75,13 +75,13 @@ constexpr int partials_per_voice = render::partials_per_voice;
 enum VoiceState { V_IDLE = 0, V_HELD, V_RELEASING };
 
 struct Voice {
-    VoiceState state     = V_IDLE;
-    uint8_t note         = 0;
-    uint8_t vel          = 0;     // stored so a live CC edit can re-render
-    uint8_t channel      = 0;     // stored for later multi-timbrality; omni
-    uint32_t alloc_seq   = 0;     // allocation order, for oldest-steal
-    int64_t released_at  = 0;     // esp_timer µs of the key-up, while RELEASING
-    bool sustained       = false; // key up, held by the sustain pedal
+    VoiceState state    = V_IDLE;
+    uint8_t note        = 0;
+    uint8_t vel         = 0;     // stored so a live CC edit can re-render
+    uint8_t channel     = 0;     // stored for later multi-timbrality; omni
+    uint32_t alloc_seq  = 0;     // allocation order, for oldest-steal
+    int64_t released_at = 0;     // esp_timer µs of the key-up, while RELEASING
+    bool sustained      = false; // key up, held by the sustain pedal
 };
 
 std::array<Voice, voice_count> s_voices;
@@ -200,21 +200,30 @@ cc_map::Knobs s_knobs;
 
 uint32_t dirty_of(cc_map::Part part) {
     switch (part) {
-    case cc_map::Part::voices:  return dirty_voices;
-    case cc_map::Part::amp_env: return dirty_amp_env;
-    case cc_map::Part::mod_env: return dirty_mod_env;
-    case cc_map::Part::cutoff:  return dirty_cutoff;
-    case cc_map::Part::lfo1:    return dirty_lfo1;
-    case cc_map::Part::lfo2:    return dirty_lfo2;
-    case cc_map::Part::volume:  return dirty_volume;
-    default:                    return 0;
+    case cc_map::Part::voices:
+        return dirty_voices;
+    case cc_map::Part::amp_env:
+        return dirty_amp_env;
+    case cc_map::Part::mod_env:
+        return dirty_mod_env;
+    case cc_map::Part::cutoff:
+        return dirty_cutoff;
+    case cc_map::Part::lfo1:
+        return dirty_lfo1;
+    case cc_map::Part::lfo2:
+        return dirty_lfo2;
+    case cc_map::Part::volume:
+        return dirty_volume;
+    default:
+        return 0;
     }
 }
 
 // Parameter feedback (#279): the patch as the CCs a surface shows, to every
 // output but the one `except` came through.
 void emit_cc(uint8_t cc, uint8_t value, void *user) {
-    const midi_message_t message = {.status = 0xB0, .len = 2, .data = {cc, value}};
+    const midi_message_t message = {
+            .status = 0xB0, .len = 2, .data = {cc, value}};
     midi_out_send(&message, *static_cast<uint8_t *>(user));
 }
 void sync_surfaces(uint8_t except) {
@@ -502,7 +511,8 @@ void flush_pending_edits(int64_t now) {
 // pitch is theirs, but the sound around it is the channel's.
 void apply_patch(const patch_t *p, int64_t now) {
     g_patch = *p;
-    s_knobs = cc_map::knobs_of(g_patch); // the patch's values stand; the knobs follow them
+    s_knobs = cc_map::knobs_of(
+            g_patch); // the patch's values stand; the knobs follow them
     s_pending |= dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
                  | dirty_lfo2 | dirty_volume | dirty_voices;
     s_last_flush = 0;
@@ -526,7 +536,8 @@ void handle_patch_request(const patch_request_t *r, int64_t now) {
 // but the bank is kept per channel so parts can follow.
 void (*s_patch_listener)(const char *name);
 
-bool patch_request(bool set, patch_t *p); // below: the hand-off to the voice task
+bool patch_request(bool set,
+                   patch_t *p); // below: the hand-off to the voice task
 
 // A Program Change as the loader task receives it: the channel's bank at the
 // moment of the change, and the program.
@@ -549,21 +560,28 @@ void patch_loader_task(void *) {
             // a storm of changes: only the last one is the sound wanted
         }
         char rel[256], path[320], err[160];
-        if (!banks_program_path(STORAGE_ROOT "/banks.toml", request.bank, request.program, rel, sizeof rel)) {
-            ESP_LOGW(tag, "bank %d program %d: no such program", request.bank, request.program);
+        if (!banks_program_path(STORAGE_ROOT "/banks.toml", request.bank,
+                                request.program, rel, sizeof rel)) {
+            ESP_LOGW(tag, "bank %d program %d: no such program", request.bank,
+                     request.program);
             continue;
         }
         snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
         patch_t p;
         if (!patch_file_read(path, &p, err, sizeof err)) {
-            ESP_LOGW(tag, "bank %d program %d: %s", request.bank, request.program, err);
+            ESP_LOGW(tag, "bank %d program %d: %s", request.bank,
+                     request.program, err);
             continue;
         }
         if (!patch_request(true, &p)) {
-            ESP_LOGW(tag, "bank %d program %d: the voice task did not take the patch", request.bank, request.program);
+            ESP_LOGW(
+                    tag,
+                    "bank %d program %d: the voice task did not take the patch",
+                    request.bank, request.program);
             continue;
         }
-        ESP_LOGI(tag, "bank %d program %d: %s", request.bank, request.program, rel);
+        ESP_LOGI(tag, "bank %d program %d: %s", request.bank, request.program,
+                 rel);
         if (s_patch_listener) {
             s_patch_listener(rel);
         }
@@ -572,9 +590,12 @@ void patch_loader_task(void *) {
 
 // On the voice task: post the change and go on to the next event.
 void program_change(uint8_t channel, uint8_t program) {
-    const ProgramRequest request{s_bank_msb[channel] * 128 + s_bank_lsb[channel], program};
-    if (s_program_queue == nullptr || xQueueSend(s_program_queue, &request, 0) != pdTRUE) {
-        ESP_LOGW(tag, "program %d: the loader's queue is full, change dropped", program);
+    const ProgramRequest request{
+            s_bank_msb[channel] * 128 + s_bank_lsb[channel], program};
+    if (s_program_queue == nullptr
+        || xQueueSend(s_program_queue, &request, 0) != pdTRUE) {
+        ESP_LOGW(tag, "program %d: the loader's queue is full, change dropped",
+                 program);
     }
 }
 
@@ -703,9 +724,11 @@ void voice_alloc_init(void) {
     s_last_flush = 0;
     flush_pending_edits(esp_timer_get_time());
 
-    s_program_queue = xQueueCreate(program_queue_length, sizeof(ProgramRequest));
+    s_program_queue =
+            xQueueCreate(program_queue_length, sizeof(ProgramRequest));
     if (s_program_queue == nullptr
-        || xTaskCreate(patch_loader_task, "patch_loader", loader_stack, nullptr, loader_priority, nullptr)
+        || xTaskCreate(patch_loader_task, "patch_loader", loader_stack, nullptr,
+                       loader_priority, nullptr)
                    != pdPASS) {
         ESP_LOGE(tag, "failed to create the patch loader");
     }

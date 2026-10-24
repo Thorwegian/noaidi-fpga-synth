@@ -48,14 +48,15 @@ void voice_alloc_sync(void);
 // allocator task; a torn field now and then is harmless for a diagnostic.
 #include <stdint.h>
 typedef struct {
-    uint8_t  state;     // 0 idle, 1 held, 2 releasing
-    uint8_t  note;      // MIDI note
-    uint8_t  vel;
-    uint8_t  sustained; // 1: key up, held by the sustain pedal
+    uint8_t state; // 0 idle, 1 held, 2 releasing
+    uint8_t note;  // MIDI note
+    uint8_t vel;
+    uint8_t sustained;  // 1: key up, held by the sustain pedal
     uint32_t alloc_seq; // allocation order
 } voice_diag_t;
-int voice_alloc_diag(voice_diag_t *out, int max); // fills out[0..n), returns n (the voice count)
-bool voice_alloc_sustain_pedal(void);             // the CC 64 state the firmware believes
+int voice_alloc_diag(voice_diag_t *out,
+                     int max); // fills out[0..n), returns n (the voice count)
+bool voice_alloc_sustain_pedal(void); // the CC 64 state the firmware believes
 
 #ifdef __cplusplus
 }

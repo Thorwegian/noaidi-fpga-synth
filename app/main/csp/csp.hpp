@@ -25,23 +25,28 @@ constexpr int sink_count     = 1024;
 constexpr int address_space  = 4096;  // what i and j can address
 constexpr int io_base        = 0x040; // read-only inputs
 constexpr int io_count       = 32;
-constexpr int direct_reach   = 1024;  // a direct operand: 0–1023
-constexpr int program_rows   = 2048;  // IMEM's rows: eight blocks of 2048 × 9 (#271)
-constexpr int program_limit  = program_rows - 1; // a program's most rows, END included: the last row is the fetch's park
-constexpr int rom_rows       = 1024;  // the decode ROM's block: 1024 × 18
-constexpr int op_count       = 256;   // the rows the word's 8-bit op reaches
-constexpr int write_window   = 48;    // queued writes a pass
-constexpr int cycles_per_pass = 3072; // four 96 kHz samples: a 24 kHz pass (#268)
-constexpr int samples_per_pass = 4;   //   (the firmware's rate conversions count them)
+constexpr int direct_reach   = 1024; // a direct operand: 0–1023
+constexpr int program_rows =
+        2048; // IMEM's rows: eight blocks of 2048 × 9 (#271)
+constexpr int program_limit =
+        program_rows
+        - 1; // a program's most rows, END included: the last row is the fetch's park
+constexpr int rom_rows     = 1024; // the decode ROM's block: 1024 × 18
+constexpr int op_count     = 256;  // the rows the word's 8-bit op reaches
+constexpr int write_window = 48;   // queued writes a pass
+constexpr int cycles_per_pass =
+        3072; // four 96 kHz samples: a 24 kHz pass (#268)
+constexpr int samples_per_pass =
+        4; //   (the firmware's rate conversions count them)
 constexpr int pass_cycle_limit = 3008; // instructions issue before this
-constexpr int vector_round   = 16;    // elements in flight in a vector loop
+constexpr int vector_round     = 16;   // elements in flight in a vector loop
 
 // The decode ROM's rows for the vector loops, the same in every program: the
 // chip's front end knows a vector loop by its op field, one cycle after the
 // row is captured and before the ROM has decoded it (rtl/csp/csp_core.sv).
 constexpr uint16_t op_vector_loop_i = 1;
 constexpr uint16_t op_vector_loop_j = 2;
-constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
+constexpr int rom_reserved          = 3; // row 0 (NOP) and the two
 
 // ---- the pipeline's timing (rtl/csp/csp_core.sv) ---------------------------
 //
@@ -57,9 +62,11 @@ constexpr int      rom_reserved     = 3;   // row 0 (NOP) and the two
 // loop one cycle late), and costs nothing to leave.
 
 constexpr int result_latency = 9;
-constexpr int state_latency  = 5;   // the flags for a SEL, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
-constexpr int index_latency  = 5;   // the IDX sum is registered into E1b (#238); the assembler and the model follow this one constant
-constexpr int jump_penalty   = 4;
+constexpr int state_latency =
+        5; // the flags for a SEL, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
+constexpr int index_latency =
+        5; // the IDX sum is registered into E1b (#238); the assembler and the model follow this one constant
+constexpr int jump_penalty = 4;
 
 // ---- number formats -------------------------------------------------------
 //
@@ -100,28 +107,28 @@ constexpr int64_t smallest(int bits) {
 
 enum class Op : uint8_t {
     nop,
-    mac,     // R = A + X × Y, saturating
-    macw,    // R = A + X × Y, wrapping
-    add3,    // R = A + X + Y
-    cmp,     // R = X − Y, the flags set
-    abs,     // R = |X|
-    min,     // R = X < Y ? X : Y
-    max,     // R = X > Y ? X : Y
-    sel,     // R = cond clear ? X : Y
-    andxor,  // R = (X & Y) ^ A
-    shift,   // R = A × 2^Y
-    loop,    // a scalar loop on i or j
-    vloop,   // a vector loop on i or j
-    idx,     // i or j = X + Y
-    end,     // the program's end: the builder's last row, where the pass's instructions stop (#271)
+    mac,    // R = A + X × Y, saturating
+    macw,   // R = A + X × Y, wrapping
+    add3,   // R = A + X + Y
+    cmp,    // R = X − Y, the flags set
+    abs,    // R = |X|
+    min,    // R = X < Y ? X : Y
+    max,    // R = X > Y ? X : Y
+    sel,    // R = cond clear ? X : Y
+    andxor, // R = (X & Y) ^ A
+    shift,  // R = A × 2^Y
+    loop,   // a scalar loop on i or j
+    vloop,  // a vector loop on i or j
+    idx,    // i or j = X + Y
+    end, // the program's end: the builder's last row, where the pass's instructions stop (#271)
 };
 
 std::string_view mnemonic(Op op);
 
 // Which value is the A operand of an arithmetic operation.
 enum class ASource : uint8_t {
-    zero        = 0,
-    result      = 1, // A = R: update in place
+    zero   = 0,
+    result = 1, // A = R: update in place
     // 2 was accumulator, dropped with ACC (#238): writes go straight to a register
 };
 
@@ -144,18 +151,33 @@ enum class IndexRegister : uint8_t { i = 0, j = 1 };
 // register's; mode 3 is the word's immediate in x or y, and "no result" in r.
 
 struct Operand {
-    enum class Mode : uint8_t { direct = 0, i = 1, j = 2, immediate = 3 } mode = Mode::direct;
+    enum class Mode : uint8_t {
+        direct    = 0,
+        i         = 1,
+        j         = 2,
+        immediate = 3
+    } mode    = Mode::direct;
     int value = 0; // the address, the offset, or nothing
 
-    static Operand direct(int address) { return {Mode::direct, address}; }
+    static Operand direct(int address) {
+        return {Mode::direct, address};
+    }
     static Operand indexed(IndexRegister index, int offset) {
         return {index == IndexRegister::i ? Mode::i : Mode::j, offset};
     }
-    static Operand immediate() { return {Mode::immediate, 0}; }
-    static Operand none() { return {Mode::immediate, 0}; }
+    static Operand immediate() {
+        return {Mode::immediate, 0};
+    }
+    static Operand none() {
+        return {Mode::immediate, 0};
+    }
 
-    bool is_indexed() const { return mode == Mode::i || mode == Mode::j; }
-    IndexRegister index() const { return mode == Mode::j ? IndexRegister::j : IndexRegister::i; }
+    bool is_indexed() const {
+        return mode == Mode::i || mode == Mode::j;
+    }
+    IndexRegister index() const {
+        return mode == Mode::j ? IndexRegister::j : IndexRegister::i;
+    }
 
     uint16_t encode() const;
     static Operand decode(uint16_t field);
@@ -173,15 +195,15 @@ enum class Unit : uint8_t {
     shift        = 3,
     loop         = 4,
     // 5 was skip, dropped (#238)
-    index        = 6,
+    index = 6,
 };
 
 enum class Writes : uint8_t {
-    nothing     = 0,
-    word        = 1, // a register (or a sink word, by the address)
-    pair        = 2, // a wide register
-    index_i     = 3,
-    index_j     = 4,
+    nothing = 0,
+    word    = 1, // a register (or a sink word, by the address)
+    pair    = 2, // a wide register
+    index_i = 3,
+    index_j = 4,
     // 5 was accumulator, dropped with ACC (#238)
 };
 
@@ -189,28 +211,38 @@ enum class ConditionKind : uint8_t {
     none   = 0,
     select = 1, // SEL chooses by cond
     // 2 was skip, dropped (#238)
-    flags  = 3, // the result sets the flags
+    flags = 3, // the result sets the flags
 };
 
 // The multiply-add unit's sub-operations.
-enum class MultiplyAddOp : uint8_t { mac = 0, add3 = 2, cmp = 3, abs = 4 };   // 1 was INTERP, dropped (#238)
+enum class MultiplyAddOp : uint8_t {
+    mac  = 0,
+    add3 = 2,
+    cmp  = 3,
+    abs  = 4
+}; // 1 was INTERP, dropped (#238)
 // The logic unit's.
 enum class LogicOp : uint8_t { min = 0, max = 1, sel = 2, andxor = 3 };
 // The loop unit's.
-enum class LoopOp : uint8_t { scalar_i = 0, scalar_j = 1, vector_i = 2, vector_j = 3 };
+enum class LoopOp : uint8_t {
+    scalar_i = 0,
+    scalar_j = 1,
+    vector_i = 2,
+    vector_j = 3
+};
 // Unit none's sub-operation that is the program's end (NOP is 0): csp_pkg::SUB_END.
 constexpr uint8_t end_sub_operation = 1;
 
 struct Control {
-    Unit unit             = Unit::none;    // [17:15]
-    Writes writes         = Writes::nothing; // [14:12]
-    ASource a_source      = ASource::zero; // [11:10]
-    bool reads_x          = false;         // [9]  X is read (from DMEM, or the immediate)
-    bool y_wide           = false;         // [8]
-    ConditionKind cond    = ConditionKind::none; // [7:6]
-    bool reads_y          = false;         // [5]  Y is read
-    bool wrap             = false;         // [3]
-    uint8_t sub           = 0;             // [2:0]
+    Unit unit          = Unit::none;      // [17:15]
+    Writes writes      = Writes::nothing; // [14:12]
+    ASource a_source   = ASource::zero;   // [11:10]
+    bool reads_x       = false; // [9]  X is read (from DMEM, or the immediate)
+    bool y_wide        = false; // [8]
+    ConditionKind cond = ConditionKind::none; // [7:6]
+    bool reads_y       = false;               // [5]  Y is read
+    bool wrap          = false;               // [3]
+    uint8_t sub        = 0;                   // [2:0]
 
     uint32_t encode() const;
     static Control decode(uint32_t row);
@@ -235,10 +267,10 @@ struct Row {
 };
 
 struct Word {
-    uint16_t op    = 0; // the ROM row, 8 bits
-    uint8_t cond   = 0; // 4 bits
+    uint16_t op  = 0; // the ROM row, 8 bits
+    uint8_t cond = 0; // 4 bits
     Operand r, x, y;
-    uint32_t imm   = 0; // 24 bits
+    uint32_t imm = 0; // 24 bits
 
     Row encode() const;
     static Word decode(const Row &row);
@@ -248,15 +280,15 @@ struct Word {
 // A loop's numbers: its body's last row in imm, its count in x's ten bits
 // and its stride in y's (docs/csp2_isa.md section 5).
 constexpr int loop_count_max  = 1023;
-constexpr int loop_stride_max = 511;   // signed, ten bits
+constexpr int loop_stride_max = 511; // signed, ten bits
 
 // ---- an image: the program and its decode ROM ------------------------------
 
 struct Image {
-    std::array<Row, program_rows> rows{};   // the program, NOPs past its end
-    std::array<uint32_t, rom_rows> rom{};   // the control words; row 0 is NOP
-    int length   = 0;                       // rows the program uses
-    int rom_used = 1;                       // rows the ROM uses
+    std::array<Row, program_rows> rows{}; // the program, NOPs past its end
+    std::array<uint32_t, rom_rows> rom{}; // the control words; row 0 is NOP
+    int length   = 0;                     // rows the program uses
+    int rom_used = 1;                     // rows the ROM uses
 };
 
 } // namespace csp

@@ -56,11 +56,13 @@ typedef struct {
     midi_parser_t parser;
     uint8_t hexdump_budget; // first-bytes hex log budget (bring-up aid)
     bool ready;             // UART configured, RX task not yet started
-    bool sensing;           // Active Sensing seen on this port: silence now means a broken link
+    bool sensing; // Active Sensing seen on this port: silence now means a broken link
 } midi_port_t;
 
-static midi_port_t s_din_port   = {.uart = UART_NUM_1, .name = "midi_in", .source = MIDI_SOURCE_DIN};
-static midi_port_t s_panel_port = {.uart = UART_NUM_0, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
+static midi_port_t s_din_port = {
+        .uart = UART_NUM_1, .name = "midi_in", .source = MIDI_SOURCE_DIN};
+static midi_port_t s_panel_port = {
+        .uart = UART_NUM_0, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
@@ -81,9 +83,11 @@ static void midi_msg_to_bus(const midi_message_t *m, void *user) {
 
 // A complete SysEx frame: the synth's own ops (midi_sysex.h), with the port
 // as the source.
-static void midi_sysex_to_synth(const uint8_t *payload, uint8_t length, void *user) {
+static void midi_sysex_to_synth(const uint8_t *payload, uint8_t length,
+                                void *user) {
     const midi_port_t *port = (const midi_port_t *) user;
-    midi_sysex_received(payload, length, port != NULL ? port->source : MIDI_SOURCE_INTERNAL);
+    midi_sysex_received(payload, length,
+                        port != NULL ? port->source : MIDI_SOURCE_INTERNAL);
 }
 
 static void midi_in_task(void *arg) {
@@ -104,7 +108,8 @@ static void midi_in_task(void *arg) {
                 ESP_LOGI(p->name, "rx byte %02X", byte);
             }
             if (byte == 0xFE) {
-                p->sensing = true; // from here on, this port's silence is a broken link
+                p->sensing =
+                        true; // from here on, this port's silence is a broken link
             }
             midi_parser_feed(&p->parser, byte);
             idle_ms     = 0;
@@ -126,11 +131,14 @@ static void midi_in_task(void *arg) {
                 // every note it holds comes off through the same path as a
                 // player's CC 123, its running status is cancelled, and
                 // silence is harmless again until it sends FE once more.
-                const midi_message_t notes_off = {.status = 0xB0, .len = 2, .data = {123, 0}};
+                const midi_message_t notes_off = {
+                        .status = 0xB0, .len = 2, .data = {123, 0}};
                 midi_msg_to_bus(&notes_off, NULL);
                 midi_parser_reset(&p->parser);
                 p->sensing = false;
-                ESP_LOGW(p->name, "Active Sensing lost: %d ms without a byte, notes off", MIDI_SOURCE_TIMEOUT_MS);
+                ESP_LOGW(p->name,
+                         "Active Sensing lost: %d ms without a byte, notes off",
+                         MIDI_SOURCE_TIMEOUT_MS);
             } else if (had_traffic) {
                 // A source that never sent FE has simply stopped; nothing is
                 // assumed and nothing is reset beyond the partial message

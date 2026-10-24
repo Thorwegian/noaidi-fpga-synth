@@ -163,8 +163,9 @@ int32_t note_word(uint8_t note) {
 void envelope(const adsr_t &env, int sustain, int attack, int decay,
               int release, Writes &writes) {
     auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
-        const int base   = channel_register(cp::envelopes + segment);
-        const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code));
+        const int base = channel_register(cp::envelopes + segment);
+        const uint32_t k =
+                patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code));
         wide(writes, base + cp::target, target22 << 10);
         wide(writes, base + cp::rate, csp::envelope_rate(k));
     };
@@ -284,11 +285,13 @@ void setup(Writes &writes) {
     // ran its fill, shaped by the LFOs, into channel 0's duty and resonance
     // sinks). A register the program reads is in the image, and the boot's
     // verify covers it.
-    static_assert(voice_count == cp::voice_count, "the voices the program runs");
+    static_assert(voice_count == cp::voice_count,
+                  "the voices the program runs");
     for (int channel = 0; channel < cp::channel_count; ++channel) {
         const int record = cp::channels + channel * cp::channel_size;
         put(writes, record + cp::lfo1, cp::lfos);
-        put(writes, record + cp::lfo2, cp::lfos + cp::lfos_a_half * cp::lfo_size);
+        put(writes, record + cp::lfo2,
+            cp::lfos + cp::lfos_a_half * cp::lfo_size);
         put(writes, record + cp::sink_block,
             cp::channel_sinks + channel * cp::channel_sink_size);
         for (const int field :
@@ -330,8 +333,8 @@ void amp_envelope(const patch_t &patch, Writes &writes) {
 void mod_envelope(const patch_t &patch, Writes &writes) {
     // linear in octaves of cutoff: the sustain is a fraction of the depth
     envelope(patch.env[1],
-             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12,
-             mod_attack, mod_decay, mod_release, writes);
+             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, mod_attack,
+             mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
     // program takes MOD_AMOUNT as a quarter of the depth and multiplies by
     // four after the envelope (voice.s: a depth reaches 32 octaves, a word
@@ -339,7 +342,8 @@ void mod_envelope(const patch_t &patch, Writes &writes) {
     // cutoff pinned at the top and the pad an octave brighter than the old
     // engine's (issue #222: the centroid 3960 Hz against the benchmark's
     // 1561 on a C5, 729 with the word zeroed).
-    put(writes, channel_register(cp::mod_amount), octaves(patch.mod_env_depth / 4));
+    put(writes, channel_register(cp::mod_amount),
+        octaves(patch.mod_env_depth / 4));
 }
 
 void cutoff(const patch_t &patch, const Controllers &controllers,
@@ -363,9 +367,9 @@ void pitch_bend(const patch_t &patch, const Controllers &controllers,
 }
 
 void lfo(const patch_t &patch, int i, Writes &writes) {
-    const lfo_t &l    = patch.lfo[i];
-    const int set     = cp::lfo_sets + i * cp::set_size;
-    const int shape   = l.shape & 3;
+    const lfo_t &l  = patch.lfo[i];
+    const int set   = cp::lfo_sets + i * cp::set_size;
+    const int shape = l.shape & 3;
 
     // The half's pool, and where in it a record of this shape sits. The
     // program (lfo.s) walks the half from BASE in shape order — saws, then
@@ -374,16 +378,18 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
     // (counts.s): the saw at the pool's start, the square after the saws, and
     // so on. The channel reads the record of the patch's shape, below.
     const int base   = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
-    const int offset = shape == WAVE_SAW   ? 0
-                     : shape == WAVE_PULSE ? cp::saws_a_half
-                     : shape == WAVE_TRI   ? cp::saws_a_half + cp::squares_a_half
-                                           : cp::saws_a_half + cp::squares_a_half
-                                                 + cp::triangles_a_half;
+    const int offset = shape == WAVE_SAW     ? 0
+                       : shape == WAVE_PULSE ? cp::saws_a_half
+                       : shape == WAVE_TRI
+                               ? cp::saws_a_half + cp::squares_a_half
+                               : cp::saws_a_half + cp::squares_a_half
+                                         + cp::triangles_a_half;
     const int record = base + offset * cp::lfo_size;
 
     // the record: the half's LFO of this shape; the program's output is
     // ±depth, which the channel scales by the destination's depth
-    wide(writes, record + cp::phase_step, csp::lfo_rate(l.rate, 1)); // every pass (#268)
+    wide(writes, record + cp::phase_step,
+         csp::lfo_rate(l.rate, 1)); // every pass (#268)
     put(writes, record + cp::depth, word_one);
     put(writes, record + cp::neg_depth, -word_one);
     put(writes, record + cp::gain,

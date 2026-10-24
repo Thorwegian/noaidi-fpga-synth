@@ -189,19 +189,24 @@ void test_notes() {
     // The mod env's velocity sensitivity is deeper (#244): CC 127 scales by
     // twice the velocity, CC 64 by the velocity once, CC 0 not at all.
     const double v_soft = 64.0 / 127.0;
-    check(std::fabs(full_state.at(base + cp::velocity_m) / 16384.0 - 2.0) < 1e-3,
+    check(std::fabs(full_state.at(base + cp::velocity_m) / 16384.0 - 2.0)
+                  < 1e-3,
           "mod env, CC 127, full velocity: twice");
-    check(std::fabs(soft_state.at(base + cp::velocity_m) / 16384.0 - 2.0 * v_soft) < 1e-3,
+    check(std::fabs(soft_state.at(base + cp::velocity_m) / 16384.0
+                    - 2.0 * v_soft)
+                  < 1e-3,
           "mod env, CC 127, soft note: twice the velocity");
     patch.vel_mod_amt = 64;
     render::Writes mid;
     render::note_on(patch, 0, 60, 64, mid);
-    check(std::fabs(state_of(mid).at(base + cp::velocity_m) / 16384.0 - v_soft) < 0.01,
+    check(std::fabs(state_of(mid).at(base + cp::velocity_m) / 16384.0 - v_soft)
+                  < 0.01,
           "mod env, CC 64: the velocity once");
     patch.vel_mod_amt = 0;
     render::Writes modflat;
     render::note_on(patch, 0, 60, 64, modflat);
-    check(std::fabs(state_of(modflat).at(base + cp::velocity_m) / 16384.0 - 1.0) < 1e-3,
+    check(std::fabs(state_of(modflat).at(base + cp::velocity_m) / 16384.0 - 1.0)
+                  < 1e-3,
           "mod env, CC 0: full regardless of velocity");
     patch.vel_amp_amt = 0;
     render::Writes off;
@@ -278,9 +283,9 @@ void test_lfo() {
     // does; the square and sine carry the depth itself, not a gain.
     const int channel_lfo[2] = {cp::lfo1, cp::lfo2};
     struct Case {
-        uint8_t     shape;
-        int         offset; // records into the half
-        int32_t     gain;
+        uint8_t shape;
+        int offset; // records into the half
+        int32_t gain;
         const char *name;
     };
     const Case cases[] = {
@@ -303,8 +308,8 @@ void test_lfo() {
             patch.lfo[i].dest  = LFO_DEST_RESONANCE;
             render::Writes writes;
             render::lfo(patch, i, writes);
-            const auto state  = state_of(writes);
-            const int  record = base + shape.offset * cp::lfo_size;
+            const auto state = state_of(writes);
+            const int record = base + shape.offset * cp::lfo_size;
             check(state.at(set + cp::base) == base,
                   "the set points at the half's first record");
             check(state.at(channel + channel_lfo[i]) == record,

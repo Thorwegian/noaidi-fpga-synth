@@ -49,19 +49,22 @@
 namespace {
 
 int usage() {
-    std::fputs("usage: csp asm program.s...\n"
-               "       csp header program.s... [-n name]\n"
-               "       csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]... [-d]\n"
-               "       csp script program.s... [-f seed] [-w address=raw]...\n"
-               "       csp match program.s... -c chip.txt [-f seed] [-w address=raw]...\n"
-               "       (several program files are joined into one, in order)\n",
-               stderr);
+    std::fputs(
+            "usage: csp asm program.s...\n"
+            "       csp header program.s... [-n name]\n"
+            "       csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]... [-d]\n"
+            "       csp script program.s... [-f seed] [-w address=raw]...\n"
+            "       csp match program.s... -c chip.txt [-f seed] [-w address=raw]...\n"
+            "       (several program files are joined into one, in order)\n",
+            stderr);
     return 2;
 }
 
 bool read_file(const std::string &path, std::string &text) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) return false;
+    if (!in) {
+        return false;
+    }
     std::ostringstream contents;
     contents << in.rdbuf();
     text = contents.str();
@@ -80,7 +83,9 @@ struct Sources {
     std::string where(int line) const {
         const Part *part = &parts.front();
         for (const Part &candidate : parts) {
-            if (candidate.first_line <= line) part = &candidate;
+            if (candidate.first_line <= line) {
+                part = &candidate;
+            }
         }
         return part->path + ":" + std::to_string(line - part->first_line + 1);
     }
@@ -88,8 +93,8 @@ struct Sources {
 
 bool report(const Sources &sources, const csp::Program &program) {
     for (const csp::Diagnostic &d : program.diagnostics) {
-        std::fprintf(stderr, "%s: %s: %s\n", sources.where(d.line).c_str(), d.error ? "error" : "warning",
-                     d.message.c_str());
+        std::fprintf(stderr, "%s: %s: %s\n", sources.where(d.line).c_str(),
+                     d.error ? "error" : "warning", d.message.c_str());
     }
     return program.ok;
 }
@@ -97,57 +102,78 @@ bool report(const Sources &sources, const csp::Program &program) {
 int assemble_command(const csp::Program &program) {
     const csp::Image &image = program.image;
     for (int row = 0; row < image.length; ++row) {
-        const csp::Word word = csp::Word::decode(image.rows[static_cast<size_t>(row)]);
-        const int line       = program.source_lines[static_cast<size_t>(row)];
-        std::printf("%04x  %09llx %09llx  %-6s", row, static_cast<unsigned long long>(image.rows[static_cast<size_t>(row)].high),
-                    static_cast<unsigned long long>(image.rows[static_cast<size_t>(row)].low),
+        const csp::Word word =
+                csp::Word::decode(image.rows[static_cast<size_t>(row)]);
+        const int line = program.source_lines[static_cast<size_t>(row)];
+        std::printf("%04x  %09llx %09llx  %-6s", row,
+                    static_cast<unsigned long long>(
+                            image.rows[static_cast<size_t>(row)].high),
+                    static_cast<unsigned long long>(
+                            image.rows[static_cast<size_t>(row)].low),
                     line > 0 ? "" : "wait");
-        if (line > 0) std::printf(" ; line %d", line);
+        if (line > 0) {
+            std::printf(" ; line %d", line);
+        }
         std::printf("\n");
         (void) word;
     }
     for (int row = 0; row < image.rom_used; ++row) {
-        const csp::Control control = csp::Control::decode(image.rom[static_cast<size_t>(row)]);
-        std::printf("rom %02x = %05x  unit %d writes %d a %d%s%s%s cond %d%s sub %d\n", row,
-                    image.rom[static_cast<size_t>(row)], static_cast<int>(control.unit),
-                    static_cast<int>(control.writes), static_cast<int>(control.a_source),
-                    control.reads_x ? " x" : "", control.reads_y ? " y" : "", control.y_wide ? " wide-y" : "",
-                    static_cast<int>(control.cond), control.wrap ? " wrap" : "", control.sub);
+        const csp::Control control =
+                csp::Control::decode(image.rom[static_cast<size_t>(row)]);
+        std::printf(
+                "rom %02x = %05x  unit %d writes %d a %d%s%s%s cond %d%s sub %d\n",
+                row, image.rom[static_cast<size_t>(row)],
+                static_cast<int>(control.unit),
+                static_cast<int>(control.writes),
+                static_cast<int>(control.a_source), control.reads_x ? " x" : "",
+                control.reads_y ? " y" : "", control.y_wide ? " wide-y" : "",
+                static_cast<int>(control.cond), control.wrap ? " wrap" : "",
+                control.sub);
     }
-    std::printf("%d rows, %d decode rows, %d cycles a pass\n", image.length, image.rom_used, program.cycles);
+    std::printf("%d rows, %d decode rows, %d cycles a pass\n", image.length,
+                image.rom_used, program.cycles);
     return 0;
 }
 
 // A symbol as a C++ constant name: NAME_LIKE_THIS → name_like_this.
 std::string constant_name(const std::string &symbol) {
     std::string name = symbol;
-    std::ranges::transform(name, name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::ranges::transform(name, name.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return name;
 }
 
 // The header the firmware loads the program from. The format is the
 // repository's (Java Code Conventions): `make format` leaves it be.
-int header_command(const csp::Program &program, const std::vector<std::string> &files, const std::string &name_space) {
+int header_command(const csp::Program &program,
+                   const std::vector<std::string> &files,
+                   const std::string &name_space) {
     const csp::Image &image = program.image;
     const bool control      = name_space == "control";
-    std::printf("// %s_program.hpp — the CSP's %s, as machine code\n"
-                "//\n"
-                "// Copyright © 2026 Thor H. Linløkken <thj@thj.no>\n"
-                "// License: CERN-OHL-S v2\n"
-                "//\n"
-                "// Generated by `csp header` (make csp-header) from, in this order:\n",
-                control ? "control" : name_space.c_str(), control ? "control program" : "boot self-test");
-    for (const std::string &file : files) std::printf("//   %s\n", file.c_str());
-    std::printf("// Do not edit: make csp-test checks that it is current.\n"
-                "// The names are those of tools/csp/programs/map.s, in lower case;\n"
-                "// the labels of the code are left out.\n\n"
-                "#pragma once\n\n"
-                "// clang-format off\n"
-                "#include <array>\n"
-                "#include <cstdint>\n\n"
-                "#include \"csp.hpp\"\n\n"
-                "namespace csp::%s {\n\n",
-                name_space.c_str());
+    std::printf(
+            "// %s_program.hpp — the CSP's %s, as machine code\n"
+            "//\n"
+            "// Copyright © 2026 Thor H. Linløkken <thj@thj.no>\n"
+            "// License: CERN-OHL-S v2\n"
+            "//\n"
+            "// Generated by `csp header` (make csp-header) from, in this order:\n",
+            control ? "control" : name_space.c_str(),
+            control ? "control program" : "boot self-test");
+    for (const std::string &file : files) {
+        std::printf("//   %s\n", file.c_str());
+    }
+    std::printf(
+            "// Do not edit: make csp-test checks that it is current.\n"
+            "// The names are those of tools/csp/programs/map.s, in lower case;\n"
+            "// the labels of the code are left out.\n\n"
+            "#pragma once\n\n"
+            "// clang-format off\n"
+            "#include <array>\n"
+            "#include <cstdint>\n\n"
+            "#include \"csp.hpp\"\n\n"
+            "namespace csp::%s {\n\n",
+            name_space.c_str());
     std::printf("// The pass's cycles, as scheduled.\n"
                 "inline constexpr int cycles = %d;\n\n"
                 "// The rows: 72 bits each, bits 71:36 then 35:0.\n"
@@ -155,7 +181,8 @@ int header_command(const csp::Program &program, const std::vector<std::string> &
                 program.cycles, image.length);
     for (int row = 0; row < image.length; ++row) {
         const csp::Row &bits = image.rows[static_cast<size_t>(row)];
-        std::printf("    {0x%09llxull, 0x%09llxull},\n", static_cast<unsigned long long>(bits.high),
+        std::printf("    {0x%09llxull, 0x%09llxull},\n",
+                    static_cast<unsigned long long>(bits.high),
                     static_cast<unsigned long long>(bits.low));
     }
     std::printf("}};\n\n"
@@ -171,8 +198,13 @@ int header_command(const csp::Program &program, const std::vector<std::string> &
     }
     std::printf("};\n\n// Registers, blocks and fields.\n");
     for (const auto &[name, value] : program.symbols) {
-        const bool label = std::ranges::any_of(name, [](unsigned char c) { return std::islower(c); });
-        if (!label) std::printf("inline constexpr int %s = %d;\n", constant_name(name).c_str(), value);
+        const bool label = std::ranges::any_of(name, [](unsigned char c) {
+            return std::islower(c);
+        });
+        if (!label) {
+            std::printf("inline constexpr int %s = %d;\n",
+                        constant_name(name).c_str(), value);
+        }
     }
     std::printf("\n} // namespace csp::%s\n"
                 "// clang-format on\n",
@@ -186,7 +218,8 @@ struct ScriptedWrite {
     int before_pass;
 };
 
-int simulate_command(const csp::Program &program, int passes, const std::vector<std::string> &watch,
+int simulate_command(const csp::Program &program, int passes,
+                     const std::vector<std::string> &watch,
                      const std::vector<ScriptedWrite> &writes, bool dump) {
     csp::Processor processor;
     processor.load(program.image);
@@ -202,11 +235,14 @@ int simulate_command(const csp::Program &program, int passes, const std::vector<
                 queued = true;
             }
         }
-        if (queued) processor.swap();
+        if (queued) {
+            processor.swap();
+        }
         const csp::PassReport report = processor.pass();
         std::printf("pass %d: %d cycles", pass, report.cycles);
         for (const std::string &name : watch) {
-            std::printf("  %s=%d", name.c_str(), processor.read(program.symbols.at(name)));
+            std::printf("  %s=%d", name.c_str(),
+                        processor.read(program.symbols.at(name)));
         }
         std::printf("\n");
         for (const std::string &error : report.errors) {
@@ -214,12 +250,16 @@ int simulate_command(const csp::Program &program, int passes, const std::vector<
             status = 1;
         }
         for (int stale : report.stale_sinks) {
-            std::printf("  error: sink 0x%03x not written this pass\n", csp::sink_base + stale);
+            std::printf("  error: sink 0x%03x not written this pass\n",
+                        csp::sink_base + stale);
             status = 1;
         }
     }
     if (dump) {
-        for (int address = 0; address < csp::register_count; ++address) std::printf("%03x %05x\n", address, processor.read(address) & 0x3FFFF);
+        for (int address = 0; address < csp::register_count; ++address) {
+            std::printf("%03x %05x\n", address,
+                        processor.read(address) & 0x3FFFF);
+        }
     }
     return status;
 }
@@ -232,9 +272,13 @@ struct RawWrite {
 
 bool parse_write(const std::string &text, RawWrite &write) {
     const size_t equals = text.find('=');
-    if (equals == std::string::npos) return false;
-    write.address = static_cast<int>(std::strtol(text.substr(0, equals).c_str(), nullptr, 0));
-    write.raw     = static_cast<int32_t>(std::strtol(text.substr(equals + 1).c_str(), nullptr, 0));
+    if (equals == std::string::npos) {
+        return false;
+    }
+    write.address = static_cast<int>(
+            std::strtol(text.substr(0, equals).c_str(), nullptr, 0));
+    write.raw = static_cast<int32_t>(
+            std::strtol(text.substr(equals + 1).c_str(), nullptr, 0));
     return true;
 }
 
@@ -242,28 +286,40 @@ bool parse_write(const std::string &text, RawWrite &write) {
 constexpr int no_fill = -1;
 
 int32_t fill_value(int address, int seed) {
-    return static_cast<int32_t>(csp::sign_extend((static_cast<int64_t>(address) * 37 + seed) & 0x1FFFF, csp::word_bits));
+    return static_cast<int32_t>(csp::sign_extend(
+            (static_cast<int64_t>(address) * 37 + seed) & 0x1FFFF,
+            csp::word_bits));
 }
 
 // `csp script`: the console commands that put the program and its registers on the chip.
-int script_command(const csp::Program &program, int fill, const std::vector<RawWrite> &writes) {
+int script_command(const csp::Program &program, int fill,
+                   const std::vector<RawWrite> &writes) {
     const csp::Image &image = program.image;
     std::printf("csp-hold\n");
-    if (fill != no_fill) std::printf("csp-burst 1 %d %d\n", csp::register_count - 1, fill);
-    for (int row = 0; row < image.rom_used; ++row) std::printf("csp-rom %d %05x\n", row, image.rom[static_cast<size_t>(row)]);
+    if (fill != no_fill) {
+        std::printf("csp-burst 1 %d %d\n", csp::register_count - 1, fill);
+    }
+    for (int row = 0; row < image.rom_used; ++row) {
+        std::printf("csp-rom %d %05x\n", row,
+                    image.rom[static_cast<size_t>(row)]);
+    }
     for (int row = 0; row < image.length; ++row) {
         const csp::Row &bits = image.rows[static_cast<size_t>(row)];
-        std::printf("csp-row %d %09llx %09llx\n", row, static_cast<unsigned long long>(bits.high),
+        std::printf("csp-row %d %09llx %09llx\n", row,
+                    static_cast<unsigned long long>(bits.high),
                     static_cast<unsigned long long>(bits.low));
     }
-    for (const RawWrite &write : writes) std::printf("csp-const %d %d\n", write.address, write.raw);
+    for (const RawWrite &write : writes) {
+        std::printf("csp-const %d %d\n", write.address, write.raw);
+    }
     std::printf("csp-go\n");
     return 0;
 }
 
 // `csp match`: the chip's registers against the model's, after the same load and as many
 // passes as the chip ran. chip.txt holds csp-peek's lines, "  aaa: hhhhh (d)   aaa: hhhhh (d) ...".
-int match_command(const csp::Program &program, const std::string &chip_path, int fill, const std::vector<RawWrite> &writes) {
+int match_command(const csp::Program &program, const std::string &chip_path,
+                  int fill, const std::vector<RawWrite> &writes) {
     std::ifstream in(chip_path);
     if (!in) {
         std::fprintf(stderr, "cannot read %s\n", chip_path.c_str());
@@ -273,15 +329,16 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
     std::vector<bool> seen(csp::register_count, false);
     // "# before the run: 040: hhhhh" (tools/lab/chip_check.py): the pass counter's register
     // as the first pass read it, the number the run before this one left there.
-    constexpr int32_t no_value = -1;
+    constexpr int32_t no_value   = -1;
     int32_t pass_register_before = no_value;
     std::string line;
     while (std::getline(in, line)) {
         if (line.rfind("# before the run:", 0) == 0) {
             const size_t at = line.find("040: ");
             if (at != std::string::npos) {
-                pass_register_before = static_cast<int32_t>(
-                        csp::sign_extend(std::strtol(line.c_str() + at + 5, nullptr, 16), csp::word_bits));
+                pass_register_before = static_cast<int32_t>(csp::sign_extend(
+                        std::strtol(line.c_str() + at + 5, nullptr, 16),
+                        csp::word_bits));
             }
             continue;
         }
@@ -289,17 +346,32 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
         while ((at = line.find(':', at)) != std::string::npos) {
             // "aaa: hhhhh" : the address is the hex word before the colon, the value the hex word after
             size_t start = at;
-            while (start > 0 && std::isxdigit(static_cast<unsigned char>(line[start - 1]))) --start;
+            while (start > 0
+                   && std::isxdigit(
+                           static_cast<unsigned char>(line[start - 1]))) {
+                --start;
+            }
             const std::string address_text = line.substr(start, at - start);
-            size_t value_start = at + 1;
-            while (value_start < line.size() && line[value_start] == ' ') ++value_start;
+            size_t value_start             = at + 1;
+            while (value_start < line.size() && line[value_start] == ' ') {
+                ++value_start;
+            }
             size_t value_end = value_start;
-            while (value_end < line.size() && std::isxdigit(static_cast<unsigned char>(line[value_end]))) ++value_end;
+            while (value_end < line.size()
+                   && std::isxdigit(
+                           static_cast<unsigned char>(line[value_end]))) {
+                ++value_end;
+            }
             if (!address_text.empty() && value_end > value_start) {
-                const int address = static_cast<int>(std::strtol(address_text.c_str(), nullptr, 16));
-                const int64_t raw = std::strtol(line.substr(value_start, value_end - value_start).c_str(), nullptr, 16);
+                const int address = static_cast<int>(
+                        std::strtol(address_text.c_str(), nullptr, 16));
+                const int64_t raw = std::strtol(
+                        line.substr(value_start, value_end - value_start)
+                                .c_str(),
+                        nullptr, 16);
                 if (address >= 0 && address < csp::register_count) {
-                    chip[static_cast<size_t>(address)] = static_cast<int32_t>(csp::sign_extend(raw, csp::word_bits));
+                    chip[static_cast<size_t>(address)] = static_cast<int32_t>(
+                            csp::sign_extend(raw, csp::word_bits));
                     seen[static_cast<size_t>(address)] = true;
                 }
             }
@@ -310,13 +382,20 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
     model.load(program.image);
     if (fill != no_fill) {
         for (int address = 1; address < csp::register_count; ++address) {
-            if (address >= csp::io_base && address < csp::io_base + csp::io_count) continue;
+            if (address >= csp::io_base
+                && address < csp::io_base + csp::io_count) {
+                continue;
+            }
             model.write(address, fill_value(address, fill));
         }
     }
-    for (const RawWrite &write : writes) model.write(write.address, write.raw);
+    for (const RawWrite &write : writes) {
+        model.write(write.address, write.raw);
+    }
     model.swap();
-    while (model.queued_writes() > 0) model.pass();   // held: the window applies the writes
+    while (model.queued_writes() > 0) {
+        model.pass(); // held: the window applies the writes
+    }
     model.release();
     // The passes the chip ran: every check program counts them in RUN_COUNT (0x3FE, wrapping) from
     // the fill's value, which the model holds too.
@@ -325,7 +404,9 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
         std::printf("the chip's registers hold no RUN_COUNT (0x3fe)\n");
         return 2;
     }
-    const int passes = static_cast<int>((static_cast<int64_t>(chip[run_count]) - model.read(run_count)) & 0x3FFFF);
+    const int passes = static_cast<int>(
+            (static_cast<int64_t>(chip[run_count]) - model.read(run_count))
+            & 0x3FFFF);
     // The pass counter: the chip's went on before this run. Its register in the dump is the
     // number of the pass after the last one that ran (held, csp_pass keeps it), so the count
     // when the run began follows, and the first pass read what the run before left there.
@@ -337,19 +418,26 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
     for (int pass = 0; pass < passes; ++pass) {
         const csp::PassReport report = model.pass();
         if (!report.errors.empty()) {
-            std::printf("the model reports: %s\n", report.errors.front().c_str());
+            std::printf("the model reports: %s\n",
+                        report.errors.front().c_str());
             return 1;
         }
     }
     std::printf("the chip ran %d passes\n", passes);
     int differing = 0;
     for (int address = 1; address < csp::register_count; ++address) {
-        if (!seen[static_cast<size_t>(address)]) continue;
-        if (address >= csp::io_base && address < csp::io_base + csp::io_count) continue;   // inputs: the chip's own
+        if (!seen[static_cast<size_t>(address)]) {
+            continue;
+        }
+        if (address >= csp::io_base && address < csp::io_base + csp::io_count) {
+            continue; // inputs: the chip's own
+        }
         if (chip[static_cast<size_t>(address)] != model.read(address)) {
             if (differing < 40) {
-                std::printf("  %03x: chip %d (%05x), model %d (%05x)\n", address, chip[static_cast<size_t>(address)],
-                            chip[static_cast<size_t>(address)] & 0x3FFFF, model.read(address), model.read(address) & 0x3FFFF);
+                std::printf("  %03x: chip %d (%05x), model %d (%05x)\n",
+                            address, chip[static_cast<size_t>(address)],
+                            chip[static_cast<size_t>(address)] & 0x3FFFF,
+                            model.read(address), model.read(address) & 0x3FFFF);
             }
             ++differing;
         }
@@ -361,7 +449,9 @@ int match_command(const csp::Program &program, const std::string &chip_path, int
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc < 3) return usage();
+    if (argc < 3) {
+        return usage();
+    }
     const std::string command = argv[1];
     // the program: every leading argument that is a file, joined
     Sources sources;
@@ -372,21 +462,34 @@ int main(int argc, char **argv) {
             std::fprintf(stderr, "cannot read %s\n", argv[arg]);
             return 2;
         }
-        const int first_line = 1 + static_cast<int>(std::ranges::count(sources.text, '\n'));
+        const int first_line =
+                1 + static_cast<int>(std::ranges::count(sources.text, '\n'));
         sources.parts.push_back({argv[arg], first_line});
         sources.text += text;
-        if (!text.empty() && text.back() != '\n') sources.text += '\n';
+        if (!text.empty() && text.back() != '\n') {
+            sources.text += '\n';
+        }
     }
-    if (sources.parts.empty()) return usage();
+    if (sources.parts.empty()) {
+        return usage();
+    }
     const csp::Program program = csp::assemble(sources.text);
-    if (!report(sources, program)) return 1;
-    if (command == "asm") return assemble_command(program);
+    if (!report(sources, program)) {
+        return 1;
+    }
+    if (command == "asm") {
+        return assemble_command(program);
+    }
     if (command == "header") {
         std::vector<std::string> files;
-        for (const Sources::Part &part : sources.parts) files.push_back(part.path);
+        for (const Sources::Part &part : sources.parts) {
+            files.push_back(part.path);
+        }
         std::string name_space = "control";
         for (; arg + 1 < argc; arg += 2) {
-            if (std::string(argv[arg]) == "-n") name_space = argv[arg + 1];
+            if (std::string(argv[arg]) == "-n") {
+                name_space = argv[arg + 1];
+            }
         }
         return header_command(program, files, name_space);
     }
@@ -397,16 +500,27 @@ int main(int argc, char **argv) {
         for (; arg + 1 < argc; arg += 2) {
             const std::string option = argv[arg];
             RawWrite write{};
-            if (option == "-w" && parse_write(argv[arg + 1], write)) writes.push_back(write);
-            else if (option == "-c") chip_path = argv[arg + 1];
-            else if (option == "-f") fill = std::atoi(argv[arg + 1]);
-            else return usage();
+            if (option == "-w" && parse_write(argv[arg + 1], write)) {
+                writes.push_back(write);
+            } else if (option == "-c") {
+                chip_path = argv[arg + 1];
+            } else if (option == "-f") {
+                fill = std::atoi(argv[arg + 1]);
+            } else {
+                return usage();
+            }
         }
-        if (command == "script") return script_command(program, fill, writes);
-        if (chip_path.empty()) return usage();
+        if (command == "script") {
+            return script_command(program, fill, writes);
+        }
+        if (chip_path.empty()) {
+            return usage();
+        }
         return match_command(program, chip_path, fill, writes);
     }
-    if (command != "sim") return usage();
+    if (command != "sim") {
+        return usage();
+    }
 
     int passes = 4;
     bool dump  = false;
@@ -418,7 +532,9 @@ int main(int argc, char **argv) {
             dump = true;
             continue;
         }
-        if (arg + 1 >= argc) return usage();
+        if (arg + 1 >= argc) {
+            return usage();
+        }
         const std::string value = argv[++arg];
         if (option == "-n") {
             passes = std::atoi(value.c_str());
@@ -431,14 +547,20 @@ int main(int argc, char **argv) {
         } else if (option == "-s") {
             const size_t equals = value.find('=');
             const size_t at     = value.find('@');
-            if (equals == std::string::npos || at == std::string::npos || at < equals) return usage();
+            if (equals == std::string::npos || at == std::string::npos
+                || at < equals) {
+                return usage();
+            }
             const std::string name = value.substr(0, equals);
             if (!program.symbols.contains(name)) {
                 std::fprintf(stderr, "unknown name %s\n", name.c_str());
                 return 2;
             }
-            writes.push_back({program.symbols.at(name), std::atoi(value.substr(equals + 1, at - equals - 1).c_str()),
-                              std::atoi(value.substr(at + 1).c_str())});
+            writes.push_back(
+                    {program.symbols.at(name),
+                     std::atoi(
+                             value.substr(equals + 1, at - equals - 1).c_str()),
+                     std::atoi(value.substr(at + 1).c_str())});
         } else {
             return usage();
         }

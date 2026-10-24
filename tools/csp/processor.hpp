@@ -44,8 +44,8 @@ struct Flags {
 
 // What one pass did.
 struct PassReport {
-    int cycles         = 0; // the cycle the next row would issue at
-    int writes_applied = 0; // firmware writes the window applied
+    int cycles         = 0;       // the cycle the next row would issue at
+    int writes_applied = 0;       // firmware writes the window applied
     std::vector<int> stale_sinks; // owned sink words this pass did not write
     std::vector<std::string> errors;
 };
@@ -61,7 +61,9 @@ public:
     // Reset clears no registers.
     void hold();
     void release();
-    bool held() const { return held_; }
+    bool held() const {
+        return held_;
+    }
 
     // Load an image. Only while held; false otherwise.
     bool load(const Image &image);
@@ -85,15 +87,25 @@ public:
     int64_t read_wide(int address) const; // a wide register pair, raw
     int32_t sink(int offset) const;       // the published sink page, raw
     int index(IndexRegister which) const;
-    Flags flags() const { return flags_; }
-    size_t queued_writes() const { return queue_.size(); }
-    int64_t pass_count() const { return pass_count_; }
+    Flags flags() const {
+        return flags_;
+    }
+    size_t queued_writes() const {
+        return queue_.size();
+    }
+    int64_t pass_count() const {
+        return pass_count_;
+    }
     // The pass counter's number, as a chip's whose passes went on before this
     // run (csp match seeds it from the chip's register 0x040).
-    void set_pass_count(int64_t count) { pass_count_ = count; }
+    void set_pass_count(int64_t count) {
+        pass_count_ = count;
+    }
 
     // Print each row as it issues (row, cycle, i, j) to stderr.
-    void trace(bool on) { trace_ = on; }
+    void trace(bool on) {
+        trace_ = on;
+    }
 
 private:
     struct QueuedWrite {
@@ -115,7 +127,7 @@ private:
     // vector loop (run_vector swaps them with the element).
     struct Scoreboard {
         std::array<int64_t, register_count> register_ready{};
-        int64_t state_ready = 0;   // the flags
+        int64_t state_ready = 0; // the flags
         std::array<int64_t, 2> index_ready{};
     };
 
@@ -142,16 +154,18 @@ private:
     struct Decoded {
         Word word;
         Control control;
-        Op op;          // the operation the control word names, with its sub-op
+        Op op; // the operation the control word names, with its sub-op
     };
 
     Decoded decode(size_t row) const;
     int resolve(const Operand &operand) const;
     int resolve_checked(const Operand &operand, PassState &state) const;
-    int32_t read_operand(const Operand &operand, int32_t immediate, PassState &state, bool check_ready);
+    int32_t read_operand(const Operand &operand, int32_t immediate,
+                         PassState &state, bool check_ready);
     int64_t read_wide_operand(const Operand &operand, PassState &state);
     void write_operand(const Operand &operand, int32_t raw, PassState &state);
-    void write_wide_operand(const Operand &operand, int64_t raw, PassState &state);
+    void write_wide_operand(const Operand &operand, int64_t raw,
+                            PassState &state);
     void check_ready(int address, bool wide, PassState &state) const;
     void note_writes(const Decoded &decoded, PassState &state);
     void execute(const Decoded &decoded, PassState &state);

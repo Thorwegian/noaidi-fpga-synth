@@ -43,7 +43,8 @@ void EngineImage::resend_all() {
     }
 }
 
-int EngineImage::send(EnginePort &port, int limit, fpga_map::dword_t ctrl_bits) {
+int EngineImage::send(EnginePort &port, int limit,
+                      fpga_map::dword_t ctrl_bits) {
     // Every dword carries its own address, so a burst takes the pending
     // words as they come, consecutive or not.
     int sent = 0;
@@ -53,7 +54,8 @@ int EngineImage::send(EnginePort &port, int limit, fpga_map::dword_t ctrl_bits) 
         if (!pending_[address]) {
             continue;
         }
-        burst[count++]    = fpga_map::fifo_dword(address, static_cast<uint32_t>(value_[address]));
+        burst[count++] = fpga_map::fifo_dword(
+                address, static_cast<uint32_t>(value_[address]));
         pending_[address] = false;
         known_[address]   = true;
         if (count == burst_dwords) {

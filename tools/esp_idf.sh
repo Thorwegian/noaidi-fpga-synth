@@ -13,7 +13,7 @@
 #     tools/esp_idf.sh --where                   which ESP-IDF, and how it was found
 #     tools/esp_idf.sh --shell                   an interactive shell with it activated
 #
-# ESP-IDF is found in this order (README.md "Build requirements"):
+# ESP-IDF is found in this order (README.md "External dependencies"):
 #   1. idf.py already on the PATH -- the shell is activated; nothing to do
 #   2. the newest activation script of an Espressif Installation Manager
 #      install, under $IDF_TOOLS_PATH or ~/.espressif/tools (activate_idf_*.sh)

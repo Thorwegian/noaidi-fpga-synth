@@ -23,8 +23,8 @@ namespace csp {
 constexpr int64_t lfo_rate(uint32_t increment, int passes_per_update) {
     // cycles per sample = increment / 2^25; a pass is samples_per_pass samples
     // (csp.hpp); the raw phase has 2^36 to a cycle
-    return static_cast<int64_t>(increment & 0xFFFF) * passes_per_update * samples_per_pass
-           * (int64_t{1} << (36 - 25));
+    return static_cast<int64_t>(increment & 0xFFFF) * passes_per_update
+           * samples_per_pass * (int64_t{1} << (36 - 25));
 }
 
 } // namespace csp

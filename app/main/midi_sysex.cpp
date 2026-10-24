@@ -16,7 +16,7 @@ namespace {
 constexpr const char *tag = "midi_sysex";
 
 // F0 | 7D 4E 4F | op | payload… | F7: the signature, then the op.
-constexpr uint8_t signature[] = {0x7D, 0x4E, 0x4F};
+constexpr uint8_t signature[]      = {0x7D, 0x4E, 0x4F};
 constexpr uint8_t signature_length = sizeof signature;
 
 bool ours(const uint8_t *payload, uint8_t length) {
@@ -33,7 +33,8 @@ bool ours(const uint8_t *payload, uint8_t length) {
 
 } // namespace
 
-void midi_sysex_received(const uint8_t *payload, uint8_t length, uint8_t source) {
+void midi_sysex_received(const uint8_t *payload, uint8_t length,
+                         uint8_t source) {
     if (!ours(payload, length)) {
         return; // another device's frame, or a runt
     }

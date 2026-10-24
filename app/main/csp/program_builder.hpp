@@ -55,8 +55,12 @@ struct Source {
     Operand operand;
     int32_t immediate = 0; // when operand.mode is immediate
 
-    static Source reg(Operand operand) { return {operand, 0}; }
-    static Source imm(int32_t raw) { return {Operand::immediate(), raw}; }
+    static Source reg(Operand operand) {
+        return {operand, 0};
+    }
+    static Source imm(int32_t raw) {
+        return {Operand::immediate(), raw};
+    }
 };
 
 class ProgramBuilder {
@@ -88,14 +92,18 @@ public:
     // (a forward label in the assembler). The count and the stride are
     // immediates. A vector loop runs its body instruction by instruction
     // across its elements, in rounds of sixteen.
-    size_t loop(IndexRegister which, size_t length, int count, int stride, bool vector = false);
-    size_t open_loop(IndexRegister which, int count, int stride, bool vector = false);
+    size_t loop(IndexRegister which, size_t length, int count, int stride,
+                bool vector = false);
+    size_t open_loop(IndexRegister which, int count, int stride,
+                     bool vector = false);
     void close_loop(size_t at);
     void close_loop(size_t at, size_t end);
 
     // The same for SKIP: `count` instructions, or up to an end set later.
 
-    size_t size() const { return instructions_.size(); }
+    size_t size() const {
+        return instructions_.size();
+    }
 
     // Schedule and encode: the image, and the issues found while emitting
     // plus the whole-program checks. A program with an error builds an
@@ -103,28 +111,30 @@ public:
     struct Built {
         Image image;
         std::vector<BuildIssue> issues;
-        std::vector<size_t> position; // each emitted instruction's row in the image
-        int cycles = 0;               // the pass's cycles, the waits included
+        std::vector<size_t>
+                position; // each emitted instruction's row in the image
+        int cycles = 0;   // the pass's cycles, the waits included
         bool ok    = true;
     };
     Built build() const;
 
 private:
     struct Entry {
-        Op op = Op::nop;
-        bool wide = false;
+        Op op            = Op::nop;
+        bool wide        = false;
         ASource a_source = ASource::zero;
-        Condition cond = Condition::always;
+        Condition cond   = Condition::always;
         Operand r, x, y;
-        int32_t immediate = 0;    // x's or y's, or the loop's stride
-        int count = 0;            // a loop's count
+        int32_t immediate   = 0; // x's or y's, or the loop's stride
+        int count           = 0; // a loop's count
         IndexRegister which = IndexRegister::i;
-        size_t end = 0;           // a loop's end, one past; 0 while open
-        bool open = false;
+        size_t end          = 0; // a loop's end, one past; 0 while open
+        bool open           = false;
     };
 
     size_t emit(Entry entry);
-    size_t arithmetic(Op op, Operand r, ASource a, Source x, Source y, bool wide);
+    size_t arithmetic(Op op, Operand r, ASource a, Source x, Source y,
+                      bool wide);
     void check_operand(const Operand &operand, bool wide, bool result);
     void issue(std::string message, bool error = true);
 

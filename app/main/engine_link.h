@@ -68,8 +68,8 @@ bool engine_link_selftest(bool leave_running);
 // FIFO's door).
 void engine_link_pause(bool paused);
 bool engine_link_raw_write(uint32_t address, uint64_t dword);
-bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords, int count,
-                                 bool auto_increment);
+bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords,
+                                 int count, bool auto_increment);
 bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count);
 // A status dword's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
