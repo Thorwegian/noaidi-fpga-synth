@@ -130,12 +130,13 @@ not fetch them.
 - **Python 3** for the LUT/boot-image generators (`scripts/`); the lab
   tools (`tools/lab`) also need **NumPy**, **Matplotlib**, **pySerial**
   and, for the audio checks, **Essentia**
-- **clang-format 18**, installed system-wide, for `make format` and
-  `make format-check`: `apt install clang-format-18` (Ubuntu 24.04 and
-  26.04 both carry it). The Makefile runs `clang-format-18` by name
-  (`CLANG_FORMAT=` overrides it). Other major versions format some
-  constructs differently, and `format-check` warns when it finds one. Our
-  C and C++ follow the Java Code Conventions, set out in `.clang-format`
+- **clang-format 18**, installed system-wide: `apt install clang-format-18`
+  (Ubuntu 24.04 and 26.04 both carry it). `make fw`, `fw-test` and
+  `csp-test` run `make format-check` first, and it fails the build on any
+  unformatted source, a missing clang-format, or another major version
+  (which formats some constructs differently). The Makefile runs
+  `clang-format-18` by name (`CLANG_FORMAT=` overrides it). Our C and C++
+  follow the Java Code Conventions, set out in `.clang-format`
 - **Node.js** with `npm install --no-save mermaid jsdom` in the repository's
   root, for `tools/docs/mermaid_check.mjs` (parses the Mermaid graphs in the
   docs before a commit)
@@ -173,7 +174,7 @@ make fw-console  # attach the console with screen (see Console below)
 make fw-test     # host tests of patch files and banks (about a minute)
 make csp-test    # host tests of the CSP reference model and assembler (tools/csp)
 make format      # reformat our C and C++ sources (.clang-format)
-make format-check  # list sources that are not formatted (a warning only)
+make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
 ```
 
 `make sim` starts every variable that has no initial value at a random

@@ -28,8 +28,8 @@
 #                   tools/csp/programs (the firmware's copy of the program)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
-#   make format-check  list the sources that are not formatted — a
-#                   warning, not a failure
+#   make format-check  fail on any source that is not formatted; fw,
+#                   fw-test and csp-test run it first
 #   make fw-storage-flash  write the patch storage partition, packed
 #                   from app/storage — ERASES all user patches
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
@@ -117,7 +117,7 @@ tools-upgrade:
 tools-upgrade-pack:
 	scripts/tools.sh upgrade pack
 
-fw:
+fw: format-check
 	cd app && $(IDF) build
 
 fw-flash:
@@ -134,7 +134,7 @@ fw-console:
 	printf 'logfile $(CURDIR)/$(CONSOLE_LOG)\nlogfile flush 1\ndeflog on\n' > app/build/screenrc
 	screen -c app/build/screenrc $(ESPPORT) 115200
 
-fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
+fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	mkdir -p $(HOST_DIR)
 	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(addprefix $(CURDIR)/,$(FW_TEST_C))
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
@@ -164,14 +164,14 @@ format:
 	$(CLANG_FORMAT) -i $(FORMAT_SOURCES)
 
 format-check:
+	@command -v $(CLANG_FORMAT) >/dev/null \
+	    || { echo "FAIL $(CLANG_FORMAT) not found: apt install clang-format-$(CLANG_FORMAT_VERSION)"; exit 1; }
 	@$(CLANG_FORMAT) --version | grep -q ' version $(CLANG_FORMAT_VERSION)\.' \
-	    || echo "WARN clang-format is not $(CLANG_FORMAT_VERSION): results may differ"
+	    || { echo "FAIL $(CLANG_FORMAT) is not clang-format $(CLANG_FORMAT_VERSION)"; exit 1; }
 	@unformatted=$$(for f in $(FORMAT_SOURCES); do \
 	    $(CLANG_FORMAT) --dry-run --Werror "$$f" 2>/dev/null || echo "$$f"; done); \
 	if [ -n "$$unformatted" ]; then \
-	    echo "WARN not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; \
-	else \
-	    echo "all sources formatted"; \
+	    echo "FAIL not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
 	fi
 
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
@@ -191,7 +191,7 @@ csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
 	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
 	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
 
-csp-test: $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
