@@ -7,8 +7,8 @@
 #   make format         reformat our C and C++ sources
 #   make format-check   list the files that are not formatted (a warning)
 #
-# Pinned to clang-format 21.1.8 (pip install clang-format==21.1.8):
-# other versions format some constructs differently.
+# Pinned to clang-format 18 (the clang-format-18 package; README.md,
+# External dependencies): other versions format some constructs differently.
 #
 # The conventions, and where they are below:
 #   - 4 spaces per indent, 8 for a continuation line, no tabs; lines up

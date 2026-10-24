@@ -56,7 +56,7 @@
 # image is current — restart the ESP32 (make fw-flash, or its reset
 # button) so the full image is rewritten. Board must match tree.
 
-# ESP-IDF is found by tools/esp_idf.sh (README.md "Build requirements"):
+# ESP-IDF is found by tools/esp_idf.sh (README.md "External dependencies"):
 # idf.py on the PATH if the shell is activated, otherwise the newest
 # activation script it knows of, sourced in a subshell of its own so nothing
 # reaches this environment; with none found it says so and stops. Agents run
@@ -153,18 +153,18 @@ fw-test: $(FW_TEST_C) $(FW_TEST_CXX)
 	$(PARSER_TEST)
 
 # Our own C and C++ sources; the libraries in app/lib keep their style.
-# .clang-format is written for clang-format 21.1.8 (pip install
-# clang-format==21.1.8); other versions format some constructs
-# differently, so the check names the version it ran.
-CLANG_FORMAT ?= clang-format
-CLANG_FORMAT_VERSION = 21.1.8
+# .clang-format is written for clang-format 18, the clang-format-18 system
+# package (README.md, External dependencies); other major versions format
+# some constructs differently, so the check names the version it ran.
+CLANG_FORMAT ?= clang-format-18
+CLANG_FORMAT_VERSION = 18
 FORMAT_SOURCES = $(shell git ls-files '*.c' '*.h' '*.cpp' '*.hpp' | grep -v '^app/lib/')
 
 format:
 	$(CLANG_FORMAT) -i $(FORMAT_SOURCES)
 
 format-check:
-	@$(CLANG_FORMAT) --version | grep -q ' $(CLANG_FORMAT_VERSION)' \
+	@$(CLANG_FORMAT) --version | grep -q ' version $(CLANG_FORMAT_VERSION)\.' \
 	    || echo "WARN clang-format is not $(CLANG_FORMAT_VERSION): results may differ"
 	@unformatted=$$(for f in $(FORMAT_SOURCES); do \
 	    $(CLANG_FORMAT) --dry-run --Werror "$$f" 2>/dev/null || echo "$$f"; done); \

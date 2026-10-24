@@ -100,7 +100,11 @@ else apparently fine).
 pll_clk O0=73728K -s
 ```
 
-## Build requirements
+## External dependencies
+
+Install these on every machine that builds or drives the board. Apart from
+the CAD suite (`make tools`) and the tomlc17 submodule, the repository does
+not fetch them.
 
 - **[OSS CAD Suite](https://github.com/yosyshq/oss-cad-suite-build)**
   — yosys / nextpnr-himbaechel / gowin_pack / openFPGALoader /
@@ -123,11 +127,18 @@ pll_clk O0=73728K -s
   `IDE/simlib/gw2a/prim_sim.v` from Gowin EDA, pointed to by `GOWIN_SIM`
   (default `/opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v`)
 - **ESP-IDF v6** for the ESP32-C3 firmware
-- **Python 3** for the LUT/boot-image generators (`scripts/`)
-- **clang-format 21.1.8** for `make format` (`pip install
-  clang-format==21.1.8`; `CLANG_FORMAT=` points the Makefile at it if it
-  is not on the path). Our C and C++ follow the Java Code Conventions,
-  set out in `.clang-format`
+- **Python 3** for the LUT/boot-image generators (`scripts/`); the lab
+  tools (`tools/lab`) also need **NumPy**, **Matplotlib**, **pySerial**
+  and, for the audio checks, **Essentia**
+- **clang-format 18**, installed system-wide, for `make format` and
+  `make format-check`: `apt install clang-format-18` (Ubuntu 24.04 and
+  26.04 both carry it). The Makefile runs `clang-format-18` by name
+  (`CLANG_FORMAT=` overrides it). Other major versions format some
+  constructs differently, and `format-check` warns when it finds one. Our
+  C and C++ follow the Java Code Conventions, set out in `.clang-format`
+- **Node.js** with `npm install --no-save mermaid jsdom` in the repository's
+  root, for `tools/docs/mermaid_check.mjs` (parses the Mermaid graphs in the
+  docs before a commit)
 - **The tomlc17 submodule** — `app/lib/tomlc17` is the TOML parser the
   firmware links ([cktan/tomlc17](https://github.com/cktan/tomlc17)),
   vendored as a git submodule. Clone with `--recurse-submodules`, or
