@@ -12,7 +12,8 @@ extern "C" {
 #endif
 
 // Bring the ESP-IDF SPI master up on these pins at this clock.
-void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, uint32_t frequency_hz);
+void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
+                   uint32_t frequency_hz);
 
 // Check the link as tb_spi_bus.sv checks the slave — the ID nonet, a
 // scratch dword written and read back whole, a burst, a status dword ignoring

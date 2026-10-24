@@ -24,12 +24,12 @@
 
 namespace spi_link {
 
-constexpr int nonet_bits      = 9;
+constexpr int nonet_bits       = 9;
 constexpr int address_bits     = 18;
-constexpr int dword_bits        = 36;
+constexpr int dword_bits       = 36;
 constexpr int nonets_per_dword = dword_bits / nonet_bits;
-constexpr uint32_t id_nonet   = 0x0A5;
-constexpr uint64_t dword_mask   = (uint64_t{1} << dword_bits) - 1;
+constexpr uint32_t id_nonet    = 0x0A5;
+constexpr uint64_t dword_mask  = (uint64_t{1} << dword_bits) - 1;
 
 // Dwords in a frame, bounded by the local frame buffer.
 constexpr int burst_max = 8;
@@ -38,7 +38,8 @@ constexpr int burst_max = 8;
 using dword_t = uint64_t;
 
 // Bring up the ESP-IDF SPI master on these pins at this clock.
-void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin, uint32_t frequency_hz);
+void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
+          uint32_t frequency_hz);
 
 // Change the clock: the device is removed from the bus and added again at
 // the new rate (the link is measured clean to 40 MHz, the ESP32-C3's
@@ -63,4 +64,4 @@ bool read_repeated(uint32_t address, dword_t *dwords, size_t count);
 
 } // namespace spi_link
 
-#include "spi_link.h"   // the C entry points main.c uses: init, and the boot check
+#include "spi_link.h" // the C entry points main.c uses: init, and the boot check

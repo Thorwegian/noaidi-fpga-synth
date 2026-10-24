@@ -57,7 +57,8 @@ public:
         capacity_ = capacity < sizeof buffer_ ? capacity : sizeof buffer_;
         length_   = 0;
         if (capacity_ >= 1) {
-            buffer_[length_++] = static_cast<uint8_t>(0x80 | ((now_ms() >> 7) & 0x3F));
+            buffer_[length_++] =
+                    static_cast<uint8_t>(0x80 | ((now_ms() >> 7) & 0x3F));
         }
     }
 
@@ -125,7 +126,8 @@ void midi_out_task(void *) {
         packet.begin(ble_midi_packet_max());
         bool more = true;
         while (more) {
-            if (ble && item.except != MIDI_SOURCE_BLE && !packet.add(item.message)) {
+            if (ble && item.except != MIDI_SOURCE_BLE
+                && !packet.add(item.message)) {
                 if (!notify(packet)) {
                     ++s_dropped;
                 }
@@ -152,7 +154,9 @@ void midi_out_init(void) {
         ESP_LOGE(tag, "failed to create the queue");
         return;
     }
-    if (xTaskCreate(midi_out_task, "midi_out", task_stack, nullptr, task_priority, nullptr) != pdPASS) {
+    if (xTaskCreate(midi_out_task, "midi_out", task_stack, nullptr,
+                    task_priority, nullptr)
+        != pdPASS) {
         ESP_LOGE(tag, "failed to create the task");
     }
 }

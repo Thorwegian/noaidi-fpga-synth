@@ -36,13 +36,17 @@ public:
         top_.eval();
         top_.reset_n = 0;
         top_.eval();
-        for (int cycle = 0; cycle < 4; ++cycle) tick();
+        for (int cycle = 0; cycle < 4; ++cycle) {
+            tick();
+        }
         top_.reset_n = 1;
         tick();
         svSetScope(svGetScopeFromName("TOP.tb_csp_cosim"));
     }
 
-    void hold(bool held) { top_.held = held ? 1 : 0; }
+    void hold(bool held) {
+        top_.held = held ? 1 : 0;
+    }
 
     // The program: its rows, END included — what an earlier, longer program
     // left past them stays in IMEM and never runs (#271) — and the decode ROM.
@@ -71,7 +75,8 @@ public:
     // A register write for the FIFO's door: the address in bits 35:24, the word in 23:6.
     void write(int address, int32_t raw) {
         top_.fifo_write = 1;
-        top_.fifo_dword = (static_cast<uint64_t>(address & 0xFFF) << 24) | (static_cast<uint64_t>(raw & 0x3FFFF) << 6);
+        top_.fifo_dword = (static_cast<uint64_t>(address & 0xFFF) << 24)
+                          | (static_cast<uint64_t>(raw & 0x3FFFF) << 6);
         spi_clock();
         top_.fifo_write = 0;
     }
@@ -87,16 +92,32 @@ public:
         top_.pass_start = 1;
         tick();
         top_.pass_start = 0;
-        for (int cycle = 0; cycle < csp::cycles_per_pass; ++cycle) tick();
+        for (int cycle = 0; cycle < csp::cycles_per_pass; ++cycle) {
+            tick();
+        }
     }
 
-    int32_t reg(int address) const { return cosim_register(address); }
-    int32_t sink(int offset) const { return cosim_sink(offset); }
-    int index(int which) const { return cosim_index(which); }
-    int flags() const { return cosim_flags(); }
-    int cycles() const { return cosim_cycles(); }
-    int row_rule_violations() const { return cosim_row_rule_violations(); }
-    int fifo_dropped() const { return cosim_fifo_dropped(); }
+    int32_t reg(int address) const {
+        return cosim_register(address);
+    }
+    int32_t sink(int offset) const {
+        return cosim_sink(offset);
+    }
+    int index(int which) const {
+        return cosim_index(which);
+    }
+    int flags() const {
+        return cosim_flags();
+    }
+    int cycles() const {
+        return cosim_cycles();
+    }
+    int row_rule_violations() const {
+        return cosim_row_rule_violations();
+    }
+    int fifo_dropped() const {
+        return cosim_fifo_dropped();
+    }
 
 private:
     void tick() {

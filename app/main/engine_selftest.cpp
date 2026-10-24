@@ -38,7 +38,9 @@ public:
 
 private:
     void queue(int address, int32_t raw) {
-        port_.write_dword(fpga_map::fifo_door, fpga_map::fifo_dword(address, static_cast<uint32_t>(raw)));
+        port_.write_dword(
+                fpga_map::fifo_door,
+                fpga_map::fifo_dword(address, static_cast<uint32_t>(raw)));
     }
 
     // The program: its rows into IMEM (two dwords a row, bits 71:36 first),
@@ -48,25 +50,31 @@ private:
     void load() {
         port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
         for (size_t pc = 0; pc < st::rows.size(); ++pc) {
-            port_.write_dword(fpga_map::program_base + 2 * pc, st::rows[pc].high);
-            port_.write_dword(fpga_map::program_base + 2 * pc + 1, st::rows[pc].low);
+            port_.write_dword(fpga_map::program_base + 2 * pc,
+                              st::rows[pc].high);
+            port_.write_dword(fpga_map::program_base + 2 * pc + 1,
+                              st::rows[pc].low);
         }
         for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
-            port_.write_dword(fpga_map::rom_base + row, row < st::rom.size() ? st::rom[row] : 0);
+            port_.write_dword(fpga_map::rom_base + row,
+                              row < st::rom.size() ? st::rom[row] : 0);
         }
         // The counters start at zero, whatever was there.
         for (const int counter_register :
-             {st::count_total, st::count_odd, st::count_half_odd, st::count_chain_odd}) {
+             {st::count_total, st::count_odd, st::count_half_odd,
+              st::count_chain_odd}) {
             queue(counter_register, 0);
         }
-        port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+        port_.write_dword(fpga_map::ctrl,
+                          fpga_map::ctrl_hold | fpga_map::ctrl_swap);
         port_.wait_ms(2);
         port_.write_dword(fpga_map::ctrl, 0); // release
     }
 
     void note(bool ok, const char *what, long got, long want) {
         char line[96];
-        std::snprintf(line, sizeof line, "%s %s (got %ld, want %ld)", ok ? "ok  " : "FAIL", what, got, want);
+        std::snprintf(line, sizeof line, "%s %s (got %ld, want %ld)",
+                      ok ? "ok  " : "FAIL", what, got, want);
         result_.lines.emplace_back(line);
         result_.passed = result_.passed && ok;
     }
@@ -105,8 +113,8 @@ private:
     };
 
     Counts counts() {
-        return {counter(st::count_total), counter(st::count_odd), counter(st::count_half_odd),
-                counter(st::count_chain_odd)};
+        return {counter(st::count_total), counter(st::count_odd),
+                counter(st::count_half_odd), counter(st::count_chain_odd)};
     }
 
     // The pass counter's low bit: over a stretch of passes, as many odd as
@@ -119,12 +127,16 @@ private:
         const long half_odd  = (second.half_odd - first.half_odd) & word_mask;
         const long chain_odd = (second.chain_odd - first.chain_odd) & word_mask;
         char line[96];
-        std::snprintf(line, sizeof line, "%ld passes, %ld with the pass counter's low bit set", total, odd);
+        std::snprintf(line, sizeof line,
+                      "%ld passes, %ld with the pass counter's low bit set",
+                      total, odd);
         note(total > 1000 && odd * 100 > total * 45 && odd * 100 < total * 55,
              "the pass counter's low bit is set in half of the passes (ANDXOR)");
         result_.lines.emplace_back(line);
-        note(half_odd >= odd - 2 && half_odd <= odd + 2, "the half's choice follows it (SHIFT)", half_odd, odd);
-        note(chain_odd >= odd - 2 && chain_odd <= odd + 2, "the table read follows it (IDX)", chain_odd, odd);
+        note(half_odd >= odd - 2 && half_odd <= odd + 2,
+             "the half's choice follows it (SHIFT)", half_odd, odd);
+        note(chain_odd >= odd - 2 && chain_odd <= odd + 2,
+             "the table read follows it (IDX)", chain_odd, odd);
     }
 
     SelfTestPort &port_;

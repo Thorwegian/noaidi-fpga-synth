@@ -47,7 +47,8 @@ typedef void (*midi_msg_cb_t)(const midi_message_t *msg, void *user);
 #define MIDI_SYSEX_MAX 64
 
 // Called for every complete SysEx frame: the bytes between F0 and F7.
-typedef void (*midi_sysex_cb_t)(const uint8_t *payload, uint8_t length, void *user);
+typedef void (*midi_sysex_cb_t)(const uint8_t *payload, uint8_t length,
+                                void *user);
 
 typedef struct {
     midi_msg_cb_t on_message; // callback, may be NULL to count silently

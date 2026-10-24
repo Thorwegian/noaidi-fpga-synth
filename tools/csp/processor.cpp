@@ -23,9 +23,11 @@ namespace {
 
 using Wide = __int128;
 
-constexpr int word_to_accumulator = accumulator_fraction_bits - word_fraction_bits;
-constexpr int wide_to_accumulator = accumulator_fraction_bits - wide_fraction_bits;
-constexpr int max_shift           = 63;
+constexpr int word_to_accumulator =
+        accumulator_fraction_bits - word_fraction_bits;
+constexpr int wide_to_accumulator =
+        accumulator_fraction_bits - wide_fraction_bits;
+constexpr int max_shift = 63;
 
 struct Reduced {
     int64_t value;
@@ -33,8 +35,12 @@ struct Reduced {
 };
 
 Reduced saturate(Wide value, int bits) {
-    if (value > largest(bits)) return {largest(bits), true};
-    if (value < smallest(bits)) return {smallest(bits), true};
+    if (value > largest(bits)) {
+        return {largest(bits), true};
+    }
+    if (value < smallest(bits)) {
+        return {smallest(bits), true};
+    }
     return {static_cast<int64_t>(value), false};
 }
 
@@ -84,41 +90,58 @@ Op op_of(const Control &control) {
         switch (static_cast<MultiplyAddOp>(control.sub)) {
         case MultiplyAddOp::mac:
             return control.wrap ? Op::macw : Op::mac;
-        case MultiplyAddOp::add3: return Op::add3;
-        case MultiplyAddOp::cmp: return Op::cmp;
-        case MultiplyAddOp::abs: return Op::abs;
+        case MultiplyAddOp::add3:
+            return Op::add3;
+        case MultiplyAddOp::cmp:
+            return Op::cmp;
+        case MultiplyAddOp::abs:
+            return Op::abs;
         }
         return Op::nop;
     case Unit::logic:
         switch (static_cast<LogicOp>(control.sub)) {
-        case LogicOp::min: return Op::min;
-        case LogicOp::max: return Op::max;
-        case LogicOp::sel: return Op::sel;
-        case LogicOp::andxor: return Op::andxor;
+        case LogicOp::min:
+            return Op::min;
+        case LogicOp::max:
+            return Op::max;
+        case LogicOp::sel:
+            return Op::sel;
+        case LogicOp::andxor:
+            return Op::andxor;
         }
         return Op::nop;
-    case Unit::shift: return Op::shift;
-    case Unit::loop: return (control.sub & 2) ? Op::vloop : Op::loop;
-    case Unit::index: return Op::idx;
+    case Unit::shift:
+        return Op::shift;
+    case Unit::loop:
+        return (control.sub & 2) ? Op::vloop : Op::loop;
+    case Unit::index:
+        return Op::idx;
     }
     return Op::nop;
 }
 
 bool condition_holds(Condition condition, const Flags &flags) {
     switch (condition) {
-    case Condition::always: return true;
-    case Condition::negative: return flags.negative;
-    case Condition::positive: return !flags.negative;
-    case Condition::zero: return flags.zero;
-    case Condition::nonzero: return !flags.zero;
-    case Condition::overflow: return flags.overflow;
+    case Condition::always:
+        return true;
+    case Condition::negative:
+        return flags.negative;
+    case Condition::positive:
+        return !flags.negative;
+    case Condition::zero:
+        return flags.zero;
+    case Condition::nonzero:
+        return !flags.zero;
+    case Condition::overflow:
+        return flags.overflow;
     }
     return false;
 }
 
 } // namespace
 
-Processor::Processor() = default;   // the pass counter's register is 0 after reset, as the chip's, until a running pass writes the next pass's number
+Processor::Processor() =
+        default; // the pass counter's register is 0 after reset, as the chip's, until a running pass writes the next pass's number
 
 // ---- firmware side --------------------------------------------------------
 
@@ -131,13 +154,17 @@ void Processor::release() {
 }
 
 bool Processor::load(const Image &image) {
-    if (!held_) return false;
+    if (!held_) {
+        return false;
+    }
     image_ = image;
     return true;
 }
 
 void Processor::write(int address, int32_t raw) {
-    queue_.push_back({address, static_cast<int32_t>(sign_extend(raw, word_bits)), false});
+    queue_.push_back({address,
+                      static_cast<int32_t>(sign_extend(raw, word_bits)),
+                      false});
 }
 
 void Processor::write_wide(int address, int64_t raw) {
@@ -147,11 +174,15 @@ void Processor::write_wide(int address, int64_t raw) {
 }
 
 void Processor::swap() {
-    for (QueuedWrite &queued : queue_) queued.committed = true;
+    for (QueuedWrite &queued : queue_) {
+        queued.committed = true;
+    }
 }
 
 void Processor::set_input(int address, int32_t raw) {
-    if (is_input(address)) registers_[address] = static_cast<int32_t>(sign_extend(raw, word_bits));
+    if (is_input(address)) {
+        registers_[address] = static_cast<int32_t>(sign_extend(raw, word_bits));
+    }
 }
 
 int Processor::apply_window(int limit) {
@@ -159,7 +190,8 @@ int Processor::apply_window(int limit) {
     while (applied < limit && !queue_.empty() && queue_.front().committed) {
         const QueuedWrite queued = queue_.front();
         queue_.pop_front();
-        if (queued.address > 0 && queued.address < register_count && !is_input(queued.address)) {
+        if (queued.address > 0 && queued.address < register_count
+            && !is_input(queued.address)) {
             registers_[queued.address] = queued.raw;
         } else if (is_sink(queued.address)) {
             // the firmware's sink words: into both pages, so that a flip keeps them (#236)
@@ -204,10 +236,14 @@ Processor::Decoded Processor::decode(size_t row) const {
 // The address an operand names: the index's bits beside the offset's.
 int Processor::resolve(const Operand &operand) const {
     switch (operand.mode) {
-    case Operand::Mode::direct: return operand.value;
-    case Operand::Mode::i: return (index_[0] | operand.value) & (address_space - 1);
-    case Operand::Mode::j: return (index_[1] | operand.value) & (address_space - 1);
-    case Operand::Mode::immediate: return -1;
+    case Operand::Mode::direct:
+        return operand.value;
+    case Operand::Mode::i:
+        return (index_[0] | operand.value) & (address_space - 1);
+    case Operand::Mode::j:
+        return (index_[1] | operand.value) & (address_space - 1);
+    case Operand::Mode::immediate:
+        return -1;
     }
     return -1;
 }
@@ -222,14 +258,18 @@ int Processor::resolve_checked(const Operand &operand, PassState &state) const {
         const auto which  = static_cast<size_t>(operand.index());
         const char letter = which == 1 ? 'j' : 'i';
         if (state.scoreboard.index_ready[which] > state.cycle) {
-            state.report.errors.push_back("row " + std::to_string(state.pc) + " at cycle " + std::to_string(state.cycle)
-                                          + " reads index " + letter + ", ready at "
-                                          + std::to_string(state.scoreboard.index_ready[which]));
+            state.report.errors.push_back(
+                    "row " + std::to_string(state.pc) + " at cycle "
+                    + std::to_string(state.cycle) + " reads index " + letter
+                    + ", ready at "
+                    + std::to_string(state.scoreboard.index_ready[which]));
         }
         if ((index_[which] & operand.value) != 0) {
-            state.report.errors.push_back("row " + std::to_string(state.pc) + ": [" + letter + "+"
-                                          + std::to_string(operand.value) + "] with " + letter + " = " + hex(index_[which])
-                                          + ": the offset's bits overlap the index's");
+            state.report.errors.push_back(
+                    "row " + std::to_string(state.pc) + ": [" + letter + "+"
+                    + std::to_string(operand.value) + "] with " + letter + " = "
+                    + hex(index_[which])
+                    + ": the offset's bits overlap the index's");
         }
     }
     return resolve(operand);
@@ -237,24 +277,34 @@ int Processor::resolve_checked(const Operand &operand, PassState &state) const {
 
 void Processor::check_ready(int address, bool wide, PassState &state) const {
     for (int reg = address; reg < address + (wide ? 2 : 1); ++reg) {
-        if (reg > 0 && reg < register_count && state.scoreboard.register_ready[reg] > state.cycle) {
+        if (reg > 0 && reg < register_count
+            && state.scoreboard.register_ready[reg] > state.cycle) {
             char text[96];
-            std::snprintf(text, sizeof text, "row %zu at cycle %lld reads register 0x%03x, ready at %lld",
-                          state.pc, static_cast<long long>(state.cycle), reg,
-                          static_cast<long long>(state.scoreboard.register_ready[reg]));
+            std::snprintf(
+                    text, sizeof text,
+                    "row %zu at cycle %lld reads register 0x%03x, ready at %lld",
+                    state.pc, static_cast<long long>(state.cycle), reg,
+                    static_cast<long long>(
+                            state.scoreboard.register_ready[reg]));
             state.report.errors.push_back(text);
         }
     }
 }
 
-int32_t Processor::read_operand(const Operand &operand, int32_t immediate, PassState &state, bool check) {
-    if (operand.mode == Operand::Mode::immediate) return immediate;
+int32_t Processor::read_operand(const Operand &operand, int32_t immediate,
+                                PassState &state, bool check) {
+    if (operand.mode == Operand::Mode::immediate) {
+        return immediate;
+    }
     const int address = resolve_checked(operand, state);
     if (address >= register_count) {
-        state.report.errors.push_back("read from " + hex(address) + ", outside the register file");
+        state.report.errors.push_back("read from " + hex(address)
+                                      + ", outside the register file");
         return 0;
     }
-    if (check) check_ready(address, false, state);
+    if (check) {
+        check_ready(address, false, state);
+    }
     note_access(address, false, state);
     return read(address);
 }
@@ -262,7 +312,8 @@ int32_t Processor::read_operand(const Operand &operand, int32_t immediate, PassS
 int64_t Processor::read_wide_operand(const Operand &operand, PassState &state) {
     const int address = resolve_checked(operand, state);
     if (address < 0 || address % 2 != 0 || address + 1 >= register_count) {
-        state.report.errors.push_back("wide read from " + hex(address) + ", not an even register");
+        state.report.errors.push_back("wide read from " + hex(address)
+                                      + ", not an even register");
         return 0;
     }
     check_ready(address, true, state);
@@ -271,10 +322,15 @@ int64_t Processor::read_wide_operand(const Operand &operand, PassState &state) {
     return read_wide(address);
 }
 
-void Processor::write_operand(const Operand &operand, int32_t raw, PassState &state) {
-    if (operand.mode == Operand::Mode::immediate) return;   // no result
+void Processor::write_operand(const Operand &operand, int32_t raw,
+                              PassState &state) {
+    if (operand.mode == Operand::Mode::immediate) {
+        return; // no result
+    }
     const int address = resolve_checked(operand, state);
-    if (address == 0) return;
+    if (address == 0) {
+        return;
+    }
     if (is_input(address)) {
         state.report.errors.push_back("write to input " + hex(address));
         return;
@@ -282,22 +338,35 @@ void Processor::write_operand(const Operand &operand, int32_t raw, PassState &st
     if (address < register_count) {
         note_access(address, true, state);
         registers_[address] = raw;
-        if (trace_) std::fprintf(stderr, "model write %d %d\n", address, raw);
+        if (trace_) {
+            std::fprintf(stderr, "model write %d %d\n", address, raw);
+        }
     } else if (is_sink(address)) {
         sink_pages_[1 - active_page_][address - sink_base] = raw;
-        if (trace_) std::fprintf(stderr, "model sink %d %d\n", address - sink_base, raw);
+        if (trace_) {
+            std::fprintf(stderr, "model sink %d %d\n", address - sink_base,
+                         raw);
+        }
         state.sinks_written.insert(address - sink_base);
     } else {
-        state.report.errors.push_back("write to " + hex(address) + ", outside registers and sinks");
+        state.report.errors.push_back("write to " + hex(address)
+                                      + ", outside registers and sinks");
     }
 }
 
-void Processor::write_wide_operand(const Operand &operand, int64_t raw, PassState &state) {
-    if (operand.mode == Operand::Mode::immediate) return;
+void Processor::write_wide_operand(const Operand &operand, int64_t raw,
+                                   PassState &state) {
+    if (operand.mode == Operand::Mode::immediate) {
+        return;
+    }
     const int address = resolve_checked(operand, state);
-    if (address == 0) return;
-    if (address % 2 != 0 || address + 1 >= register_count || is_input(address)) {
-        state.report.errors.push_back("wide write to " + hex(address) + ", not an even, writable register");
+    if (address == 0) {
+        return;
+    }
+    if (address % 2 != 0 || address + 1 >= register_count
+        || is_input(address)) {
+        state.report.errors.push_back("wide write to " + hex(address)
+                                      + ", not an even, writable register");
         return;
     }
     note_access(address, true, state);
@@ -305,8 +374,8 @@ void Processor::write_wide_operand(const Operand &operand, int64_t raw, PassStat
     registers_[address]     = static_cast<int32_t>(raw >> word_bits);
     registers_[address + 1] = static_cast<int32_t>(sign_extend(raw, word_bits));
     if (trace_) {
-        std::fprintf(stderr, "model write %d %d\nmodel write %d %d\n", address, registers_[address], address + 1,
-                     registers_[address + 1]);
+        std::fprintf(stderr, "model write %d %d\nmodel write %d %d\n", address,
+                     registers_[address], address + 1, registers_[address + 1]);
     }
 }
 
@@ -321,9 +390,12 @@ void Processor::note_writes(const Decoded &decoded, PassState &state) {
     if (control.writes == Writes::word || control.writes == Writes::pair) {
         const int address = resolve(decoded.word.r);
         if (address > 0 && address < register_count) {
-            state.scoreboard.register_ready[address] = state.cycle + result_latency;
-            if (control.writes == Writes::pair && address + 1 < register_count) {
-                state.scoreboard.register_ready[address + 1] = state.cycle + result_latency;
+            state.scoreboard.register_ready[address] =
+                    state.cycle + result_latency;
+            if (control.writes == Writes::pair
+                && address + 1 < register_count) {
+                state.scoreboard.register_ready[address + 1] =
+                        state.cycle + result_latency;
             }
         }
     }
@@ -331,21 +403,26 @@ void Processor::note_writes(const Decoded &decoded, PassState &state) {
         state.scoreboard.state_ready = state.cycle + state_latency;
     }
     if (control.unit == Unit::index) {
-        state.scoreboard.index_ready[control.sub & 1] = state.cycle + index_latency;
+        state.scoreboard.index_ready[control.sub & 1] =
+                state.cycle + index_latency;
     }
 }
 
 // Note a register access inside a vector loop: an element must not read a
 // register another element writes.
 void Processor::note_access(int address, bool write, PassState &state) const {
-    if (!state.vector || address <= 0 || address >= register_count) return;
+    if (!state.vector || address <= 0 || address >= register_count) {
+        return;
+    }
     VectorRun &run = *state.vector;
     if (!write) {
         run.readers[address].insert(run.element);
         return;
     }
     const auto [entry, first] = run.writer.try_emplace(address, run.element);
-    if (!first && entry->second != run.element) entry->second = -1;
+    if (!first && entry->second != run.element) {
+        entry->second = -1;
+    }
 }
 
 // ---- one row ---------------------------------------------------------------
@@ -355,49 +432,70 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     const Control &control = decoded.control;
     const Op op            = decoded.op;
     const bool is_wide     = control.writes == Writes::pair;
-    const auto immediate   = static_cast<int32_t>(sign_extend(word.imm & 0x3FFFF, word_bits));
-    const auto condition   = static_cast<Condition>(word.cond);
+    const auto immediate =
+            static_cast<int32_t>(sign_extend(word.imm & 0x3FFFF, word_bits));
+    const auto condition = static_cast<Condition>(word.cond);
 
     // The flags: ready?
     if (control.cond == ConditionKind::select) {
         if (state.scoreboard.state_ready > state.cycle) {
-            state.report.errors.push_back("row " + std::to_string(state.pc) + " reads the flags "
-                                          + std::to_string(state.scoreboard.state_ready - state.cycle)
-                                          + " cycles early");
+            state.report.errors.push_back(
+                    "row " + std::to_string(state.pc) + " reads the flags "
+                    + std::to_string(state.scoreboard.state_ready - state.cycle)
+                    + " cycles early");
         }
     }
 
     auto a_value = [&]() -> Wide {
         switch (control.a_source) {
-        case ASource::zero: return 0;
+        case ASource::zero:
+            return 0;
         case ASource::result:
-            return is_wide ? from_wide(read_wide_operand(word.r, state)) : from_word(read_operand(word.r, 0, state, true));
+            return is_wide ? from_wide(read_wide_operand(word.r, state))
+                           : from_word(read_operand(word.r, 0, state, true));
         }
         return 0;
     };
-    auto x_word = [&]() -> int64_t { return read_operand(word.x, immediate, state, true); };
-    auto y_word = [&]() -> int64_t { return read_operand(word.y, immediate, state, true); };
-    auto y_raw  = [&]() -> int64_t { return control.y_wide ? read_wide_operand(word.y, state) : y_word(); };
-    auto y_value = [&]() -> Wide { return control.y_wide ? from_wide(read_wide_operand(word.y, state)) : from_word(y_word()); };
+    auto x_word = [&]() -> int64_t {
+        return read_operand(word.x, immediate, state, true);
+    };
+    auto y_word = [&]() -> int64_t {
+        return read_operand(word.y, immediate, state, true);
+    };
+    auto y_raw = [&]() -> int64_t {
+        return control.y_wide ? read_wide_operand(word.y, state) : y_word();
+    };
+    auto y_value = [&]() -> Wide {
+        return control.y_wide ? from_wide(read_wide_operand(word.y, state))
+                              : from_word(y_word());
+    };
     auto store = [&](Wide result, bool wraps) {
-        const int bits      = is_wide ? wide_bits : word_bits;
-        const Wide reduced  = result >> (is_wide ? wide_to_accumulator : word_to_accumulator);
-        const Reduced value = wraps ? Reduced{wrap(reduced, bits), false} : saturate(reduced, bits);
-        if (is_wide) write_wide_operand(word.r, value.value, state);
-        else write_operand(word.r, static_cast<int32_t>(value.value), state);
+        const int bits = is_wide ? wide_bits : word_bits;
+        const Wide reduced =
+                result >> (is_wide ? wide_to_accumulator : word_to_accumulator);
+        const Reduced value = wraps ? Reduced{wrap(reduced, bits), false}
+                                    : saturate(reduced, bits);
+        if (is_wide) {
+            write_wide_operand(word.r, value.value, state);
+        } else {
+            write_operand(word.r, static_cast<int32_t>(value.value), state);
+        }
         set_flags(value.value, value.overflow);
     };
     auto store_word = [&](int64_t raw, bool flags) {
         const auto value = static_cast<int32_t>(sign_extend(raw, word_bits));
         write_operand(word.r, value, state);
-        if (flags) set_flags(value, false);
+        if (flags) {
+            set_flags(value, false);
+        }
     };
 
     switch (op) {
     case Op::nop:
         break;
     case Op::end:
-        state.stopped = true;   // the pass's instructions end here; the row costs its issue cycle, as on the chip
+        state.stopped =
+                true; // the pass's instructions end here; the row costs its issue cycle, as on the chip
         break;
     case Op::mac:
     case Op::macw: {
@@ -427,7 +525,11 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
         break;
     }
     case Op::andxor: {
-        const int64_t a = control.a_source == ASource::zero ? 0 : saturate(a_value() >> word_to_accumulator, word_bits).value;
+        const int64_t a =
+                control.a_source == ASource::zero
+                        ? 0
+                        : saturate(a_value() >> word_to_accumulator, word_bits)
+                                  .value;
         const int64_t x = x_word();
         const int64_t y = y_word();
         store_word((x & y) ^ a, true);
@@ -444,15 +546,17 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     case Op::idx: {
         const int64_t sum = x_word() + y_word();
         const auto which  = static_cast<size_t>(control.sub & 1);
-        index_[which]     = static_cast<int>(((sum % address_space) + address_space) % address_space);
+        index_[which] = static_cast<int>(((sum % address_space) + address_space)
+                                         % address_space);
         break;
     }
     case Op::loop: {
-        const auto which   = static_cast<IndexRegister>(control.sub & 1);
-        const size_t end   = (word.imm & 0x7FF) + 1;             // the row names the body's last row
-        const int count    = word.x.value;                       // the ten bits, unsigned
+        const auto which = static_cast<IndexRegister>(control.sub & 1);
+        const size_t end =
+                (word.imm & 0x7FF) + 1;    // the row names the body's last row
+        const int count    = word.x.value; // the ten bits, unsigned
         const int stride   = static_cast<int>(sign_extend(word.y.value, 10));
-        const size_t start = state.pc;                           // already past the LOOP row
+        const size_t start = state.pc; // already past the LOOP row
         if (end <= start) {
             state.report.errors.push_back("LOOP with an empty body");
             break;
@@ -465,21 +569,24 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
         break;
     }
     case Op::vloop:
-        break;   // run by run_vector
+        break; // run by run_vector
     }
 }
 
 // A vector loop: the body row by row, each for every element of a round,
 // in rounds of sixteen. The loop's index register steps per element; each
 // element has its own copy of the other index register and its own flags.
-void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) {
-    const Word &word   = decoded.word;
-    const auto own     = static_cast<IndexRegister>(decoded.control.sub & 1);
-    const auto other   = own == IndexRegister::i ? IndexRegister::j : IndexRegister::i;
+void Processor::run_vector(const Decoded &decoded, size_t at,
+                           PassState &state) {
+    const Word &word = decoded.word;
+    const auto own   = static_cast<IndexRegister>(decoded.control.sub & 1);
+    const auto other =
+            own == IndexRegister::i ? IndexRegister::j : IndexRegister::i;
     const size_t start = at + 1;
-    const size_t end   = (word.imm & 0x7FF) + 1;                // the row names the body's last row
-    const int count    = word.x.value;
-    const int stride   = static_cast<int>(sign_extend(word.y.value, 10));
+    const size_t end =
+            (word.imm & 0x7FF) + 1; // the row names the body's last row
+    const int count  = word.x.value;
+    const int stride = static_cast<int>(sign_extend(word.y.value, 10));
     if (end <= start || count <= 0) {
         state.pc = end;
         return;
@@ -490,15 +597,17 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
         int64_t state_ready;
         int64_t other_index_ready;
     };
-    int &own_index   = index_[static_cast<size_t>(own)];
-    int &other_index = index_[static_cast<size_t>(other)];
-    const int base   = own_index;
+    int &own_index        = index_[static_cast<size_t>(own)];
+    int &other_index      = index_[static_cast<size_t>(other)];
+    const int base        = own_index;
     const auto other_slot = static_cast<size_t>(other);
     std::vector<Element> elements(static_cast<size_t>(count),
-                                  {other_index, flags_, state.scoreboard.state_ready,
+                                  {other_index, flags_,
+                                   state.scoreboard.state_ready,
                                    state.scoreboard.index_ready[other_slot]});
     state.vector = VectorRun{other, 0, {}, {}};
-    for (int first = 0; first < count && !state.stopped; first += vector_round) {
+    for (int first = 0; first < count && !state.stopped;
+         first += vector_round) {
         const int last = std::min(count, first + vector_round);
         for (size_t row = start; row < end && !state.stopped; ++row) {
             const Decoded body = decode(row);
@@ -506,27 +615,34 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
                 Element &mine = elements[static_cast<size_t>(element)];
                 own_index     = (base + element * stride) & (address_space - 1);
                 other_index   = mine.other_index;
-                flags_                                 = mine.flags;
-                state.scoreboard.state_ready           = mine.state_ready;
-                state.scoreboard.index_ready[other_slot] = mine.other_index_ready;
+                flags_        = mine.flags;
+                state.scoreboard.state_ready = mine.state_ready;
+                state.scoreboard.index_ready[other_slot] =
+                        mine.other_index_ready;
                 state.vector->element = element;
                 state.pc              = row;
                 if (state.cycle >= pass_cycle_limit) {
-                    state.report.errors.push_back("pass longer than " + std::to_string(pass_cycle_limit) + " cycles");
+                    state.report.errors.push_back(
+                            "pass longer than "
+                            + std::to_string(pass_cycle_limit) + " cycles");
                     state.stopped = true;
                     break;
                 }
                 if (trace_) {
-                    std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n", row, static_cast<long long>(state.cycle),
+                    std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n",
+                                 row, static_cast<long long>(state.cycle),
                                  index_[0], index_[1]);
                 }
                 execute(body, state);
                 note_writes(body, state);
-                mine = {other_index, flags_, state.scoreboard.state_ready, state.scoreboard.index_ready[other_slot]};
+                mine = {other_index, flags_, state.scoreboard.state_ready,
+                        state.scoreboard.index_ready[other_slot]};
                 ++state.cycle;
                 // the bubble behind the first row's first element: the chip's front end knows
                 // the loop one cycle late and kills the row it fetched meanwhile
-                if (first == 0 && row == start && element == 0) ++state.cycle;
+                if (first == 0 && row == start && element == 0) {
+                    ++state.cycle;
+                }
             }
         }
     }
@@ -535,11 +651,13 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
     for (const auto &[address, writer] : run.writer) {
         const auto readers = run.readers.find(address);
         const bool shared  = readers != run.readers.end()
-                            && (writer < 0 || readers->second.size() > 1 || *readers->second.begin() != writer);
+                            && (writer < 0 || readers->second.size() > 1
+                                || *readers->second.begin() != writer);
         if (shared) {
             char hex[8];
             std::snprintf(hex, sizeof hex, "0x%03x", address);
-            state.report.errors.push_back(std::string("vector loop elements share register ") + hex);
+            state.report.errors.push_back(
+                    std::string("vector loop elements share register ") + hex);
         }
     }
     own_index = (base + count * stride) & (address_space - 1);
@@ -550,9 +668,11 @@ void Processor::run_vector(const Decoded &decoded, size_t at, PassState &state) 
         // scalar code after the loop sees the last element's state, ready
         // when every element's is
         for (const Element &each : elements) {
-            state.scoreboard.state_ready             = std::max(state.scoreboard.state_ready, each.state_ready);
-            state.scoreboard.index_ready[other_slot] = std::max(state.scoreboard.index_ready[other_slot],
-                                                                each.other_index_ready);
+            state.scoreboard.state_ready =
+                    std::max(state.scoreboard.state_ready, each.state_ready);
+            state.scoreboard.index_ready[other_slot] =
+                    std::max(state.scoreboard.index_ready[other_slot],
+                             each.other_index_ready);
         }
     }
     // nothing to leave: the own index after the loop is in its register for the next row
@@ -592,16 +712,19 @@ PassReport Processor::pass() {
     const auto length = static_cast<size_t>(image_.length);
     while (state.pc < length && !state.stopped) {
         if (state.cycle >= pass_cycle_limit) {
-            state.report.errors.push_back("pass longer than " + std::to_string(pass_cycle_limit) + " cycles");
+            state.report.errors.push_back("pass longer than "
+                                          + std::to_string(pass_cycle_limit)
+                                          + " cycles");
             state.stopped = true;
             break;
         }
         const Decoded decoded = decode(state.pc);
         if (trace_) {
-            std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n", state.pc, static_cast<long long>(state.cycle),
+            std::fprintf(stderr, "model pc %zu cycle %lld i %d j %d\n",
+                         state.pc, static_cast<long long>(state.cycle),
                          index_[0], index_[1]);
         }
-        const size_t at     = state.pc;
+        const size_t at = state.pc;
         ++state.pc;
         if (decoded.op == Op::vloop) {
             ++state.cycle;
@@ -609,18 +732,21 @@ PassReport Processor::pass() {
         } else {
             execute(decoded, state);
             note_writes(decoded, state);
-            ++state.cycle;   // an IDX is one cycle: the NOP rows after it carry the wait
+            ++state.cycle; // an IDX is one cycle: the NOP rows after it carry the wait
         }
         end_loops(state);
     }
 
-    state.report.cycles = static_cast<int>(state.cycle);   // where the next row would issue
+    state.report.cycles =
+            static_cast<int>(state.cycle); // where the next row would issue
     owned_sinks_.insert(state.sinks_written.begin(), state.sinks_written.end());
-    std::ranges::set_difference(owned_sinks_, state.sinks_written, std::back_inserter(state.report.stale_sinks));
+    std::ranges::set_difference(owned_sinks_, state.sinks_written,
+                                std::back_inserter(state.report.stale_sinks));
 
     state.report.writes_applied = apply_window(write_window);
     active_page_                = 1 - active_page_;
-    registers_[io_base]         = static_cast<int32_t>(sign_extend(pass_count_ + 1, word_bits));
+    registers_[io_base] =
+            static_cast<int32_t>(sign_extend(pass_count_ + 1, word_bits));
     return state.report;
 }
 

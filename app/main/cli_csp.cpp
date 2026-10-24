@@ -41,32 +41,43 @@ int signed_word(uint64_t raw18) {
 // the status words, anything the map lets the link read.
 int cmd_raw(int argc, char **argv) {
     if (argc < 2) {
-        std::printf("usage: csp-raw <address> [count]   (a map address, hex or decimal; at most 64)\n");
+        std::printf(
+                "usage: csp-raw <address> [count]   (a map address, hex or decimal; at most 64)\n");
         return 1;
     }
-    const uint32_t first = static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0));
-    const int count = std::min(64, argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 1);
+    const uint32_t first =
+            static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0));
+    const int count = std::min(
+            64,
+            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 1);
     uint64_t dwords[64];
-    for (int done = 0; done < count; done += 8) { // the link reads at most eight a burst
-        if (!engine_link_raw_read(first + done, dwords + done, std::min(8, count - done))) {
+    for (int done = 0; done < count;
+         done += 8) { // the link reads at most eight a burst
+        if (!engine_link_raw_read(first + done, dwords + done,
+                                  std::min(8, count - done))) {
             std::printf("  the link is not running\n");
             return 1;
         }
     }
     for (int i = 0; i < count; ++i) {
-        std::printf("  %05lx: %09llx (%llu)\n", static_cast<unsigned long>(first + i),
-                    static_cast<unsigned long long>(dwords[i]), static_cast<unsigned long long>(dwords[i]));
+        std::printf("  %05lx: %09llx (%llu)\n",
+                    static_cast<unsigned long>(first + i),
+                    static_cast<unsigned long long>(dwords[i]),
+                    static_cast<unsigned long long>(dwords[i]));
     }
     return 0;
 }
 
 int cmd_pairwatch(int argc, char **argv) {
     if (argc < 2) {
-        std::printf("usage: csp-pairwatch <register> [reads]   (an even register; default 2000 reads)\n");
+        std::printf(
+                "usage: csp-pairwatch <register> [reads]   (an even register; default 2000 reads)\n");
         return 1;
     }
     const int first = static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1;
-    const int reads = argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 2000;
+    const int reads =
+            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0))
+                     : 2000;
     // The pair's two status words are fetched a few microseconds apart within one
     // link frame, so the odd half is the next pass's in a share of the reads that
     // grows with the clock: a difference of exactly one is that, not a miss.
@@ -95,8 +106,9 @@ int cmd_pairwatch(int argc, char **argv) {
             vTaskDelay(1); // let the idle task run: the watchdog
         }
     }
-    std::printf("  pair %03x: %d of %d reads disagree (%d more were the next pass's odd half)", first, disagree, reads,
-                next_pass);
+    std::printf(
+            "  pair %03x: %d of %d reads disagree (%d more were the next pass's odd half)",
+            first, disagree, reads, next_pass);
     if (disagree > 0) {
         std::printf(" (first: %05x vs %05x)",
                     static_cast<unsigned>(first_disagreement >> 18) & 0x3FFFF,
@@ -147,7 +159,8 @@ int cmd_poke(int argc, char **argv) {
         std::printf("  refused\n");
         return 1;
     }
-    std::printf("  queued %03x <- %d%s\n", address, raw, force ? " (forced)" : "");
+    std::printf("  queued %03x <- %d%s\n", address, raw,
+                force ? " (forced)" : "");
     return 0;
 }
 
@@ -170,7 +183,8 @@ int cmd_verify(int, char **) {
                     static_cast<unsigned long>(held[i]),
                     static_cast<long>(signed_word(held[i])));
     }
-    std::printf("  verified: %d register(s) differ from the image\n", differing);
+    std::printf("  verified: %d register(s) differ from the image\n",
+                differing);
     return differing ? 1 : 0;
 }
 
@@ -183,16 +197,19 @@ int cmd_resend(int, char **) {
 
 int cmd_diag(int, char **) {
     uint64_t dwords[fpga_map::diag_words] = {};
-    if (!engine_link_raw_read(fpga_map::diag_pass, dwords, fpga_map::diag_words)) {
+    if (!engine_link_raw_read(fpga_map::diag_pass, dwords,
+                              fpga_map::diag_words)) {
         std::printf("  the link answers no ID nonet\n");
         return 1;
     }
-    std::printf("  passes %lu  queue %llx  limiter %llx  dropped %lu  stream frames %lu\n",
-                static_cast<unsigned long>(engine_link_status(fpga_map::diag_pass)),
-                static_cast<unsigned long long>(dwords[1]),
-                static_cast<unsigned long long>(dwords[2]),
-                static_cast<unsigned long>(dwords[3] & 0xFFFF),
-                static_cast<unsigned long>(engine_link_status(fpga_map::diag_stream)));
+    std::printf(
+            "  passes %lu  queue %llx  limiter %llx  dropped %lu  stream frames %lu\n",
+            static_cast<unsigned long>(engine_link_status(fpga_map::diag_pass)),
+            static_cast<unsigned long long>(dwords[1]),
+            static_cast<unsigned long long>(dwords[2]),
+            static_cast<unsigned long>(dwords[3] & 0xFFFF),
+            static_cast<unsigned long>(
+                    engine_link_status(fpga_map::diag_stream)));
     return 0;
 }
 
@@ -204,31 +221,36 @@ int cmd_trap(int argc, char **argv) {
     if (argc > 1) {
         const bool off = std::strcmp(argv[1], "off") == 0;
         const uint32_t address =
-                off ? 0 : static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0)) & 0xFFF;
+                off ? 0
+                    : static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0))
+                                & 0xFFF;
         engine_link_raw_write(fpga_map::trap, address);
         if (off) {
             std::printf("  the trap is off\n");
         } else {
-            std::printf("  the trap watches %s 0x%03x\n",
-                        address & fpga_map::trap_sink_flag ? "sink word" : "register",
-                        static_cast<unsigned>(address & ~fpga_map::trap_sink_flag));
+            std::printf(
+                    "  the trap watches %s 0x%03x\n",
+                    address & fpga_map::trap_sink_flag ? "sink word"
+                                                       : "register",
+                    static_cast<unsigned>(address & ~fpga_map::trap_sink_flag));
         }
         return 0;
     }
     uint64_t capture = 0, again = ~uint64_t{0};
     for (int attempt = 0; attempt < 8 && capture != again; ++attempt) {
-        if (!engine_link_raw_read(fpga_map::trap, &capture, 1) ||
-            !engine_link_raw_read(fpga_map::trap, &again, 1)) {
+        if (!engine_link_raw_read(fpga_map::trap, &capture, 1)
+            || !engine_link_raw_read(fpga_map::trap, &again, 1)) {
             std::printf("  the link answers no ID nonet\n");
             return 1;
         }
     }
-    const unsigned hits      = static_cast<unsigned>(capture >> 30) & 0x3F;
-    const bool     from_pass = (capture >> 29) & 1;
-    const unsigned cycle     = static_cast<unsigned>(capture >> 18) & 0x7FF;
-    const unsigned word      = static_cast<unsigned>(capture) & 0x3FFFF;
-    std::printf("  hits %u (mod 64)  last: cycle %u  word 0x%05x  by the %s\n", hits, cycle,
-                word, from_pass ? "pass (the window or the sink area)" : "core");
+    const unsigned hits  = static_cast<unsigned>(capture >> 30) & 0x3F;
+    const bool from_pass = (capture >> 29) & 1;
+    const unsigned cycle = static_cast<unsigned>(capture >> 18) & 0x7FF;
+    const unsigned word  = static_cast<unsigned>(capture) & 0x3FFFF;
+    std::printf("  hits %u (mod 64)  last: cycle %u  word 0x%05x  by the %s\n",
+                hits, cycle, word,
+                from_pass ? "pass (the window or the sink area)" : "core");
     return 0;
 }
 
@@ -239,9 +261,10 @@ int cmd_trap(int argc, char **argv) {
 // bug) or issued but did not land (link).
 int cmd_voices(int, char **) {
     voice_diag_t v[32];
-    const int n = voice_alloc_diag(v, 32);
+    const int n                           = voice_alloc_diag(v, 32);
     static const char *const state_name[] = {"idle", "HELD", "releasing"};
-    std::printf("  sustain pedal: %s\n", voice_alloc_sustain_pedal() ? "DOWN" : "up");
+    std::printf("  sustain pedal: %s\n",
+                voice_alloc_sustain_pedal() ? "DOWN" : "up");
     std::printf("   v  state      note  vel  sustained  seq\n");
     int shown = 0;
     for (int i = 0; i < n; ++i) {
@@ -289,10 +312,13 @@ int cmd_hold(int, char **) {
     // a program ends with END and never reaches it, #271)
     for (size_t pc = 0; pc + 1 < fpga_map::program_rows; ++pc) {
         const uint64_t row[2] = {0, 0};
-        engine_link_raw_write_burst(fpga_map::program_base + 2 * static_cast<uint32_t>(pc), row, 2, true);
+        engine_link_raw_write_burst(fpga_map::program_base
+                                            + 2 * static_cast<uint32_t>(pc),
+                                    row, 2, true);
     }
     for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
-        engine_link_raw_write(fpga_map::rom_base + static_cast<uint32_t>(row), 0);
+        engine_link_raw_write(fpga_map::rom_base + static_cast<uint32_t>(row),
+                              0);
     }
     std::printf("  held, program and decode ROM cleared, tick paused\n");
     return 0;
@@ -305,16 +331,21 @@ int cmd_row(int argc, char **argv) {
         std::printf("usage: csp-row <pc> <bits 71:36 hex> <bits 35:0 hex>\n");
         return 1;
     }
-    const unsigned pc    = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
-    const uint64_t row[2] = {std::strtoull(argv[2], nullptr, 16) & spi_link::dword_mask,
-                             std::strtoull(argv[3], nullptr, 16) & spi_link::dword_mask};
-    if (pc + 1 >= fpga_map::program_rows) {   // the last row is the fetch's park, never a program's
-        std::printf("  a program has at most %u rows\n", static_cast<unsigned>(fpga_map::program_rows - 1));
+    const unsigned pc =
+            static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const uint64_t row[2] = {
+            std::strtoull(argv[2], nullptr, 16) & spi_link::dword_mask,
+            std::strtoull(argv[3], nullptr, 16) & spi_link::dword_mask};
+    if (pc + 1 >= fpga_map::
+                program_rows) { // the last row is the fetch's park, never a program's
+        std::printf("  a program has at most %u rows\n",
+                    static_cast<unsigned>(fpga_map::program_rows - 1));
         return 1;
     }
     engine_link_raw_write_burst(fpga_map::program_base + 2 * pc, row, 2, true);
     ++s_words_written;
-    s_checksum = s_checksum * 31u + pc * 7u + static_cast<unsigned>(row[0]) + static_cast<unsigned>(row[1]);
+    s_checksum = s_checksum * 31u + pc * 7u + static_cast<unsigned>(row[0])
+                 + static_cast<unsigned>(row[1]);
     return 0;
 }
 
@@ -324,10 +355,12 @@ int cmd_rom(int argc, char **argv) {
         std::printf("usage: csp-rom <row> <control word hex>\n");
         return 1;
     }
-    const unsigned row  = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const unsigned row =
+            static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const uint64_t word = std::strtoull(argv[2], nullptr, 16) & 0x3FFFF;
     if (row >= fpga_map::rom_rows) {
-        std::printf("  the decode ROM has %u rows\n", static_cast<unsigned>(fpga_map::rom_rows));
+        std::printf("  the decode ROM has %u rows\n",
+                    static_cast<unsigned>(fpga_map::rom_rows));
         return 1;
     }
     engine_link_raw_write(fpga_map::rom_base + row, word);
@@ -344,7 +377,8 @@ int cmd_const(int argc, char **argv) {
             static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
     const int raw = static_cast<int>(std::strtol(argv[2], nullptr, 0));
     engine_link_raw_write(fpga_map::fifo_door,
-                          fpga_map::fifo_dword(static_cast<int>(address), static_cast<uint32_t>(raw)));
+                          fpga_map::fifo_dword(static_cast<int>(address),
+                                               static_cast<uint32_t>(raw)));
     ++s_words_written;
     s_checksum = s_checksum * 31u + address * 5u
                  + (static_cast<unsigned>(raw) & 0x3FFFFu);
@@ -361,28 +395,36 @@ int cmd_burst(int argc, char **argv) {
         std::printf("usage: csp-burst <first register> <count> <seed>\n");
         return 1;
     }
-    const unsigned first = static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
-    const unsigned count = static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0));
-    const unsigned seed  = static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
+    const unsigned first =
+            static_cast<unsigned>(std::strtoul(argv[1], nullptr, 0));
+    const unsigned count =
+            static_cast<unsigned>(std::strtoul(argv[2], nullptr, 0));
+    const unsigned seed =
+            static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
     constexpr unsigned burst_dwords = 8;
-    constexpr unsigned chunk_dwords = static_cast<unsigned>(fpga_map::queue_depth / 2);
+    constexpr unsigned chunk_dwords =
+            static_cast<unsigned>(fpga_map::queue_depth / 2);
     unsigned since_commit = 0;
     for (unsigned at = 0; at < count; at += burst_dwords) {
         uint64_t dwords[burst_dwords];
         const unsigned n = std::min(burst_dwords, count - at);
         for (unsigned k = 0; k < n; ++k) {
             const unsigned address = first + at + k;
-            dwords[k] = fpga_map::fifo_dword(static_cast<int>(address), (address * 37u + seed) & 0x1FFFFu);
+            dwords[k] = fpga_map::fifo_dword(static_cast<int>(address),
+                                             (address * 37u + seed) & 0x1FFFFu);
         }
-        engine_link_raw_write_burst(fpga_map::fifo_door, dwords, static_cast<int>(n), false);
+        engine_link_raw_write_burst(fpga_map::fifo_door, dwords,
+                                    static_cast<int>(n), false);
         since_commit += n;
         if (since_commit >= chunk_dwords || at + n == count) {
-            engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+            engine_link_raw_write(fpga_map::ctrl,
+                                  fpga_map::ctrl_hold | fpga_map::ctrl_swap);
             vTaskDelay(pdMS_TO_TICKS(2));
             since_commit = 0;
         }
     }
-    std::printf("  queued %u words, committed %u a chunk\n", count, chunk_dwords);
+    std::printf("  queued %u words, committed %u a chunk\n", count,
+                chunk_dwords);
     return 0;
 }
 
@@ -402,32 +444,37 @@ int cmd_spitest(int argc, char **argv) {
     const int rounds =
             argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0))
                      : 1000;
-    constexpr int scratch_dwords = fpga_map::scratch_last - fpga_map::scratch_first + 1;
+    constexpr int scratch_dwords =
+            fpga_map::scratch_last - fpga_map::scratch_first + 1;
     uint64_t state = 0x12345678;
     int single_bad = 0, burst_bad = 0, id_bad = 0;
     for (int round = 0; round < rounds; ++round) {
         uint64_t dwords[scratch_dwords];
         for (uint64_t &dword : dwords) {
             state = state * 6364136223846793005ull + 1442695040888963407ull;
-            dword  = (state >> 20) & spi_link::dword_mask;
+            dword = (state >> 20) & spi_link::dword_mask;
         }
         for (int k = 0; k < scratch_dwords; ++k) {
             engine_link_raw_write(fpga_map::scratch_first + k, dwords[k]);
         }
         for (int k = 0; k < scratch_dwords; ++k) {
             uint64_t one = 0;
-            id_bad += !engine_link_raw_read(fpga_map::scratch_first + k, &one, 1);
+            id_bad +=
+                    !engine_link_raw_read(fpga_map::scratch_first + k, &one, 1);
             single_bad += one != dwords[k];
         }
-        engine_link_raw_write_burst(fpga_map::scratch_first, dwords, scratch_dwords, true);
+        engine_link_raw_write_burst(fpga_map::scratch_first, dwords,
+                                    scratch_dwords, true);
         uint64_t back[scratch_dwords] = {};
-        id_bad += !engine_link_raw_read(fpga_map::scratch_first, back, scratch_dwords);
+        id_bad += !engine_link_raw_read(fpga_map::scratch_first, back,
+                                        scratch_dwords);
         for (int k = 0; k < scratch_dwords; ++k) {
             burst_bad += back[k] != dwords[k];
         }
     }
-    std::printf("  %d rounds: %d single-dword and %d burst mismatches, %d frames without the ID\n",
-                rounds, single_bad, burst_bad, id_bad);
+    std::printf(
+            "  %d rounds: %d single-dword and %d burst mismatches, %d frames without the ID\n",
+            rounds, single_bad, burst_bad, id_bad);
     return 0;
 }
 
@@ -442,7 +489,8 @@ int cmd_spiclk(int argc, char **argv) {
         std::printf("usage: csp-spiclk <MHz> (0.1 to 80)\n");
         return 1;
     }
-    const uint32_t actual = engine_link_spi_frequency(static_cast<uint32_t>(megahertz * 1e6));
+    const uint32_t actual =
+            engine_link_spi_frequency(static_cast<uint32_t>(megahertz * 1e6));
     std::printf("  SPI clock %.3f MHz\n", actual / 1e6);
     return 0;
 }
@@ -458,19 +506,24 @@ int cmd_stream(int argc, char **argv) {
     if (std::strcmp(what, "off") == 0) {
         engine_link_data_stream(false, 0);
     } else if (std::strcmp(what, "lfsr") == 0) {
-        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_lfsr));
+        engine_link_data_stream(true,
+                                static_cast<int>(fpga_map::stream_source_lfsr));
     } else if (std::strcmp(what, "counter") == 0) {
-        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_counter));
+        engine_link_data_stream(
+                true, static_cast<int>(fpga_map::stream_source_counter));
     } else if (std::strcmp(what, "probe") == 0) {
-        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_probe));
+        engine_link_data_stream(
+                true, static_cast<int>(fpga_map::stream_source_probe));
     } else if (std::strcmp(what, "engine") == 0) {
         // the debug port: the sink word at the probe address's low ten bits (csp-probe sets it)
         // and the mix, a sample at a time
-        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_engine));
+        engine_link_data_stream(
+                true, static_cast<int>(fpga_map::stream_source_engine));
     } else if (std::strcmp(what, "dump") == 0) {
         // the register file over the pipe: a register a pass, its index and its word, the whole
         // file in 43 ms (tools/lab/spdif_capture.py stream --dump, chip_check.py --stream)
-        engine_link_data_stream(true, static_cast<int>(fpga_map::stream_source_dump));
+        engine_link_data_stream(true,
+                                static_cast<int>(fpga_map::stream_source_dump));
     } else {
         std::printf("usage: csp-stream off|lfsr|counter|probe|engine|dump\n");
         return 1;
@@ -509,7 +562,8 @@ int cmd_step(int argc, char **argv) {
     const uint32_t last = engine_link_status(fpga_map::diag_pass);
     vTaskDelay(pdMS_TO_TICKS(10));
     std::printf("  stepped %d ms from pass %lu to %lu\n", milliseconds,
-                static_cast<unsigned long>(first), static_cast<unsigned long>(last));
+                static_cast<unsigned long>(first),
+                static_cast<unsigned long>(last));
     return 0;
 }
 
@@ -551,14 +605,15 @@ const console_cmd_t commands[] = {
          "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
         {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
          cmd_hold, nullptr},
-        {"csp-row", "<pc> <hi hex> <lo hex>", "lab: write an instruction row (bits 71:36, 35:0)", cmd_row,
+        {"csp-row", "<pc> <hi hex> <lo hex>",
+         "lab: write an instruction row (bits 71:36, 35:0)", cmd_row, nullptr},
+        {"csp-rom", "<row> <hex>", "lab: write a decode ROM row", cmd_rom,
          nullptr},
-        {"csp-rom", "<row> <hex>", "lab: write a decode ROM row", cmd_rom, nullptr},
         {"csp-const", "<register> <raw>",
          "lab: write a register (applies on csp-go)", cmd_const, nullptr},
         {"csp-burst", "<register> <count> <seed>",
-         "lab: test values through the queue, committed a chunk at a time, as the engine does", cmd_burst,
-         nullptr},
+         "lab: test values through the queue, committed a chunk at a time, as the engine does",
+         cmd_burst, nullptr},
         {"csp-go", "", "lab: commit the writes and release the CSP", cmd_go,
          nullptr},
         {"csp-selftest", "[run]",
@@ -566,9 +621,11 @@ const console_cmd_t commands[] = {
          nullptr},
         {"csp-peek", "<register> [count]",
          "read CSP registers (even-aligned pairs)", cmd_peek, nullptr},
-        {"csp-raw", "<address> [count]", "read dwords of the SPI map as they are", cmd_raw, nullptr},
+        {"csp-raw", "<address> [count]",
+         "read dwords of the SPI map as they are", cmd_raw, nullptr},
         {"csp-pairwatch", "<register> [reads]",
-         "read a pair many times, count the reads whose halves differ", cmd_pairwatch, nullptr},
+         "read a pair many times, count the reads whose halves differ",
+         cmd_pairwatch, nullptr},
         {"csp-poke", "<register> <raw> [force]",
          "queue a write to a CSP register ('force': even if the image says it is there)",
          cmd_poke, nullptr},
@@ -578,9 +635,12 @@ const console_cmd_t commands[] = {
         {"csp-resend", "", "send the whole register image again", cmd_resend,
          nullptr},
         {"csp-diag", "", "the gateware's diagnostic words", cmd_diag, nullptr},
-        {"csp-voices", "", "the firmware's voice table, live (a stuck note shows as HELD, #238)", cmd_voices, nullptr},
+        {"csp-voices", "",
+         "the firmware's voice table, live (a stuck note shows as HELD, #238)",
+         cmd_voices, nullptr},
         {"csp-trap", "[<register>|0x800+<sink>|off]",
-         "arm the write trap on a register or a sink word, or read what it caught", cmd_trap, nullptr},
+         "arm the write trap on a register or a sink word, or read what it caught",
+         cmd_trap, nullptr},
 };
 
 } // namespace

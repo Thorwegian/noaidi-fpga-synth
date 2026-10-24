@@ -47,7 +47,8 @@ constexpr int writes_per_tick = 480;
 class SpiPort : public EnginePort {
 public:
     void queue(const fpga_map::dword_t *dwords, int count) override {
-        spi_link::write_repeated(fpga_map::fifo_door, dwords, static_cast<size_t>(count));
+        spi_link::write_repeated(fpga_map::fifo_door, dwords,
+                                 static_cast<size_t>(count));
     }
     void write_register(uint32_t address, fpga_map::dword_t value) override {
         spi_link::write_one(address, value);
@@ -68,7 +69,9 @@ bool paused = false; // the tick sends nothing (the self-test has the chip)
 fpga_map::dword_t ctrl_word(fpga_map::dword_t bits) {
     return bits | (test_tone ? fpga_map::ctrl_test_tone : 0)
            | (data_stream ? fpga_map::ctrl_data_stream : 0)
-           | (static_cast<fpga_map::dword_t>(stream_source & fpga_map::stream_source_mask) << fpga_map::ctrl_source_shift);
+           | (static_cast<fpga_map::dword_t>(stream_source
+                                             & fpga_map::stream_source_mask)
+              << fpga_map::ctrl_source_shift);
 }
 
 // Send what is pending, at most `limit` words, and commit it with a swap.
@@ -95,10 +98,12 @@ void clear_registers() {
         for (int k = 0; k < n; ++k) {
             dwords[k] = fpga_map::fifo_dword(at + k, 0);
         }
-        spi_link::write_repeated(fpga_map::fifo_door, dwords, static_cast<size_t>(n));
+        spi_link::write_repeated(fpga_map::fifo_door, dwords,
+                                 static_cast<size_t>(n));
         since_commit += n;
         if (since_commit >= chunk_dwords || at + n >= csp::register_count) {
-            spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+            spi_link::write_one(fpga_map::ctrl,
+                                fpga_map::ctrl_hold | fpga_map::ctrl_swap);
             vTaskDelay(pdMS_TO_TICKS(2));
             since_commit = 0;
         }
@@ -132,20 +137,22 @@ void check_gateware_health() {
     static int healthy_seconds       = 0;
     std::array<fpga_map::dword_t, fpga_map::diag_words> diag{};
     xSemaphoreTake(lock, portMAX_DELAY);
-    const bool read_ok = spi_link::read(fpga_map::diag_pass, diag.data(), diag.size());
+    const bool read_ok =
+            spi_link::read(fpga_map::diag_pass, diag.data(), diag.size());
     xSemaphoreGive(lock);
     if (!read_ok) {
         ESP_LOGW(tag, "diagnostic read failed");
         return;
     }
-    const uint32_t passes    = static_cast<uint32_t>(diag[0]);
-    const bool queue_full    = (diag[1] >> 10) & 1;
-    const uint32_t reduction = static_cast<uint32_t>(diag[2] >> 11); // codes of 0.375 dB
-    const uint32_t dropped   = static_cast<uint32_t>(diag[3] & 0xFFFF);
-    const bool csp_stopped   = passes == previous_passes;
-    const bool dropped_new   = dropped != previous_dropped;
-    previous_passes          = passes;
-    previous_dropped         = dropped;
+    const uint32_t passes = static_cast<uint32_t>(diag[0]);
+    const bool queue_full = (diag[1] >> 10) & 1;
+    const uint32_t reduction =
+            static_cast<uint32_t>(diag[2] >> 11); // codes of 0.375 dB
+    const uint32_t dropped = static_cast<uint32_t>(diag[3] & 0xFFFF);
+    const bool csp_stopped = passes == previous_passes;
+    const bool dropped_new = dropped != previous_dropped;
+    previous_passes        = passes;
+    previous_dropped       = dropped;
     if (csp_stopped || dropped_new || queue_full || reduction > 16) {
         healthy_seconds = 0;
         ESP_LOGW(
@@ -167,7 +174,8 @@ void check_gateware_health() {
 // while the probe waits for its pass.
 uint64_t probe_pair(int register_address) {
     xSemaphoreTake(lock, portMAX_DELAY);
-    spi_link::write_one(fpga_map::probe_address, static_cast<fpga_map::dword_t>(register_address));
+    spi_link::write_one(fpga_map::probe_address,
+                        static_cast<fpga_map::dword_t>(register_address));
     xSemaphoreGive(lock);
     vTaskDelay(pdMS_TO_TICKS(3)); // at least two passes
     std::array<fpga_map::dword_t, 2> pair{};
@@ -220,10 +228,10 @@ void probe_task(void *) {
             pass_low_bit[sample] =
                     static_cast<unsigned>((probe_pair(0x040) >> 18) & 1);
         }
-        ESP_LOGI(tag, "probe: PASS bit 0 %u %u %u %u %u %u %u %u", pass_low_bit[0],
-                 pass_low_bit[1], pass_low_bit[2], pass_low_bit[3],
-                 pass_low_bit[4], pass_low_bit[5], pass_low_bit[6],
-                 pass_low_bit[7]);
+        ESP_LOGI(tag, "probe: PASS bit 0 %u %u %u %u %u %u %u %u",
+                 pass_low_bit[0], pass_low_bit[1], pass_low_bit[2],
+                 pass_low_bit[3], pass_low_bit[4], pass_low_bit[5],
+                 pass_low_bit[6], pass_low_bit[7]);
         for (int lfo = 0; lfo < 2; ++lfo) {
             const int record           = cp::lfos + lfo * 16 * cp::lfo_size;
             const int set              = cp::lfo_sets + lfo * cp::set_size;
@@ -266,10 +274,9 @@ int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
         if (!known[0] && !known[1]) {
             continue;
         }
-        const uint64_t pair = probe_pair(even);
-        const int32_t actual[2] = {
-                static_cast<int32_t>((pair >> 18) & 0x3FFFF),
-                static_cast<int32_t>(pair & 0x3FFFF)};
+        const uint64_t pair     = probe_pair(even);
+        const int32_t actual[2] = {static_cast<int32_t>((pair >> 18) & 0x3FFFF),
+                                   static_cast<int32_t>(pair & 0x3FFFF)};
         for (int half = 0; half < 2; ++half) {
             if (known[half] && actual[half] != (expected[half] & 0x3FFFF)) {
                 if (differing < limit) {
@@ -292,7 +299,8 @@ int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
 constexpr int boot_image_attempts = 3;
 
 void verify_boot_image() {
-    constexpr int named = 4; // the first differing registers, in the log: which words a boot loses
+    constexpr int named =
+            4; // the first differing registers, in the log: which words a boot loses
     for (int attempt = 1; attempt <= boot_image_attempts; ++attempt) {
         int registers[named];
         int32_t wanted[named], held[named];
@@ -305,12 +313,15 @@ void verify_boot_image() {
         char first[named * 32 + 1] = "";
         for (int k = 0; k < std::min(lost, named); ++k) {
             char one[32];
-            std::snprintf(one, sizeof one, " %03x:%ld/%ld", registers[k], static_cast<long>(wanted[k]),
+            std::snprintf(one, sizeof one, " %03x:%ld/%ld", registers[k],
+                          static_cast<long>(wanted[k]),
                           static_cast<long>(held[k]));
             std::strncat(first, one, sizeof first - std::strlen(first) - 1);
         }
-        ESP_LOGW(tag, "boot image: %d register(s) not as sent (image/chip:%s), sending it again (%d of %d)",
-                 lost, first, attempt, boot_image_attempts);
+        ESP_LOGW(
+                tag,
+                "boot image: %d register(s) not as sent (image/chip:%s), sending it again (%d of %d)",
+                lost, first, attempt, boot_image_attempts);
         // the CSP is held: the window applies a committed chunk within a few passes
         image.resend_all();
         while (image.pending()) {
@@ -318,8 +329,10 @@ void verify_boot_image() {
             vTaskDelay(pdMS_TO_TICKS(2));
         }
     }
-    ESP_LOGE(tag, "boot image: still not as sent after %d resends; the synth may be silent",
-             boot_image_attempts);
+    ESP_LOGE(
+            tag,
+            "boot image: still not as sent after %d resends; the synth may be silent",
+            boot_image_attempts);
 }
 
 void engine_task(void *) {
@@ -385,7 +398,8 @@ int send_and_verify(uint32_t base, size_t count, Dword dword_at) {
         const size_t n = std::min(burst.size(), count - first);
         spi_link::read(base + static_cast<uint32_t>(first), burst.data(), n);
         for (size_t k = 0; k < n; ++k) {
-            differing += burst[k] != (dword_at(first + k) & spi_link::dword_mask);
+            differing +=
+                    burst[k] != (dword_at(first + k) & spi_link::dword_mask);
         }
     }
     return differing;
@@ -398,14 +412,21 @@ int send_and_verify(uint32_t base, size_t count, Dword dword_at) {
 void load_program() {
     // the program's rows only, END included: the chip's fetch parks on END, so
     // what IMEM holds past them never runs (#271)
-    const int rows_differing = send_and_verify(fpga_map::program_base, 2 * csp::control::rows.size(), program_dword);
-    const int rom_differing  = send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_dword);
+    const int rows_differing =
+            send_and_verify(fpga_map::program_base,
+                            2 * csp::control::rows.size(), program_dword);
+    const int rom_differing =
+            send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_dword);
     if (rows_differing == 0 && rom_differing == 0) {
-        ESP_LOGI(tag, "program image: every dword as sent (%u rows, %u decode rows)",
-                 static_cast<unsigned>(csp::control::rows.size()), static_cast<unsigned>(fpga_map::rom_rows));
+        ESP_LOGI(tag,
+                 "program image: every dword as sent (%u rows, %u decode rows)",
+                 static_cast<unsigned>(csp::control::rows.size()),
+                 static_cast<unsigned>(fpga_map::rom_rows));
     } else {
-        ESP_LOGE(tag, "program image: %d row dword(s) and %d decode dword(s) not as sent", rows_differing,
-                 rom_differing);
+        ESP_LOGE(
+                tag,
+                "program image: %d row dword(s) and %d decode dword(s) not as sent",
+                rows_differing, rom_differing);
     }
 }
 
@@ -432,7 +453,8 @@ void engine_link_init(void) {
     // it (committed or not) would be applied during the self-test and the first
     // passes of the control program, over what they compute. Commit it and let
     // the held CSP apply it all now (up to 511 dwords, in one pass when held).
-    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+    spi_link::write_one(fpga_map::ctrl,
+                        fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Does the chip do what the model says? Say so before the sound depends
@@ -474,13 +496,17 @@ void engine_link_init(void) {
     verify_boot_image();
     if (hold_after_boot) {
         paused = true;
-        ESP_LOGW(tag, "hold_after_boot: the CSP stays held, the tick is paused");
+        ESP_LOGW(tag,
+                 "hold_after_boot: the CSP stays held, the tick is paused");
     } else {
         spi_link::write_one(fpga_map::ctrl, ctrl_word(0)); // release
     }
-    ESP_LOGI(tag, "control program loaded: %u rows, %u decode rows, %d cycles a pass",
-             static_cast<unsigned>(csp::control::rows.size()), static_cast<unsigned>(csp::control::rom.size()),
-             csp::control::cycles);
+    ESP_LOGI(
+            tag,
+            "control program loaded: %u rows, %u decode rows, %d cycles a pass",
+            static_cast<unsigned>(csp::control::rows.size()),
+            static_cast<unsigned>(csp::control::rom.size()),
+            csp::control::cycles);
 
     if (xTaskCreate(engine_task, "engine_link", task_stack, nullptr,
                     task_priority, &task)
@@ -515,8 +541,8 @@ bool engine_link_raw_write(uint32_t address, uint64_t dword) {
     return true;
 }
 
-bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords, int count,
-                                 bool auto_increment) {
+bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords,
+                                 int count, bool auto_increment) {
     if (!running) {
         return false;
     }
@@ -642,10 +668,12 @@ bool engine_link_point(int partial, const int *pointers) {
     std::array<fpga_map::dword_t, fpga_map::pointer_words> dwords{};
     for (int k = 0; k < render::pointer_count; ++k) {
         dwords[k / 3] |= (static_cast<fpga_map::dword_t>(pointers[k]) & 0x3FF)
-                        << (10 * (k % 3));
+                         << (10 * (k % 3));
     }
     xSemaphoreTake(lock, portMAX_DELAY);
-    spi_link::write(fpga_map::partial_base + static_cast<uint32_t>(partial) * fpga_map::partial_stride,
+    spi_link::write(fpga_map::partial_base
+                            + static_cast<uint32_t>(partial)
+                                      * fpga_map::partial_stride,
                     dwords.data(), dwords.size());
     xSemaphoreGive(lock);
     return true;

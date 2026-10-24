@@ -54,16 +54,23 @@ Seen feed(const std::vector<uint8_t> &bytes) {
 int main() {
     {
         const Seen s = feed({0x90, 60, 100, 64, 100, 0xFE, 60, 0});
-        check(s.messages.size() == 3, "running status: three messages from one status byte");
-        check(s.messages.size() == 3 && s.messages[2].status == 0x80, "velocity 0 is a note-off");
+        check(s.messages.size() == 3,
+              "running status: three messages from one status byte");
+        check(s.messages.size() == 3 && s.messages[2].status == 0x80,
+              "velocity 0 is a note-off");
         check(s.frames.empty(), "no SysEx seen");
     }
     {
-        const Seen s = feed({0xF0, 0x7D, 0x4E, 0x4F, 0xF8, 0x10, 0xF7, 0xB0, 74, 100});
+        const Seen s =
+                feed({0xF0, 0x7D, 0x4E, 0x4F, 0xF8, 0x10, 0xF7, 0xB0, 74, 100});
         check(s.frames.size() == 1, "a SysEx frame is delivered whole");
-        check(s.frames.size() == 1 && s.frames[0] == std::vector<uint8_t>{0x7D, 0x4E, 0x4F, 0x10},
+        check(s.frames.size() == 1
+                      && s.frames[0]
+                                 == std::vector<uint8_t>{0x7D, 0x4E, 0x4F,
+                                                         0x10},
               "the frame is the bytes between F0 and F7, the real-time byte inside it skipped");
-        check(s.messages.size() == 1 && s.messages[0].status == 0xB0, "a message after the frame parses");
+        check(s.messages.size() == 1 && s.messages[0].status == 0xB0,
+              "a message after the frame parses");
     }
     {
         std::vector<uint8_t> bytes{0xF0};
@@ -73,16 +80,20 @@ int main() {
         bytes.push_back(0xF7);
         bytes.insert(bytes.end(), {0xF0, 0x7D, 0x4E, 0x4F, 0x10, 0xF7});
         const Seen s = feed(bytes);
-        check(s.frames.size() == 1, "a frame that outgrows the buffer is dropped, the next one is not");
+        check(s.frames.size() == 1,
+              "a frame that outgrows the buffer is dropped, the next one is not");
     }
     {
         const Seen s = feed({0x90, 60, 100, 0xF0, 0x7D, 0x4E, 0x90, 64, 100});
-        check(s.frames.empty(), "a frame cut short by a status byte is dropped");
-        check(s.messages.size() == 2, "the status byte that cut it starts a message");
+        check(s.frames.empty(),
+              "a frame cut short by a status byte is dropped");
+        check(s.messages.size() == 2,
+              "the status byte that cut it starts a message");
     }
     {
         const Seen s = feed({0x90, 60, 100, 0xF0, 0xF7, 64, 100});
-        check(s.messages.size() == 1, "SysEx cancels running status: the data bytes after it are orphans");
+        check(s.messages.size() == 1,
+              "SysEx cancels running status: the data bytes after it are orphans");
     }
     if (g_failures == 0) {
         std::printf("midi_parser: ALL PASS\n");
