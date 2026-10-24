@@ -97,6 +97,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238) |
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
+| `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen patch, recorded over S/PDIF |
 | `baseline_check.py` | that recording against what it should hold, with Essentia |
 | `benchmark_compare.py` | a baseline recording against the benchmark take |
