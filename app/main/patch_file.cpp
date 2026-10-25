@@ -5,8 +5,6 @@
 
 #include "patch_file.h"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -137,15 +135,8 @@ std::string to_text(const patch_t &p) {
     return text;
 }
 
-bool factory_path(std::string_view path) {
-    constexpr std::string_view folder = "/patches/factory/";
-    auto same                         = [](char a, char b) {
-        return std::tolower(static_cast<unsigned char>(a))
-               == std::tolower(static_cast<unsigned char>(b));
-    };
-    return std::search(path.begin(), path.end(), folder.begin(), folder.end(),
-                       same)
-           != path.end();
+bool factory_path(const std::string &path) {
+    return strcasestr(path.c_str(), "/Patches/Factory/") != nullptr;
 }
 
 bool save(const std::string &path, const patch_t &p, std::string &error) {
