@@ -50,8 +50,9 @@ static int32_t nearest_by_ratio(double value, double step, int32_t lo_raw,
 // ── Envelope times ──────────────────────────────────────────────────
 // The CSP's envelope (envelope.s) is a one-pole RC with a wide level: each
 // pass moves the level toward its target by the fraction RATE of the
-// distance left, RATE being the per-sample coefficient's share of two
-// samples (csp::envelope_rate), with no floor — the step is D × RATE in
+// distance left, RATE being the per-sample coefficient's share of the
+// pass's samples (csp::envelope_rate; four since #268, so a code means the
+// same time at any pass rate), with no floor — the step is D × RATE in
 // 2^-32, so a segment is the exponential and nothing else. The times are
 // the exponential's, in samples at 96 kHz (docs/storage_format.md
 // "Envelope times"). The old adsr.sv stepped at least one raw unit a
