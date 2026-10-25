@@ -10,6 +10,10 @@
      (Essentia) and benchmark_compare.py against the benchmark (tools/lab/
      benchmark): envelope, pitch classes, centroid, partials, valley floor.
 
+WARNING: 3. measures the Factory preset Galaxy, still being voiced on the
+bench (#305): a change to its file moves the reference, so an audio failure
+after one may be the preset, not the build. See benchmark_compare.py.
+
 usage: acceptance.py --out DIR [--label NAME] [--fs BITSTREAM] [--loader PATH]
                      [--console /dev/ttyACM0] [--port 16:0] [--device hw:1,0]
                      [--preset /Presets/Factory/Pads/Galaxy.toml] [--boot-seconds 16]

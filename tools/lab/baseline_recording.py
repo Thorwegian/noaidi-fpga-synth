@@ -23,6 +23,10 @@ the ALSA sequencer port the synth's USB MIDI interface has, the audio comes
 in through `arecord` from the ALSA capture device the S/PDIF receiver has.
 The file is 48 kHz, 16-bit, stereo; the summary printed at the end gives the
 level of each note so that a recording can be checked without listening.
+
+WARNING: the acceptance plays Galaxy (program 1), a Factory preset still being
+voiced on the bench (#305); its benchmark is only valid for the Galaxy.toml it
+was recorded with (tools/lab/benchmark/README.md).
 """
 import argparse
 import subprocess

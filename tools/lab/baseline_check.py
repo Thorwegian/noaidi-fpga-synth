@@ -30,12 +30,21 @@ segment of it (segments()) the checker takes the middle 60 % and measures:
 The verdicts are deliberately tolerant of the preset (a pad with a slow
 attack, a long release and free-running LFOs): a note passes when its pitch
 class, at any octave, holds at least a third of the confident frames; the
-silence bar passes when it is at least 12 dB below the held note before it;
+silence bar passes when it is at least 6 dB below the held note before it
+(the bar's middle is 0.8–3.2 s into the held note's release, and Galaxy's
+7.2 s RC release is still sounding there, about 9 dB down: the rule is for a
+stuck note, which stays within a dB or two of the held level);
 the triad when each of its notes' peaks is within 24 dB of the strongest;
 the release when the level six seconds after it is at least 20 dB below the
 triad's. The exit status is 1 on any failure. The JSON carries every
 measurement, so that benchmark_compare.py can put another recording against
 this one without the WAV.
+
+WARNING: the reference is a recording of the Factory preset Galaxy, which is
+still being voiced on the bench, not a frozen test fixture (#305). A change to
+app/storage/Presets/Factory/Pads/Galaxy.toml moves what this test measures, so
+a failure after one may be the preset, not the synth. Re-record the benchmark
+(tools/lab/benchmark/README.md) in the commit that changes the preset.
 """
 import argparse
 import json
@@ -181,7 +190,7 @@ def analyse(audio):
         if name == "lead-in":
             result["ok"], result["rule"] = result["level_dbfs"] < -60, "silence"
         elif name == "bar of silence":
-            result["ok"], result["rule"] = result["level_dbfs"] < by_name["C6 held, one bar"]["level_dbfs"] - 12, "< C6-12"
+            result["ok"], result["rule"] = result["level_dbfs"] < by_name["C6 held, one bar"]["level_dbfs"] - 6, "< C6-6"
         elif name == "triad":
             result["ok"], result["rule"] = all(rel > -24 for rel in result["peaks_db"].values()), "C4 E4 G4"
         elif name == "release +2 s":
