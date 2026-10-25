@@ -1,4 +1,4 @@
-// render.cpp — a patch, as writes to the CSP's registers and sinks
+// render.cpp — a preset, as writes to the CSP's registers and sinks
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -23,7 +23,7 @@ namespace {
 constexpr int32_t word_one = csp::word_one;         // 1.0
 constexpr int32_t word_max = (1 << 17) - 1;         // the largest word
 constexpr int32_t word_min = -(1 << 17);            // and the smallest
-constexpr int raw_octave   = 1024;                  // the patch's octave
+constexpr int raw_octave   = 1024;                  // the preset's octave
 constexpr int word_per_raw = word_one / raw_octave; // 16
 constexpr int32_t middle_c = 5 * raw_octave;        // MIDI note 60, UQ4.10
 
@@ -43,7 +43,7 @@ constexpr int level_22_one = 0x400000; // full scale of the 22-bit level
 constexpr int attack_target =
         0x533333; // 1.3 of full scale: the RC charge's aim
 
-// Unison offsets (symmetric, in steps of the patch's unison detune).
+// Unison offsets (symmetric, in steps of the preset's unison detune).
 constexpr std::array<int8_t, 7> unison_7 = {-3, -2, -1, 0, 1, 2, 3};
 constexpr std::array<int8_t, 4> unison_4 = {-3, -1, 1, 3};
 
@@ -51,7 +51,7 @@ int32_t clamp_word(int64_t value) {
     return static_cast<int32_t>(std::clamp<int64_t>(value, word_min, word_max));
 }
 
-// A number of octaves, as the patch gives them (raw 1024 to the octave), in
+// A number of octaves, as the preset gives them (raw 1024 to the octave), in
 // a word.
 int32_t octaves(int64_t raw) {
     return clamp_word(raw * word_per_raw);
@@ -100,7 +100,7 @@ int voice_register(int voice, int field) {
 
 // Velocity scales an envelope's amount. c(vel) is linear; g falls from 1 at
 // the full velocity to 1 - amount/127 at the softest, so a velocity
-// sensitivity of 0 leaves every note at the patch's full amount.
+// sensitivity of 0 leaves every note at the preset's full amount.
 double velocity_curve(uint8_t velocity) {
     return velocity / 127.0;
 }
@@ -112,7 +112,7 @@ double velocity_scale(uint8_t velocity, uint8_t amount) {
 // The loudness span the amp envelope's static amounts are laid out over: the
 // velocity's amount and the sustain are fractions of 60 dB (the old engine's
 // span; `param_conventions.md`), and since the pipeline's gain is linear
-// (#176) the exponential is taken here, once per note or per patch, not
+// (#176) the exponential is taken here, once per note or per preset, not
 // in gateware. A fraction f is 2^(span × (f − 1)) of amplitude: 0 is −60 dB,
 // 1 is unity.
 constexpr double loudness_span_octaves = 10.0;
@@ -124,8 +124,8 @@ double amplitude_of_fraction(double fraction) {
 // The amp envelope's amount for a note, as the amplitude the level is
 // multiplied by: a soft note rises to a lower peak from the same floor, as
 // it always did.
-double amp_amount(const patch_t &patch, uint8_t velocity) {
-    return amplitude_of_fraction(velocity_scale(velocity, patch.vel_amp_amt));
+double amp_amount(const preset_t &preset, uint8_t velocity) {
+    return amplitude_of_fraction(velocity_scale(velocity, preset.vel_amp_amt));
 }
 
 // Velocity scales the mod envelope's amount more deeply than the amp's (#244):
@@ -142,8 +142,8 @@ double mod_velocity_scale(uint8_t velocity, uint8_t amount) {
 }
 
 // The amount the mod envelope's depth is scaled by.
-double mod_amount(const patch_t &patch, uint8_t velocity) {
-    return mod_velocity_scale(velocity, patch.vel_mod_amt);
+double mod_amount(const preset_t &preset, uint8_t velocity) {
+    return mod_velocity_scale(velocity, preset.vel_mod_amt);
 }
 
 // A MIDI note, in octaves from middle C.
@@ -153,7 +153,7 @@ int32_t note_word(uint8_t note) {
 }
 
 // An envelope's rows: attack aims past full scale, decay at the sustain level,
-// release at zero; each with the patch's rate. The amp envelope's level is
+// release at zero; each with the preset's rate. The amp envelope's level is
 // the voice's linear gain (#176), so a decay or a release is an RC fall in
 // amplitude — a constant number of dB a second, the analog envelope — and a
 // released tail reaches the floor in the segment's time (60 dB down,
@@ -165,7 +165,7 @@ void envelope(const adsr_t &env, int sustain, int attack, int decay,
     auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
         const int base = channel_register(cp::envelopes + segment);
         const uint32_t k =
-                patch_adsr_rate_coeff(patch_adsr_rate_byte(rate_code));
+                preset_adsr_rate_coeff(preset_adsr_rate_byte(rate_code));
         wide(writes, base + cp::target, target22 << 10);
         wide(writes, base + cp::rate, csp::envelope_rate(k));
     };
@@ -182,12 +182,12 @@ struct Codes {
     int right;
 };
 
-Codes gain_codes(const patch_t &patch, const Voicing &partial, int sounding) {
+Codes gain_codes(const preset_t &preset, const Voicing &partial, int sounding) {
     const int makeup = sounding <= 2 ? 8 : sounding <= 4 ? 4 : 0;
-    const int mix    = patch.osc_mix; // + favours osc 2, − osc 1
-    // the patch's volume (a UQ4.4 code, 16 steps an octave) and the make-up:
+    const int mix    = preset.osc_mix; // + favours osc 2, − osc 1
+    // the preset's volume (a UQ4.4 code, 16 steps an octave) and the make-up:
     // the voice's gain word is the envelope's alone
-    int volume = patch.volume + makeup;
+    int volume = preset.volume + makeup;
     if (partial.oscillator == 0 && mix > 0) {
         volume -= mix;
     }
@@ -197,13 +197,13 @@ Codes gain_codes(const patch_t &patch, const Voicing &partial, int sounding) {
     // the balance's extremes are a mute, not 23.6 dB down
     const bool balance_mute = (partial.oscillator == 0 && mix >= 63)
                               || (partial.oscillator == 1 && mix <= -63);
-    const int pan = patch.pan;
+    const int pan = preset.pan;
     int left      = std::clamp(volume - std::max(pan, 0), 0x01, 0xFF);
     int right     = std::clamp(volume - std::max(-pan, 0), 0x01, 0xFF);
 
     // The stereo spread: a leaning unison partial keeps its near side at full
     // and loses spread/2 steps on the far side; 127 mutes the far side.
-    const int spread   = patch.unison_stereo & 0x7F;
+    const int spread   = preset.unison_stereo & 0x7F;
     const bool lean    = partial.left != partial.right;
     const bool enabled = lean && spread < 127;
     if (enabled) {
@@ -221,11 +221,11 @@ Codes gain_codes(const patch_t &patch, const Voicing &partial, int sounding) {
 
 } // namespace
 
-int voicing(const patch_t &patch, VoicePlan &plan) {
+int voicing(const preset_t &preset, VoicePlan &plan) {
     plan             = VoicePlan{};
-    const int spread = patch.unison_detune; // raw octave steps a step
+    const int spread = preset.unison_detune; // raw octave steps a step
     int sounding     = 0;
-    switch (patch.voice_struct) {
+    switch (preset.voice_struct) {
     case VOICE_2_PLAIN:
         plan[0]  = {0, 0, true, true, true};
         plan[1]  = {1, 0, true, true, true};
@@ -320,20 +320,20 @@ void setup(Writes &writes) {
     put(writes, cp::zero_sink, 0);
 }
 
-void amp_envelope(const patch_t &patch, Writes &writes) {
+void amp_envelope(const preset_t &preset, Writes &writes) {
     // the sustain knob is a fraction of the 60 dB span, as it always was; the
     // level it aims at is that loudness as an amplitude, the gain being linear
     const double sustain =
-            std::min<uint16_t>(patch.env[0].sustain, 0x3FF) / double{0x3FF};
-    envelope(patch.env[0],
+            std::min<uint16_t>(preset.env[0].sustain, 0x3FF) / double{0x3FF};
+    envelope(preset.env[0],
              std::lround(amplitude_of_fraction(sustain) * double{0x400000}),
              amp_attack, amp_decay, amp_release, writes);
 }
 
-void mod_envelope(const patch_t &patch, Writes &writes) {
+void mod_envelope(const preset_t &preset, Writes &writes) {
     // linear in octaves of cutoff: the sustain is a fraction of the depth
-    envelope(patch.env[1],
-             std::min<uint16_t>(patch.env[1].sustain, 0x3FF) << 12, mod_attack,
+    envelope(preset.env[1],
+             std::min<uint16_t>(preset.env[1].sustain, 0x3FF) << 12, mod_attack,
              mod_decay, mod_release, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
     // program takes MOD_AMOUNT as a quarter of the depth and multiplies by
@@ -343,31 +343,31 @@ void mod_envelope(const patch_t &patch, Writes &writes) {
     // engine's (issue #222: the centroid 3960 Hz against the benchmark's
     // 1561 on a C5, 729 with the word zeroed).
     put(writes, channel_register(cp::mod_amount),
-        octaves(patch.mod_env_depth / 4));
+        octaves(preset.mod_env_depth / 4));
 }
 
-void cutoff(const patch_t &patch, const Controllers &controllers,
+void cutoff(const preset_t &preset, const Controllers &controllers,
             Writes &writes) {
     // The knob, the wheel (up to 5 octaves), and the half octave that puts a
     // note's cutoff above its pitch when the tracking is 100 %.
     constexpr int half_octave = raw_octave / 2;
     constexpr int wheel_step  = 40; // raw octave steps a wheel step
     put(writes, channel_register(cp::cutoff_base),
-        octaves(patch.filter.cutoff + half_octave
+        octaves(preset.filter.cutoff + half_octave
                 + controllers.wheel * wheel_step));
     // 64 is 100 %
     put(writes, channel_register(cp::key_track),
-        clamp_word(int64_t{patch.filter.key_track} * word_one / 64));
+        clamp_word(int64_t{preset.filter.key_track} * word_one / 64));
 }
 
-void pitch_bend(const patch_t &patch, const Controllers &controllers,
+void pitch_bend(const preset_t &preset, const Controllers &controllers,
                 Writes &writes) {
-    (void) patch;
+    (void) preset;
     put(writes, channel_register(cp::bend), octaves(controllers.bend));
 }
 
-void lfo(const patch_t &patch, int i, Writes &writes) {
-    const lfo_t &l  = patch.lfo[i];
+void lfo(const preset_t &preset, int i, Writes &writes) {
+    const lfo_t &l  = preset.lfo[i];
     const int set   = cp::lfo_sets + i * cp::set_size;
     const int shape = l.shape & 3;
 
@@ -376,7 +376,7 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
     // squares, triangles, sines, each as many as counts.s fixes — so a
     // record's shape is its place in that order. One of each shape a half
     // (counts.s): the saw at the pool's start, the square after the saws, and
-    // so on. The channel reads the record of the patch's shape, below.
+    // so on. The channel reads the record of the preset's shape, below.
     const int base   = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
     const int offset = shape == WAVE_SAW     ? 0
                        : shape == WAVE_PULSE ? cp::saws_a_half
@@ -398,10 +398,10 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
                             : 0);
     put(writes, set + cp::base, base); // the program walks the half from here
 
-    // the channel reads its LFO from the record of the patch's shape
+    // the channel reads its LFO from the record of the preset's shape
     put(writes, channel_register(i == 0 ? cp::lfo1 : cp::lfo2), record);
 
-    // The depth swings the destination by ±depth/2 of the patch's raw
+    // The depth swings the destination by ±depth/2 of the preset's raw
     // units (1024 to the octave, or to 1.0 of a pulse width): a word of
     // depth × 8. Only the chosen destination carries it.
     const int32_t amount = octaves(int64_t{l.depth} / 2);
@@ -417,22 +417,22 @@ void lfo(const patch_t &patch, int i, Writes &writes) {
         l.dest == LFO_DEST_RESONANCE ? amount : 0);
 }
 
-void channel_sound(const patch_t &patch, Writes &writes) {
+void channel_sound(const preset_t &preset, Writes &writes) {
     VoicePlan plan;
-    const int sounding = voicing(patch, plan);
+    const int sounding = voicing(preset, plan);
     const int channel  = cp::channel_sinks;
     for (int slot = 0; slot < partials_per_voice; ++slot) {
         const Voicing &partial = plan[slot];
-        const int tune         = patch.osc[partial.oscillator].tune;
+        const int tune         = preset.osc[partial.oscillator].tune;
         const int pitch        = partial.active ? tune + partial.detune : 0;
         put(writes, channel + cp::detune + slot, octaves(pitch));
         // the cutoff follows the partial's own tune and spread at the
         // tracking's ratio; the note and the bend follow it in the voices
         put(writes, channel + cp::cutoff_offset + slot,
-            clamp_word(int64_t{pitch} * patch.filter.key_track * word_per_raw
+            clamp_word(int64_t{pitch} * preset.filter.key_track * word_per_raw
                        / 64));
         const Codes codes = partial.active
-                                    ? gain_codes(patch, partial, sounding)
+                                    ? gain_codes(preset, partial, sounding)
                                     : Codes{volume_mute, volume_mute};
         put(writes, channel + cp::gain_left + slot, gain_of_code(codes.left));
         put(writes, channel + cp::gain_right + slot, gain_of_code(codes.right));
@@ -440,33 +440,33 @@ void channel_sound(const patch_t &patch, Writes &writes) {
     // the oscillators: the mode word (waveform, cascade, filter type) and the
     // pulse width, 1.0 being the rail (the program adds the LFOs)
     for (int oscillator = 0; oscillator < 2; ++oscillator) {
-        const osc_t &osc = patch.osc[oscillator];
-        const int mode   = (osc.wave & 3) | ((patch.filter.cascade & 1) << 2)
-                         | ((patch.filter.type & 3) << 3);
+        const osc_t &osc = preset.osc[oscillator];
+        const int mode   = (osc.wave & 3) | ((preset.filter.cascade & 1) << 2)
+                         | ((preset.filter.type & 3) << 3);
         put(writes, channel + (oscillator ? cp::mode_1 : cp::mode_0), mode);
         put(writes,
             channel_register(oscillator ? cp::duty_base_1 : cp::duty_base_0),
             clamp_word(osc.duty >> 9));
     }
     put(writes, channel_register(cp::resonance_base),
-        octaves(patch.filter.resonance));
+        octaves(preset.filter.resonance));
 }
 
-void velocity_amounts(const patch_t &patch, int voice, uint8_t velocity,
+void velocity_amounts(const preset_t &preset, int voice, uint8_t velocity,
                       Writes &writes) {
     put(writes, voice_register(voice, cp::velocity),
-        fraction(amp_amount(patch, velocity)));
+        fraction(amp_amount(preset, velocity)));
     put(writes, voice_register(voice, cp::velocity_m),
-        fraction(mod_amount(patch, velocity)));
+        fraction(mod_amount(preset, velocity)));
 }
 
 // The stages are the CSP's to change (an attack ends in decay at full
 // scale), so every stage write is forced: the chip may hold decay where the
 // firmware last wrote attack, and a retrigger must still go out.
-void note_on(const patch_t &patch, int voice, uint8_t note, uint8_t velocity,
+void note_on(const preset_t &preset, int voice, uint8_t note, uint8_t velocity,
              Writes &writes) {
     put(writes, voice_register(voice, cp::note), note_word(note));
-    velocity_amounts(patch, voice, velocity, writes);
+    velocity_amounts(preset, voice, velocity, writes);
     put(writes, voice_register(voice, cp::stage_a), amp_attack, true);
     put(writes, voice_register(voice, cp::stage_m), mod_attack, true);
 }

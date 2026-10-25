@@ -32,7 +32,7 @@ AUDIO_DEV = "hw:1,0"
 RATE = 48000
 NOTE = 57
 
-PATCH = [
+PRESET = [
     (20, 0), (21, 0), (26, 0),                      # 2-plain saws
     (74, 48), (31, 64), (30, 127), (71, 4),         # corner mid-dark
     (73, 0), (75, 111), (79, 127), (72, 60),        # amp: instant, held
@@ -87,7 +87,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
 

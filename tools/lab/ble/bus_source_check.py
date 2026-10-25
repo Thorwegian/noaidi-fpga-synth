@@ -34,7 +34,7 @@ NOTE = 57   # note 45's 110 Hz fundamental sank into the chain's LF
             # 1500 Hz); 57 is the pain-sweep-calibrated choice: dark
             # (CC74=52) measured -53 dBFS tonal there
 
-PATCH = [
+PRESET = [
     (20, 0), (14, 64), (15, 64), (25, 0),           # osc1 saw
     (21, 0), (22, 64), (23, 64), (85, 0),           # osc2 saw, unison
     (24, 64), (26, 64), (27, 24), (28, 127),
@@ -86,7 +86,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
 
@@ -111,7 +111,7 @@ def main():
                   f"  brightness {idx:.4f}")
         cc(74, 64)
 
-        # SELF-CONTAINED asserts (absolute anchors from other patches
+        # SELF-CONTAINED asserts (absolute anchors from other presets
         # mis-led two runs; the sim holds the exact-sum proof — the
         # firmware-shaped triple in tb_prog_sources asserts replica =
         # base + modenv + channel bit-exactly). Hardware's job here:

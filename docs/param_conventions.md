@@ -43,9 +43,9 @@ drove was logarithmic. The gain is linear since #222 (a partial's gain is its
 voice's word times its channel's), so the level now moves the amplitude: the
 attack is the first 77 % of an RC charge toward 1.3 times full scale
 (convex in amplitude, F1 below fixed), and the decay and release are RC
-falls (exponential amplitude, as every classic). The patch's sustain stays a
+falls (exponential amplitude, as every classic). The preset's sustain stays a
 fraction of the old 60 dB span (`render.cpp` turns it into the same loudness).
-The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain stay fractions of the old 60 dB span by loudness: the firmware takes the exponential once (`amplitude_of_fraction`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup patch's depth of 24 fits the register.
+The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain stay fractions of the old 60 dB span by loudness: the firmware takes the exponential once (`amplitude_of_fraction`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup preset's depth of 24 fits the register.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our

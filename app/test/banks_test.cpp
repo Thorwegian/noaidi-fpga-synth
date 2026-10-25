@@ -63,11 +63,11 @@ int main(int argc, char **argv) {
     // backslashes, an empty bank, a sparse bank numbering.
     banks::BankMap map;
     map[0]     = {"Factory",
-                  {"Patches/Factory/Pads/Supersaw.toml",
-                   "Patches/Factory/Leads/RnB Whistle.toml"}};
+                  {"Presets/Factory/Pads/Supersaw.toml",
+                   "Presets/Factory/Leads/RnB Whistle.toml"}};
     map[1]     = {"User", {}};
     map[16383] = {"Quote \" and back\\slash",
-                  {"Patches/User/Pads/Arctic Ice.toml"}};
+                  {"Presets/User/Pads/Arctic Ice.toml"}};
     banks::BankMap back;
     check(banks::parse(banks::to_text(map), back, error),
           "parse the writer's text");
@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
 
     // Lookup.
     check(banks::program_path(map, 0, 1)
-                  == "Patches/Factory/Leads/RnB Whistle.toml",
+                  == "Presets/Factory/Leads/RnB Whistle.toml",
           "program 0.1");
     check(!banks::program_path(map, 0, 2), "no program 0.2");
     check(!banks::program_path(map, 2, 0), "no bank 2");

@@ -4,4 +4,4 @@
 # Instrument-wide settings (docs/storage_format.md).
 format = 1
 
-startup_patch = "Patches/Factory/Pads/Supersaw.toml"
+startup_preset = "Presets/Factory/Pads/Supersaw.toml"

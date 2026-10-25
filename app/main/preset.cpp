@@ -1,19 +1,19 @@
-// patch.c — the active-patch instance and the init patch.
+// preset.c — the active-preset instance and the init preset.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Foundation of the VA surface: g_patch is the single source of
+// Foundation of the VA surface: g_preset is the single source of
 // truth for the active sound, and voice_alloc renders from it rather
-// than from constants of its own. patch_init() holds the init patch:
-// the sound when no stored patch loads, and the value of any key a
-// patch file leaves out. The boot timbre itself is a stored patch
-// (system.toml's startup_patch).
+// than from constants of its own. preset_init() holds the init preset:
+// the sound when no stored preset loads, and the value of any key a
+// preset file leaves out. The boot timbre itself is a stored preset
+// (system.toml's startup_preset).
 
-#include "patch.h"
+#include "preset.h"
 #include <cstring>
 
-patch_t g_patch;
+preset_t g_preset;
 
 // RATE COMPENSATION: the envelope walk these bytes are calibrated
 // against runs at 48 kHz, half the sample rate, which alone would
@@ -24,9 +24,9 @@ patch_t g_patch;
 // (already sub-millisecond). Sustain is a LEVEL — untouched.
 // The rate byte: mantissa in the low nibble, exponent in the high one.
 // The +0x10 cancels against the gateware's SHIFT_BIAS of 11; both
-// cancellations are folded into patch_adsr_rate_coeff() below.
-uint8_t patch_adsr_rate_byte(uint8_t patch_rate) {
-    return patch_rate > 0xEF ? 0xFF : (uint8_t) (patch_rate + 0x10);
+// cancellations are folded into preset_adsr_rate_coeff() below.
+uint8_t preset_adsr_rate_byte(uint8_t preset_rate) {
+    return preset_rate > 0xEF ? 0xFF : (uint8_t) (preset_rate + 0x10);
 }
 
 // One rate byte -> the linear coefficient the CSP multiplies by.
@@ -38,7 +38,7 @@ uint8_t patch_adsr_rate_byte(uint8_t patch_rate) {
 // For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
 // those codes come through bit-for-bit. Slower ones round, which costs
 // resolution above ~11 s and nothing below it.
-uint32_t patch_adsr_rate_coeff(uint8_t rate_byte) {
+uint32_t preset_adsr_rate_coeff(uint8_t rate_byte) {
     uint32_t mant  = 16u + (rate_byte & 0x0Fu);
     uint32_t shift = 26u - ((uint32_t) rate_byte >> 4);
     if (shift <= ADSR_K_SHIFT) {
@@ -49,7 +49,7 @@ uint32_t patch_adsr_rate_coeff(uint8_t rate_byte) {
     return k ? k : 1u; // a zero coefficient would freeze the envelope
 }
 
-void patch_init(patch_t *p) {
+void preset_init(preset_t *p) {
     memset(p, 0, sizeof(*p));
 
     // One saw: the "1+1" structure with the balance fully on osc 1
@@ -85,7 +85,7 @@ void patch_init(patch_t *p) {
     p->mod_env_depth  = 0;
 
     // LFOs at 1 Hz, depth 0: LFO 1 on pitch, LFO 2 on pulse width.
-    for (int i = 0; i < PATCH_NUM_LFO; i++) {
+    for (int i = 0; i < PRESET_NUM_LFO; i++) {
         p->lfo[i].shape = 2;   // triangle
         p->lfo[i].rate  = 350; // ~1 Hz (350 × 96000 / 2^25)
         p->lfo[i].depth = 0;

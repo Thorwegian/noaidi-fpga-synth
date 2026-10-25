@@ -3,8 +3,8 @@
 # License: CERN-OHL-S v2
 """Put a recording of the baseline sequence against the benchmark
 (tools/lab/benchmark/: the synth before the CSP-as-processor work, the
-Galaxy patch), by shape and spectrum rather than sample by sample — the
-patch's LFOs are free-running, so no two takes line up.
+Galaxy preset), by shape and spectrum rather than sample by sample — the
+preset's LFOs are free-running, so no two takes line up.
 
 usage: benchmark_compare.py <recording.wav> [--benchmark DIR] [--plot PNG]
                             [--json FILE]

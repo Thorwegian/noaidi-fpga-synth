@@ -13,7 +13,7 @@ here and rerunning. Emits noaidi-panel.json next to itself.
 
 Conventions: /control preArgs are [channel(1-based), cc]; every widget
 targets the 'noaidi' MIDI device declared by run.sh (--midi noaidi:...).
-Defaults mirror the boot patch (app/storage/Patches/Factory/Pads/
+Defaults mirror the boot preset (app/storage/Presets/Factory/Pads/
 Supersaw.toml) so the panel opens showing it (widgets send nothing
 until touched).
 
@@ -280,9 +280,9 @@ root_widgets = [
         knob(10, "Pan", 64, bipolar=True),
         knob(86, "Vel>Vol", 64),        # amp-env AMOUNT (OB-8 "Vol")
         knob(87, "Vel>Filt", 64),       # MOD-env AMOUNT (OB-8 "Filt")
-                                        # 0 = velocity OFF, full patch amount
+                                        # 0 = velocity OFF, full preset amount
         switch(119, "Test Tone", {"Off": 0, "On": 127}, 0),
-        sysex_button("SYNC", "f0 7d 4e 4f 10 f7"),   # the state request: the synth sends the whole patch (#287)
+        sysex_button("SYNC", "f0 7d 4e 4f 10 f7"),   # the state request: the synth sends the whole preset (#287)
         button(123, "NOTES OFF", 0),
         button(120, "SOUND OFF", 0),
     ] + program_select()),

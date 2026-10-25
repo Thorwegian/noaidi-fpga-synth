@@ -1,14 +1,14 @@
-// patch.h — the currently-active sound, in RAM.
+// preset.h — the currently-active sound, in RAM.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // This is the single source of truth for the active sound: the
-// CC/SysEx handlers MUTATE a patch_t, and voice_alloc/engine_link
-// RENDER it to the CSP's registers and sink words (render.cpp). Stored patches are files
+// CC/SysEx handlers MUTATE a preset_t, and voice_alloc/engine_link
+// RENDER it to the CSP's registers and sink words (render.cpp). Stored presets are files
 // in the format of docs/storage_format.md; loading and saving one
 // converts between that file and an instance of this. Multi-timbral layering / key split (channel awareness) is an
-// array of parts, each a patch_t — see performance_t at the bottom.
+// array of parts, each a preset_t — see performance_t at the bottom.
 //
 // Fields mirror docs/control_map.md and docs/midi_schema.md. Units
 // are the ENGINE's (log2 UQ4.10 pitch/cutoff/resonance, UQ4.4
@@ -23,11 +23,11 @@
 extern "C" {
 #endif
 
-#define PATCH_NUM_OSC 2
-#define PATCH_NUM_LFO 2
+#define PRESET_NUM_OSC 2
+#define PRESET_NUM_LFO 2
 // env 0 = amp (fixed to gain), env 1 = MOD (routable, default -> filter
 // cutoff)
-#define PATCH_NUM_ENV 2
+#define PRESET_NUM_ENV 2
 
 // ── Oscillator ──────────────────────────────────────────────────────
 typedef enum { // matches OSC word waveform field
@@ -67,7 +67,7 @@ typedef struct {
 } filter_t;
 
 // ── Envelope (ADSR) ─────────────────────────────────────────────────
-// Rates are 8-bit log2 in the PATCH; the wire format is linear.
+// Rates are 8-bit log2 in the PRESET; the wire format is linear.
 typedef struct {
     uint8_t attack, decay; // 8-bit log2 rate codes
     uint16_t sustain;      // 10-bit level: sustain / 1024 of full scale
@@ -77,8 +77,8 @@ typedef struct {
 // ── Envelope rates ──────────────────────────────────────────
 // The CSP's envelope program (tools/csp/programs/envelope.s) moves a level
 // toward a target by a rate times the distance left each pass. Firmware does
-// the decode of the patch's rate bytes, which is control-rate work and
-// belongs on this side: patch_adsr_rate_coeff gives an 18-bit coefficient k,
+// the decode of the preset's rate bytes, which is control-rate work and
+// belongs on this side: preset_adsr_rate_coeff gives an 18-bit coefficient k,
 // the fraction k / 2^24 of the distance an RC envelope covers each 96 kHz
 // sample (the gateware's original unit), and csp::envelope_rate
 // (csp/envelope.hpp) makes the program's wide rate of it.
@@ -88,9 +88,9 @@ typedef struct {
 // only settings slower than ~11 s.
 #define ADSR_K_SHIFT 24u // k is a fraction of 2^24
 
-uint8_t patch_adsr_rate_byte(uint8_t patch_rate);
+uint8_t preset_adsr_rate_byte(uint8_t preset_rate);
 // One rate byte -> the 18-bit coefficient k.
-uint32_t patch_adsr_rate_coeff(uint8_t rate_byte);
+uint32_t preset_adsr_rate_coeff(uint8_t rate_byte);
 
 // ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
@@ -115,7 +115,7 @@ typedef struct {
     int16_t amount; // signed
 } mod_route_t;
 
-#define PATCH_MOD_ROUTES 8 // matrix slots (Prophet-ish); stage 1 fills few
+#define PRESET_MOD_ROUTES 8 // matrix slots (Prophet-ish); stage 1 fills few
 
 // ── Arpeggiator / step sequencer ────────────────────────────────────
 typedef enum { CLOCK_AUTO = 0, CLOCK_INTERNAL } clock_mode_t;
@@ -129,23 +129,23 @@ typedef struct {
     // pattern/step data: grows via structured SysEx (schema follow-up)
 } arp_seq_t;
 
-// ── The patch ───────────────────────────────────────────────────────
-typedef struct patch_s {
-    osc_t osc[PATCH_NUM_OSC];
+// ── The preset ───────────────────────────────────────────────────────
+typedef struct preset_s {
+    osc_t osc[PRESET_NUM_OSC];
     voice_struct_t voice_struct;
     int8_t osc_mix;        // osc1<->osc2 balance (CC 24), 0=center
     int16_t unison_detune; // spread within a unison group
     int16_t unison_stereo; // stereo spread of the group
 
     filter_t filter;
-    adsr_t env[PATCH_NUM_ENV]; // [0]=amp, [1]=MOD
-    uint8_t mod_env_dest;      // MOD env destination (def: cutoff)
-    int16_t mod_env_depth;     // MOD env depth, signed raw octave steps
-                               // (the CSP's COEF is signed 18-bit;
-                               // ±4096 = ±4 octaves of cutoff)
-    lfo_t lfo[PATCH_NUM_LFO];
+    adsr_t env[PRESET_NUM_ENV]; // [0]=amp, [1]=MOD
+    uint8_t mod_env_dest;       // MOD env destination (def: cutoff)
+    int16_t mod_env_depth;      // MOD env depth, signed raw octave steps
+                                // (the CSP's COEF is signed 18-bit;
+                                // ±4096 = ±4 octaves of cutoff)
+    lfo_t lfo[PRESET_NUM_LFO];
 
-    mod_route_t mod[PATCH_MOD_ROUTES];
+    mod_route_t mod[PRESET_MOD_ROUTES];
 
     // Velocity sensitivity: 64 = the historical hardwired feel,
     // 0 = OFF (full amount on every note, isolation testing),
@@ -158,23 +158,23 @@ typedef struct patch_s {
     int8_t pan;         // per-channel/part pan
 
     arp_seq_t arp;
-} patch_t;
+} preset_t;
 
 // ── Performance: per-MIDI-channel parts (layering / key split) ───────
 // Channel awareness is cheap (control_map.md decision 5) and this is
-// where layering lives: one patch_t per part, plus split/layer
+// where layering lives: one preset_t per part, plus split/layer
 // routing. Single-timbre today = one active part; omni writes it.
 #define PERF_NUM_PARTS 16 // one per MIDI channel
 
 typedef struct {
-    patch_t part[PERF_NUM_PARTS];
+    preset_t part[PERF_NUM_PARTS];
     // key/velocity split ranges, layer enables: TBD with the feature
 } performance_t;
 
-// ── The active patch ────────────────────────────────────
-extern patch_t g_patch;
-// The init patch: one saw, open filter, organ envelope, no modulation.
-void patch_init(patch_t *p);
+// ── The active preset ────────────────────────────────────
+extern preset_t g_preset;
+// The init preset: one saw, open filter, organ envelope, no modulation.
+void preset_init(preset_t *p);
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
-"""The baseline recording: a fixed MIDI sequence played on a chosen patch and
+"""The baseline recording: a fixed MIDI sequence played on a chosen preset and
 recorded from the S/PDIF input, so that two builds of the synth can be compared
 by ear and by numbers.
 
@@ -15,10 +15,10 @@ The sequence (Thor, issue #222, 2026-10-17), at 60 BPM:
 usage: baseline_recording.py <out.wav> [--program N[,N...]] [--port CLIENT:PORT]
                              [--device hw:1,0] [--tail SECONDS]
 
-The patch is chosen by a MIDI Program Change (the Factory bank: 0 Supersaw,
+The preset is chosen by a MIDI Program Change (the Factory bank: 0 Supersaw,
 1 Galaxy — app/storage/banks.toml); several programs, comma-separated, play
 the sequence once each in one recording, a Program Change before each walk
-(a listening test of the patch change itself); the MIDI goes out through `aseqsend` to
+(a listening test of the preset change itself); the MIDI goes out through `aseqsend` to
 the ALSA sequencer port the synth's USB MIDI interface has, the audio comes
 in through `arecord` from the ALSA capture device the S/PDIF receiver has.
 The file is 48 kHz, 16-bit, stereo; the summary printed at the end gives the
@@ -45,7 +45,7 @@ def main():
     parser.add_argument("out", help="the WAV file to write")
     parser.add_argument("--program", default="1",
                         help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
-                             "negative sends no Program Change (the patch loaded already, e.g. by the console's `load`)")
+                             "negative sends no Program Change (the preset loaded already, e.g. by the console's `load`)")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
@@ -79,7 +79,7 @@ def main():
     # programs walk in turn, each after its Program Change and a settle.
     programs = [int(p) for p in args.program.split(",")]
     walk     = BEAT * (1 + 8 + 3 + 4 + 4) + args.tail
-    settle   = 2.0                                # a Program Change reloads the patch; let it settle
+    settle   = 2.0                                # a Program Change reloads the preset; let it settle
     length   = len(programs) * walk + (len(programs) - 1) * settle
     if programs[0] >= 0:
         midi("C0 %02X" % programs[0])

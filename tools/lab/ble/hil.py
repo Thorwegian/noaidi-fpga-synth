@@ -62,7 +62,7 @@ RTL_DIR = "rtl"
 FAULT_MINMEAN = 0.15
 FAULT_DEPTH = 0.15
 
-# A working build plays a held note at roughly -24 dBFS with the default patch.
+# A working build plays a held note at roughly -24 dBFS with the default preset.
 # Checked because the fault metric above measures MODULATION and will happily
 # call a silent or 28 dB-quiet synth "clean" -- which it did, on a build whose
 # gateware expected the linear coefficient format while the ESP was sending

@@ -25,8 +25,8 @@ the unconventional machinery stays under the hood.
   only parameter/DMEM/instruction writes through the engine link
   ([firmware_architecture.md](firmware_architecture.md)).
 - **Everything is live** — SysEx is a bulk transport for
-  configuration, not a separate "patch mode". (There is no stored
-  timbre; the concept is deliberately unnamed.)
+  configuration, not a separate edit mode. A preset is the stored form
+  of the same parameters ([storage_format.md](storage_format.md)).
 
 ## Channel policy
 
@@ -37,13 +37,13 @@ envelope rates) is per-channel.
 
 ## CC map
 
-Goal: **enough CCs to program a basic patch
-without SysEx** — the whole of patch.h reachable from a controller.
+Goal: **enough CCs to program a basic preset
+without SysEx** — the whole of preset.h reachable from a controller.
 Standard/quasi-standard CC numbers where they exist; the MIDI
 undefined block (20–31, 102–119) for everything else. All 7-bit
 unless a fine partner is listed. Discrete selectors take a small
 integer value; continuous params scale in the CC handler (engine
-units live in patch.h).
+units live in preset.h).
 
 **Global / performance**
 | CC | Target | Notes |
@@ -55,7 +55,7 @@ units live in patch.h).
 | 64 | sustain (damper) pedal | ≥64 = down. A note-off while the pedal is down keeps the voice sounding (no release); pedal up releases every voice the pedal was holding. A key struck again while sustained gets a new voice. Omni for now |
 | 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel's cutoff register) |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
-| 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full patch amount (isolation testing) |
+| 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full preset amount (isolation testing) |
 | 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; a voice has no cutoff offset of its own |
 | 120/123 | all sound off / all notes off | panic: 123 releases every held voice (sustained ones included) and lifts the sustain pedal, 120 hard-mutes immediately |
 | 119 | TEST TONE | ≥64: gateware replaces both outputs with a full-scale 1500 Hz sine (64-sample period at 96 kHz — midband so coupling caps don't skew it; lands exactly on bin 32 of a 1024-pt FFT at 48 kHz). Test infrastructure, not a musical control |
@@ -140,10 +140,10 @@ The schema reads both ways (#279, `app/main/cc_map.cpp`): the synth
 sends its own state as these CCs, so a surface follows the instrument
 the way a hardware synth's panel does.
 
-- **When.** The whole patch on a Program Change, on a console `load` or
+- **When.** The whole preset on a Program Change, on a console `load` or
   `sync`, and when a surface asks for it (the SysEx state request, op `0x10`
   below; #287: a surface that joins or comes back after a board reset asks).
-  Nothing is sent on connect. A patch CC that
+  Nothing is sent on connect. A preset CC that
   arrived from one surface goes out to every other surface after it was
   applied; the wheel, the pedal, notes and panic are performance, not
   state, and are never sent on (no THRU, and a surface never hears
@@ -155,11 +155,11 @@ the way a hardware synth's panel does.
   7-bit knob into a 4-way switch reads back as the switch's position,
   0/32/64/96; a three-way as 0/64/127). The coarse and fine pairs (cutoff
   CC 74/106, each LFO's depth 77/115 and 110/116) read back as the knob
-  positions last moved, or the ones the patch implies. The bend range
+  positions last moved, or the ones the preset implies. The bend range
   goes as its RPN sequence (101 = 0, 100 = 0, 6 = range, then 101 = 127,
   100 = 127). Coarse before fine, a destination before the depth it
   scales. `app/test/cc_map_test.cpp` round-trips all 128 values of every
-  patch CC: apply, dump, apply, the same patch.
+  preset CC: apply, dump, apply, the same preset.
 - **Not sent.** Bank Select, `mod_env_dest` is sent but stored only,
   arp CCs (not implemented).
 
@@ -181,7 +181,7 @@ engine link can do, addressable from a sequencer):
 | 0x01 | partial, word, w32 | partial parameter write (rides the page swap) |
 | 0x02 | register, w32 | register or sink-word write (queued, applied at the swap) |
 | 0x03 | pc, w36 | CSP program word write (while the CSP is held) |
-| 0x10 | — | **state request** (implemented): the synth sends the whole patch as CCs to every output, the asker's included ("Parameter feedback" above); the O.S.C. runner sends it after it links, the panel's SYNC button too |
+| 0x10 | — | **state request** (implemented): the synth sends the whole preset as CCs to every output, the asker's included ("Parameter feedback" above); the O.S.C. runner sends it after it links, the panel's SYNC button too |
 | 0x7F | — | identity request → reply with git describe of firmware |
 
 The raw ops reach everything the engine link can write. Structured

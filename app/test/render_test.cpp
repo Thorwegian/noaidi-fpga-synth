@@ -1,4 +1,4 @@
-// render_test.cpp — host test: a patch as writes to the CSP's registers
+// render_test.cpp — host test: a preset as writes to the CSP's registers
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -18,7 +18,7 @@
 #include "csp/csp.hpp"
 #include "csp/envelope.hpp"
 #include "csp/lfo.hpp"
-#include "patch.h"
+#include "preset.h"
 #include "render.hpp"
 
 namespace cp = csp::control;
@@ -103,11 +103,11 @@ void test_setup() {
 }
 
 void test_envelope() {
-    patch_t patch;
-    patch_init(&patch);
-    patch.env[0] = {0x80, 0xA0, 0x200, 0xC0};
+    preset_t preset;
+    preset_init(&preset);
+    preset.env[0] = {0x80, 0xA0, 0x200, 0xC0};
     render::Writes writes;
-    render::amp_envelope(patch, writes);
+    render::amp_envelope(preset, writes);
     const auto state = state_of(writes);
     const int base   = channel + cp::envelopes;
     check(wide_at(state, base + 0 + cp::target) == int64_t{0x533333} << 10,
@@ -120,22 +120,23 @@ void test_envelope() {
                   == std::lround(half_span * 4194304.0) << 10,
           "decay aims at the sustain's loudness, as an amplitude");
     check(wide_at(state, base + 8 + cp::target) == 0, "release aims at zero");
-    const uint32_t k = patch_adsr_rate_coeff(patch_adsr_rate_byte(0x80));
+    const uint32_t k = preset_adsr_rate_coeff(preset_adsr_rate_byte(0x80));
     check(wide_at(state, base + 0 + cp::rate) == csp::envelope_rate(k),
           "attack rate is the coefficient, per pass");
     check(wide_at(state, base + 8 + cp::rate)
                   == csp::envelope_rate(
-                          patch_adsr_rate_coeff(patch_adsr_rate_byte(0xC0))),
-          "release rate: the patch's, the level being the linear gain");
+                          preset_adsr_rate_coeff(preset_adsr_rate_byte(0xC0))),
+          "release rate: the preset's, the level being the linear gain");
     // faster codes are faster
-    check(csp::envelope_rate(patch_adsr_rate_coeff(patch_adsr_rate_byte(0xF0)))
+    check(csp::envelope_rate(
+                  preset_adsr_rate_coeff(preset_adsr_rate_byte(0xF0)))
                   > csp::envelope_rate(
-                          patch_adsr_rate_coeff(patch_adsr_rate_byte(0x40))),
+                          preset_adsr_rate_coeff(preset_adsr_rate_byte(0x40))),
           "a higher rate byte is a bigger step");
 
     render::Writes mod;
-    patch.mod_env_depth = 2048;
-    render::mod_envelope(patch, mod);
+    preset.mod_env_depth = 2048;
+    render::mod_envelope(preset, mod);
     const auto mod_state = state_of(mod);
     check(mod_state.count(channel + cp::envelopes + 16 + cp::target) == 1,
           "the mod rows");
@@ -148,11 +149,11 @@ void test_envelope() {
 }
 
 void test_notes() {
-    patch_t patch;
-    patch_init(&patch);
+    preset_t preset;
+    preset_init(&preset);
     auto note_word = [&](uint8_t note) {
         render::Writes writes;
-        render::note_on(patch, 3, note, 127, writes);
+        render::note_on(preset, 3, note, 127, writes);
         return state_of(writes).at(cp::voices + 3 * cp::voice_size + cp::note);
     };
     check(note_word(60) == 0, "middle C is octave zero");
@@ -161,11 +162,11 @@ void test_notes() {
     check(std::abs(note_word(69) - 12288) <= 16,
           "A is nine semitones up (within a raw step)");
 
-    patch.vel_amp_amt = 127;
-    patch.vel_mod_amt = 127;
+    preset.vel_amp_amt = 127;
+    preset.vel_mod_amt = 127;
     render::Writes full, soft;
-    render::note_on(patch, 0, 60, 127, full);
-    render::note_on(patch, 0, 60, 64, soft);
+    render::note_on(preset, 0, 60, 127, full);
+    render::note_on(preset, 0, 60, 64, soft);
     const auto full_state = state_of(full), soft_state = state_of(soft);
     const int base = cp::voices;
     check(full_state.at(base + cp::velocity) == 16384,
@@ -196,21 +197,21 @@ void test_notes() {
                     - 2.0 * v_soft)
                   < 1e-3,
           "mod env, CC 127, soft note: twice the velocity");
-    patch.vel_mod_amt = 64;
+    preset.vel_mod_amt = 64;
     render::Writes mid;
-    render::note_on(patch, 0, 60, 64, mid);
+    render::note_on(preset, 0, 60, 64, mid);
     check(std::fabs(state_of(mid).at(base + cp::velocity_m) / 16384.0 - v_soft)
                   < 0.01,
           "mod env, CC 64: the velocity once");
-    patch.vel_mod_amt = 0;
+    preset.vel_mod_amt = 0;
     render::Writes modflat;
-    render::note_on(patch, 0, 60, 64, modflat);
+    render::note_on(preset, 0, 60, 64, modflat);
     check(std::fabs(state_of(modflat).at(base + cp::velocity_m) / 16384.0 - 1.0)
                   < 1e-3,
           "mod env, CC 0: full regardless of velocity");
-    patch.vel_amp_amt = 0;
+    preset.vel_amp_amt = 0;
     render::Writes off;
-    render::note_on(patch, 0, 1, 1, off);
+    render::note_on(preset, 0, 1, 1, off);
     check(state_of(off).at(base + cp::velocity) == 16384,
           "velocity sensitivity 0 is every note at full");
 
@@ -223,9 +224,9 @@ void test_notes() {
                              == 24,
           "a note let go puts both envelopes in release");
 
-    // a sounding voice's amounts follow the patch without a new attack
+    // a sounding voice's amounts follow the preset without a new attack
     render::Writes refresh;
-    render::velocity_amounts(patch, 0, 64, refresh);
+    render::velocity_amounts(preset, 0, 64, refresh);
     const auto refresh_state = state_of(refresh);
     check(refresh_state.count(base + cp::velocity) == 1
                   && refresh_state.count(base + cp::stage_a) == 0
@@ -234,18 +235,18 @@ void test_notes() {
 }
 
 void test_controllers() {
-    patch_t patch;
-    patch_init(&patch);
-    patch.filter.cutoff    = 1024;
-    patch.filter.key_track = 64;
-    patch.mod_env_depth    = -3072;
-    patch.volume           = 0xCF;
+    preset_t preset;
+    preset_init(&preset);
+    preset.filter.cutoff    = 1024;
+    preset.filter.key_track = 64;
+    preset.mod_env_depth    = -3072;
+    preset.volume           = 0xCF;
     render::Controllers controllers;
     controllers.wheel = 25; // 1000 raw: nearly an octave
     controllers.bend  = -170;
     render::Writes writes;
-    render::cutoff(patch, controllers, writes);
-    render::pitch_bend(patch, controllers, writes);
+    render::cutoff(preset, controllers, writes);
+    render::pitch_bend(preset, controllers, writes);
     const auto state = state_of(writes);
     // the knob (1 octave), the wheel (1000/1024) and the half octave
     check(std::fabs(octaves_at(state, channel + cp::cutoff_base)
@@ -257,15 +258,15 @@ void test_controllers() {
     check(std::fabs(octaves_at(state, channel + cp::bend) - (-170 / 1024.0))
                   < 1e-3,
           "bend");
-    // the patch's volume is in the channel's gains (the voice's gain word is
+    // the preset's volume is in the channel's gains (the voice's gain word is
     // the envelope's): 16 steps are 6 dB
     render::Writes sound;
-    render::channel_sound(patch, sound);
+    render::channel_sound(preset, sound);
     const int32_t reference_left =
             state_of(sound).at(cp::channel_sinks + cp::gain_left);
-    patch.volume = 0xCF + 16;
+    preset.volume = 0xCF + 16;
     render::Writes louder;
-    render::channel_sound(patch, louder);
+    render::channel_sound(preset, louder);
     check(std::abs(state_of(louder).at(cp::channel_sinks + cp::gain_left)
                    - 2 * reference_left)
                   <= 2,
@@ -275,8 +276,8 @@ void test_controllers() {
 void test_lfo() {
     // A record's shape is its place in the half's pool: the saw at the start,
     // then the square, triangle and sine (counts.s, lfo.s). The firmware
-    // places an LFO on the record of the patch's shape and points the channel
-    // there, so the shape the patch asks for is the one the channel hears
+    // places an LFO on the record of the preset's shape and points the channel
+    // there, so the shape the preset asks for is the one the channel hears
     // (issue #237). BASE stays the half's first record, where the program's
     // walk begins. The record's GAIN scales its wave: the saw's phase runs ±8
     // so depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
@@ -300,20 +301,20 @@ void test_lfo() {
         const int base = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
         const int set  = cp::lfo_sets + i * cp::set_size;
         for (const Case &shape : cases) {
-            patch_t patch;
-            patch_init(&patch);
-            patch.lfo[i].shape = shape.shape;
-            patch.lfo[i].rate  = 1000;
-            patch.lfo[i].depth = 512;
-            patch.lfo[i].dest  = LFO_DEST_RESONANCE;
+            preset_t preset;
+            preset_init(&preset);
+            preset.lfo[i].shape = shape.shape;
+            preset.lfo[i].rate  = 1000;
+            preset.lfo[i].depth = 512;
+            preset.lfo[i].dest  = LFO_DEST_RESONANCE;
             render::Writes writes;
-            render::lfo(patch, i, writes);
+            render::lfo(preset, i, writes);
             const auto state = state_of(writes);
             const int record = base + shape.offset * cp::lfo_size;
             check(state.at(set + cp::base) == base,
                   "the set points at the half's first record");
             check(state.at(channel + channel_lfo[i]) == record,
-                  "the channel reads the record of the patch's shape");
+                  "the channel reads the record of the preset's shape");
             check(state.at(record + cp::gain) == shape.gain, shape.name);
             check(wide_at(state, record + cp::phase_step)
                           == csp::lfo_rate(1000, 1), // every pass (#268)
@@ -322,13 +323,13 @@ void test_lfo() {
     }
 
     // the depth reaches its one destination and nothing else
-    patch_t patch;
-    patch_init(&patch);
-    patch.lfo[1].shape = WAVE_SAW;
-    patch.lfo[1].depth = 512; // ±256 raw: a quarter octave
-    patch.lfo[1].dest  = LFO_DEST_RESONANCE;
+    preset_t preset;
+    preset_init(&preset);
+    preset.lfo[1].shape = WAVE_SAW;
+    preset.lfo[1].depth = 512; // ±256 raw: a quarter octave
+    preset.lfo[1].dest  = LFO_DEST_RESONANCE;
     render::Writes writes;
-    render::lfo(patch, 1, writes);
+    render::lfo(preset, 1, writes);
     const auto state = state_of(writes);
     check(std::fabs(octaves_at(state, channel + cp::lfo2_resonance) - 0.25)
                   < 1e-4,
@@ -340,19 +341,19 @@ void test_lfo() {
 }
 
 void test_sound() {
-    patch_t patch;
-    patch_init(&patch);
-    patch.voice_struct     = VOICE_7_PLUS_1;
-    patch.osc_mix          = 0;
-    patch.unison_detune    = 5;
-    patch.unison_stereo    = 127;
-    patch.osc[1].tune      = 512;
-    patch.filter.key_track = 128; // 200 %
-    patch.pan              = 0;
+    preset_t preset;
+    preset_init(&preset);
+    preset.voice_struct     = VOICE_7_PLUS_1;
+    preset.osc_mix          = 0;
+    preset.unison_detune    = 5;
+    preset.unison_stereo    = 127;
+    preset.osc[1].tune      = 512;
+    preset.filter.key_track = 128; // 200 %
+    preset.pan              = 0;
     render::VoicePlan plan;
-    check(render::voicing(patch, plan) == 8, "seven and one: eight partials");
+    check(render::voicing(preset, plan) == 8, "seven and one: eight partials");
     render::Writes writes;
-    render::channel_sound(patch, writes);
+    render::channel_sound(preset, writes);
     const auto state = state_of(writes);
     const int sinks  = cp::channel_sinks;
     check(state.at(sinks + cp::detune + 0) == -3 * 5 * 16,
@@ -372,13 +373,13 @@ void test_sound() {
     check(state.at(sinks + cp::gain_left + 7)
                   == state.at(sinks + cp::gain_right + 7),
           "the plain oscillator is centred");
-    check(state.at(sinks + cp::mode_0) == (patch.osc[0].wave | (1 << 2)),
+    check(state.at(sinks + cp::mode_0) == (preset.osc[0].wave | (1 << 2)),
           "the mode word: waveform and cascade");
 
     // two plain partials; the make-up lifts them by 8 steps
-    patch.voice_struct = VOICE_2_PLAIN;
+    preset.voice_struct = VOICE_2_PLAIN;
     render::Writes plain;
-    render::channel_sound(patch, plain);
+    render::channel_sound(preset, plain);
     const auto plain_state = state_of(plain);
     const int expected =
             std::lround(std::exp2((0xCF + 8 - 255) / 16.0) * 16384.0);
@@ -387,9 +388,9 @@ void test_sound() {
     check(plain_state.at(sinks + cp::gain_left + 2) == 0,
           "unused slots are silent");
 
-    patch.pan = 63;
+    preset.pan = 63;
     render::Writes panned;
-    render::channel_sound(patch, panned);
+    render::channel_sound(preset, panned);
     check(state_of(panned).at(sinks + cp::gain_left + 0) == 0,
           "pan hard right mutes the left");
 }

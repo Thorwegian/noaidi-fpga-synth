@@ -93,7 +93,7 @@ module tb_pulse_dc;
         end
 
         // A square must be bit-identical to a bare comparator, which is the
-        // property that keeps existing patches unchanged. Note the polarity,
+        // property that keeps existing presets unchanged. Note the polarity,
         // which is easy to get backwards and then blame on the RTL: the
         // comparator is `phase < duty`, so the LOW half of the phase range
         // is the HIGH output.

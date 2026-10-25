@@ -4,7 +4,7 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-The repro recipe: a 7+1 patch with velocity fully OFF, MOD env off,
+The repro recipe: a 7+1 preset with velocity fully OFF, MOD env off,
 cutoff CC74=52 + 100% key track - the corner rides a constant ~1
 octave BELOW the fundamental, which is where it glitches hardest.
 Only resonance and the 12/24 dB slope vary.
@@ -42,8 +42,8 @@ AUDIO_DEV = "hw:1,0"
 RATE = 48000
 NOTE = 57
 
-# The recipe's patch state, verbatim (only 71/30 vary in the sweep)
-PATCH = [
+# The recipe's preset state, verbatim (only 71/30 vary in the sweep)
+PRESET = [
     (20, 0), (14, 64), (15, 64), (25, 64),          # osc1: saw, centered
     (21, 96), (22, 64), (23, 64), (85, 64),         # osc2: sine, unison
     (24, 64), (26, 64), (27, 24), (28, 127),        # balance/7+1/spread
@@ -78,8 +78,8 @@ def capture(seconds=1.0):
 
 def main():
     cutoff = int(sys.argv[1]) if len(sys.argv) > 1 else 52
-    patch = [(n, cutoff if n == 74 else v) for n, v in PATCH]
-    print(f"[patch] cutoff CC74 = {cutoff}")
+    preset = [(n, cutoff if n == 74 else v) for n, v in PRESET]
+    print(f"[preset] cutoff CC74 = {cutoff}")
     btctl = subprocess.Popen(["bluetoothctl"], stdin=subprocess.PIPE,
                              stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, text=True)
@@ -100,7 +100,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in patch:
+        for num, val in preset:
             cc(num, val)
             time.sleep(0.03)
 

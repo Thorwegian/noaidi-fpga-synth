@@ -3,14 +3,14 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// For every patch CC and every one of its 128 values: apply it to the init
-// patch, dump the result as CCs, apply that dump to a fresh init patch, and
-// the two patches must be the same. The dump is also checked to name every
+// For every preset CC and every one of its 128 values: apply it to the init
+// preset, dump the result as CCs, apply that dump to a fresh init preset, and
+// the two presets must be the same. The dump is also checked to name every
 // CC exactly once (the RPN's selects aside), with the panel's values for the
-// switches. The factory patches are dumped and re-applied too; where a file
+// switches. The factory presets are dumped and re-applied too; where a file
 // holds a value no knob reaches, the difference is printed, not failed.
 //
-//   cc_map_test [patch.toml ...]
+//   cc_map_test [preset.toml ...]
 
 #include <array>
 #include <cstdio>
@@ -20,8 +20,8 @@
 #include <vector>
 
 #include "cc_map.hpp"
-#include "patch.h"
-#include "patch_file.h"
+#include "preset.h"
+#include "preset_file.h"
 
 namespace {
 
@@ -53,31 +53,32 @@ void collect(uint8_t cc, uint8_t value, void *user) {
     }
 }
 
-std::vector<Message> dump_of(const patch_t &patch, const cc_map::Knobs &knobs) {
+std::vector<Message> dump_of(const preset_t &preset,
+                             const cc_map::Knobs &knobs) {
     Collected collected;
-    cc_map::dump(patch, knobs, collect, &collected);
+    cc_map::dump(preset, knobs, collect, &collected);
     return std::vector<Message>(collected.items.begin(),
                                 collected.items.begin() + collected.count);
 }
 
-// The patch a dump describes: every message applied to the init patch, in order.
-patch_t patch_of(const std::vector<Message> &messages) {
-    patch_t patch;
-    patch_init(&patch);
-    cc_map::Knobs knobs = cc_map::knobs_of(patch);
+// The preset a dump describes: every message applied to the init preset, in order.
+preset_t preset_of(const std::vector<Message> &messages) {
+    preset_t preset;
+    preset_init(&preset);
+    cc_map::Knobs knobs = cc_map::knobs_of(preset);
     for (const Message &m : messages) {
         if (m.cc == 6) {
-            patch.bend_range =
+            preset.bend_range =
                     m.value; // RPN 0/0 data entry: the caller's, in the firmware
         } else {
-            cc_map::apply(patch, knobs, m.cc, m.value);
+            cc_map::apply(preset, knobs, m.cc, m.value);
         }
     }
-    return patch;
+    return preset;
 }
 
 // The fields the schema reaches that differ, as one line; empty when none do.
-std::string differences(const patch_t &a, const patch_t &b) {
+std::string differences(const preset_t &a, const preset_t &b) {
     std::string out;
     auto field = [&](const char *name, long long x, long long y) {
         if (x != y) {
@@ -125,10 +126,10 @@ std::string differences(const patch_t &a, const patch_t &b) {
 }
 
 void test_dump_shape() {
-    patch_t patch;
-    patch_init(&patch);
+    preset_t preset;
+    preset_init(&preset);
     const std::vector<Message> messages =
-            dump_of(patch, cc_map::knobs_of(patch));
+            dump_of(preset, cc_map::knobs_of(preset));
     check(static_cast<int>(messages.size()) == cc_map::dump_length(),
           "the dump has dump_length() messages: "
                   + std::to_string(messages.size()));
@@ -188,21 +189,21 @@ void test_dump_shape() {
 }
 
 void test_round_trip() {
-    // The baseline is the init patch within the knobs' reach: patch_init()
+    // The baseline is the init preset within the knobs' reach: preset_init()
     // holds a few values no knob lands on (an odd rate code, a sustain of
     // 1023 where the knob steps by eight), which is the file's resolution,
     // not the map's. One dump and apply brings it onto the knobs' grid.
-    patch_t raw;
-    patch_init(&raw);
-    const patch_t init          = patch_of(dump_of(raw, cc_map::knobs_of(raw)));
+    preset_t raw;
+    preset_init(&raw);
+    const preset_t init = preset_of(dump_of(raw, cc_map::knobs_of(raw)));
     const std::string init_diff = differences(raw, init);
     if (!init_diff.empty()) {
-        std::printf("  the init patch, beyond the knobs' reach: %s\n",
+        std::printf("  the init preset, beyond the knobs' reach: %s\n",
                     init_diff.c_str());
     }
-    check(differences(init, patch_of(dump_of(init, cc_map::knobs_of(init))))
+    check(differences(init, preset_of(dump_of(init, cc_map::knobs_of(init))))
                   .empty(),
-          "a patch within the knobs' reach reads back exactly");
+          "a preset within the knobs' reach reads back exactly");
     const std::vector<Message> ccs = dump_of(init, cc_map::knobs_of(init));
     int trips                      = 0;
     for (const Message &which : ccs) {
@@ -210,34 +211,34 @@ void test_round_trip() {
             continue; // the RPN is applied by the firmware, not the map
         }
         for (int value = 0; value < 128; ++value) {
-            patch_t patch           = init;
-            cc_map::Knobs knobs     = cc_map::knobs_of(patch);
+            preset_t preset         = init;
+            cc_map::Knobs knobs     = cc_map::knobs_of(preset);
             const cc_map::Part part = cc_map::apply(
-                    patch, knobs, which.cc, static_cast<uint8_t>(value));
+                    preset, knobs, which.cc, static_cast<uint8_t>(value));
             check(part != cc_map::Part::none,
-                  "CC " + std::to_string(which.cc) + " is a patch CC");
-            const patch_t back     = patch_of(dump_of(patch, knobs));
-            const std::string diff = differences(patch, back);
+                  "CC " + std::to_string(which.cc) + " is a preset CC");
+            const preset_t back    = preset_of(dump_of(preset, knobs));
+            const std::string diff = differences(preset, back);
             check(diff.empty(), "CC " + std::to_string(which.cc) + " = "
                                         + std::to_string(value)
                                         + " reads back: " + diff);
             ++trips;
         }
     }
-    std::printf("%d round trips of one CC on the init patch\n", trips);
+    std::printf("%d round trips of one CC on the init preset\n", trips);
 }
 
-// A loaded patch: dump → apply reproduces it where knobs reach; elsewhere the
+// A loaded preset: dump → apply reproduces it where knobs reach; elsewhere the
 // difference is the file's own resolution, printed.
-void test_factory_patch(const char *path) {
-    patch_t patch;
+void test_factory_preset(const char *path) {
+    preset_t preset;
     std::string error;
-    if (!patch_file::read(path, patch, error)) {
+    if (!preset_file::read(path, preset, error)) {
         check(false, std::string("read ") + path + ": " + error);
         return;
     }
-    const patch_t back     = patch_of(dump_of(patch, cc_map::knobs_of(patch)));
-    const std::string diff = differences(patch, back);
+    const preset_t back = preset_of(dump_of(preset, cc_map::knobs_of(preset)));
+    const std::string diff = differences(preset, back);
     if (!diff.empty()) {
         std::printf("  %s: beyond the knobs' reach: %s\n", path, diff.c_str());
     }
@@ -249,7 +250,7 @@ int main(int argc, char **argv) {
     test_dump_shape();
     test_round_trip();
     for (int i = 1; i < argc; ++i) {
-        test_factory_patch(argv[i]);
+        test_factory_preset(argv[i]);
     }
     if (g_failures == 0) {
         std::printf("cc_map: ALL PASS\n");

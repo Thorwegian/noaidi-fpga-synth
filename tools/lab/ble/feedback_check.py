@@ -8,18 +8,18 @@ Over the real Linux path (BlueZ's MIDI plugin, the ALSA port "Noaidi
 Bluetooth"), with the CH345 into the panel port as the keyboard's side:
 
   1. A Program Change sent into the panel port makes the synth send the whole
-     patch as CCs on BLE: every patch CC of docs/midi_schema.md exactly once
+     preset as CCs on BLE: every preset CC of docs/midi_schema.md exactly once
      (the RPN's select bytes twice), within 2 s.
-  2. The values are the loaded patch's: the fields with plain laws (waves,
+  2. The values are the loaded preset's: the fields with plain laws (waves,
      filter type and slope, voice mode, volume, velocity amounts) are read
      from the program's .toml and compared.
-  3. A patch CC sent into the panel port comes back out on BLE (feedback to
+  3. A preset CC sent into the panel port comes back out on BLE (feedback to
      the other surface); one sent over BLE does not (no echo).
 
 The dump's CC list below is cc_map::dump()'s order; the test reports what is
 missing or doubled by number.
 
-    ~/.noaidi-blenv/bin/python3 tools/lab/ble/feedback_check.py [--program 1] [--toml app/storage/Patches/Factory/Pads/Galaxy.toml]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/feedback_check.py [--program 1] [--toml app/storage/Presets/Factory/Pads/Galaxy.toml]
 """
 import argparse
 import os
@@ -41,7 +41,7 @@ DUMP = [7, 10, 101, 100, 6, 101, 100,
         113, 114, 76, 77, 115,
         111, 112, 109, 110, 116]
 
-# The storage format's names (app/main/patch_units.c) and the switch
+# The storage format's names (app/main/preset_units.c) and the switch
 # positions the panel shows for them (cc_map's four-way 0/32/64/96, three-way
 # 0/64/127).
 WAVES = {"saw": 0, "pulse": 32, "triangle": 64, "sine": 96}
@@ -75,7 +75,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
     ap.add_argument("--program", type=int, default=1, help="the Program Change to send (bank 0)")
-    ap.add_argument("--toml", default=None, help="the program's patch file, for the value check")
+    ap.add_argument("--toml", default=None, help="the program's preset file, for the value check")
     ap.add_argument("--no-reset", action="store_true")
     args = ap.parse_args()
 
@@ -103,7 +103,7 @@ def main():
 
         received(client, 1.0)  # nothing is sent on connect; drain what BlueZ's setup left
 
-        # 1. the Program Change into the panel port: the whole patch on BLE
+        # 1. the Program Change into the panel port: the whole preset on BLE
         send(panel, ProgramChangeEvent(channel=0, value=args.program))
         events = received(client, 2.5)
         got = [(e.param, e.value) for e in events if isinstance(e, ControlChangeEvent)]
@@ -117,7 +117,7 @@ def main():
                 failures.append(f"CC {cc}: {counts.get(cc, 0)} times, want {allowed}")
         for cc in sorted(counts):
             if cc not in DUMP:
-                failures.append(f"CC {cc} is not a patch CC and was sent")
+                failures.append(f"CC {cc} is not a preset CC and was sent")
         order = [cc for cc, _ in got]
         if order != DUMP and not failures:
             failures.append("the CCs came in another order than cc_map::dump()")
@@ -126,7 +126,7 @@ def main():
         values = dict(got)
         for cc, value in sorted(want.items()):
             if values.get(cc) != value:
-                failures.append(f"CC {cc} = {values.get(cc)}, the patch file says {value}")
+                failures.append(f"CC {cc} = {values.get(cc)}, the preset file says {value}")
         if want:
             print(f"[values] {len(want)} fields compared with {args.toml}")
 
@@ -165,7 +165,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("PASS: the patch reaches the surface as CCs, once each, with the file's values")
+    print("PASS: the preset reaches the surface as CCs, once each, with the file's values")
     return 0
 
 

@@ -26,7 +26,7 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
 CONFIG_ESP_TASK_WDT_PANIC=y
 
-# app_main loads the startup patch (TOML parsing) before the tasks take
+# app_main loads the startup preset (TOML parsing) before the tasks take
 # over, more than the default 3584-byte main task stack holds.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
@@ -37,8 +37,8 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 
 # The ESP32-C3 Super Mini has 4 MB of flash.
 #
-# Patch storage (docs/storage_format.md): a FAT partition on the
-# wear-levelling layer, 512-byte sectors so a ~650-byte patch takes
+# Preset storage (docs/storage_format.md): a FAT partition on the
+# wear-levelling layer, 512-byte sectors so a ~650-byte preset takes
 # two sectors instead of a 4 KB one, safety mode so a power loss
 # mid-write keeps the rest of the flash sector, and long UTF-8 names.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y

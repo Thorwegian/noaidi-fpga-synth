@@ -24,7 +24,7 @@ Control's).
 
 Ends with CC 123 + CC 120 (all notes off). The controllers it walks cannot
 be read back, so the only true restore is a Program Change that reloads the
-patch from its file: give --program N and it is sent before the soak (a clean
+preset from its file: give --program N and it is sent before the soak (a clean
 slate) and again after it, as tools/lab/baseline_recording.py does, so no
 scrambled controller is left behind. NEVER run this while anyone is playing
 the synth -- it plays over them and moves their knobs (2026-10-23, #244).
@@ -164,7 +164,7 @@ def main():
                     help="mean messages/sec between bursts (bursts add ~1 kHz sweeps)")
     ap.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     ap.add_argument("--program", type=int, default=None,
-                    help="Program Change sent before and after the soak, reloading the patch "
+                    help="Program Change sent before and after the soak, reloading the preset "
                          "so no walked controller is left behind (baseline_recording.py uses 1)")
     args = ap.parse_args()
 
@@ -176,7 +176,7 @@ def main():
     wire = Wire(args.port)
     if args.program is not None:
         wire.send(program_change(args.program))
-        time.sleep(2.0)                       # a Program Change reloads the patch; let it settle
+        time.sleep(2.0)                       # a Program Change reloads the preset; let it settle
     stop = threading.Event()
     threading.Thread(target=wire.keepalive, args=(stop,), daemon=True).start()
     soak = Soak(wire, args.rate)
@@ -185,7 +185,7 @@ def main():
     finally:
         soak.silence()
         if args.program is not None:
-            wire.send(program_change(args.program))   # restore: the patch as the file has it
+            wire.send(program_change(args.program))   # restore: the preset as the file has it
             time.sleep(2.0)
         stop.set()
         print(f"[soak] done: {soak.notes} notes, {soak.ccs} CCs, {wire.sent} messages  (seed {seed})",

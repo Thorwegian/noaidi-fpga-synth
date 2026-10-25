@@ -37,7 +37,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   machine [docs/csp2_architecture.md](docs/csp2_architecture.md).
 - **Firmware** (ESP-IDF, `app/`): MIDI in on UART1, an event bus,
   a voice allocator (a voice = 8 detuned partials, keystroke-instance
-  lifecycle), `render.cpp` (a patch as register and sink writes), and the
+  lifecycle), `render.cpp` (a preset as register and sink writes), and the
   engine link — sole owner of the SPI bus: it loads the control program and
   sends what changed, committed by one swap. See
   [docs/firmware_architecture.md](docs/firmware_architecture.md).
@@ -171,7 +171,7 @@ make fw          # build the ESP32 firmware
 make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
 make fw-console  # attach the console with screen (see Console below)
-make fw-test     # host tests of patch files and banks (about a minute)
+make fw-test     # host tests of preset files and banks (about a minute)
 make csp-test    # host tests of the CSP reference model and assembler (tools/csp)
 make format      # reformat our C and C++ sources (.clang-format)
 make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
@@ -188,29 +188,29 @@ value, with a new seed on each run; the seed is the first line of each
 the layout: output scrolls above a status bar and an input line.
 
 ```
-I (2041) storage: /storage/Patches/Factory/Pads/Supersaw.toml loaded in 11 ms
-/Patches $ cd User/Pads
-/Patches/User/Pads $ save "Arctic Ice.toml"
-saved /Patches/User/Pads/Arctic Ice.toml
- noaidi … | /Patches/User/Pads/Arctic Ice.toml
-/Patches/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
+I (2041) storage: /storage/Presets/Factory/Pads/Supersaw.toml loaded in 11 ms
+/Presets $ cd User/Pads
+/Presets/User/Pads $ save "Arctic Ice.toml"
+saved /Presets/User/Pads/Arctic Ice.toml
+ noaidi … | /Presets/User/Pads/Arctic Ice.toml
+/Presets/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
 ```
 
 - **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
   `rm <file>`.
-- **Patches:** `load <file>`, `save <file>` (anywhere: this is a
-  developer's shell; a save under `Patches/Factory` starts with the
-  copyright notice), `init` (the init patch), `patch` (print the active
-  patch as a file).
+- **Presets:** `load <file>`, `save <file>` (anywhere: this is a
+  developer's shell; a save under `Presets/Factory` starts with the
+  copyright notice), `init` (the init preset), `preset` (print the active
+  preset as a file).
 - **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
   `bank add|insert|rm|new|del|build` edit `banks.toml` (see
   [storage_format.md](docs/storage_format.md) "Banks").
 - **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
   `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
   `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
-  `ble`, `sync` (send the patch as CCs to the surfaces, as a Program
+  `ble`, `sync` (send the preset as CCs to the surfaces, as a Program
   Change does), `help`.
-- **Paths:** absolute from the storage root (`/Patches/User`) or
+- **Paths:** absolute from the storage root (`/Presets/User`) or
   relative to the working folder in the prompt, with `.` and `..`,
   taken literally (extensions included). Quote names with spaces, or let
   Tab complete them.
@@ -226,9 +226,9 @@ saved /Patches/User/Pads/Arctic Ice.toml
   with its escape sequences). For a crash, `make fw-monitor` is better:
   it decodes the panic backtrace into source lines.
 
-## Patch storage
+## Preset storage
 
-The synth keeps its patches and settings as TOML files on a FAT
+The synth keeps its presets and settings as TOML files on a FAT
 partition in the ESP32's flash
 ([docs/storage_format.md](docs/storage_format.md)). A computer reaches
 them over the USB serial port:
@@ -244,10 +244,10 @@ make fw-storage-flash                 # app/storage → synth: the factory conte
   replaces the folder with the synth's storage, so files that are no
   longer on the synth disappear from the folder too.
   `fw-storage-write` and `fw-storage-flash` replace the whole storage
-  partition, user patches included.
+  partition, user presets included.
 - **The folder is protected:** `fw-storage-read` only replaces a folder
   that is empty or already holds a storage copy (`system.toml` or
-  `Patches` at its top), so a mistyped path cannot wipe other files.
+  `Presets` at its top), so a mistyped path cannot wipe other files.
 - **First-time setup:** a new board needs `make fw-storage-flash` once,
   after `make fw-flash`. Firmware updates never touch the storage
   partition.

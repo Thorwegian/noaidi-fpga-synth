@@ -10,7 +10,7 @@ broken -- it cannot speak to the velocity-to-amount mapping at all. This
 plays a velocity ramp at three amount settings and checks two properties:
 
   amt = 0    every velocity must give the SAME level. That is the true-zero /
-             isolation rule from design.md: velocity off, full patch amount.
+             isolation rule from design.md: velocity off, full preset amount.
   amt > 0    level must rise MONOTONICALLY with velocity, one-sided, with full
              velocity reaching the same place amt = 0 does (g = 1 at vel 127).
 

@@ -17,7 +17,7 @@
 ; written to the voice's three sinks, the words the program owns for a voice.
 ; The partial pipeline takes the gain's exponential, as the old engine's
 ; attenuation LUT did, so the envelope's level moves the gain in dB and the
-; patch's volume is in the channel's left and right gains. The scratch fields
+; preset's volume is in the channel's left and right gains. The scratch fields
 ; hold the pitch and the cutoff (U_A, U_M) until the sinks are addressed: j
 ; points at the channel first, then at the sinks.
 

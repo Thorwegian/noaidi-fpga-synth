@@ -1,4 +1,4 @@
-// cli.cpp — the serial console's file and patch commands (see cli.h)
+// cli.cpp — the serial console's file and preset commands (see cli.h)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -16,8 +16,8 @@
 #include "esp_app_desc.h"
 
 #include "ble_midi.h"
-#include "patch.h"
-#include "patch_file.h"
+#include "preset.h"
+#include "preset_file.h"
 #include "storage.h"
 #include "voice_alloc.h"
 
@@ -25,8 +25,8 @@ namespace cli {
 
 namespace {
 
-std::string g_cwd     = "/Patches";   // from the storage root
-std::string g_current = "init patch"; // the active patch, for the status bar
+std::string g_cwd     = "/Presets";    // from the storage root
+std::string g_current = "init preset"; // the active preset, for the status bar
 
 void show_status() {
     console_set_status("noaidi %s | %s", esp_app_get_description()->version,
@@ -87,7 +87,7 @@ int cmd_help(int, char **) {
 }
 
 int cmd_cd(int argc, char **argv) {
-    std::string abs = resolve(argc > 1 ? argv[1] : "/Patches");
+    std::string abs = resolve(argc > 1 ? argv[1] : "/Presets");
     if (!is_dir(fs_path(abs))) {
         std::printf("cd: no folder %s\n", abs.c_str());
         return 1;
@@ -138,12 +138,12 @@ int cmd_load(int argc, char **argv) {
         return 1;
     }
     std::string abs = resolve(argv[1]), error;
-    patch_t p;
-    if (!patch_file::read(fs_path(abs), p, error)) {
+    preset_t p;
+    if (!preset_file::read(fs_path(abs), p, error)) {
         std::printf("load: %s\n", error.c_str());
         return 1;
     }
-    if (!voice_alloc_set_patch(&p)) {
+    if (!voice_alloc_set_preset(&p)) {
         std::printf("load: the synth did not answer\n");
         return 1;
     }
@@ -153,14 +153,14 @@ int cmd_load(int argc, char **argv) {
 }
 
 int cmd_init(int, char **) {
-    patch_t p;
-    patch_init(&p);
-    if (!voice_alloc_set_patch(&p)) {
+    preset_t p;
+    preset_init(&p);
+    if (!voice_alloc_set_preset(&p)) {
         std::printf("init: the synth did not answer\n");
         return 1;
     }
-    set_current("init patch");
-    std::printf("loaded the init patch\n");
+    set_current("init preset");
+    std::printf("loaded the init preset\n");
     return 0;
 }
 
@@ -170,12 +170,12 @@ int cmd_save(int argc, char **argv) {
         return 1;
     }
     std::string abs = resolve(argv[1]), error;
-    patch_t p;
-    if (!voice_alloc_get_patch(&p)) {
+    preset_t p;
+    if (!voice_alloc_get_preset(&p)) {
         std::printf("save: the synth did not answer\n");
         return 1;
     }
-    if (!patch_file::save(fs_path(abs), p, error)) {
+    if (!preset_file::save(fs_path(abs), p, error)) {
         std::printf("save: %s\n", error.c_str());
         return 1;
     }
@@ -225,13 +225,13 @@ int cmd_rmdir(int argc, char **argv) {
     return 0;
 }
 
-int cmd_patch(int, char **) {
-    patch_t p;
-    if (!voice_alloc_get_patch(&p)) {
-        std::printf("patch: the synth did not answer\n");
+int cmd_preset(int, char **) {
+    preset_t p;
+    if (!voice_alloc_get_preset(&p)) {
+        std::printf("preset: the synth did not answer\n");
         return 1;
     }
-    std::printf("# %s\n%s", g_current.c_str(), patch_file::to_text(p).c_str());
+    std::printf("# %s\n%s", g_current.c_str(), preset_file::to_text(p).c_str());
     std::fflush(stdout);
     return 0;
 }
@@ -243,29 +243,29 @@ int cmd_ble(int, char **) {
 
 int cmd_sync(int, char **) {
     voice_alloc_sync();
-    std::printf("the patch goes out as CCs to every surface\n");
+    std::printf("the preset goes out as CCs to every surface\n");
     return 0;
 }
 
 const console_cmd_t commands[] = {
         {"help", "", "list the commands", cmd_help, nullptr},
-        {"cd", "[folder]", "change folder (default /Patches)", cmd_cd,
+        {"cd", "[folder]", "change folder (default /Presets)", cmd_cd,
          complete_dir},
         {"pwd", "", "print the working folder", cmd_pwd, nullptr},
         {"ls", "[folder]", "list a folder", cmd_ls, complete_dir},
         {"mkdir", "<folder>", "create a folder", cmd_mkdir, complete_dir},
         {"rmdir", "<folder>", "remove an empty folder", cmd_rmdir,
          complete_dir},
-        {"load", "<file>", "load a patch file", cmd_load, complete_path},
-        {"init", "", "load the init patch", cmd_init, nullptr},
-        {"save", "<file>", "save the active patch to a file", cmd_save,
+        {"load", "<file>", "load a preset file", cmd_load, complete_path},
+        {"init", "", "load the init preset", cmd_init, nullptr},
+        {"save", "<file>", "save the active preset to a file", cmd_save,
          complete_path},
         {"rm", "<file>", "delete a file", cmd_rm, complete_path},
-        {"patch", "", "print the active patch as a patch file", cmd_patch,
+        {"preset", "", "print the active preset as a preset file", cmd_preset,
          nullptr},
         {"ble", "", "BLE MIDI status; re-advertise if needed", cmd_ble,
          nullptr},
-        {"sync", "", "send the patch as CCs to the surfaces", cmd_sync,
+        {"sync", "", "send the preset as CCs to the surfaces", cmd_sync,
          nullptr},
 };
 
@@ -329,12 +329,12 @@ void cli_init(void) {
     cli::register_bank_commands();
     cli_system_init();
     cli_csp_init();
-    // A Program Change names its patch on the status bar.
-    voice_alloc_set_patch_listener([](const char *name) {
+    // A Program Change names its preset on the status bar.
+    voice_alloc_set_preset_listener([](const char *name) {
         cli::set_current(std::string("/") + name);
     });
-    const char *startup = storage_startup_patch();
+    const char *startup = storage_startup_preset();
     cli::set_current(startup[0] ? std::string("/") + startup
-                                : std::string("init patch"));
+                                : std::string("init preset"));
     cli::show_prompt();
 }

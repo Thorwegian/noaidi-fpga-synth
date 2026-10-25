@@ -202,13 +202,13 @@ DepthKnobs lfo_knobs_of(uint8_t dest, int16_t depth) {
     return k;
 }
 
-void set_lfo_depth(patch_t &patch, Knobs &knobs, int i, uint8_t value,
+void set_lfo_depth(preset_t &preset, Knobs &knobs, int i, uint8_t value,
                    bool fine) {
-    lfo_t &lfo    = patch.lfo[i];
+    lfo_t &lfo    = preset.lfo[i];
     DepthKnobs &k = knobs.lfo_depth[i];
     if (!k.known) {
         k = lfo_knobs_of(lfo.dest,
-                         lfo.depth); // the other knob's part: the patch's
+                         lfo.depth); // the other knob's part: the preset's
     }
     (fine ? k.fine : k.coarse) = value;
     lfo.depth                  = lfo_depth_of(lfo.dest, k);
@@ -217,8 +217,8 @@ void set_lfo_depth(patch_t &patch, Knobs &knobs, int i, uint8_t value,
 // Four destinations, four equal bands of the knob: duty/PWM, resonance,
 // pitch, cutoff. A change works the depth out again from the knobs, when
 // they are known.
-void set_lfo_dest(patch_t &patch, const Knobs &knobs, int i, uint8_t value) {
-    lfo_t &lfo = patch.lfo[i];
+void set_lfo_dest(preset_t &preset, const Knobs &knobs, int i, uint8_t value) {
+    lfo_t &lfo = preset.lfo[i];
     lfo.dest   = static_cast<uint8_t>((value * 4) >> 7);
     if (knobs.lfo_depth[i].known) {
         lfo.depth = lfo_depth_of(lfo.dest, knobs.lfo_depth[i]);
@@ -230,10 +230,10 @@ void set_lfo_dest(patch_t &patch, const Knobs &knobs, int i, uint8_t value) {
 // 14 bits, coarse CC 74 the high seven and fine CC 106 the low, centred at
 // coarse 64: the offset from the key-tracked base, ±8 octaves (1024 raw an
 // octave) — the authority rule, full deflection reaches the rails.
-void set_cutoff(patch_t &patch, const Knobs &knobs) {
+void set_cutoff(preset_t &preset, const Knobs &knobs) {
     const int32_t v14 =
             (static_cast<int32_t>(knobs.cutoff_msb) << 7) | knobs.cutoff_lsb;
-    patch.filter.cutoff = static_cast<int16_t>(v14 - 8192);
+    preset.filter.cutoff = static_cast<int16_t>(v14 - 8192);
 }
 
 void set_tune(osc_t &osc, uint8_t value, bool fine) {
@@ -254,133 +254,133 @@ uint8_t cc_of_tune_fine(int16_t tune) {
 
 } // namespace
 
-Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
+Part apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     switch (cc) {
     // ---- global ----
     case 7:
-        patch.volume = static_cast<uint8_t>(value < 127 ? value << 1 : 0xFE);
+        preset.volume = static_cast<uint8_t>(value < 127 ? value << 1 : 0xFE);
         return Part::volume;
     case 10:
-        patch.pan = static_cast<int8_t>(static_cast<int>(value) - 64);
+        preset.pan = static_cast<int8_t>(static_cast<int>(value) - 64);
         return Part::voices;
     case 31:
-        patch.filter.key_track = static_cast<int16_t>(value);
+        preset.filter.key_track = static_cast<int16_t>(value);
         return Part::voices;
 
     // ---- the oscillators and the voice structure ----
     case 20:
     case 21:
-        patch.osc[cc - 20].wave = static_cast<waveform_t>(value >> 5);
+        preset.osc[cc - 20].wave = static_cast<waveform_t>(value >> 5);
         return Part::voices;
     case 14:
     case 22:
-        set_tune(patch.osc[cc == 14 ? 0 : 1], value, false);
+        set_tune(preset.osc[cc == 14 ? 0 : 1], value, false);
         return Part::voices;
     case 15:
     case 23:
-        set_tune(patch.osc[cc == 15 ? 0 : 1], value, true);
+        set_tune(preset.osc[cc == 15 ? 0 : 1], value, true);
         return Part::voices;
     case 24:
-        patch.osc_mix = static_cast<int8_t>(static_cast<int>(value) - 64);
+        preset.osc_mix = static_cast<int8_t>(static_cast<int>(value) - 64);
         return Part::voices;
     case 25:
     case 85:
-        patch.osc[cc == 25 ? 0 : 1].duty = duty_of(value);
+        preset.osc[cc == 25 ? 0 : 1].duty = duty_of(value);
         return Part::voices;
     case 26: {
-        const int mode     = (value * 3) >> 7;
-        patch.voice_struct = static_cast<voice_struct_t>(std::min(mode, 2));
+        const int mode      = (value * 3) >> 7;
+        preset.voice_struct = static_cast<voice_struct_t>(std::min(mode, 2));
         return Part::voices;
     }
     case 27:
-        patch.unison_detune = static_cast<int16_t>(value >> 2);
+        preset.unison_detune = static_cast<int16_t>(value >> 2);
         return Part::voices;
     case 28:
-        patch.unison_stereo = static_cast<int16_t>(value);
+        preset.unison_stereo = static_cast<int16_t>(value);
         return Part::voices;
 
     // ---- the filter ----
     case 29:
-        patch.filter.type =
+        preset.filter.type =
                 static_cast<uint8_t>((value * 3) >> 7); // LP, BP, HP
         return Part::voices;
     case 30:
-        patch.filter.cascade = value >= 64;
+        preset.filter.cascade = value >= 64;
         return Part::voices;
     case 71:
-        patch.filter.resonance = static_cast<uint16_t>(resonance_of(value));
+        preset.filter.resonance = static_cast<uint16_t>(resonance_of(value));
         return Part::voices;
     case 74:
         knobs.cutoff_msb = value;
-        set_cutoff(patch, knobs);
+        set_cutoff(preset, knobs);
         return Part::cutoff;
     case 106:
         knobs.cutoff_lsb = value;
-        set_cutoff(patch, knobs);
+        set_cutoff(preset, knobs);
         return Part::cutoff;
 
     // ---- the amp envelope ----
     case 73:
-        patch.env[0].attack = static_cast<uint8_t>(rate_code_of(value));
+        preset.env[0].attack = static_cast<uint8_t>(rate_code_of(value));
         return Part::amp_env;
     case 75:
-        patch.env[0].decay = static_cast<uint8_t>(amp_fall_code_of(value));
+        preset.env[0].decay = static_cast<uint8_t>(amp_fall_code_of(value));
         return Part::amp_env;
     case 79:
-        patch.env[0].sustain = static_cast<uint16_t>(value << 3);
+        preset.env[0].sustain = static_cast<uint16_t>(value << 3);
         return Part::amp_env;
     case 72:
-        patch.env[0].release = static_cast<uint8_t>(amp_fall_code_of(value));
+        preset.env[0].release = static_cast<uint8_t>(amp_fall_code_of(value));
         return Part::amp_env;
     case 86:
-        patch.vel_amp_amt = value;
+        preset.vel_amp_amt = value;
         return Part::amp_env;
 
     // ---- the mod envelope ----
     case 102:
-        patch.env[1].attack = static_cast<uint8_t>(rate_code_of(value));
+        preset.env[1].attack = static_cast<uint8_t>(rate_code_of(value));
         return Part::mod_env;
     case 103:
-        patch.env[1].decay = static_cast<uint8_t>(rate_code_of(value));
+        preset.env[1].decay = static_cast<uint8_t>(rate_code_of(value));
         return Part::mod_env;
     case 104:
-        patch.env[1].sustain = static_cast<uint16_t>(value << 3);
+        preset.env[1].sustain = static_cast<uint16_t>(value << 3);
         return Part::mod_env;
     case 105:
-        patch.env[1].release = static_cast<uint8_t>(rate_code_of(value));
+        preset.env[1].release = static_cast<uint8_t>(rate_code_of(value));
         return Part::mod_env;
     case 107:
-        patch.mod_env_depth = static_cast<int16_t>(mod_depth_of(value));
+        preset.mod_env_depth = static_cast<int16_t>(mod_depth_of(value));
         return Part::mod_env;
     case 108:
-        patch.mod_env_dest =
+        preset.mod_env_dest =
                 static_cast<uint8_t>(value >> 5); // stored; cutoff is live
         return Part::mod_env;
     case 87:
-        patch.vel_mod_amt = value;
+        preset.vel_mod_amt = value;
         return Part::mod_env;
 
     // ---- the LFOs ----
     case 76:
     case 109:
-        patch.lfo[cc == 76 ? 0 : 1].rate =
+        preset.lfo[cc == 76 ? 0 : 1].rate =
                 static_cast<uint16_t>(lfo_rate_of(value));
         return cc == 76 ? Part::lfo1 : Part::lfo2;
     case 77:
     case 110:
-        set_lfo_depth(patch, knobs, cc == 77 ? 0 : 1, value, false);
+        set_lfo_depth(preset, knobs, cc == 77 ? 0 : 1, value, false);
         return cc == 77 ? Part::lfo1 : Part::lfo2;
     case 115:
     case 116:
-        set_lfo_depth(patch, knobs, cc == 115 ? 0 : 1, value, true);
+        set_lfo_depth(preset, knobs, cc == 115 ? 0 : 1, value, true);
         return cc == 115 ? Part::lfo1 : Part::lfo2;
     case 113:
     case 111:
-        patch.lfo[cc == 113 ? 0 : 1].shape = static_cast<uint8_t>(value >> 5);
+        preset.lfo[cc == 113 ? 0 : 1].shape = static_cast<uint8_t>(value >> 5);
         return cc == 113 ? Part::lfo1 : Part::lfo2;
     case 114:
     case 112:
-        set_lfo_dest(patch, knobs, cc == 114 ? 0 : 1, value);
+        set_lfo_dest(preset, knobs, cc == 114 ? 0 : 1, value);
         return cc == 114 ? Part::lfo1 : Part::lfo2;
 
     default:
@@ -388,15 +388,15 @@ Part apply(patch_t &patch, Knobs &knobs, uint8_t cc, uint8_t value) {
     }
 }
 
-Knobs knobs_of(const patch_t &patch) {
+Knobs knobs_of(const preset_t &preset) {
     Knobs knobs;
     const int32_t v14 =
-            std::clamp<int32_t>(patch.filter.cutoff + 8192, 0, 16383);
+            std::clamp<int32_t>(preset.filter.cutoff + 8192, 0, 16383);
     knobs.cutoff_msb = static_cast<uint8_t>(v14 >> 7);
     knobs.cutoff_lsb = static_cast<uint8_t>(v14 & 0x7F);
-    for (int i = 0; i < PATCH_NUM_LFO; ++i) {
+    for (int i = 0; i < PRESET_NUM_LFO; ++i) {
         knobs.lfo_depth[i] =
-                lfo_knobs_of(patch.lfo[i].dest, patch.lfo[i].depth);
+                lfo_knobs_of(preset.lfo[i].dest, preset.lfo[i].depth);
     }
     return knobs;
 }
@@ -406,9 +406,9 @@ namespace {
 // The RPN for the pitch-bend range: select 0/0, data entry, deselect.
 constexpr int rpn_messages = 5;
 
-void dump_lfo(const patch_t &patch, const Knobs &knobs, int i, Emit emit,
+void dump_lfo(const preset_t &preset, const Knobs &knobs, int i, Emit emit,
               void *user) {
-    const lfo_t &lfo         = patch.lfo[i];
+    const lfo_t &lfo         = preset.lfo[i];
     const DepthKnobs knobs_i = knobs.lfo_depth[i].known
                                        ? knobs.lfo_depth[i]
                                        : lfo_knobs_of(lfo.dest, lfo.depth);
@@ -421,51 +421,51 @@ void dump_lfo(const patch_t &patch, const Knobs &knobs, int i, Emit emit,
 
 } // namespace
 
-void dump(const patch_t &patch, const Knobs &knobs, Emit emit, void *user) {
+void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
     // global
-    emit(7, clamp_cc(patch.volume >> 1), user);
-    emit(10, clamp_cc(patch.pan + 64), user);
+    emit(7, clamp_cc(preset.volume >> 1), user);
+    emit(10, clamp_cc(preset.pan + 64), user);
     emit(101, 0, user);
     emit(100, 0, user);
-    emit(6, clamp_cc(patch.bend_range), user);
+    emit(6, clamp_cc(preset.bend_range), user);
     emit(101, 127, user);
     emit(100, 127, user);
     // the oscillators
     for (int i = 0; i < 2; ++i) {
-        const osc_t &osc = patch.osc[i];
+        const osc_t &osc = preset.osc[i];
         emit(i == 0 ? 20 : 21, four_way(osc.wave), user);
         emit(i == 0 ? 14 : 22, cc_of_tune_coarse(osc.tune), user);
         emit(i == 0 ? 15 : 23, cc_of_tune_fine(osc.tune), user);
         emit(i == 0 ? 25 : 85, nearest(duty_of, osc.duty), user);
     }
-    emit(24, clamp_cc(patch.osc_mix + 64), user);
-    emit(26, three_way(patch.voice_struct), user);
-    emit(27, clamp_cc(static_cast<int64_t>(patch.unison_detune) << 2), user);
-    emit(28, clamp_cc(patch.unison_stereo), user);
+    emit(24, clamp_cc(preset.osc_mix + 64), user);
+    emit(26, three_way(preset.voice_struct), user);
+    emit(27, clamp_cc(static_cast<int64_t>(preset.unison_detune) << 2), user);
+    emit(28, clamp_cc(preset.unison_stereo), user);
     // the filter
-    emit(29, three_way(patch.filter.type), user);
-    emit(30, patch.filter.cascade ? 127 : 0, user);
+    emit(29, three_way(preset.filter.type), user);
+    emit(30, preset.filter.cascade ? 127 : 0, user);
     emit(74, knobs.cutoff_msb, user);
     emit(106, knobs.cutoff_lsb, user);
-    emit(71, nearest(resonance_of, patch.filter.resonance), user);
-    emit(31, clamp_cc(patch.filter.key_track), user);
+    emit(71, nearest(resonance_of, preset.filter.resonance), user);
+    emit(31, clamp_cc(preset.filter.key_track), user);
     // the amp envelope
-    emit(73, nearest(rate_code_of, patch.env[0].attack), user);
-    emit(75, nearest(amp_fall_code_of, patch.env[0].decay), user);
-    emit(79, clamp_cc(patch.env[0].sustain >> 3), user);
-    emit(72, nearest(amp_fall_code_of, patch.env[0].release), user);
-    emit(86, clamp_cc(patch.vel_amp_amt), user);
+    emit(73, nearest(rate_code_of, preset.env[0].attack), user);
+    emit(75, nearest(amp_fall_code_of, preset.env[0].decay), user);
+    emit(79, clamp_cc(preset.env[0].sustain >> 3), user);
+    emit(72, nearest(amp_fall_code_of, preset.env[0].release), user);
+    emit(86, clamp_cc(preset.vel_amp_amt), user);
     // the mod envelope
-    emit(102, nearest(rate_code_of, patch.env[1].attack), user);
-    emit(103, nearest(rate_code_of, patch.env[1].decay), user);
-    emit(104, clamp_cc(patch.env[1].sustain >> 3), user);
-    emit(105, nearest(rate_code_of, patch.env[1].release), user);
-    emit(108, four_way(patch.mod_env_dest), user);
-    emit(107, nearest(mod_depth_of, patch.mod_env_depth), user);
-    emit(87, clamp_cc(patch.vel_mod_amt), user);
+    emit(102, nearest(rate_code_of, preset.env[1].attack), user);
+    emit(103, nearest(rate_code_of, preset.env[1].decay), user);
+    emit(104, clamp_cc(preset.env[1].sustain >> 3), user);
+    emit(105, nearest(rate_code_of, preset.env[1].release), user);
+    emit(108, four_way(preset.mod_env_dest), user);
+    emit(107, nearest(mod_depth_of, preset.mod_env_depth), user);
+    emit(87, clamp_cc(preset.vel_mod_amt), user);
     // the LFOs
-    dump_lfo(patch, knobs, 0, emit, user);
-    dump_lfo(patch, knobs, 1, emit, user);
+    dump_lfo(preset, knobs, 0, emit, user);
+    dump_lfo(preset, knobs, 1, emit, user);
 }
 
 int dump_length() {

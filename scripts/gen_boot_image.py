@@ -8,7 +8,7 @@
 #   boot_p0.hex .. boot_p3.hex — per-partial parameter RAM init
 #
 # (The attenuation LUT lives in gen_att_lut.py — it is a fixed synth
-# resource, not test-patch data.)
+# resource, not test-preset data.)
 #
 # Test sound: a C-major chord across multiple octaves.
 #   32 notes × 8 unison voices = 256 voices.

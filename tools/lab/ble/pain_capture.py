@@ -4,7 +4,7 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-Companion to filter_pain_check.py: same recipe patch, but records
+Companion to filter_pain_check.py: same recipe preset, but records
 a few representative (slope, resonance) settings as WAV files for
 listening review (publish with tools/lab/publish_capture.sh).
 
@@ -16,7 +16,7 @@ import time
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from ble_midi_fuzz import bt, wait_for_alsa_port, open_midi_out, NOAIDI_MAC
-from filter_pain_check import PATCH, AUDIO_DEV, RATE, NOTE
+from filter_pain_check import PRESET, AUDIO_DEV, RATE, NOTE
 
 CASES = [
     ("24dB-reso32-stable",  127, 32),
@@ -49,7 +49,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
 

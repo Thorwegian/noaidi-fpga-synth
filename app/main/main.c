@@ -67,7 +67,7 @@ void app_main(void) {
     printf("Minimum free heap size: %" PRIu32 " bytes\n",
            esp_get_minimum_free_heap_size());
 
-    // Patch storage: mount before anything loads a patch.
+    // Preset storage: mount before anything loads a preset.
     storage_init();
 
     // Event bus first, then the consumers that subscribe to it; the outputs

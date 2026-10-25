@@ -82,7 +82,7 @@ IO_PORT "spdif_out" PULL_MODE=UP DRIVE=8 IO_TYPE=LVCMOS33;
 
 // Unused / Reserved — uncomment as needed
 
-// SPI Flash (for patch storage — future)
+// SPI Flash (for preset storage — future)
 // IO_LOC  "flash_cs_n"  60;
 // IO_LOC  "flash_clk"   59;
 // IO_LOC  "flash_miso"  62;

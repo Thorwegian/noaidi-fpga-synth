@@ -6,8 +6,8 @@ License: CERN-OHL-S v2
 The reference every CSP build is judged against (issue #222, 2026-10-17):
 the synth as of `main` just before the first CSP-as-processor merge
 (`7c959b4`, 2026-10-12), rebuilt with the pinned flow (seed 4, 122.7 MHz)
-and the 2026-10-17 bitstream generator, its own firmware and patch
-storage, playing the Galaxy patch (Factory bank program 1: a two-note
+and the 2026-10-17 bitstream generator, its own firmware and preset
+storage, playing the Galaxy preset (Factory bank program 1: a two-note
 arpeggio from LFO 1 on the pitch, a tremolo from LFO 2 on the pulse
 width, both LFOs free-running) through `tools/lab/baseline_recording.py`
 — at 60 BPM, C5 … C6 as quarter notes, the C6 held a full bar, a bar of

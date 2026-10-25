@@ -34,8 +34,8 @@ extern "C" {
 
 typedef enum {
     EVT_MIDI = 1,
-    EVT_PATCH, // a patch request to voice_alloc (voice_alloc.h)
-    EVT_SYNC, // the console asks voice_alloc to send the patch to the surfaces (#279)
+    EVT_PRESET, // a preset request to voice_alloc (voice_alloc.h)
+    EVT_SYNC, // the console asks voice_alloc to send the preset to the surfaces (#279)
 } evt_kind_t;
 
 // Where a MIDI event came from. The outputs send a state change to every
@@ -47,15 +47,15 @@ typedef enum {
     MIDI_SOURCE_BLE,          // MIDI over Bluetooth LE
 } midi_source_t;
 
-// A patch request: replace the active patch, or copy it out. Sent
+// A preset request: replace the active preset, or copy it out. Sent
 // straight to voice_alloc's queue, so it stays in order with MIDI; the
 // sender waits on done.
 typedef struct {
-    bool set; // true: *patch becomes the active patch;
-              // false: the active patch is copied to *patch
-    struct patch_s *patch;
+    bool set; // true: *preset becomes the active preset;
+              // false: the active preset is copied to *preset
+    struct preset_s *preset;
     SemaphoreHandle_t done;
-} patch_request_t;
+} preset_request_t;
 
 // Tagged union: extend with new kinds and members as the system grows.
 typedef struct {
@@ -63,7 +63,7 @@ typedef struct {
     uint8_t source; // midi_source_t, with EVT_MIDI
     union {
         midi_message_t midi;
-        patch_request_t patch;
+        preset_request_t preset;
     };
 } evt_t;
 

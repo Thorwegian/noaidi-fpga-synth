@@ -267,7 +267,7 @@ whatever its registers hold. Then, before the first note:
 A bitstream is accepted when all three pass at 73.728 MHz; a seed sweep
 of a design change runs all three on every seed. `tools/lab/acceptance.py`
 runs the three on the board as one command (the bitstream loaded, the
-firmware reset, the patch loaded, the sequence recorded, checked and
+firmware reset, the preset loaded, the sequence recorded, checked and
 compared) and writes the recording, the tables, the plot, the MP3 and a
 `verdict.json` to a directory; its exit status is the verdict.
 

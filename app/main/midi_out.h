@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // What goes out is the synth's own state as the CCs of docs/midi_schema.md
-// (the whole patch on a Program Change or a console load, a changed
+// (the whole preset on a Program Change or a console load, a changed
 // parameter as it changes), never what arrived: no notes, no THRU. A message
 // is queued with the source it came from, and each output skips the
 // messages from its own source, so a surface never hears itself and no loop
