@@ -40,7 +40,9 @@ void patch_file_write(FILE *out, const patch_t *p);
 // Save *p to path safely (docs/storage_format.md "Saving"): write
 // path.new ending with the line "# end", flush it to the medium, delete
 // path, rename path.new to path. A power loss at any point leaves either
-// the old patch or the new one, once patch_file_recover() has run.
+// the old patch or the new one, once patch_file_recover() has run. A
+// path under Patches/Factory/ starts with the copyright notice
+// (patch_file::factory_notice): Factory patches are source files.
 bool patch_file_save(const char *path, const patch_t *p, char *err,
                      size_t err_len);
 
@@ -67,9 +69,22 @@ int patch_file_diff(FILE *out, const patch_t *a, const patch_t *b);
 
 // The same, for C++ callers.
 namespace patch_file {
+
+// The notice every source file carries (AGENTS.md). save() starts a
+// Factory patch with it, so a patch saved on the board and committed to
+// the repo keeps it; the loader ignores it, like any comment.
+inline constexpr std::string_view factory_notice =
+        "# Copyright © 2026 Thor H. Linløkken <thj@thj.no>\n"
+        "# License: CERN-OHL-S v2\n";
+
+// Whether path lies under Patches/Factory/ (compared as FAT does,
+// ignoring case).
+bool factory_path(std::string_view path);
+
 bool parse(std::string_view text, patch_t &p, std::string &error);
 bool read(const std::string &path, patch_t &p, std::string &error);
-std::string to_text(const patch_t &p);
+std::string to_text(const patch_t &p); // the values alone, no notice
 bool save(const std::string &path, const patch_t &p, std::string &error);
+
 } // namespace patch_file
 #endif

@@ -492,6 +492,19 @@ so parsing alone cannot tell.
 A saved file therefore ends with `# end`. The loader ignores it, like
 any comment.
 
+A patch saved under `Patches/Factory` starts with the copyright notice
+every source file carries:
+
+```
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+```
+
+Factory patches are source, so a patch voiced on the board, saved
+there from the console and read out with `make fw-storage-read` is
+committed as it is. `User` patches are the player's data and get no
+notice.
+
 ## Factory content
 
 The factory patches and the default `system.toml` live in the repo
@@ -500,7 +513,8 @@ under `app/storage/`, mirroring the root above. The factory set is
 `system.toml` names it as the startup patch, and `banks.toml` makes it
 program 0 of bank 0, "Factory". `make fw-test` checks that
 every factory patch and `banks.toml` read and are already in the
-writer's own form, so they read back exactly.
+writer's own form, so they read back exactly, and that every factory
+patch starts with the copyright notice.
 
 A firmware update never writes the `storage` partition, so it cannot
 overwrite user patches. `make fw-storage-flash` packs `app/storage/`

@@ -199,7 +199,8 @@ saved /Patches/User/Pads/Arctic Ice.toml
 - **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
   `rm <file>`.
 - **Patches:** `load <file>`, `save <file>` (anywhere: this is a
-  developer's shell), `init` (the init patch), `patch` (print the active
+  developer's shell; a save under `Patches/Factory` starts with the
+  copyright notice), `init` (the init patch), `patch` (print the active
   patch as a file).
 - **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
   `bank add|insert|rm|new|del|build` edit `banks.toml` (see

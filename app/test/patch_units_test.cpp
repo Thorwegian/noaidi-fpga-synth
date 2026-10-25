@@ -1,4 +1,4 @@
-// patch_units_test.c — host test: every raw value of every patch file
+// patch_units_test.cpp — host test: every raw value of every patch file
 // key loads back exactly from the value the writer gives it
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
@@ -18,15 +18,21 @@
 // back, which must give the init patch. Each factory file given as an
 // argument must read, and its values must read back exactly through the
 // writer; a file whose text differs from the writer's own (comment lines
-// aside) only gets a warning, since that is formatting. Last, saving,
-// recovery from an interrupted save, and patch-name rules.
+// aside) only gets a warning, since that is formatting. A file under
+// Patches/Factory must start with the copyright notice, as a save there
+// writes it. Last, saving (a Factory save gets the notice, a User save
+// does not), recovery from an interrupted save, and patch-name rules.
 //
 //   make fw-test
 
+#include <filesystem>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include <string_view>
+#include <system_error>
 #include <unistd.h>
 
 #include "patch.h"
@@ -138,6 +144,37 @@ static bool exists(const char *path) {
     return access(path, F_OK) == 0;
 }
 
+// The whole of a file, "" if it cannot be read.
+static std::string read_file(const char *path) {
+    std::string text;
+    FILE *in = fopen(path, "rb");
+    char buf[4096];
+    size_t n;
+    while (in && (n = fread(buf, 1, sizeof buf, in)) > 0) {
+        text.append(buf, n);
+    }
+    if (in) {
+        fclose(in);
+    }
+    return text;
+}
+
+// text without its comment lines (those that start with '#').
+static std::string without_comments(std::string_view text) {
+    std::string body;
+    while (!text.empty()) {
+        size_t newline = text.find('\n');
+        std::string_view line =
+                text.substr(0, newline == std::string_view::npos ? text.size()
+                                                                 : newline + 1);
+        if (!line.starts_with('#')) {
+            body += line;
+        }
+        text.remove_prefix(line.size());
+    }
+    return body;
+}
+
 static void write_text(const char *path, const char *text) {
     FILE *f = fopen(path, "w");
     fputs(text, f);
@@ -211,6 +248,34 @@ static void check_saving(void) {
         fail("incomplete new .new was not deleted");
     }
     free(text);
+
+    // a Factory save starts with the copyright notice, a User save does
+    // not; both end with "# end" and read back
+    const std::string root    = std::string(dir) + "/Patches";
+    const std::string factory = root + "/Factory/Pads/C.toml";
+    const std::string user    = root + "/User/Pads/C.toml";
+    std::error_code ignored;
+    std::filesystem::create_directories(root + "/Factory/Pads", ignored);
+    std::filesystem::create_directories(root + "/User/Pads", ignored);
+    for (const std::string &path : {factory, user}) {
+        const bool in_factory = path == factory;
+        if (!patch_file_save(path.c_str(), &other, err, sizeof err)) {
+            fail(err);
+        }
+        const std::string saved = read_file(path.c_str());
+        if (saved.starts_with(patch_file::factory_notice) != in_factory) {
+            fail(in_factory ? "Factory save lacks the copyright notice"
+                            : "User save carries the copyright notice");
+        }
+        if (!saved.ends_with("# end\n")) {
+            fail("save does not end with # end");
+        }
+        if (!patch_file_read(path.c_str(), &back, err, sizeof err)
+            || patch_file_diff(stdout, &other, &back)) {
+            fail("saved patch does not read back");
+        }
+    }
+    std::filesystem::remove_all(root, ignored);
 
     remove(a);
     rmdir(dir);
@@ -309,27 +374,21 @@ int main(int argc, char **argv) {
                    argv[a]);
             s_failures++;
         }
+        // A Factory file is source: it starts with the copyright notice,
+        // as a save into Factory writes it.
+        const std::string file = read_file(argv[a]);
+        if (patch_file::factory_path(argv[a])
+            && !file.starts_with(patch_file::factory_notice)) {
+            printf("FAIL %s lacks the copyright notice\n", argv[a]);
+            s_failures++;
+        }
         // the file without its comment lines
-        FILE *in = fopen(argv[a], "r");
-        char line[256], *body = NULL;
-        size_t body_len = 0;
-        FILE *bm        = open_memstream(&body, &body_len);
-        while (in && fgets(line, sizeof line, in)) {
-            if (line[0] != '#') {
-                fputs(line, bm);
-            }
-        }
-        if (in) {
-            fclose(in);
-        }
-        fclose(bm);
-        if (strcmp(body, text) != 0) {
+        if (without_comments(file) != text) {
             printf("WARN %s is not in the writer's form; the writer gives:\n%s",
                    argv[a], text);
         } else {
             printf("%s: reads back exactly\n", argv[a]);
         }
-        free(body);
         free(text);
     }
 
