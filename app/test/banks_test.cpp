@@ -1,6 +1,7 @@
 // banks_test.cpp — host test: banks.toml reads, writes back exactly, and
-// the factory banks file reads back exactly through the writer (a warning
-// if its text is not in the writer's form)
+// the factory banks file reads back exactly through the writer and is in
+// the writer's own form, comment lines aside, so a save on the board
+// changes only what changed
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -124,8 +125,8 @@ int main(int argc, char **argv) {
     std::remove(path.c_str());
     rmdir(dir);
 
-    // The factory banks file reads, and reads back exactly through the
-    // writer. Text that differs from the writer's is formatting: a warning.
+    // The factory banks file reads, reads back exactly through the writer,
+    // and is the writer's own text, comment lines aside.
     for (int a = 1; a < argc; a++) {
         banks::BankMap factory;
         bool ok = banks::read(argv[a], factory, error);
@@ -138,10 +139,12 @@ int main(int argc, char **argv) {
         check(banks::parse(written, reread, error)
                       && banks::to_text(reread) == written,
               "the factory banks read back exactly through the writer");
-        if (written != without_comment_lines(file_text(argv[a]))) {
-            std::printf(
-                    "WARN %s is not in the writer's form; the writer gives:\n%s",
-                    argv[a], written.c_str());
+        const bool writer_form =
+                written == without_comment_lines(file_text(argv[a]));
+        check(writer_form,
+              (std::string(argv[a]) + " is not in the writer's form").c_str());
+        if (!writer_form) {
+            std::printf("  the writer gives:\n%s", written.c_str());
         } else {
             std::printf("%s: reads back exactly\n", argv[a]);
         }
