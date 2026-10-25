@@ -79,7 +79,7 @@ inline constexpr std::string_view factory_notice =
 
 // Whether path lies under Patches/Factory/ (compared as FAT does,
 // ignoring case).
-bool factory_path(std::string_view path);
+bool factory_path(const std::string &path);
 
 bool parse(std::string_view text, patch_t &p, std::string &error);
 bool read(const std::string &path, patch_t &p, std::string &error);
