@@ -3,14 +3,12 @@ format = 1
 [bank.0]
 name = "Factory"
 programs = [
-    "Patches/Factory/Pads/Supersaw.toml",        # 0
-    "Patches/Factory/Pads/Galaxy.toml",          # 1
-    "Patches/Factory/Basses/PowerBass.toml",     # 2
-    "Patches/Factory/Leads/BetterOffAlone.toml", # 3
-    "Patches/Factory/Leads/Commodore.toml",      # 4
+    "Patches/Factory/Pads/Supersaw.toml",   # 0
+    "Patches/Factory/Pads/Galaxy.toml",     # 1
 ]
 
 [bank.1]
 name = "User"
-programs = []
+programs = [
+]
 # end

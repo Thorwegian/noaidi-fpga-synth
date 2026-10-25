@@ -17,8 +17,8 @@
 #                   overwritten on every run
 #   make fw-test    host test: every patch-file value loads back exactly,
 #                   banks.toml reads and writes back, the factory patches
-#                   and banks read back exactly and are in the writer's own
-#                   form (comment lines aside), and the writes a
+#                   and banks read back exactly (a warning, not a failure,
+#                   where only their formatting differs), and the writes a
 #                   patch renders to the CSP are the arithmetic they should be
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim program.s)

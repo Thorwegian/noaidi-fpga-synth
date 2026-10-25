@@ -31,14 +31,14 @@ key_track = 100
 attack = 0.042
 sustain = -3.76
 decay = 3
-release = 9
+release = 8.88
 velocity = 61.4
 
 [mod_env]
-attack = 0.042
+attack = 0.0417
 sustain = 93.75
 decay = 3
-release = 25
+release = 25.15
 velocity = 100
 destination = "cutoff"
 depth = 24
@@ -59,4 +59,3 @@ depth = 0
 volume = 0
 pan = 0
 bend_range = 2
-# end

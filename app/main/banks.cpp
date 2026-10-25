@@ -5,7 +5,6 @@
 
 #include "banks.hpp"
 
-#include <algorithm>
 #include <charconv>
 #include <cstdio>
 
@@ -117,17 +116,10 @@ std::string to_text(const BankMap &banks) {
             text += "programs = []\n";
             continue;
         }
-        // One program per line, its number in a comment; the comments
-        // line up one column past the longest path.
-        size_t widest = 0;
-        for (const std::string &program : bank.programs) {
-            widest = std::max(widest, quoted(program).size());
-        }
         text += "programs = [\n";
         for (size_t p = 0; p < bank.programs.size(); p++) {
-            const std::string entry = quoted(bank.programs[p]) + ",";
-            text += "    " + entry + std::string(widest + 2 - entry.size(), ' ')
-                    + "# " + std::to_string(p) + "\n";
+            text += "    " + quoted(bank.programs[p]) + ",   # "
+                    + std::to_string(p) + "\n";
         }
         text += "]\n";
     }

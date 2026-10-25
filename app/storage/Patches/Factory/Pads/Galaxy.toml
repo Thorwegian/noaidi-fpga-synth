@@ -28,15 +28,15 @@ key_track = 100
 [amp_env]
 attack = 0
 sustain = -0.47
-decay = 0.34
-release = 7.2
+decay = 0.341
+release = 7.19
 velocity = 50
 
 [mod_env]
-attack = 0.9
+attack = 0.8898
 sustain = 0
-decay = 38
-release = 25
+decay = 37.73
+release = 25.15
 velocity = 50
 destination = "cutoff"
 depth = 34.17

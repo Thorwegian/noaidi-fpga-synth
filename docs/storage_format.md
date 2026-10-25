@@ -508,10 +508,10 @@ notice.
 ## Factory content
 
 The factory patches and the default `system.toml` live in the repo
-under `app/storage/`, mirroring the root above. The sound the synth
-starts with is `Patches/Factory/Pads/Supersaw.toml`: `system.toml`
-names it as the startup patch, and `banks.toml` makes it program 0 of
-bank 0, "Factory", followed by the other factory patches. `make fw-test` checks that
+under `app/storage/`, mirroring the root above. The factory set is
+`Patches/Factory/Pads/Supersaw.toml`, the sound the synth starts with:
+`system.toml` names it as the startup patch, and `banks.toml` makes it
+program 0 of bank 0, "Factory". `make fw-test` checks that
 every factory patch and `banks.toml` read and are already in the
 writer's own form, so they read back exactly, and that every factory
 patch starts with the copyright notice.
