@@ -36,12 +36,12 @@ so its tail no longer matches the instrument.
 - `baseline_galaxy_14f540b.essentia.json` — every measurement behind it:
   per segment the level, the pitch clusters, the spectral centroid, the
   valley floor (the level between the harmonics, 300–8000 Hz, the test
-  for a gritty sound: −43 to −68 dB below the strongest line on this
+  for a gritty sound: −45 to −80 dB below the strongest line on this
   take), the expected notes' peaks and a single note's first sixteen
   partials (an exception in `.gitignore` keeps it in the tree, where
   `*.json` is otherwise the flow's output);
 - `baseline_galaxy_14f540b.envelope.csv` — the level envelope, dBFS every
-  50 ms, 45 s.
+  50 ms, 29 s.
 
 Because the LFOs are free-running, a build is compared on the shape (the
 envelope, the per-beat levels) and the spectrum (the pitch classes, the
@@ -53,3 +53,12 @@ one, half an octave on the centroid, a mean of 6 dB over the partials,
 0.9 on the envelope's correlation); `--plot` draws the envelopes and the
 held C6's partials. A take has to pass both the check and the comparison
 before anyone listens to it.
+
+**Choosing the take.** Five takes were recorded on 2026-10-25. Every
+segment's level stays within 1.7 dB across them, except the first note of
+the scale, which spans 3.1 dB: where the free-running LFOs stand when the
+first note starts decides it. The benchmark is the take whose first note
+sits on the five takes' median (take 3); each of the other four passes every
+row of the comparison against it, envelope correlation 0.980–0.992. A take
+at the edge of that spread would have made a ±3 dB tolerance fail on phase
+alone, so a re-recording picks its take the same way.
