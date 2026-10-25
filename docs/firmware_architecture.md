@@ -16,9 +16,9 @@ BLE   ──► ble_midi               (musical state)            (transport + s
 
 Every event on the bus carries its **source** (the DIN jack, the panel
 port, BLE, the firmware itself). The synth model sends a CC that edited
-the patch back out through `midi_out` to every surface but the one it
+the preset back out through `midi_out` to every surface but the one it
 came from, so a knob moved on one surface moves on the others and none
-hears itself (#284, the transport; #279, the whole patch on a Program
+hears itself (#284, the transport; #279, the whole preset on a Program
 Change). Notes are never sent on: no THRU.
 
 ## midi_in
@@ -109,27 +109,27 @@ different facts:
   attack to both of a voice's envelopes, a note-off writes release, and
   the CSP owns only the attack's end at full scale. There is no
   level-sensitive gate, so a voice stolen while HELD gets a new attack
-  like any other, from the level it is at, whichever patch or channel
+  like any other, from the level it is at, whichever preset or channel
   takes it.
 
-## Patch storage
+## Preset storage
 
 `storage` mounts the FAT partition at `/storage` and loads
-`system.toml`'s startup patch at boot; `patch_file` and `patch_units`
-read, write and save patch files ([storage_format.md](storage_format.md)).
-`banks` maps Bank Select and Program Change onto patch files through
+`system.toml`'s startup preset at boot; `preset_file` and `preset_units`
+read, write and save preset files ([storage_format.md](storage_format.md)).
+`banks` maps Bank Select and Program Change onto preset files through
 `banks.toml`; `voice_alloc` keeps each channel's bank and loads the
 program at Program Change. The two storage reads a Program Change needs run on
-the **patch loader** task (#247), not the voice task: the voice task posts
+the **preset loader** task (#247), not the voice task: the voice task posts
 `{bank, program}` to a short queue and goes on to the next event; the loader
-reads banks.toml and the patch file (tens of milliseconds from SPI flash),
-coalesces a storm of changes to the last one, and hands the finished patch
-back through `patch_request`, applied between two MIDI events — so a change
+reads banks.toml and the preset file (tens of milliseconds from SPI flash),
+coalesces a storm of changes to the last one, and hands the finished preset
+back through `preset_request`, applied between two MIDI events — so a change
 under held keys never delays their note-offs or overflows the event queue.
-A patch reaches the synth model through `voice_alloc_set_patch()`,
+A preset reaches the synth model through `voice_alloc_set_preset()`,
 which queues it with the MIDI events, so a load lands between two
-events, never in the middle of one; `voice_alloc_get_patch()` copies the
-active patch out the same way.
+events, never in the middle of one; `voice_alloc_get_preset()` copies the
+active preset out the same way.
 
 ## Console
 
@@ -141,7 +141,7 @@ print through it, from any task, without breaking the line being
 typed. It keeps the last 1000 printed lines (at most 80 KB of heap),
 paged with PgUp/PgDn; Return on an empty line redraws the screen from
 them. `cli`, `cli_banks` and `cli_system` register the commands:
-files, patches, banks, and system state. Commands run in the console
+files, presets, banks, and system state. Commands run in the console
 task.
 
 ## Sequencers / arpeggiators

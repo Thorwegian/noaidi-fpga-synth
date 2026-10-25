@@ -58,7 +58,7 @@ void console_register(const console_cmd_t *cmd);
 // Print text through the console (what stdout does).
 void console_print(const char *buf, size_t len);
 
-// Set the prompt, e.g. "/Patches $ ".
+// Set the prompt, e.g. "/Presets $ ".
 void console_set_prompt(const char *prompt);
 
 // Set the status bar text.

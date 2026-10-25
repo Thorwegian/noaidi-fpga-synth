@@ -39,7 +39,7 @@ a MIDI-to-CV converter). Consequences:
 
 ```mermaid
 flowchart TD
-    MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>patch → registers and sinks"]
+    MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>preset → registers and sinks"]
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
         BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
@@ -255,12 +255,12 @@ ports.
   silent for it with every self-test passing). The console logs the count
   either way, and `csp-verify`, `csp-resend` and `csp-poke … force` do the
   same by hand. The sinks (`0x800` on) cannot be read back.
-- ADSR rates are 8-bit log₂ in the patch (4-bit octave + 4-bit
+- ADSR rates are 8-bit log₂ in the preset (4-bit octave + 4-bit
   1/16-octave fraction); firmware decodes them to the coefficient
-  (`patch_adsr_rate_coeff`) the envelope program's rate is made from
+  (`preset_adsr_rate_coeff`) the envelope program's rate is made from
   (`csp::envelope_rate`).
 - Velocity scales the amp envelope's amount in dB (a soft note is as many dB
-  down as the patch's sensitivity says: the old 60 dB span, taken as an
+  down as the preset's sensitivity says: the old 60 dB span, taken as an
   amplitude by the firmware since the gain is linear) and the mod
   envelope's depth linearly. Key tracking follows each partial's own pitch
   (note, tune, unison detune) and the channel's bend and pitch LFOs.
@@ -286,7 +286,7 @@ ports.
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the
   traffic justifies it.
-- Traffic: a note-on is a handful of words; a re-render of the patch is the
+- Traffic: a note-on is a handful of words; a re-render of the preset is the
   words that changed; envelopes, LFOs, pitch and cutoff cost no SPI traffic.
   The boot is the program (two dwords a row) and the decode ROM (one a row),
   the wiring (~400 dwords; constants are immediates in the word), and 256

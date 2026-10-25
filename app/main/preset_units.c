@@ -1,10 +1,10 @@
-// patch_units.c — the patch file's keys and their musical units
-// (see patch_units.h and docs/storage_format.md)
+// preset_units.c — the preset file's keys and their musical units
+// (see preset_units.h and docs/storage_format.md)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 
-#include "patch_units.h"
+#include "preset_units.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -59,7 +59,7 @@ static int32_t nearest_by_ratio(double value, double step, int32_t lo_raw,
 // sample and so ended linearly; its law, kept here into revision 2, made a
 // "9.9 s" release a 21 s fall once the gain was linear (#176).
 static double env_alpha(uint8_t code) {
-    return patch_adsr_rate_coeff(patch_adsr_rate_byte(code)) / 16777216.0;
+    return preset_adsr_rate_coeff(preset_adsr_rate_byte(code)) / 16777216.0;
 }
 
 static double env_g(uint8_t code) {
@@ -78,7 +78,7 @@ static double attack_samples(uint8_t code) {
     return log(1.3 / 0.3) / env_g(code);
 }
 
-static double env_time(const patch_t *p, const char *table, const char *key,
+static double env_time(const preset_t *p, const char *table, const char *key,
                        uint8_t code) {
     (void) p;
     (void) table;
@@ -94,7 +94,7 @@ static double env_time(const patch_t *p, const char *table, const char *key,
 // tie, so codes that behave identically collapse onto one. Times never
 // grow with the code (k never shrinks), so a binary search finds the
 // first code at or below t, and the answer is it or the code before.
-static int32_t env_code(const patch_t *p, const char *table, const char *key,
+static int32_t env_code(const preset_t *p, const char *table, const char *key,
                         double t) {
     if (!(t > 0.0)) {
         t = 1e-9;
@@ -129,11 +129,11 @@ static int32_t env_code(const patch_t *p, const char *table, const char *key,
 
 // ── Field accessors ─────────────────────────────────────────────────
 #define ACCESSOR(name, expr)                                                   \
-    static int32_t get_##name(const patch_t *p, int i) {                       \
+    static int32_t get_##name(const preset_t *p, int i) {                      \
         (void) i;                                                              \
         return (int32_t) (expr);                                               \
     }                                                                          \
-    static void set_##name(patch_t *p, int i, int32_t v) {                     \
+    static void set_##name(preset_t *p, int i, int32_t v) {                    \
         (void) i;                                                              \
         (expr) = v;                                                            \
     }
@@ -175,12 +175,12 @@ ACCESSOR(bend_range, p->bend_range)
 // kept as a fraction so an exact tie (50 % of 127 = 63.5) stays exact and
 // rounds away from zero, as the spec says.
 #define LINEAR(name, num, den, lo, hi)                                         \
-    static double val_##name(const patch_t *p, int i, int32_t r) {             \
+    static double val_##name(const preset_t *p, int i, int32_t r) {            \
         (void) p;                                                              \
         (void) i;                                                              \
         return r * (num) / (den);                                              \
     }                                                                          \
-    static int32_t raw_##name(const patch_t *p, int i, double v) {             \
+    static int32_t raw_##name(const preset_t *p, int i, double v) {            \
         (void) p;                                                              \
         (void) i;                                                              \
         if (isnan(v))                                                          \
@@ -202,12 +202,12 @@ LINEAR(mod_sus, 100.0, 1024.0, 0, 1023)        // percent of the depth
 LINEAR(mod_depth, 12.0, 1024.0, -11008, 11008) // ±129 semitones
 LINEAR(semis, 1.0, 1.0, 0, 48)                 // bend_range
 
-static double val_duty(const patch_t *p, int i, int32_t r) {
+static double val_duty(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     return 50.0 + r * 100.0 / 16777216.0;
 }
-static int32_t raw_duty(const patch_t *p, int i, double v) {
+static int32_t raw_duty(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     if (isnan(v)) {
@@ -224,13 +224,13 @@ static int32_t raw_duty(const patch_t *p, int i, double v) {
 }
 
 // cutoff: Hz at C4 = the key-tracked base for note 60 plus the offset.
-static double val_cutoff(const patch_t *p, int i, int32_t r) {
+static double val_cutoff(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     double pitch = C4_CUTOFF_PITCH + r;
     return 440.0 * pow(2.0, (pitch / RAW_PER_SEMI - 69.0) / 12.0);
 }
-static int32_t raw_cutoff(const patch_t *p, int i, double v) {
+static int32_t raw_cutoff(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     double pitch =
@@ -245,7 +245,7 @@ static int32_t raw_cutoff(const patch_t *p, int i, double v) {
 }
 
 // resonance: Q = 2^(code/1024) / √2, 0.707 … 32; inf = self-oscillation.
-static double val_resonance(const patch_t *p, int i, int32_t r) {
+static double val_resonance(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     if (r >= RESO_SELF_OSC) {
@@ -253,7 +253,7 @@ static double val_resonance(const patch_t *p, int i, int32_t r) {
     }
     return pow(2.0, r / 1024.0) / sqrt(2.0);
 }
-static int32_t raw_resonance(const patch_t *p, int i, double v) {
+static int32_t raw_resonance(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     if (isinf(v) && v > 0) {
@@ -270,12 +270,12 @@ static int32_t raw_resonance(const patch_t *p, int i, double v) {
 }
 
 // amp sustain: dB relative to the peak, −60.2 … −0.06.
-static double val_amp_sus(const patch_t *p, int i, int32_t r) {
+static double val_amp_sus(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     return -ENV_SPAN_DB * (1.0 - r / 1024.0);
 }
-static int32_t raw_amp_sus(const patch_t *p, int i, double v) {
+static int32_t raw_amp_sus(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     if (isnan(v)) {
@@ -293,11 +293,11 @@ static int32_t raw_amp_sus(const patch_t *p, int i, double v) {
 
 // Envelope times, seconds.
 #define ENV_TIME(name, table, key)                                             \
-    static double val_##name(const patch_t *p, int i, int32_t r) {             \
+    static double val_##name(const preset_t *p, int i, int32_t r) {            \
         (void) i;                                                              \
         return env_time(p, table, key, (uint8_t) r);                           \
     }                                                                          \
-    static int32_t raw_##name(const patch_t *p, int i, double v) {             \
+    static int32_t raw_##name(const preset_t *p, int i, double v) {            \
         (void) i;                                                              \
         return env_code(p, table, key, v);                                     \
     }
@@ -309,12 +309,12 @@ ENV_TIME(mod_decay, "mod_env", "decay")
 ENV_TIME(mod_release, "mod_env", "release")
 
 // lfo rate: Hz = rate × 96000 / 2^25.
-static double val_lfo_rate(const patch_t *p, int i, int32_t r) {
+static double val_lfo_rate(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     return r * SAMPLE_RATE / LFO_PHASE_CYCLE;
 }
-static int32_t raw_lfo_rate(const patch_t *p, int i, double v) {
+static int32_t raw_lfo_rate(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     return nearest_by_ratio(v, SAMPLE_RATE / LFO_PHASE_CYCLE, 1, 65535);
@@ -338,11 +338,11 @@ static double lfo_depth_scale(uint8_t dest, int32_t *lim) {
         return 50.0 / 2048.0; // percentage points, ±50
     }
 }
-static double val_lfo_depth(const patch_t *p, int i, int32_t r) {
+static double val_lfo_depth(const preset_t *p, int i, int32_t r) {
     int32_t lim;
     return r * lfo_depth_scale(p->lfo[i].dest, &lim);
 }
-static int32_t raw_lfo_depth(const patch_t *p, int i, double v) {
+static int32_t raw_lfo_depth(const preset_t *p, int i, double v) {
     int32_t lim;
     double scale = lfo_depth_scale(p->lfo[i].dest, &lim);
     if (isnan(v)) {
@@ -359,7 +359,7 @@ static int32_t raw_lfo_depth(const patch_t *p, int i, double v) {
 }
 
 // volume: dB, 0 = unity; -inf = off (raw 0).
-static double val_volume(const patch_t *p, int i, int32_t r) {
+static double val_volume(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     if (r <= 0) {
@@ -367,7 +367,7 @@ static double val_volume(const patch_t *p, int i, int32_t r) {
     }
     return (r - VOL_UNITY) * VOL_STEP_DB;
 }
-static int32_t raw_volume(const patch_t *p, int i, double v) {
+static int32_t raw_volume(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     if (isinf(v) && v < 0) {
@@ -387,12 +387,12 @@ static int32_t raw_volume(const patch_t *p, int i, double v) {
 }
 
 // slope: dB/octave, 12 or 24 → cascade 0 or 1.
-static double val_slope(const patch_t *p, int i, int32_t r) {
+static double val_slope(const preset_t *p, int i, int32_t r) {
     (void) p;
     (void) i;
     return r ? 24.0 : 12.0;
 }
-static int32_t raw_slope(const patch_t *p, int i, double v) {
+static int32_t raw_slope(const preset_t *p, int i, double v) {
     (void) p;
     (void) i;
     return v >= 18.0;
@@ -421,15 +421,15 @@ static const char *const s_lfo_dests[] = {"pulse_width", "resonance", "pitch",
 #define NAME(tbl, k, n, acc, list)                                             \
     { tbl, k, PF_NAME, n, false, list, get_##acc, set_##acc, NULL, NULL }
 
-static const patch_field_t s_fields[] = {
+static const preset_field_t s_fields[] = {
         NAME("voice", "structure", 1, structure, s_structures),
         NUM("voice", "osc_mix", 1, osc_mix, pct63),
         NUM("voice", "unison_detune", 1, unison_detune, detune),
         NUM("voice", "unison_stereo", 1, unison_stereo, pct127),
 
-        NAME("osc", "wave", PATCH_NUM_OSC, wave, s_waves),
-        NUM("osc", "tune", PATCH_NUM_OSC, tune, tune),
-        NUM("osc", "pulse_width", PATCH_NUM_OSC, duty, duty),
+        NAME("osc", "wave", PRESET_NUM_OSC, wave, s_waves),
+        NUM("osc", "tune", PRESET_NUM_OSC, tune, tune),
+        NUM("osc", "pulse_width", PRESET_NUM_OSC, duty, duty),
 
         NAME("filter", "type", 1, filter_type, s_filters),
         INT("filter", "slope", 1, cascade, slope),
@@ -454,31 +454,31 @@ static const patch_field_t s_fields[] = {
         NUM("mod_env", "depth", 1, mod_depth, mod_depth),
 
         // destination before depth: depth's unit depends on it
-        NAME("lfo", "shape", PATCH_NUM_LFO, lfo_shape, s_waves),
-        NUM("lfo", "rate", PATCH_NUM_LFO, lfo_rate, lfo_rate),
-        NAME("lfo", "destination", PATCH_NUM_LFO, lfo_dest, s_lfo_dests),
-        NUM("lfo", "depth", PATCH_NUM_LFO, lfo_depth, lfo_depth),
+        NAME("lfo", "shape", PRESET_NUM_LFO, lfo_shape, s_waves),
+        NUM("lfo", "rate", PRESET_NUM_LFO, lfo_rate, lfo_rate),
+        NAME("lfo", "destination", PRESET_NUM_LFO, lfo_dest, s_lfo_dests),
+        NUM("lfo", "depth", PRESET_NUM_LFO, lfo_depth, lfo_depth),
 
         NUM("part", "volume", 1, volume, volume),
         NUM("part", "pan", 1, pan, pct63),
         INT("part", "bend_range", 1, bend_range, semis),
 };
 
-const patch_field_t *patch_fields(size_t *count) {
+const preset_field_t *preset_fields(size_t *count) {
     *count = sizeof s_fields / sizeof s_fields[0];
     return s_fields;
 }
 
 // ── Load and save one value ─────────────────────────────────────────
-void patch_field_set_number(const patch_field_t *f, int i, patch_t *p,
-                            double value) {
+void preset_field_set_number(const preset_field_t *f, int i, preset_t *p,
+                             double value) {
     if (f->kind == PF_NUMBER) {
         f->set(p, i, f->to_raw(p, i, value));
     }
 }
 
-bool patch_field_set_name(const patch_field_t *f, int i, patch_t *p,
-                          const char *name) {
+bool preset_field_set_name(const preset_field_t *f, int i, preset_t *p,
+                           const char *name) {
     if (f->kind != PF_NAME) {
         return false;
     }
@@ -491,16 +491,16 @@ bool patch_field_set_name(const patch_field_t *f, int i, patch_t *p,
     return false;
 }
 
-int32_t patch_field_canonical(const patch_field_t *f, int i, const patch_t *p,
-                              int32_t raw) {
+int32_t preset_field_canonical(const preset_field_t *f, int i,
+                               const preset_t *p, int32_t raw) {
     if (f->kind != PF_NUMBER) {
         return raw;
     }
     return f->to_raw(p, i, f->to_value(p, i, raw));
 }
 
-int patch_field_format(const patch_field_t *f, int i, const patch_t *p,
-                       char *buf, size_t len) {
+int preset_field_format(const preset_field_t *f, int i, const preset_t *p,
+                        char *buf, size_t len) {
     int32_t raw = f->get(p, i);
     if (f->kind == PF_NAME) {
         int32_t n = 0;
@@ -512,7 +512,7 @@ int patch_field_format(const patch_field_t *f, int i, const patch_t *p,
     }
     // Write the canonical value: an out-of-range raw value clamps here
     // exactly as it would on loading.
-    int32_t want = patch_field_canonical(f, i, p, raw);
+    int32_t want = preset_field_canonical(f, i, p, raw);
     double v     = f->to_value(p, i, want);
     if (isinf(v)) {
         return snprintf(buf, len, v > 0 ? "inf" : "-inf");

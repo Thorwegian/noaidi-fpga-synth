@@ -35,9 +35,9 @@ RATE = 48000
 WIN_MS = 50.0                      # one 20 Hz cycle
 CHORD = (45, 52, 57, 61, 64)       # 5 notes, drive the bus hard
 
-# Hard-driven patch: the limiter must be doing real work, or the test
+# Hard-driven preset: the limiter must be doing real work, or the test
 # proves nothing (a bench that stays under threshold measures unity gain).
-PATCH = [
+PRESET = [
     (20, 0),    # osc1 saw
     (24, 0),    # mix to osc1
     (26, 64),   # voice mode 7+1 UNISON -- 8 partials per note. Plain mode
@@ -112,7 +112,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
         time.sleep(0.2)

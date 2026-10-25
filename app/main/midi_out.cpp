@@ -11,7 +11,7 @@
 // low seven bits and the message's bytes, status first (running status is
 // not used: a surface that joins mid-stream reads the first message). As
 // many messages as the negotiated MTU holds go in one notification, so a
-// patch dump of sixty CCs is two or three packets rather than sixty
+// preset dump of sixty CCs is two or three packets rather than sixty
 // connection intervals.
 
 #include "midi_out.h"
@@ -32,7 +32,7 @@ namespace {
 
 constexpr const char *tag = "midi_out";
 
-constexpr int queue_length  = 128; // a whole patch is about sixty messages
+constexpr int queue_length  = 128; // a whole preset is about sixty messages
 constexpr int task_stack    = 3072;
 constexpr int task_priority = 3;
 

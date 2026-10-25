@@ -6,16 +6,16 @@
 usage: zipper_take.py <out.wav> [--program N] [--port CLIENT:PORT] [--device hw:1,0]
 
 The stimulus is the one where a control's steps would be heard first: a
-fast amp attack and release on a bright patch with the resonance high and
+fast amp attack and release on a bright preset with the resonance high and
 the mod envelope sweeping the cutoff down fast after each note — the gain
 word and the cutoff both moving quickly, every pass. Five notes, a semitone
 apart, a second each; the recording runs on through the last release.
 
-The patch is the chosen program with these CCs over it, sent before the
+The preset is the chosen program with these CCs over it, sent before the
 notes (`midi_schema.md`): amp attack 73 = 127 (fastest), decay 75 = 64,
 sustain 79 = 127, release 72 = 100; mod attack 102 = 127, decay 103 = 100,
 depth 107 = 110 (well above the centre: the cutoff swept up and down);
-resonance 71 = 105. Two builds recorded with the same patch and the same
+resonance 71 = 105. Two builds recorded with the same preset and the same
 CCs differ only in how often the controls step; `zipper_compare.py` reads
 the two takes against each other.
 """

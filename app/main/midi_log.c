@@ -109,7 +109,7 @@ static void midi_log_task(void *arg) {
             log_midi_event(&evt.midi, evt.source);
             break;
         case EVT_SYNC:
-            printf("sync      the patch goes out as CCs  %s\n",
+            printf("sync      the preset goes out as CCs  %s\n",
                    source_name(evt.source));
             break;
         default:

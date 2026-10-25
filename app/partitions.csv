@@ -2,7 +2,7 @@
 # License: CERN-OHL-S v2
 #
 # Flash layout for the ESP32-C3 Super Mini's 4 MB flash. "storage" holds
-# the patches and settings (docs/storage_format.md).
+# the presets and settings (docs/storage_format.md).
 # Name,     Type, SubType, Offset,   Size
 nvs,        data, nvs,     0x9000,   0x6000
 phy_init,   data, phy,     0xF000,   0x1000

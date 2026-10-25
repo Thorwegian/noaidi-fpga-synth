@@ -45,11 +45,11 @@ for diagnosis, with what their output does and does not mean:
 | `csp-verify` | registers whose chip value differs from the firmware's image | it compares **program-owned** words too (envelope levels and stages, LFO phases and outputs, channel scratch, `PARITY`), which legitimately move; after any note it reports dozens. It lists only the first **24** by address. Read it through `verify_filter.py`. |
 | `csp-peek <reg> [count]` | register pairs, `0x000–0x7FF` | the sinks `0x800–0xBFF` **cannot be read back** at all; a peek there returns nothing. |
 | `csp-trap <reg>` / `csp-trap 0x8xx` / `csp-trap` | arm the write trap on a register or a sink word; read `hits, last cycle, word, by the pass or by the core` | a firmware-owned word written "by the core" is the program writing where only the firmware should: the mis-addressed write, with its cycle. The writer field means nothing at `hits 0`. |
-| `csp-resend` | the whole image sent again | this is `resend_all`. A **patch reload is not a resend**: `EngineImage::set` skips words whose value did not change, so a word corrupted on the chip survives a reload of the same patch. |
+| `csp-resend` | the whole image sent again | this is `resend_all`. A **preset reload is not a resend**: `EngineImage::set` skips words whose value did not change, so a word corrupted on the chip survives a reload of the same preset. |
 
-Storage: `make fw-storage-read DIR=x` pulls the FAT partition (patches,
+Storage: `make fw-storage-read DIR=x` pulls the FAT partition (presets,
 banks) into a folder, `fw-storage-write` the other way; both need the console
-port. The synth's own patch saves are bare TOML without the copyright header
+port. The synth's own preset saves are bare TOML without the copyright header
 (#246), so port values rather than overwriting a Factory file.
 
 ## MIDI into the synth
@@ -84,7 +84,7 @@ port. The synth's own patch saves are bare TOML without the copyright header
   does not have it.
 - **Never drive MIDI into the synth while anyone is playing it** — it plays
   over them and moves their controllers. Controllers cannot be read back, so
-  the only true restore is a Program Change that reloads the patch
+  the only true restore is a Program Change that reloads the preset
   (`midi_soak.py --program N`; `baseline_recording.py` uses program 1).
 
 ## The scripts
@@ -98,7 +98,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
-| `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen patch, recorded over S/PDIF |
+| `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, recorded over S/PDIF |
 | `baseline_check.py` | that recording against what it should hold, with Essentia |
 | `benchmark_compare.py` | a baseline recording against the benchmark take |
 | `release_tail.py` | the triad's release tail from a recording's envelope CSV: held level, levels after the release, slopes, time to 60 dB down — the shape that tells a dB release from a linear one (#176) |
@@ -118,7 +118,7 @@ Hunting a silent write loss (#248):
 | script | what |
 |---|---|
 | `verify_filter.py` | `csp-verify` classified by owner from `map.s`; only firmware-owned differences are real drift (exit 2). Re-read a hit after two seconds: a word caught mid-flight clears, a loss persists. |
-| `midi_soak.py` | random chords and knob walks with ~150-CC sweep bursts over USB→DIN, every delay jittered (a fixed-timing bench hides timing faults), seed printed to replay; `--program N` restores the patch |
+| `midi_soak.py` | random chords and knob walks with ~150-CC sweep bursts over USB→DIN, every delay jittered (a fixed-timing bench hides timing faults), seed printed to replay; `--program N` restores the preset |
 | `monitor.sh` | `verify_filter.py` on a loop while a soak plays, re-reading any real hit |
 
 Hardware checks over BLE and the audio captures (`tools/lab/ble/` — written

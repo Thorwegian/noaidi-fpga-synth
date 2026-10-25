@@ -8,9 +8,9 @@ Starts tools/osc_panel/runner.py, plays Open Stage Control's part on its port
 "Noaidi O.S.C.:surface" (subscribed for input, connected for output), and:
 
   1. waits for the runner to link and the synth's state to arrive: the whole
-     patch as CCs on the surface port, each once;
+     preset as CCs on the surface port, each once;
   2. resets the board through the console's RTS and waits for the runner to
-     reconnect, re-link and ask again: the whole patch arrives once more,
+     reconnect, re-link and ask again: the whole preset arrives once more,
      within RESET_BUDGET seconds, with nothing done on O.S.C.'s side;
   3. sends a Program Change from the surface port: the synth's dump comes
      back, which proves the relay's other direction without the console.
@@ -84,7 +84,7 @@ def main():
         got = wait_for_dump(client, RESET_BUDGET)
         print(f"[link] {len(got)} CCs from the synth after the runner linked (want {len(DUMP)})")
         if [cc for cc, _ in got] != DUMP:
-            failures.append(f"the first state was {len(got)} CCs, not the patch")
+            failures.append(f"the first state was {len(got)} CCs, not the preset")
 
         # 2. the board resets; the runner must bring the state back by itself
         received(client, 0.5)
@@ -98,10 +98,10 @@ def main():
         took = time.time() - t0
         print(f"[reset] {len(got)} CCs from the synth {took:.1f} s after the reset (want {len(DUMP)})")
         if [cc for cc, _ in got] != DUMP:
-            failures.append(f"after the reset the state was {len(got)} CCs within {RESET_BUDGET:.0f} s, not the patch")
+            failures.append(f"after the reset the state was {len(got)} CCs within {RESET_BUDGET:.0f} s, not the preset")
 
         # 3. the relay's other direction, observed through MIDI: a Program
-        #    Change from O.S.C.'s side reaches the synth, which dumps the patch
+        #    Change from O.S.C.'s side reaches the synth, which dumps the preset
         #    back to the surface port
         received(client, 0.5)
         client.event_output(ProgramChangeEvent(channel=0, value=1), port=out)

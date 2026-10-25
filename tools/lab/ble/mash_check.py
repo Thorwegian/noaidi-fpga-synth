@@ -105,13 +105,13 @@ def reset_boards():
 
 def reboot_esp_clean():
     """Reboot ONLY the ESP (no FPGA reload) to restore the default
-    patch. The mash fires ~2500 random CCs and never resets them, so
-    without this it leaves the synth on a scrambled patch — which reads
+    preset. The mash fires ~2500 random CCs and never resets them, so
+    without this it leaves the synth on a scrambled preset — which reads
     to the player as quiet/buzzy/cutting-off notes on a fresh play
     ('nothing touched', but the state is mashed). Always run at the end."""
     esp = find_esp()
     if not esp:
-        print("[restore] no ESP port; patch left mashed - reboot to clean it")
+        print("[restore] no ESP port; preset left mashed - reboot to clean it")
         return
     subprocess.run(["pkill", "-f", "console_logger"], capture_output=True)
     subprocess.run(["fuser", "-k", esp], capture_output=True)
@@ -133,7 +133,7 @@ def reboot_esp_clean():
         stdout=open("/tmp/console_logger.err", "w"),
         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
         start_new_session=True)
-    print("[restore] ESP rebooted - patch back to clean default")
+    print("[restore] ESP rebooted - preset back to clean default")
 
 
 def capture_probe(secs=1):
@@ -284,7 +284,7 @@ def main():
         if ac == 0 and max(abs(dcs[0]), abs(dcs[1])) <= 4:
             print(f"RESULT: PASS - AC-silent after mash (seed {seed}; "
                   f"parked DC {dcs} is the known output low-pass residual)")
-            reboot_esp_clean()   # never leave the patch scrambled
+            reboot_esp_clean()   # never leave the preset scrambled
             return 0
         time.sleep(5)
     print("RESULT: FAIL - still sounding at the deadline "

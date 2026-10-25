@@ -14,7 +14,7 @@ segment of it (segments()) the checker takes the middle 60 % and measures:
 
   - the level (dBFS);
   - the frame-wise pitch (PitchYinFFT on the mono mix) as clusters to the
-    semitone with their share of the confident frames — the Galaxy patch's
+    semitone with their share of the confident frames — the Galaxy preset's
     two oscillators sit an octave apart and a pulse LFO trills the pitch, so
     a monophonic tracker splits between two or three clusters;
   - the averaged magnitude spectrum: its centroid, for each expected note
@@ -27,7 +27,7 @@ segment of it (segments()) the checker takes the middle 60 % and measures:
     harmonics: noise fills it, a clean tone leaves it deep (a gritty take
     shows as a valley floor tens of dB above the benchmark's).
 
-The verdicts are deliberately tolerant of the patch (a pad with a slow
+The verdicts are deliberately tolerant of the preset (a pad with a slow
 attack, a long release and free-running LFOs): a note passes when its pitch
 class, at any octave, holds at least a third of the confident frames; the
 silence bar passes when it is at least 12 dB below the held note before it;

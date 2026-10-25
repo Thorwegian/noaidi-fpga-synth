@@ -24,7 +24,7 @@
         .equ   SINES_A_HALF, 1
 
 ; One of each shape a half, so a half holds every waveform and the firmware
-; places an LFO on the record of the patch's shape (app/main/render.cpp lfo():
+; places an LFO on the record of the preset's shape (app/main/render.cpp lfo():
 ; the saw at the pool's start, the square after the saws, and so on, and the
 ; channel reads that record). A half carries two LFOs at most — the synth is
 ; omni, one channel, two LFOs — so one slot of a shape is enough.
@@ -39,4 +39,4 @@
 ;   one of each shape (four a half)    1460 cycles
 ;   6 squares and 6 sines              1446
 ;   3 of each shape (twelve a half)    1490
-; Issue #237 moved the per-patch shape into the firmware; this is its layout.
+; Issue #237 moved the per-preset shape into the firmware; this is its layout.

@@ -4,11 +4,11 @@
 // License: CERN-OHL-S v2
 //
 // The developers' shell on the console (console.h): files (cd, pwd, ls,
-// mkdir, rmdir, rm), patches (load, save, init, patch), ble and help in
+// mkdir, rmdir, rm), presets (load, save, init, preset), ble and help in
 // cli.cpp; banks in cli_banks.cpp; system commands in cli_system.c. Paths are absolute from the
-// storage root ("/Patches/User") or relative to the working folder,
+// storage root ("/Presets/User") or relative to the working folder,
 // which the prompt shows, and are taken literally: save writes any
-// file, since this shell is for developers, factory patches included.
+// file, since this shell is for developers, factory presets included.
 // Tab completes them.
 
 #pragma once

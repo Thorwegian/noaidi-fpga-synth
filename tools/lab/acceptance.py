@@ -12,11 +12,11 @@
 
 usage: acceptance.py --out DIR [--label NAME] [--fs BITSTREAM] [--loader PATH]
                      [--console /dev/ttyACM0] [--port 16:0] [--device hw:1,0]
-                     [--patch /Patches/Factory/Pads/Galaxy.toml] [--boot-seconds 16]
+                     [--preset /Presets/Factory/Pads/Galaxy.toml] [--boot-seconds 16]
                      [--tail 24] [--no-mp3]
 
 With --fs the bitstream is loaded first (openFPGALoader, SRAM). The ESP32 is
-reset through the console's RTS and its boot log read; then the patch is
+reset through the console's RTS and its boot log read; then the preset is
 loaded, the sequence recorded (baseline_recording.py), checked and compared,
 and the recording encoded as MP3 at 320 kbps (libmp3lame) for the ticket. DIR gets the
 recording, the tables, the plot, the boot log and verdict.json; the exit
@@ -80,7 +80,7 @@ def main():
     parser.add_argument("--console", default="/dev/ttyACM0", help="the firmware's serial console")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
-    parser.add_argument("--patch", default="/Patches/Factory/Pads/Galaxy.toml", help="the patch, on the firmware's storage")
+    parser.add_argument("--preset", default="/Presets/Factory/Pads/Galaxy.toml", help="the preset, on the firmware's storage")
     parser.add_argument("--boot-seconds", type=float, default=16.0, help="how long the boot log is read")
     parser.add_argument("--tail", type=float, default=24.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-mp3", action="store_true", help="no MP3 for the ticket")
@@ -127,11 +127,11 @@ def main():
                          "lines": [line.strip() for line in verify.splitlines() if "image" in line][:24]}
     print("verified: %s register(s) differ" % ("?" if differing is None else differing))
 
-    # 3. the patch, the sequence, the checks
-    print("== patch")
-    load = command(port, "load " + args.patch, 3.0)
-    verdict["patch_loaded"] = "loaded" in load
-    print("loaded" if verdict["patch_loaded"] else load.strip()[-160:])
+    # 3. the preset, the sequence, the checks
+    print("== preset")
+    load = command(port, "load " + args.preset, 3.0)
+    verdict["preset_loaded"] = "loaded" in load
+    print("loaded" if verdict["preset_loaded"] else load.strip()[-160:])
     time.sleep(1.0)
     diag = DIAG.search(command(port, "csp-diag", 2.0))
     verdict["diag"] = {"passes": int(diag.group(1)), "limiter": diag.group(2), "dropped": int(diag.group(3))} if diag else None

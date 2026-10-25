@@ -1,10 +1,10 @@
-// patch_units_test.cpp — host test: every raw value of every patch file
+// preset_units_test.cpp — host test: every raw value of every preset file
 // key loads back exactly from the value the writer gives it
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// For each key and each raw value its patch_t field can hold, the test
+// For each key and each raw value its preset_t field can hold, the test
 // writes the value as the writer does, reads the text back as the
 // loader does, and checks
 //   - the loaded raw value is the canonical form of the written one, and
@@ -14,14 +14,14 @@
 // depends on another key (the LFO depth on its destination) is checked
 // across that key's values.
 //
-// Then it writes the init patch (patch_init) as a patch file and reads it
-// back, which must give the init patch. Each factory file given as an
+// Then it writes the init preset (preset_init) as a preset file and reads it
+// back, which must give the init preset. Each factory file given as an
 // argument must read, and its values must read back exactly through the
 // writer, and its text, comment lines aside, must be the writer's own, so
 // that a save on the board changes only what changed. A file under
-// Patches/Factory must start with the copyright notice, as a save there
+// Presets/Factory must start with the copyright notice, as a save there
 // writes it. Last, saving (a Factory save gets the notice, a User save
-// does not), recovery from an interrupted save, and patch-name rules.
+// does not), recovery from an interrupted save, and preset-name rules.
 //
 //   make fw-test
 
@@ -35,41 +35,42 @@
 #include <system_error>
 #include <unistd.h>
 
-#include "patch.h"
-#include "patch_file.h"
-#include "patch_units.h"
+#include "preset.h"
+#include "preset_file.h"
+#include "preset_units.h"
 
 static int s_failures;
 
 // What the loader does with one written value.
-static void load_text(const patch_field_t *f, int i, patch_t *p,
+static void load_text(const preset_field_t *f, int i, preset_t *p,
                       const char *text) {
     if (f->kind == PF_NAME) {
         char name[32];
         size_t n = strlen(text);
         snprintf(name, sizeof name, "%.*s", (int) (n - 2),
                  text + 1); // strip quotes
-        patch_field_set_name(f, i, p, name);
+        preset_field_set_name(f, i, p, name);
         return;
     }
     double v = strcmp(text, "inf") == 0    ? INFINITY
                : strcmp(text, "-inf") == 0 ? -INFINITY
                                            : strtod(text, NULL);
-    patch_field_set_number(f, i, p, v);
+    preset_field_set_number(f, i, p, v);
 }
 
-static void check_raw(const patch_field_t *f, int i, patch_t *p, int32_t raw) {
+static void check_raw(const preset_field_t *f, int i, preset_t *p,
+                      int32_t raw) {
     f->set(p, i, raw);
     raw           = f->get(p, i); // as the field stores it
-    int32_t canon = patch_field_canonical(f, i, p, raw);
+    int32_t canon = preset_field_canonical(f, i, p, raw);
 
     char text[64];
-    patch_field_format(f, i, p, text, sizeof text);
+    preset_field_format(f, i, p, text, sizeof text);
     load_text(f, i, p, text);
     int32_t loaded = f->get(p, i);
 
     char again[64];
-    patch_field_format(f, i, p, again, sizeof again);
+    preset_field_format(f, i, p, again, sizeof again);
     load_text(f, i, p, again);
     int32_t reloaded = f->get(p, i);
 
@@ -85,7 +86,7 @@ static void check_raw(const patch_field_t *f, int i, patch_t *p, int32_t raw) {
 }
 
 // The raw values a field can hold.
-static void raw_range(const patch_field_t *f, int32_t *lo, int32_t *hi) {
+static void raw_range(const preset_field_t *f, int32_t *lo, int32_t *hi) {
     const char *k = f->key;
     if (f->kind == PF_NAME) {
         int32_t n = 0;
@@ -126,7 +127,7 @@ static void raw_range(const patch_field_t *f, int32_t *lo, int32_t *hi) {
 // Every raw value for the first element. The conversions are the same
 // for every element, so later elements only check the accessor, on a
 // spread of values.
-static void check_field(const patch_field_t *f, int i, patch_t *p) {
+static void check_field(const preset_field_t *f, int i, preset_t *p) {
     int32_t lo, hi;
     raw_range(f, &lo, &hi);
     int32_t step = (i == 0) ? 1 : (hi - lo) / 997 + 1;
@@ -194,56 +195,56 @@ static void check_saving(void) {
     snprintf(b, sizeof b, "%s/B.toml", dir);
     snprintf(b_new, sizeof b_new, "%s.new", b);
 
-    patch_t init, other, back;
-    patch_init(&init);
-    patch_init(&other);
+    preset_t init, other, back;
+    preset_init(&init);
+    preset_init(&other);
     other.filter.resonance = 1024;
 
     // a plain save: the file reads back, no .new remains
-    if (!patch_file_save(a, &init, err, sizeof err)) {
+    if (!preset_file_save(a, &init, err, sizeof err)) {
         fail(err);
     }
-    if (!patch_file_read(a, &back, err, sizeof err)
-        || patch_file_diff(stdout, &init, &back)) {
-        fail("saved patch does not read back");
+    if (!preset_file_read(a, &back, err, sizeof err)
+        || preset_file_diff(stdout, &init, &back)) {
+        fail("saved preset does not read back");
     }
     if (exists(a_new)) {
         fail("save left a .new file");
     }
 
-    // a complete .new beside the old patch: the save finishes
+    // a complete .new beside the old preset: the save finishes
     char *text;
     size_t len;
     FILE *m = open_memstream(&text, &len);
-    patch_file_write(m, &other);
+    preset_file_write(m, &other);
     fputs("# end\n", m);
     fclose(m);
     write_text(a_new, text);
-    patch_file_recover(dir);
-    if (exists(a_new) || !patch_file_read(a, &back, err, sizeof err)
-        || patch_file_diff(stdout, &other, &back)) {
-        fail("complete .new beside the old patch was not finished");
+    preset_file_recover(dir);
+    if (exists(a_new) || !preset_file_read(a, &back, err, sizeof err)
+        || preset_file_diff(stdout, &other, &back)) {
+        fail("complete .new beside the old preset was not finished");
     }
 
-    // an incomplete .new beside the old patch: the old patch stays
+    // an incomplete .new beside the old preset: the old preset stays
     write_text(a_new, "format = 1\n[filter]\nresonance = 4\n");
-    patch_file_recover(dir);
-    if (exists(a_new) || !patch_file_read(a, &back, err, sizeof err)
-        || patch_file_diff(stdout, &other, &back)) {
-        fail("incomplete .new beside the old patch was not undone");
+    preset_file_recover(dir);
+    if (exists(a_new) || !preset_file_read(a, &back, err, sizeof err)
+        || preset_file_diff(stdout, &other, &back)) {
+        fail("incomplete .new beside the old preset was not undone");
     }
 
-    // a complete .new with no old patch: it becomes the patch
+    // a complete .new with no old preset: it becomes the preset
     write_text(b_new, text);
-    patch_file_recover(dir);
+    preset_file_recover(dir);
     if (exists(b_new) || !exists(b)) {
         fail("complete new .new was not renamed");
     }
 
-    // an incomplete .new with no old patch: deleted, no patch appears
+    // an incomplete .new with no old preset: deleted, no preset appears
     remove(b);
     write_text(b_new, "format = 1\n");
-    patch_file_recover(dir);
+    preset_file_recover(dir);
     if (exists(b_new) || exists(b)) {
         fail("incomplete new .new was not deleted");
     }
@@ -251,7 +252,7 @@ static void check_saving(void) {
 
     // a Factory save starts with the copyright notice, a User save does
     // not; both end with "# end" and read back
-    const std::string root    = std::string(dir) + "/Patches";
+    const std::string root    = std::string(dir) + "/Presets";
     const std::string factory = root + "/Factory/Pads/C.toml";
     const std::string user    = root + "/User/Pads/C.toml";
     std::error_code ignored;
@@ -259,20 +260,20 @@ static void check_saving(void) {
     std::filesystem::create_directories(root + "/User/Pads", ignored);
     for (const std::string &path : {factory, user}) {
         const bool in_factory = path == factory;
-        if (!patch_file_save(path.c_str(), &other, err, sizeof err)) {
+        if (!preset_file_save(path.c_str(), &other, err, sizeof err)) {
             fail(err);
         }
         const std::string saved = read_file(path.c_str());
-        if (saved.starts_with(patch_file::factory_notice) != in_factory) {
+        if (saved.starts_with(preset_file::factory_notice) != in_factory) {
             fail(in_factory ? "Factory save lacks the copyright notice"
                             : "User save carries the copyright notice");
         }
         if (!saved.ends_with("# end\n")) {
             fail("save does not end with # end");
         }
-        if (!patch_file_read(path.c_str(), &back, err, sizeof err)
-            || patch_file_diff(stdout, &other, &back)) {
-            fail("saved patch does not read back");
+        if (!preset_file_read(path.c_str(), &back, err, sizeof err)
+            || preset_file_diff(stdout, &other, &back)) {
+            fail("saved preset does not read back");
         }
     }
     std::filesystem::remove_all(root, ignored);
@@ -299,13 +300,13 @@ static void check_saving(void) {
             "tab\t",
             "12345678901234567890123456789012345678901234567890123456789012345"};
     for (size_t i = 0; i < sizeof good / sizeof good[0]; i++) {
-        if (!patch_name_valid(good[i])) {
+        if (!preset_name_valid(good[i])) {
             printf("FAIL name \"%s\" rejected\n", good[i]);
             s_failures++;
         }
     }
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
-        if (patch_name_valid(bad[i])) {
+        if (preset_name_valid(bad[i])) {
             printf("FAIL name \"%s\" accepted\n", bad[i]);
             s_failures++;
         }
@@ -315,13 +316,13 @@ static void check_saving(void) {
 
 int main(int argc, char **argv) {
     size_t n;
-    const patch_field_t *fields = patch_fields(&n);
-    patch_t p;
+    const preset_field_t *fields = preset_fields(&n);
+    preset_t p;
 
     for (size_t k = 0; k < n; k++) {
-        const patch_field_t *f = &fields[k];
+        const preset_field_t *f = &fields[k];
         for (int i = 0; i < f->count; i++) {
-            patch_init(&p);
+            preset_init(&p);
             if (!strcmp(f->table, "lfo") && !strcmp(f->key, "depth")) {
                 for (uint8_t d = 0; d < 4; d++) {
                     p.lfo[i].dest = d;
@@ -334,20 +335,20 @@ int main(int argc, char **argv) {
         printf("%-8s %-14s %s\n", f->table, f->key, s_failures ? "..." : "ok");
     }
 
-    // The init patch, written and read back.
-    patch_t init, back;
-    patch_init(&init);
+    // The init preset, written and read back.
+    preset_t init, back;
+    preset_init(&init);
     char *text      = NULL;
     size_t text_len = 0;
     FILE *mem       = open_memstream(&text, &text_len);
-    patch_file_write(mem, &init);
+    preset_file_write(mem, &init);
     fclose(mem);
     char err[200];
-    if (!patch_file_parse(text, text_len, &back, err, sizeof err)) {
-        printf("FAIL reading the written init patch: %s\n", err);
+    if (!preset_file_parse(text, text_len, &back, err, sizeof err)) {
+        printf("FAIL reading the written init preset: %s\n", err);
         s_failures++;
-    } else if (patch_file_diff(stdout, &init, &back) != 0) {
-        printf("FAIL the written init patch reads back different (above)\n");
+    } else if (preset_file_diff(stdout, &init, &back) != 0) {
+        printf("FAIL the written init preset reads back different (above)\n");
         s_failures++;
     }
     free(text);
@@ -355,21 +356,21 @@ int main(int argc, char **argv) {
     // Each factory file reads, and its values read back exactly through
     // the writer. Text that differs from the writer's is a warning.
     for (int a = 1; a < argc; a++) {
-        patch_t factory;
-        if (!patch_file_read(argv[a], &factory, err, sizeof err)) {
+        preset_t factory;
+        if (!preset_file_read(argv[a], &factory, err, sizeof err)) {
             printf("FAIL %s: %s\n", argv[a], err);
             s_failures++;
             continue;
         }
         mem = open_memstream(&text, &text_len);
-        patch_file_write(mem, &factory);
+        preset_file_write(mem, &factory);
         fclose(mem);
-        patch_t back;
-        if (!patch_file_parse(text, text_len, &back, err, sizeof err)) {
+        preset_t back;
+        if (!preset_file_parse(text, text_len, &back, err, sizeof err)) {
             printf("FAIL %s: the writer's text does not read: %s\n", argv[a],
                    err);
             s_failures++;
-        } else if (patch_file_diff(stdout, &factory, &back) != 0) {
+        } else if (preset_file_diff(stdout, &factory, &back) != 0) {
             printf("FAIL %s reads back different through the writer (above)\n",
                    argv[a]);
             s_failures++;
@@ -377,8 +378,8 @@ int main(int argc, char **argv) {
         // A Factory file is source: it starts with the copyright notice,
         // as a save into Factory writes it.
         const std::string file = read_file(argv[a]);
-        if (patch_file::factory_path(argv[a])
-            && !file.starts_with(patch_file::factory_notice)) {
+        if (preset_file::factory_path(argv[a])
+            && !file.starts_with(preset_file::factory_notice)) {
             printf("FAIL %s lacks the copyright notice\n", argv[a]);
             s_failures++;
         }

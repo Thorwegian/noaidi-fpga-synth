@@ -3,7 +3,7 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-How the synth stores patches and settings in its own flash, so a
+How the synth stores presets and settings in its own flash, so a
 computer can back up, inspect, edit and restore them. Everything on
 the device is plain text in a FAT file system.
 
@@ -29,10 +29,10 @@ On the ESP32-C3 Super Mini's 4 MB flash the partition table is:
 The format does not depend on the partition size. A board with more
 flash gets a larger `storage` partition and nothing else changes.
 
-**Capacity.** A file takes whole clusters. A patch file is about 650
+**Capacity.** A file takes whole clusters. A preset file is about 650
 bytes, two 512-byte clusters, plus up to about 200 bytes of directory
 entries for a long name. The 2.9 MB partition therefore holds about
-2400 patches after the FAT tables, the folders and the wear-levelling
+2400 presets after the FAT tables, the folders and the wear-levelling
 overhead: eighteen banks of 128. With 4096-byte clusters it would hold
 only about 700.
 
@@ -59,7 +59,7 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 /storage
 ├── system.toml
 ├── banks.toml
-├── Patches
+├── Presets
 │   ├── Factory
 │   │   ├── Arps
 │   │   ├── Basses
@@ -81,21 +81,21 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 └── Performances
 ```
 
-- **`Patches/Factory`** holds the patches shipped with the firmware.
+- **`Presets/Factory`** holds the presets shipped with the firmware.
   The synth never writes there.
-- **`Patches/User`** holds the user's patches. The synth saves only
+- **`Presets/User`** holds the user's presets. The synth saves only
   here.
 - **Category folders:** the twelve above. At mount, the firmware
   creates any of them that are missing under `User`. Any other folder
   under `Factory` or `User` is a category too, so a user can add one
   from a computer.
-- **Patch files:** one patch per file, directly inside a category
-  folder. Files elsewhere under `Patches` are ignored.
+- **Preset files:** one preset per file, directly inside a category
+  folder. Files elsewhere under `Presets` are ignored.
 - **`Performances`** is reserved. Its contents are not specified yet.
 
 ## Names
 
-A patch's name is its filename without `.toml`; the file does not
+A preset's name is its filename without `.toml`; the file does not
 repeat it. Category names are folder names.
 
 A name:
@@ -140,7 +140,7 @@ in a file is always one raw value written in a musical unit.
   back to that same raw value. A hand-typed `cutoff = 1000` therefore
   stays `1000` after a load and a save, instead of `1000.4174`.
 - **Exactness:** load → save → load returns the same raw values, so
-  no number of load/save cycles changes a patch.
+  no number of load/save cycles changes a preset.
   - Where several raw values sound identical, a load picks one of them
     (the lowest), so the first save may change the raw value without
     changing the sound. After that the file never changes.
@@ -159,16 +159,16 @@ value of 1024 is one octave. Hence 12 semitones = 1024 raw, and one
 raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
 440 Hz.
 
-## Patch files
+## Preset files
 
-A patch file holds the sound: every field of `patch_t` that the synth
+A preset file holds the sound: every field of `preset_t` that the synth
 renders today. `mod` (the modulation matrix) and `arp` are not
 rendered yet and are not stored. A missing key takes the value of the
-**init patch** (`patch_init`): one saw, an open 24 dB/oct lowpass with
+**init preset** (`preset_init`): one saw, an open 24 dB/oct lowpass with
 no key tracking, an
 organ envelope (fastest attack, full sustain, ~9 ms release), velocity
-off, no modulation. The init patch is also the sound when no stored
-patch loads.
+off, no modulation. The init preset is also the sound when no stored
+preset loads.
 
 ### `[voice]`
 
@@ -229,7 +229,7 @@ tracking `cutoff` is the frequency for every note, tuning and bend.
 The gateware clamps the cutoff at `FC_MAX` (14.4 kHz), its
 measured-clean limit, so `cutoff` stops there.
 
-**Resonance** is the effective resonance code: the patch's base value
+**Resonance** is the effective resonance code: the preset's base value
 plus the CC 71 setting. Q 32 is the sharpest stable setting, the top
 CC 71 reaches. `inf` selects the top code, where the damping decodes
 to zero and the filter self-oscillates. The codes in between, where
@@ -321,7 +321,7 @@ CSP's Q2.16 scale, so a raw `depth` of `d` moves the destination by
 
 ### `[part]`
 
-Patch-specific settings for the part that plays the patch.
+Preset-specific settings for the part that plays the preset.
 
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
@@ -332,7 +332,7 @@ Patch-specific settings for the part that plays the patch.
 `pan` raw values −64 and −63 both mute the right side, and the synth
 stores −63.
 
-### Example: the factory patch `Pads/Supersaw.toml`
+### Example: the factory preset `Pads/Supersaw.toml`
 
 ```toml
 format = 1
@@ -401,19 +401,19 @@ Settings that belong to the instrument rather than to a sound.
 ```toml
 format = 1
 
-startup_patch = "Patches/Factory/Pads/Supersaw.toml"
+startup_preset = "Presets/Factory/Pads/Supersaw.toml"
 ```
 
 | Key | Meaning |
 |---|---|
-| `startup_patch` | the patch loaded at power-on, as a path from the root; absent or missing file = the init patch |
+| `startup_preset` | the preset loaded at power-on, as a path from the root; absent or missing file = the init preset |
 
 New instrument-wide settings are added here as keys.
 
 ## Banks
 
-`banks.toml` maps MIDI Bank Select and Program Change onto patch files.
-A bank is a numbered list of patches: a program's position in the list
+`banks.toml` maps MIDI Bank Select and Program Change onto preset files.
+A bank is a numbered list of presets: a program's position in the list
 is its program number, so a bank has no gaps.
 
 ```toml
@@ -422,8 +422,8 @@ format = 1
 [bank.0]
 name = "Factory"
 programs = [
-    "Patches/Factory/Pads/Supersaw.toml",       # program 0
-    "Patches/Factory/Leads/RnB Whistle.toml",   # program 1
+    "Presets/Factory/Pads/Supersaw.toml",       # program 0
+    "Presets/Factory/Leads/RnB Whistle.toml",   # program 1
 ]
 
 [bank.1]
@@ -435,7 +435,7 @@ programs = []
 |---|---|
 | `[bank.<n>]` | bank *n*, 0 … 16383: the Bank Select value, MSB × 128 + LSB |
 | `name` | the bank's name, for display |
-| `programs` | the patches, as paths from the root; entry *p* is program *p*, 0 … 127 |
+| `programs` | the presets, as paths from the root; entry *p* is program *p*, 0 … 127 |
 
 - **Bank numbers are explicit.** A song keeps addressing the same bank
   when other banks are added or removed.
@@ -448,7 +448,7 @@ programs = []
   specification has it.
 - **Program Change** on a channel loads that channel's current bank's
   program into the part playing the channel. Notes already sounding
-  switch to the new patch at once. A bank or program that does not
+  switch to the new preset at once. A bank or program that does not
   exist, or a file that does not read, is reported and changes
   nothing.
 - **Reading:** `banks.toml` is read when a Program Change needs it.
@@ -457,25 +457,25 @@ programs = []
 ## Loading
 
 - **Unknown keys and tables:** ignored.
-- **Missing keys:** take the init patch's value.
+- **Missing keys:** take the init preset's value.
 - **Out-of-range values:** clamped to the range.
-- **Unknown names:** the key takes the init patch's value.
+- **Unknown names:** the key takes the init preset's value.
 - **Arrays:** extra `[[osc]]` or `[[lfo]]` entries are ignored; missing
   ones take the defaults.
 - **Unreadable files:** a file that is not valid TOML, or whose
   `format` is newer than the firmware's, is not loaded. The active
-  patch stays as it was, the error is reported, and the file is left
+  preset stays as it was, the error is reported, and the file is left
   untouched.
 
 ## Saving
 
-`banks.toml` and patch files are saved the same way.
+`banks.toml` and preset files are saved the same way.
 
 Saves from MIDI, a GUI or the front panel go only under
-`Patches/User`; the developers' serial console writes wherever it is
+`Presets/User`; the developers' serial console writes wherever it is
 told. To save `Name.toml`, the synth:
 
-1. writes the new patch to `Name.toml.new`, ending with the line
+1. writes the new preset to `Name.toml.new`, ending with the line
    `# end`, and flushes it to the flash;
 2. deletes `Name.toml`, if there is one;
 3. renames `Name.toml.new` to `Name.toml`.
@@ -486,13 +486,13 @@ being written; a cut-off file can still be valid TOML, missing keys,
 so parsing alone cannot tell.
 - A complete `Name.toml.new` finishes the save: any `Name.toml` is
   deleted and the `.new` file renamed.
-- An incomplete `Name.toml.new` is deleted, so the old patch, if any,
+- An incomplete `Name.toml.new` is deleted, so the old preset, if any,
   stays.
 
 A saved file therefore ends with `# end`. The loader ignores it, like
 any comment.
 
-A patch saved under `Patches/Factory` starts with the copyright notice
+A preset saved under `Presets/Factory` starts with the copyright notice
 every source file carries:
 
 ```
@@ -500,24 +500,24 @@ every source file carries:
 # License: CERN-OHL-S v2
 ```
 
-Factory patches are source, so a patch voiced on the board, saved
+Factory presets are source, so a preset voiced on the board, saved
 there from the console and read out with `make fw-storage-read` is
-committed as it is. `User` patches are the player's data and get no
+committed as it is. `User` presets are the player's data and get no
 notice.
 
 ## Factory content
 
-The factory patches and the default `system.toml` live in the repo
+The factory presets and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The sound the synth
-starts with is `Patches/Factory/Pads/Supersaw.toml`: `system.toml`
-names it as the startup patch, and `banks.toml` makes it program 0 of
-bank 0, "Factory", followed by the other factory patches. `make fw-test` checks that
-every factory patch and `banks.toml` read and are already in the
+starts with is `Presets/Factory/Pads/Supersaw.toml`: `system.toml`
+names it as the startup preset, and `banks.toml` makes it program 0 of
+bank 0, "Factory", followed by the other factory presets. `make fw-test` checks that
+every factory preset and `banks.toml` read and are already in the
 writer's own form, so they read back exactly, and that every factory
-patch starts with the copyright notice.
+preset starts with the copyright notice.
 
 A firmware update never writes the `storage` partition, so it cannot
-overwrite user patches. `make fw-storage-flash` packs `app/storage/`
+overwrite user presets. `make fw-storage-flash` packs `app/storage/`
 and writes it; first-time setup uses it, and it erases all user
-patches. If the partition does not mount, the synth reports it, runs
-on the init patch, and never formats the partition on its own.
+presets. If the partition does not mount, the synth reports it, runs
+on the init preset, and never formats the partition on its own.

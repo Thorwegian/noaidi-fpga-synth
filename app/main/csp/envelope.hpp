@@ -7,7 +7,7 @@
 // toward a target by a wide RATE (Q4.32) times the distance left each pass —
 // every fourth 96 kHz sample, 24 kHz (#268). The rate codes are still per
 // 96 kHz sample: k / 2^24 of the distance each sample, with k an 18-bit
-// coefficient (patch_adsr_rate_coeff), so a code means the same time at any
+// coefficient (preset_adsr_rate_coeff), so a code means the same time at any
 // pass rate.
 
 #pragma once

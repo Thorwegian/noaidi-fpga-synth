@@ -8,7 +8,7 @@
 // complete frame here with its source; a frame that is not ours is dropped.
 //
 // Ops implemented:
-//   0x10  state request — the synth sends the whole patch as CCs to every
+//   0x10  state request — the synth sends the whole preset as CCs to every
 //         output (parameter feedback, #279; a surface that joins asks, #287)
 // The raw ops of the schema's table are not implemented.
 #pragma once

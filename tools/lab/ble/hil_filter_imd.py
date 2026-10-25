@@ -50,10 +50,10 @@ RATE = 48000
 NOTES = (57, 63)                      # A3 220.0 Hz + Eb4 311.127 Hz: tritone
 FREQS = tuple(440.0 * 2 ** ((n - 69) / 12) for n in NOTES)
 
-# A deliberately PLAIN patch: one saw oscillator, no unison detune or
+# A deliberately PLAIN preset: one saw oscillator, no unison detune or
 # spread, velocity off, no LFO/mod-env movement -- so the filter is the
 # only thing that can bend the spectrum.
-PATCH = [
+PRESET = [
     (20, 0),    # osc1 = saw
     (24, 0),    # mix hard to osc1 (osc2 hard-muted at the rail)
     (26, 0),    # voice mode: PLAIN, one partial per note.
@@ -141,7 +141,7 @@ def analyse(x, noise_non=0.0):
 def main():
     slope = int(sys.argv[1]) if len(sys.argv) > 1 else 24
     slope_val = 127 if slope == 24 else 0
-    print(f"[patch] plain saw, 2 notes {NOTES} = {FREQS[0]:.1f}/{FREQS[1]:.1f} Hz, "
+    print(f"[preset] plain saw, 2 notes {NOTES} = {FREQS[0]:.1f}/{FREQS[1]:.1f} Hz, "
           f"slope {slope} dB/oct")
     print("[metric] IMD dB = non-harmonic / harmonic energy "
           "(linear filter -> noise floor; clipping -> tens of dB higher)")
@@ -164,7 +164,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
         cc(30, slope_val)

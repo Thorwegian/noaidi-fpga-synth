@@ -72,15 +72,15 @@ Prophet-capable engine:
 5. **MIDI channels — channel awareness.** The engine is omni;
    `voice_t.channel` is stored per voice. A channel-aware synth model
    gives multi-timbral layering and key splits — each channel is a
-   "part" that holds its own patch.
-6. **Active-patch data structure**: the in-RAM `patch_t` `g_patch`
-   (`app/main/patch.h`/`patch.cpp`) holds the whole currently-active
+   "part" that holds its own preset.
+6. **Active-preset data structure**: the in-RAM `preset_t` `g_preset`
+   (`app/main/preset.h`/`preset.cpp`) holds the whole currently-active
    sound — the single source of truth the CC handlers MUTATE and
    voice_alloc/render.cpp/engine_link RENDER to the CSP's registers and sink words.
-   Stored patches are TOML files in the format of
+   Stored presets are TOML files in the format of
    [storage_format.md](storage_format.md); Bank Select and
-   Program Change load them through `banks.toml` into `patch_t`; multi-timbral layering
-   (decision 5) is an array of parts, each a `patch_t`.
+   Program Change load them through `banks.toml` into `preset_t`; multi-timbral layering
+   (decision 5) is an array of parts, each a `preset_t`.
 4. **Clock source modes:** **Auto** (slave to external MIDI clock
    when one is detected, else run the internal clock) and
    **Internal** (force internal, ignoring any external clock — for

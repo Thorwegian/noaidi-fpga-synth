@@ -5,7 +5,7 @@
 //
 // bank                               list the banks
 // bank <n>                           list bank n's programs
-// bank add <n> <file>                append a patch to bank n
+// bank add <n> <file>                append a preset to bank n
 // bank insert <n> <program> <file>   insert at program; later ones move up
 // bank rm <n> <program>              delete program; later ones move down
 // bank new <n> <name>                create bank n
@@ -15,7 +15,7 @@
 //                                    order
 //
 // Every change reads banks.toml, edits it and saves it the safe way.
-// Patch paths are typed like any other path and stored from the storage
+// Preset paths are typed like any other path and stored from the storage
 // root.
 
 #include "cli_shell.hpp"
@@ -29,7 +29,7 @@
 #include <strings.h>
 
 #include "banks.hpp"
-#include "patch_file.h"
+#include "preset_file.h"
 #include "storage.h"
 
 namespace cli {
@@ -48,12 +48,12 @@ std::optional<int> number(const char *text, int max) {
     return n;
 }
 
-// A patch argument as stored in banks.toml: resolved, without the
-// leading "/". Empty if it is not a readable patch file.
-std::string patch_entry(const char *arg) {
+// A preset argument as stored in banks.toml: resolved, without the
+// leading "/". Empty if it is not a readable preset file.
+std::string preset_entry(const char *arg) {
     std::string abs = resolve(arg), error;
-    patch_t p;
-    if (!patch_file::read(fs_path(abs), p, error)) {
+    preset_t p;
+    if (!preset_file::read(fs_path(abs), p, error)) {
         std::printf("bank: %s: %s\n", abs.c_str(), error.c_str());
         return {};
     }
@@ -100,7 +100,7 @@ void list_programs(const banks::Bank &bank) {
 
 // The .toml files in a folder and its subfolders, as stored in
 // banks.toml (from the storage root), in path order (case-insensitive).
-void collect_patches(const std::string &abs, std::vector<std::string> &out) {
+void collect_presets(const std::string &abs, std::vector<std::string> &out) {
     DIR *d = opendir(fs_path(abs).c_str());
     if (!d) {
         return;
@@ -112,7 +112,7 @@ void collect_patches(const std::string &abs, std::vector<std::string> &out) {
         }
         size_t len = std::strlen(e->d_name);
         if (e->d_type == DT_DIR) {
-            collect_patches((abs == "/" ? "" : abs) + "/" + e->d_name, out);
+            collect_presets((abs == "/" ? "" : abs) + "/" + e->d_name, out);
         } else if (len > 5 && strcasecmp(e->d_name + len - 5, ".toml") == 0) {
             out.push_back(prefix + e->d_name);
         }
@@ -120,9 +120,9 @@ void collect_patches(const std::string &abs, std::vector<std::string> &out) {
     closedir(d);
 }
 
-std::vector<std::string> folder_patches(const char *arg) {
+std::vector<std::string> folder_presets(const char *arg) {
     std::vector<std::string> paths;
-    collect_patches(resolve(arg), paths);
+    collect_presets(resolve(arg), paths);
     std::sort(paths.begin(), paths.end(),
               [](const std::string &a, const std::string &b) {
                   return strcasecmp(a.c_str(), b.c_str()) < 0;
@@ -181,20 +181,20 @@ int cmd_bank(int argc, char **argv) {
                         *n);
             return 1;
         }
-        std::vector<std::string> patches = folder_patches(argv[3]);
-        if (patches.empty()) {
+        std::vector<std::string> presets = folder_presets(argv[3]);
+        if (presets.empty()) {
             std::printf("bank: no .toml files in %s or below\n", argv[3]);
             return 1;
         }
-        if (patches.size() > banks::max_programs) {
-            patches.resize(banks::max_programs);
+        if (presets.size() > banks::max_programs) {
+            presets.resize(banks::max_programs);
         }
         banks::Bank &bank = banks[*n];
         if (bank.name.empty()) {
             std::string folder = resolve(argv[3]);
             bank.name          = folder.substr(folder.rfind('/') + 1);
         }
-        bank.programs = std::move(patches);
+        bank.programs = std::move(presets);
     } else if ((op == "add" && argc == 4) || (op == "insert" && argc == 5)) {
         if (!exists) {
             std::printf("bank: no bank %d; bank new %d <name> first\n", *n, *n);
@@ -213,7 +213,7 @@ int cmd_bank(int argc, char **argv) {
             std::printf("bank: program out of range\n");
             return 1;
         }
-        std::string entry = patch_entry(argv[op == "insert" ? 4 : 3]);
+        std::string entry = preset_entry(argv[op == "insert" ? 4 : 3]);
         if (entry.empty()) {
             return 1;
         }

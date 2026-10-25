@@ -21,7 +21,7 @@ the runner owns the synth's side of the link:
     (BlueZ's plugin subscribes to the synth's notifications about a second after
     the connection, and enumerating the sequencer during that setup leaves it
     unsubscribed, #284), links both ways and asks the synth for its state
-    (a SysEx state request, docs/midi_schema.md), so the panel's knobs move to the loaded patch;
+    (a SysEx state request, docs/midi_schema.md), so the panel's knobs move to the loaded preset;
   - every reconnect logged with the time it took.
 
     ~/.noaidi-blenv/bin/python3 tools/osc_panel/runner.py [--mac 10:00:3B:B0:4D:A6]
@@ -38,7 +38,7 @@ NOAIDI_MAC = "10:00:3B:B0:4D:A6"
 LINK_DELAY = 3.0      # seconds after the Noaidi's ALSA port appears, before linking to it
 RECONNECT_EVERY = 5.0 # seconds between connect attempts while the port is gone
 ASK_DELAY = 2.0       # seconds after both the link and a surface are there, before asking: O.S.C. opens its port before its server routes what arrives
-STATE_REQUEST = bytes([0xF0, 0x7D, 0x4E, 0x4F, 0x10, 0xF7])  # SysEx op 0x10 (docs/midi_schema.md): the synth answers with the whole patch
+STATE_REQUEST = bytes([0xF0, 0x7D, 0x4E, 0x4F, 0x10, 0xF7])  # SysEx op 0x10 (docs/midi_schema.md): the synth answers with the whole preset
 
 
 def log(message):

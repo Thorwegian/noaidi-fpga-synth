@@ -11,7 +11,7 @@
 Every command replaces its destination: write and pack replace the
 whole partition, read and unpack replace the folder. A folder is only
 replaced when it is empty or holds a storage copy (system.toml or
-Patches at its top), so a mistyped path cannot wipe unrelated files.
+Presets at its top), so a mistyped path cannot wipe unrelated files.
 
 read and write talk to the ESP32 through ESP-IDF's parttool; set ESPPORT
 to pick the serial port, otherwise esptool finds it.
@@ -242,13 +242,13 @@ def replaceable(folder):
     if not os.path.isdir(folder):
         return False
     entries = os.listdir(folder)
-    return not entries or 'system.toml' in entries or 'Patches' in entries
+    return not entries or 'system.toml' in entries or 'Presets' in entries
 
 
 def unpack(image, folder):
     if not replaceable(folder):
         sys.exit(f'storage_image: {folder} is not empty and holds no storage copy '
-                 '(system.toml or Patches); not replacing it')
+                 '(system.toml or Presets); not replacing it')
     with open(image, 'rb') as f:
         img = f.read()
     lay = Layout(len(img))
@@ -275,7 +275,7 @@ def unpack(image, folder):
 def read(folder):
     if not replaceable(folder):
         sys.exit(f'storage_image: {folder} is not empty and holds no storage copy '
-                 '(system.toml or Patches); not replacing it')
+                 '(system.toml or Presets); not replacing it')
     with tempfile.TemporaryDirectory() as work:
         image = os.path.join(work, 'storage.img')
         parttool('read_partition', '--partition-name', 'storage', '--output', image)

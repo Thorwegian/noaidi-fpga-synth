@@ -44,9 +44,10 @@ generators in `scripts/`.
   signal in and puts signal out. They are all instructions of one processor,
   [csp2_isa.md](csp2_isa.md), and which is which is only a way to read
   the program.
-- "Patch" means the active sound (`patch_t` in firmware); it is not
-  used for FPGA parameter words, which are all live. "Patch panel"
-  survives only as the CV-routing metaphor.
+- "Preset" means a sound, the active one (`preset_t` in firmware) or a
+  stored file; it is not used for FPGA parameter words, which are all
+  live. "Patch" means a change to code or a tool, never a sound (#300);
+  "patch panel" survives only as the CV-routing metaphor.
 
 ## Vision
 
@@ -111,8 +112,8 @@ traffic never contend.
 
 ### Default voice
 
-The power-on timbre is the factory patch `Pads/Supersaw.toml`
-(`app/storage/`, loaded through `system.toml`'s startup patch;
+The power-on timbre is the factory preset `Pads/Supersaw.toml`
+(`app/storage/`, loaded through `system.toml`'s startup preset;
 [storage_format.md](storage_format.md)), a **7+1 supersaw with a sine
 sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
 (fattens the saws without muddying the mid), through a **24 dB/oct**
@@ -185,8 +186,8 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed cutoff-coefficient LUT `svf_fc_lut`), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the patch's UQ4.4 volume codes (6 dB per 16 steps) are turned into linear words in firmware (`render.cpp`) |
-| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the patch/CC; decoded in firmware (`patch.cpp`) to an 18-bit coefficient k, and `csp::envelope_rate` makes the program's wide rate of it |
+| Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the preset's UQ4.4 volume codes (6 dB per 16 steps) are turned into linear words in firmware (`render.cpp`) |
+| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the preset/CC; decoded in firmware (`preset.cpp`) to an 18-bit coefficient k, and `csp::envelope_rate` makes the program's wide rate of it |
 
 ## The partial pipeline
 
@@ -286,7 +287,7 @@ every future pitch/cutoff amount. 7-bit resolution at full span is
 ### Velocity routing
 
 **Velocity is a source with per-destination sensitivity amounts**
-(vel→amp, vel→MOD-env depth), patch fields with
+(vel→amp, vel→MOD-env depth), preset fields with
 CCs; zero = off, which isolates it when testing. **Velocity scales the
 MOD envelope's depth multiplicatively** (the DX7-through-modern-VA
 convention: soft note = shallower sweep, same shape) — firmware

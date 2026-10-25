@@ -3,7 +3,7 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The working folder, path resolution and the status bar's patch name,
+// The working folder, path resolution and the status bar's preset name,
 // shared by cli.cpp and cli_banks.cpp.
 
 #pragma once
@@ -16,15 +16,15 @@
 
 namespace cli {
 
-// A path as typed, absolute ("/Patches/User") or relative to the working
+// A path as typed, absolute ("/Presets/User") or relative to the working
 // folder, resolved against it with "." and "..": "/" or
-// "/Patches/User/Pads".
+// "/Presets/User/Pads".
 std::string resolve(std::string_view arg);
 
-// The file system path of a resolved path: "/storage/Patches/User/Pads".
+// The file system path of a resolved path: "/storage/Presets/User/Pads".
 std::string fs_path(std::string_view abs);
 
-// The patch the status bar names.
+// The preset the status bar names.
 void set_current(std::string_view name);
 
 // Tab completion of paths relative to the working folder, for argument

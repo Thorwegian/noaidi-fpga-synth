@@ -15,11 +15,11 @@
 #   make fw-console attach the console with screen (Ctrl-A K exits);
 #                   everything is logged to app/build/console.log,
 #                   overwritten on every run
-#   make fw-test    host test: every patch-file value loads back exactly,
-#                   banks.toml reads and writes back, the factory patches
+#   make fw-test    host test: every preset-file value loads back exactly,
+#                   banks.toml reads and writes back, the factory presets
 #                   and banks read back exactly and are in the writer's own
 #                   form (comment lines aside), and the writes a
-#                   patch renders to the CSP are the arithmetic they should be
+#                   preset renders to the CSP are the arithmetic they should be
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim program.s)
 #   make csp-test   host tests of the CSP reference model and assembler, and
@@ -30,8 +30,8 @@
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  fail on any source that is not formatted; fw,
 #                   fw-test and csp-test run it first
-#   make fw-storage-flash  write the patch storage partition, packed
-#                   from app/storage — ERASES all user patches
+#   make fw-storage-flash  write the preset storage partition, packed
+#                   from app/storage — ERASES all user presets
 #   make fw-storage-read DIR=x   replace folder x with the synth's storage
 #   make fw-storage-write DIR=x  replace the synth's storage with folder x
 #
@@ -69,17 +69,17 @@ ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))
 HOST_CC  ?= cc
 HOST_CXX ?= c++
 HOST_DIR  = app/build/host
-FW_TEST   = $(HOST_DIR)/patch_units_test
-FW_TEST_C   = app/main/patch_units.c app/lib/tomlc17/src/tomlc17.c
-FW_TEST_CXX = app/test/patch_units_test.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+FW_TEST   = $(HOST_DIR)/preset_units_test
+FW_TEST_C   = app/main/preset_units.c app/lib/tomlc17/src/tomlc17.c
+FW_TEST_CXX = app/test/preset_units_test.cpp app/main/preset.cpp app/main/preset_file.cpp app/main/safe_file.cpp
 RENDER_TEST = $(HOST_DIR)/render_test
-RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/patch.cpp app/main/csp/envelope.cpp
+RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/preset.cpp app/main/csp/envelope.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 PARSER_TEST = $(HOST_DIR)/midi_parser_test
 PARSER_TEST_CXX = app/test/midi_parser_test.cpp
 CC_MAP_TEST = $(HOST_DIR)/cc_map_test
-CC_MAP_TEST_CXX = app/test/cc_map_test.cpp app/main/cc_map.cpp app/main/patch.cpp app/main/patch_file.cpp app/main/safe_file.cpp
+CC_MAP_TEST_CXX = app/test/cc_map_test.cpp app/main/cc_map.cpp app/main/preset.cpp app/main/preset_file.cpp app/main/safe_file.cpp
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 CSP_DIR     = tools/csp
 CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp app/main/csp/envelope.cpp
@@ -139,7 +139,7 @@ fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(addprefix $(CURDIR)/,$(FW_TEST_C))
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
 	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
-	$(FW_TEST) $(shell find app/storage/Patches -name '*.toml')
+	$(FW_TEST) $(shell find app/storage/Presets -name '*.toml')
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
 	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
@@ -147,7 +147,7 @@ fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	$(RENDER_TEST)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(CC_MAP_TEST) $(CC_MAP_TEST_CXX) \
 	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
-	$(CC_MAP_TEST) $(shell find app/storage/Patches -name '*.toml')
+	$(CC_MAP_TEST) $(shell find app/storage/Presets -name '*.toml')
 	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(CURDIR)/app/main/midi_parser.c
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(PARSER_TEST) $(PARSER_TEST_CXX) $(HOST_DIR)/midi_parser.o
 	$(PARSER_TEST)

@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // The allocator keeps the voices (32, of 8 partials each), turns MIDI into
-// the active patch's changes (patch.h) and into notes, and hands both to
+// the active preset's changes (preset.h) and into notes, and hands both to
 // render.cpp, which says what the CSP's registers and sinks must hold; the
 // engine link sends it. The sound's arithmetic (the envelopes, the LFOs, the
 // pitch and cutoff of every voice) is the CSP's, running the control program
@@ -29,8 +29,8 @@
 #include "engine_link.h"
 #include "event_bus.h"
 #include "midi_out.h"
-#include "patch.h"
-#include "patch_file.h"
+#include "preset.h"
+#include "preset_file.h"
 #include "render.hpp"
 #include "storage.h"
 
@@ -42,16 +42,16 @@ constexpr int queue_length  = 64;
 constexpr int task_stack    = 6144;
 constexpr int task_priority = 5;
 
-// The patch loader (#247): a Program Change's two storage reads -- banks.toml
-// and the patch file, tens of milliseconds from SPI flash -- run on their own
+// The preset loader (#247): a Program Change's two storage reads -- banks.toml
+// and the preset file, tens of milliseconds from SPI flash -- run on their own
 // task, below the voice task, which only posts the request and later applies
-// the finished patch between two MIDI events through patch_request, as the
+// the finished preset between two MIDI events through preset_request, as the
 // console's `load` does. On the voice task those reads held every note-off
 // behind them while the event bus dropped what the queue could not take: a
-// stuck note on a patch change under held keys. A short queue, coalesced:
+// stuck note on a preset change under held keys. A short queue, coalesced:
 // of a storm of changes only the last matters.
-constexpr int loader_stack    = 6144; // a patch_t and the TOML parse live on it
-constexpr int loader_priority = 3;
+constexpr int loader_stack = 6144; // a preset_t and the TOML parse live on it
+constexpr int loader_priority      = 3;
 constexpr int program_queue_length = 4;
 
 constexpr int voice_count        = render::voice_count;
@@ -122,7 +122,7 @@ void send(const render::Writes &writes) {
 // oscillator's pulse width and mode a partial reads depends on it.
 void point_partials() {
     render::VoicePlan plan;
-    render::voicing(g_patch, plan);
+    render::voicing(g_preset, plan);
     for (int voice = 0; voice < voice_count; ++voice) {
         for (int slot = 0; slot < partials_per_voice; ++slot) {
             const auto pointers = render::pointers_of(voice, slot, plan[slot]);
@@ -130,17 +130,17 @@ void point_partials() {
                               pointers.data());
         }
     }
-    s_pointed_struct = g_patch.voice_struct;
+    s_pointed_struct = g_preset.voice_struct;
 }
 
 
-// The velocity-dependent amounts of the voices that sound, after the patch's
+// The velocity-dependent amounts of the voices that sound, after the preset's
 // sensitivities changed (a held note keeps the velocity it was struck with).
 void refresh_velocities() {
     render::Writes writes;
     for (int v = 0; v < voice_count; ++v) {
         if (s_voices[v].state == V_HELD) {
-            render::velocity_amounts(g_patch, v, s_voices[v].vel, writes);
+            render::velocity_amounts(g_preset, v, s_voices[v].vel, writes);
         }
     }
     send(writes);
@@ -148,54 +148,54 @@ void refresh_velocities() {
 
 void update_amp_env() {
     render::Writes writes;
-    render::amp_envelope(g_patch, writes);
+    render::amp_envelope(g_preset, writes);
     send(writes);
     refresh_velocities();
 }
 
 void update_mod_env() {
     render::Writes writes;
-    render::mod_envelope(g_patch, writes);
+    render::mod_envelope(g_preset, writes);
     send(writes);
     refresh_velocities();
 }
 
 void update_cutoff() {
     render::Writes writes;
-    render::cutoff(g_patch, s_controllers, writes);
+    render::cutoff(g_preset, s_controllers, writes);
     send(writes);
 }
 
-// The patch's volume is in the channel's left and right gains, with the
+// The preset's volume is in the channel's left and right gains, with the
 // voicing's own terms.
 void update_volume() {
     render::Writes writes;
-    render::channel_sound(g_patch, writes);
+    render::channel_sound(g_preset, writes);
     send(writes);
 }
 
 void update_lfo(int i) {
     render::Writes writes;
-    render::lfo(g_patch, i, writes);
+    render::lfo(g_preset, i, writes);
     send(writes);
 }
 
-// The partials follow the patch's voicing, tuning, panning and modes.
+// The partials follow the preset's voicing, tuning, panning and modes.
 void update_voices() {
     render::Writes writes;
-    render::channel_sound(g_patch, writes);
-    render::cutoff(g_patch, s_controllers, writes); // the key tracking
+    render::channel_sound(g_preset, writes);
+    render::cutoff(g_preset, s_controllers, writes); // the key tracking
     send(writes);
-    if (g_patch.voice_struct != s_pointed_struct) {
+    if (g_preset.voice_struct != s_pointed_struct) {
         point_partials();
     }
 }
 
-// ---- knobs ⇄ patch values -----------------------------------------------------------
+// ---- knobs ⇄ preset values -----------------------------------------------------------
 //
 // The CC laws, both ways, are cc_map's (cc_map.hpp). The knob positions that
-// are not patch fields (the cutoff's coarse and fine, each LFO's depth
-// knobs) live here beside the patch, and a loaded patch implies them.
+// are not preset fields (the cutoff's coarse and fine, each LFO's depth
+// knobs) live here beside the preset, and a loaded preset implies them.
 cc_map::Knobs s_knobs;
 
 uint32_t dirty_of(cc_map::Part part) {
@@ -219,7 +219,7 @@ uint32_t dirty_of(cc_map::Part part) {
     }
 }
 
-// Parameter feedback (#279): the patch as the CCs a surface shows, to every
+// Parameter feedback (#279): the preset as the CCs a surface shows, to every
 // output but the one `except` came through.
 void emit_cc(uint8_t cc, uint8_t value, void *user) {
     const midi_message_t message = {
@@ -227,7 +227,7 @@ void emit_cc(uint8_t cc, uint8_t value, void *user) {
     midi_out_send(&message, *static_cast<uint8_t *>(user));
 }
 void sync_surfaces(uint8_t except) {
-    cc_map::dump(g_patch, s_knobs, emit_cc, &except);
+    cc_map::dump(g_preset, s_knobs, emit_cc, &except);
 }
 
 // ---- notes --------------------------------------------------------------------------------------
@@ -279,7 +279,7 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     // The pitch and the velocity's amounts go in with the attack, in one
     // swap, so the attack's first pass already has them.
     render::Writes writes;
-    render::note_on(g_patch, pick, note, vel, writes);
+    render::note_on(g_preset, pick, note, vel, writes);
     send(writes);
 }
 
@@ -288,13 +288,13 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
 void pitch_bend_update(uint16_t bend14) {
     const int16_t raw =
             static_cast<int16_t>((static_cast<int32_t>(bend14) - 8192)
-                                 * g_patch.bend_range * 1024 / 12 / 8192);
+                                 * g_preset.bend_range * 1024 / 12 / 8192);
     if (raw == s_controllers.bend) {
         return;
     }
     s_controllers.bend = raw;
     render::Writes writes;
-    render::pitch_bend(g_patch, s_controllers, writes);
+    render::pitch_bend(g_preset, s_controllers, writes);
     send(writes);
 }
 
@@ -350,7 +350,7 @@ void sustain_pedal_update(bool down) {
 
 // ---- CCs --------------------------------------------------------------------------------------------
 
-// The patch's CCs are cc_map's; what is handled here is performance (the
+// The preset's CCs are cc_map's; what is handled here is performance (the
 // wheel, the pedal), the RPN mechanism, panic and the test tone. STORED but
 // not yet rendered: mod_env_dest (CC 108; cutoff is the only live MOD-env
 // destination). The arp has no CC yet.
@@ -360,7 +360,7 @@ void sustain_pedal_update(bool down) {
 // NRPN select (99/98) also deselects.
 uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
 
-// True when the CC edited the patch: the surfaces are told (handle_midi).
+// True when the CC edited the preset: the surfaces are told (handle_midi).
 bool handle_cc(uint8_t num, uint8_t val) {
     switch (num) {
     // ---- the wheel and the pedal ----
@@ -387,7 +387,7 @@ bool handle_cc(uint8_t num, uint8_t val) {
         return false;
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
-            g_patch.bend_range = std::clamp<uint8_t>(
+            g_preset.bend_range = std::clamp<uint8_t>(
                     val, 1, 12); // takes effect on the next bend
         }
         return false;
@@ -426,10 +426,10 @@ bool handle_cc(uint8_t num, uint8_t val) {
         return false;
     }
 
-    // ---- the patch: cc_map's laws; a live edit of a velocity amount
+    // ---- the preset: cc_map's laws; a live edit of a velocity amount
     // re-pushes the held voices' (the envelope's dirty bit) ----
     default: {
-        const cc_map::Part part = cc_map::apply(g_patch, s_knobs, num, val);
+        const cc_map::Part part = cc_map::apply(g_preset, s_knobs, num, val);
         s_pending |= dirty_of(part);
         return part != cc_map::Part::none;
     }
@@ -441,7 +441,7 @@ uint8_t s_bank_msb[16],
 void program_change(uint8_t channel, uint8_t program);
 
 // source: where the message came from (midi_source_t). A CC that edited the
-// patch goes out to every other surface (#279); notes never do.
+// preset goes out to every other surface (#279); notes never do.
 void handle_midi(const midi_message_t *m, uint8_t source) {
     const uint8_t type = m->status & 0xF0;
     const uint8_t ch   = m->status & 0x0F;
@@ -506,13 +506,13 @@ void flush_pending_edits(int64_t now) {
     s_last_flush = now;
 }
 
-// Make p the active patch: everything dirty, flushed at once, so the new
-// patch is in place before the next event. Held voices follow it too: their
+// Make p the active preset: everything dirty, flushed at once, so the new
+// preset is in place before the next event. Held voices follow it too: their
 // pitch is theirs, but the sound around it is the channel's.
-void apply_patch(const patch_t *p, int64_t now) {
-    g_patch = *p;
-    s_knobs = cc_map::knobs_of(
-            g_patch); // the patch's values stand; the knobs follow them
+void apply_preset(const preset_t *p, int64_t now) {
+    g_preset = *p;
+    s_knobs  = cc_map::knobs_of(
+            g_preset); // the preset's values stand; the knobs follow them
     s_pending |= dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
                  | dirty_lfo2 | dirty_volume | dirty_voices;
     s_last_flush = 0;
@@ -520,11 +520,11 @@ void apply_patch(const patch_t *p, int64_t now) {
     sync_surfaces(MIDI_SOURCE_INTERNAL); // every surface follows the change
 }
 
-void handle_patch_request(const patch_request_t *r, int64_t now) {
+void handle_preset_request(const preset_request_t *r, int64_t now) {
     if (r->set) {
-        apply_patch(r->patch, now);
+        apply_preset(r->preset, now);
     } else {
-        *r->patch = g_patch;
+        *r->preset = g_preset;
     }
     xSemaphoreGive(r->done);
 }
@@ -532,12 +532,12 @@ void handle_patch_request(const patch_request_t *r, int64_t now) {
 // ── Banks: Bank Select and Program Change (storage_format.md "Banks") ──
 // Each channel's current bank (s_bank_msb/_lsb, declared above handle_midi):
 // CC 0 sets its MSB and CC 32 its LSB, and the bank applies at the channel's
-// next Program Change. Omni today: every channel plays the one active patch,
+// next Program Change. Omni today: every channel plays the one active preset,
 // but the bank is kept per channel so parts can follow.
-void (*s_patch_listener)(const char *name);
+void (*s_preset_listener)(const char *name);
 
-bool patch_request(bool set,
-                   patch_t *p); // below: the hand-off to the voice task
+bool preset_request(bool set,
+                    preset_t *p); // below: the hand-off to the voice task
 
 // A Program Change as the loader task receives it: the channel's bank at the
 // moment of the change, and the program.
@@ -547,10 +547,10 @@ struct ProgramRequest {
 };
 QueueHandle_t s_program_queue;
 
-// The loader: reads the bank's entry and the patch file, then hands the patch
+// The loader: reads the bank's entry and the preset file, then hands the preset
 // to the voice task, which applies it between two MIDI events. Blocks on the
 // storage and on the hand-off; the voice task never does.
-void patch_loader_task(void *) {
+void preset_loader_task(void *) {
     ProgramRequest request{};
     while (true) {
         if (xQueueReceive(s_program_queue, &request, portMAX_DELAY) != pdTRUE) {
@@ -567,23 +567,23 @@ void patch_loader_task(void *) {
             continue;
         }
         snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
-        patch_t p;
-        if (!patch_file_read(path, &p, err, sizeof err)) {
+        preset_t p;
+        if (!preset_file_read(path, &p, err, sizeof err)) {
             ESP_LOGW(tag, "bank %d program %d: %s", request.bank,
                      request.program, err);
             continue;
         }
-        if (!patch_request(true, &p)) {
+        if (!preset_request(true, &p)) {
             ESP_LOGW(
                     tag,
-                    "bank %d program %d: the voice task did not take the patch",
+                    "bank %d program %d: the voice task did not take the preset",
                     request.bank, request.program);
             continue;
         }
         ESP_LOGI(tag, "bank %d program %d: %s", request.bank, request.program,
                  rel);
-        if (s_patch_listener) {
-            s_patch_listener(rel);
+        if (s_preset_listener) {
+            s_preset_listener(rel);
         }
     }
 }
@@ -601,7 +601,7 @@ void program_change(uint8_t channel, uint8_t program) {
 
 } // namespace
 
-// The console's `sync`: the voice task sends the patch to the surfaces, in
+// The console's `sync`: the voice task sends the preset to the surfaces, in
 // order with the MIDI it is handling. On the bus like a surface's own
 // request (ble_midi publishes the same when a central subscribes).
 void voice_alloc_sync(void) {
@@ -613,7 +613,7 @@ void voice_alloc_sync(void) {
 
 namespace {
 
-bool patch_request(bool set, patch_t *p) {
+bool preset_request(bool set, preset_t *p) {
     if (s_queue == nullptr) {
         return false;
     }
@@ -622,8 +622,8 @@ bool patch_request(bool set, patch_t *p) {
         return false;
     }
     evt_t evt{};
-    evt.kind  = EVT_PATCH;
-    evt.patch = {set, reinterpret_cast<struct patch_s *>(p), done};
+    evt.kind   = EVT_PRESET;
+    evt.preset = {set, reinterpret_cast<struct preset_s *>(p), done};
     // Once queued, the request holds pointers into this frame and to done, so
     // wait for it however long it takes.
     const bool ok = xQueueSend(s_queue, &evt, pdMS_TO_TICKS(500)) == pdTRUE;
@@ -649,8 +649,8 @@ void voice_alloc_task(void *) {
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(poll_ms)) == pdTRUE) {
             if (evt.kind == EVT_MIDI) {
                 handle_midi(&evt.midi, evt.source);
-            } else if (evt.kind == EVT_PATCH) {
-                handle_patch_request(&evt.patch, esp_timer_get_time());
+            } else if (evt.kind == EVT_PRESET) {
+                handle_preset_request(&evt.preset, esp_timer_get_time());
             } else if (evt.kind == EVT_SYNC) {
                 sync_surfaces(MIDI_SOURCE_INTERNAL);
             }
@@ -676,17 +676,17 @@ void voice_alloc_task(void *) {
 
 } // namespace
 
-bool voice_alloc_set_patch(const patch_t *p) {
-    patch_t copy = *p; // the caller's copy may go out of scope
-    return patch_request(true, &copy);
+bool voice_alloc_set_preset(const preset_t *p) {
+    preset_t copy = *p; // the caller's copy may go out of scope
+    return preset_request(true, &copy);
 }
 
-bool voice_alloc_get_patch(patch_t *p) {
-    return patch_request(false, p);
+bool voice_alloc_get_preset(preset_t *p) {
+    return preset_request(false, p);
 }
 
-void voice_alloc_set_patch_listener(void (*listener)(const char *name)) {
-    s_patch_listener = listener;
+void voice_alloc_set_preset_listener(void (*listener)(const char *name)) {
+    s_preset_listener = listener;
 }
 
 // A snapshot of the voice table for the console (#238). Best-effort across the
@@ -713,11 +713,11 @@ void voice_alloc_init(void) {
         ESP_LOGE(tag, "failed to create event queue");
         return;
     }
-    patch_init(&g_patch);           // the active sound, in one struct
-    storage_load_startup(&g_patch); // system.toml's startup patch, if any
-    s_knobs = cc_map::knobs_of(g_patch);
+    preset_init(&g_preset);          // the active sound, in one struct
+    storage_load_startup(&g_preset); // system.toml's startup preset, if any
+    s_knobs = cc_map::knobs_of(g_preset);
 
-    // The sound: every part of the patch to the CSP, once, and the pointers.
+    // The sound: every part of the preset to the CSP, once, and the pointers.
     point_partials();
     s_pending = dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
                 | dirty_lfo2 | dirty_volume | dirty_voices;
@@ -727,10 +727,10 @@ void voice_alloc_init(void) {
     s_program_queue =
             xQueueCreate(program_queue_length, sizeof(ProgramRequest));
     if (s_program_queue == nullptr
-        || xTaskCreate(patch_loader_task, "patch_loader", loader_stack, nullptr,
-                       loader_priority, nullptr)
+        || xTaskCreate(preset_loader_task, "preset_loader", loader_stack,
+                       nullptr, loader_priority, nullptr)
                    != pdPASS) {
-        ESP_LOGE(tag, "failed to create the patch loader");
+        ESP_LOGE(tag, "failed to create the preset loader");
     }
 
     s_sub_id = event_bus_subscribe(s_queue);

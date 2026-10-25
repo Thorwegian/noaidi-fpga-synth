@@ -1,10 +1,10 @@
-// banks.hpp — the bank map: MIDI Bank Select and Program Change → patch files
+// banks.hpp — the bank map: MIDI Bank Select and Program Change → preset files
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // banks.toml (docs/storage_format.md "Banks") holds numbered banks, each a
-// name and a list of patch paths whose positions are the program numbers.
+// name and a list of preset paths whose positions are the program numbers.
 // This module reads, edits and writes it; saving goes through
 // safe_file.hpp. A C interface below lets the C modules look a program up.
 //
@@ -56,7 +56,7 @@ std::optional<std::string> program_path(const BankMap &banks, int bank,
 extern "C" {
 #endif
 
-// Look a program up in the banks file at banks_path: copies the patch's
+// Look a program up in the banks file at banks_path: copies the preset's
 // path (from the storage root) to path. False if the file, the bank or the
 // program does not exist.
 bool banks_program_path(const char *banks_path, int bank, int program,

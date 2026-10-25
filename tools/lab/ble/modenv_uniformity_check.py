@@ -4,7 +4,7 @@
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
  
-The symptom: with a plucky MOD-env patch, random notes have a longer
+The symptom: with a plucky MOD-env preset, random notes have a longer
 MOD envelope, roughly every 32nd. Suspected cause: a knob DRAG that
 includes a re-render (e.g. PW) wedges the engine task in a long SPI
 flush; meanwhile coalesced applies keep pushing 128-write update_mod_env
@@ -35,7 +35,7 @@ RATE = 48000
 NOTE = 57
 N_NOTES = 36
 
-PATCH = [
+PRESET = [
     (20, 0), (21, 0), (26, 0),                      # 2-plain saws
     (74, 40), (31, 64), (30, 127), (71, 4),         # darkish base
     (73, 0), (75, 80), (79, 127), (72, 60),         # amp: instant on
@@ -74,7 +74,7 @@ def main():
         def cc(num, val):
             send(ControlChangeEvent(channel=0, param=num, value=val))
 
-        for num, val in PATCH:
+        for num, val in PRESET:
             cc(num, val)
             time.sleep(0.03)
 
