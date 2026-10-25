@@ -12,6 +12,5 @@ programs = [
 
 [bank.1]
 name = "User"
-programs = [
-]
+programs = []
 # end
