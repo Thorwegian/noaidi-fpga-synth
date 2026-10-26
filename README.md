@@ -8,6 +8,32 @@ unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
 
+## On the shoulders of giants
+
+Noaidi is inspired by these instruments, not a clone of any of them.
+
+- **Dave Smith (1950–2022) and the Sequential Prophet-5 (1978).** The
+  Prophet made a polyphonic synthesizer fully playable and every one
+  of its settings storable. Noaidi's plain-text presets
+  ([docs/storage_format.md](docs/storage_format.md)), its
+  two-oscillators-into-a-24-dB-lowpass voice and its RC-shaped
+  envelopes ([docs/param_conventions.md](docs/param_conventions.md))
+  follow that example.
+- **MIDI (1983), Dave Smith and Ikutaro Kakehashi.** Two rival
+  companies agreed on one open protocol, and every instrument since has
+  been able to talk to every other. Noaidi treats its MIDI
+  implementation as a surface to design with care
+  ([docs/midi_schema.md](docs/midi_schema.md)).
+- **The Minimoog**, for the idea of a house sound: a character you
+  recognise, not neutral cleanliness.
+- **The Clavia Nord Lead and the Roland JP-8000**, for virtual analog
+  in hardware, and the JP-8000 for the supersaw.
+- **The E-mu EMU10K1**, for showing what a small dedicated sound DSP can
+  do.
+- **Sylenth1 and Surge XT**, on the software side.
+
+The full reasoning is in [docs/design.md](docs/design.md) § Vision.
+
 ## License
 
 [CERN-OHL-S v2](LICENSE.txt)
