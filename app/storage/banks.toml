@@ -8,6 +8,7 @@ programs = [
     "Presets/Factory/Basses/PowerBass.toml",     # 2
     "Presets/Factory/Leads/BetterOffAlone.toml", # 3
     "Presets/Factory/Leads/Commodore.toml",      # 4
+    "Presets/Factory/Brass/SmitsBrass.toml",     # 5
 ]
 
 [bank.1]
