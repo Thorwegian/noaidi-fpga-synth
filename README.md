@@ -5,7 +5,8 @@ from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
 musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
-96 kHz synthesis, out on 48 kHz SPDIF (primary) and 96 kHz I2S.
+96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
+plus 48 kHz TOSLINK (for automated lab tests).
 
 ## License
 
@@ -21,7 +22,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
                                          a processor that computes
                                          every control signal
                                          ("gateware")
-                                         ──► SPDIF @ 48 kHz + I2S @ 96 kHz
+                                         ──► SPDIF/TOSLINK @ 97/48 kHz + I2S @ 96 kHz
 ```
 
 - **Gateware** (SystemVerilog, `rtl/`): a time-division-multiplexed
@@ -77,8 +78,8 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 | Signal | Pin | Description |
 |---|---|---|
 | sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
-| spdif48_out | 27 | SPDIF 48 kHz — the primary audio path |
-| spdif_out | 86 | SPDIF 96 kHz — parked, unwired |
+| spdif48_out | 86 | SPDIF 48 kHz — lab test audio path |
+| spdif_out | 27 | SPDIF 96 kHz — primary audio path |
 | i2s_data | 54 | I2S serial data |
 | i2s_lrclk | 55 | I2S word select |
 | i2s_bclk | 56 | I2S bit clock |

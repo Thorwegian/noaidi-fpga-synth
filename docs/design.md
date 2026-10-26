@@ -297,8 +297,8 @@ linear scaling) and just gains a sensitivity amount.
 
 ## Audio outputs
 
-- **SPDIF**: pin 27 carries the 48 kHz stream (channel status 48 kHz),
-  pin 86 the parked 96 kHz stream; biphase-mark, M/W/B preambles,
+- **SPDIF**: pin 86 carries the 48 kHz stream (channel status 48 kHz),
+  pin 27 the 96 kHz stream; biphase-mark, M/W/B preambles,
   valid channel status (consumer PCM / 24-bit). What a receiver requires and
   why is documented in `spdif_tx.sv`.
 - **I2S** (pins 54–56): self-clocked master, BCLK = sysclk/12.
