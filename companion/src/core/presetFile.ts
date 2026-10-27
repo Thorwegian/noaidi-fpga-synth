@@ -1,4 +1,4 @@
-// patchFile.ts — read and write patch files, TOML format 1
+// presetFile.ts — read and write preset files, TOML format 1
 // (docs/storage_format.md)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
@@ -16,22 +16,22 @@
 // A file whose format is newer than the companion's reads, but read-only:
 // its keys may mean something else. Comments and layout are not kept; the
 // writer writes its own clean form. The compatibility contract is the
-// musical patch (same values through the C reader), not the text.
+// musical preset (same values through the C reader), not the text.
 //
 // Pure TypeScript: no React or native imports.
 
 import { parse, TomlDate } from 'smol-toml';
 
-import { initPatch, type Patch, type TomlTable } from './patch';
+import { initPreset, type Preset, type TomlTable } from './preset';
 import {
-  normalize, parameters, PATCH_FILE_FORMAT,
+  normalize, parameters, PRESET_FILE_FORMAT,
   type Parameter, type ParameterId, type Value,
 } from './parameters';
 
-export class PatchFileError extends Error {}
+export class PresetFileError extends Error {}
 
-export interface PatchFileRead {
-  readonly patch: Patch;
+export interface PresetFileRead {
+  readonly preset: Preset;
   readonly format: number;
   // The file's format is newer than this companion's: show it, do not save
   // over it.
@@ -78,22 +78,22 @@ function describe(v: unknown): string {
   return typeof v === 'string' ? `"${v}"` : String(v);
 }
 
-export function readPatchFile(text: string): PatchFileRead {
+export function readPresetFile(text: string): PresetFileRead {
   let doc: TomlTable;
   try {
     doc = parse(text.replace(/^﻿/, ''),
                 { integersAsBigInt: true, unsafeKeyBehaviour: 'throw' }) as TomlTable;
   } catch (e) {
-    throw new PatchFileError(`not valid TOML: ${(e as Error).message}`);
+    throw new PresetFileError(`not valid TOML: ${(e as Error).message}`);
   }
   if (typeof doc.format !== 'bigint' || doc.format < 1n)
-    throw new PatchFileError(doc.format === undefined ? 'no format key'
+    throw new PresetFileError(doc.format === undefined ? 'no format key'
                                                       : 'format is not a positive integer');
   const format = Number(doc.format);
   const warnings: string[] = [];
-  const readOnly = format > PATCH_FILE_FORMAT;
+  const readOnly = format > PRESET_FILE_FORMAT;
   if (readOnly)
-    warnings.push(`format ${format} is newer than this companion's (${PATCH_FILE_FORMAT}): ` +
+    warnings.push(`format ${format} is newer than this companion's (${PRESET_FILE_FORMAT}): ` +
                   'opened read-only, and values may not mean what they show');
 
   const extra = copyTree(doc);
@@ -110,7 +110,7 @@ export function readPatchFile(text: string): PatchFileRead {
     }
   }
 
-  const values: Record<ParameterId, Value> = { ...initPatch().values };
+  const values: Record<ParameterId, Value> = { ...initPreset().values };
   const unresolved: Record<ParameterId, unknown> = {};
   const valueOf = (id: ParameterId) => values[id]!;
   for (const p of parameters) {             // dependencies first
@@ -143,7 +143,7 @@ export function readPatchFile(text: string): PatchFileRead {
   if (kept.length > 0)
     warnings.push(`kept, not understood: ${kept.join(', ')}`);
 
-  return { patch: { values, unresolved, extra }, format, readOnly, warnings };
+  return { preset: { values, unresolved, extra }, format, readOnly, warnings };
 }
 
 function keptPaths(extra: TomlTable): string[] {
@@ -186,14 +186,14 @@ function inline(v: unknown): string {
     const entries = Object.entries(v).map(([k, x]) => `${key(k)} = ${inline(x)}`);
     return entries.length ? `{ ${entries.join(', ')} }` : '{}';
   }
-  throw new PatchFileError(`cannot write ${String(v)}`);
+  throw new PresetFileError(`cannot write ${String(v)}`);
 }
 
 // A known parameter's value: its normalized value, or the file's value it
 // could not interpret.
-function known(patch: Patch, p: Parameter): string {
-  if (p.id in patch.unresolved) return inline(patch.unresolved[p.id]);
-  const v = patch.values[p.id]!;
+function known(preset: Preset, p: Parameter): string {
+  if (p.id in preset.unresolved) return inline(preset.unresolved[p.id]);
+  const v = preset.values[p.id]!;
   if (typeof v === 'string') return quote(v);
   if (!Number.isFinite(v)) return v > 0 ? 'inf' : '-inf';
   return p.kind === 'number' && p.integer ? String(Math.round(v)) : String(v);
@@ -203,11 +203,11 @@ function entries(table: TomlTable | undefined): string[] {
   return Object.entries(table ?? {}).map(([k, v]) => `${key(k)} = ${inline(v)}`);
 }
 
-// patch as a format-1 patch file. Do not write a patch read from a file
+// preset as a format-1 preset file. Do not write a preset read from a file
 // with readOnly set.
-export function writePatchFile(patch: Patch): string {
-  const extra = patch.extra;
-  const lines: string[] = [`format = ${PATCH_FILE_FORMAT}`];
+export function writePresetFile(preset: Preset): string {
+  const extra = preset.extra;
+  const lines: string[] = [`format = ${PRESET_FILE_FORMAT}`];
   const unknownTables: string[] = [];
   for (const [k, v] of Object.entries(extra)) {
     if (knownTables.has(k)) continue;
@@ -219,7 +219,7 @@ export function writePatchFile(patch: Patch): string {
     const own = parameters.filter((p) => p.file.table === table);
     if (!isArray) {
       lines.push('', `[${key(table)}]`);
-      for (const p of own) lines.push(`${p.file.key} = ${known(patch, p)}`);
+      for (const p of own) lines.push(`${p.file.key} = ${known(preset, p)}`);
       lines.push(...entries(extra[table] as TomlTable | undefined));
       continue;
     }
@@ -227,7 +227,7 @@ export function writePatchFile(patch: Patch): string {
     const count = Math.max(...own.map((p) => p.file.index! + 1), kept.length);
     for (let i = 0; i < count; i++) {
       lines.push('', `[[${key(table)}]]`);
-      for (const p of own) if (p.file.index === i) lines.push(`${p.file.key} = ${known(patch, p)}`);
+      for (const p of own) if (p.file.index === i) lines.push(`${p.file.key} = ${known(preset, p)}`);
       lines.push(...entries(kept[i]));
     }
   }

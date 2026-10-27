@@ -17,7 +17,7 @@
 // Pure TypeScript: no React or native imports.
 
 import { parameter, parameters, type ParameterId, type Value } from '../core/parameters';
-import type { Patch } from '../core/patch';
+import type { Preset } from '../core/preset';
 
 // How a player changes it.
 export type Interaction =
@@ -80,7 +80,7 @@ interface Entry {
   readonly label: (n: number) => string;
   readonly shortLabel: string;
   readonly section: (n: number) => string;
-  readonly unit: string | ((patch: Patch | undefined, index: number) => string);
+  readonly unit: string | ((preset: Preset | undefined, index: number) => string);
   readonly interaction: Interaction;
   readonly editor: EditorControl;
   readonly choiceLabels?: Readonly<Record<string, string>>;
@@ -193,7 +193,7 @@ const ENTRIES: Readonly<Record<string, Entry>> = {
   'lfo.depth': entry(lfo, 'Depth', {
     // the destination's unit: percentage points of pulse width, octaves of
     // Q, semitones of pitch or cutoff
-    unit: (patch, i) => LFO_DEPTH_UNIT[String(patch?.values[`lfo[${i}].destination`])] ?? '',
+    unit: (preset, i) => LFO_DEPTH_UNIT[String(preset?.values[`lfo[${i}].destination`])] ?? '',
     interaction: 'continuous', editor: 'slider',
     format: (v, unit) => `${signed(num(v), unit === 'pts' ? 1 : 2)} ${unit}`.trimEnd(),
   }),
@@ -217,12 +217,12 @@ function entryKey(id: ParameterId): string {
 }
 
 // How parameter id is shown. A unit that depends on another parameter (an
-// LFO's depth on its destination) is read from patch.
-export function display(id: ParameterId, patch?: Patch): ParameterDisplay {
+// LFO's depth on its destination) is read from preset.
+export function display(id: ParameterId, preset?: Preset): ParameterDisplay {
   const e = ENTRIES[entryKey(id)];
   if (!e) throw new RangeError(`no display entry for ${id}`);
   const n = parameter(id).file.index ?? 0;
-  const unit = typeof e.unit === 'function' ? e.unit(patch, n) : e.unit;
+  const unit = typeof e.unit === 'function' ? e.unit(preset, n) : e.unit;
   return {
     id,
     label: e.label(n),

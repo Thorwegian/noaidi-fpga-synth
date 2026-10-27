@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { initPatch, setValue } from '../src/core/patch';
+import { initPreset, setValue } from '../src/core/preset';
 import { parameters } from '../src/core/parameters';
 import { display, displayCoverage } from '../src/display/parameters';
 
@@ -14,7 +14,7 @@ describe('display metadata', () => {
 
   it('formats every parameter\'s init value and range ends', () => {
     for (const p of parameters) {
-      const d = display(p.id, initPatch());
+      const d = display(p.id, initPreset());
       expect(d.format(p.initValue)).not.toMatch(/undefined|NaN/);
       if (p.kind === 'number') {
         expect(d.format(p.range.min)).not.toMatch(/undefined|NaN/);
@@ -31,10 +31,10 @@ describe('display metadata', () => {
   });
 
   it('gives an LFO depth its destination\'s unit', () => {
-    let patch = setValue(initPatch(), 'lfo[0].destination', 'pulse_width');
-    expect(display('lfo[0].depth', patch).format(12.5)).toBe('+12.5 pts');
-    patch = setValue(patch, 'lfo[0].destination', 'cutoff');
-    expect(display('lfo[0].depth', patch).format(-24)).toBe('−24.00 st');
+    let preset = setValue(initPreset(), 'lfo[0].destination', 'pulse_width');
+    expect(display('lfo[0].depth', preset).format(12.5)).toBe('+12.5 pts');
+    preset = setValue(preset, 'lfo[0].destination', 'cutoff');
+    expect(display('lfo[0].depth', preset).format(-24)).toBe('−24.00 st');
   });
 
   it('formats special values in words', () => {

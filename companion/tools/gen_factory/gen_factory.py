@@ -5,7 +5,7 @@
 #
 """gen_factory.py -- the factory patches and system.toml, as a TypeScript module.
 
-    python3 tools/gen_factory/gen_factory.py ../app/storage > src/generated/factoryPatches.ts
+    python3 tools/gen_factory/gen_factory.py ../app/storage > src/generated/factoryPresets.ts
 
 The app bundles the firmware's factory content (app/storage) as text, so it
 opens with a representative sound and needs no file access to do so.

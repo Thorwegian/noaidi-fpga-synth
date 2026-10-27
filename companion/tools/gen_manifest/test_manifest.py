@@ -45,8 +45,8 @@ def check_values(where, spec, errors):
 def main(path):
     manifest = json.load(open(path, encoding="utf-8"))
     errors = []
-    if not isinstance(manifest.get("patchFileFormat"), int):
-        errors.append("patchFileFormat missing")
+    if not isinstance(manifest.get("presetFileFormat"), int):
+        errors.append("presetFileFormat missing")
     seen = {}
     for p in manifest["parameters"]:
         pid = p["id"]

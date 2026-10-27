@@ -10,11 +10,14 @@
 
 static int32_t s_w = DESIGN_W, s_h = DESIGN_H;
 
-void geometry_set(int32_t width, int32_t height)
-{
+void geometry_set(int32_t width, int32_t height) {
     s_w = width;
     s_h = height;
 }
 
-int32_t sx(int32_t x) { return x * s_w / DESIGN_W; }
-int32_t sy(int32_t y) { return y * s_h / DESIGN_H; }
+int32_t sx(int32_t x) {
+    return x * s_w / DESIGN_W;
+}
+int32_t sy(int32_t y) {
+    return y * s_h / DESIGN_H;
+}

@@ -3,13 +3,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { initPatch } from '../src/core/patch';
-import { createPatchStore } from '../src/core/patchStore';
+import { initPreset } from '../src/core/preset';
+import { createPresetStore } from '../src/core/presetStore';
 import { MockTransport, linkStoreToTransport } from '../src/core/transport';
 
-describe('patchStore', () => {
+describe('presetStore', () => {
   it('sets, gets and tells listeners what changed', () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     const heard: string[][] = [];
     store.subscribe((_, changed) => heard.push([...changed]));
     store.set('filter.cutoff', 1000);
@@ -18,7 +18,7 @@ describe('patchStore', () => {
   });
 
   it('reports dependents a change re-normalized', () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     store.set('lfo[0].destination', 'cutoff');
     store.set('lfo[0].depth', 100);
     const heard: string[][] = [];
@@ -29,7 +29,7 @@ describe('patchStore', () => {
   });
 
   it('ignores a set that changes nothing', () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     let calls = 0;
     store.subscribe(() => calls++);
     store.set('filter.cutoff', 1e9);   // clamps to the init value, the top
@@ -38,20 +38,20 @@ describe('patchStore', () => {
   });
 
   it('throws for a value the parameter cannot hold', () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     expect(() => store.set('osc[0].wave', 'noise')).toThrow(RangeError);
     expect(() => store.set('no.such', 1)).toThrow(RangeError);
   });
 
   it('undoes and redoes, one step per coalesced run', () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     for (const v of [1000, 900, 800]) store.set('filter.cutoff', v, { coalesce: true });
     store.set('osc[0].tune', 7);
     expect(store.undo()).toBe(true);
     expect(store.get('osc[0].tune')).toBe(0);
     expect(store.get('filter.cutoff')).toBe(800);
     expect(store.undo()).toBe(true);
-    expect(store.get('filter.cutoff')).toBe(initPatch().values['filter.cutoff']);
+    expect(store.get('filter.cutoff')).toBe(initPreset().values['filter.cutoff']);
     expect(store.undo()).toBe(false);
     expect(store.redo()).toBe(true);
     expect(store.get('filter.cutoff')).toBe(800);
@@ -60,7 +60,7 @@ describe('patchStore', () => {
 
 describe('MockTransport', () => {
   it('carries store changes to the synth and synth changes to the store, without echo', async () => {
-    const store = createPatchStore(initPatch());
+    const store = createPresetStore(initPreset());
     const synth = new MockTransport();
     await synth.connect();
     linkStoreToTransport(store, synth);

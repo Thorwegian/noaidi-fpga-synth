@@ -11,7 +11,7 @@
 import { forwardRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { PatchStore } from '../../core/patchStore';
+import type { PresetStore } from '../../core/presetStore';
 import type { Cell, Layout } from '../../core/surface';
 import { display } from '../../display/parameters';
 import type { FromDisplay } from '../../simulator/displayBridge';
@@ -25,7 +25,7 @@ import { LvglDisplay, type DisplayHandle } from './LvglDisplay';
 interface Props {
   readonly layout: Layout;
   readonly panel: PanelModel;
-  readonly store: PatchStore;
+  readonly store: PresetStore;
   readonly showValues: boolean;
   readonly onDisplayMessage: (message: FromDisplay) => void;
 }
@@ -50,7 +50,7 @@ export const Panel = forwardRef<DisplayHandle, Props>(function Panel(
   const controls: ReactNode[] = layout.controls.map((c) => {
     const a = layout.fixed[c.id];
     const label = c.label ?? (a ? display(a.param).shortLabel : '');
-    const valueText = showValues && a ? display(a.param, store.getPatch()).format(store.get(a.param)) : undefined;
+    const valueText = showValues && a ? display(a.param, store.getPreset()).format(store.get(a.param)) : undefined;
     let body: ReactNode = null;
     switch (c.kind) {
       case 'knob':

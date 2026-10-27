@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // Absolute, like a knob: the cap sits at the parameter's place in the panel
-// range, so recalled patches position it and a row of faders shows a
+// range, so recalled presets position it and a row of faders shows a
 // shape at a glance. Dragging moves the cap relative to where it was (a
 // touch never makes it jump). No motor is simulated.
 

@@ -53,7 +53,8 @@ $(BUILD)/host/src/%.o: src/%.c
 	$(HOST_CC) -O1 -Wall -Wextra $(INCLUDES) -c $< -o $@
 
 $(BUILD)/host/display_test: test/display_test.c $(HOST_OBJ)
-	$(HOST_CC) -O1 -Wall -Wextra $(INCLUDES) -o $@ $^ -lm
+	@echo "cc ... -o $@"
+	@$(HOST_CC) -O1 -Wall -Wextra $(INCLUDES) -o $@ $^ -lm
 
 test:
 	@$(MAKE) -j$(JOBS) $(BUILD)/host/display_test

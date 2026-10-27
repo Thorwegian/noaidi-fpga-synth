@@ -4,20 +4,20 @@
 // License: CERN-OHL-S v2
 //
 // React draws the physical controls (Panel); the screen is the LVGL
-// display. The sound lives in the patch store (loaded with the synth's
-// configured startup patch), the control rules in the surface core, the
+// display. The sound lives in the preset store (loaded with the synth's
+// configured startup preset), the control rules in the surface core, the
 // link to a synth is MockTransport. React only wires these together.
 
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { parse } from 'smol-toml';
 
-import { initPatch, type Patch } from '../core/patch';
-import { readPatchFile } from '../core/patchFile';
-import { createPatchStore } from '../core/patchStore';
+import { initPreset, type Preset } from '../core/preset';
+import { readPresetFile } from '../core/presetFile';
+import { createPresetStore } from '../core/presetStore';
 import { MockTransport, linkStoreToTransport } from '../core/transport';
 import { display } from '../display/parameters';
-import { FACTORY_FILES } from '../generated/factoryPatches';
+import { FACTORY_FILES } from '../generated/factoryPresets';
 import { layoutA } from '../layouts/layoutA';
 import { connectDisplay, type FromDisplay } from '../simulator/displayBridge';
 import { createPanel } from '../simulator/panel';
@@ -26,24 +26,24 @@ import { Panel } from './components/Panel';
 
 const REFRESH_MS = { 30: 33, 60: 16 } as const;
 
-// The sound the synth starts with: system.toml's startup_patch.
-function startupPatch(): { patch: Patch; name: string } {
+// The sound the synth starts with: system.toml's startup_preset.
+function startupPreset(): { preset: Preset; name: string } {
   try {
-    const system = parse(FACTORY_FILES['system.toml'] ?? '') as { startup_patch?: string };
-    const path = system.startup_patch ?? '';
+    const system = parse(FACTORY_FILES['system.toml'] ?? '') as { startup_preset?: string };
+    const path = system.startup_preset ?? '';
     const text = FACTORY_FILES[path];
-    if (text) return { patch: readPatchFile(text).patch, name: path.split('/').pop()!.replace(/\.toml$/, '') };
-  } catch { /* fall through to the init patch */ }
-  return { patch: initPatch(), name: 'Init' };
+    if (text) return { preset: readPresetFile(text).preset, name: path.split('/').pop()!.replace(/\.toml$/, '') };
+  } catch { /* fall through to the init preset */ }
+  return { preset: initPreset(), name: 'Init' };
 }
 
 export default function App() {
-  const { store, panel, transport, patchName } = useMemo(() => {
-    const { patch, name } = startupPatch();
-    const store = createPatchStore(patch);
+  const { store, panel, transport, presetName } = useMemo(() => {
+    const { preset, name } = startupPreset();
+    const store = createPresetStore(preset);
     const transport = new MockTransport();
     linkStoreToTransport(store, transport);
-    return { store, panel: createPanel(layoutA, store), transport, patchName: name };
+    return { store, panel: createPanel(layoutA, store), transport, presetName: name };
   }, []);
 
   const screen = useRef<DisplayHandle>(null);
@@ -77,7 +77,7 @@ export default function App() {
       <Panel ref={screen} layout={layoutA} panel={panel} store={store} showValues={showValues}
              onDisplayMessage={onDisplayMessage} />
       <View style={styles.diag}>
-        <Text style={styles.diagText}>{layoutA.name} · {patchName}</Text>
+        <Text style={styles.diagText}>{layoutA.name} · {presetName}</Text>
         <Text style={styles.diagText}>Focus: {focus ? display(focus.param).label : 'overview'}</Text>
         <Text style={styles.diagText} numberOfLines={1}>
           Mock synth: {last?.op === 'setParameter' ? `${last.id} = ${String(last.value)}` : last?.op ?? '-'}

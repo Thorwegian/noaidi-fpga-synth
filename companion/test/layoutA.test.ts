@@ -3,17 +3,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { readPatchFile } from '../src/core/patchFile';
-import { createPatchStore } from '../src/core/patchStore';
+import { readPresetFile } from '../src/core/presetFile';
+import { createPresetStore } from '../src/core/presetStore';
 import { hasParameter, parameter, type NumberParameter } from '../src/core/parameters';
 import { assignmentFor, panelRange, validateLayout } from '../src/core/surface';
-import { FACTORY_FILES } from '../src/generated/factoryPatches';
+import { FACTORY_FILES } from '../src/generated/factoryPresets';
 import { layoutA } from '../src/layouts/layoutA';
 import { createPanel } from '../src/simulator/panel';
 
 function setup() {
   let now = 0;
-  const store = createPatchStore(readPatchFile(FACTORY_FILES['Patches/Factory/Pads/Supersaw.toml']!).patch);
+  const store = createPresetStore(readPresetFile(FACTORY_FILES['Presets/Factory/Pads/Supersaw.toml']!).preset);
   const panel = createPanel(layoutA, store, () => now);
   return { store, panel, advance: (ms: number) => { now += ms; } };
 }

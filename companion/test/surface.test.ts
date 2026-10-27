@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { initPatch, setValue } from '../src/core/patch';
+import { initPreset, setValue } from '../src/core/preset';
 import {
   assignmentFor, initialSurfaceState, positionToValue, reduceSurface, screenView,
   turnEncoder, validateLayout, valueToPosition, type Assignment, type Layout,
@@ -75,10 +75,10 @@ describe('tapers', () => {
 
 describe('turnEncoder', () => {
   it('steps through names and moves numbers along the panel travel', () => {
-    const p1 = turnEncoder(LAYOUT, initPatch(), { param: 'osc[0].wave' }, 2);
+    const p1 = turnEncoder(LAYOUT, initPreset(), { param: 'osc[0].wave' }, 2);
     expect(p1.values['osc[0].wave']).toBe('triangle');
     const a = { param: 'osc[0].tune', range: { min: -12, max: 12 } };
-    const p2 = turnEncoder(LAYOUT, setValue(initPatch(), 'osc[0].tune', 0), a, 10);
+    const p2 = turnEncoder(LAYOUT, setValue(initPreset(), 'osc[0].tune', 0), a, 10);
     expect(p2.values['osc[0].tune']).toBeCloseTo(2.4, 2);
   });
 });

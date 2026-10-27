@@ -15,8 +15,8 @@
 //
 // Pure TypeScript: no React or native imports.
 
-import type { Patch } from '../core/patch';
-import type { PatchStore } from '../core/patchStore';
+import type { Preset } from '../core/preset';
+import type { PresetStore } from '../core/presetStore';
 import { parameter, parameters, type ParameterId } from '../core/parameters';
 import { assignmentFor, layerOf, type Graphic, type SurfaceController } from '../core/surface';
 
@@ -52,8 +52,8 @@ export function paramAt(index: number): ParameterId | undefined {
   return parameters[index]?.id;
 }
 
-export function valueMessage(patch: Patch, id: ParameterId): ToDisplay {
-  const v = patch.values[id]!;
+export function valueMessage(preset: Preset, id: ParameterId): ToDisplay {
+  const v = preset.values[id]!;
   const param = paramIndex(id);
   if (parameter(id).kind === 'name') return { type: 'name', param, name: v as string };
   const n = v as number;
@@ -90,10 +90,10 @@ export function focusMessage(surface: SurfaceController): ToDisplay {
 }
 
 // Everything the display shows, for a display that just started.
-export function fullState(store: PatchStore, surface: SurfaceController): ToDisplay[] {
-  const patch = store.getPatch();
+export function fullState(store: PresetStore, surface: SurfaceController): ToDisplay[] {
+  const preset = store.getPreset();
   return [
-    ...parameters.map((p) => valueMessage(patch, p.id)),
+    ...parameters.map((p) => valueMessage(preset, p.id)),
     layerMessage(surface),
     overviewMessage(surface),
     focusMessage(surface),
@@ -108,12 +108,12 @@ export interface DisplayBridge {
 
 // Send the display every change from now on, and the full state whenever
 // it reports ready. A tap on the screen focuses that parameter.
-export function connectDisplay(store: PatchStore, surface: SurfaceController,
+export function connectDisplay(store: PresetStore, surface: SurfaceController,
                                send: (message: ToDisplay) => void,
                                now: () => number = Date.now): DisplayBridge {
   let lastLayer = surface.getState().layerId;
-  const offStore = store.subscribe((patch, changed) => {
-    for (const id of changed) send(valueMessage(patch, id));
+  const offStore = store.subscribe((preset, changed) => {
+    for (const id of changed) send(valueMessage(preset, id));
   });
   const offSurface = surface.subscribe((state) => {
     if (state.layerId !== lastLayer) {

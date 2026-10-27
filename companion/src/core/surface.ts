@@ -24,7 +24,7 @@
 // Pure TypeScript: no React or native imports.
 
 import { hasParameter, parameter, type NumberParameter, type ParameterId, type Range } from './parameters';
-import { getValue, setValue, type Patch } from './patch';
+import { getValue, setValue, type Preset } from './preset';
 
 export type ControlKind = 'knob' | 'fader' | 'encoder' | 'button';
 
@@ -176,12 +176,12 @@ export function defaultTaper(p: NumberParameter, range: Range): Taper {
 }
 
 // The panel range of an assignment; for one with rangeBy, given the
-// patch's value of the parameter it depends on.
-export function panelRange(a: Assignment, patch?: Patch): Range {
+// preset's value of the parameter it depends on.
+export function panelRange(a: Assignment, preset?: Preset): Range {
   const p = parameter(a.param);
   if (p.kind !== 'number') throw new RangeError(`${a.param} is not a number parameter`);
-  if (a.rangeBy && patch && p.dependsOn) {
-    const r = a.rangeBy[String(getValue(patch, p.dependsOn))];
+  if (a.rangeBy && preset && p.dependsOn) {
+    const r = a.rangeBy[String(getValue(preset, p.dependsOn))];
     if (r) return r;
   }
   return a.range ?? p.range;
@@ -194,8 +194,8 @@ function taperOf(a: Assignment, range: Range): Taper {
 const clamp01 = (x: number) => Math.min(Math.max(x, 0), 1);
 
 // Control position (0 … 1) → value in the panel range.
-export function positionToValue(a: Assignment, position: number, patch?: Patch): number {
-  const range = panelRange(a, patch);
+export function positionToValue(a: Assignment, position: number, preset?: Preset): number {
+  const range = panelRange(a, preset);
   const { min, max } = range;
   const x = clamp01(position);
   switch (taperOf(a, range)) {
@@ -211,8 +211,8 @@ export function positionToValue(a: Assignment, position: number, patch?: Patch):
 
 // Value → control position (0 … 1); values outside the panel range sit at
 // the ends.
-export function valueToPosition(a: Assignment, value: number, patch?: Patch): number {
-  const range = panelRange(a, patch);
+export function valueToPosition(a: Assignment, value: number, preset?: Preset): number {
+  const range = panelRange(a, preset);
   const { min, max } = range;
   if (max === min) return 0;
   switch (taperOf(a, range)) {
@@ -228,20 +228,20 @@ export function valueToPosition(a: Assignment, value: number, patch?: Patch): nu
   }
 }
 
-// The patch after an encoder turns steps detents: a name parameter steps
+// The preset after an encoder turns steps detents: a name parameter steps
 // through its names, a number parameter moves steps / detents of its panel
 // travel (the assignment's detents, or the layout's).
-export function turnEncoder(layout: Layout, patch: Patch, a: Assignment, steps: number): Patch {
+export function turnEncoder(layout: Layout, preset: Preset, a: Assignment, steps: number): Preset {
   const p = parameter(a.param);
-  const current = getValue(patch, a.param);
+  const current = getValue(preset, a.param);
   if (p.kind === 'name') {
     const i = p.names.indexOf(current as string);
     const next = Math.min(Math.max(i + steps, 0), p.names.length - 1);
-    return setValue(patch, a.param, p.names[next]);
+    return setValue(preset, a.param, p.names[next]);
   }
   const detents = a.detents ?? layout.encoderStepsPerTravel;
-  const pos = valueToPosition(a, current as number, patch) + steps / detents;
-  return setValue(patch, a.param, positionToValue(a, pos, patch));
+  const pos = valueToPosition(a, current as number, preset) + steps / detents;
+  return setValue(preset, a.param, positionToValue(a, pos, preset));
 }
 
 // ── Focus and screen ────────────────────────────────────────────────

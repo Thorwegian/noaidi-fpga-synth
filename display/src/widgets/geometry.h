@@ -8,6 +8,6 @@
 
 #include <stdint.h>
 
-void    geometry_set(int32_t width, int32_t height);
+void geometry_set(int32_t width, int32_t height);
 int32_t sx(int32_t design_x);
 int32_t sy(int32_t design_y);

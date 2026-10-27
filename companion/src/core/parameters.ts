@@ -4,7 +4,7 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// src/generated/parameters.json comes from the firmware's patch-file table
+// src/generated/parameters.json comes from the firmware's preset-file table
 // (tools/gen_manifest), so this module adds no knowledge of the engine: it
 // types the manifest and applies its rules. A value is a number in the
 // parameter's musical unit (±Infinity for the special values "inf" and
@@ -97,8 +97,8 @@ function toParameter(raw: any): Parameter {
   };
 }
 
-// The patch file format the manifest was generated for.
-export const PATCH_FILE_FORMAT: number = manifest.patchFileFormat;
+// The preset file format the manifest was generated for.
+export const PRESET_FILE_FORMAT: number = manifest.presetFileFormat;
 
 // Every parameter, in the order the firmware's loader applies them: a
 // parameter comes after the one it depends on.
@@ -124,8 +124,8 @@ export function dependents(id: ParameterId): readonly NumberParameter[] {
 // ── Values ──────────────────────────────────────────────────────────
 
 // What p can hold, given the values of the other parameters. A dependency
-// on a name picks that name's spec; a dependency on a number (decay on its
-// envelope's sustain) keeps the union range, which the engine narrows.
+// on a name picks that name's spec; a dependency on a number (none today)
+// keeps the union range, which the engine narrows.
 export function effectiveSpec(p: NumberParameter, valueOf: (id: ParameterId) => Value): ValueSpec {
   if (p.dependsOn && p.byValue) {
     const spec = p.byValue[String(valueOf(p.dependsOn))];

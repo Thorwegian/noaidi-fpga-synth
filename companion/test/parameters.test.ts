@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  dependents, normalize, parameter, parameters, PATCH_FILE_FORMAT,
+  dependents, normalize, parameter, parameters, PRESET_FILE_FORMAT,
   type NumberParameter, type ParameterId, type Value,
 } from '../src/core/parameters';
 
@@ -13,7 +13,7 @@ const num = (id: ParameterId) => parameter(id) as NumberParameter;
 
 describe('manifest', () => {
   it('describes format 1 and the arrays of tables', () => {
-    expect(PATCH_FILE_FORMAT).toBe(1);
+    expect(PRESET_FILE_FORMAT).toBe(1);
     expect(parameters.map((p) => p.id)).toContain('osc[1].tune');
     expect(parameters.map((p) => p.id)).toContain('lfo[1].depth');
     expect(parameter('osc[1].tune').file).toEqual({ table: 'osc', index: 1, key: 'tune' });
@@ -30,7 +30,8 @@ describe('manifest', () => {
       if (p.kind === 'number' && p.dependsOn)
         expect(order.indexOf(p.dependsOn)).toBeLessThan(order.indexOf(p.id));
     expect(dependents('lfo[0].destination').map((p) => p.id)).toEqual(['lfo[0].depth']);
-    expect(dependents('amp_env.sustain').map((p) => p.id)).toEqual(['amp_env.decay']);
+    // a decay takes the same time from any sustain level (the CSP's RC envelope)
+    expect(dependents('amp_env.sustain')).toEqual([]);
   });
 });
 

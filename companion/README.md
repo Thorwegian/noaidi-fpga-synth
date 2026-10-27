@@ -3,28 +3,28 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-The companion app (issue #198): a patch editor and a software prototype of
+The companion app (issue #198): a preset editor and a software prototype of
 the Noaidi control surface, for Android tablets, Windows and macOS. It works
-entirely offline: patches are local, portable TOML files in the format of
+entirely offline: presets are local, portable TOML files in the format of
 [docs/storage_format.md](../docs/storage_format.md).
 
 The app works with semantic parameters such as `filter.cutoff` or
 `lfo[1].depth`, in musical units. It does not hold a second model of the
-synth: the parameter list comes from the firmware's own patch-file table.
+synth: the parameter list comes from the firmware's own preset-file table.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `patch`, `patchFile` (TOML format 1), `patchStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
+| `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `preset`, `presetFile` (TOML format 1), `presetStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
 | `src/display/` | companion-owned display metadata: label, section, unit, formatting, interaction, Editor control |
 | `src/simulator/` | pure TypeScript: `panel` (simulated controls acting on the store and the surface), `knobGesture` (rotary or vertical knob drags), `displayBridge` (JSON messages to and from the LVGL display) |
 | `src/layouts/` | panel layouts as data: grid placement, assignments, panel ranges and tapers, layers and their overviews; `layoutA` is the first whole-panel hypothesis |
 | `src/app/` | React Native: `Panel` draws a layout (`Knob`, `Fader`, `Encoder`, `LayerButton`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
-| `src/generated/` | checked in: `parameters.json` (gen_manifest), `factoryPatches.ts` (app/storage), `displayHtml.ts` (the LVGL display page, `make -C display web`) |
-| `test/` | vitest tests; `compat.test.ts` runs the firmware's own patch reader |
+| `src/generated/` | checked in: `parameters.json` (gen_manifest), `factoryPresets.ts` (app/storage), `displayHtml.ts` (the LVGL display page, `make -C display web`) |
+| `test/` | vitest tests; `compat.test.ts` runs the firmware's own preset reader |
 | `tools/gen_manifest/` | writes the parameter manifest |
-| `tools/patch_tool/` | the firmware's patch reader and writer on the computer, for the compatibility tests |
+| `tools/preset_tool/` | the firmware's preset reader and writer on the computer, for the compatibility tests |
 
 ## The screen
 
@@ -54,13 +54,13 @@ crashes on vitest's optional peers).
 
 | Command | What it does |
 |---|---|
-| `make -C companion manifest` | regenerate the manifest, the display's `noaidi_param_ids.h` and `factoryPatches.ts` (needs a host C compiler) |
-| `make -C companion check` | everything: manifest fresh and consistent, `tsc`, all tests including the compatibility tests (needs a host C compiler and `git submodule update --init app/lib/tomlc17`) |
+| `make -C companion manifest` | regenerate the manifest, the display's `noaidi_param_ids.h` and `factoryPresets.ts` (needs a host C and C++ compiler) |
+| `make -C companion check` | everything: manifest fresh and consistent, `tsc`, all tests including the compatibility tests (needs a host C and C++ compiler and `git submodule update --init app/lib/tomlc17`) |
 | `npm test` | the TypeScript tests; the compatibility tests are skipped |
 
-## Patch files
+## Preset files
 
-`src/core/patchFile.ts` reads and writes format 1 as the firmware's loader
+`src/core/presetFile.ts` reads and writes format 1 as the firmware's loader
 does: keys apply in manifest order, a missing key takes its init value, a
 value outside the range clamps. In addition the companion keeps what it
 does not understand and writes it back: unknown keys and tables, unknown
@@ -70,9 +70,9 @@ name from newer firmware) until that parameter is edited. A file with a
 newer `format` opens read-only with a warning. Comments and layout are not
 kept: the writer writes its own clean form.
 
-The compatibility contract is the musical patch, not the text, and
+The compatibility contract is the musical preset, not the text, and
 `test/compat.test.ts` checks it against the firmware's reader: the factory
-patches and 300 random patches load to the same raw values both ways.
+presets and 300 random presets load to the same raw values both ways.
 
 Values are kept in musical units. A value of a key with listed values is
 snapped to the nearest one (by the key's `nearest` measure); other values
@@ -90,12 +90,12 @@ each panel layout (`src/core/surface.ts`).
 
 ## Parameter manifest
 
-`src/generated/parameters.json` lists every parameter a patch file holds,
-generated from `app/main/patch_units.c` by `tools/gen_manifest`, which
+`src/generated/parameters.json` lists every parameter a preset file holds,
+generated from `app/main/preset_units.c` by `tools/gen_manifest`, which
 compiles the firmware sources unchanged. The manifest is checked in, so
-building the app needs no C compiler.
+building the app needs no C or C++ compiler.
 
-Run `make -C companion manifest` after any change to the patch-file keys,
+Run `make -C companion manifest` after any change to the preset-file keys,
 and commit the result.
 
 Each parameter entry has:
@@ -106,14 +106,14 @@ Each parameter entry has:
 | `file` | where format 1 stores it: TOML `table`, `index`, `key` |
 | `kind` | `"number"` or `"name"` |
 | `names` | a name key's names |
-| `initValue` | the init patch's value: what a file that omits the key loads as. The init patch is a neutral fallback, not a representative sound |
+| `initValue` | the init preset's value: what a file that omits the key loads as. The init preset is a neutral fallback, not a representative sound |
 | `integer` | a number key that takes whole numbers only |
 | `nearest` | how a value converts to the nearest engine value: `"difference"` (linear units) or `"ratio"` (seconds, Hz, Q) |
 | `range` | min and max of the finite values the engine can hold; a file value outside it is clamped |
 | `special` | values outside the finite range: `"inf"` (self-oscillating resonance), `"-inf"` (volume off) |
 | `valueCount` | how many distinct values the key can hold |
 | `values` | all of them, ascending, for keys with at most 1024 |
-| `dependsOn` | the parameter whose value changes this one's conversion: decay depends on its envelope's sustain, an LFO's depth on its destination |
+| `dependsOn` | the parameter whose value changes this one's conversion, found by probing: today only an LFO's depth, on its destination |
 | `byValue` | for a dependency on a name: `range`, `valueCount` and `values` per name; `range` is then their union |
 
 Numbers are the actual musical values to 6 significant digits, more where

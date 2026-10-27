@@ -11,8 +11,8 @@
 //
 // Pure TypeScript: no React or native imports.
 
-import type { Patch } from './patch';
-import type { PatchStore } from './patchStore';
+import type { Preset } from './preset';
+import type { PresetStore } from './presetStore';
 import type { ParameterId, Value } from './parameters';
 
 export type ParameterChangeListener = (id: ParameterId, value: Value) => void;
@@ -24,7 +24,7 @@ export interface Transport {
   // A live edit of the active sound.
   setParameter(id: ParameterId, value: Value): void;
   // Replace the active sound.
-  sendPatch(patch: Patch): Promise<void>;
+  sendPreset(preset: Preset): Promise<void>;
   // Changes made on the synth side (its own controls, another client).
   onParameterChanged(listener: ParameterChangeListener): () => void;
 }
@@ -32,7 +32,7 @@ export interface Transport {
 export type MockCall =
   | { readonly op: 'connect' | 'disconnect' }
   | { readonly op: 'setParameter'; readonly id: ParameterId; readonly value: Value }
-  | { readonly op: 'sendPatch'; readonly patch: Patch };
+  | { readonly op: 'sendPreset'; readonly preset: Preset };
 
 // Records every call; simulateChange() plays a change from the synth side.
 export class MockTransport implements Transport {
@@ -47,8 +47,8 @@ export class MockTransport implements Transport {
     this.calls.push({ op: 'setParameter', id, value });
   }
 
-  async sendPatch(patch: Patch): Promise<void> {
-    this.calls.push({ op: 'sendPatch', patch });
+  async sendPreset(preset: Preset): Promise<void> {
+    this.calls.push({ op: 'sendPreset', preset });
   }
 
   onParameterChanged(listener: ParameterChangeListener): () => void {
@@ -63,11 +63,11 @@ export class MockTransport implements Transport {
 
 // Keep a store and a transport in step: store changes go to the synth,
 // synth changes come into the store without being sent back.
-export function linkStoreToTransport(store: PatchStore, transport: Transport): () => void {
+export function linkStoreToTransport(store: PresetStore, transport: Transport): () => void {
   let fromSynth = false;
-  const offStore = store.subscribe((patch, changed) => {
+  const offStore = store.subscribe((preset, changed) => {
     if (fromSynth) return;
-    for (const id of changed) transport.setParameter(id, patch.values[id]!);
+    for (const id of changed) transport.setParameter(id, preset.values[id]!);
   });
   const offSynth = transport.onParameterChanged((id, value) => {
     fromSynth = true;

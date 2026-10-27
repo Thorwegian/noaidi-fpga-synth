@@ -2,7 +2,7 @@
 // License: CERN-OHL-S v2
 //
 // The whole simulator path to the real display, with the checked-in page
-// (src/generated/displayHtml.ts) run as shipped: patch store → display
+// (src/generated/displayHtml.ts) run as shipped: preset store → display
 // bridge → JSON message → shell.js → WebAssembly → LVGL label; and a touch
 // on the LVGL screen back to a focus in the surface core and onto the
 // screen again. The page runs in a Node VM with just enough of a browser
@@ -11,10 +11,10 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
-import { readPatchFile } from '../src/core/patchFile';
-import { createPatchStore } from '../src/core/patchStore';
+import { readPresetFile } from '../src/core/presetFile';
+import { createPresetStore } from '../src/core/presetStore';
 import { DISPLAY_HEIGHT, DISPLAY_HTML, DISPLAY_WIDTH } from '../src/generated/displayHtml';
-import { FACTORY_FILES } from '../src/generated/factoryPatches';
+import { FACTORY_FILES } from '../src/generated/factoryPresets';
 import { layoutA } from '../src/layouts/layoutA';
 import { connectDisplay, paramIndex, type FromDisplay } from '../src/simulator/displayBridge';
 import { createPanel } from '../src/simulator/panel';
@@ -83,13 +83,13 @@ describe('the real display through the simulator bridge', () => {
     const page = await openPage();
     expect(page.fromPage[0]).toEqual({ type: 'ready', width: DISPLAY_WIDTH, height: DISPLAY_HEIGHT });
 
-    const store = createPatchStore(readPatchFile(FACTORY_FILES['Patches/Factory/Pads/Supersaw.toml']!).patch);
+    const store = createPresetStore(readPresetFile(FACTORY_FILES['Presets/Factory/Pads/Supersaw.toml']!).preset);
     let now = 0;
     const panel = createPanel(layoutA, store, () => now);
     const bridge = connectDisplay(store, panel.surface, page.post, () => now);
     bridge.receive(page.fromPage[0]!);   // ready: the full state goes over
 
-    expect(page.shownValue('filter.cutoff')).toBe('370 Hz');
+    expect(page.shownValue('filter.cutoff')).toBe('262 Hz');
     expect(page.shownValue('filter.resonance')).toBe('Q 1.00');
     expect(page.encoderLabel(0)).toBe('Type');
     expect(page.shownValue('filter.type')).toBe('LP');

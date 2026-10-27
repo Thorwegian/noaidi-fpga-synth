@@ -15,7 +15,7 @@ import { paramAt, paramIndex } from '../src/simulator/displayBridge';
 const HEADER = readFileSync(new URL('../../display/include/noaidi_param_ids.h', import.meta.url), 'utf8');
 
 describe('C and TypeScript parameter IDs', () => {
-  const entries = [...HEADER.matchAll(/^\s+(NOAIDI_PARAM_\w+) = (\d+),\s+\/\/ (\S+)$/gm)]
+  const entries = [...HEADER.matchAll(/^\s+(NOAIDI_PARAM_\w+)\s+= (\d+),\s+\/\/ (\S+)$/gm)]
     .map((m) => ({ name: m[1]!, value: Number(m[2]), id: m[3]! }));
 
   it('list the same parameters in the same order', () => {

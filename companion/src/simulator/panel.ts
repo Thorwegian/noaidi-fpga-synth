@@ -11,8 +11,8 @@
 //
 // Pure TypeScript: no React or native imports.
 
-import { getValue } from '../core/patch';
-import type { PatchStore } from '../core/patchStore';
+import { getValue } from '../core/preset';
+import type { PresetStore } from '../core/presetStore';
 import {
   assignmentFor, createSurfaceController, positionToValue, turnEncoder, valueToPosition,
   type Layout, type SurfaceController,
@@ -32,7 +32,7 @@ export interface Panel {
   tick(): void;
 }
 
-export function createPanel(layout: Layout, store: PatchStore, now: () => number = Date.now): Panel {
+export function createPanel(layout: Layout, store: PresetStore, now: () => number = Date.now): Panel {
   const surface = createSurfaceController(layout, now());
   const control = (id: string) => surface.dispatch({ type: 'control', control: id, time: now() });
 
@@ -43,19 +43,19 @@ export function createPanel(layout: Layout, store: PatchStore, now: () => number
     move(id, position) {
       const a = assignmentFor(layout, surface.getState(), id);
       if (!a) return;
-      store.set(a.param, positionToValue(a, position, store.getPatch()), { coalesce: true });
+      store.set(a.param, positionToValue(a, position, store.getPreset()), { coalesce: true });
       control(id);
     },
 
     position(id) {
       const a = assignmentFor(layout, surface.getState(), id);
-      return a ? valueToPosition(a, store.get(a.param) as number, store.getPatch()) : 0;
+      return a ? valueToPosition(a, store.get(a.param) as number, store.getPreset()) : 0;
     },
 
     turn(id, steps) {
       const a = assignmentFor(layout, surface.getState(), id);
       if (!a) return;
-      const next = turnEncoder(layout, store.getPatch(), a, steps);
+      const next = turnEncoder(layout, store.getPreset(), a, steps);
       store.set(a.param, getValue(next, a.param), { coalesce: true });
       control(id);
     },
