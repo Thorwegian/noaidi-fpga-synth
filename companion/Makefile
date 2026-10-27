@@ -62,7 +62,7 @@ manifest: $(GEN)
 	mv $(BUILD)/parameters.json $(MANIFEST)
 	$(GEN) --c-header > $(BUILD)/noaidi_param_ids.h
 	mv $(BUILD)/noaidi_param_ids.h $(PARAM_IDS)
-	python3 -I tools/gen_factory/gen_factory.py $(STORAGE) > $(BUILD)/factoryPresets.ts
+	python3 -I tools/gen_factory/gen_factory.py $(STORAGE) $(APP_MAIN)/storage.c > $(BUILD)/factoryPresets.ts
 	mv $(BUILD)/factoryPresets.ts $(FACTORY)
 
 check: $(GEN) $(PRESET_TOOL)
@@ -72,7 +72,7 @@ check: $(GEN) $(PRESET_TOOL)
 	$(GEN) --c-header > $(BUILD)/noaidi_param_ids.h
 	diff -u $(PARAM_IDS) $(BUILD)/noaidi_param_ids.h || \
 	    { echo "$(PARAM_IDS) is stale: run make -C companion manifest"; exit 1; }
-	python3 -I tools/gen_factory/gen_factory.py $(STORAGE) > $(BUILD)/factoryPresets.ts
+	python3 -I tools/gen_factory/gen_factory.py $(STORAGE) $(APP_MAIN)/storage.c > $(BUILD)/factoryPresets.ts
 	diff -u $(FACTORY) $(BUILD)/factoryPresets.ts || \
 	    { echo "$(FACTORY) is stale: run make -C companion manifest"; exit 1; }
 	python3 -I tools/gen_manifest/test_manifest.py $(MANIFEST)

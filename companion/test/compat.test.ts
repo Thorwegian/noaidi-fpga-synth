@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 
 import { initPreset, setValue, type Preset } from '../src/core/preset';
 import { readPresetFile, writePresetFile } from '../src/core/presetFile';
+import { validPresetName } from '../src/library/presetName';
 import {
   effectiveSpec, parameters, type NumberParameter, type Parameter, type Value,
 } from '../src/core/parameters';
@@ -112,6 +113,14 @@ describe.skipIf(!TOOL)('compatibility with the firmware reader', () => {
       }
     }
   }, 60_000);   // about 1200 runs of preset_tool
+
+  it('agrees with the firmware on preset names', () => {
+    const names = ['Supersaw', 'Ærlig Gjøk', 'a'.repeat(64), 'a'.repeat(65), '', ' lead', 'lead ',
+                   'lead.', 'a/b', 'a\\b', 'a:b', 'a*b', 'a?b', 'a"b', 'a<b', 'a>b', 'a|b', 'tab\there',
+                   '🎹 keys', '…', 'x.y'];
+    for (const name of names)
+      expect(validPresetName(name), JSON.stringify(name)).toBe(tool('name', name).status === 0);
+  });
 
   it('unknown keys do not disturb the firmware', () => {
     const unknown = readPresetFile(`format = 1

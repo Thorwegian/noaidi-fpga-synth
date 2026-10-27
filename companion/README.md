@@ -18,13 +18,41 @@ synth: the parameter list comes from the firmware's own preset-file table.
 |---|---|
 | `src/core/` | pure TypeScript, no React or native imports: `parameters` (the manifest, normalizing values), `preset`, `presetFile` (TOML format 1), `presetStore`, `surface` (panel layouts, tapers, focus rules), `transport` (interface and `MockTransport`) |
 | `src/display/` | companion-owned display metadata: label, section, unit, formatting, interaction, Editor control |
+| `src/library/` | pure TypeScript: the factory and user library (`library`), preset-name rules (`presetName`), and the session: the current preset, where it came from, Save / Save As / Export (`session`) |
+| `src/editor/` | pure TypeScript: the Editor's sections and controls, from the catalogue and display metadata (`editorModel`) |
+| `src/companion.ts` | the parts wired together: one session whose store the views, the display bridge and the transport share |
 | `src/simulator/` | pure TypeScript: `panel` (simulated controls acting on the store and the surface), `knobGesture` (rotary or vertical knob drags), `displayBridge` (JSON messages to and from the LVGL display) |
 | `src/layouts/` | panel layouts as data: grid placement, assignments, panel ranges and tapers, layers and their overviews; `layoutA` is the first whole-panel hypothesis |
-| `src/app/` | React Native: `Panel` draws a layout (`Knob`, `Fader`, `Encoder`, `LayerButton`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
+| `src/app/` | React Native: the Library, Editor and Panel tabs (`App`), `editor/` (full-range controls), `library/` (list, Save As), `platform/files` (user library, import, export), and `Panel`, which draws a layout (`Knob`, `Fader`, `Encoder`, `LayerButton`) around `LvglDisplay`, the real LVGL display in a WebView (iframe on web) |
 | `src/generated/` | checked in: `parameters.json` (gen_manifest), `factoryPresets.ts` (app/storage), `displayHtml.ts` (the LVGL display page, `make -C display web`) |
 | `test/` | vitest tests; `compat.test.ts` runs the firmware's own preset reader |
 | `tools/gen_manifest/` | writes the parameter manifest |
 | `tools/preset_tool/` | the firmware's preset reader and writer on the computer, for the compatibility tests |
+
+## Library, Editor and Panel
+
+The app has three views of one current preset: the **Library** (factory
+presets from the firmware tree, by category, and the user's own), the
+**Editor** (every stored parameter over its whole engine range, grouped as
+the synth is: Voice, Osc 1, Osc 2, Filter, the two envelopes, the two LFOs,
+Part) and the **Panel** (Layout A around the real display). Opening,
+editing and saving all act on the one preset store.
+
+Saving follows the synth's layout and never needs a network:
+- user presets live in the app's own storage as
+  `Presets/User/<Category>/<Name>.toml` (browser storage on the web);
+- **Save** writes back to the user preset that is open; a factory
+  preset, an imported file or the startup preset needs **Save As**, which
+  makes a user preset: factory presets are never written;
+- **Import** opens a `.toml` from anywhere the system's file picker offers;
+  **Export** writes the preset as `<Name>.toml` into a folder the user
+  picks (a download on the web);
+- a file whose `format` is newer than the companion's opens read-only:
+  no Save, Save As or Export.
+
+Preset names follow the synth's rules (`src/library/presetName.ts`,
+checked against the firmware's `preset_name_valid`), and the categories
+are the firmware's own list (`s_categories` in `app/main/storage.c`).
 
 ## The screen
 

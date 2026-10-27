@@ -5,7 +5,10 @@
 //
 // The app speaks semantic parameters (setParameter("filter.cutoff", 370));
 // how that reaches the synth (MIDI CC, SysEx, the serial console, USB,
-// BLE) is a transport's business and stays behind this interface.
+// BLE) is a transport's business and stays behind this interface. A MIDI
+// transport carries the firmware's own CC laws (app/main/cc_map.cpp),
+// including coarse/fine pairs such as cutoff: one semantic change may be
+// several messages, and no caller needs to know.
 // MockTransport stands in for a synth so the whole UI works without
 // hardware.
 //
@@ -25,12 +28,16 @@ export interface Transport {
   setParameter(id: ParameterId, value: Value): void;
   // Replace the active sound.
   sendPreset(preset: Preset): Promise<void>;
+  // Ask the synth for its whole current state; it answers with parameter
+  // changes (on MIDI: the state request SysEx F0 7D 4E 4F 10 F7, answered
+  // with the CCs of every parameter).
+  requestState(): Promise<void>;
   // Changes made on the synth side (its own controls, another client).
   onParameterChanged(listener: ParameterChangeListener): () => void;
 }
 
 export type MockCall =
-  | { readonly op: 'connect' | 'disconnect' }
+  | { readonly op: 'connect' | 'disconnect' | 'requestState' }
   | { readonly op: 'setParameter'; readonly id: ParameterId; readonly value: Value }
   | { readonly op: 'sendPreset'; readonly preset: Preset };
 
@@ -49,6 +56,10 @@ export class MockTransport implements Transport {
 
   async sendPreset(preset: Preset): Promise<void> {
     this.calls.push({ op: 'sendPreset', preset });
+  }
+
+  async requestState(): Promise<void> {
+    this.calls.push({ op: 'requestState' });
   }
 
   onParameterChanged(listener: ParameterChangeListener): () => void {

@@ -11,6 +11,8 @@
 //                                it back as the synth would save it
 //   preset_tool diff <a> <b>     print every key where the two files load
 //                                differently; exit 1 if any
+//   preset_tool name <name>      exit 0 if name is a valid preset name
+//                                (preset_name_valid), 1 if not
 //
 // A file the synth would not load exits 2 with the reason.
 
@@ -51,8 +53,10 @@ int main(int argc, char **argv) {
         }
         return preset_file_diff(stdout, &a, &b) > 0 ? 1 : 0;
     }
-    std::fprintf(
-            stderr,
-            "usage: preset_tool canon <file> | preset_tool diff <a> <b>\n");
+    if (argc == 3 && std::string_view(argv[1]) == "name") {
+        return preset_name_valid(argv[2]) ? 0 : 1;
+    }
+    std::fprintf(stderr, "usage: preset_tool canon <file> | preset_tool diff "
+                         "<a> <b> | preset_tool name <name>\n");
     return 2;
 }
