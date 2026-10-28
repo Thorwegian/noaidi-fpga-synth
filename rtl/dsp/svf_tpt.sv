@@ -307,7 +307,8 @@ module svf_tpt #(
     //   A  the partial's index, cascade flag, phase and gains: the input to
     //      the output registers, 16 clocks;
     //   B  section 2's input states: the input to section 2, 10 clocks;
-    //   C  g, g+R2, h and the mode: CB to section 2, section 1's 7 clocks;
+    //   C  g, g+R2, h and the mode: CB to section 2, section 1's 7 clocks
+    //      (a register of its own, then 6 in the shadow SRAM);
     //   D  section 1's new states and its output: section 1 to the output
     //      registers, section 2's 6 clocks.
     wire [IDXW-1:0]          sec2f_idx;
@@ -323,11 +324,26 @@ module svf_tpt #(
     delay_line #(.WIDTH (72), .DELAY (10)) u_delay_sec2_states (
         .clk (clk), .d ({in_ic1eq2, in_ic2eq2}), .q ({sec1g_ic1eq2, sec1g_ic2eq2}));
 
+    // C's cells take their data from registers of their own, a clock after CB:
+    // cb_gR2 also feeds a multiplier, and cb_h is the reciprocal table's
+    // output register, so neither may feed a second block's pins (#238).
+    (* keep *) logic signed [35:0] coefficient_g, coefficient_gR2;
+    (* keep *) logic [17:0]        coefficient_h;
+    (* keep *) logic [1:0]         coefficient_mode;
+    (* keep *)
+    always_ff @(posedge clk) begin
+        coefficient_g    <= cb_g;
+        coefficient_gR2  <= cb_gR2;
+        coefficient_h    <= cb_h;
+        coefficient_mode <= cb_filter_mode;
+    end
     wire signed [35:0] sec2_g, sec2_gR2;
     wire [17:0]        sec2_h;
     wire [1:0]         sec2_filter_mode;
-    delay_line #(.WIDTH (36 + 36 + 18 + 2), .DELAY (7)) u_delay_coefficients (
-        .clk (clk), .d ({cb_g, cb_gR2, cb_h, cb_filter_mode}), .q ({sec2_g, sec2_gR2, sec2_h, sec2_filter_mode}));
+    delay_line #(.WIDTH (36 + 36 + 18 + 2), .DELAY (6)) u_delay_coefficients (
+        .clk (clk),
+        .d   ({coefficient_g, coefficient_gR2, coefficient_h, coefficient_mode}),
+        .q   ({sec2_g, sec2_gR2, sec2_h, sec2_filter_mode}));
 
     wire signed [35:0] sec2f_s1an, sec2f_s2an;
     wire signed [17:0] sec2f_y1;
