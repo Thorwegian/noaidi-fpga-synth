@@ -4,9 +4,11 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 The reference every build is judged against (issue #222; re-recorded for
-#304, 2026-10-25): `main` at `14f540b`, the CSP's second revision with its
-RC envelopes and the #176 release law, its own firmware and preset storage,
-playing the Galaxy preset (Factory bank program 1: a two-note arpeggio from
+#304 on 2026-10-25 and for #321 on 2026-10-28): `main` at `d03e915`, the
+CSP's second revision with its RC envelopes and the #176 release law, the
+48 kHz lab path through the half-band decimator (#320: flat to 20 kHz
+where the pair average it replaced was 2 dB down), its own firmware and
+preset storage, playing the Galaxy preset (Factory bank program 1: a two-note arpeggio from
 LFO 1 on the pitch, a tremolo from LFO 2 on the pulse width, both LFOs
 free-running) through `tools/lab/baseline_recording.py`, the MIDI over BLE
 (`--port 128:0`) — at 60 BPM, C5 … C6 as quarter notes, the C6 held a full
@@ -24,23 +26,23 @@ recorded to its end — from the S/PDIF output, 48 kHz, 16-bit, stereo.
 The first benchmark, `main@7c959b4` of 2026-10-17 (the synth before the
 CSP-as-processor work, the reference for the goal of sounding like before),
 stays on the GitHub pre-release `baseline-20261017` as
-`baseline_galaxy_14f540b.wav` and `.m4a`; its RC-less release fell faster,
+`baseline_galaxy_d03e915.wav` and `.m4a`; its RC-less release fell faster,
 so its tail no longer matches the instrument.
 
-- the recording: `baseline_galaxy_14f540b.mp3` (320 kbps) at
-  https://thj.no/synth-claude-uploads/, linked from #304; the WAV is kept on
+- the recording: `baseline_galaxy_d03e915.mp3` (320 kbps) at
+  https://thj.no/synth-claude-uploads/, linked from #321; the WAV is kept on
   the lab computer, out of the tree;
-- `baseline_galaxy_14f540b.essentia.txt` — `tools/lab/baseline_check.py`'s
+- `baseline_galaxy_d03e915.essentia.txt` — `tools/lab/baseline_check.py`'s
   table: per beat the level and the pitch clusters, the bar of silence,
   the triad's peaks, the release;
-- `baseline_galaxy_14f540b.essentia.json` — every measurement behind it:
+- `baseline_galaxy_d03e915.essentia.json` — every measurement behind it:
   per segment the level, the pitch clusters, the spectral centroid, the
   valley floor (the level between the harmonics, 300–8000 Hz, the test
-  for a gritty sound: −45 to −80 dB below the strongest line on this
+  for a gritty sound: −45 to −78 dB below the strongest line on this
   take), the expected notes' peaks and a single note's first sixteen
   partials (an exception in `.gitignore` keeps it in the tree, where
   `*.json` is otherwise the flow's output);
-- `baseline_galaxy_14f540b.envelope.csv` — the level envelope, dBFS every
+- `baseline_galaxy_d03e915.envelope.csv` — the level envelope, dBFS every
   50 ms, 29 s.
 
 Because the LFOs are free-running, a build is compared on the shape (the
@@ -54,11 +56,13 @@ one, half an octave on the centroid, a mean of 6 dB over the partials,
 held C6's partials. A take has to pass both the check and the comparison
 before anyone listens to it.
 
-**Choosing the take.** Five takes were recorded on 2026-10-25. Every
-segment's level stays within 1.7 dB across them, except the first note of
-the scale, which spans 3.1 dB: where the free-running LFOs stand when the
-first note starts decides it. The benchmark is the take whose first note
-sits on the five takes' median (take 3); each of the other four passes every
-row of the comparison against it, envelope correlation 0.980–0.992. A take
-at the edge of that spread would have made a ±3 dB tolerance fail on phase
-alone, so a re-recording picks its take the same way.
+**Choosing the take.** Five takes were recorded on 2026-10-28 through the
+half-band path. Every segment's level stays within 1.5 dB across them,
+except the first note of the scale, which spans 2.1 dB: where the
+free-running LFOs stand when the first note starts decides it. The
+benchmark is the take whose first note sits on the five takes' median
+(take 4). Three of the other four pass every row of the comparison
+against it (envelope correlation 0.980–0.994); the fifth misses one row by
+one point, the B5 pitch-class share at 32 % against the 33 % the check
+asks, the row Galaxy's pitch arpeggio makes marginal (#305). A re-recording
+picks its take the same way.

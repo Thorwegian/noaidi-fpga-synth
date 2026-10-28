@@ -2,8 +2,8 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 """Put a recording of the baseline sequence against the benchmark
-(tools/lab/benchmark/: main@14f540b, the CSP's second revision with its RC
-envelopes, playing the Galaxy preset), by shape and spectrum rather than sample by sample — the
+(tools/lab/benchmark/: main@d03e915, the CSP's second revision with its RC
+envelopes and the half-band 48 kHz path, playing the Galaxy preset), by shape and spectrum rather than sample by sample — the
 preset's LFOs are free-running, so no two takes line up.
 
 usage: benchmark_compare.py <recording.wav> [--benchmark DIR] [--plot PNG]
@@ -51,7 +51,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import baseline_check as check                    # noqa: E402
 
 BENCHMARK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark")
-BENCHMARK = "baseline_galaxy_14f540b"
+BENCHMARK = "baseline_galaxy_d03e915"
 ENVELOPE_FLOOR = -80.0
 LEVEL_TOLERANCE_SOUNDING = 3.0                    # dB, a note, the held C6, the triad
 LEVEL_TOLERANCE_QUIET = 6.0                       # dB, the lead-in, the silence bar, the release
