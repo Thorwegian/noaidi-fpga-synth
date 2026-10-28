@@ -60,17 +60,22 @@ module lab (
     dut_carry_chain #(.BITS (18))   u_carry_18  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[5]), .mismatch (mismatch[5]));
     dut_carry_chain #(.BITS (36))   u_carry_36  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[6]), .mismatch (mismatch[6]));
     dut_carry_chain #(.BITS (54))   u_carry_54  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[7]), .mismatch (mismatch[7]));
+    // a fixed delay in the shadow SRAM, its data out into logic or into a register first (#309):
+    // cheap enough to sit beside the CSP with the chains
+    dut_lutram      #(.LOGIC_AFTER (1'b1))  u_lutram_logic (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[8]), .mismatch (mismatch[8]));
+    dut_lutram      #(.LOGIC_AFTER (1'b0))  u_lutram_reg   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[9]), .mismatch (mismatch[9]));
+
     // the blocks and the nets the chains do not have: the DSP's multiply-add, a block RAM's data out
     // into logic, an adder in front of a block RAM's address pins, a register's fan-out — a build
     // of their own (lab_pkg.sv: LAB_BLOCKS), since their references do not fit beside the CSP
-    if (lab_pkg::DEVICES > 8) begin : g_blocks
-    dut_dsp         #(.PIPE (0))            u_dsp          (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[8]),  .mismatch (mismatch[8]));
-    dut_dsp         #(.PIPE (1))            u_dsp_piped    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[9]),  .mismatch (mismatch[9]));
-    dut_bsram       #(.LOGIC_AFTER (1'b1))  u_bsram_logic  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[10]), .mismatch (mismatch[10]));
-    dut_bsram       #(.LOGIC_AFTER (1'b0))  u_bsram_reg    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[11]), .mismatch (mismatch[11]));
-    dut_bsram_pins  #(.ADDER (1'b1))        u_pins_adder   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[12]), .mismatch (mismatch[12]));
-    dut_bsram_pins  #(.ADDER (1'b0))        u_pins_reg     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[13]), .mismatch (mismatch[13]));
-    dut_fanout      #(.FANOUT (64))         u_fanout_64    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[14]), .mismatch (mismatch[14]));
+    if (lab_pkg::DEVICES > 10) begin : g_blocks
+    dut_dsp         #(.PIPE (0))            u_dsp          (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[10]),  .mismatch (mismatch[10]));
+    dut_dsp         #(.PIPE (1))            u_dsp_piped    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[11]),  .mismatch (mismatch[11]));
+    dut_bsram       #(.LOGIC_AFTER (1'b1))  u_bsram_logic  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[12]), .mismatch (mismatch[12]));
+    dut_bsram       #(.LOGIC_AFTER (1'b0))  u_bsram_reg    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[13]), .mismatch (mismatch[13]));
+    dut_bsram_pins  #(.ADDER (1'b1))        u_pins_adder   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[14]), .mismatch (mismatch[14]));
+    dut_bsram_pins  #(.ADDER (1'b0))        u_pins_reg     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[15]), .mismatch (mismatch[15]));
+    dut_fanout      #(.FANOUT (64))         u_fanout_64    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[16]), .mismatch (mismatch[16]));
     end
 
     // ---- the counters: cycles, and each device's mismatches, saturating ----

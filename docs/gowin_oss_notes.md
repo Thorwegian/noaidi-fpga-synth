@@ -422,6 +422,19 @@ what feeds it; anything but a flop is a fault waiting for a seed.
   and DSP pins, long routes, fan-out — is, and the lab's next devices
   measure those. The graph: `docs/lab/lab_sweep_eb72fdb.png`
   (`tools/lab/lab_sweep_plot.py`).
+- **Measured 2026-10-28 (the lab, #309: fc18413, the CSP beside it).** A
+  fixed delay in the shadow SRAM, a 16-row circular buffer of nine
+  RAM16SDP4 (a 36-bit word read fifteen cycles after it was written,
+  `rtl/lab/dut_lutram.sv`), against the same word through fifteen
+  flip-flops: **clean to 133 MHz with its asynchronous data out straight
+  into an XOR and a 36-bit parity**, and clean with a register first. A
+  RAM16SDP4 delay therefore clears the 30 % margin with room, and is the
+  primitive for a pipeline's fixed delays, not a chain of flip-flops. The
+  same bitstream's chains: 10 levels miss from 105 MHz as before, and 8
+  levels from 115 MHz where eb72fdb's placement held to 133 — still above
+  the margin's 105.3, but a placement-dependent figure, not a fixed one.
+  The graph: `docs/lab/lab_sweep_fc18413.png` (`tools/lab/lab_sweep.py`
+  ran it).
 
 The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
 LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the

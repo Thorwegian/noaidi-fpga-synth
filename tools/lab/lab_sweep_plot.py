@@ -11,7 +11,7 @@ The input is the sweep's text, one line a clock:
 
 the differences of two reads of the lab's counters (rtl/lab/lab.sv: dword 0
 counts cycles, dwords 1 … DEVICES the devices' mismatches) some seconds
-apart; the dev box's sweep script prints it. A device with no miss over the
+apart; lab_sweep.py prints it. A device with no miss over the
 window is drawn hollow at one miss per the window's cycles: the rate it is
 known to be below, not a measurement of zero.
 
@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 # The devices in the lab's order (rtl/lab/lab.sv).
 DEVICE_NAMES = ["LUT ×2", "LUT ×4", "LUT ×6", "LUT ×8", "LUT ×10",
                 "carry 18", "carry 36", "carry 54",
+                "RAM16SDP4 → logic", "RAM16SDP4 → reg",
                 "DSP", "DSP piped", "BSRAM → logic", "BSRAM → reg",
                 "adder → BSRAM pins", "reg → BSRAM pins", "fan-out 64"]
 DESIGN_MHZ = 73.728
