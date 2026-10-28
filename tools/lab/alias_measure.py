@@ -8,8 +8,8 @@ a line at that frequency.
 The fundamental is measured (the strongest peak near the note's nominal
 frequency: the phase increment is quantised, so MIDI 127 plays 12541 Hz,
 not 12544, and at the 23rd harmonic that is 65 Hz; a line is matched
-within the bin plus that uncertainty times its harmonic number). Then a
-peak at F is
+within the bin plus that uncertainty times its harmonic number, over the
+first 64 harmonics). Then a peak at F is
 
   - a harmonic, k·f0;
   - the oscillator's own folding at 96 kHz: |m·96000 − k·f0| with m ≥ 1,
@@ -44,6 +44,7 @@ SAMPLE_RATE = 48000
 ENGINE_RATE = 96000
 PASS_RATE = 24000
 BIN_HZ = 0.75                          # the spectrum's bin; the measured f0 is this uncertain, times k
+HARMONICS = 64                         # a saw's 64th harmonic is 36 dB down: beyond, below what matters here
 
 
 def tolerance(k):
@@ -72,20 +73,20 @@ def measured_f0(freqs, levels, nominal):
 def explanations(frequency, f0):
     """Every process that puts a line within the tolerance of the frequency."""
     found = []
-    for k in range(1, 300):
+    for k in range(1, HARMONICS + 1):
         if abs(k * f0 - frequency) < tolerance(k):
             found.append("harmonic %d" % k)
     for m in range(1, 9):
-        for k in range(1, 300):
+        for k in range(1, HARMONICS + 1):
             if abs(abs(m * ENGINE_RATE - k * f0) - frequency) < tolerance(k):
                 found.append("oscillator: harmonic %d folded at %d x 96 kHz" % (k, m))
-    for k in range(1, 300):
+    for k in range(1, HARMONICS + 1):
         line = k * f0 % ENGINE_RATE
         line = ENGINE_RATE - line if line > ENGINE_RATE / 2 else line        # where the harmonic sits at 96 kHz
         if PASS_RATE < line < ENGINE_RATE / 2 and abs((SAMPLE_RATE - line) - frequency) < tolerance(k):
             found.append("second fold at 48 kHz: harmonic %d from %.0f Hz" % (k, line))
     for n in range(1, 17, 2):
-        for k in range(1, 300):
+        for k in range(1, HARMONICS + 1):
             if abs(abs(n * PASS_RATE - k * f0) - frequency) < tolerance(k):
                 found.append("24 kHz pass: n=%d k=%d" % (n, k))
     return found
