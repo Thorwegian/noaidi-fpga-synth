@@ -28,6 +28,7 @@ import matplotlib.pyplot as plt
 DEVICE_NAMES = ["LUT ×2", "LUT ×4", "LUT ×6", "LUT ×8", "LUT ×10",
                 "carry 18", "carry 36", "carry 54",
                 "RAM16SDP4 → logic", "RAM16SDP4 → reg",
+                "pin 2 tiles", "pin 5 tiles", "pin 10 tiles", "pin 20 tiles", "pin 40 tiles",
                 "DSP", "DSP piped", "BSRAM → logic", "BSRAM → reg",
                 "adder → BSRAM pins", "reg → BSRAM pins", "fan-out 64"]
 DESIGN_MHZ = 73.728

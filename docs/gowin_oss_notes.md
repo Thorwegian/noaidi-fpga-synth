@@ -441,6 +441,22 @@ what feeds it; anything but a flop is a fault waiting for a seed.
   the margin's 105.3, but a placement-dependent figure, not a fixed one.
   The graph: `docs/lab/lab_sweep_fc18413.png` (`tools/lab/lab_sweep.py`
   ran it).
+- **Measured 2026-10-28 (the lab, #319: a52de6a, the CSP beside it).** A
+  register's route into a shadow-SRAM cell's address pins, with a length
+  set by pinning the register (`rtl/lab/dut_pin_distance.sv`; a BEL
+  attribute on a flip-flop primitive is honoured, one on a RAM16SDP4 aborts
+  nextpnr, so the cell is placed by the tool and the routed length read
+  from the netlist): **7, 18, 25, 34 and 47 tiles, point to point, miss
+  nowhere to 133 MHz.** Length alone does not break an untimed route on
+  this chip. What killed the chip in #318 was one register on 18–23 cells'
+  pins: fan-out, with the length, is the next thing to measure. The same
+  bitstream's CSP fails its self-test at 73.728 MHz, reproducibly, with
+  117 MHz reported post-route: the same RTL as main, which works at 115;
+  its flop-to-block-pin routes are no longer and no wider than main's. A
+  placement that fails on a path none of these measures see: the
+  instruction memory's two slices whose routes grew (17 → 30 and 16 → 28
+  tiles) are the first suspects, the #244 class the second. The graph:
+  `docs/lab/lab_sweep_a52de6a.png`.
 
 The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
 LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the
