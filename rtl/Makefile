@@ -142,8 +142,23 @@ pack.fs: pnr.json
 		--min-mhz $(TIMING_MIN_MHZ) --warn-mhz $(TIMING_WARN_MHZ) || \
 		{ rm -f $@; echo '*** timing gate FAILED: bitstream deleted ***'; exit 1; }
 
-report: pnr.json
+report: pnr.json utilisation
 	python3 ../tools/netlist/synth_report.py pnr_report.json --paths 6
+
+# Where the resources go (#309): a second synthesis that keeps the
+# hierarchy (-noflatten; the bitstream's stays flat), counted per module by
+# tools/netlist/utilisation.py against the placed totals and the chip's
+# capacity in pnr.log. Fit a block to the primitives before writing it.
+# The lab's blocks are read but not instantiated without LAB_BUILD; their
+# memory-to-register warnings are dropped, every other message shown.
+obj_dir/utilisation.json: $(SRC) $(LUTS) Makefile
+	mkdir -p obj_dir
+	set -o pipefail; yosys -q -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -noflatten; tee -q -o $@.new stat -json -top $(TOP)' 2>&1 \
+	    | { grep -v '^Warning: Replacing memory .* lab/' || true; }
+	mv $@.new $@
+
+utilisation: obj_dir/utilisation.json
+	python3 ../tools/netlist/utilisation.py $< $(if $(wildcard pnr.log),--placed pnr.log,)
 
 timing-check: pnr.log
 	python3 ../tools/netlist/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)

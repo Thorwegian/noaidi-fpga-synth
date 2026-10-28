@@ -9,7 +9,10 @@ One rule decides the folder: what the thing needs.
   boot image, `tools.sh`. Nothing here is run by hand.
 - **`tools/netlist/`** — gates and inspection of the *routed* design.
   `pin_audit.py` and `check_timing.py` run inside `make pack.fs` (`rtl/Makefile`);
-  `synth_report.py` reads the place-and-route report; `pin_distance.py` and
+  `synth_report.py` reads the place-and-route report; `utilisation.py` counts
+  each module's primitives (flip-flops, LUT4, ALU, BSRAM, RAM16SDP4, DSP)
+  against the chip's capacity, and `make -C rtl report` runs both
+  (`make -C rtl utilisation` alone); `pin_distance.py` and
   `placement_check.py` are run by hand on a routed nextpnr JSON.
 - **`tools/esp_idf.sh`** — the firmware's toolchain, found without a wrapper:
   `tools/esp_idf.sh idf.py build` runs any `idf.py` command with ESP-IDF
