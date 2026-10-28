@@ -346,34 +346,32 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // 48 kHz S/PDIF — THE PRIMARY PATH: pin 27 feeds the coax and a red
-    // LED (68 Ω series) taped into the dev box's ICUSBAUDIO7D optical
-    // input, whose receiver follows this clock and keeps 16 bits of each
-    // channel (measured bit-perfect, #233). Two things can be on it:
+    // 48 kHz S/PDIF — the lab's path: pin 86 feeds the TOSLINK into the
+    // lab computer's ICUSBAUDIO7D optical input, whose receiver follows
+    // this clock and keeps 16 bits of each channel (measured bit-perfect,
+    // #233; the 96 kHz stream on pin 27 is the listening path, #307).
+    // Two things can be on it:
     //
-    //  - the audio, decimated by two with pair averaging: a 2-tap boxcar
-    //    whose null sits at 48 kHz. sample_tick48 coincides with a
-    //    sample_tick, so out_left/out_right are the very values the
-    //    96 kHz transmitter latches on the same edge: the held register
-    //    is the previous sample, the wire is the current one;
+    //  - the audio, decimated by two through the half-band FIR
+    //    (dsp/halfband_decimator.sv, #308): 63 taps, flat to 20 kHz,
+    //    78 dB down from 28 kHz, computed once a 48 kHz sample from the
+    //    96 kHz samples with one multiplier. The pair average that was
+    //    here let everything above 24 kHz fold back into the band;
     //  - the data stream (CTRL[3]): one 32-bit word a sample, the left
     //    channel's top 16 bits its high half and the right's its low
-    //    half, straight onto the transmitter — no averaging, or every
-    //    word would be mixed with its predecessor.
+    //    half, straight onto the transmitter, unfiltered.
     //----------------------------------------------------------------
-    logic signed [23:0] dec48_l_prev, dec48_r_prev;
-    always_ff @(posedge sysclk or negedge rst_n)
-        if (!rst_n) begin
-            dec48_l_prev <= '0;
-            dec48_r_prev <= '0;
-        end else if (sample_tick) begin
-            dec48_l_prev <= out_left;
-            dec48_r_prev <= out_right;
-        end
-
-    // A 24+24 sum needs 25 bits; halving brings it back into 24.
-    wire signed [23:0] dec48_l = 24'((25'(out_left)  + 25'(dec48_l_prev)) >>> 1);
-    wire signed [23:0] dec48_r = 24'((25'(out_right) + 25'(dec48_r_prev)) >>> 1);
+    logic signed [23:0] dec48_l, dec48_r;
+    halfband_decimator u_decimator48 (
+        .clk           (sysclk),
+        .rst_n         (rst_n),
+        .sample_tick   (sample_tick),
+        .sample_tick48 (sample_tick48),
+        .in_left       (out_left),
+        .in_right      (out_right),
+        .out_left      (dec48_l),
+        .out_right     (dec48_r)
+    );
 
     logic [31:0] stream_word;
     logic [15:0] stream_frames;

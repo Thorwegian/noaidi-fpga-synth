@@ -135,23 +135,18 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   Talks to the FPGA as SPI master (measured clean to 40 MHz).
 - **Tang Nano 20K**: a dumb-but-fast 256-partial synthesis engine. It has
   no concept of notes, MIDI or CCs.
-- **Audio outputs: the 48 kHz S/PDIF on pin 27
-  is THE PRIMARY AUDIO PATH** — one pin, two sinks: the coax (through
-  the consumer-level divider) to the Focusrite for human listening,
-  and a red LED taped into the dev box's ICUSBAUDIO7D optical input
-  for bit-perfect automated capture (LED-as-TOSLINK: tone −0.0 dBFS
-  on the exact FFT bin, tone-off capture bit-exact zeros).
-  **Everything inside the FPGA runs at 96 kHz**; only this output tap
-  decimates by 2, currently with pair averaging (a 2-tap boxcar,
-  null at 48 kHz). Its stopband is shallow, so 20–28 kHz content
-  folds down attenuated mainly by the 2 kHz output low-pass; a
-  windowed-sinc / Lanczos polyphase decimator is the acknowledged
-  upgrade, **gated on a listening verdict**. The 96 kHz S/PDIF is
-  parked on header pin 86, unwired — a future bit-perfect high-rate
-  instrument. I2S unchanged.
-
-## Clocking
-
+- **Audio outputs: two S/PDIF streams of one mix.** The 96 kHz stream on
+  pin 27, through the consumer-level divider to the Focusrite, is the
+  listening path; the 48 kHz stream on pin 86, a TOSLINK into the lab
+  computer's ICUSBAUDIO7D optical input, is the lab's bit-perfect capture
+  (tone −0.0 dBFS on the exact FFT bin, tone-off capture bit-exact zeros;
+  #233, #307). **Everything inside the FPGA runs at 96 kHz**; only the
+  48 kHz tap decimates by 2, through a 63-tap half-band FIR
+  (`rtl/dsp/halfband_decimator.sv`, #308): flat to 20 kHz, 78 dB down
+  from 28 kHz, computed serially with one multiplier and a 64-sample
+  history in the shadow SRAM. The pair average it replaced (a 2-tap
+  boxcar, 3 dB down at 24 kHz) let the upper partials fold back into
+  the band as inharmonic mirrors.
 - Sample rate **96 kHz**; SYSCLK **73.728 MHz = 768 × 96 kHz**, from
   the board's MS5351 CLK0 on FPGA package pin 10.
 - Per-board one-time setup: `pll_clk O0=73728K -s` (whole kHz only —

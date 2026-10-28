@@ -36,6 +36,8 @@ MOD = \
 	$(LAB) \
 	$(TOP).sv \
 	dsp/timebase.sv \
+	dsp/shadow_ram.sv \
+	dsp/halfband_decimator.sv \
 	dsp/osc_core.sv \
 	spi/spi_bus.sv \
 	spdif/spdif_tx.sv \
@@ -53,7 +55,8 @@ LUTS = \
 	dsp/att_lut.hex \
 	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
-	dsp/sine_lut.hex
+	dsp/sine_lut.hex \
+	dsp/halfband_lut.hex
 
 all: pack.fs
 
@@ -79,6 +82,8 @@ dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
 dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
+	python3 $<
+dsp/halfband_lut.hex: ../scripts/gen_halfband.py
 	python3 $<
 
 # Synthesis. pipefail matters: without it this recipe's status is tee's, so
@@ -320,6 +325,13 @@ obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv tb/tb_output_lpf.sv Makefile
 sim-output-lpf: obj_dir/tb_output_lpf/sim
 	$(call run_sim,$<,tb/sim-output-lpf.out)
 
+# The 48 kHz decimator (#308): the impulse response is the table at both parities, 1.5 kHz
+# passes within 0.02 dB, 30 kHz is 75 dB down, DC and full scale come through, both channels.
+obj_dir/tb_halfband/sim: dsp/shadow_ram.sv dsp/halfband_decimator.sv tb/tb_halfband.sv dsp/halfband_lut.hex Makefile
+	$(VERILATE) dsp/shadow_ram.sv dsp/halfband_decimator.sv tb/tb_halfband.sv
+sim-halfband: obj_dir/tb_halfband/sim
+	$(call run_sim,$<,tb/sim-halfband.out)
+
 # Log-domain limiter unit bench: transparency, proportional attack,
 # release, saturation.
 obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_lut.hex Makefile
@@ -329,12 +341,12 @@ sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
 SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
-          tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out
+          tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out tb/sim-halfband.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter
+sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \
