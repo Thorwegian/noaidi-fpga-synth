@@ -15,6 +15,8 @@
 # indexes them by tap number with a 6-bit counter
 # (rtl/dsp/halfband_decimator.sv). The quantised filter's own response is
 # printed: the passband ripple to 20 kHz and the stopband from 28 kHz.
+# tools/lab/spdif_capture.py takes the same taps from quantised_taps(), so
+# its model of the hardware needs no build product.
 from pathlib import Path
 import numpy as np
 from scipy import signal
@@ -24,24 +26,32 @@ FS = 96000.0
 BETA = 7.857                     # Kaiser: 80 dB
 FRACTION_BITS = 17
 
-taps = signal.firwin(TAPS, 0.5, window=("kaiser", BETA))   # cutoff fs/4 (Nyquist = 1)
-quantised = np.round(taps * (1 << FRACTION_BITS)).astype(int)
-assert quantised[TAPS // 2] == 1 << (FRACTION_BITS - 1), "the centre tap is 1/2"
-assert all(quantised[k] == 0 for k in range(1, TAPS, 2) if k != TAPS // 2), "every odd tap but the centre is zero"
-assert max(abs(quantised)) < 1 << 17, "Q1.17"
+def quantised_taps():
+    """The 64 table entries as integers, Q1.17: the 63 taps and a zero."""
+    taps = signal.firwin(TAPS, 0.5, window=("kaiser", BETA))   # cutoff fs/4 (Nyquist = 1)
+    quantised = np.round(taps * (1 << FRACTION_BITS)).astype(int)
+    assert quantised[TAPS // 2] == 1 << (FRACTION_BITS - 1), "the centre tap is 1/2"
+    assert all(quantised[k] == 0 for k in range(1, TAPS, 2) if k != TAPS // 2), "every odd tap but the centre is zero"
+    assert max(abs(quantised)) < 1 << 17, "Q1.17"
+    return [int(v) for v in quantised] + [0]
 
-response = quantised / (1 << FRACTION_BITS)
-freqs, h = signal.freqz(response, worN=8192, fs=FS)
-magnitude = 20 * np.log10(np.abs(h) + 1e-12)
-passband = magnitude[freqs <= 20000]
-stopband = magnitude[freqs >= 28000]
-print("half-band %d taps, %d non-zero: passband to 20 kHz %+.3f / %+.3f dB, stopband from 28 kHz %.1f dB, -6 dB at %.0f Hz"
-      % (TAPS, np.count_nonzero(quantised), passband.max(), passband.min(), stopband.max(),
-         freqs[np.argmin(np.abs(magnitude + 6.02))]))
 
-out = Path(__file__).resolve().parent.parent / "rtl" / "dsp" / "halfband_lut.hex"
-with out.open("w") as f:
-    for k in range(64):
-        value = int(quantised[k]) if k < TAPS else 0
-        f.write("%05x\n" % (value & 0x3FFFF))
-print("wrote", out)
+def main():
+    quantised = np.array(quantised_taps()[:TAPS])
+    response = quantised / (1 << FRACTION_BITS)
+    freqs, h = signal.freqz(response, worN=8192, fs=FS)
+    magnitude = 20 * np.log10(np.abs(h) + 1e-12)
+    passband = magnitude[freqs <= 20000]
+    stopband = magnitude[freqs >= 28000]
+    print("half-band %d taps, %d non-zero: passband to 20 kHz %+.3f / %+.3f dB, stopband from 28 kHz %.1f dB, -6 dB at %.0f Hz"
+          % (TAPS, np.count_nonzero(quantised), passband.max(), passband.min(), stopband.max(),
+             freqs[np.argmin(np.abs(magnitude + 6.02))]))
+    out = Path(__file__).resolve().parent.parent / "rtl" / "dsp" / "halfband_lut.hex"
+    with out.open("w") as f:
+        for value in quantised_taps():
+            f.write("%05x\n" % (value & 0x3FFFF))
+    print("wrote", out)
+
+
+if __name__ == "__main__":
+    main()
