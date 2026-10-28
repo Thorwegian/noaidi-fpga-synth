@@ -65,17 +65,32 @@ module lab (
     dut_lutram      #(.LOGIC_AFTER (1'b1))  u_lutram_logic (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[8]), .mismatch (mismatch[8]));
     dut_lutram      #(.LOGIC_AFTER (1'b0))  u_lutram_reg   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[9]), .mismatch (mismatch[9]));
 
+    // a block's address pins fed from a register a chosen distance away (#319): five shadow-SRAM
+    // cells on row Y31, each placed by the tool beside its pinned write registers, its read-row
+    // register pinned 2, 5, 10, 20 or 40 tiles from the cell's column; the untimed route from the
+    // one to the other is the path under test, its routed length read by pin_distance.py
+    dut_pin_distance #(.NEAR_X (17), .NEAR_Y (31), .DATA_X (16), .FAR_X (17), .FAR_Y (30))
+        u_pin_2  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[10]), .mismatch (mismatch[10]));
+    dut_pin_distance #(.NEAR_X (26), .NEAR_Y (31), .DATA_X (25), .FAR_X (23), .FAR_Y (30))
+        u_pin_5  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[11]), .mismatch (mismatch[11]));
+    dut_pin_distance #(.NEAR_X (28), .NEAR_Y (31), .DATA_X (30), .FAR_X (39), .FAR_Y (31))
+        u_pin_10 (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[12]), .mismatch (mismatch[12]));
+    dut_pin_distance #(.NEAR_X (31), .NEAR_Y (31), .DATA_X (33), .FAR_X (12), .FAR_Y (31))
+        u_pin_20 (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[13]), .mismatch (mismatch[13]));
+    dut_pin_distance #(.NEAR_X (35), .NEAR_Y (31), .DATA_X (37), .FAR_X (1), .FAR_Y (24))
+        u_pin_40 (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[14]), .mismatch (mismatch[14]));
+
     // the blocks and the nets the chains do not have: the DSP's multiply-add, a block RAM's data out
     // into logic, an adder in front of a block RAM's address pins, a register's fan-out — a build
     // of their own (lab_pkg.sv: LAB_BLOCKS), since their references do not fit beside the CSP
-    if (lab_pkg::DEVICES > 10) begin : g_blocks
-    dut_dsp         #(.PIPE (0))            u_dsp          (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[10]),  .mismatch (mismatch[10]));
-    dut_dsp         #(.PIPE (1))            u_dsp_piped    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[11]),  .mismatch (mismatch[11]));
-    dut_bsram       #(.LOGIC_AFTER (1'b1))  u_bsram_logic  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[12]), .mismatch (mismatch[12]));
-    dut_bsram       #(.LOGIC_AFTER (1'b0))  u_bsram_reg    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[13]), .mismatch (mismatch[13]));
-    dut_bsram_pins  #(.ADDER (1'b1))        u_pins_adder   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[14]), .mismatch (mismatch[14]));
-    dut_bsram_pins  #(.ADDER (1'b0))        u_pins_reg     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[15]), .mismatch (mismatch[15]));
-    dut_fanout      #(.FANOUT (64))         u_fanout_64    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[16]), .mismatch (mismatch[16]));
+    if (lab_pkg::DEVICES > 15) begin : g_blocks
+    dut_dsp         #(.PIPE (0))            u_dsp          (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[15]),  .mismatch (mismatch[15]));
+    dut_dsp         #(.PIPE (1))            u_dsp_piped    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[16]),  .mismatch (mismatch[16]));
+    dut_bsram       #(.LOGIC_AFTER (1'b1))  u_bsram_logic  (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[17]), .mismatch (mismatch[17]));
+    dut_bsram       #(.LOGIC_AFTER (1'b0))  u_bsram_reg    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[18]), .mismatch (mismatch[18]));
+    dut_bsram_pins  #(.ADDER (1'b1))        u_pins_adder   (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[19]), .mismatch (mismatch[19]));
+    dut_bsram_pins  #(.ADDER (1'b0))        u_pins_reg     (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[20]), .mismatch (mismatch[20]));
+    dut_fanout      #(.FANOUT (64))         u_fanout_64    (.clk (clk), .reset_n (reset_n), .stimulus (stimulus), .inject_fault (inject_fault[21]), .mismatch (mismatch[21]));
     end
 
     // ---- the counters: cycles, and each device's mismatches, saturating ----
