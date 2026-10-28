@@ -17,7 +17,7 @@ The known stream is the gateware's test tone until the data mode exists: a
 whose samples at 48 kHz repeat every 32 and whose values this script derives
 from `scripts/gen_sine_lut.py` and `rtl/dsp/osc_core.sv` with the same
 integer arithmetic, through the 48 kHz path's half-band decimator with its
-table (`rtl/dsp/halfband_lut.hex`). Which 96 kHz sample is the newest at a
+taps (from `scripts/gen_halfband.py`, the table's generator). Which 96 kHz sample is the newest at a
 48 kHz tick is either parity, so the tone has two possible phase sets;
 whichever matches is reported.
 
@@ -38,6 +38,7 @@ usage: spdif_capture.py tone   [--seconds N] [--device hw:1,0] [--port 16:0]
 With --wav the file is analysed instead of captured. --keep saves the capture.
 """
 import argparse
+import importlib.util
 import math
 import os
 import subprocess
@@ -73,11 +74,12 @@ def tone_sample(phase, lut):
 
 
 def halfband_taps():
-    """The decimator's 63 taps as rtl/dsp/halfband_lut.hex holds them, Q1.17 two's complement."""
+    """The decimator's 63 taps, Q1.17 two's complement, from the table's own generator (scripts/gen_halfband.py)."""
     here = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(here, "..", "..", "rtl", "dsp", "halfband_lut.hex")) as handle:
-        words = [int(line, 16) for line in handle if line.strip()]
-    return [word - (1 << 18) if word & (1 << 17) else word for word in words[:HALFBAND_TAPS]]
+    spec = importlib.util.spec_from_file_location("gen_halfband", os.path.join(here, "..", "..", "scripts", "gen_halfband.py"))
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    return generator.quantised_taps()[:HALFBAND_TAPS]
 
 
 def tone_sequences():
