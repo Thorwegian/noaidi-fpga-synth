@@ -16,8 +16,10 @@ The known stream is the gateware's test tone until the data mode exists: a
 1500 Hz sine from the oscillator's quarter-wave table, enabled by MIDI CC 119,
 whose samples at 48 kHz repeat every 32 and whose values this script derives
 from `scripts/gen_sine_lut.py` and `rtl/dsp/osc_core.sv` with the same
-integer arithmetic. The 48 kHz output takes every other 96 kHz sample, so the
-tone has two possible phase sets; whichever matches is reported.
+integer arithmetic, through the 48 kHz path's half-band decimator with its
+table (`rtl/dsp/halfband_lut.hex`). Which 96 kHz sample is the newest at a
+48 kHz tick is either parity, so the tone has two possible phase sets;
+whichever matches is reported.
 
 The standing check is the data stream (`rtl/spdif/spdif_stream.sv`, the
 memory map's "data stream"): frames of 64 words with a sync word, a
@@ -48,6 +50,7 @@ import numpy as np
 SAMPLE_RATE = 48000
 TONE_PERIOD = 32                 # samples at 48 kHz: phase step 2^19 of 2^24
 TONE_CC = 119
+HALFBAND_TAPS = 63               # rtl/dsp/halfband_decimator.sv
 LUT_ENTRIES = 256
 LUT_PEAK = (1 << 23) - 1
 
@@ -58,36 +61,49 @@ def sine_lut():
 
 
 def tone_sample(phase, lut):
-    """osc_core's sine for a 24-bit phase, as the 16 bits the S/PDIF word carries on top."""
+    """osc_core's sine for a 24-bit phase, as top.sv puts it on the mix: the
+    Q2.16 output's 16 bits with eight zero bits below (`{tone_q216[15:0], 8'b0}`)."""
     quadrant = (phase >> 22) & 3
     quarter_index = (phase >> 14) & 0xFF
     if quadrant & 1:
         quarter_index = 0xFF - quarter_index
     magnitude = lut[quarter_index]
     sine = -magnitude if quadrant & 2 else magnitude      # 24-bit two's complement
-    return sine >> 8                                      # arithmetic: Q0.24 → the 16-bit word
+    return (sine >> 8) << 8                               # arithmetic: the 16 bits the tone has, then the zeros
+
+
+def halfband_taps():
+    """The decimator's 63 taps as rtl/dsp/halfband_lut.hex holds them, Q1.17 two's complement."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(here, "..", "..", "rtl", "dsp", "halfband_lut.hex")) as handle:
+        words = [int(line, 16) for line in handle if line.strip()]
+    return [word - (1 << 18) if word & (1 << 17) else word for word in words[:HALFBAND_TAPS]]
 
 
 def tone_sequences():
     """The two candidate 32-sample sequences at 48 kHz.
 
-    The 48 kHz transmitter sends the average of the current and the previous
-    96 kHz sample (top.sv: a two-tap boxcar, `(current + previous) >>> 1` in
-    25 bits, back to 24), and the card keeps the top 16 bits. Which 96 kHz
-    sample is "current" at the 48 kHz tick is either parity, so both are
-    tried.
+    The 48 kHz transmitter sends the half-band decimator's output
+    (rtl/dsp/halfband_decimator.sv, #308): for each 48 kHz sample the 63 taps
+    over the top 18 bits of the 96 kHz samples back from the newest, rounded
+    half up to 24 bits and saturated, as the hardware does it; the card keeps
+    the top 16. Which 96 kHz sample is the newest at the 48 kHz tick is either
+    parity, so both are tried.
     """
     lut = sine_lut()
+    taps = halfband_taps()
     step_96k = 1 << 18
-    samples_96k = [tone_sample((n * step_96k) & 0xFFFFFF, lut) << 8 for n in range(2 * TONE_PERIOD)]
+    period_96k = 2 * TONE_PERIOD
+    samples_96k = [tone_sample((n * step_96k) & 0xFFFFFF, lut) for n in range(period_96k)]
     sequences = {}
-    for parity, name in ((0, "even current"), (1, "odd current")):
-        averaged = []
-        for k in range(TONE_PERIOD):
-            current = samples_96k[(2 * k + parity) % len(samples_96k)]
-            previous = samples_96k[(2 * k + parity - 1) % len(samples_96k)]
-            averaged.append(((current + previous) >> 1) >> 8)       # 24-bit average, then the top 16
-        sequences[name] = np.array(averaged, dtype=np.int64)
+    for parity, name in ((0, "even newest"), (1, "odd newest")):
+        filtered = []
+        for m in range(TONE_PERIOD):
+            acc = sum(taps[k] * (samples_96k[(2 * m + parity - k) % period_96k] >> 6) for k in range(HALFBAND_TAPS))
+            value = (acc + (1 << 10)) >> 11                          # Q1.35 -> Q0.24; Python's >> floors, as the RTL's >>>
+            value = max(-(1 << 23), min((1 << 23) - 1, value))
+            filtered.append(value >> 8)                               # the top 16 bits
+        sequences[name] = np.array(filtered, dtype=np.int64)
     return sequences
 
 

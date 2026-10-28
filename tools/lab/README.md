@@ -105,6 +105,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `zipper_take.py` | the control-stepping stimulus (#268): fast attack and release, resonant sweep, five notes, recorded over S/PDIF |
 | `zipper_compare.py` | two takes of that stimulus against each other: the energy and flatness above 10 kHz and in 4–10 kHz, the loudest high-band frame — step noise, if any |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
+| `alias_measure.py` | a held note's non-harmonic peaks on the 48 kHz path, each classified as a harmonic, the oscillator's 96 kHz folding, a 48 kHz product or a 24 kHz sideband (the CSP's pass); the probe is `init` at MIDI 120 (#308) |
 | `lab_sweep.py` | the clock sweep on a lab bitstream: each device's misses at each system clock, the clock restored after (#241, #309) |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
