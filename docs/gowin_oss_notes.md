@@ -137,7 +137,13 @@ and the DSP. Issue #230 carries the patch work (fork
   memory's address and data pins, a DSP's operands, must come from a
   register with nothing between. The LUT-RAM cells (`RAM16SDP4`) are
   treated the same: small arrays in the core are flip-flops
-  (`ram_style = "logic"`).
+  (`ram_style = "logic"`), and where LUT-RAM is used each cell has
+  address registers of its own. **Measured 2026-10-28 (#309):** the
+  filter's delays in 82 RAM16SDP4, one pair of pointer registers per
+  delay line, so each pointer bit fed the address pins of 18–23 cells:
+  the CSP ran no pass at all, at 73.728 MHz. The same RTL with the
+  delays as register chains ran; with a pointer pair per cell
+  (`rtl/dsp/delay_line.sv`) it ran and passed the acceptance.
 - **Bypass mode is the slow kind.** A block inferred from
   `q <= mem[addr]` reads asynchronously after the registered address; its
   clock-to-out plus any logic eats most of a 13.5 ns cycle. The pipeline

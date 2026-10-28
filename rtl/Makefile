@@ -27,7 +27,7 @@ PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
-AUDIO = dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
+AUDIO = dsp/partial_pipeline.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
 LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/dut_lutram.sv lab/lab.sv
 MOD = \
 	$(CSP) \
