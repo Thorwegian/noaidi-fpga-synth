@@ -105,6 +105,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `zipper_take.py` | the control-stepping stimulus (#268): fast attack and release, resonant sweep, five notes, recorded over S/PDIF |
 | `zipper_compare.py` | two takes of that stimulus against each other: the energy and flatness above 10 kHz and in 4–10 kHz, the loudest high-band frame — step noise, if any |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
+| `lab_sweep.py` | the clock sweep on a lab bitstream: each device's misses at each system clock, the clock restored after (#241, #309) |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
 | `publish_capture.sh` | encode a capture as MP3 into the repo's `public_html/` on the cloud box, served at `https://thj.no/synth-claude-uploads/` — the link for listening review on a phone (run it on the cloud box; copy a lab take over first) |

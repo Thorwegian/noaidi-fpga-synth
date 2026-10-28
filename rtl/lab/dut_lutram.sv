@@ -52,11 +52,15 @@ module dut_lutram #(
         for (int g = 0; g < GROUPS; g++) parity_level[g] = ^padded[g * 4 +: 4];
     endfunction
 
-    // the stimulus registered: the word written, and the word the read is XORed with
+    // the stimulus registered: the word written, and the word the read is XORed with. The
+    // stimulus is {lfsr64, lfsr32}, and lfsr32's taps reach bit 22 only, so its bits 23–31 are
+    // always zero (a lane the tool removes): the written word is lfsr64's low 36 bits, the mask
+    // lfsr64's top 28 and lfsr32's low 8, apart from each other.
+    localparam int LFSR32_W = 32;
     logic [WORD_W-1:0] write_word_q, mask_word_q, mask_word_d;
     always_ff @(posedge clk) begin
-        write_word_q <= stimulus[WORD_W-1:0];
-        mask_word_q  <= stimulus[lab_pkg::STIMULUS_W-1 -: WORD_W];
+        write_word_q <= stimulus[LFSR32_W +: WORD_W];
+        mask_word_q  <= {stimulus[lab_pkg::STIMULUS_W-1 -: WORD_W - 8], stimulus[7:0]};
         mask_word_d  <= mask_word_q;
     end
 

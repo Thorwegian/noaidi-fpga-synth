@@ -94,8 +94,8 @@ dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 # so the flag is the default again; `make WIDELUT=` builds without it.
 WIDELUT ?= -nowidelut
 # The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
-# `make pack.fs LAB_BUILD=1` builds the chains beside the CSP, `LAB_BUILD=1 LAB_BLOCKS=1` all
-# seventeen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
+# `make pack.fs LAB_BUILD=1` builds the chains and the shadow-SRAM pair beside the CSP,
+# `LAB_BUILD=1 LAB_BLOCKS=1` all seventeen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
 # (LAB above is the lab's file list.)
 LAB_BUILD ?=
 LAB_BLOCKS ?=
