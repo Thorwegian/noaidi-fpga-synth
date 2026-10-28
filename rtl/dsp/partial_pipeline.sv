@@ -55,6 +55,13 @@
 // State RAM is semi dual-port: the read address is issued with the
 // partial at F3, writeback happens about 25 cycles later — the read
 // and write addresses can never collide.
+//
+// Reset (#309): in the pipeline stages only the *_valid registers have
+// one. A stage's datapath register is meaningful only beside its valid
+// bit, so it is a plain flip-flop with no reset and no enable: a reset
+// there costs the reset net's fanout and keeps a fixed delay out of
+// memory, and buys nothing. The mix and limiter registers keep theirs:
+// they are state, and the limiter's gain must start defined.
 //--------------------------------------------------------------------
 `default_nettype none
 module partial_pipeline #(
@@ -205,15 +212,21 @@ module partial_pipeline #(
     logic [synth_pkg::POINTER_W-1:0] f2_pointer [synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS];
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            f1_valid <= 1'b0;  f1_idx <= '0;
-            f2_valid <= 1'b0;  f2_idx <= '0;
-            f3_valid <= 1'b0;  f3_idx <= '0;
-        end else begin
-            f1_valid <= partial_start;  f1_idx <= partial_index;
-            f2_valid <= f1_valid;       f2_idx <= f1_idx;
-            f3_valid <= f2_valid;       f3_idx <= f2_idx;
-        end
+        if (!rst_n) f1_valid <= 1'b0;
+        else        f1_valid <= partial_start;
+    end
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) f2_valid <= 1'b0;
+        else        f2_valid <= f1_valid;
+    end
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) f3_valid <= 1'b0;
+        else        f3_valid <= f2_valid;
+    end
+    always_ff @(posedge clk) begin
+        f1_idx <= partial_index;
+        f2_idx <= f1_idx;
+        f3_idx <= f2_idx;
     end
 
     // F1: the first six words. F2: the last four, with the pointers kept
@@ -283,13 +296,11 @@ module partial_pipeline #(
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s1_valid <= 1'b0;
-            s1_idx   <= '0;
-        end else begin
-            s1_valid <= f3_valid;
-            s1_idx   <= f3_idx;
-        end
+        if (!rst_n) s1_valid <= 1'b0;
+        else        s1_valid <= f3_valid;
+    end
+    always_ff @(posedge clk) begin
+        s1_idx   <= f3_idx;
     end
 
     //----------------------------------------------------------------
@@ -308,46 +319,29 @@ module partial_pipeline #(
     logic signed [35:0] s2_ic1eq1, s2_ic2eq1, s2_ic1eq2, s2_ic2eq2;
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s2_valid   <= 1'b0;
-            s2_idx   <= '0;
-            s2_pitch_sum <= '0;
-            s2_cutoff_sum <= '0;
-            s2_gain_voice <= '0;
-            s2_gain_left <= '0;
-            s2_gain_right <= '0;
-            s2_duty  <= '0;
-            s2_resonance <= '0;
-            s2_wave  <= '0;
-            s2_cascade  <= 1'b0;
-            s2_filter_mode <= '0;
-            s2_phase <= '0;
-            s2_ic1eq1 <= '0;
-            s2_ic2eq1 <= '0;
-            s2_ic1eq2 <= '0;
-            s2_ic2eq2 <= '0;
-        end else begin
-            s2_valid   <= s1_valid;
-            s2_idx   <= s1_idx;
-            s2_pitch_sum  <= {s1_pitch_voice[17], s1_pitch_voice}
-                           + {s1_pitch_channel[17], s1_pitch_channel};
-            s2_cutoff_sum <= {s1_cutoff_voice[17], s1_cutoff_voice}
-                           + {s1_cutoff_channel[17], s1_cutoff_channel};
-            s2_gain_voice <= s1_gain_voice;
-            s2_gain_left  <= s1_gain_left;
-            s2_gain_right <= s1_gain_right;
-            s2_duty  <= s1_duty;
-            s2_resonance <= s1_resonance;
-            // the mode word: [1:0] waveform, [2] cascade, [4:3] filter type
-            s2_wave  <= s1_mode[1:0];
-            s2_cascade  <= s1_mode[2];
-            s2_filter_mode <= s1_mode[4:3];
-            s2_phase <= s1_phase;
-            s2_ic1eq1 <= s1_ic1eq1;
-            s2_ic2eq1 <= s1_ic2eq1;
-            s2_ic1eq2 <= s1_ic1eq2;
-            s2_ic2eq2 <= s1_ic2eq2;
-        end
+        if (!rst_n) s2_valid <= 1'b0;
+        else        s2_valid <= s1_valid;
+    end
+    always_ff @(posedge clk) begin
+        s2_idx   <= s1_idx;
+        s2_pitch_sum  <= {s1_pitch_voice[17], s1_pitch_voice}
+                       + {s1_pitch_channel[17], s1_pitch_channel};
+        s2_cutoff_sum <= {s1_cutoff_voice[17], s1_cutoff_voice}
+                       + {s1_cutoff_channel[17], s1_cutoff_channel};
+        s2_gain_voice <= s1_gain_voice;
+        s2_gain_left  <= s1_gain_left;
+        s2_gain_right <= s1_gain_right;
+        s2_duty  <= s1_duty;
+        s2_resonance <= s1_resonance;
+        // the mode word: [1:0] waveform, [2] cascade, [4:3] filter type
+        s2_wave  <= s1_mode[1:0];
+        s2_cascade  <= s1_mode[2];
+        s2_filter_mode <= s1_mode[4:3];
+        s2_phase <= s1_phase;
+        s2_ic1eq1 <= s1_ic1eq1;
+        s2_ic2eq1 <= s1_ic2eq1;
+        s2_ic1eq2 <= s1_ic1eq2;
+        s2_ic2eq2 <= s1_ic2eq2;
     end
 
     //----------------------------------------------------------------
@@ -420,53 +414,31 @@ module partial_pipeline #(
     logic signed [35:0] s3_ic1eq1, s3_ic2eq1, s3_ic1eq2, s3_ic2eq2;
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s3_phase_inc_lut <= '0;
-            s3_svf_fc_lut     <= '0;
-            s3_q1_lut    <= '0;
-            s3_reso_oct  <= '0;
-            s3_valid   <= 1'b0;
-            s3_idx   <= '0;
-            s3_phase <= '0;
-            s3_pitch_oct <= '0;
-            s3_fc_oct    <= '0;
-            s3_wave  <= '0;
-            s3_duty  <= '0;
-            s3_gain_voice    <= '0;
-            s3_gain_mute     <= 1'b1;
-            s3_gain_left  <= '0;
-            s3_gain_right <= '0;
-            s3_cascade  <= 1'b0;
-            s3_filter_mode <= '0;
-            s3_reso_att <= 16'hffff;
-            s3_ic1eq1 <= '0;
-            s3_ic2eq1 <= '0;
-            s3_ic1eq2 <= '0;
-            s3_ic2eq2 <= '0;
-        end else begin
-            s3_phase_inc_lut <= phase_lut[eff_pitch[9:0]];
-            s3_svf_fc_lut     <= svf_fc_lut[eff_fc[9:0]];
-            s3_q1_lut    <= q1_lut[eff_reso[9:6]];
-            s3_reso_oct  <= eff_reso[13:10];
-            s3_valid   <= s2_valid;
-            s3_idx   <= s2_idx;
-            s3_phase <= s2_phase;
-            s3_pitch_oct <= eff_pitch[13:10];
-            s3_fc_oct    <= eff_fc[13:10];
-            s3_wave  <= s2_wave;
-            s3_duty  <= eff_duty;
-            s3_gain_voice    <= gain_unity_clamped;
-            s3_gain_mute     <= gain_mute;
-            s3_gain_left  <= s2_gain_left;
-            s3_gain_right <= s2_gain_right;
-            s3_cascade  <= s2_cascade;
-            s3_filter_mode <= s2_filter_mode;
-            s3_reso_att <= s2_cascade ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
-            s3_ic1eq1 <= s2_ic1eq1;
-            s3_ic2eq1 <= s2_ic2eq1;
-            s3_ic1eq2 <= s2_ic1eq2;
-            s3_ic2eq2 <= s2_ic2eq2;
-        end
+        if (!rst_n) s3_valid <= 1'b0;
+        else        s3_valid <= s2_valid;
+    end
+    always_ff @(posedge clk) begin
+        s3_phase_inc_lut <= phase_lut[eff_pitch[9:0]];
+        s3_svf_fc_lut     <= svf_fc_lut[eff_fc[9:0]];
+        s3_q1_lut    <= q1_lut[eff_reso[9:6]];
+        s3_reso_oct  <= eff_reso[13:10];
+        s3_idx   <= s2_idx;
+        s3_phase <= s2_phase;
+        s3_pitch_oct <= eff_pitch[13:10];
+        s3_fc_oct    <= eff_fc[13:10];
+        s3_wave  <= s2_wave;
+        s3_duty  <= eff_duty;
+        s3_gain_voice    <= gain_unity_clamped;
+        s3_gain_mute     <= gain_mute;
+        s3_gain_left  <= s2_gain_left;
+        s3_gain_right <= s2_gain_right;
+        s3_cascade  <= s2_cascade;
+        s3_filter_mode <= s2_filter_mode;
+        s3_reso_att <= s2_cascade ? reso_att_lut[eff_reso[13:8]] : 16'hffff;
+        s3_ic1eq1 <= s2_ic1eq1;
+        s3_ic2eq1 <= s2_ic2eq1;
+        s3_ic1eq2 <= s2_ic1eq2;
+        s3_ic2eq2 <= s2_ic2eq2;
     end
 
     // S3 combinational datapath
@@ -519,22 +491,18 @@ module partial_pipeline #(
     logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s3b_valid<=1'b0; s3b_idx<='0; s3b_att<='0;
-            s3b_k<='0; s3b_q1<='0; s3b_ic1eq1<='0; s3b_ic2eq1<='0;
-            s3b_ic1eq2<='0; s3b_ic2eq2<='0; s3b_cascade<=1'b0; s3b_filter_mode<='0;
-            s3b_phase<='0; s3b_gain_voice<='0; s3b_gain_left<='0; s3b_gain_right<='0;
-            s3b_duty<='0; s3b_wave<='0;
-        end else begin
-            s3b_valid<=s3_valid; s3b_idx<=s3_idx;
-            s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
-            s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
-            s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
-            s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
-            s3b_phase<=phase_next; s3b_gain_voice<=gain_decoded;
-            s3b_gain_left<=s3_gain_left; s3b_gain_right<=s3_gain_right;
-            s3b_duty<=s3_duty; s3b_wave<=s3_wave;
-        end
+        if (!rst_n) s3b_valid <= 1'b0;
+        else        s3b_valid <= s3_valid;
+    end
+    always_ff @(posedge clk) begin
+        s3b_idx<=s3_idx;
+        s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
+        s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
+        s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
+        s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
+        s3b_phase<=phase_next; s3b_gain_voice<=gain_decoded;
+        s3b_gain_left<=s3_gain_left; s3b_gain_right<=s3_gain_right;
+        s3b_duty<=s3_duty; s3b_wave<=s3_wave;
     end
 
     // Waveform generation stands alone in its own stage, driven by the
@@ -557,22 +525,19 @@ module partial_pipeline #(
     logic signed [23:0] s3c_phase;
     logic signed [35:0] s3c_gain_left, s3c_gain_right;   // voice × channel, Q8.28
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s3c_valid<=1'b0; s3c_idx<='0; s3c_osc<='0; s3c_att<='0;
-            s3c_k<='0; s3c_q1<='0;
-            s3c_ic1eq1<='0; s3c_ic2eq1<='0; s3c_ic1eq2<='0; s3c_ic2eq2<='0;
-            s3c_cascade<=1'b0; s3c_filter_mode<='0; s3c_phase<='0; s3c_gain_left<='0; s3c_gain_right<='0;
-        end else begin
-            s3c_valid<=s3b_valid; s3c_idx<=s3b_idx;
-            s3c_osc <= osc_sample; s3c_att <= s3b_att;
-            s3c_k<=s3b_k; s3c_q1<=s3b_q1;
-            s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
-            s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
-            s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
-            s3c_phase<=s3b_phase;
-            s3c_gain_left  <= s3b_gain_voice * s3b_gain_left;      // multiply only
-            s3c_gain_right <= s3b_gain_voice * s3b_gain_right;
-        end
+        if (!rst_n) s3c_valid <= 1'b0;
+        else        s3c_valid <= s3b_valid;
+    end
+    always_ff @(posedge clk) begin
+        s3c_idx<=s3b_idx;
+        s3c_osc <= osc_sample; s3c_att <= s3b_att;
+        s3c_k<=s3b_k; s3c_q1<=s3b_q1;
+        s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
+        s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
+        s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
+        s3c_phase<=s3b_phase;
+        s3c_gain_left  <= s3b_gain_voice * s3b_gain_left;      // multiply only
+        s3c_gain_right <= s3b_gain_voice * s3b_gain_right;
     end
 
     //----------------------------------------------------------------
@@ -604,21 +569,19 @@ module partial_pipeline #(
     logic signed [23:0] s3d_phase;
     logic signed [17:0] s3d_gain_left, s3d_gain_right;   // Q4.14, clamped
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s3d_valid<=1'b0; s3d_idx<='0; s3d_osc<='0; s3d_k<='0; s3d_q1<='0;
-            s3d_ic1eq1<='0; s3d_ic2eq1<='0; s3d_ic1eq2<='0; s3d_ic2eq2<='0;
-            s3d_cascade<=1'b0; s3d_filter_mode<='0; s3d_phase<='0; s3d_gain_left<='0; s3d_gain_right<='0;
-        end else begin
-            s3d_valid<=s3c_valid; s3d_idx<=s3c_idx;
-            s3d_osc <= 18'($signed(osc_mul >>> 16));
-            s3d_k<=s3c_k; s3d_q1<=s3c_q1;
-            s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
-            s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
-            s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
-            s3d_phase<=s3c_phase;
-            s3d_gain_left  <= gain_of(s3c_gain_left);
-            s3d_gain_right <= gain_of(s3c_gain_right);
-        end
+        if (!rst_n) s3d_valid <= 1'b0;
+        else        s3d_valid <= s3c_valid;
+    end
+    always_ff @(posedge clk) begin
+        s3d_idx<=s3c_idx;
+        s3d_osc <= 18'($signed(osc_mul >>> 16));
+        s3d_k<=s3c_k; s3d_q1<=s3c_q1;
+        s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
+        s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
+        s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
+        s3d_phase<=s3c_phase;
+        s3d_gain_left  <= gain_of(s3c_gain_left);
+        s3d_gain_right <= gain_of(s3c_gain_right);
     end
 
     //----------------------------------------------------------------
@@ -665,27 +628,18 @@ module partial_pipeline #(
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            s10_valid  <= 1'b0;
-            s10_idx  <= '0;
-            s10_outl <= '0;
-            s10_outr <= '0;
-            s10_phase <= '0;
-            s10_ic1eq1n <= '0;
-            s10_ic2eq1n <= '0;
-            s10_ic1eq2n <= '0;
-            s10_ic2eq2n <= '0;
-        end else begin
-            s10_valid  <= s9_valid;
-            s10_idx  <= s9_idx;
-            s10_outl <= 22'(prod_l >>> 14);
-            s10_outr <= 22'(prod_r >>> 14);
-            s10_phase <= s9_phase;
-            s10_ic1eq1n <= s9_ic1eq1n;
-            s10_ic2eq1n <= s9_ic2eq1n;
-            s10_ic1eq2n <= s9_ic1eq2n;
-            s10_ic2eq2n <= s9_ic2eq2n;
-        end
+        if (!rst_n) s10_valid <= 1'b0;
+        else        s10_valid <= s9_valid;
+    end
+    always_ff @(posedge clk) begin
+        s10_idx  <= s9_idx;
+        s10_outl <= 22'(prod_l >>> 14);
+        s10_outr <= 22'(prod_r >>> 14);
+        s10_phase <= s9_phase;
+        s10_ic1eq1n <= s9_ic1eq1n;
+        s10_ic2eq1n <= s9_ic2eq1n;
+        s10_ic1eq2n <= s9_ic1eq2n;
+        s10_ic2eq2n <= s9_ic2eq2n;
     end
 
     //----------------------------------------------------------------
