@@ -28,7 +28,7 @@ CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
 AUDIO = dsp/partial_pipeline.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
-LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/lab.sv
+LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/dut_lutram.sv lab/lab.sv
 MOD = \
 	$(CSP) \
 	$(SINK) \
@@ -95,7 +95,7 @@ dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
 WIDELUT ?= -nowidelut
 # The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
 # `make pack.fs LAB_BUILD=1` builds the chains beside the CSP, `LAB_BUILD=1 LAB_BLOCKS=1` all
-# fifteen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
+# seventeen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
 # (LAB above is the lab's file list.)
 LAB_BUILD ?=
 LAB_BLOCKS ?=
@@ -256,7 +256,7 @@ obj_dir/tb_partial_pipeline/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_
 sim-partial: obj_dir/tb_partial_pipeline/sim
 	$(call run_sim,$<,tb/sim-partial.out)
 
-# The lab: every device's reference agrees with it, and an injected fault is counted (all fifteen devices).
+# The lab: every device's reference agrees with it, and an injected fault is counted (all seventeen devices).
 obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
 	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
 

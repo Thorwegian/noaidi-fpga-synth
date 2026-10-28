@@ -11,7 +11,7 @@ package lab_pkg;
     // the CSP; the block and fan-out devices (their references are thousands of flip-flops) are
     // a build of their own: `make pack.fs LAB_BUILD=1 LAB_BLOCKS=1`. The bench runs all of them.
 `ifdef LAB_BLOCKS
-    parameter int DEVICES    = 15;
+    parameter int DEVICES    = 17;
 `else
     parameter int DEVICES    = 8;
 `endif

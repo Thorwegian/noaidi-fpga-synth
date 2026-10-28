@@ -28,7 +28,8 @@ import matplotlib.pyplot as plt
 DEVICE_NAMES = ["LUT ×2", "LUT ×4", "LUT ×6", "LUT ×8", "LUT ×10",
                 "carry 18", "carry 36", "carry 54",
                 "DSP", "DSP piped", "BSRAM → logic", "BSRAM → reg",
-                "adder → BSRAM pins", "reg → BSRAM pins", "fan-out 64"]
+                "adder → BSRAM pins", "reg → BSRAM pins", "fan-out 64",
+                "RAM16SDP4 → logic", "RAM16SDP4 → reg"]
 DESIGN_MHZ = 73.728
 MARGIN = 0.7                        # the breaking clock × 0.7 must clear the design's
 LINE = re.compile(r"^\s*([0-9.]+)\s*MHz:\s*([0-9 ]+)$")
