@@ -1,0 +1,16 @@
+[   INFO   ] MusicExtractorSVM: no classifier models were configured by default
+segment                      level      pitch       want  verdict
+lead-in                  -120.0 dB                     silence  ok    
+note 1 of the scale       -20.5 dB 71.99 (C5)               C5  ok    C5 69%  C4 26%  C6 3%
+note 2 of the scale       -21.9 dB 73.86 (D5)               D5  ok    D5 34%  D4 30%  C3 15%
+note 3 of the scale       -20.9 dB 75.87 (E5)               E5  ok    E5 37%  E4 29%  E6 16%
+note 4 of the scale       -21.6 dB 76.58 (F5)               F5  ok    F5 53%  F4 19%  E5 11%
+note 5 of the scale       -21.2 dB 67.02 (G4)               G5  ok    G4 44%  G5 28%  C4 12%
+note 6 of the scale       -22.2 dB 66.97 (G4)               A5  ok    A4 32%  G3 20%  A5 16%
+note 7 of the scale       -22.9 dB 70.95 (B4)               B5  ok    G3 32%  B4 24%  B5 20%
+C6 held, one bar          -23.4 dB 83.91 (C6)               C6  ok    C6 52%  C5 40%  C7 7%
+bar of silence            -33.5 dB                      < C6-6  ok    
+triad                     -19.6 dB 48.01 (C3)         C4 E4 G4  ok    C4 -1 dB  E4 -1 dB  G4 0 dB
+release +2 s              -28.5 dB                     < triad  ok    
+release +6 s              -59.9 dB                  < triad-20  ok    
+0 failure(s)
