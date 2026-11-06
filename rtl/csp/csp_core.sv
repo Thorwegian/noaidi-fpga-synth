@@ -999,7 +999,9 @@ module csp_core (
     // register, which costs the flags one cycle (STATE_LATENCY 5 -> 6). The write to DMEM still
     // takes E5's result.
     logic        e6_sets_flags, e6_sets_copy, e6_r_wide, e6_result_overflow;
-    logic [35:0] e6_result;
+    // the flags' raw material, four bits instead of the result: the zero of each 18-bit half and
+    // the sign at each width, so E5 keeps a three-level detect and E6 only picks
+    logic        e6_zero_low, e6_zero_high, e6_negative_wide, e6_negative_narrow;
     logic [ELEMENT_W-1:0]    e6_element;
     logic [GENERATION_W-1:0] e6_generation;
     wire e5_sets_flags = e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS && (!e5_vector || e5_final);
@@ -1009,14 +1011,17 @@ module csp_core (
         else          {e6_sets_flags, e6_sets_copy} <= {e5_sets_flags, e5_sets_copy};
     end
     always_ff @(posedge clk) begin
-        e6_result          <= result;
+        e6_zero_low        <= result[17:0]  == '0;
+        e6_zero_high       <= result[35:18] == '0;
+        e6_negative_wide   <= result[35];
+        e6_negative_narrow <= result[17];
         e6_result_overflow <= result_overflow;
         e6_r_wide          <= e5_r_wide;
         e6_element         <= e5_element;
         e6_generation      <= e5_generation;
     end
-    wire result_negative = e6_r_wide ? e6_result[35] : e6_result[17];
-    wire result_zero     = e6_r_wide ? e6_result == '0 : e6_result[17:0] == '0;
+    wire result_negative = e6_r_wide ? e6_negative_wide : e6_negative_narrow;
+    wire result_zero     = e6_r_wide ? e6_zero_high && e6_zero_low : e6_zero_low;
 
     // where the write goes: a register (not an input, which the program never writes), or a sink word
     wire e5_is_register = !e5_write_address[11];

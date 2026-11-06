@@ -74,7 +74,7 @@ flowchart LR
     E2 --> E3[E3: the DSP computes<br/>the shifter's coarse stage]
     E3 --> E4[E4: the product captured<br/>the shifter's fine stage]
     E4 --> E5[E5: reduced, saturated or wrapped<br/>the result registered]
-    E5 --> E6[E6: the flags from the registered result<br/>the element's copies written]
+    E5 --> E6[E6: the flags from the registered half-zeros and signs<br/>the element's copies written]
     E5 --> W[W: write pins are registers<br/>the write lands at the next edge]
 ```
 
@@ -97,7 +97,7 @@ cycles below count from there.
 | E3 | 6 | the multiply-add computes; the shifter's coarse stage | the block's own output register; the shifter |
 | E4 | 7 | the product is out of the block and captured; the shifter's fine stage | the product, captured |
 | E5 | 8 | the sum reduced to its destination, saturated or wrapped; DMEM's write enables, row and words decoded; the result registered for the flags | the write registers; the result, captured |
-| E6 | 9 | negative and zero taken from the registered result; the flags written, and inside a vector loop the element's copies (#330: the zero detect and the copies' element decode on the end of E5's saturation and result mux were the core's longest fabric path, 12 levels; a cycle here, `STATE_LATENCY` 5 to 6, costs the control program 2 cycles a pass) | the flags; the copies |
+| E6 | 9 | negative and zero picked from four bits registered at the end of E5 (the zero of each 18-bit half of the result, the sign at each width); the flags written, and inside a vector loop the element's copies (#330: the zero detect and the copies' element decode on the end of E5's saturation and result mux were the core's longest fabric path, 12 levels; a cycle here, `STATE_LATENCY` 5 to 6, costs the control program 2 cycles a pass) | the flags; the copies |
 | W | 9 | the write registers drive DMEM's write pins (or a sink word's); the write lands at the edge after | the registers on the pins |
 
 The numbers the assembler schedules by follow from the table. A result is
