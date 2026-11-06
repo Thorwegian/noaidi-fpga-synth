@@ -30,7 +30,6 @@ flowchart LR
   `make fw-monitor` hold it; `board.py`, `make fw-flash` and the storage
   targets need it. `lsof /dev/ttyACM0` says who has it. Detach a screen with
   Ctrl-A D; never `fuser -k` (it kills your own session).
-- Scratch, logs and results go under `~/.local/tmp/claude`, never `/tmp`.
 
 ## Talking to the console
 
