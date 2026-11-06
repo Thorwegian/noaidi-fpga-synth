@@ -19,8 +19,12 @@ The preset is chosen by a MIDI Program Change (the Factory bank: 0 Supersaw,
 1 Galaxy — app/storage/banks.toml); several programs, comma-separated, play
 the sequence once each in one recording, a Program Change before each walk
 (a listening test of the preset change itself); the MIDI goes out through `aseqsend` to
-the ALSA sequencer port the synth's USB MIDI interface has, the audio comes
-in through `arecord` from the ALSA capture device the S/PDIF receiver has.
+the ALSA sequencer port the synth's USB MIDI interface has (held open by a
+subscription for the run: the kernel opens a USB MIDI port's device only
+while some client is subscribed to it, and drops a direct event to an
+unsubscribed port without an error, so `aseqsend` alone plays nothing when
+nothing else happens to be connected), the audio comes in through `arecord`
+from the ALSA capture device the S/PDIF receiver has.
 The file is 48 kHz, 16-bit, stereo; the summary printed at the end gives the
 level of each note so that a recording can be checked without listening.
 
@@ -61,6 +65,20 @@ def main():
     def midi(*messages):
         for message in messages:
             subprocess.run(["aseqsend", "-p", args.port, message], check=True)
+
+    # Subscribe Midi Through to the port for the run (nothing flows through
+    # it): a kernel rawmidi port on the sequencer opens its device only while
+    # it has a subscriber, and `aseqsend`'s direct events to an unsubscribed
+    # port are dropped silently. A port already subscribed from elsewhere
+    # makes this a no-op with a complaint, which is fine.
+    subprocess.run(["aconnect", "14:0", args.port], capture_output=True)
+    try:
+        return walk_and_record(args, midi)
+    finally:
+        subprocess.run(["aconnect", "-d", "14:0", args.port], capture_output=True)
+
+
+def walk_and_record(args, midi):
 
     # Active Sensing every quarter second, as a keyboard sends it, so that
     # the synth's MIDI parser never sees the line as silent between notes.
