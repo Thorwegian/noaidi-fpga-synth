@@ -139,8 +139,11 @@ PLACER_BETA ?= 0.75
 
 # Place and route, with the report tools/netlist/synth_report.py reads: the
 # frequency per clock, the cell counts, the worst path per clock pair.
+# pipefail here too: without it a failed place-and-route (the router giving
+# up, the timing verdict) exits 0 through tee, and a script that trusts make
+# goes on with no pnr.json or a stale one.
 pnr.json: yosys.json
-	$(NEXTPNR) --json $< \
+	set -o pipefail; $(NEXTPNR) --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
