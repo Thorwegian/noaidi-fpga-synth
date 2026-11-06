@@ -122,13 +122,15 @@ not fetch them.
   ties off unused wires in the logic tiles, which the board needs at
   73.728 MHz, while its nextpnr cannot place the design
   (`docs/gowin_oss_notes.md`). The place-and-route itself runs on the
-  project's **nextpnr fork** ([Thorwegian/nextpnr](https://github.com/Thorwegian/nextpnr)),
+  project's **nextpnr fork** ([HermesOracle/nextpnr](https://github.com/HermesOracle/nextpnr)),
   pinned by commit in `tools/nextpnr.version` and built from source by the
   same `make tools` into `.tools/nextpnr` (`scripts/nextpnr.sh`; needs
   cmake, g++, Boost and Eigen3): it times the DSP cells, the block RAM's
   port B address and the LUT1..3 cells the suite's nextpnr leaves untimed,
   which is the difference between a report of 119 MHz on a bitstream the
-  chip runs to 82 and a report of 82 on one it runs to 110. Without the
+  chip runs to 82 and a report of 72 to 82 on one it runs to 110, and it
+  keeps a MULT18X18 out of a MULTALU36X18's DSP macro, the cause of the
+  seed-dependent router failures. Without the
   fork the gateware targets fall back to the suite's nextpnr (or set
   `NEXTPNR`). The simulations need
   Verilator 5 with `--timing` and a C++20 compiler (clang, or gcc 10+);

@@ -4,17 +4,21 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 #
-# The fork carries Gowin timing the suite's nextpnr lacks: arcs for the
-# DSP cells and the dual-port block RAM's port B address, and (with
+# The fork carries Gowin fixes the suite's nextpnr lacks: timing arcs for
+# the DSP cells and the dual-port block RAM's port B address, (with
 # upstream since 2026-10-16) arcs for LUT1..LUT3 cells, a third of the
-# LUTs of this design, which the pinned suite never timed. Measured on
-# main (d03e915), one netlist, one seed, the boot self-test per clock
+# LUTs of this design, which the pinned suite never timed, and the DSP
+# macro exclusion that stops a MULT18X18 sharing a MULTALU36X18's macro
+# (the "two arcs with same sink wire" router failures, #162, #183).
+# Measured on main (d03e915), one netlist, the boot self-test per clock
 # step: the suite reports 119 MHz and the chip fails from 86; this
-# nextpnr reports 82 and the chip holds to 110 (docs/gowin_oss_notes.md).
+# nextpnr reports 72-82 across seeds and the chip holds to 110
+# (docs/gowin_oss_notes.md). The fixes are offered upstream
+# (YosysHQ/nextpnr #1890, #1891, #1892).
 # The chip database is generated with the pack suite's Apicula, so the
 # placement and the bitstream generator agree on the chip.
 # The place-and-route result (rtl/Makefile: PLACER_BETA, SEED) belongs to
 # this commit: change it by editing commit= (the full SHA, which is what
 # git can fetch by) and running `make tools`.
-repository=Thorwegian/nextpnr
-commit=ddc708719e23ab41e3240c12b7d71a142f5ff1a6
+repository=HermesOracle/nextpnr
+commit=45a321efc21b6213d22cd6ac3c825ac361117b60

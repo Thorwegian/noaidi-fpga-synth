@@ -16,7 +16,9 @@ PACK_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite-pack)) $(
 # tools/nextpnr.version and built by `make tools` into .tools/nextpnr
 # (scripts/nextpnr.sh): it times the DSP cells, the block RAM's port B
 # address and the LUT1..3 cells the suite's nextpnr leaves untimed, so its
-# report is the one the gate reads. Without it, the suite's (NEXTPNR=...).
+# report is the one the gate reads, and its DSP packing does not let two
+# multipliers share a macro (the router failures of #162). Without it, the
+# suite's (NEXTPNR=...).
 NEXTPNR ?= $(firstword $(wildcard $(abspath ../.tools/nextpnr/bin/nextpnr-himbaechel)) nextpnr-himbaechel)
 export CAD_SUITE
 export PATH := $(CAD_SUITE)/bin:$(PATH)
