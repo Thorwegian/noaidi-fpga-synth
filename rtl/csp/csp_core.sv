@@ -992,8 +992,31 @@ module csp_core (
         endcase
     end
 
-    wire result_negative = e5_r_wide ? result[35] : result[17];
-    wire result_zero     = e5_r_wide ? result == '0 : result[17:0] == '0;
+    // ---- E6: the flags, a cycle after the result ---------------------------------------------------------
+    // The result's zero detect and the copies' element decode were the longest fabric path of the
+    // core (#330: e5_shift_value through the saturation and the result mux into result_zero and
+    // copy_zero, 12 levels); the result is registered here and the flags are taken from the
+    // register, which costs the flags one cycle (STATE_LATENCY 5 -> 6). The write to DMEM still
+    // takes E5's result.
+    logic        e6_sets_flags, e6_sets_copy, e6_r_wide, e6_result_overflow;
+    logic [35:0] e6_result;
+    logic [ELEMENT_W-1:0]    e6_element;
+    logic [GENERATION_W-1:0] e6_generation;
+    wire e5_sets_flags = e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS && (!e5_vector || e5_final);
+    wire e5_sets_copy  = e5_live && e5_vector && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS;
+    always_ff @(posedge clk or negedge reset_n) begin
+        if (!reset_n) {e6_sets_flags, e6_sets_copy} <= '0;
+        else          {e6_sets_flags, e6_sets_copy} <= {e5_sets_flags, e5_sets_copy};
+    end
+    always_ff @(posedge clk) begin
+        e6_result          <= result;
+        e6_result_overflow <= result_overflow;
+        e6_r_wide          <= e5_r_wide;
+        e6_element         <= e5_element;
+        e6_generation      <= e5_generation;
+    end
+    wire result_negative = e6_r_wide ? e6_result[35] : e6_result[17];
+    wire result_zero     = e6_r_wide ? e6_result == '0 : e6_result[17:0] == '0;
 
     // where the write goes: a register (not an input, which the program never writes), or a sink word
     wire e5_is_register = !e5_write_address[11];
@@ -1024,10 +1047,10 @@ module csp_core (
         end else begin
             // the flags: the registers', or inside a vector loop the element's copy, and the
             // registers' too for the last element, whose flags the rows after the loop see
-            if (e5_live && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS && (!e5_vector || e5_final)) begin
+            if (e6_sets_flags) begin
                 flag_negative <= result_negative;
                 flag_zero     <= result_zero;
-                flag_overflow <= result_overflow;
+                flag_overflow <= e6_result_overflow;
             end
             // a sink word: the row's, or the pass's (the firmware's, into both pages)
             sink_write_enable <= extra_write_enable ? extra_is_sink : (e5_writes_dest && e5_is_sink && e5_writes == csp_pkg::WRITES_WORD);
@@ -1035,17 +1058,16 @@ module csp_core (
         end
     end
 
-    wire e5_sets_copy = e5_live && e5_vector && e5_cond_kind == csp_pkg::CONDITION_KIND_FLAGS;
     always_ff @(posedge clk or negedge reset_n) begin
         if (!reset_n)          copy_valid <= '0;
-        else if (e5_sets_copy) copy_valid[e5_element] <= 1'b1;
+        else if (e6_sets_copy) copy_valid[e6_element] <= 1'b1;
     end
     always_ff @(posedge clk) begin
-        if (e5_sets_copy) begin
-            copy_negative[e5_element]   <= result_negative;
-            copy_zero[e5_element]       <= result_zero;
-            copy_overflow[e5_element]   <= result_overflow;
-            copy_generation[e5_element] <= e5_generation;
+        if (e6_sets_copy) begin
+            copy_negative[e6_element]   <= result_negative;
+            copy_zero[e6_element]       <= result_zero;
+            copy_overflow[e6_element]   <= e6_result_overflow;
+            copy_generation[e6_element] <= e6_generation;
         end
     end
 

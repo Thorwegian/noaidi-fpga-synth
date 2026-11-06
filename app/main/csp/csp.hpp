@@ -63,7 +63,7 @@ constexpr int rom_reserved          = 3; // row 0 (NOP) and the two
 
 constexpr int result_latency = 9;
 constexpr int state_latency =
-        5; // the flags for a SEL, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
+        6; // the flags for a SEL, 6 cycles after the CMP (5 until #330, when the flags moved to E6; 7 for SKIP, dropped #238)
 constexpr int index_latency =
         5; // the IDX sum is registered into E1b (#238); the assembler and the model follow this one constant
 constexpr int jump_penalty = 4;

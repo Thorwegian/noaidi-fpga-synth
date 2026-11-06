@@ -21,10 +21,10 @@
 namespace csp::selftest {
 
 // The pass's cycles, as scheduled.
-inline constexpr int cycles = 135;
+inline constexpr int cycles = 136;
 
 // The rows: 72 bits each, bits 71:36 then 35:0.
-inline constexpr std::array<Row, 135> rows{{
+inline constexpr std::array<Row, 136> rows{{
     {0x030062040ull, 0xc00000001ull},
     {0x030064040ull, 0xc00000001ull},
     {0x000000000ull, 0x000000000ull},
@@ -79,6 +79,7 @@ inline constexpr std::array<Row, 135> rows{{
     {0x000000000ull, 0x000000000ull},
     {0x05006c06aull, 0xc00030000ull},
     {0x090000c00ull, 0x000030000ull},
+    {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
     {0x000000000ull, 0x000000000ull},
