@@ -501,9 +501,13 @@ they pay:
    the routes, not the logic.
 8. **When a path will not fit, pipeline it and pay the latency in the
    model** (`app/main/csp/csp.hpp`: `result_latency`, `index_latency`),
-   never in a half-cycle trick: the budget is 1 472 cycles a pass and
-   every stage costs a cycle on every dependent instruction, which is
-   the price to weigh (issue #222, the A stage: 1 437 → 1 472 cycles).
+   never in a half-cycle trick: the budget is 3 008 issue cycles a pass
+   (a 24 kHz pass since #268; it was 1 472 at 48 kHz) and every stage
+   costs a cycle on every dependent instruction, which is the price to
+   weigh (issue #222, the A stage: 1 437 → 1 472 cycles at the old rate).
+   Measured 2026-11-06 on the control program as the builder schedules
+   it: 1 460 cycles; `result_latency` 9 → 10 makes it 1 500,
+   `state_latency` 5 → 6 makes it 1 462 (#330).
 
 ## 6. What the tool did not time at all: LUT1, LUT2 and LUT3 (2026-11-06)
 
