@@ -52,10 +52,13 @@ case ${1:-install} in
         git -C "$source_dir" fetch -q origin "$commit"
         git -C "$source_dir" checkout -q --detach "$commit"
         git -C "$source_dir" submodule update -q --init --recursive
-        # FindApycula wants a prefix whose bin/python has apycula: the pack suite's Python, under that name
+        # FindApycula wants a prefix whose bin/python has apycula: a wrapper that
+        # runs the pack suite's Python (a symlink will not do; tabbypy3 finds the
+        # suite relative to its own path)
         python_prefix=$root/.tools/nextpnr-python
         mkdir -p "$python_prefix/bin"
-        ln -sf "$pack_suite/bin/tabbypy3" "$python_prefix/bin/python"
+        printf '#!/bin/sh\nexec "%s/bin/tabbypy3" "$@"\n' "$pack_suite" > "$python_prefix/bin/python"
+        chmod +x "$python_prefix/bin/python"
         build_dir=$source_dir/build
         cmake -S "$source_dir" -B "$build_dir" \
             -DARCH=himbaechel -DHIMBAECHEL_UARCH=gowin -DHIMBAECHEL_GOWIN_DEVICES=GW2A-18C \
