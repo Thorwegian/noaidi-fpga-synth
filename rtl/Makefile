@@ -12,6 +12,12 @@
 # revision's design.
 CAD_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite)) /opt/oss-cad-suite)
 PACK_SUITE ?= $(firstword $(wildcard $(abspath ../.tools/oss-cad-suite-pack)) $(CAD_SUITE))
+# Place and route with the project's own nextpnr, the fork pinned by
+# tools/nextpnr.version and built by `make tools` into .tools/nextpnr
+# (scripts/nextpnr.sh): it times the DSP cells, the block RAM's port B
+# address and the LUT1..3 cells the suite's nextpnr leaves untimed, so its
+# report is the one the gate reads. Without it, the suite's (NEXTPNR=...).
+NEXTPNR ?= $(firstword $(wildcard $(abspath ../.tools/nextpnr/bin/nextpnr-himbaechel)) nextpnr-himbaechel)
 export CAD_SUITE
 export PATH := $(CAD_SUITE)/bin:$(PATH)
 
@@ -132,7 +138,7 @@ PLACER_BETA ?= 0.75
 # Place and route, with the report tools/netlist/synth_report.py reads: the
 # frequency per clock, the cell counts, the worst path per clock pair.
 pnr.json: yosys.json
-	nextpnr-himbaechel --json $< \
+	$(NEXTPNR) --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
@@ -174,7 +180,7 @@ SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
 	@mkdir -p obj_dir/sweep
 	@for s in $(SEEDS); do \
-		nextpnr-himbaechel --json yosys.json --write /dev/null \
+		$(NEXTPNR) --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
 			--vopt cst=constraints.cst --placer-heap-beta $(PLACER_BETA) \
 			--report obj_dir/sweep/report_$$s.json \

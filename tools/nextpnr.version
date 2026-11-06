@@ -1,0 +1,19 @@
+# The nextpnr the gateware is placed and routed with (scripts/nextpnr.sh):
+# the project's fork, built from source into .tools/nextpnr, used by
+# rtl/Makefile in preference to the OSS CAD Suite's.
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+# The fork carries Gowin timing the suite's nextpnr lacks: arcs for the
+# DSP cells and the dual-port block RAM's port B address, and (with
+# upstream since 2026-10-16) arcs for LUT1..LUT3 cells, a third of the
+# LUTs of this design, which the pinned suite never timed. Measured on
+# main (d03e915), one netlist, one seed, the boot self-test per clock
+# step: the suite reports 119 MHz and the chip fails from 86; this
+# nextpnr reports 82 and the chip holds to 110 (docs/gowin_oss_notes.md).
+# The chip database is generated with the pack suite's Apicula, so the
+# placement and the bitstream generator agree on the chip.
+# The place-and-route result (rtl/Makefile: PLACER_BETA, SEED) belongs to
+# this commit: change it by editing commit= and running `make tools`.
+repository=Thorwegian/nextpnr
+commit=ddc70871
