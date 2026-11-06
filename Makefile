@@ -46,7 +46,7 @@
 #                   targets use them when they are there)
 #   make tools-check   is there a newer release of either?
 #   make tools-upgrade pin the newest release for the flow; then make
-#                   tools, make sim-lockstep, and re-check SEED in
+#                   tools, make sim-lockstep, and re-check PLACER_BETA in
 #                   rtl/Makefile. tools-upgrade-pack does the same for the
 #                   bitstream generator; then the clock sweep on the board
 #   make all        gateware bitstream + firmware build
