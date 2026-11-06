@@ -27,13 +27,14 @@
 // write pointer. The sample_tick that is not a sample_tick48 (the odd one)
 // starts a run: for the left channel then the right, tap k reads the
 // history at (newest − k) and the coefficient at k, one tap a clock, and
-// a four-stage pipeline (the read's two clocks, the product, the sum)
+// a five-stage pipeline (the read's three clocks, the product, the sum)
 // accumulates; the last tap's sum is rounded, saturated and written to
 // that channel's output. The run takes about 130 clocks, and the 48 kHz
 // transmitter latches the outputs at the next sample_tick48, about 760
 // clocks later. A write and the run never meet on the history: the write
-// lands in the cells a clock after the tick, and the run starts the clock
-// after that, so its first read is of a row already written.
+// lands in the cells two clocks after the tick, and the run's first read
+// reaches the cells the clock after that, so it is of a row already
+// written.
 //
 // Pins (docs/gowin_oss_notes.md): the multiplier's operands are the
 // history's output register and the coefficient register, each feeding
@@ -118,9 +119,9 @@ module halfband_decimator (
     end
     assign read_address = newest - tap;
 
-    // ---- the pipeline: issue, the read's two clocks, the product, the sum ----
-    // a tap issued at clock c: its history word and coefficient are registered at c+3, its
-    // product at c+4, its sum at c+5; the flags below are the issue a clock, two, ... later
+    // ---- the pipeline: issue, the read's three clocks, the product, the sum ----
+    // a tap issued at clock c: its history word and coefficient are registered at c+4, its
+    // product at c+5, its sum at c+6; the flags below are the issue a clock, two, ... later
     logic [4:0] valid_pipe, last_pipe, channel_pipe;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -132,16 +133,17 @@ module halfband_decimator (
         end
     end
 
-    logic [TAP_W-1:0]            tap_q, tap_qq;   // the tap, one and two clocks behind, for the ROM
-    logic signed [COEF_W-1:0]    coef_q;          // the ROM's word, registered with the history's (c+3)
-    logic signed [OPERAND_W-1:0] sample_q;        // the channel's history word's top 18 bits (c+3)
-    logic signed [PRODUCT_W-1:0] product_q;       // c+4
-    logic signed [ACC_W-1:0]     accumulator;     // c+5
+    logic [TAP_W-1:0]            tap_q, tap_qq, tap_qqq; // the tap, one to three clocks behind, for the ROM
+    logic signed [COEF_W-1:0]    coef_q;          // the ROM's word, registered with the history's (c+4)
+    logic signed [OPERAND_W-1:0] sample_q;        // the channel's history word's top 18 bits (c+4)
+    logic signed [PRODUCT_W-1:0] product_q;       // c+5
+    logic signed [ACC_W-1:0]     accumulator;     // c+6
     always_ff @(posedge clk) begin
         tap_q     <= tap;
         tap_qq    <= tap_q;
-        coef_q    <= coef_rom[tap_qq];
-        sample_q  <= channel_pipe[1] ? history_right : history_left;
+        tap_qqq   <= tap_qq;
+        coef_q    <= coef_rom[tap_qqq];
+        sample_q  <= channel_pipe[2] ? history_right : history_left;
         product_q <= sample_q * coef_q;
     end
 
@@ -161,10 +163,10 @@ module halfband_decimator (
             accumulator <= '0;                    // state: a run's first sum starts from nothing
             out_left    <= '0;
             out_right   <= '0;
-        end else if (valid_pipe[3]) begin
-            accumulator <= last_pipe[3] ? '0 : sum;
-            if (last_pipe[3]) begin
-                if (channel_pipe[3]) out_right <= saturate(rounded);
+        end else if (valid_pipe[4]) begin
+            accumulator <= last_pipe[4] ? '0 : sum;
+            if (last_pipe[4]) begin
+                if (channel_pipe[4]) out_right <= saturate(rounded);
                 else                 out_left  <= saturate(rounded);
             end
         end
