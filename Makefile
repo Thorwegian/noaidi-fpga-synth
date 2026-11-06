@@ -106,10 +106,12 @@ flash:
 tools:
 	scripts/tools.sh install
 	scripts/tools.sh install pack
+	scripts/nextpnr.sh install
 
 tools-check:
 	scripts/tools.sh check
 	scripts/tools.sh check pack
+	scripts/nextpnr.sh check
 
 tools-upgrade:
 	scripts/tools.sh upgrade

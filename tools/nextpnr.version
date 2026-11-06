@@ -1,0 +1,24 @@
+# The nextpnr the gateware is placed and routed with (scripts/nextpnr.sh):
+# the project's fork, built from source into .tools/nextpnr, used by
+# rtl/Makefile in preference to the OSS CAD Suite's.
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+# The fork carries Gowin fixes the suite's nextpnr lacks: timing arcs for
+# the DSP cells and the dual-port block RAM's port B address, (with
+# upstream since 2026-10-16) arcs for LUT1..LUT3 cells, a third of the
+# LUTs of this design, which the pinned suite never timed, and the DSP
+# macro exclusion that stops a MULT18X18 sharing a MULTALU36X18's macro
+# (the "two arcs with same sink wire" router failures, #162, #183).
+# Measured on main (d03e915), one netlist, the boot self-test per clock
+# step: the suite reports 119 MHz and the chip fails from 86; this
+# nextpnr reports 72-82 across seeds and the chip holds to 110
+# (docs/gowin_oss_notes.md). The fixes are offered upstream
+# (YosysHQ/nextpnr #1890, #1891, #1892).
+# The chip database is generated with the pack suite's Apicula, so the
+# placement and the bitstream generator agree on the chip.
+# The place-and-route result (rtl/Makefile: PLACER_BETA, SEED) belongs to
+# this commit: change it by editing commit= (the full SHA, which is what
+# git can fetch by) and running `make tools`.
+repository=HermesOracle/nextpnr
+commit=45a321efc21b6213d22cd6ac3c825ac361117b60
