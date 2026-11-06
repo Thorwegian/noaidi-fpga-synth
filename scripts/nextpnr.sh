@@ -14,9 +14,12 @@
 #   nextpnr.sh path      print the directory holding bin/
 #
 # Needs: git, cmake, a C++17 compiler, Boost (program_options, filesystem,
-# thread, iostreams), Eigen3. Debian/Ubuntu: cmake g++ libboost-all-dev
-# libeigen3-dev. The Python integration is left out (no python3-dev needed);
-# the build only runs Python for the chip database.
+# thread, iostreams, python), Eigen3, the Python development headers.
+# Debian/Ubuntu: cmake g++ libboost-all-dev libeigen3-dev python3-dev.
+# The Python integration is built in (--pre-place, --pre-route, --post-route
+# and the other hooks, the instrument of the path walks and pin audits in
+# docs/gowin_oss_notes.md), against the system Python; the chip database is
+# generated with the pack suite's Python, which is a separate matter.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,9 +31,12 @@ pack_suite=$($root/scripts/tools.sh path pack)
 # shellcheck source=/dev/null
 . "$version_file"
 
+# the build is the pinned commit, and it has the Python hooks (an install
+# from before they were built in is rebuilt)
 installed() {
     [ -x "$install_dir/bin/nextpnr-himbaechel" ] && [ -r "$install_dir/COMMIT" ] &&
-        [ "$(cat "$install_dir/COMMIT")" = "$commit" ]
+        [ "$(cat "$install_dir/COMMIT")" = "$commit" ] &&
+        "$install_dir/bin/nextpnr-himbaechel" --help 2>&1 | grep -q -- --pre-route
 }
 
 case ${1:-install} in
@@ -62,7 +68,7 @@ case ${1:-install} in
         build_dir=$source_dir/build
         cmake -S "$source_dir" -B "$build_dir" \
             -DARCH=himbaechel -DHIMBAECHEL_UARCH=gowin -DHIMBAECHEL_GOWIN_DEVICES=GW2A-18C \
-            -DBUILD_PYTHON=OFF -DBUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_PYTHON=ON -DBUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Release \
             -DAPYCULA_INSTALL_PREFIX="$python_prefix" \
             -DCMAKE_INSTALL_PREFIX="$install_dir"
         cmake --build "$build_dir" -j "$(nproc)"

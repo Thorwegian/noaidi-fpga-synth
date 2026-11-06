@@ -125,7 +125,8 @@ not fetch them.
   project's **nextpnr fork** ([HermesOracle/nextpnr](https://github.com/HermesOracle/nextpnr)),
   pinned by commit in `tools/nextpnr.version` and built from source by the
   same `make tools` into `.tools/nextpnr` (`scripts/nextpnr.sh`; needs
-  cmake, g++, Boost and Eigen3): it times the DSP cells, the block RAM's
+  cmake, g++, Boost, Eigen3 and python3-dev, for the Python hooks the
+  path walks use): it times the DSP cells, the block RAM's
   port B address and the LUT1..3 cells the suite's nextpnr leaves untimed,
   which is the difference between a report of 119 MHz on a bitstream the
   chip runs to 82 and a report of 72 to 82 on one it runs to 110, and it
