@@ -72,9 +72,22 @@ ACTIVATE="$(find_activation)" || {
 }
 export IDF_ACTIVATE="$ACTIVATE"
 
+# export.sh names the Python venv after whichever python3 is first on the
+# PATH (idf6.0_py3.14_env for a 3.14), and fails when that is not the Python
+# the venv was installed with. A classic install has exactly one venv under
+# python_env; pin it, so an unrelated Python ahead on the PATH (an agent's
+# bundled interpreter, pyenv) does not break activation.
+if [ -z "${IDF_PYTHON_ENV_PATH:-}" ]; then
+    for venv in "${IDF_TOOLS_PATH:-${HOME}/.espressif}"/python_env/idf*_env; do
+        [ -x "${venv}/bin/python" ] && IDF_PYTHON_ENV_PATH="$venv"
+    done
+    [ -n "${IDF_PYTHON_ENV_PATH:-}" ] && export IDF_PYTHON_ENV_PATH
+fi
+
 case "$1" in
     --where)
         echo "ESP-IDF activated by ${ACTIVATE}"
+        [ -n "${IDF_PYTHON_ENV_PATH:-}" ] && echo "Python venv ${IDF_PYTHON_ENV_PATH}"
         exit 0 ;;
     --shell)
         exec bash -c '. "$IDF_ACTIVATE" >/dev/null || exit; exec "${SHELL:-bash}" -i' bash ;;
