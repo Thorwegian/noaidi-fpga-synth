@@ -25,8 +25,9 @@
 // 133 MHz (dut_lutram, LOGIC_AFTER). A write and a read of one row in the
 // same clock read the old word, as the primitive does.
 //
-// The copies are a tree, not a fan: the caller's pins reach one copy per
-// bank, and the bank's copy reaches its LANES cells. nextpnr's Gowin global
+// The address and enable copies are a tree, not a fan: the caller's pins
+// reach one copy per bank, and the bank's copy reaches its LANES cells; the
+// data is registered once for the memory (a bit reaches one cell a bank). nextpnr's Gowin global
 // router takes a net with 8 to 50 sinks of which more than 10 are far (over
 // four tiles) onto the long-wire segments and locks the ordinary wires of
 // the last hop to every sink; the main router may not rip those up, and a
@@ -80,17 +81,21 @@ module shadow_ram #(
 
     logic [BANKS*PADDED-1:0] bank_data;              // every bank's word, the select picks one
 
+    // the data a clock behind, in step with the banks' copies of the address: one register for
+    // the memory, since a data bit reaches one cell a bank (BANKS sinks), the tree is for the
+    // address and the enable
+    logic [PADDED-1:0] write_q;
+    always_ff @(posedge clk) write_q <= write_padded;
+
     for (genvar bank = 0; bank < BANKS; bank++) begin : g_bank
         // the bank's own copy of the caller's pins, the only thing its cells' copies read
         logic              bank_we_q;
         logic [ROW_W-1:0]  bank_wad_q, bank_rad_q;
-        logic [PADDED-1:0] bank_di_q;
         (* keep *)
         always_ff @(posedge clk) begin
             bank_we_q  <= write_enable && bank_of(write_address) == BANK_W'(bank);
             bank_wad_q <= write_address[ROW_W-1:0];
             bank_rad_q <= read_address[ROW_W-1:0];
-            bank_di_q  <= write_padded;
         end
         for (genvar lane = 0; lane < LANES; lane++) begin : g_lane
             // this cell's own pins
@@ -102,7 +107,7 @@ module shadow_ram #(
                 we_q  <= bank_we_q;
                 wad_q <= bank_wad_q;
                 rad_q <= bank_rad_q;
-                di_q  <= bank_di_q[lane * 4 +: 4];
+                di_q  <= write_q[lane * 4 +: 4];
             end
 `ifdef SYNTHESIS
             // the primitive itself, its pins on this cell's registers: inferred from an array,
