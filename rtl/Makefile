@@ -120,9 +120,10 @@ yosys.json: $(SRC) $(LUTS) Makefile
 	# ROMs' addresses, the sink area's read addresses, the pointer blocks' writes) are on the list.
 	python3 ../tools/netlist/pin_audit.py $@ || echo "PIN AUDIT: findings above (#238)"
 
-# The placement seed. Seeds are probes, not a lottery (docs/gowin_oss_notes.md):
-# every seed must meet the clock, and `make timing-sweep` says whether they do.
-SEED ?= 1
+# No placement seed: the build takes nextpnr's default. A design that only
+# meets the clock on a chosen seed is at the fabric's edge, and the answer is
+# the path (#330), not the seed. Seeds exist here only as a diagnostic of the
+# tool: `make timing-sweep` places on several and reports each.
 
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
 # "met the constraint on this placement, with this seed", and the silicon
@@ -150,7 +151,7 @@ pnr.json: yosys.json
 		--vopt cst=constraints.cst \
 		--placer-heap-beta $(PLACER_BETA) \
 		--report pnr_report.json \
-		--freq 73.728 --seed $(SEED) 2>&1 | tee pnr.log
+		--freq 73.728 2>&1 | tee pnr.log
 
 pack.fs: pnr.json
 	$(PACK_SUITE)/bin/gowin_pack -d GW2A-18C -o $@ $<
@@ -179,8 +180,9 @@ utilisation: obj_dir/utilisation.json
 timing-check: pnr.log
 	python3 ../tools/netlist/check_timing.py $< --min-mhz $(TIMING_WARN_MHZ)
 
-# The sweep: place and route on every seed in SEEDS, one report each
-# (obj_dir/sweep/report_<seed>.json), then the worst of each column.
+# The sweep, a diagnostic of the tool (the fork, tools/nextpnr.version): place
+# and route on every seed in SEEDS, one report each (obj_dir/sweep/report_<seed>.json),
+# then the worst of each column. The build itself takes no seed.
 SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
 	@mkdir -p obj_dir/sweep

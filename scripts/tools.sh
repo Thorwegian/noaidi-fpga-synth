@@ -16,7 +16,7 @@
 #   tools.sh upgrade [pack]   pin the newest release (version file and
 #                             checksums); then `make tools` fetches it.
 #                             Check the gateware afterwards: make
-#                             sim-lockstep, and the seed in rtl/Makefile
+#                             sim-lockstep, and PLACER_BETA in rtl/Makefile
 #   tools.sh path [pack]      print the directory holding bin/
 #
 # The second word names the pin: the suite (default) or the pack suite.
@@ -105,7 +105,7 @@ for asset in json.load(sys.stdin)["assets"]:
         sed -i -e "s/^tag=.*/tag=$newest/" \
                -e "s/^sha256_linux_x64=.*/sha256_linux_x64=$x64/" \
                -e "s/^sha256_linux_arm64=.*/sha256_linux_arm64=$arm64/" "$version_file"
-        echo "pinned $newest (was $tag). Now: make tools, make sim-lockstep, and re-check SEED/PLACER_BETA in rtl/Makefile."
+        echo "pinned $newest (was $tag). Now: make tools, make sim-lockstep, and re-check PLACER_BETA in rtl/Makefile."
         ;;
     *)
         echo "usage: tools.sh install|check|upgrade|path [suite|pack]" >&2
