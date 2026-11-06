@@ -14,6 +14,7 @@
 # The chip database is generated with the pack suite's Apicula, so the
 # placement and the bitstream generator agree on the chip.
 # The place-and-route result (rtl/Makefile: PLACER_BETA, SEED) belongs to
-# this commit: change it by editing commit= and running `make tools`.
+# this commit: change it by editing commit= (the full SHA, which is what
+# git can fetch by) and running `make tools`.
 repository=Thorwegian/nextpnr
-commit=ddc70871
+commit=ddc708719e23ab41e3240c12b7d71a142f5ff1a6
