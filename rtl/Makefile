@@ -126,10 +126,11 @@ yosys.json: $(SRC) $(LUTS) Makefile
 # tool: `make timing-sweep` places on several and reports each.
 
 # TIMING HEADROOM GATE. nextpnr reporting PASS is not enough: PASS means
-# "met the constraint on this placement, with this seed", and the silicon
-# takes about 0.82 of what the tool reports for the fabric. Both numbers
-# are RATCHETS: raise them as paths are fixed, never lower one to make a
-# build go green.
+# "met the constraint on this placement", and the model still has pip
+# classes at 0 ps (docs/gowin_oss_notes.md section 6), so the report is a
+# worst-corner figure with a known optimistic term. Both numbers are
+# RATCHETS: raise them as paths are fixed, never lower one to make a build
+# go green.
 TIMING_MIN_MHZ  ?= 2.0
 TIMING_WARN_MHZ ?= 8.0
 

@@ -35,7 +35,10 @@ goes to `AGENTS.md` only when it has one.
 | *Therefore every block pin needs a register beside it, placed by hand* | **observed** | the one bitstream that plays four of four has them; but the unconstrained design through the patched tool booted with the register image intact four of four with its pin registers 24–42 tiles away — the rule as a *necessity* is not proved |
 | Placing the DSP's 162 operand and product registers costs the fabric's placement | **measured** | nine seeds at 84.6–92.6 MHz against 104–107 for the same netlist without them; every pass faulty on the board (section 2) |
 | The sum's registers near the DSP go with sound | **hypothesis** | a correlation over ten bitstreams (the two that played had them nearest), and with the product register placed one seed played three boots of four, the other none — not isolated from the seed |
-| The report-to-silicon ratio is about 0.8 | **observed** | fitted on two builds (0.82 and 0.78); a rule of thumb, not a law |
+| ~~The report-to-silicon ratio is about 0.8~~ retired: it was the fraction of the paths the tool could see | **measured** | section 6: the pinned nextpnr timed no path through a LUT1, LUT2 or LUT3 cell (30 % of the LUTs); with them timed the report is on the safe side of the chip |
+| The pinned nextpnr times no path through a LUT1..3 cell; the project's nextpnr does, and its report tracks the chip | **measured** | the source (`gowin_arch_gen.py`, `arch.cc`), the detailed report of eb72fdb, and main d03e915 swept on the board under both tools: 119 reported / fails from 86, against 82 reported / fails from 115 (section 6.3) |
+| The seed-dependent router failures were a DSP packing bug, not congestion | **measured** | `MULTALU36X18` blocked half its macro; a `MULT18X18` placed in the other half shared its operand wires; fixed, 0 of 3 seeds to 3 of 3 on one netlist (section 6.4) |
+| #324's dead placement is not a timing fault | **measured** | 0 passes at every clock down to 50 MHz on two placements, main passing on the same board (section 6.5) |
 | A flop's `BEL` alone is overridden by the LUT–flop pairing; the LUT must be placed with it | **measured** | `placement_check.py`: 342 of 342 flops moved, 0 of 706 once the LUTs carried the attribute (section 2) |
 | A `BEL` on a DSP primitive breaks the packer | **measured** | nextpnr's "unbound cell … DUMMY_CELL" on two seeds (section 2) |
 | yosys merges identical registers across copies; `(* keep *)` on the `always_ff` keeps them | **measured** | `merge_test`, and the register file's three write registers found as one (section 1) |
@@ -498,7 +501,136 @@ they pay:
    the routes, not the logic.
 8. **When a path will not fit, pipeline it and pay the latency in the
    model** (`app/main/csp/csp.hpp`: `result_latency`, `index_latency`),
-   never in a half-cycle trick: the budget is 1 472 cycles a pass and
-   every stage costs a cycle on every dependent instruction, which is
-   the price to weigh (issue #222, the A stage: 1 437 → 1 472 cycles).
+   never in a half-cycle trick: the budget is 3 008 issue cycles a pass
+   (a 24 kHz pass since #268; it was 1 472 at 48 kHz) and every stage
+   costs a cycle on every dependent instruction, which is the price to
+   weigh (issue #222, the A stage: 1 437 → 1 472 cycles at the old rate).
+   Measured 2026-11-06 on the control program as the builder schedules
+   it: 1 460 cycles; `result_latency` 9 → 10 makes it 1 500,
+   `state_latency` 5 → 6 makes it 1 462 (#330).
 
+## 6. What the tool did not time at all: LUT1, LUT2 and LUT3 (2026-11-06)
+
+Found in the nextpnr source while answering the question of section 1 for
+good, and the reason for the figures of section 0 that say "about 0.8".
+
+### 6.1 The mechanism
+
+`create_timing_info()` in `himbaechel/uarch/gowin/gowin_arch_gen.py` of
+the pinned suite's nextpnr (0.10-108) made a timing variant for the
+`LUT4` cell type only. yosys's `synth_gowin` emits `LUT1`, `LUT2`, `LUT3`
+and `LUT4` as four cell types and the packer keeps them. A cell type with
+no variant gets `timing_index = -1` (`himbaechel/arch.cc`,
+`assignArchInfo`), and `get_port_timing_class_default()` then answers
+`TMG_IGNORE` for every port of that cell. The analyser neither launches
+from, propagates through, nor ends at such a cell: a path with a LUT1,
+LUT2 or LUT3 anywhere in it is not shortened in the report, it is absent
+from it, and from the weights the placer and the router work with.
+
+Upstream fixed the same thing independently on 2026-10-16 (YosysHQ/nextpnr
+`e677d5c3`, "gowin: add timing arcs for LUT1, LUT2 and LUT3"), three weeks
+before this was found here and after the suite release the project pins.
+
+### 6.2 How much of the design that was
+
+- The 2026-10-28 netlist (`4d79197`, #318): 9 531 LUT4, 2 819 LUT3,
+  1 084 LUT2, 115 LUT1 cells. The D input of 1 527 of 9 477 flip-flops is
+  driven straight from a LUT1..3, so the last hop into those registers was
+  untimed, and any LUT1..3 earlier in a cone cut the path there.
+- `eb72fdb`'s detailed timing report (`--detailed-timing-report`, rebuilt
+  on thj.no: 137.97 MHz, the lab box's figure, so the placement is the
+  same): every reported D endpoint is driven by a LUT4 or an ALU, none by a
+  LUT1..3. The lab's ten-level chain of #241, which the chip breaks at
+  105 MHz (9.5 ns), ends in a LUT3 and has no endpoint in the report at
+  all; the worst reported figure in that module is 1.7 ns on a reference
+  flop. Summing the chipdb's own arcs along its routed path by hand gives
+  8.4 ns against the chip's 9.5 to 10 ns: the arcs are about right, the
+  omission is the whole error.
+- `a52de6a` (#324, reported 117.67 MHz = 8.5 ns): 4 171 of 12 243 endpoints
+  have a LUT1..3 on their worst path by the same hand walk, and the worst
+  of them is 14.75 ns, over the 13.56 ns period, into the instruction
+  memory's `port_b_row` registers. (The hand walk overstates carry-chain
+  paths and is not a substitute for the tool; its use was to see what the
+  tool skipped.)
+
+### 6.3 Measured on the chip, one netlist, several tools
+
+main `d03e915`, the Oct 26 netlist, the boot self-test once per clock step
+(the coarse instrument of section 3: one boot, pass or fail), the clock
+restored to 73.728 after each sweep:
+
+| nextpnr | report, system clock | routes | chip, self-test |
+|---|---|---|---|
+| pinned suite 0.10-108, seed 1 | 119.35 MHz | yes | clean to 82, fails from 86 |
+| fork + LUT1..3 arcs only (`35b6856`), seed 1 | 87.95 | yes | clean to 110, fails from 115 |
+| fork merged with upstream `937c770c` (all arcs) | 81.80 | yes | clean to 110, fails from 115 |
+| the same, before the DSP fix of 6.4, seeds 1, 2, 3 | | 0 of 3 | |
+| the same with the DSP fix (`45a321ef`, the pinned tool), seeds 1, 2, 3 | 78.93 / 71.90 (FAIL) / 77.30 | 3 of 3 | |
+
+Two things follow. The placement is better, not only the report: the same
+RTL runs 30 MHz higher on the chip when the placer can see the paths. And
+the honest report sits on the safe side of the chip (82 reported, 110
+measured on this board) where the old one sat on the unsafe side (119
+reported, 82 measured). The remaining optimism is in the pip classes the
+model still has at 0 ps (`LUT_IN`, `DI`, `SEL`, `CIN`, `COUT`, the long
+wires `LW_TAP`/`LW_BRANCH`/`LW_SPAN`, `ISB`; `getWireDelay` returns 0), so
+a finished model would report lower than 82, never higher. Gowin's tables
+are worst-corner values (`group_to_timingvalue` takes the slowest of the
+four), and the self-test ceiling is one board on one day; neither 110 nor
+the pinned suite's figure is a number to design to.
+
+Thor's playtest at 73.728 MHz on the LUT-patched bitstream: clean under
+heavy playing. The acceptance's three legs (section 3) agree with the
+sweeps.
+
+The worst path the fork reports is the one Gowin EDA reported as worst on
+its own synthesis of the same RTL (#324): `e5_shift_value` through the
+result's carry chain into `result_negative`, `result_zero`, `copy_zero`;
+behind it the instruction memory's fetch, `rom_row` through the issue
+decode into `fetch_next`. The pinned suite never showed either. They are
+#330.
+
+### 6.4 The router failures were a packing bug
+
+The "Found two arcs with same sink wire" failures (#162, #183: a third of
+the seeds, every RTL change a new seed) came from the DSP packer. A unit's
+silicon is marked as taken by `DUMMY_CELL` children on the 9x9 and padd9
+bels it covers, and two units conflict only if they share one. `ALU54D`,
+which uses a whole macro, blocks all four 9x9s; `MULTALU36X18` and
+`MULTADDALU18X18`, which also use both 18x18 multipliers of their macro,
+blocked only the first half's two. The placer could therefore put a
+`MULT18X18` on the macro's second half, whose operand pins share wires
+with the macro-wide cell, and the router found two nets on one sink wire
+(seen placed: `X28Y36/MULTALU36X181`, the CSP's multiply-add, with
+`X28Y36/MULT18X1811`, the decimator's; B29 and B11 both on `X35Y36/A7`).
+Fixed in the project's nextpnr (`45a321ef`, table above: 0 of 3 seeds to
+3 of 3) and offered upstream (YosysHQ/nextpnr #1892). With it the build
+takes no seed (#333); `make timing-sweep` remains as a diagnostic of the
+tool.
+
+### 6.5 What this changes in the earlier sections
+
+- The "report-to-silicon ratio of about 0.8" (section 0, section 1's last
+  bullet) was the fraction of the design's paths the tool could see. It
+  is retired: the fork's report is to be read as a worst-corner figure
+  with a known optimistic term (the zero pip classes), not scaled.
+- Section 1's observations stand; its explanation widens. The block pins
+  were untimed (the port B address, the DSP) or timed small, and the
+  paths into them often ran through LUT1..3 cells, which cut them from
+  the report entirely. Rule 1 of section 5 (a register on every block pin)
+  remains good design; it is no longer the only defence.
+- Section 5's rule 7, read the report's path, is now the instrument: the
+  path it names is the real one.
+- #324 is not a timing fault. The a52de6a lab bitstream runs no pass at
+  any clock down to 50 MHz, on the pinned placement and on one by the
+  fixed tool alike, while main passes on the same board and firmware; a
+  margin runs out gradually with the clock (section 1's fine sweep), a
+  core dead at 50 MHz has a functional cause in that build.
+
+### 6.6 Where the tool is now
+
+`tools/nextpnr.version` pins HermesOracle/nextpnr (upstream `937c770c`
+with the port B address arcs, the DSP arcs and the DSP macro exclusion;
+the LUT1..3 arcs are upstream's), built by `make tools` into
+`.tools/nextpnr` on both machines (`scripts/nextpnr.sh`). The fork's own
+changes are offered upstream as YosysHQ/nextpnr #1890, #1891 and #1892.
