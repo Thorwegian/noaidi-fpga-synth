@@ -53,7 +53,8 @@ module tb_partial_pipeline;
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick),
         .slot_issue(slot_issue),
-        .slot(slot)
+        .slot(slot),
+        .cell_tick(), .sample_tick48(), .cell_tick48(), .sample_tick24()
     );
 
     //----------------------------------------------------------------
@@ -86,7 +87,8 @@ module tb_partial_pipeline;
         .pointer_write_data(pointer_write_data),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
-        .mix_left(mix_left), .mix_right(mix_right)
+        .mix_left(mix_left), .mix_right(mix_right),
+        .master_gain_q()
     );
 
     //----------------------------------------------------------------

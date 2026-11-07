@@ -54,7 +54,8 @@ module tb_spi_bus;
         .imem_load_enable(imem_load_enable), .imem_row(imem_row), .imem_upper(imem_upper),
         .imem_load_dword(imem_load_dword), .imem_read_dword(imem_read_dword),
         .rom_load_enable(rom_load_enable), .rom_row(rom_row), .rom_load_word(rom_load_word),
-        .rom_read_word(rom_read_word)
+        .rom_read_word(rom_read_word),
+        .pointer_write_enable(), .pointer_write_index(), .pointer_write_data()
     );
 
     // The blocks behind the regions, as the slave sees them: written at the

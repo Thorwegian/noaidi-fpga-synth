@@ -34,7 +34,8 @@ module tb_spdif48_block;
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick), .slot_issue(slot_issue),
         .sample_tick48(sample_tick48), .cell_tick48(cell_tick48),
-        .slot(slot)
+        .slot(slot),
+        .cell_tick(), .sample_tick24()
     );
 
     logic signed [23:0] al = 24'sh123456;
