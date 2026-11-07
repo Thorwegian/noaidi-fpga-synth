@@ -7,13 +7,17 @@ One rule decides the folder: what the thing needs.
 
 - **`scripts/`** — build-time generators, invoked by `make`: the LUTs, the
   boot image, `tools.sh`. Nothing here is run by hand.
-- **`tools/netlist/`** — gates and inspection of the *routed* design.
+- **`tools/netlist/`** — gates and inspection of the *routed* design, and
+  of what the simulation covers.
   `pin_audit.py` and `check_timing.py` run inside `make pack.fs` (`rtl/Makefile`);
   `synth_report.py` reads the place-and-route report; `utilisation.py` counts
   each module's primitives (flip-flops, LUT4, ALU, BSRAM, RAM16SDP4, DSP)
   against the chip's capacity, and `make -C rtl report` runs both
   (`make -C rtl utilisation` alone); `pin_distance.py` and
-  `placement_check.py` are run by hand on a routed nextpnr JSON.
+  `placement_check.py` are run by hand on a routed nextpnr JSON;
+  `bench_coverage.py` runs inside `make sim` (`make -C rtl sim-coverage`
+  alone) and fails on an RTL source no bench verilates, a file under
+  `rtl/tb` no target builds, or an output port no bench reads.
 - **`tools/esp_idf.sh`** — the firmware's toolchain, found without a wrapper:
   `tools/esp_idf.sh idf.py build` runs any `idf.py` command with ESP-IDF
   activated, `--where` says which ESP-IDF it found. The Makefile's `fw*`

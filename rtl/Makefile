@@ -374,8 +374,19 @@ sim-limiter: obj_dir/tb_limiter/sim
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
-SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
-              sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+BENCHES = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
+          sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+
+# What the benches cover, checked rather than assumed (#376): every RTL
+# source outside tb/ verilated by some bench, every file under tb/ built by
+# some target, every output of a module a bench instantiates read by some
+# bench. tools/netlist/bench_coverage.py takes the benches' commands from a
+# dry run and elaborates each bench once (--json-only, a second or two in
+# all); a gap is a FAIL line in its log, which the gate reads like a bench's.
+sim-coverage:
+	{ $(MAKE) -n -B $(BENCHES) | python3 ../tools/netlist/bench_coverage.py; } > tb/sim-coverage.out 2>&1 || true
+
+SIM_TARGETS = $(BENCHES) sim-coverage
 SIM_OUT = $(patsubst sim-%,tb/sim-%.out,$(SIM_TARGETS))
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
