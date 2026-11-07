@@ -37,8 +37,8 @@ int signed_word(uint64_t raw18) {
 // the logic unit, and through the logic unit twice), so at a raised clock the
 // count is the rate at which one of the two paths miscomputes, measured on the
 // chip, which no timing report can give for a path it does not time.
-// csp-raw reads dwords of the SPI map as they are: the lab's counters (#241),
-// the status words, anything the map lets the link read.
+// csp-raw reads dwords of the SPI map as they are: the status words, anything
+// the map lets the link read.
 int cmd_raw(int argc, char **argv) {
     if (argc < 2) {
         std::printf(

@@ -36,12 +36,10 @@ CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
 AUDIO = dsp/partial_pipeline.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
-LAB = lab/lab_pkg.sv lab/dut_lut_chain.sv lab/dut_carry_chain.sv lab/dut_dsp.sv lab/dut_bsram.sv lab/dut_bsram_pins.sv lab/dut_fanout.sv lab/dut_lutram.sv lab/lab.sv
 MOD = \
 	$(CSP) \
 	$(SINK) \
 	$(AUDIO) \
-	$(LAB) \
 	$(TOP).sv \
 	dsp/timebase.sv \
 	dsp/shadow_ram.sv \
@@ -106,15 +104,8 @@ dsp/halfband_lut.hex: ../scripts/gen_halfband.py
 # back (776 wide-LUT cells) the legaliser gave up at 72 % of the flip-flops,
 # so the flag is the default again; `make WIDELUT=` builds without it.
 WIDELUT ?= -nowidelut
-# The lab (#241) is a build of its own: its flip-flops do not fit beside the audio path.
-# `make pack.fs LAB_BUILD=1` builds the chains and the shadow-SRAM pair beside the CSP,
-# `LAB_BUILD=1 LAB_BLOCKS=1` all seventeen devices (rtl/lab/lab_pkg.sv); without LAB_BUILD the lab's region reads zero.
-# (LAB above is the lab's file list.)
-LAB_BUILD ?=
-LAB_BLOCKS ?=
-LAB_DEFINES = $(if $(LAB_BUILD),-DLAB,) $(if $(LAB_BLOCKS),-DLAB_BLOCKS,)
 yosys.json: $(SRC) $(LUTS) Makefile
-	set -o pipefail; yosys -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
+	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
 	# every block's pins from a flip-flop of their own, none shared: the untimed routes (#238).
 	# The verdict is printed; the build goes on while the partial pipeline's own pins (its LUT
 	# ROMs' addresses, the sink area's read addresses, the pointer blocks' writes) are on the list.
@@ -167,12 +158,9 @@ report: pnr.json utilisation
 # hierarchy (-noflatten; the bitstream's stays flat), counted per module by
 # tools/netlist/utilisation.py against the placed totals and the chip's
 # capacity in pnr.log. Fit a block to the primitives before writing it.
-# The lab's blocks are read but not instantiated without LAB_BUILD; their
-# memory-to-register warnings are dropped, every other message shown.
 obj_dir/utilisation.json: $(SRC) $(LUTS) Makefile
 	mkdir -p obj_dir
-	set -o pipefail; yosys -q -p 'read_verilog -sv $(LAB_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -noflatten; tee -q -o $@.new stat -json -top $(TOP)' 2>&1 \
-	    | { grep -v '^Warning: Replacing memory .* lab/' || true; }
+	set -o pipefail; yosys -q -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -noflatten; tee -q -o $@.new stat -json -top $(TOP)'
 	mv $@.new $@
 
 utilisation: obj_dir/utilisation.json
@@ -290,13 +278,6 @@ obj_dir/tb_partial_pipeline/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_
 sim-partial: obj_dir/tb_partial_pipeline/sim
 	$(call run_sim,$<,tb/sim-partial.out)
 
-# The lab: every device's reference agrees with it, and an injected fault is counted (all seventeen devices).
-obj_dir/tb_lab/sim: $(PKG) $(LAB) tb/tb_lab.sv Makefile
-	$(VERILATE) -DLAB_BLOCKS $(PKG) $(LAB) tb/tb_lab.sv
-
-sim-lab: obj_dir/tb_lab/sim
-	$(call run_sim,$<,tb/sim-lab.out)
-
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
 
@@ -354,13 +335,13 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-lab.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
+SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
           tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out tb/sim-halfband.out
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-lab sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \

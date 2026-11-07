@@ -6,7 +6,7 @@ has a CLI on the board's second serial port (/dev/ttyUSB1) whose
 `pll_clk O0=<kHz>K` reprograms the clock generator the FPGA runs on, at once.
 The design's clock is 73.728 MHz, and every measurement at another clock ends
 by restoring it (docs/gowin_oss_notes.md section 3): `chip_check.py --khz`
-and the lab sweep do so themselves.
+does so itself.
 
 usage: board_clock.py KHZ [--port /dev/ttyUSB1]
        board_clock.py --command "<BL616 CLI line>" [--port /dev/ttyUSB1]

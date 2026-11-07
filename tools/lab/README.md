@@ -105,8 +105,6 @@ Board, acceptance and measurement (`tools/lab/`):
 | `zipper_compare.py` | two takes of that stimulus against each other: the energy and flatness above 10 kHz and in 4–10 kHz, the loudest high-band frame — step noise, if any |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
 | `alias_measure.py` | a held note's non-harmonic peaks on the 48 kHz path, each classified as a harmonic, the oscillator's 96 kHz folding, a 48 kHz product or a 24 kHz sideband (the CSP's pass); the probe is `init` at MIDI 120 (#308) |
-| `lab_sweep.py` | the clock sweep on a lab bitstream: each device's misses at each system clock, the clock restored after (#241, #309) |
-| `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `placement_sweep.sh` | `make timing-sweep` on the lab box's four cores: ships `rtl/yosys.json` from the cloud box, places `SEEDS` there `JOBS` at a time on the lab checkout's pinned nextpnr, brings the logs and reports back to `rtl/obj_dir/sweep/` (#343) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
 | `encode_capture.sh` | encode a capture as a 320 kbps MP3 next to it, to send over chat (listening review on a phone) |
