@@ -1,6 +1,6 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
-![The prototype: a Tang Nano 20K and an ESP32-C3 Super Mini on perfboard, two DIN MIDI inputs through optocouplers, audio out on optical](https://thj.no/synth/images/prototype-board.jpg)
+![A 3D render of the circuit board: sockets for the Tang Nano 20K and an ESP32-S3 module, two DIN MIDI inputs, an I2S DAC module, RCA and USB-C](https://thj.no/synth/images/pcb-iso.jpg)
 
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
@@ -47,7 +47,9 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   design: [docs/design.md](docs/design.md).
 - **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-C3
   Super Mini with 4 MB of flash. The firmware's partition table
-  (`app/partitions.csv`) assumes the 4 MB.
+  (`app/partitions.csv`) assumes the 4 MB. The circuit board that
+  carries them (the render above, in progress) is its own repository:
+  [Thorwegian/noaidi-fpga-synth-kicad](https://github.com/Thorwegian/noaidi-fpga-synth-kicad).
 
 ## Console
 
