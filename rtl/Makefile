@@ -339,13 +339,18 @@ obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
 
-SIM_OUT = tb/sim-bus.out tb/sim-fifo.out tb/sim-fifo-random.out tb/sim-memories.out tb/sim-csp-cosim.out tb/sim-sink.out tb/sim-stream.out tb/sim-spdif.out tb/sim-spdif48.out \
-          tb/sim-pulse-dc.out tb/sim-output-lpf.out tb/sim-limiter.out tb/sim-halfband.out
+# The benches `make sim` runs, one list: each `sim-<name>` target writes
+# tb/sim-<name>.out through run_sim, and the gate's log list is derived
+# from the same names, so a bench cannot be run without being read (#381:
+# sim-partial was in `sim` for weeks with its log in nobody's grep).
+SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-stream sim-spdif sim-spdif48 \
+              sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+SIM_OUT = $(patsubst sim-%,tb/sim-%.out,$(SIM_TARGETS))
 
 # Each bench logs to its own file so `make -j4 sim` can run them in
 # parallel; `sim` prints the logs in a fixed order afterwards. A bench that
 # FAILS must fail the build: one grep covers all.
-sim: sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-stream sim-spdif sim-spdif48 sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+sim: $(SIM_TARGETS)
 	@cat $(SIM_OUT)
 	@if grep -qE 'FAILURE|^FAIL|TIMEOUT' $(SIM_OUT); then \
 	    echo '*** sim gate FAILED: a bench reported FAILURE (see above) ***'; \
