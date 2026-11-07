@@ -109,7 +109,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
 | `placement_sweep.sh` | `make timing-sweep` on the lab box's four cores: ships `rtl/yosys.json` from the cloud box, places `SEEDS` there `JOBS` at a time on the lab checkout's pinned nextpnr, brings the logs and reports back to `rtl/obj_dir/sweep/` (#343) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
-| `publish_capture.sh` | encode a capture as MP3 into the repo's `public_html/` on the cloud box, served at `https://thj.no/synth-claude-uploads/` — the link for listening review on a phone (run it on the cloud box; copy a lab take over first) |
+| `encode_capture.sh` | encode a capture as a 320 kbps MP3 next to it, to send over chat (listening review on a phone) |
 
 The netlist gates and inspections (`pin_audit`, `check_timing`,
 `synth_report`, `pin_distance`, `placement_check`) are not lab tools and live
