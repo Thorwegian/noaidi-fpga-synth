@@ -302,6 +302,8 @@ module top (
     osc_core u_tone_osc (
         .phase_next (tone_phase),      // advanced above, not here
         .duty       (24'sd0),
+        .pulse_hi   (25'sd8388607),
+        .pulse_lo   (-25'sd8388608),
         .wave       (2'd3),            // sine (quarter-wave LUT)
         .sample_out (tone_q216)
     );

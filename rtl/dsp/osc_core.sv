@@ -24,6 +24,8 @@
 module osc_core (
     input  logic signed [23:0] phase_next, // advanced phase (Q0.24)
     input  logic signed [23:0] duty,       // PWM duty cycle (Q0.24, signed)
+    input  logic signed [24:0] pulse_hi,   // 2^23-1 - duty, by the caller a stage earlier
+    input  logic signed [24:0] pulse_lo,   // -2^23  - duty, likewise
     input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
 
     output logic signed [17:0] sample_out  // Q2.16
@@ -57,22 +59,28 @@ module osc_core (
     // At duty 0 the correction subtracts nothing, so a square is bit-identical
     // to before.
     //
+    // The two possible results depend on duty alone, so the CALLER subtracts
+    // them a stage earlier (pulse_hi, pulse_lo) and the comparator only
+    // selects: the compare's LUT tree no longer feeds a 25-bit carry chain,
+    // which was this stage's critical path (7 LUT levels then 7 carry cells).
+    //
     // 25 bits because a corrected narrow pulse reaches ~2^24. After the >>> 8
     // below that is at most ±2^16, and Q2.16 spans ±2.0 against a nominal
     // oscillator's ±0.5, so it fits without a clamp — and no clamp is added on
     // purpose, since one here would mask a width error instead of showing it.
     //----------------------------------------------------------------
     logic signed [24:0] pulse;
-    assign pulse = ((phase_next < duty) ? 25'sd8388607 : -25'sd8388608)
-                 - 25'(duty);
+    assign pulse = (phase_next < duty) ? pulse_hi : pulse_lo;
 
     //----------------------------------------------------------------
-    // Triangle: fold sawtooth at midpoint (phase = 2^23)
+    // Triangle: fold sawtooth at midpoint (phase = 2^23). Modulo 2^24,
+    //   (p << 1) - 2^23                 ==  (p << 1) ^ 2^23
+    //   2^23-1 - ((p - 2^23) << 1)      == ~(p << 1) ^ 2^23
+    // so the fold is bitwise: no carry chain, same bits as the subtracts.
     //----------------------------------------------------------------
     logic signed [23:0] triangle;
-    assign triangle = (phase_next < 24'h800000)
-        ? (phase_next << 1) - 24'h800000
-        : 24'h7FFFFF - ((phase_next - 24'h800000) << 1);
+    assign triangle = (phase_next[23] ? ~(phase_next << 1) : (phase_next << 1))
+                    ^ 24'h800000;
 
     //----------------------------------------------------------------
     // Sine: true sine from a quarter-wave LUT. One quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
