@@ -73,7 +73,7 @@ saved /Presets/User/Pads/Arctic Ice.toml
 ```
 
 The status bar's right end is the master limiter's meter: a gap in the
-bar grows leftwards by one column per 1.5 dB of gain reduction, twenty
+bar grows leftwards by one column per 0.375 dB of gain reduction, twenty
 readings a second (`DIAG_LIMITER`, [memory_map.md](docs/memory_map.md)),
 over the text if the limiter is working that hard.
 

@@ -211,12 +211,12 @@ constexpr bool log_lfo_probe = false;
 constexpr bool hold_after_boot = false;
 
 // The limiter meter: the master limiter's reduction, DIAG_LIMITER[18:11] in
-// codes of 0.375 dB, on the console's status bar as one column per four
-// codes (1.5 dB). The level is 26 bits and the threshold code 192, so the
-// reduction never passes 223 codes: 56 columns at the very most. Twenty
-// readings a second, one dword each, at the lowest priority there is: the
-// engine's worst wait for the bus is this one frame (the lock is a mutex,
-// which inherits priority). A reading the bus refused shows as 0.
+// codes of 0.375 dB, on the console's status bar as one column per code.
+// The level is 26 bits and the threshold code 192, so the reduction never
+// passes 223 codes (83.6 dB): past an 80-column bar, which it may overrun.
+// Twenty readings a second, one dword each, at the lowest priority there
+// is: the engine's worst wait for the bus is this one frame (the lock is a
+// mutex, which inherits priority). A reading the bus refused shows as 0.
 constexpr int meter_period_ms = 50;
 
 void meter_task(void *) {
@@ -227,7 +227,7 @@ void meter_task(void *) {
         const fpga_map::dword_t word =
                 spi_link::read_one(fpga_map::diag_limiter);
         xSemaphoreGive(lock);
-        const int columns = static_cast<int>((word >> 11) & 0xFF) >> 2;
+        const int columns = static_cast<int>((word >> 11) & 0xFF);
         if (columns != shown) {
             shown = columns;
             console_set_meter(columns);

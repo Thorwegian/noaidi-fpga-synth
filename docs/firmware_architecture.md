@@ -146,7 +146,7 @@ them. `cli`, `cli_banks` and `cli_system` register the commands:
 files, presets, banks, and system state. Commands run in the console
 task. The status bar's right end is a meter the engine link feeds
 (`engine_meter`, priority 1, one `DIAG_LIMITER` read every 50 ms): one
-column per 1.5 dB of the master limiter's gain reduction.
+column per 0.375 dB of the master limiter's gain reduction.
 
 ## Sequencers / arpeggiators
 
