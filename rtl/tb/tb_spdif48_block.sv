@@ -11,6 +11,8 @@
 //
 //   1. sample_tick48 always coincides with a cell_tick48 (alignment
 //      by construction — checked every frame, not assumed)
+//   1b. sample_tick24, the CSP's pass start (#379): on every other
+//      sample_tick48 starting with the first, never off one
 //   2. exactly 128 cells of 12 sysclk per 1536-sysclk sample period
 //      (the frame decode collapses if this drifts)
 //   3. biphase-mark cells, even parity, M/W/B preambles — identical
@@ -28,14 +30,15 @@ module tb_spdif48_block;
     always #5 clk = ~clk;    // ratios are all internal; absolute rate is moot
 
     logic       sample_tick, slot_issue;
-    logic       sample_tick48, cell_tick48;
+    logic       sample_tick48, cell_tick48, sample_tick24;
     logic [9:0] slot;
     timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick), .slot_issue(slot_issue),
         .sample_tick48(sample_tick48), .cell_tick48(cell_tick48),
+        .sample_tick24(sample_tick24),
         .slot(slot),
-        .cell_tick(), .sample_tick24()
+        .cell_tick()
     );
 
     logic signed [23:0] al = 24'sh123456;
@@ -161,11 +164,14 @@ module tb_spdif48_block;
     // ONLY by sample_tick48 (see the write-collision note in
     // tb_spdif_block.sv — same discipline here).
     reg do_check = 0;
+    integer ticks48 = 0, ticks24 = 0;
     always @(posedge clk) begin
         if (!rst_n) begin
             ci       <= 0;
             started  <= 0;
             do_check <= 0;
+            ticks48  <= 0;
+            ticks24  <= 0;
         end else begin
             // alignment check (point 1): the 48 kHz frame boundary must
             // sit on the 48 kHz cell grid, every single frame
@@ -173,6 +179,20 @@ module tb_spdif48_block;
                 $display("FAIL: sample_tick48 without cell_tick48 (slot %0d)",
                          slot);
                 errors = errors + 1;
+            end
+            // point 1b: the 24 kHz tick is every other 48 kHz tick, the
+            // first after reset included, and never on its own
+            if (sample_tick24 && !sample_tick48) begin
+                $display("FAIL: sample_tick24 without sample_tick48 (slot %0d)", slot);
+                errors = errors + 1;
+            end
+            if (sample_tick48) begin
+                if (sample_tick24 !== (ticks48 % 2 == 0)) begin
+                    $display("FAIL: sample_tick24 = %0d on 48 kHz tick %0d", sample_tick24, ticks48);
+                    errors = errors + 1;
+                end
+                ticks48 <= ticks48 + 1;
+                if (sample_tick24) ticks24 <= ticks24 + 1;
             end
             if (sample_tick48) begin
                 started <= 1;
@@ -202,6 +222,11 @@ module tb_spdif48_block;
         $display("");
         $display("%0d frames decoded across %0d full blocks (48 kHz)",
                  NFRAMES, NFRAMES/192);
+        $display("%0d 24 kHz ticks over %0d 48 kHz ticks", ticks24, ticks48);
+        if (ticks24 != (ticks48 + 1) / 2) begin
+            $display("FAIL: sample_tick24 count");
+            errors = errors + 1;
+        end
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
         $finish;

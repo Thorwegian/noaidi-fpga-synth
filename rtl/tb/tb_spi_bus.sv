@@ -11,9 +11,10 @@
 // address; the status dwords reading their inputs and ignoring writes;
 // out-of-window drop and zero-read (no aliasing); the door's strobe with
 // its dword; IMEM's and the ROM's loads and read-backs through models that
-// answer a clock after the row, as the blocks do; the read suite again at
-// a 40 MHz-class SCLK. Every strobe is sampled on the sclk edge it must
-// be valid on, as its consumers do.
+// answer a clock after the row, as the blocks do; a partial's pointers,
+// three a dword and the entry whole on the fourth, write-only; the read
+// suite again at a 40 MHz-class SCLK. Every strobe is sampled on the sclk
+// edge it must be valid on, as its consumers do.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -43,6 +44,9 @@ module tb_spi_bus;
     wire [csp_pkg::ROM_W-1:0]         rom_load_word;
     logic [SPI_DWORD_W-1:0]  imem_read_dword;
     logic [csp_pkg::ROM_W-1:0] rom_read_word;
+    wire                         pointer_write_enable;
+    wire [7:0]                   pointer_write_index;
+    wire [POINTER_ENTRY_W-1:0]   pointer_write_data;
 
     spi_bus #(.ID_NONET(ID)) dut (
         .sclk(sclk), .cs(cs), .mosi(mosi), .miso(miso),
@@ -55,7 +59,8 @@ module tb_spi_bus;
         .imem_load_dword(imem_load_dword), .imem_read_dword(imem_read_dword),
         .rom_load_enable(rom_load_enable), .rom_row(rom_row), .rom_load_word(rom_load_word),
         .rom_read_word(rom_read_word),
-        .pointer_write_enable(), .pointer_write_index(), .pointer_write_data()
+        .pointer_write_enable(pointer_write_enable), .pointer_write_index(pointer_write_index),
+        .pointer_write_data(pointer_write_data)
     );
 
     // The blocks behind the regions, as the slave sees them: written at the
@@ -80,11 +85,19 @@ module tb_spi_bus;
     integer swaps = 0;
     integer door_writes = 0;
     logic [SPI_DWORD_W-1:0] last_door_dword;
+    integer pointer_writes = 0;
+    logic [7:0]                 last_pointer_index;
+    logic [POINTER_ENTRY_W-1:0] last_pointer_entry;
     always @(posedge sclk) begin
         if (swap) swaps = swaps + 1;
         if (fifo_write_enable) begin
             door_writes    = door_writes + 1;
             last_door_dword = fifo_write_dword;
+        end
+        if (pointer_write_enable) begin
+            pointer_writes     = pointer_writes + 1;
+            last_pointer_index = pointer_write_index;
+            last_pointer_entry = pointer_write_data;
         end
     end
 
@@ -107,6 +120,13 @@ module tb_spi_bus;
             $display("FAIL: %0s = %0d, want %0d", what, got, want);
             errors = errors + 1;
         end else $display("pass: %0s = %0d", what, got);
+    endtask
+
+    task check_entry(input string what, input [POINTER_ENTRY_W-1:0] got, input [POINTER_ENTRY_W-1:0] want);
+        if (got !== want) begin
+            $display("FAIL: %0s = %025h, want %025h", what, got, want);
+            errors = errors + 1;
+        end else $display("pass: %0s = %025h", what, got);
     endtask
 
     // ---- Mode 0 master, in 9-bit nonets ---------------------------------
@@ -277,7 +297,32 @@ module tb_spi_bus;
         check36("ROM row 7 read back", read_dwords[0], 36'h2_1234);
         check36("ROM row 8 read back", read_dwords[1], 36'h0_5678);
 
-        $display("--- 11. the read suite again at a 40 MHz-class SCLK ---");
+        $display("--- 11. a partial's pointers: three a dword, the entry whole on the fourth, write-only ---");
+        // partial 5: ten pointers 0x101 .. 0x10A, the first at the bottom of dword 0
+        write_dwords[0] = {6'd0, 10'h103, 10'h102, 10'h101};
+        write_dwords[1] = {6'd0, 10'h106, 10'h105, 10'h104};
+        write_dwords[2] = {6'd0, 10'h109, 10'h108, 10'h107};
+        write_dwords[3] = {26'd0, 10'h10A};
+        write_burst(MAP_PARTIAL_BASE + 18'(5 * MAP_PARTIAL_STRIDE), 4, 1);
+        checkn("one entry written by the burst", pointer_writes, 1);
+        checkn("for partial 5", last_pointer_index, 5);
+        check_entry("partial 5's entry", last_pointer_entry,
+                    {10'h10A, 10'h109, 10'h108, 10'h107, 10'h106, 10'h105, 10'h104, 10'h103, 10'h102, 10'h101});
+        read_burst(MAP_PARTIAL_BASE + 18'(5 * MAP_PARTIAL_STRIDE), 1, 1);
+        check36("the pointers read zero", read_dwords[0], '0);
+        // the last partial's fourth dword alone: the entry is the staged three dwords and the new tenth
+        write_dwords[0] = {26'd0, 10'h3FF};
+        write_burst(MAP_PARTIAL_BASE + 18'((NUM_PARTIALS - 1) * MAP_PARTIAL_STRIDE + 3), 1, 1);
+        checkn("the fourth dword alone commits", pointer_writes, 2);
+        checkn("for the last partial", last_pointer_index, NUM_PARTIALS - 1);
+        check_entry("the staged nine and the new tenth", last_pointer_entry,
+                    {10'h3FF, 10'h109, 10'h108, 10'h107, 10'h106, 10'h105, 10'h104, 10'h103, 10'h102, 10'h101});
+        // one partial past the region: dropped
+        write_dwords[0] = '1;
+        write_burst(MAP_PARTIAL_BASE + 18'(NUM_PARTIALS * MAP_PARTIAL_STRIDE + 3), 1, 1);
+        checkn("past the last partial: dropped", pointer_writes, 2);
+
+        $display("--- 12. the read suite again at a 40 MHz-class SCLK ---");
         half = 13;                        // ~38 MHz
         read_burst(18'h00006, 2, 1);
         check36("fast dword[0x6]", read_dwords[0], 36'h2_2222_2222);
