@@ -490,7 +490,7 @@ module partial_pipeline #(
     logic signed [23:0] s3b_phase;
     logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
-    logic signed [24:0] s3b_pulse_max, s3b_pulse_min;   // the pulse's two levels, from duty alone
+    logic signed [24:0] s3b_pulse_max, s3b_pulse_min;   // the pulse's DC-corrected levels (osc_core: 2^23-1 - duty, -2^23 - duty)
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) s3b_valid <= 1'b0;
         else        s3b_valid <= s3_valid;

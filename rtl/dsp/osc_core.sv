@@ -24,7 +24,9 @@
 module osc_core (
     input  logic signed [23:0] phase_next, // advanced phase (Q0.24)
     input  logic signed [23:0] duty,       // PWM duty cycle (Q0.24, signed)
-    input  logic signed [24:0] pulse_max,   // the pulse's high level, 2^23-1 - duty, by the caller a stage earlier
+    input  logic signed [24:0] pulse_max,   // the pulse's high level with the DC offset
+                                            // removed: 2^23-1 - duty, by the caller a
+                                            // stage earlier (see the pulse section)
     input  logic signed [24:0] pulse_min,   // its low level, -2^23 - duty, likewise
     input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
 
@@ -59,10 +61,11 @@ module osc_core (
     // At duty 0 the correction subtracts nothing, so a square is bit-identical
     // to before.
     //
-    // The two levels of the pulse depend on duty alone, so the CALLER subtracts
-    // them a stage earlier (pulse_max, pulse_min) and the comparator only
-    // selects: the compare's LUT tree no longer feeds a 25-bit carry chain,
-    // which was this stage's critical path (7 LUT levels then 7 carry cells).
+    // The DC-corrected levels, 2^23-1 - duty and -2^23 - duty, depend on duty
+    // alone, so the CALLER subtracts them a stage earlier (pulse_max,
+    // pulse_min) and the comparator only selects between them: the
+    // compare's LUT tree no longer feeds a 25-bit carry chain, which was
+    // this stage's critical path (7 LUT levels then 7 carry cells).
     //
     // 25 bits because a corrected narrow pulse reaches ~2^24. After the >>> 8
     // below that is at most ±2^16, and Q2.16 spans ±2.0 against a nominal
