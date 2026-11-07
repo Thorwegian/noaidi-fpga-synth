@@ -8,6 +8,8 @@ unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
 
+![The prototype: a Tang Nano 20K and an ESP32-C3 Super Mini on perfboard, two DIN MIDI inputs through optocouplers, audio out on optical](https://thj.no/synth/images/prototype-board.jpg)
+
 ## License
 
 [CERN-OHL-S v2](LICENSE.txt)
@@ -238,6 +240,14 @@ saved /Presets/User/Pads/Arctic Ice.toml
   `app/build/console.log`, overwritten on every run (`less -R` shows it
   with its escape sequences). For a crash, `make fw-monitor` is better:
   it decodes the panic backtrace into source lines.
+
+![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
+
+The Open Stage Control panel in `tools/osc_panel/` puts every parameter
+on a knob or selector, labelled with its CC number, and drives the synth
+over the panel MIDI input:
+
+![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
 
 ## Preset storage
 
