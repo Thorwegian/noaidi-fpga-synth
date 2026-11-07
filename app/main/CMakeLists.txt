@@ -13,6 +13,8 @@ idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        INCLUDE_DIRS ""
                        PRIV_INCLUDE_DIRS "../lib/tomlc17/src")
 
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NOAIDI_BUILD="${NOAIDI_BUILD}")
+
 # tomlc17 prints a uint32_t with %x, which is a format mismatch on this
 # target (uint32_t is unsigned long); it only affects an error message.
 set_source_files_properties("../lib/tomlc17/src/tomlc17.c" PROPERTIES COMPILE_OPTIONS "-Wno-format")

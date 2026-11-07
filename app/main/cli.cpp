@@ -13,7 +13,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "esp_app_desc.h"
 
 #include "ble_midi.h"
 #include "preset.h"
@@ -29,8 +28,7 @@ std::string g_cwd     = "/Presets";    // from the storage root
 std::string g_current = "init preset"; // the active preset, for the status bar
 
 void show_status() {
-    console_set_status("noaidi %s | %s", esp_app_get_description()->version,
-                       g_current.c_str());
+    console_set_status("noaidi %s | %s", NOAIDI_BUILD, g_current.c_str());
 }
 
 void show_prompt() {

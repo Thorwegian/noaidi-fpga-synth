@@ -69,7 +69,7 @@ static int cmd_info(int argc, char **argv) {
     esp_flash_get_size(NULL, &flash);
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_BT);
-    printf("  firmware  %s, built %s %s, ESP-IDF %s\n", ad->version, ad->date,
+    printf("  firmware  %s, built %s %s, ESP-IDF %s\n", NOAIDI_BUILD, ad->date,
            ad->time, esp_get_idf_version());
     printf("  chip      %s rev v%d.%d, %d core%s, %" PRIu32 " MB flash\n",
            CONFIG_IDF_TARGET, chip.revision / 100, chip.revision % 100,
