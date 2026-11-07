@@ -166,37 +166,46 @@ static int page_rows(void) {
     return s_rows - 2;
 }
 
+static void pad(int columns) {
+    static const char spaces[] = "                                ";
+    const int chunk            = (int) sizeof spaces - 1;
+    while (columns > 0) {
+        int k = columns < chunk ? columns : chunk;
+        term_write(spaces, (size_t) k);
+        columns -= k;
+    }
+}
+
+// The status bar: the text, then reverse-video padding to the window's
+// width, however wide; the meter is the rightmost s_meter columns in
+// normal video, over the text if it comes to that.
 static void draw_status(void) {
     if (!s_vt100) {
         return;
     }
-    char row[200];
-    int n = s_back ? snprintf(row, sizeof row,
+    char text[200];
+    int n = s_back ? snprintf(text, sizeof text,
                               " %d lines back, PgDn for live | %s", s_back,
                               s_status)
-                   : snprintf(row, sizeof row, " %s", s_status);
+                   : snprintf(text, sizeof text, " %s", s_status);
     if (n < 0) {
         n = 0;
     }
-    if (n > (int) sizeof row - 1) {
-        n = (int) sizeof row - 1;
+    if (n > (int) sizeof text - 1) {
+        n = (int) sizeof text - 1;
     }
-    while (n < s_cols && n < (int) sizeof row - 1) { // pad: reverse video
-        row[n++] = ' ';                              // fills the whole row
+    int meter  = s_meter < s_cols ? s_meter : s_cols;
+    int bright = s_cols - meter;
+    if (n > bright) {
+        n = bright;
     }
-    if (n > s_cols) {
-        n = s_cols;
-    }
-    // the meter: the rightmost s_meter columns in normal video, over the
-    // text if it comes to that
-    int meter = s_meter < n ? s_meter : n;
-    memset(row + n - meter, ' ', (size_t) meter);
     term_printf("\x1b"
                 "7\x1b[%d;1H\x1b[7m",
                 s_rows - 1);
-    term_write(row, (size_t) (n - meter));
+    term_write(text, (size_t) n);
+    pad(bright - n);
     term_puts("\x1b[0m");
-    term_write(row + n - meter, (size_t) meter);
+    pad(meter);
     term_puts("\x1b"
               "8");
 }
