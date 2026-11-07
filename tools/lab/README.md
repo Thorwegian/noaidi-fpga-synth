@@ -107,6 +107,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `alias_measure.py` | a held note's non-harmonic peaks on the 48 kHz path, each classified as a harmonic, the oscillator's 96 kHz folding, a 48 kHz product or a 24 kHz sideband (the CSP's pass); the probe is `init` at MIDI 120 (#308) |
 | `lab_sweep.py` | the clock sweep on a lab bitstream: each device's misses at each system clock, the clock restored after (#241, #309) |
 | `lab_sweep_plot.py` | the clock sweep as a graph: each device's miss rate against the clock (#241) |
+| `placement_sweep.sh` | `make timing-sweep` on the lab box's four cores: ships `rtl/yosys.json` from the cloud box, places `SEEDS` there `JOBS` at a time on the lab checkout's pinned nextpnr, brings the logs and reports back to `rtl/obj_dir/sweep/` (#343) |
 | `console_logger.sh` | the always-on console witness: logs `/dev/ttyACM*` to a file |
 | `publish_capture.sh` | encode a capture as MP3 into the repo's `public_html/` on the cloud box, served at `https://thj.no/synth-claude-uploads/` — the link for listening review on a phone (run it on the cloud box; copy a lab take over first) |
 
