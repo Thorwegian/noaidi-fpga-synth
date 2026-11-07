@@ -182,7 +182,7 @@ engine link can do, addressable from a sequencer):
 | 0x02 | register, w32 | register or sink-word write (queued, applied at the swap) |
 | 0x03 | pc, w36 | CSP program word write (while the CSP is held) |
 | 0x10 | — | **state request** (implemented): the synth sends the whole preset as CCs to every output, the asker's included ("Parameter feedback" above); the O.S.C. runner sends it after it links, the panel's SYNC button too |
-| 0x7F | — | identity request → reply with git describe of firmware |
+| 0x7F | — | identity request → reply with the firmware build name (branch@commit, the boot banner's string) |
 
 The raw ops reach everything the engine link can write. Structured
 configuration (whole-timbre dumps, mod-routing setups, step-sequencer
