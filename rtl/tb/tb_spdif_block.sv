@@ -27,7 +27,8 @@ module tb_spdif_block;
     logic [9:0] slot;
     timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
-        .sample_tick(sample_tick), .slot_issue(slot_issue), .slot(slot)
+        .sample_tick(sample_tick), .slot_issue(slot_issue), .slot(slot),
+        .cell_tick(), .sample_tick48(), .cell_tick48(), .sample_tick24()
     );
 
     logic signed [23:0] al = 24'sh123456;

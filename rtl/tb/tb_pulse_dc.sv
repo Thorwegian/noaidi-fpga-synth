@@ -34,8 +34,20 @@ module tb_pulse_dc;
     logic        [1:0]  wave;
     wire  signed [17:0] sample;
 
-    osc_core u_dut (.phase_next(phase), .duty(duty), .wave(wave),
-                    .sample_out(sample));
+    // What partial_pipeline registers at S3B alongside the phase: the
+    // pulse's DC-corrected levels (2^23-1 - duty, -2^23 - duty) and the
+    // sine read from the full-wave table at the top ten phase bits. Here
+    // they are combinational; the bench waits #1 after every phase anyway.
+    wire signed [24:0] pulse_max =  25'sd8388607 - 25'(duty);
+    wire signed [24:0] pulse_min = -25'sd8388608 - 25'(duty);
+
+    logic signed [15:0] sine_lut [0:1023];
+    initial $readmemh("dsp/sine_lut.hex", sine_lut);
+    wire signed [15:0] sine = sine_lut[phase[23:14]];
+
+    osc_core u_dut (.phase_next(phase), .duty(duty),
+                    .pulse_max(pulse_max), .pulse_min(pulse_min),
+                    .wave(wave), .sine(sine), .sample_out(sample));
 
     integer errors = 0;
 

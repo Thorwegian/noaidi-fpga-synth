@@ -28,7 +28,8 @@ module tb_spdif_stream;
     timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick), .slot_issue(slot_issue), .cell_tick(cell_tick),
-        .sample_tick48(sample_tick48), .cell_tick48(cell_tick48), .slot(slot)
+        .sample_tick48(sample_tick48), .cell_tick48(cell_tick48), .slot(slot),
+        .sample_tick24()
     );
 
     logic [31:0] sample_counter = '0;
