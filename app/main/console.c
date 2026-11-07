@@ -31,7 +31,9 @@
 static SemaphoreHandle_t s_lock;     // everything written to the terminal
 static int s_rows = 24, s_cols = 80; // until the terminal answers
 static int64_t s_query_sent; // when the size query went out, 0 = none pending
+static bool s_vt100;         // a terminal answered the size query, ever
 static char s_status[128];
+static int s_meter; // columns of the status bar in normal video
 static char s_prompt[96] = "$ ";
 
 // Raw output to the USB serial port. Dropped when no host is attached,
@@ -79,6 +81,9 @@ static char s_line[LINE_MAX_BYTES];
 static size_t s_len, s_pos; // bytes; s_pos is the cursor
 
 static void draw_input(void) {
+    if (!s_vt100) {
+        return;
+    }
     term_printf("\x1b[%d;1H\x1b[2K", s_rows);
     term_puts(s_prompt);
     term_write(s_line, s_len);
@@ -161,29 +166,47 @@ static int page_rows(void) {
     return s_rows - 2;
 }
 
+static void pad(int columns) {
+    static const char spaces[] = "                                ";
+    const int chunk            = (int) sizeof spaces - 1;
+    while (columns > 0) {
+        int k = columns < chunk ? columns : chunk;
+        term_write(spaces, (size_t) k);
+        columns -= k;
+    }
+}
+
+// The status bar: the text, then reverse-video padding to the window's
+// width, however wide; the meter is the rightmost s_meter columns in
+// normal video, over the text if it comes to that.
 static void draw_status(void) {
-    char row[200];
-    int n = s_back ? snprintf(row, sizeof row,
+    if (!s_vt100) {
+        return;
+    }
+    char text[200];
+    int n = s_back ? snprintf(text, sizeof text,
                               " %d lines back, PgDn for live | %s", s_back,
                               s_status)
-                   : snprintf(row, sizeof row, " %s", s_status);
+                   : snprintf(text, sizeof text, " %s", s_status);
     if (n < 0) {
         n = 0;
     }
-    if (n > (int) sizeof row - 1) {
-        n = (int) sizeof row - 1;
+    if (n > (int) sizeof text - 1) {
+        n = (int) sizeof text - 1;
     }
-    while (n < s_cols && n < (int) sizeof row - 1) { // pad: reverse video
-        row[n++] = ' ';                              // fills the whole row
-    }
-    if (n > s_cols) {
-        n = s_cols;
+    int meter  = s_meter < s_cols ? s_meter : s_cols;
+    int bright = s_cols - meter;
+    if (n > bright) {
+        n = bright;
     }
     term_printf("\x1b"
                 "7\x1b[%d;1H\x1b[7m",
                 s_rows - 1);
-    term_write(row, (size_t) n);
-    term_puts("\x1b[0m\x1b"
+    term_write(text, (size_t) n);
+    pad(bright - n);
+    term_puts("\x1b[0m");
+    pad(meter);
+    term_puts("\x1b"
               "8");
 }
 
@@ -203,8 +226,12 @@ static void draw_output(void) {
 }
 
 // Draw the whole screen: the output rows in a scroll region (DECSTBM),
-// the status bar and the input line below. Only on waking the console.
+// the status bar and the input line below. Only on waking the console,
+// and only once a terminal has answered: a plain reader gets no layout.
 static void draw_screen(void) {
+    if (!s_vt100) {
+        return;
+    }
     term_printf("\x1b[r\x1b[2J\x1b[1;%dr", page_rows());
     draw_output();
     draw_status();
@@ -214,10 +241,14 @@ static void draw_screen(void) {
 // One line of output: into the scrollback, and onto the screen. Live, it
 // goes in at the bottom of the scroll region, whose newline scrolls only
 // that region: nothing else is redrawn. Scrolled back, only the status
-// bar's count changes.
+// bar's count changes. Without a terminal (a script reading the port, a
+// log), the line goes out plain.
 static void emit_line(const char *text, size_t len) {
     sb_add(text, len);
-    if (s_back == 0) {
+    if (!s_vt100) {
+        term_write(text, len);
+        term_puts("\r\n");
+    } else if (s_back == 0) {
         term_printf("\x1b"
                     "7\x1b[%d;1H\n",
                     page_rows());
@@ -291,6 +322,13 @@ void console_set_status(const char *fmt, ...) {
     draw_status();
     xSemaphoreGiveRecursive(s_lock);
     va_end(ap);
+}
+
+void console_set_meter(int columns) {
+    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
+    s_meter = columns < 0 ? 0 : columns;
+    draw_status();
+    xSemaphoreGiveRecursive(s_lock);
 }
 
 // Split a line into arguments on spaces; "double quotes" keep spaces.
@@ -583,6 +621,7 @@ static void csi(const char *params, char final) {
             s_rows       = a;
             s_cols       = b;
             s_query_sent = 0;
+            s_vt100      = true;
             s_back       = 0;
             draw_screen();
         }
@@ -608,8 +647,8 @@ static void console_task(void *arg) {
         xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
         if (s_query_sent
             && esp_timer_get_time() - s_query_sent > SIZE_QUERY_US) {
-            s_query_sent = 0; // no answer (nothing attached yet):
-            draw_screen();    // lay out at the size we have
+            s_query_sent = 0; // no answer: nothing attached, or no terminal
+            draw_screen();    // a known terminal: lay out at the size we have
         }
         if (got <= 0) {
             xSemaphoreGiveRecursive(s_lock);

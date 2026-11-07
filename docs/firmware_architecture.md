@@ -136,13 +136,17 @@ active preset out the same way.
 `console` owns the USB serial port (USB-Serial/JTAG). On a VT100
 terminal it splits the screen like an IRC client: a scroll region for
 everything printed, a status bar, and an input line with a line
-editor, history and Tab completion. `stdout`, `stderr` and so ESP_LOG
+editor, history and Tab completion. Until a terminal has answered its
+size query it draws no layout, and a script reading the port gets plain
+lines. `stdout`, `stderr` and so ESP_LOG
 print through it, from any task, without breaking the line being
 typed. It keeps the last 1000 printed lines (at most 80 KB of heap),
 paged with PgUp/PgDn; Return on an empty line redraws the screen from
 them. `cli`, `cli_banks` and `cli_system` register the commands:
 files, presets, banks, and system state. Commands run in the console
-task.
+task. The status bar's right end is a meter the engine link feeds
+(`engine_meter`, priority 1, one `DIAG_LIMITER` read every 50 ms): one
+column per 0.375 dB of the master limiter's gain reduction.
 
 ## Sequencers / arpeggiators
 

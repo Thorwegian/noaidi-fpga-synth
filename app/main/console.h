@@ -21,8 +21,13 @@
 // Return on an empty line wakes the console: it asks the terminal for
 // its size (a cursor-position report) and redraws the whole screen from
 // the scrollback. That is the only full redraw; the size is also asked
-// for at boot. The console assumes a VT100 terminal; until one answers,
-// it lays out 24 × 80.
+// for at boot. Until a terminal has answered, ever, the console draws no
+// layout: output goes out as plain lines, for a script or a log reading
+// the port.
+//
+// The status bar carries a meter: its rightmost columns in normal video,
+// as many as console_set_meter() last said, over the text if need be.
+// The caller decides what a column means.
 //
 // stdout and stderr are this console's stream, so printf and ESP_LOG
 // both land in the output. The line editor has cursor keys, Home/End,
@@ -64,6 +69,10 @@ void console_set_prompt(const char *prompt);
 // Set the status bar text.
 void console_set_status(const char *fmt, ...)
         __attribute__((format(printf, 1, 2)));
+
+// Set the meter: how many of the status bar's rightmost columns are in
+// normal video. 0 is no meter.
+void console_set_meter(int columns);
 
 // The registered commands, for help.
 int console_commands(const console_cmd_t *const **cmds);
