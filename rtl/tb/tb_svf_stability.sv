@@ -37,7 +37,8 @@ module tb_svf_stability;
     timebase u_timebase (
         .clk(clk), .rst_n(rst_n),
         .sample_tick(sample_tick), .slot_issue(slot_issue),
-        .cell_tick(), .slot(slot)
+        .cell_tick(), .slot(slot),
+        .sample_tick48(), .cell_tick48(), .sample_tick24()
     );
 
     // The sink area, and partial 0 pointed at six words of it: its pitch,
@@ -55,7 +56,7 @@ module tb_svf_stability;
         .clk(clk), .reset_n(rst_n),
         .write_enable(sink_write_enable), .write_both(1'b1),
         .write_address(sink_write_address), .write_data(sink_write_data),
-        .pass_done(1'b0),
+        .pass_start(1'b0),      // no flip: the words go to both pages (write_both)
         .read_address(sink_read_address), .read_data(sink_read_data)
     );
 
@@ -75,7 +76,8 @@ module tb_svf_stability;
         .pointer_write_data(pointer_write_data),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
-        .mix_left(ml), .mix_right(mr)
+        .mix_left(ml), .mix_right(mr),
+        .master_gain_q()
     );
 
     task automatic write_word(input integer address, input integer value);
