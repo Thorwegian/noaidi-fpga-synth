@@ -93,7 +93,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | script | what |
 |---|---|
 | `board.py` | console commands in, replies out (above) |
-| `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238) |
+| `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238); the limiter's reduction polled through the take and reported for the triad (#355) |
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
