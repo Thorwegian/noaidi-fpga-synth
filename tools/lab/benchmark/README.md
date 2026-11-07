@@ -25,13 +25,28 @@ recorded to its end — from the S/PDIF output, 48 kHz, 16-bit, stereo.
 
 The first benchmark, `main@7c959b4` of 2026-10-17 (the synth before the
 CSP-as-processor work, the reference for the goal of sounding like before),
-stays on the GitHub pre-release `baseline-20261017` as
-`baseline_galaxy_d03e915.wav` and `.m4a`; its RC-less release fell faster,
-so its tail no longer matches the instrument.
+is lost: the GitHub pre-release it was put on was deleted and no copy
+survives on either machine (#367). Its RC-less release fell faster, so its
+tail no longer matched the instrument anyway.
 
-- the recording: `baseline_galaxy_d03e915.mp3` (320 kbps) at
-  https://thj.no/synth-claude-uploads/, linked from #321; the WAV is kept on
-  the lab computer, out of the tree;
+**What the reference is.** The reference is the JSON and the CSV below:
+`benchmark_compare.py` reads those two files and nothing else. The WAV they
+were made from is take 4 of the 2026-10-28 session (`take4.wav`, md5
+`2b4d7e2044b11b66090ee45a45354615`; the JSON's `file` field names it), kept
+on the lab box out of the tree, with no copies elsewhere. A file is the
+benchmark if `baseline_check.py` on it reproduces this folder's JSON and CSV
+exactly. After a change to the checker, remake the derived files from it
+with the Essentia interpreter (`~/.noaidi-blenv/bin/python` on the lab box)
+and commit them with the checker:
+
+```
+cd tools/lab/benchmark
+~/.noaidi-blenv/bin/python ../baseline_check.py <path to take4.wav> \
+    --json baseline_galaxy_d03e915.essentia.json \
+    --envelope baseline_galaxy_d03e915.envelope.csv \
+    > baseline_galaxy_d03e915.essentia.txt
+```
+
 - `baseline_galaxy_d03e915.essentia.txt` — `tools/lab/baseline_check.py`'s
   table: per beat the level and the pitch clusters, the bar of silence,
   the triad's peaks, the release;
