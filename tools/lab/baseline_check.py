@@ -49,6 +49,7 @@ a failure after one may be the preset, not the synth. Re-record the benchmark
 import argparse
 import json
 import math
+import os
 import sys
 
 import numpy as np
@@ -235,7 +236,7 @@ def main():
                 out.write("%.2f,%.2f\n" % (t, level))
     if args.json:
         with open(args.json, "w") as out:
-            json.dump({"file": args.wav, "failures": failures, "segments": results}, out, indent=1)
+            json.dump({"file": os.path.basename(args.wav), "failures": failures, "segments": results}, out, indent=1)
     print("%d failure(s)" % failures)
     return 1 if failures else 0
 
