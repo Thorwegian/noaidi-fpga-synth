@@ -317,6 +317,16 @@ obj_dir/tb_spdif48_block/sim: $(PKG) dsp/timebase.sv spdif/spdif_tx.sv tb/tb_spd
 sim-spdif48: obj_dir/tb_spdif48_block/sim
 	$(call run_sim,$<,tb/sim-spdif48.out)
 
+# The I2S output (#377), decoded as a receiver decodes it, with the timebase's
+# tick as top.sv wires it: the bit clock's period, 32 bit clocks a channel, the
+# MSB one clock after the word select, 24 bits and 8 of padding, each word the
+# one the last tick latched and both channels of a frame from the same tick.
+obj_dir/tb_i2s_tx/sim: $(PKG) dsp/timebase.sv i2s/i2s_tx.sv tb/tb_i2s_tx.sv Makefile
+	$(VERILATE) $(PKG) dsp/timebase.sv i2s/i2s_tx.sv tb/tb_i2s_tx.sv
+
+sim-i2s: obj_dir/tb_i2s_tx/sim
+	$(call run_sim,$<,tb/sim-i2s.out)
+
 # The pulse oscillator must average to ZERO at every duty (the comparator
 # alone is centred at 50 % only). Without the fix this bench reports 8
 # failures, which is the only reason its passing means anything.
@@ -353,7 +363,7 @@ sim-limiter: obj_dir/tb_limiter/sim
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
-SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 \
+SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s \
               sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
 SIM_OUT = $(patsubst sim-%,tb/sim-%.out,$(SIM_TARGETS))
 
