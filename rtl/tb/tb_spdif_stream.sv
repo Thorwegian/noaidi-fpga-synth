@@ -38,10 +38,12 @@ module tb_spdif_stream;
     logic [STREAM_SOURCE_W-1:0] source = STREAM_SOURCE_LFSR;
     logic [31:0] word;
     logic [15:0] frames_sent;
+    logic        carries_in_two;
     spdif_stream dut (
         .clk(clk), .reset_n(rst_n), .sample_tick(sample_tick48), .source(source),
         .sample_counter(sample_counter), .probe_pair(36'h8_0001_2345), .probe_register(11'h123),
-        .sink_word(18'h2ABCD), .mix_left(24'sd0), .mix_right(24'sd0), .word(word), .frames_sent(frames_sent), .carries_in_two()
+        .sink_word(18'h2ABCD), .mix_left(24'sd0), .mix_right(24'sd0), .word(word), .frames_sent(frames_sent),
+        .carries_in_two(carries_in_two)
     );
 
     wire spdif_out;
@@ -100,7 +102,7 @@ module tb_spdif_stream;
     reg [31:0] previous_counter;
     integer    counter_words = 0;
 
-    task automatic take_word(input [31:0] w);
+    task automatic take_word(input [31:0] w, input integer tick);
         reg [31:0] c;
         integer p;
         words_received = words_received + 1;
@@ -109,6 +111,15 @@ module tb_spdif_stream;
             else return;
         end
         received[position] = w;
+        // carries_in_two (#395): the flag the dump's sweep steps on, sampled before tick
+        // t, says whether the word issued at t + 2 is a payload word. The frame started
+        // at `tick` carries the word issued at tick - 1, so the flag at tick - 3 spoke of it.
+        if (tick >= 3 && carries_at[tick - 3] !== (position != 0 && position != 1 && position != 63)) begin
+            $display("FAIL frame %0d word %0d: carries_in_two was %0d three ticks before it",
+                     frames_checked, position, carries_at[tick - 3]);
+            errors = errors + 1;
+        end
+        if (tick >= 3) carries_checked = carries_checked + 1;
         if (position == 63) begin
             // the frame is whole: check it
             if (received[0] !== STREAM_SYNC) begin
@@ -157,15 +168,21 @@ module tb_spdif_stream;
 
     reg        do_check = 0;
     reg [23:0] data_l, data_r;
+    integer    ticks = 0, frame_tick = 0, carries_checked = 0;
+    reg        carries_at [0:4095];      // carries_in_two as sampled at each 48 kHz tick
     always @(posedge clk) begin
         if (!rst_n) begin
             cell_index <= 0;
             started    <= 0;
             do_check   <= 0;
+            ticks      <= 0;
         end else begin
             if (sample_tick48) begin
                 started    <= 1;
                 cell_index <= 0;
+                carries_at[ticks] <= carries_in_two;
+                frame_tick <= ticks;
+                ticks      <= ticks + 1;
             end else if (started && cell_phase == 4'd11 && cell_index < 128) begin
                 cells[cell_index] <= {7'd0, spdif_out};
                 cell_index        <= cell_index + 1;
@@ -175,7 +192,7 @@ module tb_spdif_stream;
                 do_check <= 0;
                 decode_subframe(0, data_l);
                 decode_subframe(64, data_r);
-                take_word({data_l[23:8], data_r[23:8]});
+                take_word({data_l[23:8], data_r[23:8]}, frame_tick);
             end
         end
     end
@@ -191,9 +208,13 @@ module tb_spdif_stream;
         wait (frames_checked == 6);
 
         $display("");
-        $display("%0d frames checked (%0d words received), %0d counter words", frames_checked, words_received, counter_words);
+        $display("%0d frames checked (%0d words received), %0d counter words, carries_in_two checked on %0d words",
+                 frames_checked, words_received, counter_words, carries_checked);
         if (frames_sent < 6) begin
             $display("FAIL: frames_sent = %0d", frames_sent); errors = errors + 1;
+        end
+        if (carries_checked < 300) begin
+            $display("FAIL: carries_in_two checked on %0d words only", carries_checked); errors = errors + 1;
         end
         if (errors == 0) $display("ALL PASS");
         else             $display("%0d FAILURE(S)", errors);
