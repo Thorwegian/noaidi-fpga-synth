@@ -114,12 +114,17 @@ module partial_pipeline #(
                                        // LUTs, no BSRAM block
     reg [15:0] reso_att_lut [0:63];    // resonance-indexed input
                                        // attenuation, UQ0.16 (cascade)
+    reg signed [15:0] sine_lut [0:1023];   // the sine wave, Q2.16, one
+                                       // entry per value of the top ten
+                                       // phase bits (scripts/gen_sine_lut.py);
+                                       // BSRAM, read at the S3B edge
 
     initial begin
         $readmemh("dsp/phase_lut.hex", phase_lut);
         $readmemh("dsp/svf_fc_lut.hex", svf_fc_lut);
         $readmemh("dsp/q1_lut.hex", q1_lut);
         $readmemh("dsp/reso_att_lut.hex", reso_att_lut);
+        $readmemh("dsp/sine_lut.hex", sine_lut);
     end
 
     //----------------------------------------------------------------
@@ -490,6 +495,8 @@ module partial_pipeline #(
     logic signed [23:0] s3b_phase;
     logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
+    logic signed [24:0] s3b_pulse_max, s3b_pulse_min;   // the pulse's DC-corrected levels (osc_core: 2^23-1 - duty, -2^23 - duty)
+    logic signed [15:0] s3b_sine;      // the sine at s3b_phase, the table's clocked read
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) s3b_valid <= 1'b0;
         else        s3b_valid <= s3_valid;
@@ -503,15 +510,22 @@ module partial_pipeline #(
         s3b_phase<=phase_next; s3b_gain_voice<=gain_decoded;
         s3b_gain_left<=s3_gain_left; s3b_gain_right<=s3_gain_right;
         s3b_duty<=s3_duty; s3b_wave<=s3_wave;
+        s3b_pulse_max <= 25'sd8388607  - 25'(s3_duty);
+        s3b_pulse_min <= -25'sd8388608 - 25'(s3_duty);
+        s3b_sine <= sine_lut[phase_next[23:14]];
     end
 
     // Waveform generation stands alone in its own stage, driven by the
-    // REGISTERED phase: a sine LUT read plus a 4:1 mux, which must not
-    // be chained behind the phase adder.
+    // REGISTERED phase (the sine read in block RAM alongside it): a
+    // compare, a fold and a 4:1 mux, which must not be chained behind
+    // the phase adder.
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),
+        .pulse_max   (s3b_pulse_max),
+        .pulse_min   (s3b_pulse_min),
         .wave       (s3b_wave),
+        .sine       (s3b_sine),
         .sample_out (osc_sample)
     );
 
