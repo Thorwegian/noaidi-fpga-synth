@@ -10,7 +10,9 @@ musical thinking, on a
 of their own. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
-plus 48 kHz TOSLINK (for automated lab tests).
+plus 48 kHz TOSLINK (for automated lab tests). Recordings, a browser
+model of the engine and the pictures are at
+[thj.no/synth](https://thj.no/synth/).
 
 ## Architecture
 
