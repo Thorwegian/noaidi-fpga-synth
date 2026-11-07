@@ -2,6 +2,8 @@
 
 ![A 3D render of the circuit board: sockets for the Tang Nano 20K and an ESP32-S3 module, two DIN MIDI inputs, an I2S DAC module, RCA and USB-C](https://thj.no/synth/images/pcb-iso.jpg)
 
+<a href="https://thj.no/synth/"><img src="https://thj.no/synth/images/button-website.png" width="183" height="48" alt="Official website"></a>
+
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
@@ -10,9 +12,7 @@ musical thinking, on a
 of their own. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
-plus 48 kHz TOSLINK (for automated lab tests). Recordings, a browser
-model of the engine and the pictures are at
-[thj.no/synth](https://thj.no/synth/).
+plus 48 kHz TOSLINK (for automated lab tests).
 
 ## Architecture
 
