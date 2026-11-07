@@ -118,6 +118,12 @@ public:
     int fifo_dropped() const {
         return cosim_fifo_dropped();
     }
+    int probe_register() const {
+        return cosim_probe_register();
+    }
+    int32_t probe_word(int odd) const {
+        return cosim_probe_word(odd);
+    }
 
 private:
     void tick() {

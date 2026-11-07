@@ -93,6 +93,7 @@ public:
         rtl_.pass();
         const csp::PassReport report = model_.pass();
         ++passes_run;
+        ++passes_here_;
         for (const std::string &error : report.errors) {
             std::printf("  %s: the model reports: %s\n", what.c_str(),
                         error.c_str());
@@ -163,11 +164,29 @@ private:
         if (rtl_.fifo_dropped() != 0) {
             note("FIFO drops", rtl_.fifo_dropped(), 0);
         }
+        // the probe, parked on the aligned pair at the top of the inputs (csp_pkg::PARK_REGISTER):
+        // it reads the pair two cycles before a pass ends and publishes at the start of the
+        // next, so the first pass of an image has nothing to compare yet
+        constexpr int park_register = csp::io_base + csp::io_count - 2;
+        if (passes_here_ > 1 && rtl_.probe_register() != park_register) {
+            note("probe register", rtl_.probe_register(), park_register);
+        }
+        if (passes_here_ > 1
+            && rtl_.probe_word(0) != model_.read(park_register)) {
+            note("probe even word", rtl_.probe_word(0),
+                 model_.read(park_register));
+        }
+        if (passes_here_ > 1
+            && rtl_.probe_word(1) != model_.read(park_register + 1)) {
+            note("probe odd word", rtl_.probe_word(1),
+                 model_.read(park_register + 1));
+        }
         return differences;
     }
 
     Rtl rtl_;
     csp::Processor model_;
+    int passes_here_ = 0; // passes run on this image
 };
 
 // ---- directed programs: assembled ------------------------------------------------------------

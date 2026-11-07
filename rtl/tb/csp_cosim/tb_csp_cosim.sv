@@ -67,6 +67,7 @@ module tb_csp_cosim (
     logic [csp_pkg::CYCLE_W-1:0]  cycle;
     logic [31:0]                  pass_counter;
     logic [csp_pkg::WIDE_W-1:0]   probe_pair;
+    logic [csp_pkg::REGISTER_W-1:0] probe_register;
     logic                         sink_write_enable, sink_write_both;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
     logic [csp_pkg::WORD_W-1:0]   sink_write_data;
@@ -76,7 +77,7 @@ module tb_csp_cosim (
         .fetch_next (fetch_next), .fetch_row (fetch_row), .rom_op (rom_op), .control_word (control_word),
         .fifo_pop (fifo_pop), .fifo_committed (fifo_committed), .fifo_head_valid (fifo_head_valid),
         .fifo_head_dword (fifo_head_dword),
-        .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_step (1'b0), .probe_pair (probe_pair), .probe_register (),
+        .probe_address (csp_pkg::REGISTER_W'(csp_pkg::PARK_REGISTER)), .probe_sweep (1'b0), .probe_step (1'b0), .probe_pair (probe_pair), .probe_register (probe_register),
         .trap_address ('0), .trap_capture (),
         .cycle (cycle), .pass_counter (pass_counter),
         .sink_write_enable (sink_write_enable), .sink_write_both (sink_write_both), .sink_write_address (sink_write_address), .sink_write_data (sink_write_data)
@@ -112,6 +113,8 @@ module tb_csp_cosim (
     export "DPI-C" function cosim_set_program_length;
     export "DPI-C" function cosim_row_rule_violations;
     export "DPI-C" function cosim_fifo_dropped;
+    export "DPI-C" function cosim_probe_register;
+    export "DPI-C" function cosim_probe_word;
 
     function int cosim_register(input int address);
         logic [csp_pkg::WORD_W-1:0] word;
@@ -145,6 +148,16 @@ module tb_csp_cosim (
 
     function int cosim_fifo_dropped();
         return int'(fifo_dropped);
+    endfunction
+
+    // the probe's last read: the register it reports, and the pair's even and odd word
+    function int cosim_probe_register();
+        return int'(probe_register);
+    endfunction
+
+    function int cosim_probe_word(input int odd);
+        return odd != 0 ? int'($signed(probe_pair[csp_pkg::WORD_W-1:0]))
+                        : int'($signed(probe_pair[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]));
     endfunction
 
     // +rtltrace: every row entering A, to compare with the model's CSP_TRACE
