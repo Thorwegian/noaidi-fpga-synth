@@ -490,7 +490,7 @@ module partial_pipeline #(
     logic signed [23:0] s3b_phase;
     logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
     logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
-    logic signed [24:0] s3b_pulse_hi, s3b_pulse_lo;   // the pulse's two values, from duty alone
+    logic signed [24:0] s3b_pulse_max, s3b_pulse_min;   // the pulse's two levels, from duty alone
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) s3b_valid <= 1'b0;
         else        s3b_valid <= s3_valid;
@@ -504,8 +504,8 @@ module partial_pipeline #(
         s3b_phase<=phase_next; s3b_gain_voice<=gain_decoded;
         s3b_gain_left<=s3_gain_left; s3b_gain_right<=s3_gain_right;
         s3b_duty<=s3_duty; s3b_wave<=s3_wave;
-        s3b_pulse_hi <= 25'sd8388607  - 25'(s3_duty);
-        s3b_pulse_lo <= -25'sd8388608 - 25'(s3_duty);
+        s3b_pulse_max <= 25'sd8388607  - 25'(s3_duty);
+        s3b_pulse_min <= -25'sd8388608 - 25'(s3_duty);
     end
 
     // Waveform generation stands alone in its own stage, driven by the
@@ -514,8 +514,8 @@ module partial_pipeline #(
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),
-        .pulse_hi   (s3b_pulse_hi),
-        .pulse_lo   (s3b_pulse_lo),
+        .pulse_max   (s3b_pulse_max),
+        .pulse_min   (s3b_pulse_min),
         .wave       (s3b_wave),
         .sample_out (osc_sample)
     );

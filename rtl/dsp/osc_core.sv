@@ -24,8 +24,8 @@
 module osc_core (
     input  logic signed [23:0] phase_next, // advanced phase (Q0.24)
     input  logic signed [23:0] duty,       // PWM duty cycle (Q0.24, signed)
-    input  logic signed [24:0] pulse_hi,   // 2^23-1 - duty, by the caller a stage earlier
-    input  logic signed [24:0] pulse_lo,   // -2^23  - duty, likewise
+    input  logic signed [24:0] pulse_max,   // the pulse's high level, 2^23-1 - duty, by the caller a stage earlier
+    input  logic signed [24:0] pulse_min,   // its low level, -2^23 - duty, likewise
     input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
 
     output logic signed [17:0] sample_out  // Q2.16
@@ -59,8 +59,8 @@ module osc_core (
     // At duty 0 the correction subtracts nothing, so a square is bit-identical
     // to before.
     //
-    // The two possible results depend on duty alone, so the CALLER subtracts
-    // them a stage earlier (pulse_hi, pulse_lo) and the comparator only
+    // The two levels of the pulse depend on duty alone, so the CALLER subtracts
+    // them a stage earlier (pulse_max, pulse_min) and the comparator only
     // selects: the compare's LUT tree no longer feeds a 25-bit carry chain,
     // which was this stage's critical path (7 LUT levels then 7 carry cells).
     //
@@ -70,7 +70,7 @@ module osc_core (
     // purpose, since one here would mask a width error instead of showing it.
     //----------------------------------------------------------------
     logic signed [24:0] pulse;
-    assign pulse = (phase_next < duty) ? pulse_hi : pulse_lo;
+    assign pulse = (phase_next < duty) ? pulse_max : pulse_min;
 
     //----------------------------------------------------------------
     // Triangle: fold sawtooth at midpoint (phase = 2^23). Modulo 2^24,
