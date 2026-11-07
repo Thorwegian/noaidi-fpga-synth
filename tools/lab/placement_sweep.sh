@@ -41,6 +41,10 @@ ssh -p "$PORT" -o BatchMode=yes "$LAB" "rm -rf $REMOTE && mkdir -p $REMOTE" || e
 scp -P "$PORT" -q rtl/yosys.json rtl/constraints.cst "$LAB:$REMOTE/" || exit 1
 ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS NEXTPNR=\$HOME/$LABREPO/.tools/nextpnr/bin/nextpnr-himbaechel bash -s" <<'EOF'
 [ -x "$NEXTPNR" ] || { echo "placement_sweep: no $NEXTPNR on the lab box; make tools there" >&2; exit 2; }
+# nextpnr prints the Fmax block after placement, during routing and at the end;
+# only the last one is the result (the first is an estimate that says FAIL on a
+# design the router then meets)
+misses_clock() { grep "Max frequency for clock" "$1" | tail -3 | grep -q "FAIL at"; }
 run_seed() {
   s=$1
   $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
@@ -48,7 +52,7 @@ run_seed() {
     > pnr_$s.log 2>&1
   if grep -q "Unable to find legal placement" pnr_$s.log; then echo "seed $s: placement failed (rtl/obj_dir/sweep/pnr_$s.log)"
   elif grep -q "Routing design failed" pnr_$s.log; then echo "seed $s: routing failed (rtl/obj_dir/sweep/pnr_$s.log)"
-  elif grep -q "FAIL at" pnr_$s.log; then echo "seed $s: placed and routed, misses the clock (rtl/obj_dir/sweep/pnr_$s.log)"
+  elif misses_clock pnr_$s.log; then echo "seed $s: placed and routed, misses the clock (rtl/obj_dir/sweep/pnr_$s.log)"
   elif [ ! -f report_$s.json ]; then echo "seed $s: place and route failed (rtl/obj_dir/sweep/pnr_$s.log)"
   fi
 }
@@ -67,7 +71,7 @@ for s in $SEEDS; do
   total=$((total + 1))
   [ -f rtl/obj_dir/sweep/report_$s.json ] || continue
   routed=$((routed + 1)); reports="$reports rtl/obj_dir/sweep/report_$s.json"
-  grep -q "FAIL at" rtl/obj_dir/sweep/pnr_$s.log || met=$((met + 1))
+  grep "Max frequency for clock" rtl/obj_dir/sweep/pnr_$s.log | tail -3 | grep -q "FAIL at" || met=$((met + 1))
 done
 [ -n "$reports" ] && python3 tools/netlist/synth_report.py $reports
 echo "placement_sweep: $routed of $total seeds placed and routed, $met of $total meet the clock (seeds $SEEDS)"
