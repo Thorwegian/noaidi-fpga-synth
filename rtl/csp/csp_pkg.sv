@@ -79,7 +79,7 @@ package csp_pkg;
     // compute, E4 the product out, E5 reduced and saturated, W the write pins.
     parameter int FIRST_ISSUE_CYCLE = 4;       // the address stage of the program's row 0
     parameter int RESULT_LATENCY    = 9;       // A to the cycle a reader's A may follow a W
-    parameter int STATE_LATENCY     = 5;       // the flags: a SEL reads them in E1b, 5 cycles after the CMP (was 7 for SKIP, dropped #238)
+    parameter int STATE_LATENCY     = 6;       // the flags: a SEL reads them in E1b, 6 cycles after the CMP (5 until #330: the flags are taken from E6's registered result; 7 for SKIP, dropped #238)
     parameter int INDEX_LATENCY     = 5;       // an IDX's index, in the register for the A stage (the sum registered into E1b, #238)
     parameter int JUMP_PENALTY      = 4;       // the rows in flight behind a loop's last row
 
