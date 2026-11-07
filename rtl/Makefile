@@ -327,6 +327,17 @@ obj_dir/tb_i2s_tx/sim: $(PKG) dsp/timebase.sv i2s/i2s_tx.sv tb/tb_i2s_tx.sv Make
 sim-i2s: obj_dir/tb_i2s_tx/sim
 	$(call run_sim,$<,tb/sim-i2s.out)
 
+# The chip's wiring (#378): top itself through its pins, the SPI master of
+# tb_spi_bus on the bus and the receivers of tb_i2s_tx and tb_spdif_block on
+# the outputs: the memories and the pointers through the real blocks, every
+# status slot against the signal it packs, silence, the test tone on all three
+# outputs, the data stream. 6 ms of chip time, about a second.
+obj_dir/tb_top/sim: $(PKG) $(MOD) tb/tb_top.sv $(LUTS) Makefile
+	$(VERILATE) $(PKG) $(MOD) tb/tb_top.sv
+
+sim-top: obj_dir/tb_top/sim
+	$(call run_sim,$<,tb/sim-top.out)
+
 # The pulse oscillator must average to ZERO at every duty (the comparator
 # alone is centred at 50 % only). Without the fix this bench reports 8
 # failures, which is the only reason its passing means anything.
@@ -363,7 +374,7 @@ sim-limiter: obj_dir/tb_limiter/sim
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
-SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s \
+SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
               sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
 SIM_OUT = $(patsubst sim-%,tb/sim-%.out,$(SIM_TARGETS))
 
