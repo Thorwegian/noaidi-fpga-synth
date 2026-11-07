@@ -1,5 +1,7 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
+![The prototype: a Tang Nano 20K and an ESP32-C3 Super Mini on perfboard, two DIN MIDI inputs through optocouplers, audio out on optical](https://thj.no/synth/images/prototype-board.jpg)
+
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
@@ -7,8 +9,6 @@ musical thinking. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
-
-![The prototype: a Tang Nano 20K and an ESP32-C3 Super Mini on perfboard, two DIN MIDI inputs through optocouplers, audio out on optical](https://thj.no/synth/images/prototype-board.jpg)
 
 ## License
 
@@ -74,6 +74,12 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 |---|---|---|
 | MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
 | Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — reserved for the Open Stage Control dev panel (requires the console on USB-Serial/JTAG, which it is) |
+
+The Open Stage Control panel in `tools/osc_panel/` puts every parameter
+on a knob or selector, labelled with its CC number, and drives the synth
+over the panel MIDI input:
+
+![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 
@@ -242,12 +248,6 @@ saved /Presets/User/Pads/Arctic Ice.toml
   it decodes the panic backtrace into source lines.
 
 ![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
-
-The Open Stage Control panel in `tools/osc_panel/` puts every parameter
-on a knob or selector, labelled with its CC number, and drives the synth
-over the panel MIDI input:
-
-![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
 
 ## Preset storage
 
