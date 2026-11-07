@@ -6,7 +6,7 @@
  
 Companion to filter_pain_check.py: same recipe preset, but records
 a few representative (slope, resonance) settings as WAV files for
-listening review (publish with tools/lab/publish_capture.sh).
+listening review (encode with tools/lab/encode_capture.sh).
 
     ~/.noaidi-blenv/bin/python3 tools/lab/ble/pain_capture.py
 """
