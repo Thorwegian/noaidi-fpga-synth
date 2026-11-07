@@ -205,9 +205,13 @@ flash: pack.fs
 #
 # Warnings are fatal except: lint and style, TIMESCALEMOD (the benches set
 # a `timescale, the RTL does not), MULTIDRIVEN (initial values in
-# spi_bus.sv) and ZERODLY (tb_spi_bus's variable delays).
+# spi_bus.sv) and ZERODLY (tb_spi_bus's variable delays). PINMISSING is
+# lint but stays fatal: a bench that leaves an input off an instance
+# reads the run's random there (#373, tb_pulse_dc after osc_core grew
+# three inputs), and the failures then change with SIM_SEED.
 VL_FLAGS = --binary --timing -O3 --x-assign unique --x-initial unique -I. \
-           -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-ZERODLY -Wno-SELRANGE
+           -Wno-lint -Wno-style -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN -Wno-ZERODLY -Wno-SELRANGE \
+           -Wwarn-PINMISSING
 VERILATE = mkdir -p $(@D) && verilator $(VL_FLAGS) --top-module $(notdir $(@D)) --Mdir $(@D) -o sim
 
 ifeq ($(origin SIM_SEED),undefined)
@@ -306,7 +310,7 @@ sim-spdif48: obj_dir/tb_spdif48_block/sim
 # The pulse oscillator must average to ZERO at every duty (the comparator
 # alone is centred at 50 % only). Without the fix this bench reports 8
 # failures, which is the only reason its passing means anything.
-obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv Makefile
+obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv dsp/sine_lut.hex Makefile
 	$(VERILATE) $(PKG) dsp/osc_core.sv tb/tb_pulse_dc.sv
 
 sim-pulse-dc: obj_dir/tb_pulse_dc/sim
