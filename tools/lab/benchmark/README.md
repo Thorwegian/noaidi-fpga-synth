@@ -32,9 +32,9 @@ tail no longer matched the instrument anyway.
 **What the reference is.** The reference is the JSON and the CSV below:
 `benchmark_compare.py` reads those two files and nothing else. The WAV they
 were made from, `baseline_galaxy_d03e915.wav` (take 4 of 2026-10-28, md5
-`2b4d7e2044b11b66090ee45a45354615`), stays out of the tree, as
-`~/Documents/noaidi-benchmark/` on the lab box and `~/noaidi-benchmark/` on
-thj.no. A copy is the benchmark if `baseline_check.py` on it reproduces this
+`2b4d7e2044b11b66090ee45a45354615`), stays out of the tree, at
+`~/.local/share/noaidi-benchmark/` on the lab box and on thj.no. A copy is
+the benchmark if `baseline_check.py` on it reproduces this
 folder's JSON and CSV exactly. After a change to the checker, remake the
 derived files from the WAV with the Essentia interpreter
 (`~/.noaidi-blenv/bin/python` on the lab box), and commit them with the
@@ -42,7 +42,7 @@ checker:
 
 ```
 cd tools/lab/benchmark
-~/.noaidi-blenv/bin/python ../baseline_check.py ~/Documents/noaidi-benchmark/baseline_galaxy_d03e915.wav \
+~/.noaidi-blenv/bin/python ../baseline_check.py ~/.local/share/noaidi-benchmark/baseline_galaxy_d03e915.wav \
     --json baseline_galaxy_d03e915.essentia.json \
     --envelope baseline_galaxy_d03e915.envelope.csv \
     > baseline_galaxy_d03e915.essentia.txt
