@@ -298,18 +298,15 @@ module top (
         if (!rst_n)           tone_phase <= '0;
         else if (sample_tick) tone_phase <= tone_phase + 24'd262144;
 
-    logic signed [17:0] tone_q216;
-    osc_core u_tone_osc (
-        .phase_next (tone_phase),      // advanced above, not here
-        .duty       (24'sd0),
-        .pulse_max   (25'sd8388607),
-        .pulse_min   (-25'sd8388608),
-        .wave       (2'd3),            // sine (quarter-wave LUT)
-        .sample_out (tone_q216)
-    );
-    // Sine spans ±32767, which fits 16 signed bits exactly, so the
-    // concat IS the <<8 with the sign landing at bit 23.
-    wire signed [23:0] tone_sample = {tone_q216[15:0], 8'b0};
+    // The sine straight from the oscillator's table (block RAM, read on
+    // the clock: a clock late against the phase, nothing at 768 clocks
+    // a sample). Q2.16 spans ±32767, which fits 16 signed bits exactly,
+    // so the concat IS the <<8 with the sign landing at bit 23.
+    reg signed [15:0] tone_sine_lut [0:1023];
+    initial $readmemh("dsp/sine_lut.hex", tone_sine_lut);
+    logic signed [15:0] tone_sine;
+    always_ff @(posedge sysclk) tone_sine <= tone_sine_lut[tone_phase[23:14]];
+    wire signed [23:0] tone_sample = {tone_sine, 8'b0};
 
     //----------------------------------------------------------------
     // Output low-pass (output_lpf.sv): one-pole 6 dB/oct on the mix,

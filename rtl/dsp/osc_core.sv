@@ -10,6 +10,13 @@
 //
 //   sample_out — selected waveform, scaled Q0.24 → Q2.16
 //
+// The sine comes in ready-made (sine, Q2.16): the caller reads it on
+// the clock from the full-wave table in block RAM (scripts/
+// gen_sine_lut.py) with the same phase it registers for this module.
+// The table used to be a quarter wave read without a clock, which can
+// only be built from LUTs (741 of them) with a 24-bit negate after it:
+// eleven LUT levels, the longest path of the oscillator stage.
+//
 // The phase adder belongs to the CALLER, not to this module, for two
 // reasons. The caller needs the advanced phase anyway, for the state
 // writeback, so holding the adder here would mean two 24-bit adders
@@ -28,7 +35,9 @@ module osc_core (
                                             // removed: 2^23-1 - duty, by the caller a
                                             // stage earlier (see the pulse section)
     input  logic signed [24:0] pulse_min,   // its low level, -2^23 - duty, likewise
-    input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine (LUT)
+    input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine
+    input  logic signed [15:0] sine,       // the sine at phase_next, Q2.16, from
+                                           // the caller's block RAM read
 
     output logic signed [17:0] sample_out  // Q2.16
 );
@@ -73,7 +82,10 @@ module osc_core (
     // purpose, since one here would mask a width error instead of showing it.
     //----------------------------------------------------------------
     logic signed [24:0] pulse;
-    assign pulse = (phase_next < duty) ? pulse_max : pulse_min;
+    // The compare as a subtract's sign, so it maps to one carry chain
+    // rather than a LUT tree feeding a chain (abc's shape of `<`).
+    wire signed [24:0] below = 25'(phase_next) - 25'(duty);
+    assign pulse = below[24] ? pulse_max : pulse_min;
 
     //----------------------------------------------------------------
     // Triangle: fold sawtooth at midpoint (phase = 2^23). Modulo 2^24,
@@ -86,37 +98,18 @@ module osc_core (
                     ^ 24'h800000;
 
     //----------------------------------------------------------------
-    // Sine: true sine from a quarter-wave LUT. One quarter lives in sine_lut[0..255] as Q0.24 magnitude; the full
-    // cycle is rebuilt from the top two phase bits — quadrant[0]
-    // mirrors the falling quarters, quadrant[1] negates the lower
-    // half. Full-scale like saw/tri. (A true parabolic waveform,
-    // should one be wanted, belongs as its own waveform type.)
-    //----------------------------------------------------------------
-    reg [23:0] sine_lut [0:255];
-    initial $readmemh("dsp/sine_lut.hex", sine_lut);
-
-    logic [1:0]  quadrant;
-    logic [7:0]  quarter_idx;
-    logic [23:0] quarter_mag;
-    assign quadrant = phase_next[23:22];
-    assign quarter_idx    = quadrant[0] ? ~phase_next[21:14] : phase_next[21:14];
-    assign quarter_mag    = sine_lut[quarter_idx];
-
-    logic signed [23:0] sine;
-    assign sine = quadrant[1] ? -$signed(quarter_mag) : $signed(quarter_mag);
-
-    //----------------------------------------------------------------
     // Waveform select
     //----------------------------------------------------------------
     // 25 bits so the DC-corrected pulse survives the mux; the other
-    // three are sign-extended and unchanged.
+    // three are sign-extended and unchanged. The sine is already the
+    // output word, so it enters at bit 8 and the >>> 8 returns it.
     logic signed [24:0] muxed;
     always_comb begin
         case (wave)
             2'd0:    muxed = 25'(saw);
             2'd1:    muxed = pulse;
             2'd2:    muxed = 25'(triangle);
-            default: muxed = 25'(sine);
+            default: muxed = 25'(signed'({sine, 8'b0}));
         endcase
     end
 
