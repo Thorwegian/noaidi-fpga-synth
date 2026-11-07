@@ -10,6 +10,14 @@
      (Essentia) and benchmark_compare.py against the benchmark (tools/lab/
      benchmark): envelope, pitch classes, centroid, partials, valley floor.
 
+While the sequence records, DIAG_LIMITER (docs/memory_map.md, 0x00A: the
+master limiter's envelope state, 0.375 dB per code) is polled over the
+console about four times a second, so the take says how much the limiter
+worked during the triad (#355): the maximum and the mean over the triad's
+window and the take's maximum with its time, the series as
+<label>.limiter.csv. It is a reading, not a check: a borderline triad level
+has its explanation in the same output.
+
 WARNING: 3. measures the Factory preset Galaxy, still being voiced on the
 bench (#305): a change to its file moves the reference, so an audio failure
 after one may be the preset, not the build. See benchmark_compare.py.
@@ -23,7 +31,7 @@ With --fs the bitstream is loaded first (openFPGALoader, SRAM). The ESP32 is
 reset through the console's RTS and its boot log read; then the preset is
 loaded, the sequence recorded (baseline_recording.py), checked and compared,
 and the recording encoded as MP3 at 320 kbps (libmp3lame) for the ticket. DIR gets the
-recording, the tables, the plot, the boot log and verdict.json; the exit
+recording, the tables, the plot, the boot log, the limiter series and verdict.json; the exit
 status is 0 when all three pass. Run it with the interpreter Essentia is
 installed in.
 """
@@ -33,6 +41,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 
 import serial
@@ -47,6 +56,40 @@ BOOT_IMAGE = re.compile(r"boot image: ([^\r\n]{0,100})")
 PROGRAM = re.compile(r"control program loaded: ([^\r\n]{0,100})")
 VERIFIED = re.compile(r"verified: (\d+) register")
 DIAG = re.compile(r"passes (\d+)\s+queue \S+\s+limiter (\S+)\s+dropped (\d+)")
+LIMITER_DB_PER_CODE = 0.375                       # rtl/dsp/limiter.sv: 16 codes per octave
+LIMITER_FRACTION_BITS = 11                        # partial_pipeline.sv LIM_SUB: DIAG_LIMITER[18:11] is the code
+LIMITER_POLL_S = 0.2                              # the console's wait per csp-diag; about four readings a second
+# The triad in the take's clock: baseline_recording.py starts its recorder
+# about half a second after it is launched (imports, the first Active
+# Sensing and its settle), then a beat of lead-in and fifteen beats of scale,
+# held C6 and silence before the triad's four beats (its segments()). The
+# window keeps half a second clear of both ends of the triad.
+TRIAD_WINDOW_S = (17.0, 20.0)
+
+
+def limiter_db(word):
+    """DIAG_LIMITER's word as the limiter's reduction in dB."""
+    return (int(word, 16) & 0x7FFFF) / float(1 << LIMITER_FRACTION_BITS) * LIMITER_DB_PER_CODE
+
+
+def poll_limiter(port, readings, stop, t0):
+    """DIAG_LIMITER read until stop is set: (seconds since t0, reduction dB) appended to readings."""
+    while not stop.is_set():
+        match = DIAG.search(command(port, "csp-diag", LIMITER_POLL_S))
+        if match:
+            readings.append((time.monotonic() - t0, limiter_db(match.group(2))))
+
+
+def limiter_summary(readings):
+    """The triad window's maximum and mean, the take's maximum and its time."""
+    if not readings:
+        return None
+    window = [db for t, db in readings if TRIAD_WINDOW_S[0] <= t <= TRIAD_WINDOW_S[1]]
+    at, take_max = max(readings, key=lambda r: r[1])
+    return {"readings": len(readings), "window_s": list(TRIAD_WINDOW_S),
+            "triad_max_db": round(max(window), 2) if window else None,
+            "triad_mean_db": round(sum(window) / len(window), 2) if window else None,
+            "take_max_db": round(take_max, 2), "take_max_at_s": round(at, 1)}
 
 
 def boot(port, seconds):
@@ -139,12 +182,35 @@ def main():
     time.sleep(1.0)
     diag = DIAG.search(command(port, "csp-diag", 2.0))
     verdict["diag"] = {"passes": int(diag.group(1)), "limiter": diag.group(2), "dropped": int(diag.group(3))} if diag else None
-    port.close()
 
     wav = base + ".wav"
     print("== recording")
+    readings, stop = [], threading.Event()
+    poller = threading.Thread(target=poll_limiter, args=(port, readings, stop, time.monotonic()), daemon=True)
+    poller.start()
     run([sys.executable, os.path.join(HERE, "baseline_recording.py"), wav, "--program", "-1",
          "--tail", str(args.tail), "--port", args.port, "--device", args.device], log)
+    stop.set()
+    poller.join()
+    port.close()
+    with open(base + ".limiter.csv", "w") as out:
+        out.write("time_s,reduction_db\n")
+        for t, db in readings:
+            out.write("%.2f,%.3f\n" % (t, db))
+    verdict["limiter"] = limiter_summary(readings)
+    if verdict["limiter"] and verdict["limiter"]["triad_max_db"] is not None:
+        line = "limiter during the triad (%.0f to %.0f s of the take, %d readings over the take): max %.2f dB, mean %.2f dB; the take's max %.2f dB at %.1f s" % (
+            TRIAD_WINDOW_S[0], TRIAD_WINDOW_S[1], verdict["limiter"]["readings"],
+            verdict["limiter"]["triad_max_db"], verdict["limiter"]["triad_mean_db"],
+            verdict["limiter"]["take_max_db"], verdict["limiter"]["take_max_at_s"])
+    elif verdict["limiter"]:
+        line = "limiter: %d readings over the take, none inside the triad's window (%.0f to %.0f s); the take's max %.2f dB at %.1f s" % (
+            verdict["limiter"]["readings"], TRIAD_WINDOW_S[0], TRIAD_WINDOW_S[1],
+            verdict["limiter"]["take_max_db"], verdict["limiter"]["take_max_at_s"])
+    else:
+        line = "limiter: no reading (csp-diag answered nothing during the take)"
+    log.append(line)
+    print(line)
     print("== baseline_check")
     check_rc = run([sys.executable, os.path.join(HERE, "baseline_check.py"), wav,
                     "--envelope", base + ".envelope.csv", "--json", base + ".check.json"], log)
