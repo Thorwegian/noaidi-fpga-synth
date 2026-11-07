@@ -204,6 +204,8 @@ value, with a new seed on each run; the seed is the first line of each
 
 ## Console
 
+![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
+
 `make fw-console` attaches `screen` to the ESP32's USB serial port
 (`ESPPORT` overrides the port it finds). **Press Return** to bring up
 the layout: output scrolls above a status bar and an input line.
@@ -246,8 +248,6 @@ saved /Presets/User/Pads/Arctic Ice.toml
   `app/build/console.log`, overwritten on every run (`less -R` shows it
   with its escape sequences). For a crash, `make fw-monitor` is better:
   it decodes the panic backtrace into source lines.
-
-![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
 
 ## Preset storage
 
