@@ -335,7 +335,16 @@ sim-i2s: obj_dir/tb_i2s_tx/sim
 obj_dir/tb_top/sim: $(PKG) $(MOD) tb/tb_top.sv $(LUTS) Makefile
 	$(VERILATE) $(PKG) $(MOD) tb/tb_top.sv
 
-sim-top: obj_dir/tb_top/sim
+# The boot self-test's image for tb_top (#378), assembled by the host tool as
+# the firmware's is: the rows and the decode ROM as hex for $readmemh (a count,
+# then the words), loaded over the bus the way the firmware loads them.
+CSP_TOOL     = ../app/build/host/csp
+CSP_SELFTEST = ../tools/csp/programs/map.s ../tools/csp/programs/selftest.s
+obj_dir/tb_top/selftest.imem.hex: $(CSP_SELFTEST) ../tools/csp/main.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.hpp
+	$(MAKE) -C .. csp
+	mkdir -p $(@D) && $(CSP_TOOL) image $(CSP_SELFTEST) -o $(@D)/selftest
+
+sim-top: obj_dir/tb_top/sim obj_dir/tb_top/selftest.imem.hex
 	$(call run_sim,$<,tb/sim-top.out)
 
 # The pulse oscillator must average to ZERO at every duty (the comparator
