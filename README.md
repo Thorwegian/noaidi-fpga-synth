@@ -140,6 +140,11 @@ make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
 `make sim` starts every variable that has no initial value at a random
 value, with a new seed on each run; the seed is the first line of each
 `rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
+It also checks what the benches cover (`tools/netlist/bench_coverage.py`,
+`rtl/tb/sim-coverage.out`): an RTL source no bench verilates, a bench no
+target builds, or an output port no bench reads fails the run with the
+name of the gap, so a module or a port cannot fall out of the suite
+unnoticed.
 
 ## Preset storage
 
