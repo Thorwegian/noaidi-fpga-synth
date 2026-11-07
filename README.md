@@ -196,7 +196,7 @@ not fetch them.
   `.tools/` (gitignored, checksum verified; the gateware targets prefer it
   and fall back to `/opt/oss-cad-suite`, or set `CAD_SUITE`).
   `make tools-check` looks for a newer release, `make tools-upgrade` pins
-  it (then re-run `make sim-lockstep` and re-check `PLACER_BETA` in `rtl/Makefile`:
+  it (then re-run `make sim` and a placement sweep (`tools/lab/placement_sweep.sh`), and re-check `PLACER_BETA` in `rtl/Makefile`:
   the place-and-route result belongs to the tool version). The bitstream
   itself is written by the `gowin_pack` of a second, newer release pinned
   in `tools/oss-cad-suite-pack.version` (fetched by the same `make tools`

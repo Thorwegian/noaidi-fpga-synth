@@ -261,8 +261,9 @@ its gain the product of its voice's and its channel's, each saturating into
 the parameter's legal range; the extremes clamp, nothing wraps. One format
 (signed Q4.14 words; octaves for pitch, cutoff and resonance, linear for
 gain). Velocity and other per-note values are firmware writes to a voice's
-registers. The firmware's side is `app/main/render.cpp`; the system bench
-(`make sim-synth`) plays its writes on the Verilated synthesizer.
+registers. The firmware's side is `app/main/render.cpp`; the chip-level bench
+(`make -C rtl sim-top`, `rtl/tb/tb_top.sv`) plays bus writes on the Verilated
+chip.
 
 ### Modulation authority rule
 
