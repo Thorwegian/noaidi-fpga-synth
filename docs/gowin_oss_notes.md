@@ -416,34 +416,16 @@ what feeds it; anything but a flop is a fault waiting for a seed.
   endpoint and **17** LUT levels: ABC re-folded the late select back into
   the mux trees. Depth is decided by the synthesiser's view of the cone,
   not by the RTL's shape; to shorten a chain, register something in it.
-- **Measured 2026-10-21 (the lab, #241: eb72fdb seed 1, the CSP beside it
-  in the same bitstream).** A chain of LUT4 levels between two registers,
-  18 chains wide on an LFSR's bits, compared every cycle with a reference
-  that takes one level a cycle (`rtl/lab/dut_lut_chain.sv`): **2, 4, 6 and
-  8 levels miss nowhere to 133 MHz**, the clock generator's ceiling (about
-  800 M cycles a clock, 3 s each); **10 levels miss from 105 MHz** (5 × 10⁻⁵
-  a cycle at 105, 1.3 × 10⁻⁴ at 110, 5.7 × 10⁻³ at 133). Carry chains of
-  18, 36 and 54 bits, an adder a cycle registered in and out
-  (`dut_carry_chain.sv`), miss nowhere to 133 MHz. Eight levels with the
-  routes a small module gets hold a 7.5 ns period and ten break at 9.5, so
-  at 13.56 ns the LUT depth of a path is not what breaks the core at 96 MHz
-  (the chip check, #235); what its paths have and these do not — block RAM
-  and DSP pins, long routes, fan-out — is, and the lab's next devices
-  measure those. The graph: `docs/lab/lab_sweep_eb72fdb.png`
-  (`tools/lab/lab_sweep_plot.py`).
-- **Measured 2026-10-28 (the lab, #309: fc18413, the CSP beside it).** A
-  fixed delay in the shadow SRAM, a 16-row circular buffer of nine
-  RAM16SDP4 (a 36-bit word read fifteen cycles after it was written,
-  `rtl/lab/dut_lutram.sv`), against the same word through fifteen
-  flip-flops: **clean to 133 MHz with its asynchronous data out straight
-  into an XOR and a 36-bit parity**, and clean with a register first. A
-  RAM16SDP4 delay therefore clears the 30 % margin with room, and is the
-  primitive for a pipeline's fixed delays, not a chain of flip-flops. The
-  same bitstream's chains: 10 levels miss from 105 MHz as before, and 8
-  levels from 115 MHz where eb72fdb's placement held to 133 — still above
-  the margin's 105.3, but a placement-dependent figure, not a fixed one.
-  The graph: `docs/lab/lab_sweep_fc18413.png` (`tools/lab/lab_sweep.py`
-  ran it).
+- **The on-chip primitive bench (`rtl/lab`, #241, removed in #371).** While
+  the place-and-route report had no Gowin timing data, chains of LUT4s,
+  carry chains, DSP, fan-out, block RAM and RAM16SDP4 devices were swept
+  against the clock on the board (October 2026): 8 LUT levels and 54-bit
+  carry chains held to 133 MHz, 10 levels missed from 105 MHz, a
+  RAM16SDP4 delay was clean to 133 MHz with its asynchronous data out
+  straight into logic. The pinned nextpnr fork now carries the timing
+  data and its estimate has been more conservative than the chip on every
+  board take since, so the bench went and primitive-speed questions go to
+  the report (section 6), not to a board sweep.
 
 The GW2A's logic cell is a four-input LUT and a flip-flop; there is no
 LUT6, and the wide-function muxes (`MUX2_LUT5` … `MUX2_LUT8`) that the
@@ -455,8 +437,8 @@ and the flip-flop's clock-to-out at 0.20–0.23 ns; the routed reports of
 the CSP show 0.37–0.57 ns a level and 0.17–1.2 ns a hop between levels.
 At 73.728 MHz the period is 13.56 ns and the board wants the report at
 0.8 of that, so a path may hold about ten LUT levels with short routes,
-or six with the routes a mid-sized design actually gets (the lab's chains,
-measured above, hold eight levels at 7.5 ns: short routes). The CSP's
+or six with the routes a mid-sized design actually gets (the bench's
+chains, above, held eight levels at 7.5 ns: short routes). The CSP's
 critical path today is exactly that: the pass control, the index
 adders, the fetch buffer's word, the private-index mux — ten levels
 across half the chip. Rules that keep a path under that, in the order

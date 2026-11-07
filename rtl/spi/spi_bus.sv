@@ -81,12 +81,7 @@ module spi_bus #(
     // ---- a partial's pointers (sclk domain): the entry, whole, when its fourth dword arrives ----
     output logic                             pointer_write_enable,
     output logic [7:0]                       pointer_write_index,
-    output logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data,
-
-    // the lab's counters (#241), read as they are
-    output logic [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] lab_index,
-    input  logic [synth_pkg::SPI_DWORD_W-1:0] lab_dword,
-    output logic                             lab_snapshot    // toggles when a read frame starts at the lab's base
+    output logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data
 );
 
     //--------------------------------------------------------------------
@@ -118,7 +113,6 @@ module spi_bus #(
     //--------------------------------------------------------------------
     localparam logic [synth_pkg::SPI_ADDRESS_W-1:0] IMEM_END = synth_pkg::MAP_IMEM_BASE + synth_pkg::SPI_ADDRESS_W'(2 * csp_pkg::PROGRAM_ROWS);
     localparam logic [synth_pkg::SPI_ADDRESS_W-1:0] ROM_END  = synth_pkg::MAP_ROM_BASE + synth_pkg::SPI_ADDRESS_W'(csp_pkg::ROM_ROWS);
-    localparam logic [synth_pkg::SPI_ADDRESS_W-1:0] LAB_END  = synth_pkg::MAP_LAB_BASE + synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_LAB_DWORDS);
 
     function automatic logic in_system(input logic [synth_pkg::SPI_ADDRESS_W-1:0] address);
         in_system = address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_SYSTEM_DWORDS);
@@ -128,10 +122,6 @@ module spi_bus #(
     endfunction
     function automatic logic in_rom(input logic [synth_pkg::SPI_ADDRESS_W-1:0] address);
         in_rom = address >= synth_pkg::MAP_ROM_BASE && address < ROM_END;
-    endfunction
-
-    function automatic logic in_lab(input logic [synth_pkg::SPI_ADDRESS_W-1:0] address);
-        in_lab = address >= synth_pkg::MAP_LAB_BASE && address < LAB_END;
     endfunction
 
     //--------------------------------------------------------------------
@@ -177,8 +167,6 @@ module spi_bus #(
     logic [synth_pkg::SPI_DWORD_W-synth_pkg::SPI_NONET_W-1:0] partial_dword;   // the dword's first three nonets
     logic [synth_pkg::SPI_DWORD_W-1:0]    stream_dword;      // the dword streaming out NOW
 
-    initial lab_snapshot = 1'b0;
-
     initial begin
         frame_phase    = PHASE_COMMAND;
         is_read        = 1'b0;
@@ -199,7 +187,6 @@ module spi_bus #(
         if (in_system(dword_address))    read_data = system_at(dword_address);
         else if (in_imem(dword_address)) read_data = imem_read_dword;
         else if (in_rom(dword_address))  read_data = synth_pkg::SPI_DWORD_W'(rom_read_word);
-        else if (in_lab(dword_address))  read_data = lab_dword;
         else                            read_data = '0;
     end
 
@@ -222,9 +209,6 @@ module spi_bus #(
                     dword_address <= address_on_wire;
                     nonet_index  <= '0;
                     frame_phase  <= is_read ? PHASE_TURNAROUND : PHASE_DATA;
-                    // a read of the lab's counters from their base: the lab snapshots them during the
-                    // turnaround and serves the snapshot, which stays put, for this frame and the next
-                    if (is_read && address_on_wire == synth_pkg::MAP_LAB_BASE) lab_snapshot <= ~lab_snapshot;
                 end
                 PHASE_TURNAROUND: begin                  // one dword's worth of nonets
                     nonet_index <= nonet_index + 2'd1;
@@ -305,9 +289,6 @@ module spi_bus #(
     assign imem_row         = imem_offset[csp_pkg::PROGRAM_W:1];
     assign imem_upper       = !imem_offset[0];           // the first dword of a row is its upper half
     assign imem_load_dword   = dword_data;
-
-    wire [synth_pkg::SPI_ADDRESS_W-1:0] lab_offset = dword_address - synth_pkg::MAP_LAB_BASE;
-    assign lab_index = lab_offset[$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0];
 
     wire [synth_pkg::SPI_ADDRESS_W-1:0] rom_offset = dword_address - synth_pkg::MAP_ROM_BASE;
     assign rom_load_enable  = dword_complete && in_rom(dword_address);

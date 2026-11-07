@@ -146,9 +146,6 @@ module top (
     logic                              rom_load_enable;
     logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_row;
     logic [csp_pkg::ROM_ADDRESS_W-1:0] rom_op;
-    logic                                    lab_snapshot;
-    logic [$clog2(synth_pkg::MAP_LAB_DWORDS)-1:0] lab_index;
-    logic [synth_pkg::SPI_DWORD_W-1:0]       lab_dword;
     logic [csp_pkg::ROM_W-1:0]         rom_load_word, rom_read_word, control_word;
 
     csp_decode_rom u_rom (
@@ -224,9 +221,6 @@ module top (
     logic signed [23:0] sample_left, sample_right;   // Q0.24
     logic [18:0] master_gain_q;
 
-    // The audio path and the lab (#241) do not fit the chip together: the lab's build
-    // (`make pack.fs LAB_BUILD=1`) has the CSP beside the lab and no partials
-`ifndef LAB
     csp_sink_area #(.READ_PORTS (SINK_PORTS)) u_sink_area (
         .clk           (sysclk),
         .reset_n       (rst_n),
@@ -259,28 +253,6 @@ module top (
         .mix_right            (sample_right),
         .master_gain_q        (master_gain_q)
     );
-`else
-    assign sink_read_address[synth_pkg::SINK_READ_PORTS-1:0] = '0;
-    assign sink_read_data = '0;
-    assign sample_left    = '0;
-    assign sample_right   = '0;
-    assign master_gain_q  = '0;
-`endif
-
-    // the lab (#241): devices under test with their mismatch counters, read through the link —
-    // a build of its own (`make pack.fs LAB_BUILD=1`): its flip-flops do not fit beside the audio path
-`ifdef LAB
-    lab u_lab (
-        .clk             (sysclk),
-        .reset_n         (rst_n),
-        .inject_fault    ('0),
-        .snapshot_toggle (lab_snapshot),
-        .index           (lab_index),
-        .dword           (lab_dword)
-    );
-`else
-    assign lab_dword = '0;
-`endif
 
     //----------------------------------------------------------------
     // Test tone (audio-chain purity check): 1500 Hz sine,
@@ -462,10 +434,7 @@ module top (
         .rom_read_word      (rom_read_word),
         .pointer_write_enable (pointer_write_enable),
         .pointer_write_index  (pointer_write_index),
-        .pointer_write_data   (pointer_write_data),
-        .lab_index          (lab_index),
-        .lab_dword          (lab_dword),
-        .lab_snapshot       (lab_snapshot)
+        .pointer_write_data   (pointer_write_data)
     );
 
     //----------------------------------------------------------------
