@@ -427,11 +427,23 @@ module csp_core (
         end
     end
 
+    // The loop's end is decided from registered bits (#360: the decision, the program
+    // counter's mux and the trip to IMEM's eight address copies were one path of 11 LUT
+    // levels): whether the row at A is the body's last row was compared a stage earlier,
+    // against the last row the register will hold then (a LOOP row at A writes it the same
+    // clock its body's first row moves up), and whether one repeat is left is a flag kept
+    // beside the count.
+    wire a_is_loop_i = a_is_loop && !a_loop_on_j;
+    wire a_is_loop_j = a_is_loop &&  a_loop_on_j;
+    logic last_i, last_j;                          // a_pc == loop_last_i / _j
+    logic exhausted_i, exhausted_j;                // loop_remaining_i / _j == 1
+    always_ff @(posedge clk) begin
+        last_i <= capture_pc == (a_is_loop_i ? a_imm[PC_W-1:0] : loop_last_i);
+        last_j <= capture_pc == (a_is_loop_j ? a_imm[PC_W-1:0] : loop_last_j);
+    end
     // a scalar loop whose last row is a vector loop's ends on the last element of the last round
-    wire hit_i = a_present && loop_active_i && a_pc == loop_last_i && (!a_vector || a_final);
-    wire hit_j = a_present && loop_active_j && a_pc == loop_last_j && (!a_vector || a_final);
-    wire exhausted_i = loop_remaining_i == 10'd1;
-    wire exhausted_j = loop_remaining_j == 10'd1;
+    wire hit_i = a_present && loop_active_i && last_i && (!a_vector || a_final);
+    wire hit_j = a_present && loop_active_j && last_j && (!a_vector || a_final);
     // a row that ends two loops ends the inner first, and the outer only if the inner is exhausted
     wire process_i = hit_i && (!hit_j || !loop_inner_is_j || exhausted_j);
     wire process_j = hit_j && (!hit_i ||  loop_inner_is_j || exhausted_i);
@@ -469,16 +481,18 @@ module csp_core (
     end
 
     always_ff @(posedge clk) begin
-        if (process_i && !exhausted_i) loop_remaining_i <= loop_remaining_i - 10'd1;
-        if (process_j && !exhausted_j) loop_remaining_j <= loop_remaining_j - 10'd1;
+        if (process_i && !exhausted_i) begin loop_remaining_i <= loop_remaining_i - 10'd1; exhausted_i <= loop_remaining_i == 10'd2; end
+        if (process_j && !exhausted_j) begin loop_remaining_j <= loop_remaining_j - 10'd1; exhausted_j <= loop_remaining_j == 10'd2; end
         if (a_is_loop) begin
             if (a_loop_on_j) begin
                 loop_remaining_j <= a_x_operand[9:0];
+                exhausted_j      <= a_x_operand[9:0] == 10'd1;
                 loop_stride_j    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
                 loop_start_j     <= a_pc + 1'b1;
                 loop_last_j      <= a_imm[PC_W-1:0];
             end else begin
                 loop_remaining_i <= a_x_operand[9:0];
+                exhausted_i      <= a_x_operand[9:0] == 10'd1;
                 loop_stride_i    <= {{2{a_y_operand[9]}}, a_y_operand[9:0]};
                 loop_start_i     <= a_pc + 1'b1;
                 loop_last_i      <= a_imm[PC_W-1:0];
