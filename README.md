@@ -73,13 +73,7 @@ runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
 | Signal | GPIO | Description |
 |---|---|---|
 | MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
-| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — reserved for the Open Stage Control dev panel (requires the console on USB-Serial/JTAG, which it is) |
-
-The Open Stage Control panel in `tools/osc_panel/` puts every parameter
-on a knob or selector, labelled with its CC number, and drives the synth
-over the panel MIDI input:
-
-![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
+| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 
@@ -248,6 +242,23 @@ saved /Presets/User/Pads/Arctic Ice.toml
   `app/build/console.log`, overwritten on every run (`less -R` shows it
   with its escape sequences). For a crash, `make fw-monitor` is better:
   it decodes the panic backtrace into source lines.
+
+## Control panel
+
+![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
+
+The development control surface: an [Open Stage
+Control](https://openstagecontrol.ammd.net/) panel in the browser, every
+CC of [midi_schema.md](docs/midi_schema.md) as a knob or selector with
+its real range and default, labelled with its controller number.
+`tools/osc_panel/gen_panel.py` generates the panel from its table (the
+panel is the CC map rendered as knobs: a new parameter is one line there),
+and `tools/osc_panel/run.sh` regenerates it and serves it headless on
+port 8080 of the dev host. Transport is MIDI over BLE, both ways: the
+knobs go to the synth, and the synth's state comes back as the same CCs,
+so a Program Change (or the console's `sync`) moves the knobs;
+`tools/osc_panel/runner.py` keeps the BLE port alive across board
+resets. The panel opens showing the boot preset.
 
 ## Preset storage
 
