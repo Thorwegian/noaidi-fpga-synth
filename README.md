@@ -59,7 +59,9 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 `make fw-console` attaches `screen` to the ESP32's USB serial port
 (`ESPPORT` overrides the port it finds). **Press Return** to bring up
-the layout: output scrolls above a status bar and an input line.
+the layout: output scrolls above a status bar and an input line. The
+layout is drawn only once a terminal has answered the console's size
+query; a script or a logger reading the port gets plain lines.
 
 ```
 I (2041) storage: /storage/Presets/Factory/Pads/Supersaw.toml loaded in 11 ms
@@ -69,6 +71,11 @@ saved /Presets/User/Pads/Arctic Ice.toml
  noaidi … | /Presets/User/Pads/Arctic Ice.toml
 /Presets/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
 ```
+
+The status bar's right end is the master limiter's meter: a gap in the
+bar grows leftwards by one column per 1.5 dB of gain reduction, twenty
+readings a second (`DIAG_LIMITER`, [memory_map.md](docs/memory_map.md)),
+over the text if the limiter is working that hard.
 
 - **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
   `rm <file>`.

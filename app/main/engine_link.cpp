@@ -19,6 +19,7 @@
 #include "freertos/task.h"
 
 #include "csp/control_program.hpp"
+#include "console.h"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
 #include "fpga_map.hpp"
@@ -208,6 +209,31 @@ constexpr bool log_lfo_probe = false;
 // Diagnostic: leave the CSP held and the tick paused after the boot image is
 // in, to snapshot the chip before its program has run (tools/lab/snapshot.py).
 constexpr bool hold_after_boot = false;
+
+// The limiter meter: the master limiter's reduction, DIAG_LIMITER[18:11] in
+// codes of 0.375 dB, on the console's status bar as one column per four
+// codes (1.5 dB). The level is 26 bits and the threshold code 192, so the
+// reduction never passes 223 codes: 56 columns at the very most. Twenty
+// readings a second, one dword each, at the lowest priority there is: the
+// engine's worst wait for the bus is this one frame (the lock is a mutex,
+// which inherits priority). A reading the bus refused shows as 0.
+constexpr int meter_period_ms = 50;
+
+void meter_task(void *) {
+    int shown = -1;
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(meter_period_ms));
+        xSemaphoreTake(lock, portMAX_DELAY);
+        const fpga_map::dword_t word =
+                spi_link::read_one(fpga_map::diag_limiter);
+        xSemaphoreGive(lock);
+        const int columns = static_cast<int>((word >> 11) & 0xFF) >> 2;
+        if (columns != shown) {
+            shown = columns;
+            console_set_meter(columns);
+        }
+    }
+}
 
 // Every few seconds, log what the CSP holds for the LFOs: the pass counter
 // and, for each LFO, its record (phase, step, depth and its negative, gain
@@ -517,6 +543,7 @@ void engine_link_init(void) {
     if (log_lfo_probe) {
         xTaskCreate(probe_task, "engine_probe", 3072, nullptr, 2, nullptr);
     }
+    xTaskCreate(meter_task, "engine_meter", 3072, nullptr, 1, nullptr);
     esp_timer_create_args_t timer_args = {};
     timer_args.callback                = tick_timer_cb;
     timer_args.name                    = "engine_tick";
