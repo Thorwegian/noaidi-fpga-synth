@@ -282,6 +282,16 @@ obj_dir/tb_partial_pipeline/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_
 sim-partial: obj_dir/tb_partial_pipeline/sim
 	$(call run_sim,$<,tb/sim-partial.out)
 
+# The filter at its corners (#380): the saw through the pipeline at the
+# cutoff clamp with the heaviest damping and with q1 = 1, and in
+# self-oscillation, judged by the autocorrelation at the saw's period;
+# the muted channel must stay silent. About ten seconds.
+obj_dir/tb_svf_stability/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_svf_stability.sv $(LUTS) Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_svf_stability.sv
+
+sim-svf-stability: obj_dir/tb_svf_stability/sim
+	$(call run_sim,$<,tb/sim-svf-stability.out)
+
 sim-bus: obj_dir/tb_spi_bus/sim
 	$(call run_sim,$<,tb/sim-bus.out)
 
@@ -343,7 +353,7 @@ sim-limiter: obj_dir/tb_limiter/sim
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
-SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-stream sim-spdif sim-spdif48 \
+SIM_TARGETS = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 \
               sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
 SIM_OUT = $(patsubst sim-%,tb/sim-%.out,$(SIM_TARGETS))
 
