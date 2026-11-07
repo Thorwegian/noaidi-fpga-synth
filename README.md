@@ -10,10 +10,6 @@ unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
 
-## License
-
-[CERN-OHL-S v2](LICENSE.txt)
-
 ## Architecture
 
 ```
@@ -53,55 +49,130 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   Super Mini with 4 MB of flash. The firmware's partition table
   (`app/partitions.csv`) assumes the 4 MB.
 
-## Wiring
+## Console
 
-**Inter-board SPI** (ESP32-C3 Super Mini master ↔ Tang Nano 20K
-slave, Mode 0, 10 MHz — measured clean to 40):
+![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
 
-| Signal | ESP32-C3 GPIO | Tang Nano 20K pin |
-|---|---|---|
-| MOSI | 6 | 26 |
-| MISO | 5 | 29 |
-| SCLK | 4 | 25 |
-| CS (active low) | 7 | 28 |
-
-(GPIO7 doubles as UART1's default TX, which is why MIDI UART init
-runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
-
-**ESP32-C3 peripherals:**
-
-| Signal | GPIO | Description |
-|---|---|---|
-| MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
-| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
-
-**Tang Nano 20K** (full list in `rtl/constraints.cst`):
-
-| Signal | Pin | Description |
-|---|---|---|
-| sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
-| spdif48_out | 86 | SPDIF 48 kHz — lab test audio path |
-| spdif_out | 27 | SPDIF 96 kHz — primary audio path |
-| i2s_data | 54 | I2S serial data |
-| i2s_lrclk | 55 | I2S word select |
-| i2s_bclk | 56 | I2S bit clock |
-| rst | 87 | reset button |
-| led[5:0] | 20–15 | status LEDs |
-
-One-time clock setup (the MS5351 must be programmed or pin 10 runs
-at the wrong frequency — everything then *seems* to work except
-audio rates, and SPDIF shows carrier-but-no-lock; a gateware PLL is
-never the workaround): connect to the BL616
-CLI at 115200 baud (Ctrl+X Ctrl+C Enter) and run the command below.
-The value must be whole kilohertz — an `M` suffix with a decimal
-point is invalid syntax for this command — and `-s` is what makes it
-survive power cycles; without it the clock silently reverts on the
-next blip (symptom: SPDIF carrier present but no lock, everything
-else apparently fine).
+`make fw-console` attaches `screen` to the ESP32's USB serial port
+(`ESPPORT` overrides the port it finds). **Press Return** to bring up
+the layout: output scrolls above a status bar and an input line.
 
 ```
-pll_clk O0=73728K -s
+I (2041) storage: /storage/Presets/Factory/Pads/Supersaw.toml loaded in 11 ms
+/Presets $ cd User/Pads
+/Presets/User/Pads $ save "Arctic Ice.toml"
+saved /Presets/User/Pads/Arctic Ice.toml
+ noaidi … | /Presets/User/Pads/Arctic Ice.toml
+/Presets/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
 ```
+
+- **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
+  `rm <file>`.
+- **Presets:** `load <file>`, `save <file>` (anywhere: this is a
+  developer's shell; a save under `Presets/Factory` starts with the
+  copyright notice), `init` (the init preset), `preset` (print the active
+  preset as a file).
+- **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
+  `bank add|insert|rm|new|del|build` edit `banks.toml` (see
+  [storage_format.md](docs/storage_format.md) "Banks").
+- **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
+  `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
+  `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
+  `ble`, `sync` (send the preset as CCs to the surfaces, as a Program
+  Change does), `help`.
+- **Paths:** absolute from the storage root (`/Presets/User`) or
+  relative to the working folder in the prompt, with `.` and `..`,
+  taken literally (extensions included). Quote names with spaces, or let
+  Tab complete them.
+- **Keys:** ↑/↓ recall earlier commands; ←/→, Home/End, Ctrl-A/E/U/W
+  edit; Ctrl-C clears the line. **Return on an empty line** redraws the
+  screen: after attaching, or after resizing the window.
+- **Scrollback:** the console keeps the last 1000 lines (at most 80 KB).
+  **PgUp/PgDn** page through them; the status bar shows how far back
+  you are, and PgDn past the newest line returns to live output.
+- **Exiting:** `Ctrl-A K` leaves `screen`.
+- **Log:** everything the console receives is written to
+  `app/build/console.log`, overwritten on every run (`less -R` shows it
+  with its escape sequences). For a crash, `make fw-monitor` is better:
+  it decodes the panic backtrace into source lines.
+
+## Control panel
+
+![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
+
+The development control surface: an [Open Stage
+Control](https://openstagecontrol.ammd.net/) panel in the browser, every
+CC of [midi_schema.md](docs/midi_schema.md) as a knob or selector with
+its real range and default, labelled with its controller number.
+`tools/osc_panel/gen_panel.py` generates the panel from its table (the
+panel is the CC map rendered as knobs: a new parameter is one line there),
+and `tools/osc_panel/run.sh` regenerates it and serves it headless on
+port 8080 of the dev host. Transport is MIDI over BLE, both ways: the
+knobs go to the synth, and the synth's state comes back as the same CCs,
+so a Program Change (or the console's `sync`) moves the knobs;
+`tools/osc_panel/runner.py` keeps the BLE port alive across board
+resets. The panel opens showing the boot preset.
+
+## Build & run
+
+Everything runs from the repo root (the tools it needs are listed under
+"External dependencies" below; `make tools` fetches the CAD suite):
+
+```bash
+make sim         # full gateware sim suite in Verilator (make -j4 sim to parallelize)
+make pack        # synthesize + place/route -> rtl/pack.fs
+make sram        # load bitstream into FPGA SRAM (volatile, fast)
+make flash       # write bitstream to FPGA flash (persistent)
+make fw          # build the ESP32 firmware
+make fw-flash    # build + flash the firmware (port must be free)
+make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
+make fw-console  # attach the console with screen (see Console above)
+make fw-test     # host tests of preset files and banks (about a minute)
+make csp-test    # host tests of the CSP reference model and assembler (tools/csp)
+make format      # reformat our C and C++ sources (.clang-format)
+make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
+```
+
+`make sim` starts every variable that has no initial value at a random
+value, with a new seed on each run; the seed is the first line of each
+`rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
+
+## Preset storage
+
+The synth keeps its presets and settings as TOML files on a FAT
+partition in the ESP32's flash
+([docs/storage_format.md](docs/storage_format.md)). A computer reaches
+them over the USB serial port:
+
+```bash
+make fw-storage-read DIR=~/noaidi     # synth → folder
+#   ... edit, add or delete files in ~/noaidi ...
+make fw-storage-write DIR=~/noaidi    # folder → synth
+make fw-storage-flash                 # app/storage → synth: the factory content
+```
+
+- **Every command replaces its destination.** `fw-storage-read`
+  replaces the folder with the synth's storage, so files that are no
+  longer on the synth disappear from the folder too.
+  `fw-storage-write` and `fw-storage-flash` replace the whole storage
+  partition, user presets included.
+- **The folder is protected:** `fw-storage-read` only replaces a folder
+  that is empty or already holds a storage copy (`system.toml` or
+  `Presets` at its top), so a mistyped path cannot wipe other files.
+- **First-time setup:** a new board needs `make fw-storage-flash` once,
+  after `make fw-flash`. Firmware updates never touch the storage
+  partition.
+- **Requirements:** the commands find ESP-IDF through the firmware
+  build, so run `make fw` once first. They need the serial port, so
+  leave the console (`Ctrl-A K`) before running them. `ESPPORT=/dev/...` picks the
+  serial port if esptool doesn't find it.
+- **Reset:** the synth reads its storage at boot. esptool resets it
+  after every command, so it boots with what was just written.
+
+After any gateware load (`sram`/`flash`), restart the ESP32
+(`make fw-flash` or its reset button) so the engine link rewrites the
+full parameter image — the FPGA boots with the boot image, not your
+live state.
 
 ## External dependencies
 
@@ -173,132 +244,62 @@ ESP-IDF it found, `tools/esp_idf.sh --shell` for an activated shell.
 `IDF=...` overrides the detection with any command that runs `idf.py`; with
 no ESP-IDF found, the script says so and stops.
 
-## Build & run
+## Wiring
 
-Everything runs from the repo root:
+**Inter-board SPI** (ESP32-C3 Super Mini master ↔ Tang Nano 20K
+slave, Mode 0, 10 MHz — measured clean to 40):
 
-```bash
-make sim         # full gateware sim suite in Verilator (make -j4 sim to parallelize)
-make pack        # synthesize + place/route -> rtl/pack.fs
-make sram        # load bitstream into FPGA SRAM (volatile, fast)
-make flash       # write bitstream to FPGA flash (persistent)
-make fw          # build the ESP32 firmware
-make fw-flash    # build + flash the firmware (port must be free)
-make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
-make fw-console  # attach the console with screen (see Console below)
-make fw-test     # host tests of preset files and banks (about a minute)
-make csp-test    # host tests of the CSP reference model and assembler (tools/csp)
-make format      # reformat our C and C++ sources (.clang-format)
-make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
+| Signal | ESP32-C3 GPIO | Tang Nano 20K pin |
+|---|---|---|
+| MOSI | 6 | 26 |
+| MISO | 5 | 29 |
+| SCLK | 4 | 25 |
+| CS (active low) | 7 | 28 |
+
+(GPIO7 doubles as UART1's default TX, which is why MIDI UART init
+runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
+
+**ESP32-C3 peripherals:**
+
+| Signal | GPIO | Description |
+|---|---|---|
+| MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
+| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
+
+**Tang Nano 20K** (full list in `rtl/constraints.cst`):
+
+| Signal | Pin | Description |
+|---|---|---|
+| sysclk | 10 | 73.728 MHz from the board's MS5351 CLK0 |
+| spdif48_out | 86 | SPDIF 48 kHz — lab test audio path |
+| spdif_out | 27 | SPDIF 96 kHz — primary audio path |
+| i2s_data | 54 | I2S serial data |
+| i2s_lrclk | 55 | I2S word select |
+| i2s_bclk | 56 | I2S bit clock |
+| rst | 87 | reset button |
+| led[5:0] | 20–15 | status LEDs |
+
+One-time clock setup (the MS5351 must be programmed or pin 10 runs
+at the wrong frequency — everything then *seems* to work except
+audio rates, and SPDIF shows carrier-but-no-lock; a gateware PLL is
+never the workaround): connect to the BL616
+CLI at 115200 baud (Ctrl+X Ctrl+C Enter) and run the command below.
+The value must be whole kilohertz — an `M` suffix with a decimal
+point is invalid syntax for this command — and `-s` is what makes it
+survive power cycles; without it the clock silently reverts on the
+next blip (symptom: SPDIF carrier present but no lock, everything
+else apparently fine).
+
 ```
-
-`make sim` starts every variable that has no initial value at a random
-value, with a new seed on each run; the seed is the first line of each
-`rtl/tb/sim-*.out`, and `make sim SIM_SEED=<n>` repeats a run exactly.
-
-## Console
-
-![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
-
-`make fw-console` attaches `screen` to the ESP32's USB serial port
-(`ESPPORT` overrides the port it finds). **Press Return** to bring up
-the layout: output scrolls above a status bar and an input line.
-
+pll_clk O0=73728K -s
 ```
-I (2041) storage: /storage/Presets/Factory/Pads/Supersaw.toml loaded in 11 ms
-/Presets $ cd User/Pads
-/Presets/User/Pads $ save "Arctic Ice.toml"
-saved /Presets/User/Pads/Arctic Ice.toml
- noaidi … | /Presets/User/Pads/Arctic Ice.toml
-/Presets/User/Pads $ load ../../Factory/Pads/Supersaw.toml█
-```
-
-- **Files:** `cd [folder]`, `pwd`, `ls [folder]`, `mkdir`, `rmdir`,
-  `rm <file>`.
-- **Presets:** `load <file>`, `save <file>` (anywhere: this is a
-  developer's shell; a save under `Presets/Factory` starts with the
-  copyright notice), `init` (the init preset), `preset` (print the active
-  preset as a file).
-- **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
-  `bank add|insert|rm|new|del|build` edit `banks.toml` (see
-  [storage_format.md](docs/storage_format.md) "Banks").
-- **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
-  `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
-  `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
-  `ble`, `sync` (send the preset as CCs to the surfaces, as a Program
-  Change does), `help`.
-- **Paths:** absolute from the storage root (`/Presets/User`) or
-  relative to the working folder in the prompt, with `.` and `..`,
-  taken literally (extensions included). Quote names with spaces, or let
-  Tab complete them.
-- **Keys:** ↑/↓ recall earlier commands; ←/→, Home/End, Ctrl-A/E/U/W
-  edit; Ctrl-C clears the line. **Return on an empty line** redraws the
-  screen: after attaching, or after resizing the window.
-- **Scrollback:** the console keeps the last 1000 lines (at most 80 KB).
-  **PgUp/PgDn** page through them; the status bar shows how far back
-  you are, and PgDn past the newest line returns to live output.
-- **Exiting:** `Ctrl-A K` leaves `screen`.
-- **Log:** everything the console receives is written to
-  `app/build/console.log`, overwritten on every run (`less -R` shows it
-  with its escape sequences). For a crash, `make fw-monitor` is better:
-  it decodes the panic backtrace into source lines.
-
-## Control panel
-
-![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
-
-The development control surface: an [Open Stage
-Control](https://openstagecontrol.ammd.net/) panel in the browser, every
-CC of [midi_schema.md](docs/midi_schema.md) as a knob or selector with
-its real range and default, labelled with its controller number.
-`tools/osc_panel/gen_panel.py` generates the panel from its table (the
-panel is the CC map rendered as knobs: a new parameter is one line there),
-and `tools/osc_panel/run.sh` regenerates it and serves it headless on
-port 8080 of the dev host. Transport is MIDI over BLE, both ways: the
-knobs go to the synth, and the synth's state comes back as the same CCs,
-so a Program Change (or the console's `sync`) moves the knobs;
-`tools/osc_panel/runner.py` keeps the BLE port alive across board
-resets. The panel opens showing the boot preset.
-
-## Preset storage
-
-The synth keeps its presets and settings as TOML files on a FAT
-partition in the ESP32's flash
-([docs/storage_format.md](docs/storage_format.md)). A computer reaches
-them over the USB serial port:
-
-```bash
-make fw-storage-read DIR=~/noaidi     # synth → folder
-#   ... edit, add or delete files in ~/noaidi ...
-make fw-storage-write DIR=~/noaidi    # folder → synth
-make fw-storage-flash                 # app/storage → synth: the factory content
-```
-
-- **Every command replaces its destination.** `fw-storage-read`
-  replaces the folder with the synth's storage, so files that are no
-  longer on the synth disappear from the folder too.
-  `fw-storage-write` and `fw-storage-flash` replace the whole storage
-  partition, user presets included.
-- **The folder is protected:** `fw-storage-read` only replaces a folder
-  that is empty or already holds a storage copy (`system.toml` or
-  `Presets` at its top), so a mistyped path cannot wipe other files.
-- **First-time setup:** a new board needs `make fw-storage-flash` once,
-  after `make fw-flash`. Firmware updates never touch the storage
-  partition.
-- **Requirements:** the commands find ESP-IDF through the firmware
-  build, so run `make fw` once first. They need the serial port, so
-  leave the console (`Ctrl-A K`) before running them. `ESPPORT=/dev/...` picks the
-  serial port if esptool doesn't find it.
-- **Reset:** the synth reads its storage at boot. esptool resets it
-  after every command, so it boots with what was just written.
-
-After any gateware load (`sram`/`flash`), restart the ESP32
-(`make fw-flash` or its reset button) so the engine link rewrites the
-full parameter image — the FPGA boots with the boot image, not your
-live state.
 
 ## Official Sipeed docs for Tang Nano 20K
 
 - [About](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html)
 - [Instructions](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/example/unbox.html)
 - [Code examples](https://github.com/sipeed/TangNano-20K-example/)
+
+## License
+
+[CERN-OHL-S v2](LICENSE.txt)
