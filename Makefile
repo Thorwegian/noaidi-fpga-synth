@@ -21,7 +21,9 @@
 #                   form (comment lines aside), and the writes a
 #                   preset renders to the CSP are the arithmetic they should be
 #   make csp        build tools/csp: the CSP assembler and simulator
-#                   (app/build/host/csp asm|sim program.s)
+#                   (app/build/host/csp asm|sim|image program.s; `image`
+#                   writes the rows and the ROM as hex for a bench, which
+#                   rtl/Makefile does for tb_top's boot self-test)
 #   make csp-test   host tests of the CSP reference model and assembler, and
 #                   that the firmware's control_program.hpp is current
 #   make csp-header regenerate app/main/csp/control_program.hpp from

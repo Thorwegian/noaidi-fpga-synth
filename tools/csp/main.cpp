@@ -39,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -52,6 +53,7 @@ int usage() {
     std::fputs(
             "usage: csp asm program.s...\n"
             "       csp header program.s... [-n name]\n"
+            "       csp image program.s... -o prefix     (prefix.imem.hex, prefix.rom.hex for $readmemh)\n"
             "       csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]... [-d]\n"
             "       csp script program.s... [-f seed] [-w address=raw]...\n"
             "       csp match program.s... -c chip.txt [-f seed] [-w address=raw]...\n"
@@ -142,6 +144,33 @@ std::string constant_name(const std::string &symbol) {
         return static_cast<char>(std::tolower(c));
     });
     return name;
+}
+
+// The image as a bench loads it over the bus ($readmemh): <prefix>.imem.hex
+// holds the row count, then two dwords a row, bits 71:36 first, in the
+// order they are written to the IMEM region; <prefix>.rom.hex holds the
+// count of rows used, then one control word a row.
+int image_command(const csp::Program &program, const std::string &prefix) {
+    const csp::Image &image = program.image;
+    std::ofstream imem(prefix + ".imem.hex");
+    std::ofstream rom(prefix + ".rom.hex");
+    if (!imem || !rom) {
+        std::fprintf(stderr, "cannot write %s.imem.hex / .rom.hex\n",
+                     prefix.c_str());
+        return 2;
+    }
+    imem << std::hex << image.length << '\n';
+    for (int row = 0; row < image.length; ++row) {
+        const csp::Row &bits = image.rows[static_cast<size_t>(row)];
+        imem << std::setfill('0') << std::setw(9) << bits.high << '\n'
+             << std::setfill('0') << std::setw(9) << bits.low << '\n';
+    }
+    rom << std::hex << image.rom_used << '\n';
+    for (int row = 0; row < image.rom_used; ++row) {
+        rom << std::setfill('0') << std::setw(9)
+            << image.rom[static_cast<size_t>(row)] << '\n';
+    }
+    return 0;
 }
 
 // The header the firmware loads the program from. The format is the
@@ -492,6 +521,12 @@ int main(int argc, char **argv) {
             }
         }
         return header_command(program, files, name_space);
+    }
+    if (command == "image") {
+        if (arg + 1 < argc && std::string(argv[arg]) == "-o") {
+            return image_command(program, argv[arg + 1]);
+        }
+        return usage();
     }
     if (command == "script" || command == "match") {
         std::vector<RawWrite> writes;

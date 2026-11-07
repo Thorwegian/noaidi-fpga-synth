@@ -32,10 +32,16 @@
 //      extremes within 1 % of the tone's
 //   8. the data stream on the 48 kHz output: the frames slot climbs as
 //      the transmitter counts, and the output is no longer silence
+//   9. the boot self-test (tools/csp/programs/selftest.s, assembled by the
+//      host tool into obj_dir/tb_top/selftest.*.hex) loaded over the bus
+//      as the firmware loads it, the CSP released: passes count, and the
+//      probe reads the results the model computes
+//  10. a note: five sink words through the door and the write queue, a
+//      partial pointed at them over the bus, and the left channel sounds
+//      while the right, at the zero word, stays silent; the dead-core
+//      path (a52de6a, #351) end to end
 //
-// About 6 ms of chip time, a second under Verilator. A CSP program
-// through the bus into a running pass is the next increment (an
-// assembled image is needed; #378).
+// About 9 ms of chip time, a second and a half under Verilator.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -326,8 +332,39 @@ module tb_top;
         end else $display("pass: %0s carries the decimated tone, period 32, extremes %0d .. %0d", what, lo, hi);
     endtask
 
+    // ---- the boot self-test's image (obj_dir/tb_top/selftest.*.hex, from the host tool) ----
+    logic [35:0] imem_image [0:2 * csp_pkg::PROGRAM_ROWS];      // [0] the row count, then two dwords a row
+    logic [35:0] rom_image  [0:csp_pkg::ROM_ROWS];              // [0] the rows used, then one word a row
+    initial begin
+        $readmemh("obj_dir/tb_top/selftest.imem.hex", imem_image);
+        $readmemh("obj_dir/tb_top/selftest.rom.hex", rom_image);
+    end
+
+    // the image over the bus as the firmware loads it: the rows two dwords each
+    // from MAP_IMEM_BASE, the ROM a dword a row from MAP_ROM_BASE, bursts of eight
+    task automatic load_image();
+        integer rows, dwords, k, m;
+        rows   = int'(imem_image[0]);
+        dwords = 2 * rows;
+        for (k = 0; k < dwords; k = k + 8) begin
+            for (m = 0; m < 8; m = m + 1) write_dwords[m] = (k + m < dwords) ? imem_image[1 + k + m] : '0;
+            write_burst(MAP_IMEM_BASE + 18'(k), (dwords - k < 8) ? dwords - k : 8, 1);
+        end
+        rows = int'(rom_image[0]);
+        for (k = 0; k < rows; k = k + 8) begin
+            for (m = 0; m < 8; m = m + 1) write_dwords[m] = (k + m < rows) ? rom_image[1 + k + m] : '0;
+            write_burst(MAP_ROM_BASE + 18'(k), (rows - k < 8) ? rows - k : 8, 1);
+        end
+    endtask
+
+    // a register or sink write through the door: [35:24] the address, [23:6] the word
+    function automatic logic [35:0] door_dword(input integer address, input integer word);
+        door_dword = {address[11:0], word[17:0], 6'b0};
+    endfunction
+
     integer tone_i2s_l, tone_i2s_r, tone_96, tone_48;
-    integer stream_48;
+    integer stream_48, note_i2s;
+    integer passes_before, passes_after;
     reg [35:0] value;
     logic [107:0] entry;
     integer j;
@@ -445,6 +482,85 @@ module tb_top;
             $display("FAIL: %0d of 64 frames on the 48 kHz output are not the stream word of their tick", j);
             errors = errors + 1;
         end else $display("pass: the 48 kHz output carries the stream word of each tick, 64 frames, both halves");
+
+        $display("--- 9. the boot self-test through the bus: the image loaded, the CSP released, the probe read ---");
+        write_dwords[0] = 36'h0_0000_0002;                 // held, everything off
+        write_burst(MAP_CTRL, 1, 1);
+        load_image();
+        $display("loaded %0d rows and %0d ROM words", int'(imem_image[0]), int'(rom_image[0]));
+        read_status(MAP_DIAG_PASS, passes_before);
+        write_dwords[0] = 36'h0_0000_0000;                 // released
+        write_burst(MAP_CTRL, 1, 1);
+        checkn("led[3] (the CSP running)", led[3], 1);
+        repeat (3 * 3072) @(posedge sysclk);               // three passes
+        read_status(MAP_DIAG_PASS, passes_after);
+        if (passes_after - passes_before < 3 || passes_after - passes_before > 4) begin
+            $display("FAIL: %0d passes counted over three pass times", passes_after - passes_before);
+            errors = errors + 1;
+        end else $display("pass: %0d passes counted over three pass times (and the reads' own time)", passes_after - passes_before);
+        // the self-test's results (tools/csp/programs/selftest.s), as the model computes them:
+        // |-4.0| = 4.0, 4.0 x 0.125 = 0.5, 0.5 - 4.0 = -3.5, in Q4.14; the probe reads the
+        // pair at a pass's end and the status slot has it two SPI clocks later
+        write_dwords[0] = 36'h068;                         // RES_ABS, the even of its pair
+        write_burst(MAP_PROBE_ADDRESS, 1, 1);
+        repeat (2 * 3072) @(posedge sysclk);
+        read_status(MAP_PROBE_EVEN, value);
+        checkn("RES_ABS (0x068) = |-4.0|", value, 65536);
+        write_dwords[0] = 36'h06A;                         // RES_MAC
+        write_burst(MAP_PROBE_ADDRESS, 1, 1);
+        repeat (2 * 3072) @(posedge sysclk);
+        read_status(MAP_PROBE_EVEN, value);
+        checkn("RES_MAC (0x06A) = 4.0 x 0.125", value, 8192);
+        write_dwords[0] = 36'h06C;                         // RES_ADD3
+        write_burst(MAP_PROBE_ADDRESS, 1, 1);
+        repeat (2 * 3072) @(posedge sysclk);
+        read_status(MAP_PROBE_EVEN, value);
+        checkn("RES_ADD3 (0x06C) = 0.5 - 4.0", value, (-57344) & 32'h3FFFF);
+
+        $display("--- 10. a note: sink words through the door and the queue, a partial pointed at them, sound ---");
+        // partial 0's pointers: pitch, cutoff, resonance, the voice gain and the left gain at
+        // sink words 0 .. 4; the right gain, duty and mode at the zero word, so the right side is silent
+        entry = 108'({10{POINTER_ZERO}});
+        entry[POINTER_PITCH_VOICE * 10 +: 10]  = 10'd0;
+        entry[POINTER_CUTOFF_VOICE * 10 +: 10] = 10'd1;
+        entry[POINTER_RESONANCE * 10 +: 10]    = 10'd2;
+        entry[POINTER_GAIN_VOICE * 10 +: 10]   = 10'd3;
+        entry[POINTER_GAIN_LEFT * 10 +: 10]    = 10'd4;
+        write_dwords[0] = {6'd0, entry[29:0]};
+        write_dwords[1] = {6'd0, entry[59:30]};
+        write_dwords[2] = {6'd0, entry[89:60]};
+        write_dwords[3] = {26'd0, entry[99:90]};
+        write_burst(MAP_PARTIAL_BASE, 4, 1);
+        // the words, as tb_svf_stability's fixture: a saw at 375 Hz, cutoff 0x2000, q1 = 1.0,
+        // the voice gain 0.25, the left gain 1.0. The queue still holds step 4's 511 dwords
+        // and would drop them at its door (step 4 proved that), so first a swap commits the
+        // 511 and the pass applies them at 48 a pass
+        write_dwords[0] = 36'h0_0000_0001;                 // the swap, the CSP running
+        write_burst(MAP_CTRL, 1, 1);
+        repeat (12 * 3072) @(posedge sysclk);
+        read_status(MAP_DIAG_QUEUE, value);
+        checkn("the queue drained: no longer full", value[10], 0);
+        write_dwords[0] = door_dword(csp_pkg::SINK_BASE + 0, (14'h1614 - 14'h1400) <<< 4);
+        write_dwords[1] = door_dword(csp_pkg::SINK_BASE + 1, (14'h2000 - 14'h1400) <<< 4);
+        write_dwords[2] = door_dword(csp_pkg::SINK_BASE + 2, 14'h0200 <<< 4);
+        write_dwords[3] = door_dword(csp_pkg::SINK_BASE + 3, 4096);
+        write_dwords[4] = door_dword(csp_pkg::SINK_BASE + 4, 16384);
+        write_burst(MAP_FIFO_DOOR, 5, 0);
+        write_dwords[0] = 36'h0_0000_0001;                 // the swap: the five land at the next pass's end
+        write_burst(MAP_CTRL, 1, 1);
+        repeat (3 * 3072) @(posedge sysclk);
+        checkn("the five sink words landed on both pages", dut.u_sink_area.pages[0][3], 4096);
+        note_i2s = i2s_nl + 8;
+        wait (i2s_nl >= note_i2s + 64 && i2s_nr >= note_i2s + 65);
+        j = 0;
+        for (int k = 0; k < 64; k++) if (i2s_l[note_i2s + k] !== 24'sd0) j++;
+        if (j < 60) begin
+            $display("FAIL: the note is not on the left channel (%0d of 64 words non-zero)", j);
+            errors = errors + 1;
+        end else $display("pass: the note sounds on the left channel (%0d of 64 words non-zero)", j);
+        check_silence("I2S right with the note hard left", i2s_r, note_i2s + 1, 64);
+        read_status(MAP_DIAG_LIMITER, value);
+        checkn("the limiter slot still the envelope", value, dut.master_gain_q);
 
         $display("");
         $display("%0d I2S words, %0d S/PDIF 96 kHz frames, %0d S/PDIF 48 kHz frames decoded", i2s_nl, frames96, frames48);
