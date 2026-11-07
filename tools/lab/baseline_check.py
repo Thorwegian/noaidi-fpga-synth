@@ -140,6 +140,11 @@ class Analyser:
         for midi in pitches:
             name = note_name(round(midi))
             clusters[name] = clusters.get(name, 0) + 1
+        # Every cluster is kept: the pitch-class rule folds the octaves, and
+        # the detector splits a note between B4, B5 and subharmonics (G3 =
+        # B5/5, A3 = B5/4.5), so a list cut to the largest three drops the
+        # octave the rule would fold in (#354: 28 % over the top three, 52 %
+        # over all). The table prints the largest three.
         clusters = {name: 100 * count // len(pitches) for name, count in clusters.items()}
         strongest = float(spectrum.max()) or 1e-12
         # The valley floor: the level of the valleys between the harmonics,
@@ -154,7 +159,7 @@ class Analyser:
         result = {
             "level_dbfs": round(level_db(piece), 2),
             "median_midi": None if not pitches else round(float(np.median(pitches)), 2),
-            "clusters": dict(sorted(clusters.items(), key=lambda kv: -kv[1])[:3]),
+            "clusters": dict(sorted(clusters.items(), key=lambda kv: -kv[1])),
             "centroid_hz": round(float(self.centroid(spectrum)), 1),
             "valley_db": round(valley_db, 1),
             "peaks_db": {},
@@ -206,7 +211,7 @@ def print_table(results):
     print("%-24s %9s %10s %10s  %s" % ("segment", "level", "pitch", "want", "verdict"))
     for r in results:
         median = "%.2f (%s)" % (r["median_midi"], note_name(round(r["median_midi"]))) if r["median_midi"] is not None else "-"
-        detail = "  ".join("%s %d%%" % kv for kv in r["clusters"].items())
+        detail = "  ".join("%s %d%%" % kv for kv in list(r["clusters"].items())[:3])
         if r["segment"] == "triad":
             detail = "  ".join("%s %.0f dB" % kv for kv in r["peaks_db"].items())
         print("%-24s %6.1f dB %-16s %10s  %-4s  %s" % (r["segment"], r["level_dbfs"], median if r["want"] else "",

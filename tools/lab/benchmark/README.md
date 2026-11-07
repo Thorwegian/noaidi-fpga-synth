@@ -61,8 +61,9 @@ half-band path. Every segment's level stays within 1.5 dB across them,
 except the first note of the scale, which spans 2.1 dB: where the
 free-running LFOs stand when the first note starts decides it. The
 benchmark is the take whose first note sits on the five takes' median
-(take 4). Three of the other four pass every row of the comparison
-against it (envelope correlation 0.980–0.994); the fifth misses one row by
-one point, the B5 pitch-class share at 32 % against the 33 % the check
-asks, the row Galaxy's pitch arpeggio makes marginal (#305). A re-recording
-picks its take the same way.
+(take 4). The other four pass every row of the comparison against it
+(envelope correlation 0.980–0.994); the row Galaxy's pitch arpeggio makes
+marginal (#305), the B5 pitch-class share, reads 52–79 % on them against
+the 33 % the check asks now that the share counts every cluster the
+detector finds (#354: counted over the three largest only, one take read
+32 %). A re-recording picks its take the same way.
