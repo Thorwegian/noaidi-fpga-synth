@@ -88,7 +88,7 @@ module partial_pipeline #(
     output logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address,
     input  logic [synth_pkg::SINK_READ_PORTS-1:0][17:0] sink_read_data,
 
-    output logic signed [23:0] mix_left,    // Q0.24, published 10 cycles
+    output logic signed [23:0] mix_left,    // Q0.24, published 11 cycles
                                              // after sample_tick (S11
                                              // limiter); stable by
                                              // the next tick, which is when
@@ -706,8 +706,20 @@ module partial_pipeline #(
     );
     // 26-bit acc x UQ0.16 gain -> back to the acc scale (>>16); gain <= 1
     // so it always fits. Registered-input, registered-output DSP.
-    wire signed [43:0] lim_mul_l = lim_acc_l * $signed({1'b0, lim_gain});
-    wire signed [43:0] lim_mul_r = lim_acc_r * $signed({1'b0, lim_gain});
+    // the product as two partial products (a DSP each), registered free-running
+    // (no enable, no reset: the consumer reads them one step later) and summed
+    wire signed [8:0]   lim_hi_l = lim_acc_l[25:17], lim_hi_r = lim_acc_r[25:17];
+    wire        [16:0]  lim_lo_l = lim_acc_l[16:0],  lim_lo_r = lim_acc_r[16:0];
+    logic signed [26:0] lim_phi_l, lim_phi_r;
+    logic        [33:0] lim_plo_l, lim_plo_r;
+    always_ff @(posedge clk) begin
+        lim_phi_l <= lim_hi_l * $signed({1'b0, lim_gain});
+        lim_phi_r <= lim_hi_r * $signed({1'b0, lim_gain});
+        lim_plo_l <= lim_lo_l * lim_gain;
+        lim_plo_r <= lim_lo_r * lim_gain;
+    end
+    wire signed [43:0] lim_mul_l = (44'(lim_phi_l) <<< 17) + 44'($signed({1'b0, lim_plo_l}));
+    wire signed [43:0] lim_mul_r = (44'(lim_phi_r) <<< 17) + 44'($signed({1'b0, lim_plo_r}));
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -755,12 +767,15 @@ module partial_pipeline #(
                     lim_gain   <= lim_gain_lin;
                     lim_step  <= 4'd9;
                 end
-                4'd9: begin   // apply the gain
-                    lim_prod_l <= 26'(lim_mul_l >>> 16);
-                    lim_prod_r <= 26'(lim_mul_r >>> 16);
+                4'd9: begin   // the partial products land in their registers
                     lim_step  <= 4'd10;
                 end
-                4'd10: begin  // Q4.14 -> Q0.24, rail
+                4'd10: begin  // apply the gain
+                    lim_prod_l <= 26'(lim_mul_l >>> 16);
+                    lim_prod_r <= 26'(lim_mul_r >>> 16);
+                    lim_step  <= 4'd11;
+                end
+                4'd11: begin  // Q4.14 -> Q0.24, rail
                     mix_left   <= sat24(36'(lim_prod_l) <<< 10);
                     mix_right  <= sat24(36'(lim_prod_r) <<< 10);
                     lim_step  <= 4'd0;
