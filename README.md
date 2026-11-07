@@ -5,7 +5,9 @@
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
 FPGA (GW2AR-18C) doing all audio synthesis and an ESP32 doing all
-musical thinking. Playable today: 32-voice polyphony, 8 detuned
+musical thinking, on a
+[circuit board](https://github.com/Thorwegian/noaidi-fpga-synth-kicad)
+of their own. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
@@ -47,9 +49,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   design: [docs/design.md](docs/design.md).
 - **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-C3
   Super Mini with 4 MB of flash. The firmware's partition table
-  (`app/partitions.csv`) assumes the 4 MB. The circuit board that
-  carries them (the render above, in progress) is its own repository:
-  [Thorwegian/noaidi-fpga-synth-kicad](https://github.com/Thorwegian/noaidi-fpga-synth-kicad).
+  (`app/partitions.csv`) assumes the 4 MB.
 
 ## Console
 
