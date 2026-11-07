@@ -15,19 +15,20 @@
 // (docs/gowin_oss_notes.md, the rule for every block's pins; measured on
 // the shadow SRAM in #309: one pointer register feeding 23 cells' address
 // pins killed the chip while the build met timing). So each cell holds its
-// own copy of the write row, the write enable (its bank's), the data lane
-// and the read row; `keep` on the block stops yosys merging the identical
+// own copy of the write row, the write enable (its bank's) and the read
+// row; `keep` on the block stops yosys merging the identical
 // copies, and the cell is the RAM16SDP4 primitive itself, because a memory
 // inferred from an array has its address register folded in and re-emitted
-// once per net, shared by every cell on that net. The cells' data out goes
+// once per net, shared by every cell on that net. The data pins are fed
+// from the memory's one data register (a data bit reaches one cell a bank,
+// as in delay_line). The cells' data out goes
 // through the bank select, a registered copy of the read address's bank
 // bits, into the output register: the path the lab measured clean to
 // 133 MHz (dut_lutram, LOGIC_AFTER). A write and a read of one row in the
 // same clock read the old word, as the primitive does.
 //
 // The address and enable copies are a tree, not a fan: the caller's pins
-// reach one copy per bank, and the bank's copy reaches its LANES cells; the
-// data is registered once for the memory (a bit reaches one cell a bank). nextpnr's Gowin global
+// reach one copy per bank, and the bank's copy reaches its LANES cells. nextpnr's Gowin global
 // router takes a net with 8 to 50 sinks of which more than 10 are far (over
 // four tiles) onto the long-wire segments and locks the ordinary wires of
 // the last hop to every sink; the main router may not rip those up, and a
@@ -81,11 +82,16 @@ module shadow_ram #(
 
     logic [BANKS*PADDED-1:0] bank_data;              // every bank's word, the select picks one
 
-    // the data a clock behind, in step with the banks' copies of the address: one register for
-    // the memory, since a data bit reaches one cell a bank (BANKS sinks), the tree is for the
-    // address and the enable
-    logic [PADDED-1:0] write_q;
-    always_ff @(posedge clk) write_q <= write_padded;
+    // the data two clocks behind, in step with the cells' copies of the address: two registers
+    // for the memory, no copy per bank or cell. A data bit reaches one cell a bank (BANKS
+    // sinks, under the global router's threshold), and the per-cell rule is for the address
+    // and enable pins (#309 measured a shared address register; delay_line feeds its cells'
+    // data straight from the caller); the tree is for those.
+    logic [PADDED-1:0] write_d, write_q;
+    always_ff @(posedge clk) begin
+        write_d <= write_padded;
+        write_q <= write_d;
+    end
 
     for (genvar bank = 0; bank < BANKS; bank++) begin : g_bank
         // the bank's own copy of the caller's pins, the only thing its cells' copies read
@@ -101,13 +107,12 @@ module shadow_ram #(
             // this cell's own pins
             logic              we_q;
             logic [ROW_W-1:0]  wad_q, rad_q;
-            logic [3:0]        di_q;
+            wire  [3:0]        di_q = write_q[lane * 4 +: 4];
             (* keep *)
             always_ff @(posedge clk) begin
                 we_q  <= bank_we_q;
                 wad_q <= bank_wad_q;
                 rad_q <= bank_rad_q;
-                di_q  <= write_q[lane * 4 +: 4];
             end
 `ifdef SYNTHESIS
             // the primitive itself, its pins on this cell's registers: inferred from an array,
