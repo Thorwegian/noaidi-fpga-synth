@@ -12,14 +12,14 @@
 # rtl/obj_dir/sweep/ where `make timing-sweep` would have put them; the summary
 # is synth_report.py over the reports that exist, as timing-sweep ends.
 #
-# usage: tools/lab/placement_sweep.sh [SEEDS="1 2 3 4 5"] [JOBS=4] [LAB=thor@home.thj.no]
+# usage: tools/lab/placement_sweep.sh [SEEDS="1 2 3 4"] [JOBS=4] [LAB=thor@home.thj.no]
 #        (environment variables; run from the repo root after `make -C rtl yosys.json`)
 #
 # A seed whose placement fails to legalise or route is reported as such, like
 # timing-sweep's line; the exit status is that of synth_report.py. Seeds stay a
 # diagnostic of the tool (AGENTS.md); nothing here goes into a build.
 set -o pipefail
-SEEDS=${SEEDS:-1 2 3 4 5}
+SEEDS=${SEEDS:-1 2 3 4}
 JOBS=${JOBS:-4}
 LAB=${LAB:-thor@home.thj.no}
 PORT=${PORT:-23000}
