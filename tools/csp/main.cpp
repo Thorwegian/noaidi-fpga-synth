@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 //   csp asm program.s...
-//       assemble; print each row (72 bits as two 36-bit halves, hex) with
+//       assemble; print each row (a qword as two dwords, hex) with
 //       its source line, then the decode ROM's rows and the pass's cycles
 //   csp header program.s... [-n name]
 //       assemble and print a C++ header: the rows, the ROM and every name (registers, blocks, fields) as a constant, for the
@@ -205,7 +205,7 @@ int header_command(const csp::Program &program,
             name_space.c_str());
     std::printf("// The pass's cycles, as scheduled.\n"
                 "inline constexpr int cycles = %d;\n\n"
-                "// The rows: 72 bits each, bits 71:36 then 35:0.\n"
+                "// The rows: a qword each, bits 71:36 then 35:0.\n"
                 "inline constexpr std::array<Row, %d> rows{{\n",
                 program.cycles, image.length);
     for (int row = 0; row < image.length; ++row) {

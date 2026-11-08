@@ -13,7 +13,7 @@
 // the first revision ran it. UG287-1.4E p29 and p30 (figure 4-9) give the
 // registers; the macro's ports are figure 3-1 on p5.
 //
-// In the CSP's formats (docs/csp2_isa.md): a is a word (Q4.14), b a wide
+// In the CSP's formats (docs/csp2_isa.md): a is a word (Q4.14), b a dword
 // value (Q4.32) and c the accumulator's format (Q8.46); the product of the
 // first two is Q8.46 already, so the sum needs no shifting. The sum wraps at
 // 54 bits inside the block; the core's E4 detects that from the operands'

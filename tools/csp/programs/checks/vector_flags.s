@@ -4,7 +4,7 @@
 ; License: CERN-OHL-S v2
 ;
 ; The envelope's loop (envelope.s) compares a level, selects a stage by the
-; flags, points j at the stage's row through an IDX and accumulates a wide
+; flags, points j at the stage's row through an IDX and accumulates a dword
 ; level from what j reads: the per-element flags and the per-element other
 ; index, which vloop.s and the four micro-programs never touch. The same
 ; shapes over four items whose fill puts two elements below the threshold
@@ -43,7 +43,7 @@
             MAC    [i+Z], 0, [j+0], =1.0            ; Z = the register j names
             CMP    [i+D], [j+0], [i+X]              ; D = that register - X, the flags set again
             SEL    [i+SPARE], [i+Y], =0.25          ; negative: 0.25, else Y
-            MAC.d  [i+L], [i+D], W_                 ; L += D x W_ (a pair the fill set), wide, in place
+            MAC.d  [i+L], [i+D], W_                 ; L += D x W_ (a pair the fill set), a dword, in place
             IDX    j, =#0x280, [i+W]                ; this element's j again, elsewhere
             ADD3   [j+0], 0, [i+Z], =0.125          ; a write through it
 end_v:

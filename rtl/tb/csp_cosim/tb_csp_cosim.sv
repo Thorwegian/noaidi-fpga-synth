@@ -66,7 +66,7 @@ module tb_csp_cosim (
 
     logic [csp_pkg::CYCLE_W-1:0]  cycle;
     logic [31:0]                  pass_counter;
-    logic [csp_pkg::WIDE_W-1:0]   probe_pair;
+    logic [csp_pkg::DWORD_W-1:0]   probe_pair;
     logic [csp_pkg::REGISTER_W-1:0] probe_register;
     logic                         sink_write_enable, sink_write_both;
     logic [csp_pkg::SINK_WORD_W-1:0] sink_write_address;
@@ -157,7 +157,7 @@ module tb_csp_cosim (
 
     function int cosim_probe_word(input int odd);
         return odd != 0 ? int'($signed(probe_pair[csp_pkg::WORD_W-1:0]))
-                        : int'($signed(probe_pair[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]));
+                        : int'($signed(probe_pair[csp_pkg::DWORD_W-1:csp_pkg::WORD_W]));
     endfunction
 
     // +rtltrace: every row entering A, to compare with the model's CSP_TRACE

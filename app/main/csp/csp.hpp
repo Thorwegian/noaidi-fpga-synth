@@ -75,7 +75,7 @@ constexpr int jump_penalty = 4;
 // accumulator  54 bits  Q8.46
 
 constexpr int word_bits                 = 18;
-constexpr int wide_bits                 = 36;
+constexpr int dword_bits                = 36;
 constexpr int accumulator_bits          = 54;
 constexpr int word_fraction_bits        = 14;
 constexpr int wide_fraction_bits        = 32;

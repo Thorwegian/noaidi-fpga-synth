@@ -13,7 +13,7 @@ namespace {
 
 constexpr int coefficient_bits          = 18;
 constexpr int coefficient_fraction_bits = 24; // k / 2^24 per sample
-constexpr int rate_fraction_bits        = 32; // the wide rate is Q4.32
+constexpr int rate_fraction_bits        = 32; // the dword rate is Q4.32
 
 } // namespace
 

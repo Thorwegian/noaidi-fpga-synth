@@ -129,7 +129,7 @@ module tb_spi_bus;
         end else $display("pass: %0s = %025h", what, got);
     endtask
 
-    // ---- Mode 0 master, in 9-bit nonets ---------------------------------
+    // ---- Mode 0 master, in nonets -------------------------------------
     reg [8:0] tx_nonets [0:63];
     reg [8:0] rx_nonets [0:63];
 

@@ -251,8 +251,7 @@ void test_macw_and_wide() {
     check_equal(m.get("A_"), q(-7.5), "MACW wraps 7.5 + 1.0 to −7.5");
     check(!m.processor.flags().overflow, "MACW does not set V");
     check_equal(m.get_wide("W_"), q_wide(-7.75), "MACW.d wraps a dword phase");
-    check_equal(m.get("W_"), q(-7.75),
-                "a wide register's upper word reads as Q4.14");
+    check_equal(m.get("W_"), q(-7.75), "a dword's upper word reads as Q4.14");
 }
 
 
@@ -798,7 +797,7 @@ end:
 
 const char *envelope_program = R"(
         .block VOICE
-        .field LEVEL, 2                     ; wide
+        .field LEVEL, 2                     ; dword
         .field STAGE, 1                     ; 0 attack, 4 decay, 8 release: the firmware's to start and end
         .field SPARE_VOICE, 1
         .field VELOCITY, 1
@@ -806,7 +805,7 @@ const char *envelope_program = R"(
         .field U, 1                         ; scratch
         .end
         .block SEGMENT                      ; a row of the envelope table
-        .field TARGET, 2                    ; wide
+        .field TARGET, 2                    ; dword
         .field RATE, 1
         .field SPARE, 1
         .end
@@ -948,7 +947,7 @@ void test_lfo() {
     check(lowest == q(-1.0) && highest >= q(0.75), "the triangle spans ±depth");
 }
 
-// An envelope coefficient (per 96 kHz sample) as a wide rate for a pass: the
+// An envelope coefficient (per 96 kHz sample) as a dword rate for a pass: the
 // same fraction of the distance in the pass's samples (four, #268).
 void test_envelope_rates() {
     const uint32_t coefficients[] = {1,    7,     100,   250,    1000,

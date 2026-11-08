@@ -55,8 +55,8 @@ module csp_pass (
     // cycle ahead of the read pins (which come from a register), the words two cycles on.
     output logic                            probe_request,
     input  wire  [csp_pkg::REGISTER_W-1:0]  probe_register_in,  // the register asked for, when asked
-    input  wire  [csp_pkg::WIDE_W-1:0]      dmem_read_pair,
-    output logic [csp_pkg::WIDE_W-1:0]      probe_pair,         // as of the last pass
+    input  wire  [csp_pkg::DWORD_W-1:0]      dmem_read_pair,
+    output logic [csp_pkg::DWORD_W-1:0]      probe_pair,         // as of the last pass
     output logic [csp_pkg::REGISTER_W-1:0]  probe_register      // the register it was read at
 );
 

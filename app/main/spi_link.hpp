@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // The FPGA's memory map is addressed in 36-bit dwords, and the wire carries
-// nothing but 9-bit nonets: a command nonet, two for the 18-bit address,
+// nothing but nonets: a command nonet, two for the 18-bit address,
 // four for each dword. The ESP32's SPI master clocks any number of bits a
 // transfer, so a frame is packed bit by bit and sent as one CS-framed
 // transaction; nothing straddles a boundary and nothing is padded.

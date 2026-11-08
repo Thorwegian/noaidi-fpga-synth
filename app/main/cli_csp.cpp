@@ -164,7 +164,7 @@ int op_hold(int, char **) {
     return 0;
 }
 
-// csp row writes one 72-bit instruction row: two dwords, bits 71:36 then 35:0,
+// csp row writes one instruction row, a qword: two dwords, bits 71:36 then 35:0,
 // at the row's place in IMEM. The CSP must be held (csp hold).
 int op_row(int argc, char **argv) {
     if (argc != 4) {

@@ -84,7 +84,7 @@ public:
 
     // ---- observation ----
     int32_t read(int address) const;      // a register, raw
-    int64_t read_wide(int address) const; // a wide register pair, raw
+    int64_t read_wide(int address) const; // a dword (a register pair), raw
     int32_t sink(int offset) const;       // the published sink page, raw
     int index(IndexRegister which) const;
     Flags flags() const {

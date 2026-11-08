@@ -5,7 +5,7 @@
 //
 // Arithmetic happens in the accumulator's format, Q8.46, in a 128-bit
 // integer so nothing overflows on the way: a word enters shifted left by
-// 32, a wide value by 14, a word × word product by 18, and a word × wide
+// 32, a dword by 14, a word × word product by 18, and a word × dword
 // product as it is. Results are truncated (an arithmetic shift right, so
 // toward minus infinity) and then saturated or wrapped to the destination
 // (docs/csp2_isa.md; the first revision's arithmetic, kept).
@@ -56,7 +56,7 @@ Wide from_wide(int64_t wide) {
     return Wide{wide} << wide_to_accumulator;
 }
 
-// A product in the accumulator's format: word × word, or word × wide.
+// A product in the accumulator's format: word × word, or word × dword.
 Wide product(int64_t x_word, int64_t y, bool y_is_wide) {
     const Wide raw = Wide{x_word} * Wide{y};
     return y_is_wide ? raw : raw << (word_to_accumulator - word_fraction_bits);
@@ -168,7 +168,7 @@ void Processor::write(int address, int32_t raw) {
 }
 
 void Processor::write_wide(int address, int64_t raw) {
-    const int64_t value = sign_extend(raw, wide_bits);
+    const int64_t value = sign_extend(raw, dword_bits);
     write(address, static_cast<int32_t>(value >> word_bits));
     write(address + 1, static_cast<int32_t>(sign_extend(value, word_bits)));
 }
@@ -212,7 +212,7 @@ int32_t Processor::read(int address) const {
 int64_t Processor::read_wide(int address) const {
     const int64_t upper = read(address);
     const int64_t lower = read(address + 1) & ((int64_t{1} << word_bits) - 1);
-    return sign_extend((upper << word_bits) | lower, wide_bits);
+    return sign_extend((upper << word_bits) | lower, dword_bits);
 }
 
 int32_t Processor::sink(int offset) const {
@@ -470,7 +470,7 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
                               : from_word(y_word());
     };
     auto store = [&](Wide result, bool wraps) {
-        const int bits = is_wide ? wide_bits : word_bits;
+        const int bits = is_wide ? dword_bits : word_bits;
         const Wide reduced =
                 result >> (is_wide ? wide_to_accumulator : word_to_accumulator);
         const Reduced value = wraps ? Reduced{wrap(reduced, bits), false}

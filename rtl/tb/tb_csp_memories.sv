@@ -60,7 +60,7 @@ module tb_csp_memories;
         .head_dword(head_dword), .read_pointer_gray(read_gray)
     );
 
-    wire [WIDE_W-1:0]     probe_pair;
+    wire [DWORD_W-1:0]     probe_pair;
     logic [REGISTER_W-1:0] probe_address = REGISTER_W'(PARK_REGISTER);
     logic [ADDRESS_W-1:0]  trap_address = '0;       // the write trap, driven in section 5
     wire  [DWORD_W-1:0]    trap_capture;

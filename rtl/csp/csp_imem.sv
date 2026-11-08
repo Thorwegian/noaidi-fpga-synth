@@ -1,11 +1,11 @@
 //------------------------------------------------------------------------
-// csp_imem.sv — the instruction memory: eight 9-bit slices of one 72-bit row
+// csp_imem.sv — the instruction memory: eight nonet slices of one qword row
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
 // Eight DPX9B blocks of 2048 × 9, the same address on all eight, so that
-// one row is one 72-bit instruction (docs/csp2_architecture.md section 2:
+// one row is one instruction, a qword (docs/csp2_architecture.md section 2:
 // slices, not replicas). Port A is the SPI side on the SPI clock: the
 // load writes a row as two dwords, the first to the upper four slices
 // (bits 71:36) and the second to the lower four, and reads them back the
@@ -54,7 +54,7 @@ module csp_imem (
 
     for (genvar slice = 0; slice < csp_pkg::SLICES; slice++) begin : g_slice
         localparam bit UPPER = slice >= csp_pkg::SLICES / 2;
-        localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the dword's 9-bit lane
+        localparam int LANE  = UPPER ? slice - csp_pkg::SLICES / 2 : slice;   // the dword's nonet lane
         wire write_this = load_enable && load_upper == UPPER;
         wire [csp_pkg::SLICE_W-1:0] lane_in = load_dword[LANE * csp_pkg::SLICE_W +: csp_pkg::SLICE_W];
         // this slice's copy of the program counter: the fetch pins' own register (the `keep` on
@@ -63,7 +63,7 @@ module csp_imem (
         (* keep *) always_ff @(posedge clk) port_b_row <= fetch_next;
 
 `ifdef SYNTHESIS
-        // A 9-bit word's address is AD[13:3] (UG285-1.4E p4, table 2-2); the
+        // A nonet's address (the block's 9-bit mode) is AD[13:3] (UG285-1.4E p4, table 2-2); the
         // block's data pins are 18 wide, the nine of this slice the low ones.
         logic [17:0] out_a, out_b;
         DPX9B #(

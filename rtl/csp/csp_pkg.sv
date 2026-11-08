@@ -48,7 +48,7 @@ package csp_pkg;
     //   word         18 bits  Q4.14
     //   dword        36 bits  Q4.32  (an aligned pair, upper word even)
     parameter int WORD_W = 18;
-    parameter int WIDE_W = 36;
+    parameter int DWORD_W = 36;
 
     // A dword in the write FIFO: [35:24] the address, [23:6] the word, [5:0] spare.
     parameter int DWORD_W          = 36;

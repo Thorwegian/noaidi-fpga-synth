@@ -277,7 +277,7 @@ void run_directed(VerilatedContext &context) {
     const std::vector<Directed> programs   = {
             {"selftest", map + program_file("selftest.s"), 24},
             // the chip check's one-path programs (tools/csp/programs/checks, #235): the scalar loops'
-            // repeat, one vector loop, the wide pair's write and read
+            // repeat, one vector loop, the dword's write and read
             {"loop", program_file("checks/loop.s"), 24},
             {"vloop", program_file("checks/vloop.s"), 24},
             {"vector_flags", program_file("checks/vector_flags.s"), 24},

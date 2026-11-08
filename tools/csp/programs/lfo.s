@@ -4,7 +4,7 @@
 ; License: CERN-OHL-S v2
 ;
 ; After map.s and counts.s. An LFO is a record of the pool (map.s). Its
-; phase is a wide register that runs from −8 to +8 and wraps (one cycle);
+; phase is a dword that runs from −8 to +8 and wraps (one cycle);
 ; the upper word is a sawtooth over that range, so the gains carry the
 ; scale. Each update adds PHASE_STEP (the firmware's csp::lfo_rate) and
 ; writes OUT, the wave at the new phase, as osc_core would, scaled by the

@@ -7,7 +7,7 @@
 // Wire format (SPI Mode 0, MSB first, one CS-framed transaction). Every
 // block RAM on the chip is 9, 18 or 36 bits wide, so the wire is too:
 //
-//   nonet 0        the command, 9 bits: [8] 1 = read, 0 = write
+//   nonet 0        the command: [8] 1 = read, 0 = write
 //                                       [7] 1 = auto-increment the address per dword
 //                                       [6:0] reserved (ignored)
 //   nonets 1..2    the address, 18 bits, in dwords, MSB first

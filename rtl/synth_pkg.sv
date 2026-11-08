@@ -31,7 +31,7 @@ package synth_pkg;
 
     //--- The wire (docs/memory_map.md, conventions) ------------------
     // Every block RAM on the chip is 9, 18 or 36 bits wide, so the SPI
-    // link is too: a 9-bit command nonet, an 18-bit address in 36-bit
+    // link is too: a command nonet, an 18-bit address in 36-bit
     // dwords, and 36-bit payload dwords. Nothing straddles a boundary.
     parameter int SPI_NONET_W  = 9;
     parameter int SPI_ADDRESS_W = 18;

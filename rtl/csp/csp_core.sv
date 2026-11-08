@@ -85,13 +85,13 @@ module csp_core (
     // registers: each bank's row, the parked row when the bank is not read.
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_even_index,
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_r_odd_index,
-    input  wire  [csp_pkg::WIDE_W-1:0]       read_r_pair,
+    input  wire  [csp_pkg::DWORD_W-1:0]       read_r_pair,
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_even_index,
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_x_odd_index,
-    input  wire  [csp_pkg::WIDE_W-1:0]       read_x_pair,
+    input  wire  [csp_pkg::DWORD_W-1:0]       read_x_pair,
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_even_index,
     output logic [csp_pkg::BANK_INDEX_W-1:0] read_y_odd_index,
-    input  wire  [csp_pkg::WIDE_W-1:0]       read_y_pair,
+    input  wire  [csp_pkg::DWORD_W-1:0]       read_y_pair,
 
     // the probe's read, through the R copy while the core is idle: asked a cycle ahead of the pins
     input  wire                              probe_request,
@@ -540,7 +540,7 @@ module csp_core (
         r1_r_odd         <= a_r_address[0];
         r1_x_odd         <= a_x_address[0];
         r1_y_odd         <= a_y_address[0];
-        // the pins: a word read takes the bank of its address and parks the other; a wide read takes both
+        // the pins: a word read takes the bank of its address and parks the other; a dword read takes both
         read_r_even_index <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide || !a_r_address[0]), a_r_address[AW-1:0]);
         read_r_odd_index  <= probe_request ? probe_index : bank_row(a_read_r && (a_r_wide ||  a_r_address[0]), a_r_address[AW-1:0]);
         read_x_even_index <= bank_row(a_read_x && !a_x_address[0], a_x_address[AW-1:0]);
@@ -731,7 +731,7 @@ module csp_core (
     end
 
     // SHIFT: the count is Y; the shift is relative to the destination's format (the count less 32
-    // for a word, less 14 for a wide value), the count clamped to +-63. Left past 36 bits any
+    // for a word, less 14 for a dword), the count clamped to +-63. Left past 36 bits any
     // nonzero value saturates anyway, and right past 54 bits a value is its sign: both clamp.
     wire signed [17:0] shift_count   = e1b_y[17:0];
     wire signed [17:0] shift_clamped = shift_count > 18'sd63 ? 18'sd63 : (shift_count < -18'sd63 ? -18'sd63 : shift_count);
@@ -1044,13 +1044,13 @@ module csp_core (
     wire e5_writes_dest = e5_live && !e5_r_none && (e5_writes == csp_pkg::WRITES_WORD || e5_writes == csp_pkg::WRITES_PAIR);
 
     // DMEM's write pins, decoded here so that they come from registers: a bank's enable (a word write
-    // takes the bank of its address, a wide one both, register 0 neither), one row, a word for each bank
+    // takes the bank of its address, a dword one both, register 0 neither), one row, a word for each bank
     wire        e5_register_write = e5_writes_dest && e5_is_register && !e5_is_input;
     wire [AW-1:0] e5_address      = e5_write_address[AW-1:0];
     wire        e5_discard        = e5_address == '0;
     wire        core_even_enable  = e5_register_write && !e5_discard && (e5_r_wide || !e5_address[0]);
     wire        core_odd_enable   = e5_register_write && !e5_discard && (e5_r_wide ||  e5_address[0]);
-    // the pass's writes arrive while the core is idle: one word, never wide
+    // the pass's writes arrive while the core is idle: one word, never a dword
     wire        extra_is_sink     = extra_write_address[11:10] == 2'b10;     // 0x800 … 0xBFF
     wire        extra_discard     = extra_write_address == '0;
     wire        extra_even_enable = extra_write_enable && !extra_is_sink && !extra_discard && !extra_write_address[0];

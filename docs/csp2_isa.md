@@ -24,10 +24,10 @@ Taken on issue #231; the text below is written to them.
 
 | decided | what | where |
 |---|---|---|
-| 2026-10-18 | the word is 72 bits, eight 9-bit slices of one row | section 2 |
+| 2026-10-18 | the row is a qword (72 bits), eight nonet slices | section 2 |
 | 2026-10-18 | no hardware interlock: the window's placement is the guarantee | section 8 |
 | 2026-10-18 | the sink area stays six replicas of two pages, twelve blocks | `csp2_architecture.md` section 2 |
-| 2026-10-18 | the wire is in nines: a 9-bit command, an 18-bit address, 36-bit dwords of four nonets | `memory_map.md`, conventions |
+| 2026-10-18 | the wire is in nines: a command nonet, an 18-bit address (two nonets), dwords of four nonets | `memory_map.md`, conventions |
 
 ## 1. A program
 
@@ -57,10 +57,10 @@ Taken on issue #231; the text below is written to them.
 - **Programs load with the CSP held**, and the decode ROM loads with
   them (section 4): a program and its decode are one image.
 
-## 2. The word
+## 2. The row
 
-One instruction is one **72-bit word**, read from eight block RAMs of
-2048 × 9 as one row (54 bits from six blocks would have dropped the
+One instruction is one **row**, a qword (72 bits), read from eight block RAMs of
+2048 × 9, a nonet from each (54 bits from six blocks would have dropped the
 immediate to 6 bits and a mode from each operand; the budget has the
 eight). Each field goes straight into a register of the stage that uses
 it; no field is decoded from another.
@@ -103,7 +103,7 @@ a loop. Inside a vector loop (section 5) the loop's own index is the
 element's, and the other index may be the element's private one, set
 by an `IDX` in the body.
 
-An **immediate** in `x` or `y` is the word's `imm` field as an 18-bit
+An **immediate** in `x` or `y` is the row's `imm` field as an 18-bit
 Q4.14 value: constants no longer live in registers the firmware writes
 at boot.
 
@@ -166,7 +166,7 @@ row is captured and before the ROM has decoded it (section 5).
 
 **Scalar loops** (`LOOP.i`, `LOOP.j`) repeat the next *n* instructions
 *count* times, stepping `i` or `j` by *stride*; they nest one level,
-each with its own counter. The three numbers are in the word: the body's
+each with its own counter. The three numbers are in the row: the body's
 last row in `imm` (the assembler subtracts; the chip only compares), the
 count in `x`'s immediate mode, the stride in `y`'s.
 A repeat costs four cycles (the four rows behind the last body row are in
@@ -214,7 +214,7 @@ loop walks has a power-of-two stride. The file, 2048 words of 18 bits
 
 | region | contents | rule |
 |---|---|---|
-| `0x000–0x03F` | the firmware's constants (fewer: immediates are in the word) | written once, read anywhere |
+| `0x000–0x03F` | the firmware's constants (fewer: immediates are in the row) | written once, read anywhere |
 | `0x040–0x05F` | inputs: noise, the pass counter, the test tone | read only; the two last words are the read ports' parking row |
 | `0x060–0x07F` | globals: the LFO sets | |
 | `0x080–0x1FF` | the LFO pool: records of **16** words (was 12) | stride 16 |
@@ -249,11 +249,11 @@ cheaper proof than a check in logic.
 
 | | first revision | second | because |
 |---|---|---|---|
-| the word | 36 bits, fields packed | 72 bits, one field per register | no field is decoded from another; the budget has the blocks |
+| the row | a dword, fields packed | a qword, one field per register | no field is decoded from another; the budget has the blocks |
 | decode | LUTs, 10–13 levels to the issue | a block RAM row, registered on the pins | the tool times no pin; a block read is nothing but a register on a pin, which is the only thing that has held at 73.728 MHz on every seed |
 | operands | base + index + offset through an adder | bits side by side, power-of-two strides | the adder before the banks was the critical path's start on nine seeds of ten |
 | vector loops | up to 64 elements interleaved | rounds of 16 | a 64-way select on the issue decision was the critical path's end; 16 is two LUT levels from a register, and nine in flight hide the latency |
 | hazards | checked in hardware | scheduled by the assembler | the check and its consumers are the depth the chip cannot afford; the model already knows every latency |
-| immediates | constant registers written at boot | in the word | the constant pool was where the boot image lost its words |
+| immediates | constant registers written at boot | in the row | the constant pool was where the boot image lost its words |
 | conditionality | `SEL` (and, rev 1, a scalar `SKIP`) | `SEL` only | a skip counter per interleaved element would be front-end state again; a signal graph needs no control-flow skip (#238) |
 | acceptance | added at the end | in the design | the self-test's changing-operand checks, `csp verify` and the baseline with the valley floor found what the report never showed |

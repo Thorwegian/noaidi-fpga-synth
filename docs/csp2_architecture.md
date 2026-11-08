@@ -162,7 +162,7 @@ the chip issues in the cycle the model counts.
 
 | memory | blocks | ports | rule |
 |---|---|---|---|
-| IMEM, the instruction memory | 8 × (2048 × 9): eight 9-bit slices of one 72-bit row, the same address on all eight, not replicas | A: the SPI load on the SPI clock, with the CSP held; B: the fetch | a dual-clocked block: the load crosses no logic; a row is two 36-bit dwords on the wire (`memory_map.md`) |
+| IMEM, the instruction memory | 8 × (2048 × 9): eight nonet slices of one qword row, the same address on all eight, not replicas | A: the SPI load on the SPI clock, with the CSP held; B: the fetch | a dual-clocked block: the load crosses no logic; a row is two 36-bit dwords on the wire (`memory_map.md`) |
 | decode ROM | 1 × (1024 × 18) | A: this word's row; B: the next word's | loaded with the program, as one image |
 | DMEM, the data memory | 6 × (1024 × 18): a copy for each of the three read ports (R, X and Y), each an even and an odd bank for the aligned pairs; every copy takes every write | A: the write (every copy); B: a read | parked on a row nothing writes when no instruction reads; the write from a registered word; the probe reads on the pass's last cycle, after the window's last write has landed |
 | the write FIFO | 1 × (512 × 36), holding 511: one 36-bit wire dword an entry | A: the SPI write, on the SPI clock; B: the pop | the one queue in the system (the firmware keeps a *pending* bit per word, no queue of its own): it crosses the clocks, lands a group of writes in one pass, and holds the boot image while it lands 48 a pass; its depth is a size. The two ports never meet: the pointers cannot coincide on a row that holds data, and when the FIFO is empty the read port idles one row *behind* the head, not on the row the next write takes — the first revision idled on the head and hid the lost first word behind a decoy write. Landscaping to consider under the map's rule: a port of the firmware's own into DMEM would leave only the crossing |
@@ -170,7 +170,7 @@ the chip issues in the cycle the model counts.
 
 Thirty-five of the chip's forty-six blocks are in use at the end of the
 first revision (the partial pipeline and the output take the rest); the
-second revision adds four for the wide word and one for the ROM, and
+second revision adds four for the qword row and one for the ROM, and
 takes back two if DMEM needs two read ports rather than three: 38 or 40
 of 46.
 
@@ -236,7 +236,7 @@ A pass is every fourth 96 kHz sample, 24 kHz, 3072 cycles (#268: it was every se
 
 Every DMEM pin, read and write, is a register of the core's: the rows with the
 parked ones already chosen, the banks' enables already decoded (a word write takes one
-bank, a wide one both, register 0 neither). The logic before a block's pin is the one
+bank, a dword one both, register 0 neither). The logic before a block's pin is the one
 path the tool does not time (rule 1); the first version of this core had a write mux
 and the address-zero decode between its registers and the pins, and its first board
 run failed at 102 MHz against a report of 161.
@@ -248,7 +248,7 @@ complete pass.
 
 The firmware holds the CSP, writes the instruction rows and the decode
 ROM's rows as one image, writes the wiring through the FIFO, and
-releases; the wire is in nines (a 9-bit command, an 18-bit address,
+releases; the wire is in nines (a command nonet, an 18-bit address,
 36-bit dwords: `memory_map.md`, conventions), so every dword is one row of
 one block. The register file outlives the firmware's reset, so the boot
 zeroes every register between the self-test and the image, and the image
