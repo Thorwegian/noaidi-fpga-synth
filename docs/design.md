@@ -198,8 +198,8 @@ are not smoothed; they reach the CSP together, between two passes.
 Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 - **The wire is in nines.** Every block RAM on the chip is 9, 18 or 36
-  bits wide, so the link is too: 18-bit addresses in dwords and 36-bit
-  payload dwords, nothing straddling a boundary. (The first revision's
+  bits wide, so the link is too: an 18-bit address that counts dwords,
+  then 36-bit payload dwords, nothing straddling a boundary. (The first revision's
   32-bit wire carried 18 useful bits in 32 clocks; gone since #235.)
 - Transaction: the command nonet (`[8]` R/W, `[7]` auto-increment), two
   address nonets, then dwords of four nonets each, streaming while CS
