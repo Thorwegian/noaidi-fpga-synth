@@ -13,41 +13,10 @@ generators in `scripts/`.
 
 ## Terminology
 
-- **Partial** — what the FPGA *generates*: one oscillator→filter→gain
-  sound unit. The FPGA has 256 of them and no opinion about how they
-  are used.
-- **Issue slot** — how it generates them, technically: one of the 256 pairs
-  of time slots per sample period in which a partial enters the partial
-  pipeline (`slot_issue`). One issue computes one partial; "issue slot"
-  speaks about hardware, "partial" about sound.
-- **Voice** — a firmware-side *grouping* of partials (e.g. 8 detuned
-  partials sounding one keystroke). Grouping is entirely the ESP32's
-  business; a voice is one possible grouping, not the only one.
-- The user's scope of action via MIDI/control surfaces is **not yet
-  nailed down** — firmware vocabulary above voice level stays open.
-- **Scope ladder**:
-  - **Global** — fans out to all channels (whole synth).
-  - **Channel** — fans out to all voices on one channel.
-  - **Voice** — fans out to all partials on one voice.
+The project's own words (partial, issue slot, voice, the scope ladder,
+source and sink, preset and patch, the sizes, the CSP's and the lab's
+terms) are defined in one place, [glossary.md](glossary.md).
 
-  Each channel is its own little synth; channels just happen to share
-  certain resources. NOTHING in the CSP is Global by intent: every register
-  the firmware calls "global" (the bend, the wheel's cutoff, the volume) is a
-  CHANNEL register that coincides with global scope while exactly one channel
-  exists.
-- **Source / sink is the couple**: the CSP's results are SOURCES (the
-  envelopes, the LFOs, a voice's pitch, cutoff and gain); the words the
-  partial pipeline reads from the sink area are SINKS. The control program
-  (`tools/csp/programs`) is the wiring between them.
-- **Generators vs processors**: the envelope and LFO parts of the program are
-  GENERATORS (an LFO has no inputs; an envelope has its gate); the rest takes
-  signal in and puts signal out. They are all instructions of one processor,
-  [csp2_isa.md](csp2_isa.md), and which is which is only a way to read
-  the program.
-- "Preset" means a sound, the active one (`preset_t` in firmware) or a
-  stored file; it is not used for FPGA parameter words, which are all
-  live. "Patch" means a change to code or a tool, never a sound (#300);
-  "patch panel" survives only as the CV-routing metaphor.
 
 ## Vision
 
