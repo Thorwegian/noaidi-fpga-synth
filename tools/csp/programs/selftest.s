@@ -71,8 +71,8 @@
         ADD3    ONE_RAW, 0, =1.0, ZERO
         MACW    COUNT_PASSES, COUNT_PASSES, ONE_RAW, =#1
         ; Copies of the pass counter, in aligned pairs the firmware's probe reads from
-        ; one pass: the console's csp-pairwatch reads a pair thousands of times at a
-        ; raised clock and counts the reads whose halves disagree. The first pair
+        ; one pass: a reader that peeks a pair thousands of times at a raised clock
+        ; and counts the reads whose halves disagree measures the miss rate. The first pair
         ; counts the multiply-add's misses (against the logic unit's copy), the
         ; second the logic unit's own. Each copy is one row with no chain.
         ANDXOR  PASS_VIA_LOGIC, 0, PASS, =#-1       ; PASS & all ones: the logic unit

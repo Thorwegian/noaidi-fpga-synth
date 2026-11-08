@@ -291,7 +291,7 @@ and the DSP. Issue #230 carries the patch work (fork
   the design is too hard to place). A seed that happens to work is a
   measurement, not a release. The instrument for the first use is a
   per-bitstream fingerprint of what fails (section 3: the firmware's
-  `csp-verify` lists which writes a bitstream loses), compared across
+  `csp verify` lists which writes a bitstream loses), compared across
   seeds and configurations.
 
 ## 3. Measuring on the board
@@ -302,31 +302,33 @@ and the DSP. Issue #230 carries the patch work (fork
   system clock without a rebuild; always end with 73728. Sweep upwards
   from 73.728 to find a bitstream's real limit.
 - **The S/PDIF pipe is the debug port** (Thor, #236, 2026-10-21): 1.5 Mbit/s
-  against the console's bytes a second. `csp-stream dump` carries the whole
+  against the console's bytes a second. `csp stream dump` carries the whole
   register file in 43 ms, held or running (the probe walks it a register a
-  pass), `csp-stream engine` the sink word at the probe's address as the
+  pass), `csp stream engine` the sink word at the probe's address as the
   partials read it beside the pipeline's mix, a sample at a time (the
-  address's low ten bits: `csp-peek <sink index>` sets it, 0 … 1023, as
-  `csp-peek` refuses 0x800 and above);
+  address's low ten bits: `csp peek <sink index>` sets it, 0 … 1023, as
+  `csp peek` refuses 0x800 and above);
   `tools/lab/spdif_capture.py stream` decodes both (`--dump` writes the file
-  as csp-peek prints it). The first use found the silent engine's cause in
+  as csp peek prints it). The first use found the silent engine's cause in
   one capture under a held note: the program's sinks moving, the firmware's
   zero. Read the registers over the pipe (`chip_check.py --stream`), not the
   console (2048 registers: 32 s).
-- **The write trap** (`csp-trap <register>`, `csp-trap 0x800+<sink index>`,
-  `csp-trap` to read, `off`; system dword 0x7, #238) catches a write nobody
+- **The write trap** (system dword 0x7, #238) catches a write nobody
   asked for where it happens: the CSP latches the last write to the watched
   register — the pass's cycle, the word, the core's or the pass's — and
   counts the hits. The cycle names the row whose W stage fell in it (the
   model's `CSP_TRACE` gives the cycle of every row's write for the offset);
   a pass's write with a word the firmware never sent is the window's, from
-  the FIFO or the wire. Arm it before the boot's image and read after.
+  the FIFO or the wire. Arm it before the boot's image and read after. Its
+  console command (`csp-trap`) went with the unused ops in #406; the
+  gateware keeps the trap, and a stuck-note hunt brings the op back from
+  the history.
 - **The chip check** is the instrument for "does the chip compute what the
   model computes", the co-simulation's method on silicon: `csp script
   <program>.s -f <seed>` prints the console lines that fill every register
   from the seed and load a program whose `RUN_COUNT` register (0x3FE)
   counts its passes; `tools/lab/chip_check.py` sends them, lets the chip
-  run, freezes it and reads every register back (`csp-peek`); `csp match
+  run, freezes it and reads every register back (`csp peek`); `csp match
   <program>.s -c <dump> -f <seed>` runs the model for the passes the dump
   counts and diffs every register but the inputs. 0 differences on every
   program in `tools/csp/programs/checks/` is the acceptance, and the control program
@@ -342,19 +344,19 @@ and the DSP. Issue #230 carries the patch work (fork
   one dword in eight, and the check's channel pointers left in channels
   1–15 ran its fill, LFO-shaped, into channel 0's duty and resonance
   sinks — a pad eight semitones dark, found through the pipe).
-- **Bisect by words** when a program fails: `csp-hold` (clears the
-  program and the decode ROM), `csp-rom row hex` for the ROM rows,
-  `csp-row pc hi lo` for the first N words, `csp-const` for the constants
-  (the script's own lines, cut short), `csp-go`, run, `csp-freeze`, dump;
+- **Bisect by words** when a program fails: `csp hold` (clears the
+  program and the decode ROM), `csp rom row hex` for the ROM rows,
+  `csp row pc hi lo` for the first N words, `csp const` for the constants
+  (the script's own lines, cut short), `csp go`, run, `csp freeze`, dump;
   "constants intact?" is a criterion that needs no model.
 - **Micro-programs** of one to five words isolate a construct; the set
   that passes at 73.728 (plain, `IDX`-relative, vector `i`, private `j`,
   read-modify-write, a register rewritten through the queue while read)
   is the baseline a new fault is compared against.
-- `csp-hold` clears the program, not the registers: the self-test's
+- `csp hold` clears the program, not the registers: the self-test's
   counters (`COUNT_*`, 0x100–0x106) accumulate across runs and saturate
   at 131071, after which the firmware's "pass counter's low bit" check
-  reports nonsense. Zero them (`csp-poke`) before trusting it.
+  reports nonsense. Zero them (`csp const`, while held) before trusting it.
 - The marker program checks issue capacity only; its near-identical
   neighbouring words hide a word-mixing fetch fault.
 - The acceptance script must pack the bitstream every time and print its
@@ -364,13 +366,14 @@ and the DSP. Issue #230 carries the patch work (fork
   mismatch, fixed 2026-10-17); a self-test that passes says the link and
   its own program work, nothing about the register image.
 - **The register image first, timing second.** On a silent board ask
-  `csp-verify` (the firmware reads every register it wrote back through
+  `csp verify` (the firmware reads every register it wrote back through
   the probe and counts the differences) before any timing experiment:
   on 2026-10-17 every silent boot of three bitstreams had a wrong boot
   image — the constant ONE zero or carrying another word's value — while
   every self-test passed, and the symptom looked like timing for a day.
-  The image also gives a bitstream a fingerprint: `csp-resend` a dozen
-  times with a verify after each (a console loop on the dev box)
+  The image also gave a bitstream a fingerprint: the image resent a dozen
+  times (the console's `csp-resend`, removed in #406) with a verify after
+  each (a console loop on the dev box)
   lists *which* writes it loses. One bitstream lost words by boot state
   (the queue's read side, its pointer standing where the last session
   left it), another lost the same four addresses on every boot and

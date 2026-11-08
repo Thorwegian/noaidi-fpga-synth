@@ -1,12 +1,16 @@
-// cli_csp.cpp — the serial console's commands for the CSP
+// cli_csp.cpp — the serial console's `csp` command: the lab's view of the CSP
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// csp-peek reads CSP registers through the gateware's register probe
-// (docs/memory_map.md), csp-poke queues a write to one, csp-diag reads the
-// gateware's diagnostic words. For looking at a board that does not do what
-// the simulation says.
+// One command, `csp <op> ...`, so that `help` shows a player one line for the
+// lab's instruments and `csp help` lists them. Every op is sent by a tool:
+// `csp verify`, `csp diag`, `csp peek` and `csp voices` by the acceptance,
+// the board checks and the soak (tools/lab); `csp stream` by the S/PDIF
+// capture; `csp hold`, `csp rom`, `csp row`, `csp const`, `csp burst`,
+// `csp go` and `csp freeze` by the chip check (`csp script` in tools/csp
+// prints them, tools/lab/chip_check.py sends them). An op nothing sends is
+// not kept here.
 
 #include "cli.h"
 
@@ -31,99 +35,13 @@ int signed_word(uint64_t raw18) {
     return word >= (1 << 17) ? word - (1 << 18) : word;
 }
 
-// csp-pairwatch reads one register pair through the probe again and again and
-// counts the reads whose two halves differ. The self-test program writes the
-// pass counter into both halves of two pairs (through the multiply-add and
-// the logic unit, and through the logic unit twice), so at a raised clock the
-// count is the rate at which one of the two paths miscomputes, measured on the
-// chip, which no timing report can give for a path it does not time.
-// csp-raw reads dwords of the SPI map as they are: the status words, anything
-// the map lets the link read.
-int cmd_raw(int argc, char **argv) {
-    if (argc < 2) {
-        std::printf(
-                "usage: csp-raw <address> [count]   (a map address, hex or decimal; at most 64)\n");
-        return 1;
-    }
-    const uint32_t first =
-            static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0));
-    const int count = std::min(
-            64,
-            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0)) : 1);
-    uint64_t dwords[64];
-    for (int done = 0; done < count;
-         done += 8) { // the link reads at most eight a burst
-        if (!engine_link_raw_read(first + done, dwords + done,
-                                  std::min(8, count - done))) {
-            std::printf("  the link is not running\n");
-            return 1;
-        }
-    }
-    for (int i = 0; i < count; ++i) {
-        std::printf("  %05lx: %09llx (%llu)\n",
-                    static_cast<unsigned long>(first + i),
-                    static_cast<unsigned long long>(dwords[i]),
-                    static_cast<unsigned long long>(dwords[i]));
-    }
-    return 0;
-}
+// Each op runs with argv[0] its own name, as a command of its own would.
 
-int cmd_pairwatch(int argc, char **argv) {
+// csp peek reads CSP registers through the gateware's register probe
+// (docs/memory_map.md), a pair a line.
+int op_peek(int argc, char **argv) {
     if (argc < 2) {
-        std::printf(
-                "usage: csp-pairwatch <register> [reads]   (an even register; default 2000 reads)\n");
-        return 1;
-    }
-    const int first = static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1;
-    const int reads =
-            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0))
-                     : 2000;
-    // The pair's two status words are fetched a few microseconds apart within one
-    // link frame, so the odd half is the next pass's in a share of the reads that
-    // grows with the clock: a difference of exactly one is that, not a miss.
-    int disagree = 0, next_pass = 0, failed = 0;
-    uint64_t first_disagreement = 0;
-    for (int n = 0; n < reads; ++n) {
-        uint64_t pair = 0;
-        if (!engine_link_peek(first, &pair)) {
-            ++failed;
-            continue;
-        }
-        const unsigned even = static_cast<unsigned>(pair >> 18) & 0x3FFFF;
-        const unsigned odd  = static_cast<unsigned>(pair) & 0x3FFFF;
-        if (even == odd) {
-            continue;
-        }
-        if (odd == ((even + 1) & 0x3FFFF)) {
-            ++next_pass;
-            continue;
-        }
-        if (disagree == 0) {
-            first_disagreement = pair;
-        }
-        ++disagree;
-        if ((n & 255) == 255) {
-            vTaskDelay(1); // let the idle task run: the watchdog
-        }
-    }
-    std::printf(
-            "  pair %03x: %d of %d reads disagree (%d more were the next pass's odd half)",
-            first, disagree, reads, next_pass);
-    if (disagree > 0) {
-        std::printf(" (first: %05x vs %05x)",
-                    static_cast<unsigned>(first_disagreement >> 18) & 0x3FFFF,
-                    static_cast<unsigned>(first_disagreement) & 0x3FFFF);
-    }
-    if (failed > 0) {
-        std::printf("; %d reads failed", failed);
-    }
-    std::printf("\n");
-    return 0;
-}
-
-int cmd_peek(int argc, char **argv) {
-    if (argc < 2) {
-        std::printf("usage: csp-peek <register> [count]   (decimal or 0x..)\n");
+        std::printf("usage: csp peek <register> [count]   (decimal or 0x..)\n");
         return 1;
     }
     const int first = static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1;
@@ -144,30 +62,10 @@ int cmd_peek(int argc, char **argv) {
     return 0;
 }
 
-int cmd_poke(int argc, char **argv) {
-    if (argc < 3 || argc > 4) {
-        std::printf("usage: csp-poke <register> <raw> [force]\n");
-        return 1;
-    }
-    const int address = static_cast<int>(std::strtol(argv[1], nullptr, 0));
-    const int raw     = static_cast<int>(std::strtol(argv[2], nullptr, 0));
-    // The image drops a write of the value it believes the chip holds;
-    // `force` sends it anyway, for a chip whose copy is in doubt.
-    const bool force = argc == 4;
-    if (!(force ? engine_link_write_forced(address, raw)
-                : engine_link_write(address, raw))) {
-        std::printf("  refused\n");
-        return 1;
-    }
-    std::printf("  queued %03x <- %d%s\n", address, raw,
-                force ? " (forced)" : "");
-    return 0;
-}
-
 // Every register the image knows, read back through the probe: how many
 // differ from the image, and the first of them. A sounding voice's levels
 // and stages differ legitimately (the CSP writes them); verify a silent synth.
-int cmd_verify(int, char **) {
+int op_verify(int, char **) {
     constexpr int limit = 24;
     int registers[limit];
     int32_t wanted[limit], held[limit];
@@ -188,14 +86,7 @@ int cmd_verify(int, char **) {
     return differing ? 1 : 0;
 }
 
-// The whole image sent again, over the next ticks.
-int cmd_resend(int, char **) {
-    engine_link_resend();
-    std::printf("  every known word queued again\n");
-    return 0;
-}
-
-int cmd_diag(int, char **) {
+int op_diag(int, char **) {
     uint64_t dwords[fpga_map::diag_words] = {};
     if (!engine_link_raw_read(fpga_map::diag_pass, dwords,
                               fpga_map::diag_words)) {
@@ -213,53 +104,12 @@ int cmd_diag(int, char **) {
     return 0;
 }
 
-// The write trap (#238): armed on a register (or a sink word, 0x800 + its
-// index), it keeps the last write it caught — the pass's cycle, the word,
-// who wrote — and counts the hits. The capture crosses from the CSP's
-// clock as it is, so it is read until two reads agree.
-int cmd_trap(int argc, char **argv) {
-    if (argc > 1) {
-        const bool off = std::strcmp(argv[1], "off") == 0;
-        const uint32_t address =
-                off ? 0
-                    : static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0))
-                                & 0xFFF;
-        engine_link_raw_write(fpga_map::trap, address);
-        if (off) {
-            std::printf("  the trap is off\n");
-        } else {
-            std::printf(
-                    "  the trap watches %s 0x%03x\n",
-                    address & fpga_map::trap_sink_flag ? "sink word"
-                                                       : "register",
-                    static_cast<unsigned>(address & ~fpga_map::trap_sink_flag));
-        }
-        return 0;
-    }
-    uint64_t capture = 0, again = ~uint64_t{0};
-    for (int attempt = 0; attempt < 8 && capture != again; ++attempt) {
-        if (!engine_link_raw_read(fpga_map::trap, &capture, 1)
-            || !engine_link_raw_read(fpga_map::trap, &again, 1)) {
-            std::printf("  the link answers no ID nonet\n");
-            return 1;
-        }
-    }
-    const unsigned hits  = static_cast<unsigned>(capture >> 30) & 0x3F;
-    const bool from_pass = (capture >> 29) & 1;
-    const unsigned cycle = static_cast<unsigned>(capture >> 18) & 0x7FF;
-    const unsigned word  = static_cast<unsigned>(capture) & 0x3FFFF;
-    std::printf("  hits %u (mod 64)  last: cycle %u  word 0x%05x  by the %s\n",
-                hits, cycle, word,
-                from_pass ? "pass (the window or the sink area)" : "core");
-    return 0;
-}
-
 // The voice table, live (#238): the firmware's view of each sounding voice —
 // a stuck note shows as HELD (or sustained) that the player has let go. Read
-// alongside csp-peek of the voice's stage words (0x600 + 16*v + 2 and + 10;
+// alongside csp peek of the voice's stage words (0x600 + 16*v + 2 and + 10;
 // 8 and 24 are release) to see whether the release never issued (firmware
 // bug) or issued but did not land (link).
-int cmd_voices(int, char **) {
+int op_voices(int, char **) {
     voice_diag_t v[32];
     const int n                           = voice_alloc_diag(v, 32);
     static const char *const state_name[] = {"idle", "HELD", "releasing"};
@@ -283,23 +133,13 @@ int cmd_voices(int, char **) {
     return 0;
 }
 
-int cmd_selftest(int argc, char **argv) {
-    const bool leave_running = argc > 1;
-    std::printf(
-            "  the CSP's program is replaced by the self-test's%s; reboot to restore\n",
-            leave_running ? ", left running" : "");
-    std::printf("  %s\n",
-                engine_link_selftest(leave_running) ? "passed" : "FAILED");
-    return 0;
-}
-
-// A lab on the board: csp-hold (stop the tick, hold the CSP, clear its program),
-// csp-row, csp-rom and csp-const (load), csp-go (release it). Then csp-peek.
-// What the lab has loaded since csp-hold, to check against the host's list.
+// A lab on the board: csp hold (stop the tick, hold the CSP, clear its program),
+// csp row, csp rom and csp const (load), csp go (release it). Then csp peek.
+// What the lab has loaded since csp hold, to check against the host's list.
 unsigned s_words_written;
 unsigned s_checksum;
 
-int cmd_hold(int, char **) {
+int op_hold(int, char **) {
     s_words_written = 0;
     s_checksum      = 0;
     engine_link_pause(true);
@@ -324,11 +164,11 @@ int cmd_hold(int, char **) {
     return 0;
 }
 
-// csp-row writes one 72-bit instruction row: two dwords, bits 71:36 then 35:0,
-// at the row's place in IMEM. The CSP must be held (csp-hold).
-int cmd_row(int argc, char **argv) {
+// csp row writes one 72-bit instruction row: two dwords, bits 71:36 then 35:0,
+// at the row's place in IMEM. The CSP must be held (csp hold).
+int op_row(int argc, char **argv) {
     if (argc != 4) {
-        std::printf("usage: csp-row <pc> <bits 71:36 hex> <bits 35:0 hex>\n");
+        std::printf("usage: csp row <pc> <bits 71:36 hex> <bits 35:0 hex>\n");
         return 1;
     }
     const unsigned pc =
@@ -349,10 +189,10 @@ int cmd_row(int argc, char **argv) {
     return 0;
 }
 
-// csp-rom writes one row of the decode ROM: a control word. The CSP must be held.
-int cmd_rom(int argc, char **argv) {
+// csp rom writes one row of the decode ROM: a control word. The CSP must be held.
+int op_rom(int argc, char **argv) {
     if (argc != 3) {
-        std::printf("usage: csp-rom <row> <control word hex>\n");
+        std::printf("usage: csp rom <row> <control word hex>\n");
         return 1;
     }
     const unsigned row =
@@ -368,9 +208,9 @@ int cmd_rom(int argc, char **argv) {
     return 0;
 }
 
-int cmd_const(int argc, char **argv) {
+int op_const(int argc, char **argv) {
     if (argc != 3) {
-        std::printf("usage: csp-const <register> <raw>\n");
+        std::printf("usage: csp const <register> <raw>\n");
         return 1;
     }
     const unsigned address =
@@ -385,14 +225,14 @@ int cmd_const(int argc, char **argv) {
     return 0;
 }
 
-// csp-burst <first register> <count> <seed>: the registers' test values
+// csp burst <first register> <count> <seed>: the registers' test values
 // (register × 37 + seed) through the write queue, in bursts of up to 8
 // consecutive dwords and committed a chunk at a time, as the engine loads the
 // boot image: the window applies only committed dwords, the queue holds 511
 // of them, and a held CSP applies a committed chunk within a few passes.
-int cmd_burst(int argc, char **argv) {
+int op_burst(int argc, char **argv) {
     if (argc != 4) {
-        std::printf("usage: csp-burst <first register> <count> <seed>\n");
+        std::printf("usage: csp burst <first register> <count> <seed>\n");
         return 1;
     }
     const unsigned first =
@@ -428,7 +268,7 @@ int cmd_burst(int argc, char **argv) {
     return 0;
 }
 
-int cmd_go(int, char **) {
+int op_go(int, char **) {
     engine_link_raw_write(fpga_map::ctrl,
                           fpga_map::ctrl_hold | fpga_map::ctrl_swap);
     vTaskDelay(pdMS_TO_TICKS(5));
@@ -438,68 +278,12 @@ int cmd_go(int, char **) {
     return 0;
 }
 
-// Does the SPI link carry what it is given? Random 36-bit dwords to the
-// scratch dwords and back, N rounds, singly and in bursts.
-int cmd_spitest(int argc, char **argv) {
-    const int rounds =
-            argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0))
-                     : 1000;
-    constexpr int scratch_dwords =
-            fpga_map::scratch_last - fpga_map::scratch_first + 1;
-    uint64_t state = 0x12345678;
-    int single_bad = 0, burst_bad = 0, id_bad = 0;
-    for (int round = 0; round < rounds; ++round) {
-        uint64_t dwords[scratch_dwords];
-        for (uint64_t &dword : dwords) {
-            state = state * 6364136223846793005ull + 1442695040888963407ull;
-            dword = (state >> 20) & spi_link::dword_mask;
-        }
-        for (int k = 0; k < scratch_dwords; ++k) {
-            engine_link_raw_write(fpga_map::scratch_first + k, dwords[k]);
-        }
-        for (int k = 0; k < scratch_dwords; ++k) {
-            uint64_t one = 0;
-            id_bad +=
-                    !engine_link_raw_read(fpga_map::scratch_first + k, &one, 1);
-            single_bad += one != dwords[k];
-        }
-        engine_link_raw_write_burst(fpga_map::scratch_first, dwords,
-                                    scratch_dwords, true);
-        uint64_t back[scratch_dwords] = {};
-        id_bad += !engine_link_raw_read(fpga_map::scratch_first, back,
-                                        scratch_dwords);
-        for (int k = 0; k < scratch_dwords; ++k) {
-            burst_bad += back[k] != dwords[k];
-        }
-    }
-    std::printf(
-            "  %d rounds: %d single-dword and %d burst mismatches, %d frames without the ID\n",
-            rounds, single_bad, burst_bad, id_bad);
-    return 0;
-}
-
-// csp-spiclk <MHz>: the link's clock, for the test above at other rates.
-int cmd_spiclk(int argc, char **argv) {
+// csp stream off | lfsr | counter | probe | engine | dump: the data stream on
+// the 48 kHz S/PDIF output, the pipe tools/lab/spdif_capture.py checks bit
+// for bit.
+int op_stream(int argc, char **argv) {
     if (argc != 2) {
-        std::printf("usage: csp-spiclk <MHz>\n");
-        return 1;
-    }
-    const double megahertz = std::strtod(argv[1], nullptr);
-    if (megahertz < 0.1 || megahertz > 80.0) {
-        std::printf("usage: csp-spiclk <MHz> (0.1 to 80)\n");
-        return 1;
-    }
-    const uint32_t actual =
-            engine_link_spi_frequency(static_cast<uint32_t>(megahertz * 1e6));
-    std::printf("  SPI clock %.3f MHz\n", actual / 1e6);
-    return 0;
-}
-
-// csp-stream off | lfsr | counter: the data stream on the 48 kHz S/PDIF
-// output, the pipe tools/lab/spdif_capture.py checks bit for bit.
-int cmd_stream(int argc, char **argv) {
-    if (argc != 2) {
-        std::printf("usage: csp-stream off|lfsr|counter|probe|engine|dump\n");
+        std::printf("usage: csp stream off|lfsr|counter|probe|engine|dump\n");
         return 1;
     }
     const char *what = argv[1];
@@ -515,7 +299,7 @@ int cmd_stream(int argc, char **argv) {
         engine_link_data_stream(
                 true, static_cast<int>(fpga_map::stream_source_probe));
     } else if (std::strcmp(what, "engine") == 0) {
-        // the debug port: the sink word at the probe address's low ten bits (csp-probe sets it)
+        // the debug port: the sink word at the probe address's low ten bits
         // and the mix, a sample at a time
         engine_link_data_stream(
                 true, static_cast<int>(fpga_map::stream_source_engine));
@@ -525,18 +309,17 @@ int cmd_stream(int argc, char **argv) {
         engine_link_data_stream(true,
                                 static_cast<int>(fpga_map::stream_source_dump));
     } else {
-        std::printf("usage: csp-stream off|lfsr|counter|probe|engine|dump\n");
+        std::printf("usage: csp stream off|lfsr|counter|probe|engine|dump\n");
         return 1;
     }
     std::printf("  stream %s\n", what);
     return 0;
 }
 
-// A snapshot of the CSP's registers: csp-freeze (stop the tick, hold the CSP:
-// the program stays), csp-dump (every register, one pair a line), csp-thaw.
-// tools/lab/snapshot.py takes two snapshots a few passes apart for
-// `csp replay` to check the model against.
-int cmd_freeze(int, char **) {
+// csp freeze stops the tick and holds the CSP with its program in place, so
+// that the chip check reads a register file nothing is writing; csp go
+// releases it again.
+int op_freeze(int, char **) {
     engine_link_pause(true);
     engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
     vTaskDelay(pdMS_TO_TICKS(10)); // a pass in flight finishes
@@ -544,109 +327,83 @@ int cmd_freeze(int, char **) {
     return 0;
 }
 
-int cmd_thaw(int, char **) {
-    engine_link_raw_write(fpga_map::ctrl, 0);
-    std::printf("  thawed\n");
-    return 0;
-}
-
-int cmd_step(int argc, char **argv) {
-    const int milliseconds =
-            argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) : 1;
-    // The pass counter counts held passes too (and register 0x040 follows it):
-    // note where the run began and where it was held again, for `csp replay`.
-    const uint32_t first = engine_link_status(fpga_map::diag_pass);
-    engine_link_raw_write(fpga_map::ctrl, 0);
-    vTaskDelay(pdMS_TO_TICKS(milliseconds));
-    engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
-    const uint32_t last = engine_link_status(fpga_map::diag_pass);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    std::printf("  stepped %d ms from pass %lu to %lu\n", milliseconds,
-                static_cast<unsigned long>(first),
-                static_cast<unsigned long>(last));
-    return 0;
-}
-
-int cmd_dump(int argc, char **argv) {
-    const int first =
-            argc > 1 ? static_cast<int>(std::strtol(argv[1], nullptr, 0)) & ~1
-                     : 0;
-    const int count =
-            argc > 2 ? static_cast<int>(std::strtol(argv[2], nullptr, 0))
-                     : 0x800;
-    for (int at = first; at < first + count && at < 0x800; at += 2) {
-        uint64_t pair = 0;
-        if (!engine_link_peek(at, &pair)) {
-            std::printf("  the link is not running\n");
-            return 1;
-        }
-        std::printf("R %03x %05x %05x\n", at,
-                    static_cast<unsigned>(pair >> 18) & 0x3FFFF,
-                    static_cast<unsigned>(pair) & 0x3FFFF);
-    }
-    std::printf("  dumped\n");
-    return 0;
-}
-
-const console_cmd_t commands[] = {
-        {"csp-freeze", "",
-         "hold the CSP (its program stays) and pause the tick", cmd_freeze,
-         nullptr},
-        {"csp-thaw", "", "release the CSP", cmd_thaw, nullptr},
-        {"csp-step", "[ms]",
-         "release the CSP for some milliseconds, then hold it", cmd_step,
-         nullptr},
-        {"csp-dump", "[first [count]]", "every register, a pair a line",
-         cmd_dump, nullptr},
-        {"csp-spitest", "[rounds]", "write and read back the scratch dwords",
-         cmd_spitest, nullptr},
-        {"csp-spiclk", "<MHz>", "the SPI link's clock", cmd_spiclk, nullptr},
-        {"csp-stream", "off|lfsr|counter|probe|engine|dump",
-         "the data stream on the 48 kHz S/PDIF output", cmd_stream, nullptr},
-        {"csp-hold", "", "lab: pause the tick, hold the CSP, clear its program",
-         cmd_hold, nullptr},
-        {"csp-row", "<pc> <hi hex> <lo hex>",
-         "lab: write an instruction row (bits 71:36, 35:0)", cmd_row, nullptr},
-        {"csp-rom", "<row> <hex>", "lab: write a decode ROM row", cmd_rom,
-         nullptr},
-        {"csp-const", "<register> <raw>",
-         "lab: write a register (applies on csp-go)", cmd_const, nullptr},
-        {"csp-burst", "<register> <count> <seed>",
-         "lab: test values through the queue, committed a chunk at a time, as the engine does",
-         cmd_burst, nullptr},
-        {"csp-go", "", "lab: commit the writes and release the CSP", cmd_go,
-         nullptr},
-        {"csp-selftest", "[run]",
-         "run the boot self-test again ('run': leave it running)", cmd_selftest,
-         nullptr},
-        {"csp-peek", "<register> [count]",
-         "read CSP registers (even-aligned pairs)", cmd_peek, nullptr},
-        {"csp-raw", "<address> [count]",
-         "read dwords of the SPI map as they are", cmd_raw, nullptr},
-        {"csp-pairwatch", "<register> [reads]",
-         "read a pair many times, count the reads whose halves differ",
-         cmd_pairwatch, nullptr},
-        {"csp-poke", "<register> <raw> [force]",
-         "queue a write to a CSP register ('force': even if the image says it is there)",
-         cmd_poke, nullptr},
-        {"csp-verify", "",
-         "read every register the image knows back and count the differences",
-         cmd_verify, nullptr},
-        {"csp-resend", "", "send the whole register image again", cmd_resend,
-         nullptr},
-        {"csp-diag", "", "the gateware's diagnostic words", cmd_diag, nullptr},
-        {"csp-voices", "",
-         "the firmware's voice table, live (a stuck note shows as HELD, #238)",
-         cmd_voices, nullptr},
-        {"csp-trap", "[<register>|0x800+<sink>|off]",
-         "arm the write trap on a register or a sink word, or read what it caught",
-         cmd_trap, nullptr},
+struct Op {
+    const char *name;
+    const char *usage;
+    const char *help;
+    int (*run)(int argc, char **argv);
 };
+
+const Op ops[] = {
+        {"diag", "", "the gateware's diagnostic words", op_diag},
+        {"verify", "",
+         "read every register the image knows back and count the differences",
+         op_verify},
+        {"voices", "",
+         "the firmware's voice table, live (a stuck note shows as HELD, #238)",
+         op_voices},
+        {"peek", "<register> [count]",
+         "read CSP registers (even-aligned pairs)", op_peek},
+        {"stream", "off|lfsr|counter|probe|engine|dump",
+         "the data stream on the 48 kHz S/PDIF output", op_stream},
+        {"freeze", "", "hold the CSP (its program stays) and pause the tick",
+         op_freeze},
+        {"hold", "", "pause the tick, hold the CSP, clear its program",
+         op_hold},
+        {"row", "<pc> <hi hex> <lo hex>",
+         "write an instruction row (bits 71:36, 35:0)", op_row},
+        {"rom", "<row> <hex>", "write a decode ROM row", op_rom},
+        {"const", "<register> <raw>", "write a register (applies on csp go)",
+         op_const},
+        {"burst", "<register> <count> <seed>",
+         "test values through the queue, committed a chunk at a time, as the engine does",
+         op_burst},
+        {"go", "", "commit the writes and release the CSP", op_go},
+};
+
+void list_ops() {
+    for (const Op &op : ops) {
+        std::printf("  csp %-7s %-36s %s\n", op.name, op.usage, op.help);
+    }
+}
+
+int cmd_csp(int argc, char **argv) {
+    if (argc < 2) {
+        std::printf("usage: csp <op> ...\n");
+        list_ops();
+        return 1;
+    }
+    if (std::strcmp(argv[1], "help") == 0) {
+        list_ops();
+        return 0;
+    }
+    for (const Op &op : ops) {
+        if (std::strcmp(op.name, argv[1]) == 0) {
+            return op.run(argc - 1, argv + 1);
+        }
+    }
+    std::printf("csp: no op \"%s\"; try csp help\n", argv[1]);
+    return 1;
+}
+
+void complete_csp(int argi, const char *prefix, void (*add)(const char *)) {
+    if (argi != 1) {
+        return;
+    }
+    const size_t length = std::strlen(prefix);
+    for (const Op &op : ops) {
+        if (std::strncmp(op.name, prefix, length) == 0) {
+            add(op.name);
+        }
+    }
+}
+
+const console_cmd_t command = {"csp", "<op> ...",
+                               "lab: the CSP's instruments (csp help)", cmd_csp,
+                               complete_csp};
 
 } // namespace
 
 extern "C" void cli_csp_init(void) {
-    for (const console_cmd_t &command : commands) {
-        console_register(&command);
-    }
+    console_register(&command);
 }

@@ -18,14 +18,14 @@
 //       after the last pass, "address value" a line, raw.
 //   csp script program.s... [-f seed] [-w address=raw]...
 //       assemble and print the firmware console's commands that load the
-//       program on the chip: csp-hold, the decode ROM's rows, the instruction
-//       rows, the register writes given, csp-go. -f first fills every
-//       register but the inputs with the firmware's csp-burst pattern,
+//       program on the chip: csp hold, the decode ROM's rows, the instruction
+//       rows, the register writes given, csp go. -f first fills every
+//       register but the inputs with the firmware's csp burst pattern,
 //       (address × 37 + seed) & 0x1FFFF, so the chip and the model start
 //       alike whatever the chip held. The dev box's claude_chipcheck.py sends
 //       the lines and reads the registers back.
 //   csp match program.s... -c chip.txt [-f seed] [-w address=raw]...
-//       the chip's registers (csp-peek's lines, every pair) against the
+//       the chip's registers (csp peek's lines, every pair) against the
 //       model run from the same load for as many passes as the chip ran,
 //       which the program counts in RUN_COUNT (0x3FE): the differing
 //       registers, or none.
@@ -311,7 +311,7 @@ bool parse_write(const std::string &text, RawWrite &write) {
     return true;
 }
 
-// The firmware's csp-burst pattern: every register but the inputs, from a seed.
+// The firmware's csp burst pattern: every register but the inputs, from a seed.
 constexpr int no_fill = -1;
 
 int32_t fill_value(int address, int seed) {
@@ -324,29 +324,29 @@ int32_t fill_value(int address, int seed) {
 int script_command(const csp::Program &program, int fill,
                    const std::vector<RawWrite> &writes) {
     const csp::Image &image = program.image;
-    std::printf("csp-hold\n");
+    std::printf("csp hold\n");
     if (fill != no_fill) {
-        std::printf("csp-burst 1 %d %d\n", csp::register_count - 1, fill);
+        std::printf("csp burst 1 %d %d\n", csp::register_count - 1, fill);
     }
     for (int row = 0; row < image.rom_used; ++row) {
-        std::printf("csp-rom %d %05x\n", row,
+        std::printf("csp rom %d %05x\n", row,
                     image.rom[static_cast<size_t>(row)]);
     }
     for (int row = 0; row < image.length; ++row) {
         const csp::Row &bits = image.rows[static_cast<size_t>(row)];
-        std::printf("csp-row %d %09llx %09llx\n", row,
+        std::printf("csp row %d %09llx %09llx\n", row,
                     static_cast<unsigned long long>(bits.high),
                     static_cast<unsigned long long>(bits.low));
     }
     for (const RawWrite &write : writes) {
-        std::printf("csp-const %d %d\n", write.address, write.raw);
+        std::printf("csp const %d %d\n", write.address, write.raw);
     }
-    std::printf("csp-go\n");
+    std::printf("csp go\n");
     return 0;
 }
 
 // `csp match`: the chip's registers against the model's, after the same load and as many
-// passes as the chip ran. chip.txt holds csp-peek's lines, "  aaa: hhhhh (d)   aaa: hhhhh (d) ...".
+// passes as the chip ran. chip.txt holds csp peek's lines, "  aaa: hhhhh (d)   aaa: hhhhh (d) ...".
 int match_command(const csp::Program &program, const std::string &chip_path,
                   int fill, const std::vector<RawWrite> &writes) {
     std::ifstream in(chip_path);

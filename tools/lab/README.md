@@ -39,12 +39,15 @@ for diagnosis, with what their output does and does not mean:
 
 | command | gives | caveat |
 |---|---|---|
-| `csp-diag` | passes, queue, limiter, `dropped`, stream frames | `passes ÷ 48000` is the FPGA's uptime in seconds since the bitstream loaded: it dates the last gateware load (the counter runs held or not, 32-bit, wraps at 24.9 h, survives ESP32 resets). `dropped` counts only writes refused at a full queue door. |
-| `csp-voices` | the firmware's voice table | a stuck note showing **HELD** never got its note-off (firmware side); all **idle** while the chip still sounds is a chip-side loss. |
-| `csp-verify` | registers whose chip value differs from the firmware's image | it compares **program-owned** words too (envelope levels and stages, LFO phases and outputs, channel scratch, `PARITY`), which legitimately move; after any note it reports dozens. It lists only the first **24** by address. Read it through `verify_filter.py`. |
-| `csp-peek <reg> [count]` | register pairs, `0x000–0x7FF` | the sinks `0x800–0xBFF` **cannot be read back** at all; a peek there returns nothing. |
-| `csp-trap <reg>` / `csp-trap 0x8xx` / `csp-trap` | arm the write trap on a register or a sink word; read `hits, last cycle, word, by the pass or by the core` | a firmware-owned word written "by the core" is the program writing where only the firmware should: the mis-addressed write, with its cycle. The writer field means nothing at `hits 0`. |
-| `csp-resend` | the whole image sent again | this is `resend_all`. A **preset reload is not a resend**: `EngineImage::set` skips words whose value did not change, so a word corrupted on the chip survives a reload of the same preset. |
+| `csp diag` | passes, queue, limiter, `dropped`, stream frames | `passes ÷ 48000` is the FPGA's uptime in seconds since the bitstream loaded: it dates the last gateware load (the counter runs held or not, 32-bit, wraps at 24.9 h, survives ESP32 resets). `dropped` counts only writes refused at a full queue door. |
+| `csp voices` | the firmware's voice table | a stuck note showing **HELD** never got its note-off (firmware side); all **idle** while the chip still sounds is a chip-side loss. |
+| `csp verify` | registers whose chip value differs from the firmware's image | it compares **program-owned** words too (envelope levels and stages, LFO phases and outputs, channel scratch, `PARITY`), which legitimately move; after any note it reports dozens. It lists only the first **24** by address. Read it through `verify_filter.py`. |
+| `csp peek <reg> [count]` | register pairs, `0x000–0x7FF` | the sinks `0x800–0xBFF` **cannot be read back** at all; a peek there returns nothing. |
+
+`csp help` lists every op. The console carries only the ops a tool under
+`tools/` sends (#406); the write trap's and the image resend's console
+commands went with that, and the gateware's trap (system dword 0x7, #238)
+has no console front today.
 
 Storage: `make fw-storage-read DIR=x` pulls the FAT partition (presets,
 banks) into a folder, `fw-storage-write` the other way; both need the console
@@ -73,7 +76,7 @@ port. The synth's own preset saves are bare TOML without the copyright header
   it, or stop it only after its last note-off. Before #276 the silence reset
   also flushed the UART and could drop the first message after a pause (a
   note-off lost that way left a note stuck under a take); after any test
-  that plays notes, read `csp-voices`. `baseline_recording.py` is the model.
+  that plays notes, read `csp voices`. `baseline_recording.py` is the model.
 - **BLE is Open Stage Control's.** The synth accepts one BLE connection; the
   BLE-era scripts in `tools/lab/ble/` (`ble_midi_fuzz.py`, `hil.py`, the
   `*_check.py` tests that import it) take it over and must disconnect *and
@@ -117,7 +120,7 @@ Hunting a silent write loss (#248):
 
 | script | what |
 |---|---|
-| `verify_filter.py` | `csp-verify` classified by owner from `map.s`; only firmware-owned differences are real drift (exit 2). Re-read a hit after two seconds: a word caught mid-flight clears, a loss persists. |
+| `verify_filter.py` | `csp verify` classified by owner from `map.s`; only firmware-owned differences are real drift (exit 2). Re-read a hit after two seconds: a word caught mid-flight clears, a loss persists. |
 | `midi_soak.py` | random chords and knob walks with ~150-CC sweep bursts over USB→DIN, every delay jittered (a fixed-timing bench hides timing faults), seed printed to replay; `--program N` restores the preset |
 | `monitor.sh` | `verify_filter.py` on a loop while a soak plays, re-reading any real hit |
 

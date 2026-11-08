@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# monitor.sh -- csp-verify through the owner classifier, on a loop, while a soak plays.
+# monitor.sh -- csp verify through the owner classifier, on a loop, while a soak plays.
 #
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 #
-# Every INTERVAL seconds, for COUNT rounds, verify_filter.py reads csp-verify and
+# Every INTERVAL seconds, for COUNT rounds, verify_filter.py reads csp verify and
 # reports only FIRMWARE-OWNED differences as real drift (the program's own words are
 # expected to move). A real hit is re-read after two seconds: a write caught
 # mid-flight -- the image updated, the chip a pass behind -- clears on the re-read,

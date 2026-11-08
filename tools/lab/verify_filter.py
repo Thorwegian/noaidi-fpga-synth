@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""csp-verify, read by who owns each word: real drift vs. the program's own state.
+"""csp verify, read by who owns each word: real drift vs. the program's own state.
 
     Copyright © 2026 Thor H. Linløkken <thj@thj.no>
     License: CERN-OHL-S v2
 
-`csp-verify` compares every register against the firmware's image, but the
+`csp verify` compares every register against the firmware's image, but the
 program rewrites many words each pass -- envelope levels and stages, LFO phases
 and outputs, channel scratch, PARITY -- so after any note they legitimately
 differ from the value the firmware last seeded. Counted raw, that noise buries
 the fault we are after: a FIRMWARE-OWNED word (a gate, a phase step, a depth, a
 pointer) that silently did not land (#237, #244).
 
-This runs csp-verify through tools/lab/board.py, classifies each differing
+This runs csp verify through tools/lab/board.py, classifies each differing
 address by owner from the record layouts in tools/csp/programs/map.s, and
 reports the firmware-owned differences as real drift. Exit 2 if any, else 0.
 
@@ -90,7 +90,7 @@ SUMMARY = re.compile(r"verified: (\d+) register")
 
 
 def read_verify(repo):
-    out = subprocess.run(["python3", f"{repo}/tools/lab/board.py", "csp-verify"],
+    out = subprocess.run(["python3", f"{repo}/tools/lab/board.py", "csp verify"],
                          capture_output=True, text=True, timeout=60).stdout
     return out
 
@@ -123,7 +123,7 @@ def report(text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--repo", default=REPO)
-    ap.add_argument("--stdin", action="store_true", help="classify csp-verify output from stdin")
+    ap.add_argument("--stdin", action="store_true", help="classify csp verify output from stdin")
     args = ap.parse_args()
     text = sys.stdin.read() if args.stdin else read_verify(args.repo)
     sys.exit(report(text))

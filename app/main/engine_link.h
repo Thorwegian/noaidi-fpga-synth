@@ -30,10 +30,6 @@ void engine_link_init(void);
 // the link is not running.
 bool engine_link_write(int address, int32_t raw);
 
-// The same write, sent even when the image says the value is there already:
-// for a chip whose copy of a register is in doubt.
-bool engine_link_write_forced(int address, int32_t raw);
-
 // Read every register the image knows back through the probe and compare:
 // returns how many differ, and fills up to `limit` of them (register,
 // what the image says, what the chip holds). Takes a few seconds; the
@@ -43,10 +39,6 @@ bool engine_link_write_forced(int address, int32_t raw);
 int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
                        int limit);
 
-// Queue every known word of the image again, so that the chip's registers
-// are rebuilt from it over the next ticks.
-void engine_link_resend(void);
-
 // Point a partial's ten sink pointers (indices into the sink area, 10 bits
 // each) at once: the FPGA takes the whole entry atomically.
 bool engine_link_point(int partial, const int *pointers);
@@ -55,12 +47,6 @@ bool engine_link_point(int partial, const int *pointers);
 // (even) is the even register, in bits 35:18 of the result; the odd one is in
 // 17:0. Waits a few milliseconds. False if the link is not running.
 bool engine_link_peek(int address, uint64_t *pair);
-
-// Run the boot self-test again (the CSP's program is replaced by the test's;
-// reboot to get the control program back). With `leave_running` the test's
-// program keeps running, for looking at it with engine_link_peek. Returns
-// whether it passed.
-bool engine_link_selftest(bool leave_running);
 
 // For experiments on a board (cli_csp.cpp): stop the 1 kHz tick sending the
 // register image, and write or read dwords of the FPGA's SPI map directly
@@ -73,8 +59,6 @@ bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords,
 bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count);
 // A status dword's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
-// The SPI clock, changed between frames; the rate actually set.
-uint32_t engine_link_spi_frequency(uint32_t frequency_hz);
 
 // The gateware's test tone: a full-scale 1500 Hz sine on both outputs.
 void engine_link_test_tone(bool on);

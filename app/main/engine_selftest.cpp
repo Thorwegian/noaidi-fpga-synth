@@ -145,10 +145,8 @@ private:
 
 } // namespace
 
-SelfTestResult run_selftest(SelfTestPort &port, bool leave_running) {
+SelfTestResult run_selftest(SelfTestPort &port) {
     SelfTestResult result = Run(port).run();
-    if (!leave_running) {
-        port.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
-    }
+    port.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
     return result;
 }

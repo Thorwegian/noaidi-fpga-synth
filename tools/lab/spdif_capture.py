@@ -27,7 +27,7 @@ sequence number, 61 payload words from a known LFSR or the sample counter,
 and a CRC-32. A frame whose CRC fails is counted and the hunt for the next
 sync word starts after its sync word; the sequence numbers say how many
 frames went between the ones that arrived. The stream is switched on from
-the firmware's console (`csp-stream lfsr`), so this mode takes a capture
+the firmware's console (`csp stream lfsr`), so this mode takes a capture
 made while it was on, or captures with --device alone.
 
 usage: spdif_capture.py tone   [--seconds N] [--device hw:1,0] [--port 16:0]
@@ -376,12 +376,12 @@ def analyse_stream(samples, probe_counter=False):
     elif frames_ok:
         print("verdict: frames arrive, with the losses above")
     else:
-        print("verdict: no whole frame — is the stream on (csp-stream lfsr)?")
+        print("verdict: no whole frame — is the stream on (csp stream lfsr)?")
     return registers
 
 
 def write_dump(registers, path, before=""):
-    """The registers as csp-peek prints them (a pair a line), for `csp match -c`; the first line
+    """The registers as csp peek prints them (a pair a line), for `csp match -c`; the first line
     carries the pass counter's register before the run, as chip_check.py writes it."""
     with open(path, "w") as out:
         out.write("# before the run: %s\n" % before)
@@ -414,7 +414,7 @@ def main():
     parser.add_argument("--keep", help="save the capture here")
     parser.add_argument("--probe-counter", action="store_true",
                         help="stream mode: the probed register counts the passes, check its steps")
-    parser.add_argument("--dump", help="stream mode, the dump source: write the register file here, as csp-peek prints it")
+    parser.add_argument("--dump", help="stream mode, the dump source: write the register file here, as csp peek prints it")
     args = parser.parse_args()
     if args.mode == "tone":
         samples = read_wav(args.wav) if args.wav else capture(args.seconds, args.device, args.port, args.keep)

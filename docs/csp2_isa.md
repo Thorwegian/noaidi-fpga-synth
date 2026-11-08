@@ -250,4 +250,4 @@ cheaper proof than a check in logic.
 | hazards | checked in hardware | scheduled by the assembler | the check and its consumers are the depth the chip cannot afford; the model already knows every latency |
 | immediates | constant registers written at boot | in the word | the constant pool was where the boot image lost its words |
 | conditionality | `SEL` (and, rev 1, a scalar `SKIP`) | `SEL` only | a skip counter per interleaved element would be front-end state again; a signal graph needs no control-flow skip (#238) |
-| acceptance | added at the end | in the design | the self-test's changing-operand checks, `csp-verify` and the baseline with the valley floor found what the report never showed |
+| acceptance | added at the end | in the design | the self-test's changing-operand checks, `csp verify` and the baseline with the valley floor found what the report never showed |

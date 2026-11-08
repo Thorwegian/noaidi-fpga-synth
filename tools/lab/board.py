@@ -8,7 +8,7 @@
 #
 # --reset restarts the ESP32 (RTS) first and prints its boot log for SECONDS.
 # The commands are those of the firmware's console (app/main/cli*.cpp), for
-# instance "csp-diag" or "csp-peek 0x40 2". Port: /dev/ttyACM0.
+# instance "csp diag" or "csp peek 0x40 2". Port: /dev/ttyACM0.
 import re
 import sys
 import time

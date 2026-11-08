@@ -4,7 +4,7 @@
 """The three acceptances of a bitstream on the board, as one run (#238):
 
   1. the boot's self-test: the chip does what the model says;
-  2. `csp-verify`: every register the firmware wrote, read back through the
+  2. `csp verify`: every register the firmware wrote, read back through the
      probe, none differing;
   3. the Galaxy sequence recorded over S/PDIF, through baseline_check.py
      (Essentia) and benchmark_compare.py against the benchmark (tools/lab/
@@ -58,7 +58,7 @@ VERIFIED = re.compile(r"verified: (\d+) register")
 DIAG = re.compile(r"passes (\d+)\s+queue \S+\s+limiter (\S+)\s+dropped (\d+)")
 LIMITER_DB_PER_CODE = 0.375                       # rtl/dsp/limiter.sv: 16 codes per octave
 LIMITER_FRACTION_BITS = 11                        # partial_pipeline.sv LIM_SUB: DIAG_LIMITER[18:11] is the code
-LIMITER_POLL_S = 0.2                              # the console's wait per csp-diag; about four readings a second
+LIMITER_POLL_S = 0.2                              # the console's wait per csp diag; about four readings a second
 # The triad in the take's clock: baseline_recording.py starts its recorder
 # about half a second after it is launched (imports, the first Active
 # Sensing and its settle), then a beat of lead-in and fifteen beats of scale,
@@ -75,7 +75,7 @@ def limiter_db(word):
 def poll_limiter(port, readings, stop, t0):
     """DIAG_LIMITER read until stop is set: (seconds since t0, reduction dB) appended to readings."""
     while not stop.is_set():
-        match = DIAG.search(command(port, "csp-diag", LIMITER_POLL_S))
+        match = DIAG.search(command(port, "csp diag", LIMITER_POLL_S))
         if match:
             readings.append((time.monotonic() - t0, limiter_db(match.group(2))))
 
@@ -165,9 +165,9 @@ def main():
     print("boot image: %s" % verdict["boot_image"])
     print("control program: %s" % verdict["control_program"])
 
-    # 2. csp-verify, while the synth is silent
-    print("== csp-verify")
-    verify = command(port, "csp-verify", 4.0)
+    # 2. csp verify, while the synth is silent
+    print("== csp verify")
+    verify = command(port, "csp verify", 4.0)
     match = VERIFIED.search(verify)
     differing = int(match.group(1)) if match else None
     verdict["verify"] = {"differing": differing,
@@ -180,7 +180,7 @@ def main():
     verdict["preset_loaded"] = "loaded" in load
     print("loaded" if verdict["preset_loaded"] else load.strip()[-160:])
     time.sleep(1.0)
-    diag = DIAG.search(command(port, "csp-diag", 2.0))
+    diag = DIAG.search(command(port, "csp diag", 2.0))
     verdict["diag"] = {"passes": int(diag.group(1)), "limiter": diag.group(2), "dropped": int(diag.group(3))} if diag else None
 
     wav = base + ".wav"
@@ -208,7 +208,7 @@ def main():
             verdict["limiter"]["readings"], TRIAD_WINDOW_S[0], TRIAD_WINDOW_S[1],
             verdict["limiter"]["take_max_db"], verdict["limiter"]["take_max_at_s"])
     else:
-        line = "limiter: no reading (csp-diag answered nothing during the take)"
+        line = "limiter: no reading (csp diag answered nothing during the take)"
     log.append(line)
     print(line)
     print("== baseline_check")
