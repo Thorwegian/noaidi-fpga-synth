@@ -29,7 +29,7 @@ slate) and again after it, as tools/lab/baseline_recording.py does, so no
 scrambled controller is left behind. NEVER run this while anyone is playing
 the synth -- it plays over them and moves their knobs (2026-10-23, #244).
 
-Read `csp-verify` / `csp-voices` on the console while it runs to catch the
+Read `csp verify` / `csp voices` on the console while it runs to catch the
 first register that drifts.
 """
 import argparse

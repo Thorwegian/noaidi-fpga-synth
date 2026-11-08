@@ -260,7 +260,7 @@ whatever its registers hold. Then, before the first note:
    the ROM, whose checks use operands that change every pass (`SHIFT`,
    `IDX`); the counts are printed and compared with the model's. A stale
    operand on any path shows here as a fraction of passes wrong;
-2. **`csp-verify`**: every register the firmware wrote, read back through
+2. **`csp verify`**: every register the firmware wrote, read back through
    the probe; sent again while they differ, the count printed;
 3. the **baseline take** through `tools/lab`: the Galaxy sequence
    recorded, checked with Essentia, compared with the benchmark's
@@ -277,7 +277,7 @@ compared) and writes the recording, the tables, the plot, the MP3 and a
 
 | fault | found by | the rule it became |
 |---|---|---|
-| a boot image with ONE zero, the synth silent | `csp-verify` | no row read while written (the probe's row); parked read ports |
+| a boot image with ONE zero, the synth silent | `csp verify` | no row read while written (the probe's row); parked read ports |
 | the FIFO losing a batch's first words | the dumps against the playing consensus | the idle read port was on the row the next write took (rule 2); it idles one row behind, and the decoy write goes |
 | a stale operand on 15 % of passes, the arpeggio 11 % short, noise under the tone | the self-test's SHIFT/IDX counts; the valley floor | the front end's depth: a ROM, not a decoder; no hazard check; 16 not 64 |
 | a store landing with address bits dropped | the five-word test | the write from a registered word |

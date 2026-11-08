@@ -253,8 +253,8 @@ ports.
   three times) when they differ — the write queue has lost words of the boot
   image on some boots (issue #222: the constant ONE among them, the synth
   silent for it with every self-test passing). The console logs the count
-  either way, and `csp-verify`, `csp-resend` and `csp-poke … force` do the
-  same by hand. The sinks (`0x800` on) cannot be read back.
+  either way, and `csp verify` does the read-back by hand. The sinks
+  (`0x800` on) cannot be read back.
 - ADSR rates are 8-bit log₂ in the preset (4-bit octave + 4-bit
   1/16-octave fraction); firmware decodes them to the coefficient
   (`preset_adsr_rate_coeff`) the envelope program's rate is made from
@@ -269,8 +269,8 @@ ports.
 
 ## SPI speed budget
 
-- Firmware default: **10 MHz**, one CS frame per transaction; `csp-spiclk
-  <MHz>` changes it at run time.
+- Firmware default: **10 MHz**, one CS frame per transaction
+  (`spi_link::init`'s rate).
 - **Measured on hardware with the wire in nines (#233, 2026-10-18): clean at
   10, 20, 26.7 and 40 MHz** — a thousand rounds of five scratch dwords each,
   singly and in a burst, at every rate: no dword wrong and the ID nonet on

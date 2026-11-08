@@ -88,7 +88,7 @@ int send(int limit, fpga_map::dword_t ctrl_bits) {
 // Bursts of eight through the FIFO's door, every dword at the door's address
 // (spi_link::write auto-increments, and landed one dword in eight: issue
 // #238), committed a chunk at a time and applied by the held CSP's window,
-// as csp-burst does (cli_csp.cpp).
+// as csp burst does (cli_csp.cpp).
 void clear_registers() {
     constexpr int burst_dwords = 8;
     constexpr int chunk_dwords = fpga_map::queue_depth / 2;
@@ -603,32 +603,6 @@ uint32_t engine_link_status(uint32_t address) {
     return value;
 }
 
-uint32_t engine_link_spi_frequency(uint32_t frequency_hz) {
-    if (!running) {
-        return 0;
-    }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    const uint32_t actual = spi_link::set_frequency(frequency_hz);
-    xSemaphoreGive(lock);
-    return actual;
-}
-
-bool engine_link_selftest(bool leave_running) {
-    if (!running) {
-        return false;
-    }
-    SpiSelfTestPort self_test_port;
-    xSemaphoreTake(lock, portMAX_DELAY);
-    paused = true;
-    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold);
-    xSemaphoreGive(lock);
-    const SelfTestResult result = run_selftest(self_test_port, leave_running);
-    for (const std::string &line : result.lines) {
-        ESP_LOGI(tag, "self-test: %s", line.c_str());
-    }
-    return result.passed;
-}
-
 bool engine_link_peek(int address, uint64_t *pair) {
     if (!running || pair == nullptr || address < 0 || address >= 0x800) {
         return false;
@@ -647,31 +621,12 @@ bool engine_link_write(int address, int32_t raw) {
     return ok;
 }
 
-bool engine_link_write_forced(int address, int32_t raw) {
-    if (!running) {
-        return false;
-    }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    const bool ok = image.set(address, raw, true);
-    xSemaphoreGive(lock);
-    return ok;
-}
-
 int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
                        int limit) {
     if (!running) {
         return -1;
     }
     return verify_image(registers, wanted, held, limit);
-}
-
-void engine_link_resend(void) {
-    if (!running) {
-        return;
-    }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    image.resend_all();
-    xSemaphoreGive(lock);
 }
 
 bool engine_link_write_all(const render::Writes &writes) {
