@@ -11,12 +11,12 @@
 //   label:  MNEMONIC operand, operand, ...   ; comment
 //
 //   operands   r37, 0x25        a register, direct (0–1023)
-//              NAME             a .reg, .wide or .const name
+//              NAME             a .reg, .dword or .const name
 //              [i+NAME], [i+3]  i plus an offset; [i] is offset 0
 //              =0.5, =#3        an immediate: a Q4.14 value, or a raw integer
 //   directives .equ NAME, value           a name for a number
 //              .reg NAME, address          a register
-//              .wide NAME, address         a wide register (even)
+//              .dword NAME, address        a register pair (even)
 //              .const NAME, value          a named immediate
 //              .block NAME … .field NAME, words … .end   a block's layout
 //              .org address                the next instruction's row

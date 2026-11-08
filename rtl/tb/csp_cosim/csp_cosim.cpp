@@ -215,8 +215,8 @@ const char *registers = R"(
         .reg B_, 0x061
         .reg C_, 0x062
         .reg D_, 0x063
-        .wide W_, 0x064
-        .wide V_, 0x066
+        .dword W_, 0x064
+        .dword V_, 0x066
         .reg S_, 0x068
         .reg T_, 0x069
         .block ITEM
@@ -299,7 +299,7 @@ void run_directed(VerilatedContext &context) {
             SHIFT   T_, 0, =#-3
 )",
                4},
-            {"wide", std::string(registers) + R"(
+            {"dword", std::string(registers) + R"(
             MAC.d    W_, A_, V_
             MACW.d   V_, B_, W_
             ADD3.d   V_, D_, W_

@@ -212,8 +212,8 @@ const char *registers = R"(
         .reg B_, 0x061
         .reg C_, 0x062
         .reg D_, 0x063
-        .wide W_, 0x064
-        .wide V_, 0x066
+        .dword W_, 0x064
+        .dword V_, 0x066
 )";
 
 void test_mac() {
@@ -705,8 +705,8 @@ void test_assembler() {
     check(has_diagnostic(csp::assemble("LOOP.i 1, =#2, =#1\n"), true,
                          "past the program's end"),
           "a loop past the end of the program");
-    check(has_diagnostic(csp::assemble(".wide W, 0x061\n"), true, "even"),
-          "a wide register at an odd address");
+    check(has_diagnostic(csp::assemble(".dword W, 0x061\n"), true, "even"),
+          "a dword at an odd address");
     check(has_diagnostic(csp::assemble("MAC r64, 0, r1, r2\n"), true, "input"),
           "no result into an input register");
 
@@ -904,8 +904,8 @@ void test_lfo() {
                          "one immediate"),
           "SEL with two different immediates does not assemble: the square's levels come from registers");
     Machine lfo(R"(
-        .wide  PHASE, 0x060
-        .wide  RATE, 0x062
+        .dword  PHASE, 0x060
+        .dword  RATE, 0x062
         .reg   SAW, 0x064
         .reg   SQUARE, 0x065
         .reg   T, 0x066

@@ -112,7 +112,7 @@ std::optional<double> parse_real(std::string_view text) {
 
 // ---- the assembler --------------------------------------------------------
 
-enum class SymbolKind { number, reg, wide, constant, label };
+enum class SymbolKind { number, reg, dword, constant, label };
 
 struct Symbol {
     SymbolKind kind;
@@ -369,7 +369,7 @@ std::optional<Source> Assembler::source(std::string_view text) {
         symbol != symbols_.end()) {
         switch (symbol->second.kind) {
         case SymbolKind::reg:
-        case SymbolKind::wide:
+        case SymbolKind::dword:
             address = symbol->second.value;
             break;
         case SymbolKind::constant:
@@ -449,7 +449,7 @@ void Assembler::directive(const std::string &name, std::string_view text) {
                 define(std::string(operands[0]), SymbolKind::number, *value);
             }
         }
-    } else if (name == ".REG" || name == ".WIDE") {
+    } else if (name == ".REG" || name == ".DWORD") {
         if (need(2)) {
             const auto address = number(operands[1]);
             if (!address) {
@@ -459,12 +459,12 @@ void Assembler::directive(const std::string &name, std::string_view text) {
                 error("register address outside 0x001-0xBFF");
                 return;
             }
-            if (name == ".WIDE" && *address % 2 != 0) {
-                error("a wide register needs an even address");
+            if (name == ".DWORD" && *address % 2 != 0) {
+                error("a dword needs an even address");
                 return;
             }
             define(std::string(operands[0]),
-                   name == ".WIDE" ? SymbolKind::wide : SymbolKind::reg,
+                   name == ".DWORD" ? SymbolKind::dword : SymbolKind::reg,
                    *address);
         }
     } else if (name == ".CONST") {
