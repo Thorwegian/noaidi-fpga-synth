@@ -162,7 +162,7 @@ module top (
 
     logic [csp_pkg::CYCLE_W-1:0] cycle;
     logic [31:0]                 pass_counter;
-    logic [csp_pkg::WIDE_W-1:0]  probe_pair;
+    logic [csp_pkg::DWORD_W-1:0]  probe_pair;
     logic [csp_pkg::REGISTER_W-1:0] probe_register;   // the register the pair was read at
     // the stream's dump source walks the register file: the probe takes every register in turn,
     // moving on only when the stream's word two samples on will carry it (not a header's)
@@ -383,7 +383,7 @@ module top (
     //----------------------------------------------------------------
     logic [31:0] passes_meta, passes_sync;
     logic [15:0] frames_meta, frames_sync;
-    logic [csp_pkg::WIDE_W-1:0] probe_meta, probe_sync;
+    logic [csp_pkg::DWORD_W-1:0] probe_meta, probe_sync;
     always_ff @(posedge sclk or negedge rst_n)
         if (!rst_n) begin
             {passes_meta, passes_sync} <= '0;
@@ -402,7 +402,7 @@ module top (
         status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'({fifo_full, fifo_read_gray});
         status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(fifo_dropped);
         status[synth_pkg::MAP_DIAG_LIMITER - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(master_gain_q);
-        status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
+        status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::DWORD_W-1:csp_pkg::WORD_W]);
         status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
         status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(frames_sync);
     end

@@ -112,7 +112,7 @@ std::optional<double> parse_real(std::string_view text) {
 
 // ---- the assembler --------------------------------------------------------
 
-enum class SymbolKind { number, reg, wide, constant, label };
+enum class SymbolKind { number, reg, dword, constant, label };
 
 struct Symbol {
     SymbolKind kind;
@@ -369,7 +369,7 @@ std::optional<Source> Assembler::source(std::string_view text) {
         symbol != symbols_.end()) {
         switch (symbol->second.kind) {
         case SymbolKind::reg:
-        case SymbolKind::wide:
+        case SymbolKind::dword:
             address = symbol->second.value;
             break;
         case SymbolKind::constant:
@@ -449,7 +449,7 @@ void Assembler::directive(const std::string &name, std::string_view text) {
                 define(std::string(operands[0]), SymbolKind::number, *value);
             }
         }
-    } else if (name == ".REG" || name == ".WIDE") {
+    } else if (name == ".REG" || name == ".DWORD") {
         if (need(2)) {
             const auto address = number(operands[1]);
             if (!address) {
@@ -459,12 +459,12 @@ void Assembler::directive(const std::string &name, std::string_view text) {
                 error("register address outside 0x001-0xBFF");
                 return;
             }
-            if (name == ".WIDE" && *address % 2 != 0) {
-                error("a wide register needs an even address");
+            if (name == ".DWORD" && *address % 2 != 0) {
+                error("a dword needs an even address");
                 return;
             }
             define(std::string(operands[0]),
-                   name == ".WIDE" ? SymbolKind::wide : SymbolKind::reg,
+                   name == ".DWORD" ? SymbolKind::dword : SymbolKind::reg,
                    *address);
         }
     } else if (name == ".CONST") {
@@ -530,7 +530,7 @@ void Assembler::instruction(const std::string &full_name,
     const std::string name = full_name.substr(0, dot);
     const std::string suffix =
             dot == std::string::npos ? "" : full_name.substr(dot + 1);
-    const bool is_wide = suffix == "W";
+    const bool is_dword = suffix == "D";
 
     auto need = [&](size_t count) {
         if (operands.size() != count) {
@@ -556,18 +556,18 @@ void Assembler::instruction(const std::string &full_name,
             {"POS", Condition::positive},    {"ZERO", Condition::zero},
             {"NONZERO", Condition::nonzero}, {"OVF", Condition::overflow}};
 
-    const bool takes_wide = arithmetic.contains(name) || name == "SHIFT";
-    if (is_wide && !takes_wide) {
-        error(name + " has no wide form");
+    const bool takes_dword = arithmetic.contains(name) || name == "SHIFT";
+    if (is_dword && !takes_dword) {
+        error(name + " has no dword form");
         return;
     }
-    if (!suffix.empty() && !is_wide && name != "LOOP") {
+    if (!suffix.empty() && !is_dword && name != "LOOP") {
         error("unknown suffix ." + suffix + " on " + name);
         return;
     }
 
     if (const auto forms = arithmetic.find(name); forms != arithmetic.end()) {
-        if (is_wide) {
+        if (is_dword) {
             if (need(3)) {
                 const auto r = result(operands[0]);
                 const auto x = r ? source(operands[1]) : std::nullopt;
@@ -621,7 +621,7 @@ void Assembler::instruction(const std::string &full_name,
             builder_.nop();
         }
     } else if (name == "SHIFT") {
-        if (is_wide) {
+        if (is_dword) {
             if (need(2)) {
                 const auto r = result(operands[0]);
                 const auto y = r ? source(operands[1]) : std::nullopt;

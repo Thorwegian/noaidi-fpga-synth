@@ -10,7 +10,7 @@ is kept here for reference.*
 
 The second revision keeps what the first proved and drops what the chip
 measured as unaffordable: a fixed program per sample, three-operand
-saturating arithmetic, wide pairs, sinks as stores, loops with
+saturating arithmetic, dwords (register pairs), sinks as stores, loops with
 fixed counts — and in place of a decoder in logic, a decode read from a
 block RAM; in place of an adder on every operand, addresses made by
 putting bits side by side; in place of a hazard check in hardware, a
@@ -24,10 +24,10 @@ Taken on issue #231; the text below is written to them.
 
 | decided | what | where |
 |---|---|---|
-| 2026-10-18 | the word is 72 bits, eight 9-bit slices of one row | section 2 |
+| 2026-10-18 | the row is a qword (72 bits), eight nonet slices | section 2 |
 | 2026-10-18 | no hardware interlock: the window's placement is the guarantee | section 8 |
 | 2026-10-18 | the sink area stays six replicas of two pages, twelve blocks | `csp2_architecture.md` section 2 |
-| 2026-10-18 | the wire is in nines: a 9-bit command, an 18-bit address, 36-bit dwords of four nonets | `memory_map.md`, conventions |
+| 2026-10-18 | the wire is in nines: a command nonet, an 18-bit address (two nonets), dwords of four nonets | `memory_map.md`, conventions |
 
 ## 1. A program
 
@@ -57,10 +57,10 @@ Taken on issue #231; the text below is written to them.
 - **Programs load with the CSP held**, and the decode ROM loads with
   them (section 4): a program and its decode are one image.
 
-## 2. The word
+## 2. The row
 
-One instruction is one **72-bit word**, read from eight block RAMs of
-2048 × 9 as one row (54 bits from six blocks would have dropped the
+One instruction is one **row**, a qword (72 bits), read from eight block RAMs of
+2048 × 9, a nonet from each (54 bits from six blocks would have dropped the
 immediate to 6 bits and a mode from each operand; the budget has the
 eight). Each field goes straight into a register of the stage that uses
 it; no field is decoded from another.
@@ -103,7 +103,7 @@ a loop. Inside a vector loop (section 5) the loop's own index is the
 element's, and the other index may be the element's private one, set
 by an `IDX` in the body.
 
-An **immediate** in `x` or `y` is the word's `imm` field as an 18-bit
+An **immediate** in `x` or `y` is the row's `imm` field as an 18-bit
 Q4.14 value: constants no longer live in registers the firmware writes
 at boot.
 
@@ -112,7 +112,7 @@ at boot.
 The `op` field is the address of a row in a block RAM of 1024 × 18 that
 holds the **control word**: what the datapath does, with no logic
 between the row and the stage registers. Every variant is a row — a
-`MAC` from zero, a `MAC` accumulating into its result, a wide `MAC` are
+`MAC` from zero, a `MAC` accumulating into its result, a dword `MAC` are
 three rows — so the assembler's encoding is a table and the decode is a
 read.
 
@@ -121,10 +121,10 @@ The control word:
 | bits | field | values |
 |---|---|---|
 | 17:15 | unit | none, multiply-add, logic, shift, loop, index |
-| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j` |
+| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a dword (a register pair), index `i`, index `j` |
 | 11:10 | A source | zero, `r` (update in place) |
 | 9 | reads X | X is read: from DMEM, or the immediate |
-| 8 | wide Y | Y is a pair |
+| 8 | dword Y | Y is a register pair |
 | 7:6 | condition kind | none, select by `cond`, set the flags |
 | 5 | reads Y | Y is read |
 | 4 | spare | |
@@ -141,7 +141,7 @@ the operation is the same):
 
 | family | rows | operation |
 |---|---|---|
-| multiply-add | `MAC`, `MAC` in place, `MAC.w`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
+| multiply-add | `MAC`, `MAC` in place, `MAC.d`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
 | add | `ADD3` | R = A + X + Y |
 | compare | `CMP` | R = X − Y, the flags set |
 | select | `SEL` | R = `cond` clear ? X : Y |
@@ -149,6 +149,12 @@ the operation is the same):
 | logic | `ANDXOR` | R = (X & Y) ^ A |
 | shift | `SHIFT` | R = A × 2^Y |
 | front end | `LOOP`, `LOOP.v`, `IDX`, `NOP`, `END` | section 5, section 6; `END` closes every image: the assembler's last row, where the pass's instructions stop (#271) |
+
+The width suffix **`.d`** (dword, as the PDP-11's `MOVB` is to `MOV` in
+reverse) is taken by `MAC`, `MACW`, `ADD3` and `SHIFT`: R is a dword, so is
+Y (except `SHIFT`'s count), X a word, and the operation works in place (A
+is R), so `MAC.d R, X, Y` has three operands. `MACW`'s W is *wrapping*, an
+operation of its own; `MACW.d` is the wrapping multiply-add on a dword.
 
 A row the program never uses is a row the ROM never holds; the ROM's
 image is the assembler's, loaded with the program. Three rows are fixed in
@@ -160,7 +166,7 @@ row is captured and before the ROM has decoded it (section 5).
 
 **Scalar loops** (`LOOP.i`, `LOOP.j`) repeat the next *n* instructions
 *count* times, stepping `i` or `j` by *stride*; they nest one level,
-each with its own counter. The three numbers are in the word: the body's
+each with its own counter. The three numbers are in the row: the body's
 last row in `imm` (the assembler subtracts; the chip only compares), the
 count in `x`'s immediate mode, the stride in `y`'s.
 A repeat costs four cycles (the four rows behind the last body row are in
@@ -208,7 +214,7 @@ loop walks has a power-of-two stride. The file, 2048 words of 18 bits
 
 | region | contents | rule |
 |---|---|---|
-| `0x000–0x03F` | the firmware's constants (fewer: immediates are in the word) | written once, read anywhere |
+| `0x000–0x03F` | the firmware's constants (fewer: immediates are in the row) | written once, read anywhere |
 | `0x040–0x05F` | inputs: noise, the pass counter, the test tone | read only; the two last words are the read ports' parking row |
 | `0x060–0x07F` | globals: the LFO sets | |
 | `0x080–0x1FF` | the LFO pool: records of **16** words (was 12) | stride 16 |
@@ -243,11 +249,11 @@ cheaper proof than a check in logic.
 
 | | first revision | second | because |
 |---|---|---|---|
-| the word | 36 bits, fields packed | 72 bits, one field per register | no field is decoded from another; the budget has the blocks |
+| the row | a dword, fields packed | a qword, one field per register | no field is decoded from another; the budget has the blocks |
 | decode | LUTs, 10–13 levels to the issue | a block RAM row, registered on the pins | the tool times no pin; a block read is nothing but a register on a pin, which is the only thing that has held at 73.728 MHz on every seed |
 | operands | base + index + offset through an adder | bits side by side, power-of-two strides | the adder before the banks was the critical path's start on nine seeds of ten |
 | vector loops | up to 64 elements interleaved | rounds of 16 | a 64-way select on the issue decision was the critical path's end; 16 is two LUT levels from a register, and nine in flight hide the latency |
 | hazards | checked in hardware | scheduled by the assembler | the check and its consumers are the depth the chip cannot afford; the model already knows every latency |
-| immediates | constant registers written at boot | in the word | the constant pool was where the boot image lost its words |
+| immediates | constant registers written at boot | in the row | the constant pool was where the boot image lost its words |
 | conditionality | `SEL` (and, rev 1, a scalar `SKIP`) | `SEL` only | a skip counter per interleaved element would be front-end state again; a signal graph needs no control-flow skip (#238) |
 | acceptance | added at the end | in the design | the self-test's changing-operand checks, `csp verify` and the baseline with the valley floor found what the report never showed |

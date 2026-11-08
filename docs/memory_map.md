@@ -43,7 +43,7 @@ flowchart TD
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
         BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
-        BUS --> PGM["IMEM: 2048 rows of 72 bits<br/>eight 9-bit slices<br/>decode ROM 1024 × 18"]
+        BUS --> PGM["IMEM: 2048 qword rows<br/>eight nonet slices<br/>decode ROM 1024 × 18"]
         BUS --> PTR["pointer RAM<br/>256 × 10 pointers"]
         Q --> CSP["CSP: the control program,<br/>once per 3072 cycles"]
         PGM --> CSP
@@ -68,7 +68,7 @@ flowchart TD
   clocks and split a 36-bit instruction over a high-bits register; that is
   gone.)
 - **A dword is 36 bits**: a register or sink write is one dword (`[35:24]` the
-  12-bit address, `[23:6]` the 18-bit word, `[5:0]` spare); a wide register is
+  12-bit address, `[23:6]` the 18-bit word, `[5:0]` spare); a register pair is
   two dwords, the pair's halves; an instruction row is two dwords; a decode ROM
   row is one dword with the upper half unused; a status or probe word reads
   back as one dword, 18 or 36 wide as it is.
@@ -138,11 +138,11 @@ tone along with a swap.
 
 ## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x090FF`
 
-An instruction is 72 bits ([csp2_isa.md](csp2_isa.md) section 2), held as
-eight 9-bit slices of one row in eight blocks of 2048 × 9. A row is two
-dwords: the first carries bits `[71:36]`, one 9-bit slice to each of the
+An instruction is a qword ([csp2_isa.md](csp2_isa.md) section 2), held as
+eight nonet slices of one row in eight blocks of 2048 × 9. A row is two
+dwords: the first carries bits `[71:36]`, one nonet to each of the
 upper four blocks, the second bits `[35:0]` to the lower four; row `pc` is
-at `0x08000 + 2 pc`. The decode ROM's rows (a block of 1024 × 18 of which the word's eight-bit `op`
+at `0x08000 + 2 pc`. The decode ROM's rows (a block of 1024 × 18 of which the row's eight-bit `op`
 reaches the first 256; the operations as `csp2_isa.md` section 4 lists them) are
 one dword each at `0x09000 + op`, the upper half of the dword unused. The last
 row is not written: the decode parks on it while the CSP is held. Both are loaded as one image with the
@@ -217,11 +217,11 @@ frames sent.
 
 ## Partial pointers — `0x2000 + 64 p`
 
-Partial `p` (0–255) takes four words, 30 bits each, three 10-bit pointers to a
-word (the first at the word's bottom). The fourth word completes the entry:
+Partial `p` (0–255) takes four dwords, 30 bits of each used: three 10-bit pointers to a
+word (the first at the dword's bottom). The fourth dword completes the entry:
 the pointers, ten in all, become the partial's together.
 
-| Word | Bits `[9:0]` | `[19:10]` | `[29:20]` |
+| Dword | Bits `[9:0]` | `[19:10]` | `[29:20]` |
 |---|---|---|---|
 | `+0` | pitch (voice) | pitch (channel: detune) | cutoff (voice) |
 | `+1` | cutoff (channel: offset) | gain (voice) | gain left (channel) |

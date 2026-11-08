@@ -3,8 +3,8 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The LFO program (tools/csp/programs/lfo.s) adds a wide RATE register to a
-// wide phase register once per update; a cycle is the phase's whole 36-bit
+// The LFO program (tools/csp/programs/lfo.s) adds a dword RATE register to a
+// dword phase register once per update; a cycle is the phase's whole 36-bit
 // range. The old LFO added a 16-bit increment to a 25-bit phase each 96 kHz
 // sample, so a cycle took 2^25 / increment samples.
 

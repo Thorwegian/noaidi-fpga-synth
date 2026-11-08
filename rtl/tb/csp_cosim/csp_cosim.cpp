@@ -215,8 +215,8 @@ const char *registers = R"(
         .reg B_, 0x061
         .reg C_, 0x062
         .reg D_, 0x063
-        .wide W_, 0x064
-        .wide V_, 0x066
+        .dword W_, 0x064
+        .dword V_, 0x066
         .reg S_, 0x068
         .reg T_, 0x069
         .block ITEM
@@ -277,7 +277,7 @@ void run_directed(VerilatedContext &context) {
     const std::vector<Directed> programs   = {
             {"selftest", map + program_file("selftest.s"), 24},
             // the chip check's one-path programs (tools/csp/programs/checks, #235): the scalar loops'
-            // repeat, one vector loop, the wide pair's write and read
+            // repeat, one vector loop, the dword's write and read
             {"loop", program_file("checks/loop.s"), 24},
             {"vloop", program_file("checks/vloop.s"), 24},
             {"vector_flags", program_file("checks/vector_flags.s"), 24},
@@ -299,11 +299,11 @@ void run_directed(VerilatedContext &context) {
             SHIFT   T_, 0, =#-3
 )",
                4},
-            {"wide", std::string(registers) + R"(
-            MAC.w    W_, A_, V_
-            MACW.w   V_, B_, W_
-            ADD3.w   V_, D_, W_
-            SHIFT.w  W_, =#2
+            {"dword", std::string(registers) + R"(
+            MAC.d    W_, A_, V_
+            MACW.d   V_, B_, W_
+            ADD3.d   V_, D_, W_
+            SHIFT.d  W_, =#2
             MAC      A_, 0, W_, =0.25
 )",
                4},

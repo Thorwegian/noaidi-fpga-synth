@@ -87,7 +87,7 @@ constexpr dword_t fifo_dword(int address, uint32_t raw) {
            | (dword_t{raw & word_mask} << 6);
 }
 
-// The CSP's program: a 72-bit row is two dwords, the first its upper half,
+// The CSP's program: a row (a qword) is two dwords, the first its upper half,
 // at program_base + 2 × pc; the decode ROM's rows one dword each. The word's op
 // field is eight bits, so the ROM's first 256 rows are all a program can name; the
 // block holds 1024, and its last row is where the decode parks while the CSP is

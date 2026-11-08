@@ -40,7 +40,7 @@ module csp (
     input  wire  [csp_pkg::REGISTER_W-1:0]   probe_address,
     input  wire                              probe_sweep,        // the sweep's register is the probe's
     input  wire                              probe_step,         // and it moves on at this pass's start
-    output logic [csp_pkg::WIDE_W-1:0]       probe_pair,
+    output logic [csp_pkg::DWORD_W-1:0]       probe_pair,
     output logic [csp_pkg::REGISTER_W-1:0]   probe_register,
 
     // the write trap (#238): a write of the core's or the pass's to this register (bit 11: a sink
@@ -62,7 +62,7 @@ module csp (
     // the core's ports: DMEM's pins are the core's registers
     logic [csp_pkg::BANK_INDEX_W-1:0] read_r_even_index, read_r_odd_index, read_x_even_index, read_x_odd_index,
                                       read_y_even_index, read_y_odd_index;
-    logic [csp_pkg::WIDE_W-1:0]       read_r_pair, read_x_pair, read_y_pair;
+    logic [csp_pkg::DWORD_W-1:0]       read_r_pair, read_x_pair, read_y_pair;
     logic                             write_even_enable, write_odd_enable;
     logic [csp_pkg::BANK_INDEX_W-1:0] write_index;
     logic [csp_pkg::WORD_W-1:0]       write_even_data, write_odd_data;

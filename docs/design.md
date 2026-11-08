@@ -151,7 +151,7 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
 | Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the preset's UQ4.4 volume codes (6 dB per 16 steps) are turned into linear words in firmware (`render.cpp`) |
-| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the preset/CC; decoded in firmware (`preset.cpp`) to an 18-bit coefficient k, and `csp::envelope_rate` makes the program's wide rate of it |
+| Envelope rates | 8-bit log₂ | 4-bit octave + 4-bit 1/16-octave in the preset/CC; decoded in firmware (`preset.cpp`) to an 18-bit coefficient k, and `csp::envelope_rate` makes the program's dword rate of it |
 
 ## The partial pipeline
 

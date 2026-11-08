@@ -6,7 +6,7 @@
 //
 // One read copy of DMEM (docs/csp2_architecture.md section 2): two DPX9B
 // blocks of 1024 × 18, the even registers in one and the odd in the other,
-// so that a word write touches one bank and a wide access reads the
+// so that a word write touches one bank and a dword access reads the
 // aligned pair from both at one index. Port A is the write, port B the
 // read, both on the system clock; a read is in the blocks' output
 // registers the clock after its index (bypass mode). The core instantiates
@@ -53,7 +53,7 @@ module csp_dmem (
     // the read: each bank's row, the parked row when the bank is not read
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    read_even_index,
     input  wire [csp_pkg::BANK_INDEX_W-1:0]    read_odd_index,
-    output logic [csp_pkg::WIDE_W-1:0]         read_pair       // {even, odd} the clock after
+    output logic [csp_pkg::DWORD_W-1:0]         read_pair       // {even, odd} the clock after
 );
     // each bank's write register: the pins' own. The `keep` goes on the process, one a bank:
     // identical flip-flops with identical inputs are one flip-flop to yosys, a `keep` on the

@@ -80,7 +80,7 @@ module tb_top;
         end else $display("pass: %0s = %0d", what, got);
     endtask
 
-    // ---- Mode 0 master, in 9-bit nonets (tb_spi_bus's) -----------------
+    // ---- Mode 0 master, in nonets (tb_spi_bus's) ---------------------
     reg [8:0] tx_nonets [0:63];
     reg [8:0] rx_nonets [0:63];
     task spi_frame(input integer nonets);
@@ -429,7 +429,7 @@ module tb_top;
         write_burst(MAP_PROBE_ADDRESS, 1, 1);
         #(40 * half);
         read_status(MAP_PROBE_EVEN, value);
-        checkn("the probe's even slot", value, dut.probe_pair[csp_pkg::WIDE_W-1:csp_pkg::WORD_W]);
+        checkn("the probe's even slot", value, dut.probe_pair[csp_pkg::DWORD_W-1:csp_pkg::WORD_W]);
         read_status(MAP_PROBE_ODD, value);
         checkn("the probe's odd slot", value, dut.probe_pair[csp_pkg::WORD_W-1:0]);
         read_status(MAP_DIAG_STREAM, value);

@@ -27,7 +27,7 @@ namespace csp::control {
 // The pass's cycles, as scheduled.
 inline constexpr int cycles = 1462;
 
-// The rows: 72 bits each, bits 71:36 then 35:0.
+// The rows: a qword each, bits 71:36 then 35:0.
 inline constexpr std::array<Row, 452> rows{{
     {0x030000c00ull, 0x000000070ull},
     {0x000000000ull, 0x000000000ull},

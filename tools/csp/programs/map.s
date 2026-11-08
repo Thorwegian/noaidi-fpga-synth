@@ -23,7 +23,7 @@
 ; smaller than the largest offset used through it: the regions' strides
 ; (16, 64, 16, 8) are powers of two, and a channel's sink block, 48 words
 ; at 0x900 + 48 × channel, is a multiple of 16 with the program's three
-; words at offsets 0–2. Wide fields are at even offsets. A vector loop's
+; words at offsets 0–2. Dword fields are at even offsets. A vector loop's
 ; elements must not share registers, so every scratch word a loop uses is
 ; in its record; a field's name says what it holds in the loop that uses
 ; it, and a scratch field that two loops use for different things has a

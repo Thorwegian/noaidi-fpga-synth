@@ -99,7 +99,7 @@ void ProgramBuilder::check_operand(const Operand &operand, bool wide,
             issue("a direct operand reaches 0–1023: "
                   + std::to_string(operand.value));
         } else if (wide && operand.value % 2 != 0) {
-            issue("a wide operand needs an even register: "
+            issue("a dword operand needs an even register: "
                   + std::to_string(operand.value));
         } else if (result && is_input(operand.value)) {
             issue("a result cannot go to an input register");
@@ -110,7 +110,7 @@ void ProgramBuilder::check_operand(const Operand &operand, bool wide,
         if (operand.value < 0 || operand.value > 0x3FF) {
             issue("an offset is 0–1023: " + std::to_string(operand.value));
         } else if (wide && operand.value % 2 != 0) {
-            issue("a wide operand needs an even offset: "
+            issue("a dword operand needs an even offset: "
                   + std::to_string(operand.value));
         }
         break;
@@ -127,7 +127,7 @@ size_t ProgramBuilder::emit(Entry entry) {
 size_t ProgramBuilder::arithmetic(Op op, Operand r, ASource a, Source x,
                                   Source y, bool wide) {
     if (wide && a != ASource::result) {
-        issue(std::string(mnemonic(op)) + ".w works in place: A is R");
+        issue(std::string(mnemonic(op)) + ".d works in place: A is R");
     }
     if (x.operand.mode == Operand::Mode::immediate
         && y.operand.mode == Operand::Mode::immediate

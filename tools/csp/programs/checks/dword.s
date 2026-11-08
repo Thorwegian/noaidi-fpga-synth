@@ -1,4 +1,4 @@
-; wide.s -- a directed program of the co-simulation, run on the model, the RTL and the chip
+; dword.s -- a directed program of the co-simulation, run on the model, the RTL and the chip
 ;
 ; Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 ; License: CERN-OHL-S v2
@@ -10,8 +10,8 @@
         .reg B_, 0x061
         .reg C_, 0x062
         .reg D_, 0x063
-        .wide W_, 0x064
-        .wide V_, 0x066
+        .dword W_, 0x064
+        .dword V_, 0x066
         .reg S_, 0x068
         .reg T_, 0x069
         .block ITEM
@@ -24,8 +24,8 @@
         .reg RUN_COUNT, 0x3FE
         ADD3   RUN_ONE, 0, =1.0, ZERO
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
-            MAC.w    W_, A_, V_
-            MACW.w   V_, B_, W_
-            ADD3.w   V_, D_, W_
-            SHIFT.w  W_, =#2
+            MAC.d    W_, A_, V_
+            MACW.d   V_, B_, W_
+            ADD3.d   V_, D_, W_
+            SHIFT.d  W_, =#2
             MAC      A_, 0, W_, =0.25

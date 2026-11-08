@@ -7,16 +7,16 @@
 ; keeps an envelope table at the address its voices' CHANNEL field holds:
 ; three rows of four words for the amp envelope's attack (+0), decay
 ; (+4) and release (+8), and three for the mod envelope's (+16, +20, +24). A
-; row is two wide registers: the segment's target (1.3 for the attack, the
+; row is two dwords: the segment's target (1.3 for the attack, the
 ; sustain level, 0) and its rate. A segment moves the level toward its
 ; target by the fraction RATE of the distance left each pass: an RC charge,
 ; as adsr.sv at 96 kHz (the firmware converts, app/main/csp/envelope.hpp).
-; The rate is wide, Q4.32, so it can be as slow as adsr.sv's 2^-24: a
+; The rate is a dword, Q4.32, so it can be as slow as adsr.sv's 2^-24: a
 ; word's smallest step would be 2^-14, a time constant of 0.34 s at 48 kHz.
 ; The distance is a word: the upper words of target and level, subtracted.
 ; The level stops within a word's step (2^-14) of its target.
 ;
-; A voice holds, for each envelope, its level (wide) and stage (the row's
+; A voice holds, for each envelope, its level (a dword) and stage (the row's
 ; offset in the table: 0, 4 or 8, and 16, 20 or 24), its velocity and the
 ; mod envelope's (the amounts a note's velocity sets), the outputs, and
 ; scratch fields (U per envelope, D), per voice because a vector loop's
@@ -49,11 +49,11 @@
 
         IDX     j, [i+CHANNEL], [i+STAGE_A] ;   the amp envelope: j → its row
         CMP     [i+D], [j+TARGET], [i+LEVEL_A]  ; D ← target − level
-        MAC.w   [i+LEVEL_A], [i+D], [j+RATE]    ; level ← level + D × rate
+        MAC.d   [i+LEVEL_A], [i+D], [j+RATE]    ; level ← level + D × rate
         MAC     [i+OUT_A], 0, [i+LEVEL_A], [i+VELOCITY]
 
         IDX     j, [i+CHANNEL], [i+STAGE_M] ;   the mod envelope
         CMP     [i+D], [j+TARGET], [i+LEVEL_M]
-        MAC.w   [i+LEVEL_M], [i+D], [j+RATE]
+        MAC.d   [i+LEVEL_M], [i+D], [j+RATE]
         MAC     [i+U_M], 0, [i+LEVEL_M], [i+VELOCITY_M]   ; the mod envelope's output
 done:

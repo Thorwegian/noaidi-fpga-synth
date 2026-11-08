@@ -10,8 +10,8 @@
         .reg B_, 0x061
         .reg C_, 0x062
         .reg D_, 0x063
-        .wide W_, 0x064
-        .wide V_, 0x066
+        .dword W_, 0x064
+        .dword V_, 0x066
         .reg S_, 0x068
         .reg T_, 0x069
         .block ITEM

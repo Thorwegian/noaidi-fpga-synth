@@ -70,7 +70,7 @@ int32_t gain_of_code(int code) {
     return fraction(std::exp2((code - 255) / 16.0));
 }
 
-// A wide register's two words, the upper first.
+// A dword's two words, the upper first.
 void wide(Writes &writes, int address, int64_t raw36, bool force = false) {
     writes.push_back({address,
                       static_cast<int32_t>(csp::sign_extend(
