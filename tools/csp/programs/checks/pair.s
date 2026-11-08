@@ -31,6 +31,6 @@
         .reg RUN_COUNT, 0x3FE
         ADD3   RUN_ONE, 0, =1.0, ZERO
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
-            ADD3.w   V_, D_, W_                 ; the pair write, from a word and a pair the fill set
-            MAC.w    U_, A_, V_                 ; the wide read of the pair the chip wrote
+            ADD3.d   V_, D_, W_                 ; the pair write, from a word and a pair the fill set
+            MAC.d    U_, A_, V_                 ; the wide read of the pair the chip wrote
             ADD3     T_, 0, =0.25, ZERO

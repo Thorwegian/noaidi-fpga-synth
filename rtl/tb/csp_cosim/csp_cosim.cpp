@@ -300,10 +300,10 @@ void run_directed(VerilatedContext &context) {
 )",
                4},
             {"wide", std::string(registers) + R"(
-            MAC.w    W_, A_, V_
-            MACW.w   V_, B_, W_
-            ADD3.w   V_, D_, W_
-            SHIFT.w  W_, =#2
+            MAC.d    W_, A_, V_
+            MACW.d   V_, B_, W_
+            ADD3.d   V_, D_, W_
+            SHIFT.d  W_, =#2
             MAC      A_, 0, W_, =0.25
 )",
                4},

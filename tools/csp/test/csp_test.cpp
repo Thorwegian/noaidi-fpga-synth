@@ -244,13 +244,13 @@ void test_macw_and_wide() {
     Machine m(std::string(registers) + R"(
         .const ONE, 1.0
         MACW  A_, A_, B_, ONE
-        MACW.w W_, ONE, V_
+        MACW.d W_, ONE, V_
 )");
     m.set("A_", q(7.5)).set("B_", q(1.0));
     m.set_wide("W_", q_wide(7.75)).set_wide("V_", q_wide(0.5)).start().run();
     check_equal(m.get("A_"), q(-7.5), "MACW wraps 7.5 + 1.0 to −7.5");
     check(!m.processor.flags().overflow, "MACW does not set V");
-    check_equal(m.get_wide("W_"), q_wide(-7.75), "MACW.w wraps a wide phase");
+    check_equal(m.get_wide("W_"), q_wide(-7.75), "MACW.d wraps a dword phase");
     check_equal(m.get("W_"), q(-7.75),
                 "a wide register's upper word reads as Q4.14");
 }
@@ -315,9 +315,9 @@ void test_schedule() {
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC B_, 0, A_, =1.0\n"),
                 csp::result_latency + 1, "a read of R waits for its write");
     check_equal(
-            cycles(".reg W_LOWER, 0x065\nMAC.w W_, =1.0, V_\nMAC B_, 0, W_LOWER, =1.0\n"),
+            cycles(".reg W_LOWER, 0x065\nMAC.d W_, =1.0, V_\nMAC B_, 0, W_LOWER, =1.0\n"),
             csp::result_latency + 1,
-            "a read of a pair's lower word waits for the wide write");
+            "a read of a pair's lower word waits for the dword write");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC C_, 0, B_, =1.0\n"), 2,
                 "another register does not wait");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"),
@@ -633,7 +633,7 @@ void test_limits() {
     // 256 distinct control words would need more decode rows than the op
     // field reaches; the program's variants come to a handful
     const csp::Program program = csp::assemble(
-            std::string(registers) + "MAC A_, 0, B_, C_\nMAC.w W_, B_, V_\n"
+            std::string(registers) + "MAC A_, 0, B_, C_\nMAC.d W_, B_, V_\n"
             + "SEL A_, B_, C_\nIDX i, =#0x100, 0\nIDX j, =#0x100, 0\n");
     check_equal(
             program.image.rom_used, csp::rom_reserved + 5 + 1,
@@ -682,9 +682,9 @@ void test_assembler() {
     check(has_diagnostic(csp::assemble("MAC r1100, 0, r1, r2\n"), true,
                          "reaches 0–1023"),
           "direct operands reach 0–1023");
-    check(has_diagnostic(csp::assemble("CMP.w r2, r4, r6\n"), true,
-                         "no wide form"),
-          ".w on an instruction without one");
+    check(has_diagnostic(csp::assemble("CMP.d r2, r4, r6\n"), true,
+                         "no dword form"),
+          ".d on an instruction without one");
     check(has_diagnostic(csp::assemble("MAC r1, r2, r3, r4\n"), true,
                          "must be 0 or the R"),
           "an A operand that is not 0 or R");
@@ -821,7 +821,7 @@ const char *envelope_program = R"(
         CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
         SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
         CMP     [i+U], [j+TARGET], [i+LEVEL]   ;   U ← target − level (the distance)
-        MAC.w   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate (as envelope.s does it)
+        MAC.d   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate (as envelope.s does it)
 done:
 )";
 
@@ -918,7 +918,7 @@ void test_lfo() {
         .const DEPTH_8, 0.125
         .const DEPTH_4, 0.25
 
-        MACW.w  PHASE, ONE, RATE            ; advance and wrap
+        MACW.d  PHASE, ONE, RATE            ; advance and wrap
         MAC     SAW, 0, PHASE, DEPTH_8      ; sawtooth, ±depth
         CMP     ZERO, PHASE, ZERO
         SEL     SQUARE, LOW, HIGH           ; square, ±depth

@@ -127,7 +127,7 @@ size_t ProgramBuilder::emit(Entry entry) {
 size_t ProgramBuilder::arithmetic(Op op, Operand r, ASource a, Source x,
                                   Source y, bool wide) {
     if (wide && a != ASource::result) {
-        issue(std::string(mnemonic(op)) + ".w works in place: A is R");
+        issue(std::string(mnemonic(op)) + ".d works in place: A is R");
     }
     if (x.operand.mode == Operand::Mode::immediate
         && y.operand.mode == Operand::Mode::immediate

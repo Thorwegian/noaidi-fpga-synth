@@ -29,22 +29,22 @@
         IDX     i, [j+BASE], 0                      ; i → its first record
 
         LOOP.vi saws, =#SAWS_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]      ; advance and wrap
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]      ; advance and wrap
         MAC     [i+OUT], 0, [i+PHASE], [i+GAIN]     ; ±depth
 saws:
         LOOP.vi squares, =#SQUARES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         CMP     ZERO, [i+PHASE], ZERO
         SEL     [i+OUT], [i+NEG_DEPTH], [i+DEPTH]   ; high while the phase is negative
 squares:
         LOOP.vi triangles, =#TRIANGLES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         ABS     [i+T], [i+PHASE]                    ; 0 … 8
         MAC     [i+T], 0, [i+T], [i+GAIN]           ; 0 … 2 × depth
         ADD3    [i+OUT], 0, [i+T], [i+NEG_DEPTH]    ; ±depth, low at phase 0
 triangles:
         LOOP.vi sines, =#SINES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         MAC     [i+P], 0, [i+PHASE], EIGHTH         ; p = phase ÷ 8, −1 … 1
         ABS     [i+T], [i+P]
         MAC     [i+T], 0, [i+T], [i+P]              ; p|p|
@@ -62,22 +62,22 @@ sines:
         IDX     i, [j+BASE], 0                      ; i → its first record
 
         LOOP.vi saws_1, =#SAWS_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]      ; advance and wrap
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]      ; advance and wrap
         MAC     [i+OUT], 0, [i+PHASE], [i+GAIN]     ; ±depth
 saws_1:
         LOOP.vi squares_1, =#SQUARES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         CMP     ZERO, [i+PHASE], ZERO
         SEL     [i+OUT], [i+NEG_DEPTH], [i+DEPTH]   ; high while the phase is negative
 squares_1:
         LOOP.vi triangles_1, =#TRIANGLES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         ABS     [i+T], [i+PHASE]                    ; 0 … 8
         MAC     [i+T], 0, [i+T], [i+GAIN]           ; 0 … 2 × depth
         ADD3    [i+OUT], 0, [i+T], [i+NEG_DEPTH]    ; ±depth, low at phase 0
 triangles_1:
         LOOP.vi sines_1, =#SINES_A_HALF, =#LFO_SIZE
-        MACW.w  [i+PHASE], ONE, [i+PHASE_STEP]
+        MACW.d  [i+PHASE], ONE, [i+PHASE_STEP]
         MAC     [i+P], 0, [i+PHASE], EIGHTH         ; p = phase ÷ 8, −1 … 1
         ABS     [i+T], [i+P]
         MAC     [i+T], 0, [i+T], [i+P]              ; p|p|

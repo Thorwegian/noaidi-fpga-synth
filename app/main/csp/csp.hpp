@@ -71,7 +71,7 @@ constexpr int jump_penalty = 4;
 // ---- number formats -------------------------------------------------------
 //
 // word         18 bits  Q4.14
-// wide         36 bits  Q4.32  (an aligned register pair, upper word even)
+// dword        36 bits  Q4.32  (an aligned register pair, upper word even)
 // accumulator  54 bits  Q8.46
 
 constexpr int word_bits                 = 18;
@@ -103,7 +103,7 @@ constexpr int64_t smallest(int bits) {
 // ---- the operations -------------------------------------------------------
 //
 // What a program writes; each becomes one or more decode ROM rows by its
-// variant (in place, wide).
+// variant (in place, dword).
 
 enum class Op : uint8_t {
     nop,
@@ -201,7 +201,7 @@ enum class Unit : uint8_t {
 enum class Writes : uint8_t {
     nothing = 0,
     word    = 1, // a register (or a sink word, by the address)
-    pair    = 2, // a wide register
+    pair    = 2, // a dword: a register pair
     index_i = 3,
     index_j = 4,
     // 5 was accumulator, dropped with ACC (#238)
@@ -249,7 +249,7 @@ struct Control {
     bool operator==(const Control &) const = default;
 };
 
-// The control word of an operation in a variant: wide (R and Y are pairs,
+// The control word of an operation in a variant: dword (R and Y are pairs,
 // X a word) and the A source. Operations without a variant ignore them.
 Control control_of(Op op, bool wide, ASource a_source);
 

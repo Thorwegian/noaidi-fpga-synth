@@ -10,7 +10,7 @@ is kept here for reference.*
 
 The second revision keeps what the first proved and drops what the chip
 measured as unaffordable: a fixed program per sample, three-operand
-saturating arithmetic, wide pairs, sinks as stores, loops with
+saturating arithmetic, dwords (register pairs), sinks as stores, loops with
 fixed counts — and in place of a decoder in logic, a decode read from a
 block RAM; in place of an adder on every operand, addresses made by
 putting bits side by side; in place of a hazard check in hardware, a
@@ -112,7 +112,7 @@ at boot.
 The `op` field is the address of a row in a block RAM of 1024 × 18 that
 holds the **control word**: what the datapath does, with no logic
 between the row and the stage registers. Every variant is a row — a
-`MAC` from zero, a `MAC` accumulating into its result, a wide `MAC` are
+`MAC` from zero, a `MAC` accumulating into its result, a dword `MAC` are
 three rows — so the assembler's encoding is a table and the decode is a
 read.
 
@@ -121,10 +121,10 @@ The control word:
 | bits | field | values |
 |---|---|---|
 | 17:15 | unit | none, multiply-add, logic, shift, loop, index |
-| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a wide pair, index `i`, index `j` |
+| 14:12 | writes | nothing, a word (a register, or a sink word by its address), a dword (a register pair), index `i`, index `j` |
 | 11:10 | A source | zero, `r` (update in place) |
 | 9 | reads X | X is read: from DMEM, or the immediate |
-| 8 | wide Y | Y is a pair |
+| 8 | dword Y | Y is a register pair |
 | 7:6 | condition kind | none, select by `cond`, set the flags |
 | 5 | reads Y | Y is read |
 | 4 | spare | |
@@ -141,7 +141,7 @@ the operation is the same):
 
 | family | rows | operation |
 |---|---|---|
-| multiply-add | `MAC`, `MAC` in place, `MAC.w`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
+| multiply-add | `MAC`, `MAC` in place, `MAC.d`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
 | add | `ADD3` | R = A + X + Y |
 | compare | `CMP` | R = X − Y, the flags set |
 | select | `SEL` | R = `cond` clear ? X : Y |
@@ -149,6 +149,12 @@ the operation is the same):
 | logic | `ANDXOR` | R = (X & Y) ^ A |
 | shift | `SHIFT` | R = A × 2^Y |
 | front end | `LOOP`, `LOOP.v`, `IDX`, `NOP`, `END` | section 5, section 6; `END` closes every image: the assembler's last row, where the pass's instructions stop (#271) |
+
+The width suffix **`.d`** (dword, as the PDP-11's `MOVB` is to `MOV` in
+reverse) is taken by `MAC`, `MACW`, `ADD3` and `SHIFT`: R is a dword, so is
+Y (except `SHIFT`'s count), X a word, and the operation works in place (A
+is R), so `MAC.d R, X, Y` has three operands. `MACW`'s W is *wrapping*, an
+operation of its own; `MACW.d` is the wrapping multiply-add on a dword.
 
 A row the program never uses is a row the ROM never holds; the ROM's
 image is the assembler's, loaded with the program. Three rows are fixed in

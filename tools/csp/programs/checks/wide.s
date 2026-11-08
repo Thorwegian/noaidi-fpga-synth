@@ -24,8 +24,8 @@
         .reg RUN_COUNT, 0x3FE
         ADD3   RUN_ONE, 0, =1.0, ZERO
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
-            MAC.w    W_, A_, V_
-            MACW.w   V_, B_, W_
-            ADD3.w   V_, D_, W_
-            SHIFT.w  W_, =#2
+            MAC.d    W_, A_, V_
+            MACW.d   V_, B_, W_
+            ADD3.d   V_, D_, W_
+            SHIFT.d  W_, =#2
             MAC      A_, 0, W_, =0.25

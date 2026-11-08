@@ -46,7 +46,7 @@ package csp_pkg;
 
     // ---- number formats -----------------------------------------------------
     //   word         18 bits  Q4.14
-    //   wide         36 bits  Q4.32  (an aligned pair, upper word even)
+    //   dword        36 bits  Q4.32  (an aligned pair, upper word even)
     parameter int WORD_W = 18;
     parameter int WIDE_W = 36;
 
@@ -95,7 +95,7 @@ package csp_pkg;
     parameter logic [1:0] MODE_IMMEDIATE = 2'd3;   // the immediate; for r, no result
 
     // ---- the control word (docs/csp2_isa.md section 4) ------------------------------
-    //   [17:15] unit  [14:12] writes  [11:10] A source  [9] reads X  [8] wide Y
+    //   [17:15] unit  [14:12] writes  [11:10] A source  [9] reads X  [8] dword Y
     //   [7:6] condition kind  [5] reads Y  [3] wrap  [2:0] sub-operation
     parameter logic [2:0] UNIT_NONE         = 3'd0;
     parameter logic [2:0] SUB_END           = 3'd1;   // unit none, sub-operation 1: the program's END row (NOP is 0), #271
