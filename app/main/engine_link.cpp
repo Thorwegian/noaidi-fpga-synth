@@ -131,8 +131,7 @@ void tick_timer_cb(void *) {
 // Once a second, ask the gateware how it is doing and say so if it is not
 // well: the CSP has stopped running passes, or the queue dropped writes.
 // Silence that outlasts the notes is then explained by the log, not guessed
-// at. The master limiter's reduction is the status bar's meter, not a
-// warning: a hot preset holds it past 6 dB for as long as the chord lasts.
+// at.
 void check_gateware_health() {
     static uint32_t previous_passes  = 0;
     static uint32_t previous_dropped = 0;
