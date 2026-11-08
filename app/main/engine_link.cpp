@@ -135,7 +135,6 @@ void tick_timer_cb(void *) {
 void check_gateware_health() {
     static uint32_t previous_passes  = 0;
     static uint32_t previous_dropped = 0;
-    static int healthy_seconds       = 0;
     std::array<fpga_map::dword_t, fpga_map::diag_words> diag{};
     xSemaphoreTake(lock, portMAX_DELAY);
     const bool read_ok =
@@ -155,7 +154,6 @@ void check_gateware_health() {
     previous_passes        = passes;
     previous_dropped       = dropped;
     if (csp_stopped || dropped_new || queue_full || reduction > 16) {
-        healthy_seconds = 0;
         ESP_LOGW(
                 tag,
                 "gateware: passes %lu%s, queue %s, dropped %lu%s, limiter -%.1f dB (raw %05lx)",
@@ -164,9 +162,6 @@ void check_gateware_health() {
                 static_cast<unsigned long>(dropped),
                 dropped_new ? " (new)" : "", reduction * 0.375,
                 static_cast<unsigned long>(diag[2]));
-    } else if (++healthy_seconds % 60 == 0) {
-        ESP_LOGI(tag, "gateware ok: passes %lu, limiter -%.1f dB",
-                 static_cast<unsigned long>(passes), reduction * 0.375);
     }
 }
 
