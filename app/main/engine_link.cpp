@@ -129,9 +129,10 @@ void tick_timer_cb(void *) {
 }
 
 // Once a second, ask the gateware how it is doing and say so if it is not
-// well: the CSP has stopped running passes, the queue dropped writes, or the
-// master limiter holds the output down. Silence that outlasts the notes is
-// then explained by the log, not guessed at.
+// well: the CSP has stopped running passes, or the queue dropped writes.
+// Silence that outlasts the notes is then explained by the log, not guessed
+// at. The master limiter's reduction is the status bar's meter, not a
+// warning: a hot preset holds it past 6 dB for as long as the chord lasts.
 void check_gateware_health() {
     static uint32_t previous_passes  = 0;
     static uint32_t previous_dropped = 0;
@@ -153,7 +154,7 @@ void check_gateware_health() {
     const bool dropped_new = dropped != previous_dropped;
     previous_passes        = passes;
     previous_dropped       = dropped;
-    if (csp_stopped || dropped_new || queue_full || reduction > 16) {
+    if (csp_stopped || dropped_new || queue_full) {
         ESP_LOGW(
                 tag,
                 "gateware: passes %lu%s, queue %s, dropped %lu%s, limiter -%.1f dB (raw %05lx)",
