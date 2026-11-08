@@ -187,7 +187,9 @@ written at pipeline end, a fixed number of cycles later, so the
 addresses never collide.
 
 **Parameter smoothing**: articulation comes from the control program's
-envelopes, updating every pass (48 kHz) with no SPI timing in the loop, so
+envelopes, updating every pass (24 kHz, every fourth sample; the pass is
+[csp2_architecture.md](csp2_architecture.md) section 5) with no SPI
+timing in the loop, so
 nothing audible needs a smoother. Firmware-written registers (wheel, bend)
 are not smoothed; they reach the CSP together, between two passes.
 
@@ -195,12 +197,14 @@ are not smoothed; they reach the CSP together, between two passes.
 
 Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
-- **Wire format ≠ storage geometry.** The SPI protocol speaks 16-bit
-  addresses and 32-bit data words — a stable ABI with room to grow —
-  while the BSRAM behind it implements whatever subset exists (first
-  target: an 11-bit / 2048-word backed space) in 36-bit native words.
-- Transaction: command byte (`[7]` R/W, `[6]` auto-increment) + 2
-  address bytes + 4-byte data words, streaming while CS stays low.
+- **The wire is in nines.** Every block RAM on the chip is 9, 18 or 36
+  bits wide, so the link is too: 18-bit addresses in dwords and 36-bit
+  payload dwords, nothing straddling a boundary. (The first revision's
+  32-bit wire carried 18 useful bits in 32 clocks; gone since #235.)
+- Transaction: the command nonet (`[8]` R/W, `[7]` auto-increment), two
+  address nonets, then dwords of four nonets each, streaming while CS
+  stays low. MISO's first nonet is always the ID nonet, a link check on
+  every frame. The format and the address map are memory_map.md's.
 - CDC: solved structurally, once — dual-clock semi dual-port BSRAM
   (write sclk, read sysclk; true dual-port does not infer on this
   toolchain) for the write queue, the program and the pointers. The
