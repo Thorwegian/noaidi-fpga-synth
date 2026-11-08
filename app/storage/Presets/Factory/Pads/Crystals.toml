@@ -1,0 +1,60 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+format = 1
+
+[voice]
+structure = "7+1"
+osc_mix = 0
+unison_detune = 0.05
+unison_stereo = 0
+
+[[osc]]
+wave = "saw"
+tune = 0
+pulse_width = 50
+
+[[osc]]
+wave = "pulse"
+tune = 12
+pulse_width = 50
+
+[filter]
+type = "bandpass"
+slope = 24
+cutoff = 311.1
+resonance = 3.171
+key_track = 100
+
+[amp_env]
+attack = 0
+sustain = -0.47
+decay = 7.2
+release = 3.6
+velocity = 51
+
+[mod_env]
+attack = 0
+sustain = 0
+decay = 6.3
+release = 6.3
+velocity = 66
+destination = "cutoff"
+depth = 71.3
+
+[[lfo]]
+shape = "triangle"
+rate = 2.089
+destination = "pitch"
+depth = 0.11
+
+[[lfo]]
+shape = "triangle"
+rate = 2.595
+destination = "pulse_width"
+depth = 12.4
+
+[part]
+volume = 5.6
+pan = 0
+bend_range = 2
+# end
