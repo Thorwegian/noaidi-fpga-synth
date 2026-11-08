@@ -48,9 +48,13 @@ flowchart TD
         Q --> CSP["CSP: the control program,<br/>once per 3072 cycles"]
         PGM --> CSP
         CSP --> SINKS["sink area<br/>1024 words × 2 pages"]
-        PTR --> PIPE["Partial pipeline — 256 partials,<br/>one per two cycles:<br/>osc → SVF → SVF → gain → mix"]
+        PTR --> PIPE["Partial pipeline — 256 partials,<br/>one per two cycles:<br/>osc → SVF → SVF → gain → mix → master limiter"]
         SINKS --> PIPE
-        PIPE --> OUT["I2S master + SPDIF"]
+        PIPE --> LPF["output low-pass"]
+        LPF --> OUT96["96 kHz S/PDIF + I2S master"]
+        LPF --> DEC["half-band decimator ÷ 2"]
+        DEC --> OUT48["48 kHz S/PDIF (pin 86, the lab's TOSLINK)"]
+        STREAM["data stream (CTRL[3])"] --> OUT48
     end
 ```
 
