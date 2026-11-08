@@ -53,6 +53,7 @@ Suitable for a subagent:
 - Running make/test targets and reporting the numbers.
 - C firmware tasks with a test that decides done.
 - Doc edits whose content is already specified.
+- Reading document screenshots, datasheet figures and board photos. Where a PDF exists, `pdftotext` first; the subagent reads only what the text layer lacks. Numbers to be acted on (pins, registers, line references) get checked against the source.
 
 Not suitable:
 - Writing or debugging SystemVerilog.
