@@ -43,17 +43,17 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 ```
 
-# Delegated work
+# Division of labour
 
-Subagents run on a cheaper model than the lead agent. That model has already failed on this codebase's RTL, so work is split by what it can be trusted with.
+The top agent is Claude Fable, with Deepseek V4 Pro as the fallback. Subagents run on DeepSeek Flash. Deepseek V4 Pro has already failed on this codebase's RTL, so work is split by what it can be trusted with.
 
-Suitable for a subagent:
+Suitable for DeepSeek Flash:
 - Web and datasheet research.
 - Log and build-output digging.
 - Running make/test targets and reporting the numbers.
 - C firmware tasks with a test that decides done.
 - Doc edits whose content is already specified.
-- Reading document screenshots, datasheet figures and board photos. Where a PDF exists, `pdftotext` first; the subagent reads only what the text layer lacks. Numbers to be acted on (pins, registers, line references) get checked against the original document, not the subagent's transcription.
+- Reading document screenshots, datasheet figures and board photos.
 
 Not suitable:
 - Writing or debugging SystemVerilog.
@@ -63,7 +63,7 @@ Not suitable:
 
 A subagent's output is delivered to the lead agent, never to a commit or a PR. The lead agent verifies before acting on it.
 
-A subagent that finds itself editing RTL stops and reports instead.
+If any DeepSeek agent finds itself editing RTL, it stops and reports instead.
 
 # Finding your feet
 
