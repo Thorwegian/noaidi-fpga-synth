@@ -1,111 +1,69 @@
 //------------------------------------------------------------------------
-// limiter.sv -- log-domain peak limiter, PIPELINED per-step function.
+// limiter.sv -- FET-style feedback limiter: a linear gain state slewed
+// toward its target, exponential in amplitude, no tables.
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Everything lives in att_lut's log-gain grid: 16 code units per octave
-// (6.02 dB), 0.375 dB per unit. No division anywhere:
-//   level_code = octave(level)*16 + log_lut[4 bits under the leading 1]
-//   target     = max(0, level_code - thresh_code)      "dB over threshold"
-//   gain_q     slews toward target<<SUB (attack up / release down)
-//   gain_lin   = att_lut[code[3:0]] >> code[7:4]       (UQ0.16)
+// The gain state is UQ0.24 with unity at 25'h1000000 (one bit above the
+// UQ0.16 applied gain, so the applied gain is the top 17 bits). Each
+// sample the caller presents the output peak (the feedback level: the
+// level the gained signal had, what a FET compressor's detector sees)
+// and the state takes one step toward its target:
+//   over the threshold:  gain -= gain >>> ATTACK_SH   (a constant ratio
+//      a sample, constant dB a sample -- the peak-limiter attack)
+//   under it:            gain += (UNITY - gain + ROUND) >>> RELEASE_SH
+//      (an RC toward unity, rounded up so it reaches unity exactly:
+//      exponential in amplitude, the opto/FET release that recovers fast
+//      when deep and slower as it nears unity)
 //
-// FIVE registered stages -- the silicon timing rule: never chain a
-// LUT + barrel shift into arithmetic in one cycle. A combinational
-// form of this module sputters on hardware even where STA passes.
-//   S1a  octave: priority encoder            (decode)
-//   S1b  mantissa shift + log_lut -> code    (barrel shift + LUT)
-//   S2a  target = code - threshold, clamped  (adds)
-//   S2b  slew toward target -> gain_q_out    (adds/compares)
-//   S3   att_lut + shift -> gain_lin         (LUT + barrel shift)
-// Latency: present `level` (and hold it) at cycle 0 -> gain_q_out valid
-// from cycle 4, gain_lin from cycle 5. The state (gain_q, the envelope)
-// is OWNED BY THE INSTANTIATOR -- a register for the master, a per-
-// partial RAM for the filter -- so one module serves both; for a
-// streaming instance the stages simply pipeline. `level` and the gained
-// signal are separate ports: feedforward / feedback / external sidechain
-// is wiring, not a mode.
+// No division, no LUT, no priority encoder: one compare and one shift-add
+// a sample. The release's time constant is 2^RELEASE_SH samples; the
+// attack's rate is 2^-ATTACK_SH of the remaining gain a sample.
+//
+// `code` is the gain in the log grid the diagnostics and the console meter
+// speak (codes of 0.375 dB, 16 to the octave): a leading-one count for
+// the octave and the four bits under the leading one for the fraction
+// (16*log2(1/gain) = 16*(24-p) - m). At unity it is 0, saturating at 255.
 //------------------------------------------------------------------------
 `default_nettype none
 module limiter #(
-    parameter int LEVEL_W = 26,
-    parameter int SUB     = 10          // sub-step bits: fractional slew
+    parameter int LEVEL_W              = 26,   // the level's width (the caller's scale)
+    parameter logic [LEVEL_W-1:0] THRESHOLD = '0 // level above which the gain falls
 ) (
-    input  wire                clk,
-    input  wire                rst_n,
-    input  wire  [LEVEL_W-1:0] level,          // unsigned magnitude (hold it)
-    input  wire  [7+SUB:0]     gain_q_in,      // state: code[7:0] . sub[SUB-1:0]
-    input  wire  [7:0]         thresh_code,
-    input  wire  [7+SUB:0]     attack_q,       // slew per step, sub-units
-    input  wire  [7+SUB:0]     release_q,
-    output logic [7+SUB:0]     gain_q_out,     // S2b register
-    output logic [16:0]        gain_lin        // S3 register, UQ0.16
+    input  wire                level,        // the output peak, held by the caller
+    input  wire  [24:0]        gain_state,   // UQ0.24, unity at 25'h1000000
+    output logic [24:0]        gain_next,    // the state one sample on
+    output logic [7:0]         code           // the reduction, codes of 0.375 dB
 );
-    localparam int OW = $clog2(LEVEL_W);       // octave width
+    localparam int ATTACK_SH  = 3;    // attack: gain -= gain >>> ATTACK_SH
+    localparam int RELEASE_SH = 11;   // release: gain += (UNITY-gain) >>> RELEASE_SH
+    localparam logic [24:0] UNITY = 25'h1000000;
 
-    reg [3:0]  log_lut [0:15];
-    reg [16:0] att_lut [0:15];
-    initial begin
-        $readmemh("dsp/log_lut.hex", log_lut);
-        $readmemh("dsp/att_lut.hex", att_lut);
-    end
-
-    // ---- S1a: octave = index of the leading 1 ----
-    logic [OW-1:0]      oct_c;
-    logic               nonzero_c;
+    // ---- the state's next value: one step toward the target ----
+    wire [24:0] reduced = gain_state - (gain_state >>> ATTACK_SH);
+    wire [24:0] recoved =
+            gain_state + ((UNITY - gain_state + ((1 << RELEASE_SH) - 1)) >>> RELEASE_SH);
     always_comb begin
-        oct_c = '0; nonzero_c = 1'b0;
-        for (int i = 0; i < LEVEL_W; i++)
-            if (level[i]) begin oct_c = OW'(i); nonzero_c = 1'b1; end
+        gain_next = (level > THRESHOLD) ? reduced : recoved;
     end
-    logic [OW-1:0]      s1_oct;
-    logic               s1_nonzero;
-    logic [LEVEL_W-1:0] s1_level;
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) begin s1_oct <= '0; s1_nonzero <= 1'b0; s1_level <= '0; end
-        else        begin s1_oct <= oct_c; s1_nonzero <= nonzero_c; s1_level <= level; end
 
-    // ---- S1b: 4 bits under the leading 1 -> log fraction -> level_code ----
-    logic [LEVEL_W-1:0] mantissa_c;
+    // ---- the reduction code: leading-one count + four mantissa bits ----
+    // code = 16 * log2(unity/gain): the octave (24 - p) in whole codes of
+    // 16, minus m, the four bits under the leading one (m tracks the
+    // fractional octave's complement to 0.375 dB).
+    logic [4:0] p;
     always_comb begin
-        if (s1_oct >= OW'(4)) mantissa_c = s1_level >> (s1_oct - OW'(4));
-        else                  mantissa_c = s1_level << (OW'(4) - s1_oct);
+        p = 5'd0;
+        for (int i = 0; i < 25; i++)
+            if (gain_state[i]) p = 5'(i);
     end
-    logic [OW+4:0] s2_code;
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) s2_code <= '0;
-        else        s2_code <= s1_nonzero ? ({s1_oct, 4'd0} + (OW+5)'(log_lut[mantissa_c[3:0]])) : '0;
-
-    // ---- S2a: target = dB over threshold, clamped to the 8-bit code ----
-    logic [7:0] target_c;
+    wire [3:0] m = (p >= 4) ? gain_state[p-1 -: 4] : 4'd0;
+    logic [8:0] code_full;
     always_comb begin
-        if (s2_code > (OW+5)'(thresh_code)) begin
-            if (s2_code - (OW+5)'(thresh_code) > (OW+5)'(255)) target_c = 8'd255;
-            else target_c = 8'(s2_code - (OW+5)'(thresh_code));
-        end else target_c = 8'd0;
+        code_full = (24 - p) * 16 - m;
+        code      = (code_full > 255) ? 8'd255 : code_full[7:0];
     end
-    logic [7:0] s3_target;
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) s3_target <= '0;
-        else        s3_target <= target_c;
-
-    // ---- S2b: slew toward target<<SUB, bounded per step ----
-    wire [7+SUB:0] target_q = {s3_target, {SUB{1'b0}}};
-    logic [7+SUB:0] gain_q_c;
-    always_comb begin
-        if (target_q > gain_q_in) gain_q_c = (target_q - gain_q_in > attack_q)  ? gain_q_in + attack_q  : target_q;
-        else                gain_q_c = (gain_q_in - target_q > release_q) ? gain_q_in - release_q : target_q;
-    end
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) gain_q_out <= '0;
-        else        gain_q_out <= gain_q_c;
-
-    // ---- S3: decode: 6 dB per int (shift), 0.375 dB per frac (LUT) ----
-    wire [7:0] code = gain_q_out[7+SUB:SUB];
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) gain_lin <= 17'h10000;
-        else        gain_lin <= att_lut[code[3:0]] >> code[7:4];
 
 endmodule
 `default_nettype wire
