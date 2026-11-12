@@ -66,7 +66,7 @@ module tb_svf_stability;
     logic sclk = 1'b0;
     always #25 sclk = ~sclk;
 
-    logic signed [23:0] ml, mr;
+    logic signed [25:0] ml, mr;   // the raw Q4.14 sum (the limiter is the next block)
     partial_pipeline u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .slot_issue(slot_issue), .sample_tick(sample_tick),
@@ -76,8 +76,7 @@ module tb_svf_stability;
         .pointer_write_data(pointer_write_data),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
-        .mix_left(ml), .mix_right(mr),
-        .master_gain_q()
+        .mix_left(ml), .mix_right(mr)
     );
 
     task automatic write_word(input integer address, input integer value);
@@ -137,7 +136,7 @@ module tb_svf_stability;
 
     // ---- autocorrelation at lag 256 ---------------------------------
     localparam integer LAG = 256, SETTLE = 512, MEAS = 1536;
-    logic signed [23:0] dbuf [0:LAG-1];
+    logic signed [25:0] dbuf [0:LAG-1];
     integer  di;
     longint  sum_xx, sum_xy;
     longint  pk;
@@ -208,7 +207,7 @@ module tb_svf_stability;
         measure(r, peak);
         $display("corner1 fc=3FFF r=0:     r=%0d peak=%0d (Butterworth at FC_MAX)",
                  r, peak);
-        if (r < 500 || peak > 6000000) begin
+        if (r < 500 || peak > 5859) begin   // 5859 Q4.14 = 6000000 Q0.24, under the rail
             $display("FAIL: unstable or railed at the Butterworth corner");
             errors = errors + 1;
         end
@@ -218,7 +217,7 @@ module tb_svf_stability;
         set_filter(14'h3FFF, 14'h0200);
         measure(r, peak);
         $display("corner2 fc=3FFF r=200:   r=%0d peak=%0d", r, peak);
-        if (r < 500 || peak > 6000000) begin
+        if (r < 500 || peak > 5859) begin   // 5859 Q4.14 = 6000000 Q0.24, under the rail
             $display("FAIL: unstable or railed at r=200 corner");
             errors = errors + 1;
         end
