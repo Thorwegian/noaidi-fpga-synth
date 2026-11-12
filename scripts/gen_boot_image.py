@@ -7,9 +7,6 @@
 # Writes (into rtl/dsp/):
 #   boot_p0.hex .. boot_p3.hex — per-partial parameter RAM init
 #
-# (The attenuation LUT lives in gen_att_lut.py — it is a fixed synth
-# resource, not test-preset data.)
-#
 # Test sound: a C-major chord across multiple octaves.
 #   32 notes × 8 unison voices = 256 voices.
 #   Notes: for k in 1..8 → [C, E, G, C+12] at MIDI 12*k, i.e. C0..C8.

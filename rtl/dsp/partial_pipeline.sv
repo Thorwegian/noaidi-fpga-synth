@@ -88,13 +88,12 @@ module partial_pipeline #(
     output logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address,
     input  logic [synth_pkg::SINK_READ_PORTS-1:0][17:0] sink_read_data,
 
-    output logic signed [23:0] mix_left,    // Q0.24, published 11 cycles
-                                             // after sample_tick (S11
-                                             // limiter); stable by
-                                             // the next tick, which is when
-                                             // every consumer latches it
-    output logic signed [23:0] mix_right,
-    output logic        [18:0] master_gain_q   // the master limiter's envelope state (diagnostics)
+    output logic signed [25:0] mix_left,    // Q4.14 with 8 guard bits: the
+                                             // raw stereo sum, published at
+                                             // sample_tick and held for the
+                                             // sample; the master limiter
+                                             // (master_limiter.sv) takes it
+    output logic signed [25:0] mix_right
 );
 
     localparam int VW = $clog2(NUM_PARTIALS);   // partial index width
@@ -662,140 +661,31 @@ module partial_pipeline #(
     // Mixdown headroom: 256 partials × Q4.14 (±8.0) sums to ±2048 in a
     // 26-bit Q4.14 accumulator (12 integer bits, ±2048) — marginal by
     // design exactly as the Q2.16 era was (256 × ±2.0 vs ±512). The
-    // output limiter (sat24) converts Q4.14 → Q0.24 (<< 10) and clips
-    // only in the pathological all-aligned-at-the-rail case; overall
-    // loudness is set by the per-partial UQ4.4 gains: −2 bits of audio
-    // scale cancel the +2 bits of conversion shift.
+    // sum is published raw at the tick; the master limiter and the
+    // Q4.14 → Q0.24 clip are the next block (master_limiter.sv, #416).
+    // Overall loudness is set by the per-partial UQ4.4 gains: −2 bits
+    // of audio scale cancel the +2 bits of conversion shift there.
     //----------------------------------------------------------------
-    function automatic logic signed [23:0] sat24(input logic signed [35:0] x);
-        if (x > 36'sd8388607)
-            sat24 = 24'sd8388607;
-        else if (x < -36'sd8388608)
-            sat24 = -24'sd8388608;
-        else
-            sat24 = x[23:0];
-    endfunction
-
     logic signed [25:0] mix_acc_l, mix_acc_r;   // Q4.14 audio + 8 guard bits
-
-    //----------------------------------------------------------------
-    // S11 master limiter: log-domain peak limiter on the PRE-clip
-    // accumulators, attenuating before the clamp, stereo-linked on
-    // max(|L|,|R|), FEEDFORWARD (this
-    // sample's level gates this sample), then sat24. Fully registered,
-    // one operation class per stage (the silicon timing rule): the first
-    // cut computed abs -> max -> lzc -> shift -> LUT -> adds -> LUT ->
-    // shift in ONE cycle, passed STA, and sputtered at -63 dBFS on the
-    // board. 768 cycles of slack per sample, so the phase
-    // walk is free:  p1 abs | p2 max -> level | p3..p7 limiter pipeline
-    // settles (5 stages) | p8 latch gain_q + gain | p9 multiply | p10
-    // sat24 publish. Every consumer latches mix_* at the NEXT tick, so
-    // audio semantics are unchanged. lim_gain_q persists across samples
-    // = the envelope. Constants: threshold code 192 = −6 dBFS (one
-    // octave under the full-scale code 208), attack 1/8 code ≈ 0.05 dB
-    // per sample, release 1/2048 code per sample ≈ 17.6 dB/s. sat24 stays
-    // underneath as the guaranteed catch.
-    //----------------------------------------------------------------
-    localparam int          LIM_SUB       = 11;
-    localparam logic [7:0]  LIM_THRESH    = 8'd192;
-    localparam logic [18:0] LIM_ATTACK_Q  = 19'd256;
-    localparam logic [18:0] LIM_RELEASE_Q = 19'd1;
-    logic signed [25:0] lim_acc_l, lim_acc_r, lim_prod_l, lim_prod_r;
-    logic        [25:0] lim_abs_l, lim_abs_r, lim_level;   // unsigned magnitudes
-    logic        [18:0] lim_gain_q;                        // envelope state
-    assign master_gain_q = lim_gain_q;
-    logic        [16:0] lim_gain;                          // UQ0.16 applied gain
-    logic        [3:0]  lim_step;
-    wire         [18:0] lim_gain_q_next;
-    wire         [16:0] lim_gain_lin;
-    limiter #(.LEVEL_W(26), .SUB(LIM_SUB)) u_lim (
-        .clk(clk), .rst_n(rst_n),
-        .level      (lim_level),
-        .gain_q_in  (lim_gain_q),
-        .thresh_code(LIM_THRESH),
-        .attack_q   (LIM_ATTACK_Q),
-        .release_q  (LIM_RELEASE_Q),
-        .gain_q_out (lim_gain_q_next),
-        .gain_lin   (lim_gain_lin)
-    );
-    // 26-bit acc x UQ0.16 gain -> back to the acc scale (>>16); gain <= 1
-    // so it always fits. Registered-input, registered-output DSP.
-    // the product as two partial products (a DSP each), registered free-running
-    // (no enable, no reset: the consumer reads them one step later) and summed
-    wire signed [8:0]   lim_hi_l = lim_acc_l[25:17], lim_hi_r = lim_acc_r[25:17];
-    wire        [16:0]  lim_lo_l = lim_acc_l[16:0],  lim_lo_r = lim_acc_r[16:0];
-    logic signed [26:0] lim_phi_l, lim_phi_r;
-    logic        [33:0] lim_plo_l, lim_plo_r;
-    always_ff @(posedge clk) begin
-        lim_phi_l <= lim_hi_l * $signed({1'b0, lim_gain});
-        lim_phi_r <= lim_hi_r * $signed({1'b0, lim_gain});
-        lim_plo_l <= lim_lo_l * lim_gain;
-        lim_plo_r <= lim_lo_r * lim_gain;
-    end
-    wire signed [43:0] lim_mul_l = (44'(lim_phi_l) <<< 17) + 44'($signed({1'b0, lim_plo_l}));
-    wire signed [43:0] lim_mul_r = (44'(lim_phi_r) <<< 17) + 44'($signed({1'b0, lim_plo_r}));
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            mix_acc_l  <= '0;
-            mix_acc_r  <= '0;
-            mix_left   <= '0;
-            mix_right  <= '0;
-            lim_acc_l  <= '0;
-            lim_acc_r  <= '0;
-            lim_abs_l  <= '0;
-            lim_abs_r  <= '0;
-            lim_level  <= '0;
-            lim_prod_l <= '0;
-            lim_prod_r <= '0;
-            lim_gain_q <= '0;
-            lim_gain   <= 17'h10000;
-            lim_step  <= 4'd0;
+            mix_acc_l <= '0;
+            mix_acc_r <= '0;
+            mix_left  <= '0;
+            mix_right <= '0;
         end else begin
             if (sample_tick) begin
-                // sample boundary: hold the finished sum for the
-                // limiter, start accumulating the next sample
-                lim_acc_l  <= mix_acc_l;
-                lim_acc_r  <= mix_acc_r;
-                mix_acc_l  <= '0;
-                mix_acc_r  <= '0;
-                lim_step  <= 4'd1;
+                // sample boundary: publish the finished sum, start
+                // accumulating the next sample
+                mix_left  <= mix_acc_l;
+                mix_right <= mix_acc_r;
+                mix_acc_l <= '0;
+                mix_acc_r <= '0;
             end else if (s10_valid) begin
                 mix_acc_l <= mix_acc_l + {{4{s10_outl[21]}}, s10_outl};
                 mix_acc_r <= mix_acc_r + {{4{s10_outr[21]}}, s10_outr};
             end
-            case (lim_step)
-                4'd1: begin   // |acc|: explicit two's-complement negate on the bits
-                    lim_abs_l <= lim_acc_l[25] ? (~lim_acc_l + 26'd1) : lim_acc_l;
-                    lim_abs_r <= lim_acc_r[25] ? (~lim_acc_r + 26'd1) : lim_acc_r;
-                    lim_step <= 4'd2;
-                end
-                4'd2: begin   // stereo link: the louder channel gates both
-                    lim_level <= (lim_abs_l > lim_abs_r) ? lim_abs_l : lim_abs_r;
-                    lim_step <= 4'd3;
-                end
-                4'd3, 4'd4, 4'd5, 4'd6, 4'd7:   // limiter pipeline settles
-                    lim_step <= lim_step + 4'd1;
-                4'd8: begin   // both outputs valid (gain_q from p7, gain from p8)
-                    lim_gain_q <= lim_gain_q_next;
-                    lim_gain   <= lim_gain_lin;
-                    lim_step  <= 4'd9;
-                end
-                4'd9: begin   // the partial products land in their registers
-                    lim_step  <= 4'd10;
-                end
-                4'd10: begin  // apply the gain
-                    lim_prod_l <= 26'(lim_mul_l >>> 16);
-                    lim_prod_r <= 26'(lim_mul_r >>> 16);
-                    lim_step  <= 4'd11;
-                end
-                4'd11: begin  // Q4.14 -> Q0.24, rail
-                    mix_left   <= sat24(36'(lim_prod_l) <<< 10);
-                    mix_right  <= sat24(36'(lim_prod_r) <<< 10);
-                    lim_step  <= 4'd0;
-                end
-                default: ;
-            endcase
         end
     end
 

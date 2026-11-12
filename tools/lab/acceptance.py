@@ -11,7 +11,7 @@
      benchmark): envelope, pitch classes, centroid, partials, valley floor.
 
 While the sequence records, DIAG_LIMITER (docs/memory_map.md, 0x00A: the
-master limiter's envelope state, 0.375 dB per code) is polled over the
+master limiter's applied gain, linear, UQ0.18) is polled over the
 console about four times a second, so the take says how much the limiter
 worked during the triad (#355): the maximum and the mean over the triad's
 window and the take's maximum with its time, the series as
@@ -37,6 +37,7 @@ installed in.
 """
 import argparse
 import json
+import math
 import os
 import re
 import subprocess
@@ -56,8 +57,8 @@ BOOT_IMAGE = re.compile(r"boot image: ([^\r\n]{0,100})")
 PROGRAM = re.compile(r"control program loaded: ([^\r\n]{0,100})")
 VERIFIED = re.compile(r"verified: (\d+) register")
 DIAG = re.compile(r"passes (\d+)\s+queue \S+\s+limiter (\S+)\s+dropped (\d+)")
-LIMITER_DB_PER_CODE = 0.375                       # rtl/dsp/limiter.sv: 16 codes per octave
-LIMITER_FRACTION_BITS = 11                        # partial_pipeline.sv LIM_SUB: DIAG_LIMITER[18:11] is the code
+LIMITER_UNITY = 1 << 18                           # DIAG_LIMITER[18:0]: the applied gain, UQ0.18 (master_limiter.sv)
+LIMITER_FLOOR_DB = 110.0                          # a gain of zero, which the chip never publishes
 LIMITER_POLL_S = 0.2                              # the console's wait per csp diag; about four readings a second
 # The triad in the take's clock: baseline_recording.py starts its recorder
 # about half a second after it is launched (imports, the first Active
@@ -68,8 +69,13 @@ TRIAD_WINDOW_S = (17.0, 20.0)
 
 
 def limiter_db(word):
-    """DIAG_LIMITER's word as the limiter's reduction in dB."""
-    return (int(word, 16) & 0x7FFFF) / float(1 << LIMITER_FRACTION_BITS) * LIMITER_DB_PER_CODE
+    """DIAG_LIMITER's word as the limiter's reduction in dB: 20 log10(unity / gain)."""
+    gain = int(word, 16) & 0x7FFFF
+    if gain >= LIMITER_UNITY:
+        return 0.0
+    if gain == 0:
+        return LIMITER_FLOOR_DB
+    return 20.0 * math.log10(LIMITER_UNITY / float(gain))
 
 
 def poll_limiter(port, readings, stop, t0):
