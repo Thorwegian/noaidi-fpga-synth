@@ -180,7 +180,29 @@ beyond a polysynth's needs; spending it is the control program's job.
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12 dB/oct single section or
 24 dB/oct cascade — a separate filter per partial costs nothing in cycles) →
 stereo log attenuation (independent L/R, the mono→stereo point) → mix
-accumulate (26-bit, 8 guard bits, sat24 limiter) + state write-back.
+accumulate (26-bit, 8 guard bits) + state write-back. The pipeline
+publishes the raw stereo sum at the sample tick.
+
+**The post-mix chain** (`top.sv`, #416): blocks that each take and
+publish a stereo sample at the tick, an insert chain. First the master
+limiter with the output clip (`master_limiter.sv`, the gain computer in
+`limiter.sv`): a feedback peak limiter modelled on the 1176's sidechain
+minus the FET's curve. The output's peak (max of |L|, |R|, before the
+clip) drives a linear gain whose log integrates the overshoot
+(`gain -= gain × overshoot >> 17`, one DSP multiply a sample), so the
+attack's loop gain is the same at every signal level: a time constant
+of 32 samples (0.33 ms) on the last dB, faster on the first ones of a
+big hit (the 1176's program-dependent attack). The release is an RC
+toward unity in amplitude, time constant 32 768 samples (341 ms). The
+threshold is −6 dBFS, the ratio infinite; both time constants are
+parameters, the 1176's "Dr. Pepper" setting until the firmware sets
+them. Feedback means the first samples of a step over the threshold
+reach the clip (`sat24`, the guaranteed catch: 17 samples from 16 dB
+over) and the detector follows the rectified waveform inside a low
+note's cycle, the 1176's own traits; a comparator with a fixed step was
+tried first and limit-cycles (#404). Then the output low-pass, then the
+half-band tap. The reduction is read off the gain as 0.375 dB codes for
+`DIAG_LIMITER` and the console's meter.
 
 **State RAM**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, a fixed number of cycles later, so the

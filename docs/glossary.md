@@ -80,7 +80,7 @@ a bit count follows only where a reader needs it.
 - **half-band tap** — the 48 kHz TOSLINK output: the 96 kHz stream
   decimated by two through a 63-tap half-band FIR
   (`halfband_decimator.sv`, #308). The lab's capture path.
-- **limiter** — the master limiter on the mix (`limiter.sv`); the control
+- **limiter** — the master limiter on the mix (`master_limiter.sv`, its gain computer `limiter.sv`); the control
   panel's meter shows how hard it works.
 
 ## The CSP
