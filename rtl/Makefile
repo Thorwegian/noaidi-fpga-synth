@@ -35,7 +35,7 @@ PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
-AUDIO = dsp/partial_pipeline.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/output_lpf.sv
+AUDIO = dsp/partial_pipeline.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/limiter.sv dsp/master_limiter.sv dsp/output_lpf.sv
 MOD = \
 	$(CSP) \
 	$(SINK) \
@@ -58,8 +58,6 @@ LUTS = \
 	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
-	dsp/att_lut.hex \
-	dsp/log_lut.hex \
 	dsp/reso_att_lut.hex \
 	dsp/sine_lut.hex \
 	dsp/halfband_lut.hex
@@ -76,12 +74,6 @@ dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
 dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
-	python3 $<
-
-dsp/att_lut.hex: ../scripts/gen_att_lut.py
-	python3 $<
-
-dsp/log_lut.hex: ../scripts/gen_log_lut.py
 	python3 $<
 
 dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
@@ -371,20 +363,29 @@ obj_dir/tb_halfband/sim: dsp/shadow_ram.sv dsp/halfband_decimator.sv tb/tb_halfb
 sim-halfband: obj_dir/tb_halfband/sim
 	$(call run_sim,$<,tb/sim-halfband.out)
 
-# Log-domain limiter unit bench: transparency, proportional attack,
-# release, saturation.
-obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv dsp/log_lut.hex dsp/att_lut.hex Makefile
+# The limiter's gain computer (limiter.sv): transparency, the attack settling the
+# output on the threshold, the release toward unity, no ripple, the code.
+obj_dir/tb_limiter/sim: dsp/limiter.sv tb/tb_limiter.sv Makefile
 	$(VERILATE) dsp/limiter.sv tb/tb_limiter.sv
 
 sim-limiter: obj_dir/tb_limiter/sim
 	$(call run_sim,$<,tb/sim-limiter.out)
+
+# The master limiter block (master_limiter.sv): the walk after the tick,
+# the gained and clipped pair exact against the gain applied, the
+# envelope on a step (attack to the threshold, ripple, release, unity).
+obj_dir/tb_master_limiter/sim: dsp/limiter.sv dsp/master_limiter.sv tb/tb_master_limiter.sv Makefile
+	$(VERILATE) dsp/limiter.sv dsp/master_limiter.sv tb/tb_master_limiter.sv
+
+sim-master-limiter: obj_dir/tb_master_limiter/sim
+	$(call run_sim,$<,tb/sim-master-limiter.out)
 
 # The benches `make sim` runs, one list: each `sim-<name>` target writes
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
 BENCHES = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
-          sim-pulse-dc sim-output-lpf sim-limiter sim-halfband
+          sim-pulse-dc sim-output-lpf sim-limiter sim-master-limiter sim-halfband
 
 # What the benches cover, checked rather than assumed (#376): every RTL
 # source outside tb/ verilated by some bench, every file under tb/ built by

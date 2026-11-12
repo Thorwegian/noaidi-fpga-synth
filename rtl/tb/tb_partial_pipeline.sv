@@ -21,16 +21,11 @@
 //   6. oscillator: per-partial phase advance == LUT delta each period
 //   7. SVF dynamics: both filter state pairs leave zero
 //   8. gain multiply: s10_out == (s9_sample * gain) >>> 14, exact
-//   9. mixer: mix_left/right == sat24(sum of s10 outputs << 10)
-//      exactly, over a full sample period, L and R independently, for
-//      as long as the master limiter's applied gain is unity: the
-//      stimulus is OVER its -6 dBFS threshold (256 partials at gains up
-//      to 0.3), the envelope climbs 1/8 code a sample, and the gain
-//      leaves unity at one full code, the eighth sample (asserted)
+//   9. mixer: mix_left/right == the sum of the s10 outputs exactly,
+//      over a full sample period, L and R independently, every period
+//      (the raw Q4.14 sum: the master limiter and the clip are the next
+//      block, master_limiter.sv, with their own bench)
 //  10. signal energy: the mix is not silent
-//  11. the master limiter's diagnostic (#379): master_gain_q is the
-//      envelope state, the attack step times the samples so far; once
-//      it reaches a code the applied gain is below unity
 //
 // Run from rtl/ via `make sim-partial` ($readmemh paths are relative to rtl/).
 //--------------------------------------------------------------------
@@ -52,8 +47,7 @@ module tb_partial_pipeline;
 
     logic        sample_tick, slot_issue;
     logic [9:0]  slot;
-    logic signed [23:0] mix_left, mix_right;
-    logic [18:0] master_gain_q;
+    logic signed [25:0] mix_left, mix_right;
 
     timebase #(.CYCLES(768), .NUM_ISSUE_SLOTS(2 * PARTIALS)) u_timebase (
         .clk(clk), .rst_n(rst_n),
@@ -93,8 +87,7 @@ module tb_partial_pipeline;
         .pointer_write_data(pointer_write_data),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
-        .mix_left(mix_left), .mix_right(mix_right),
-        .master_gain_q(master_gain_q)
+        .mix_left(mix_left), .mix_right(mix_right)
     );
 
     //----------------------------------------------------------------
@@ -239,18 +232,11 @@ module tb_partial_pipeline;
     // Test state
     //----------------------------------------------------------------
     integer errors = 0;
-    integer n_front = 0, n_param = 0, n_gain = 0, n_mix = 0, n_phase = 0, n_paged = 0, n_diag = 0;
+    integer n_front = 0, n_param = 0, n_gain = 0, n_mix = 0, n_phase = 0, n_paged = 0;
     integer period = 0;                // running count of sample periods
     integer adds_this_period = 0;      // partials entering the mix
 
-    // the master limiter's constants (partial_pipeline.sv): the envelope
-    // climbs LIM_ATTACK_Q a sample toward a target far above (the sum is
-    // well over the threshold); the applied gain is unity while the
-    // envelope is under one code, 1 << LIM_SUB
-    localparam int LIM_ATTACK_Q = 256;
-    localparam int LIM_SUB      = 11;
-    localparam int UNITY_PERIODS = (1 << LIM_SUB) / LIM_ATTACK_Q;   // 8: periods 2 .. 8 see unity
-    localparam int LAST_PERIOD  = UNITY_PERIODS + 4;                 // four attenuated periods after
+    localparam int LAST_PERIOD = 12;
 
     longint exp_acc_l, exp_acc_r;      // expected mix accum (Q4.14, wide)
     longint exp_lat_l, exp_lat_r;      // expected latched outputs
@@ -260,12 +246,6 @@ module tb_partial_pipeline;
 
     // the gain multiply's operands, one register back
     integer prev_s9_sample = 0, prev_s9_gain_l = 0, prev_s9_gain_r = 0;
-
-    function automatic longint sat24_impl(input longint x);
-        if (x > 8388607)      return 8388607;
-        if (x < -8388608)     return -8388608;
-        return x;
-    endfunction
 
     // paging: the word the CSP changes in the shadow page, and when
     localparam int CHANGED_WORD = 5 * 16 + 4;     // a gain-left word
@@ -371,10 +351,8 @@ module tb_partial_pipeline;
                 errors = errors + 1;
             end
             if (period >= 1) begin
-                // Q4.14 → Q0.24 is << 10 (mirrors the RTL's
-                // sat24(mix_acc <<< 10)).
-                exp_lat_l = sat24_impl(exp_acc_l << 10);
-                exp_lat_r = sat24_impl(exp_acc_r << 10);
+                exp_lat_l = exp_acc_l;
+                exp_lat_r = exp_acc_r;
             end
             period = period + 1;
             adds_this_period = 0;
@@ -389,50 +367,18 @@ module tb_partial_pipeline;
             adds_this_period = adds_this_period + 1;
         end
 
-        // 9. latch check: at slot 16, mix regs hold the latched sums.
-        // The S11 master limiter publishes mix_* 10 cycles after the
-        // tick (feedforward needs the finished sum first). The sum is
-        // over the −6 dBFS threshold from the first period, but the
-        // applied gain stays unity until the envelope reaches one code,
-        // UNITY_PERIODS samples in; asserted, so a change to the attack
-        // or the run length fails here with its reason, not in the sum.
-        if (slot == 16 && period >= 2 && period <= UNITY_PERIODS) begin
-            n_mix = n_mix + 1;
-            if (u_pipe.lim_gain !== 17'h10000) begin
-                $display("FAIL mix: period %0d the limiter's gain is %0h, not unity, so the sum cannot be exact",
-                         period - 1, u_pipe.lim_gain);
-                errors = errors + 1;
-            end
-            if (mix_left !== exp_lat_l[23:0]) begin
-                $display("FAIL mix L: period %0d mix=%h expect=%h",
-                         period - 1, mix_left, exp_lat_l[23:0]);
-                errors = errors + 1;
-            end
-            if (mix_right !== exp_lat_r[23:0]) begin
-                $display("FAIL mix R: period %0d mix=%h expect=%h",
-                         period - 1, mix_right, exp_lat_r[23:0]);
-                errors = errors + 1;
-            end
-        end
-
-        // 11. the diagnostic: the envelope state, the attack step a
-        // sample (the target is far above: the sum is well over the
-        // threshold); past one code the applied gain is below unity
+        // 9. latch check: at slot 16, mix regs hold the sums the tick
+        // published, the raw Q4.14 accumulators, exact every period
         if (slot == 16 && period >= 2) begin
-            n_diag = n_diag + 1;
-            if (master_gain_q !== u_pipe.lim_gain_q) begin
-                $display("FAIL diag: period %0d master_gain_q=%0d, the state is %0d",
-                         period - 1, master_gain_q, u_pipe.lim_gain_q);
+            n_mix = n_mix + 1;
+            if (mix_left !== exp_lat_l[25:0]) begin
+                $display("FAIL mix L: period %0d mix=%h expect=%h",
+                         period - 1, mix_left, exp_lat_l[25:0]);
                 errors = errors + 1;
             end
-            if (master_gain_q !== LIM_ATTACK_Q * (period - 1)) begin
-                $display("FAIL diag: period %0d master_gain_q=%0d expect %0d (sample %0d of the attack)",
-                         period - 1, master_gain_q, LIM_ATTACK_Q * (period - 1), period - 1);
-                errors = errors + 1;
-            end
-            if (period > UNITY_PERIODS && u_pipe.lim_gain === 17'h10000) begin
-                $display("FAIL diag: period %0d the envelope is at code %0d and the gain still unity",
-                         period - 1, master_gain_q >> LIM_SUB);
+            if (mix_right !== exp_lat_r[25:0]) begin
+                $display("FAIL mix R: period %0d mix=%h expect=%h",
+                         period - 1, mix_right, exp_lat_r[25:0]);
                 errors = errors + 1;
             end
         end
@@ -471,7 +417,7 @@ module tb_partial_pipeline;
             integer energy_l, energy_r;
             energy_l = mix_left  < 0 ? -mix_left  : mix_left;
             energy_r = mix_right < 0 ? -mix_right : mix_right;
-            if (energy_l < 10000 || energy_r < 10000) begin
+            if (energy_l < 10 || energy_r < 10) begin   // Q4.14: 10 is 10000 in Q0.24
                 $display("FAIL energy: mix=%d/%d too quiet", mix_left, mix_right);
                 errors = errors + 1;
             end
@@ -506,8 +452,8 @@ module tb_partial_pipeline;
     //----------------------------------------------------------------
     always @(posedge clk) begin
         if (period >= LAST_PERIOD && slot == 400) begin
-            $display("checked: %0d front end, %0d parameters, %0d gains, %0d mix periods, %0d phases, %0d after the flip, %0d diagnostics",
-                     n_front, n_param, n_gain, n_mix, n_phase, n_paged, n_diag);
+            $display("checked: %0d front end, %0d parameters, %0d gains, %0d mix periods, %0d phases, %0d after the flip",
+                     n_front, n_param, n_gain, n_mix, n_phase, n_paged);
             if (errors == 0 && n_paged == 0)
                 $display("FAIL: the paging case never ran");
             else if (errors == 0)

@@ -218,8 +218,9 @@ module top (
     logic        pointer_write_enable;
     logic [7:0]  pointer_write_index;
     logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
-    logic signed [23:0] sample_left, sample_right;   // Q0.24
-    logic [18:0] master_gain_q;
+    logic signed [25:0] mix_left, mix_right;         // Q4.14 + guard: the raw sum
+    logic signed [23:0] sample_left, sample_right;   // Q0.24, limited and clipped
+    logic [7:0] master_reduction;                    // the master limiter's gain reduction, 0.375 dB codes
 
     csp_sink_area #(.READ_PORTS (SINK_PORTS)) u_sink_area (
         .clk           (sysclk),
@@ -249,9 +250,24 @@ module top (
         .pointer_write_data   (pointer_write_data),
         .sink_read_address    (sink_read_address[synth_pkg::SINK_READ_PORTS-1:0]),
         .sink_read_data       (sink_read_data[synth_pkg::SINK_READ_PORTS-1:0]),
-        .mix_left             (sample_left),
-        .mix_right            (sample_right),
-        .master_gain_q        (master_gain_q)
+        .mix_left             (mix_left),
+        .mix_right            (mix_right)
+    );
+
+    //----------------------------------------------------------------
+    // The post-mix chain (#416): the master limiter with the output
+    // clip first (master_limiter.sv), the output low-pass after it,
+    // each taking and publishing a stereo sample at the tick
+    //----------------------------------------------------------------
+    master_limiter u_master_limiter (
+        .clk         (sysclk),
+        .rst_n       (rst_n),
+        .sample_tick (sample_tick),
+        .in_left     (mix_left),
+        .in_right    (mix_right),
+        .out_left    (sample_left),
+        .out_right   (sample_right),
+        .reduction   (master_reduction)
     );
 
     //----------------------------------------------------------------
@@ -401,7 +417,7 @@ module top (
         status[synth_pkg::MAP_DIAG_PASS    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(passes_sync);
         status[synth_pkg::MAP_DIAG_QUEUE   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'({fifo_full, fifo_read_gray});
         status[synth_pkg::MAP_DIAG_DROPPED - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(fifo_dropped);
-        status[synth_pkg::MAP_DIAG_LIMITER - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(master_gain_q);
+        status[synth_pkg::MAP_DIAG_LIMITER - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'({master_reduction, 11'b0});
         status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::DWORD_W-1:csp_pkg::WORD_W]);
         status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
         status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(frames_sync);
