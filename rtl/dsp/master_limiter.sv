@@ -41,7 +41,7 @@ module master_limiter #(
     input  wire  signed [25:0] in_right,
     output logic signed [23:0] out_left,     // Q0.24, published 3 cycles after the tick
     output logic signed [23:0] out_right,
-    output logic        [7:0]  reduction     // the gain reduction, codes of 0.375 dB
+    output logic        [18:0] gain_out      // the applied gain, UQ0.18 (unity 19'h40000): the state's top bits, for the diagnostics
 );
     function automatic logic signed [23:0] sat24(input logic signed [35:0] x);
         if (x > 36'sd8388607)
@@ -69,9 +69,9 @@ module master_limiter #(
         .level    (level),
         .gain_in  (gain_state),
         .gain_out (lim_gain_out),
-        .done     (lim_done),
-        .code     (reduction)
+        .done     (lim_done)
     );
+    assign gain_out = gain_state[24:6];
 
     // 26-bit sum x UQ0.16 gain -> back to the sum's scale (>>16); gain <= 1
     // so it always fits. Two partial products (a DSP each), registered

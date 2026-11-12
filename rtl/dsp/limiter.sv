@@ -36,11 +36,8 @@
 // four registered stages (one operation class per stage, the silicon
 // timing rule): present `level` and `gain_in` with `start`; `gain_out` is
 // valid with `done` four clocks later. The state is the instantiator's.
-//
-// `code` is the reduction in the grid the diagnostics and the console
-// meter speak, 16 codes an octave (0.375 dB): the leading one of the
-// gain gives the octave, the four bits under it index a log fraction.
-// Registered from gain_in every clock; 0 at unity, saturating at 255.
+// The gain is published linear; the firmware takes the log for its
+// meter (DIAG_LIMITER, memory_map.md).
 //------------------------------------------------------------------------
 `default_nettype none
 module limiter #(
@@ -55,8 +52,7 @@ module limiter #(
     input  wire  [LEVEL_W-1:0] level,        // the output peak (unsigned magnitude)
     input  wire  [24:0]        gain_in,      // UQ0.24, unity at 25'h1000000
     output logic [24:0]        gain_out,     // the state one sample on
-    output logic               done,         // gain_out is valid this clock
-    output logic [7:0]         code          // the reduction of gain_in, codes of 0.375 dB
+    output logic               done          // gain_out is valid this clock
 );
     localparam logic [24:0] UNITY = 25'h1000000;
     localparam int ERR_W = 17;                         // the overshoot, clamped to one DSP operand
@@ -117,37 +113,6 @@ module limiter #(
             done <= s3_valid;
             if (s3_valid) gain_out <= s3_over ? s3_attack : s3_release;
         end
-
-    // ---- the reduction code, from gain_in, registered every clock ----
-    // 16 * log2(UNITY / gain): the leading one at bit p is (24 - p)
-    // octaves; the five bits under it, m, give the fraction of an
-    // octave, round(16 * log2(1 + (m + 1/2) / 32)) (the interval's
-    // midpoint, so the error is under a code either way), and the code
-    // is the octave's 16 less that fraction.
-    function automatic logic [3:0] log_frac(input logic [4:0] m);
-        case (m)
-            5'd0:  log_frac = 4'd0;  5'd1:  log_frac = 4'd1;  5'd2:  log_frac = 4'd2;  5'd3:  log_frac = 4'd2;
-            5'd4:  log_frac = 4'd3;  5'd5:  log_frac = 4'd4;  5'd6:  log_frac = 4'd4;  5'd7:  log_frac = 4'd5;
-            5'd8:  log_frac = 4'd5;  5'd9:  log_frac = 4'd6;  5'd10: log_frac = 4'd7;  5'd11: log_frac = 4'd7;
-            5'd12: log_frac = 4'd8;  5'd13: log_frac = 4'd8;  5'd14: log_frac = 4'd9;  5'd15: log_frac = 4'd9;
-            5'd16: log_frac = 4'd10; 5'd17: log_frac = 4'd10; 5'd18: log_frac = 4'd11; 5'd19: log_frac = 4'd11;
-            5'd20: log_frac = 4'd11; 5'd21: log_frac = 4'd12; 5'd22: log_frac = 4'd12; 5'd23: log_frac = 4'd13;
-            5'd24: log_frac = 4'd13; 5'd25: log_frac = 4'd14; 5'd26: log_frac = 4'd14; 5'd27: log_frac = 4'd14;
-            default: log_frac = 4'd15;
-        endcase
-    endfunction
-    logic [4:0] p;
-    always_comb begin
-        p = 5'd0;
-        for (int i = 0; i < 25; i++)
-            if (gain_in[i]) p = 5'(i);
-    end
-    wire [24:0] shifted = gain_in << (5'd24 - p);      // the leading one at bit 24
-    wire [4:0]  m       = shifted[23:19];
-    wire [8:0]  code_c  = 9'(24 - p) * 9'd16 - 9'(log_frac(m));
-    always_ff @(posedge clk or negedge rst_n)
-        if (!rst_n) code <= '0;
-        else        code <= (gain_in == '0) ? 8'd255 : (code_c > 9'd255) ? 8'd255 : code_c[7:0];
 
 endmodule
 `default_nettype wire

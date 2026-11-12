@@ -6,6 +6,7 @@
 #include "engine_link.h"
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <bitset>
 #include <cstdio>
@@ -58,6 +59,22 @@ public:
 
 EngineImage image;
 SpiPort port;
+
+// The master limiter's gain reduction in codes of 0.375 dB (16 an octave),
+// from DIAG_LIMITER: the applied gain, linear, UQ0.18, unity 0x40000. The
+// log is taken once here, not in gateware: 16 * log2(unity / gain), to the
+// nearest code; 0 at unity, 288 (108 dB) at a gain of 1, 300 at zero.
+uint32_t reduction_codes(fpga_map::dword_t word) {
+    const uint32_t gain = static_cast<uint32_t>(word) & 0x7FFFF;
+    if (gain >= 0x40000) {
+        return 0;
+    }
+    if (gain == 0) {
+        return 300;
+    }
+    return static_cast<uint32_t>(
+            std::lround(16.0 * std::log2(262144.0 / gain)));
+}
 SemaphoreHandle_t lock = nullptr;
 TaskHandle_t task      = nullptr;
 bool test_tone         = false;
@@ -144,15 +161,14 @@ void check_gateware_health() {
         ESP_LOGW(tag, "diagnostic read failed");
         return;
     }
-    const uint32_t passes = static_cast<uint32_t>(diag[0]);
-    const bool queue_full = (diag[1] >> 10) & 1;
-    const uint32_t reduction =
-            static_cast<uint32_t>(diag[2] >> 11); // codes of 0.375 dB
-    const uint32_t dropped = static_cast<uint32_t>(diag[3] & 0xFFFF);
-    const bool csp_stopped = passes == previous_passes;
-    const bool dropped_new = dropped != previous_dropped;
-    previous_passes        = passes;
-    previous_dropped       = dropped;
+    const uint32_t passes    = static_cast<uint32_t>(diag[0]);
+    const bool queue_full    = (diag[1] >> 10) & 1;
+    const uint32_t reduction = reduction_codes(diag[2]);
+    const uint32_t dropped   = static_cast<uint32_t>(diag[3] & 0xFFFF);
+    const bool csp_stopped   = passes == previous_passes;
+    const bool dropped_new   = dropped != previous_dropped;
+    previous_passes          = passes;
+    previous_dropped         = dropped;
     if (csp_stopped || dropped_new || queue_full) {
         ESP_LOGW(
                 tag,
@@ -205,13 +221,14 @@ constexpr bool log_lfo_probe = false;
 // in, to snapshot the chip before its program has run (tools/lab/snapshot.py).
 constexpr bool hold_after_boot = false;
 
-// The limiter meter: the master limiter's reduction, DIAG_LIMITER[18:11] in
-// codes of 0.375 dB, on the console's status bar as one column per code.
-// The level is 26 bits and the threshold code 192, so the reduction never
-// passes 223 codes (83.6 dB): past an 80-column bar, which it may overrun.
-// Twenty readings a second, one dword each, at the lowest priority there
-// is: the engine's worst wait for the bus is this one frame (the lock is a
-// mutex, which inherits priority). A reading the bus refused shows as 0.
+// The limiter meter: the master limiter's gain reduction on the console's
+// status bar, one column per code of 0.375 dB. DIAG_LIMITER[18:0] is the
+// applied gain, linear, UQ0.18 (unity 0x40000); reduction_codes takes the
+// log. The gain's 18 fraction bits bound the reduction at 108 dB, 288
+// codes: past an 80-column bar, which it may overrun. Twenty readings a
+// second, one dword each, at the lowest priority there is: the engine's
+// worst wait for the bus is this one frame (the lock is a mutex, which
+// inherits priority). A reading the bus refused shows as full reduction.
 constexpr int meter_period_ms = 50;
 
 void meter_task(void *) {
@@ -222,7 +239,7 @@ void meter_task(void *) {
         const fpga_map::dword_t word =
                 spi_link::read_one(fpga_map::diag_limiter);
         xSemaphoreGive(lock);
-        const int columns = static_cast<int>((word >> 11) & 0xFF);
+        const int columns = static_cast<int>(reduction_codes(word));
         if (columns != shown) {
             shown = columns;
             console_set_meter(columns);

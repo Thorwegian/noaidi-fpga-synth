@@ -201,8 +201,8 @@ reach the clip (`sat24`, the guaranteed catch: 17 samples from 16 dB
 over) and the detector follows the rectified waveform inside a low
 note's cycle, the 1176's own traits; a comparator with a fixed step was
 tried first and limit-cycles (#404). Then the output low-pass, then the
-half-band tap. The reduction is read off the gain as 0.375 dB codes for
-`DIAG_LIMITER` and the console's meter.
+half-band tap. The gain is published linear on `DIAG_LIMITER`; the
+firmware takes the log for its health line and the console's meter.
 
 **State RAM**: semi dual-ported BSRAM, read at pipeline start,
 written at pipeline end, a fixed number of cycles later, so the

@@ -10,8 +10,7 @@
 // the output on the threshold (a hair above: the attack's proportional
 // step against the release's constant push) in the predicted time; no
 // ripple once settled (a comparator would limit-cycle); the release is
-// an RC toward unity (one time constant, 1/e) and reaches unity exactly;
-// the code tracks 16 * log2(unity / gain) to a code across the range.
+// an RC toward unity (one time constant, 1/e) and reaches unity exactly.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -29,14 +28,13 @@ module tb_limiter;
     logic          start = 0, done;
     logic [LW-1:0] level = '0;
     logic [24:0]   gain = UNITY, gain_out;
-    logic [7:0]    code;
     integer errors = 0, i, n;
     real    g, g0, out, lo, hi;
 
     limiter #(.LEVEL_W(LW), .THRESHOLD(THRESH),
               .ATTACK_SH(ATTACK_SH), .RELEASE_SH(RELEASE_SH)) dut (
         .clk(clk), .rst_n(rst_n), .start(start), .level(level),
-        .gain_in(gain), .gain_out(gain_out), .done(done), .code(code)
+        .gain_in(gain), .gain_out(gain_out), .done(done)
     );
 
     function automatic real to_real(input [24:0] g);
@@ -63,13 +61,13 @@ module tb_limiter;
     initial begin
         repeat (3) @(posedge clk); rst_n = 1; repeat (3) @(posedge clk);
 
-        // 1) under the threshold: unity stays unity, code 0
+        // 1) under the threshold: unity stays unity
         for (i = 0; i < 20; i = i + 1) sample(26'd1000);
         @(negedge clk);
-        if (gain !== UNITY || code != 0) begin
-            $display("FAIL: not transparent under the threshold (gain=%0h code=%0d)", gain, code);
+        if (gain !== UNITY) begin
+            $display("FAIL: not transparent under the threshold (gain=%0h)", gain);
             errors = errors + 1;
-        end else $display("pass: transparent under the threshold (unity, code 0)");
+        end else $display("pass: transparent under the threshold (unity)");
 
         // 2) a step to 26000, 6.35x the threshold (16.1 dB over): the loop
         //    pulls the output to the threshold. Predicted time to within
@@ -85,8 +83,8 @@ module tb_limiter;
             errors = errors + 1;
         end else $display("pass: the attack lands in the predicted time");
         for (i = 0; i < 400; i = i + 1) sample(26'd26000);
-        $display("settled: gain %0f, output %0.1f (threshold 4096, %0.3f dB), code %0d (%0.1f dB)",
-                 to_real(gain), out, db(out / 4096.0), code, code * 0.375);
+        $display("settled: gain %0f (%0.1f dB), output %0.1f (threshold 4096, %0.3f dB)",
+                 to_real(gain), db(to_real(gain)), out, db(out / 4096.0));
         if (out < 4096.0 || out > 4096.0 * 1.023) begin
             $display("FAIL: the output did not settle on the threshold (0 to +0.2 dB)");
             errors = errors + 1;
@@ -125,25 +123,6 @@ module tb_limiter;
             $display("FAIL: the release never reaches unity exactly (gain=%0h)", gain);
             errors = errors + 1;
         end else $display("pass: the release reaches unity exactly (%0d more samples)", n);
-
-        // 5) the code: 16 * log2(unity / gain) to a code, across the range
-        begin : codes
-            logic [24:0] probes [0:6];
-            real expected;
-            probes[0] = UNITY; probes[1] = 25'h800000; probes[2] = 25'hC00000;
-            probes[3] = 25'h400000; probes[4] = 25'h123456; probes[5] = 25'h000100; probes[6] = 25'h000001;
-            for (i = 0; i < 7; i = i + 1) begin
-                @(negedge clk); gain = probes[i];
-                @(negedge clk); @(negedge clk);
-                expected = 16.0 * $ln(16777216.0 / $itor(probes[i])) / $ln(2.0);
-                if (expected > 255.0) expected = 255.0;
-                if ($itor(code) > expected + 1.0 || $itor(code) < expected - 1.0) begin
-                    $display("FAIL: code %0d for gain %0h, expected %0.1f", code, probes[i], expected);
-                    errors = errors + 1;
-                end
-            end
-            $display("pass: the code tracks the reduction to a code over 7 gains");
-        end
 
         if (errors == 0) $display("ALL PASS");
         else $display("FAILED: %0d", errors);

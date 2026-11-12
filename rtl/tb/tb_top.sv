@@ -424,7 +424,7 @@ module tb_top;
         read_status(MAP_DIAG_PASS, value);
         checkn("the passes slot", value, dut.pass_counter);
         read_status(MAP_DIAG_LIMITER, value);
-        checkn("the limiter slot", value, {dut.master_reduction, 11'b0});
+        checkn("the limiter slot", value, dut.master_gain);
         write_dwords[0] = 36'h0A4;
         write_burst(MAP_PROBE_ADDRESS, 1, 1);
         #(40 * half);
@@ -560,7 +560,7 @@ module tb_top;
         end else $display("pass: the note sounds on the left channel (%0d of 64 words non-zero)", j);
         check_silence("I2S right with the note hard left", i2s_r, note_i2s + 1, 64);
         read_status(MAP_DIAG_LIMITER, value);
-        checkn("the limiter slot still the reduction", value, {dut.master_reduction, 11'b0});
+        checkn("the limiter slot still the gain", value, dut.master_gain);
 
         $display("");
         $display("%0d I2S words, %0d S/PDIF 96 kHz frames, %0d S/PDIF 48 kHz frames decoded", i2s_nl, frames96, frames48);
