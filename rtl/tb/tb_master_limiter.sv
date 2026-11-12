@@ -11,7 +11,8 @@
 // << 10) for the gain the block applied, published after the second
 // clock and before the twelfth, the walk finished before the next tick,
 // the published gain the state's top 19 bits.
-// On the stimulus: silence is zeros at unity; a step 16 dB over lets
+// On the stimulus: silence is zeros at unity; a step 16 dB over lands
+// within 1 dB of the threshold in the predicted time (66 samples), lets
 // its first samples through to the clip (the feedback's one-sample
 // loop: predicted 17 clipped) and then settles the output on the
 // threshold with no ripple; the stereo link gates both channels on the
@@ -125,7 +126,18 @@ module tb_master_limiter;
         $display("the envelope on a step of %0d (%0.1f dB over the threshold):", OVER, db($itor(OVER) / 4096.0));
         clipped = 0; printed = 1;
         next_left = OVER; next_right = -OVER;
-        run(1000);
+        n = 0;
+        do begin
+            run(1);
+            @(posedge clk iff phase == 4'd13);
+            n = n + 1;
+        end while (out_left > 24'sd4194304 * 1.122 && n < 1000);
+        $display("attack: %0d samples to within 1 dB of the threshold (predicted 66 from dx/dn = -a x (x - 1))", n);
+        if (n < 40 || n > 110) begin
+            $display("FAIL: the attack's time is off");
+            errors = errors + 1;
+        end else $display("pass: the attack lands in the predicted time");
+        run(1000 - n);
         @(posedge clk iff phase == 4'd13);
         $display("clipped samples at the step: %0d (predicted 17)", clipped);
         if (clipped < 10 || clipped > 25) begin

@@ -185,8 +185,8 @@ publishes the raw stereo sum at the sample tick.
 
 **The post-mix chain** (`top.sv`, #416): blocks that each take and
 publish a stereo sample at the tick, an insert chain. First the master
-limiter with the output clip (`master_limiter.sv`, the gain computer in
-`limiter.sv`): a feedback peak limiter modelled on the 1176's sidechain
+limiter with the output clip (`master_limiter.sv`): a feedback peak
+limiter modelled on the 1176's sidechain
 minus the FET's curve. The output's peak (max of |L|, |R|, before the
 clip) drives a linear gain whose log integrates the overshoot
 (`gain -= gain × overshoot >> 17`, one DSP multiply a sample), so the
