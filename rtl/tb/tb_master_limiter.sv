@@ -153,22 +153,27 @@ module tb_master_limiter;
             errors = errors + 1;
         end else $display("pass: no ripple once settled");
 
-        // 4) the stereo link: the louder channel gates both
+        // 4) the stereo link: the louder channel gates both. 2000 samples:
+        //    with the loud channel ignored the release would lift the
+        //    gain by a third in that time, and the loud channel's output
+        //    would leave the threshold band.
         g0 = $itor(gain_out);
         next_left = UNDER; next_right = -OVER;
-        run(300);
+        run(2000);
         @(posedge clk iff phase == 4'd13);
-        if ($itor(gain_out) > g0 * 1.06 || $itor(gain_out) < g0 / 1.06) begin
-            $display("FAIL: with the right channel loud the gain is %0h, was %0.0f", gain_out, g0);
+        if (-out_right < 24'sd4194304 || -out_right > 24'sd4290000
+            || $itor(gain_out) > g0 * 1.03 || $itor(gain_out) < g0 / 1.03) begin
+            $display("FAIL: with the right channel loud, |out_right| %0d, gain %0h (was %0.0f)", -out_right, gain_out, g0);
             errors = errors + 1;
-        end else $display("pass: the right channel alone holds the gain (%0.1f dB)", db($itor(gain_out) / 262144.0));
+        end else $display("pass: the right channel alone holds the gain (%0.1f dB) and sits on the threshold", db($itor(gain_out) / 262144.0));
         next_left = OVER; next_right = UNDER;
-        run(300);
+        run(2000);
         @(posedge clk iff phase == 4'd13);
-        if ($itor(gain_out) > g0 * 1.06 || $itor(gain_out) < g0 / 1.06) begin
-            $display("FAIL: with the left channel loud the gain is %0h, was %0.0f", gain_out, g0);
+        if (out_left < 24'sd4194304 || out_left > 24'sd4290000
+            || $itor(gain_out) > g0 * 1.03 || $itor(gain_out) < g0 / 1.03) begin
+            $display("FAIL: with the left channel loud, out_left %0d, gain %0h (was %0.0f)", out_left, gain_out, g0);
             errors = errors + 1;
-        end else $display("pass: the left channel alone holds the gain (%0.1f dB)", db($itor(gain_out) / 262144.0));
+        end else $display("pass: the left channel alone holds the gain (%0.1f dB) and sits on the threshold", db($itor(gain_out) / 262144.0));
 
         // 5) the release: an RC toward unity, 1/e of the deficit after
         //    2^15 samples, then unity exactly
