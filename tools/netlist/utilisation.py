@@ -14,9 +14,7 @@ With --placed, the last rows are nextpnr's placed counts and the chip's
 capacity for each kind, read from its log's "Device utilisation" block, the
 figures everyone quotes (its --report JSON counts LUT4 differently). They
 are of the flattened design, so they differ from the sum by the optimisation
-across module boundaries, a few cells. DSP has no single capacity: one DSP
-block holds several of the smaller multipliers, so the placed row lists the
-multiplier kinds instead.
+across module boundaries, a few cells.
 
 The kinds are the ones a design is fitted to:
 
@@ -27,7 +25,17 @@ The kinds are the ones a design is fitted to:
   BSRAM      block SRAMs (SP, SDPB, DPB and their x9 forms, pROM);
   RAM16SDP4  the shadow SRAM, 16 x 4 bits in a CLS's LUTs: the primitive for
              a short fixed delay or a small table;
-  DSP        the multipliers and DSP adders (MULT*, ALU54D, PADD*).
+  DSP        the DSP primitives (MULT*, ALU54D, PADD*), counted as cells;
+  MULT       the same primitives weighed by the 18 x 18 multipliers each one
+             occupies, so the DSP pool reads as one number out of 48 (#428).
+
+The chip's DSP is 12 blocks of two macros, a macro two 18 x 18 multipliers
+with a 54-bit ALU behind them (UG287 section 3; the capacities in nextpnr's
+log say the same: 48 MULT18X18, 24 of each macro-sized primitive, 12
+MULT36X36). So a MULT36X36 is a block, 4; a MULTALU36X18, MULTALU18X18,
+MULTADDALU18X18 or ALU54D a macro, 2; a MULT18X18 or PADD18 one; a MULT9X9
+or PADD9 half. A PADD or ALU54D holds its multiplier's slot without
+multiplying; the column counts the slots a design takes from the pool.
 
 A module is hidden when it holds less than --min-share percent (default 1)
 of every kind.
@@ -37,8 +45,14 @@ import json
 import re
 import sys
 
-KINDS = ("DFF", "LUT4", "ALU", "BSRAM", "RAM16SDP4", "DSP")
+KINDS = ("DFF", "LUT4", "ALU", "BSRAM", "RAM16SDP4", "DSP", "MULT")
 BSRAM_TYPES = {"SP", "SPX9", "SDPB", "SDPX9B", "DPB", "DPX9B", "pROM", "pROMX9"}
+
+# The 18 x 18 multiplier slots each DSP primitive occupies, of the chip's 48.
+MULT_SLOTS = {"MULT9X9": 0.5, "PADD9": 0.5, "MULT18X18": 1, "PADD18": 1,
+              "MULTALU18X18": 2, "MULTADDALU18X18": 2, "MULTALU36X18": 2, "ALU54D": 2,
+              "MULT36X36": 4}
+MULT_POOL = 48
 
 # nextpnr's names for the kinds whose capacity is one number.
 PLACED_NAMES = {"DFF": "DFF", "LUT4": "LUT4", "ALU": "ALU", "BSRAM": "BSRAM", "RAM16SDP4": "RAM16SDP4"}
@@ -83,9 +97,19 @@ def walk(modules, module, path, count, rows):
         kind = kind_of(cell_type)
         if kind:
             local[kind] += number * count
+        if cell_type in MULT_SLOTS:
+            local["MULT"] += number * count * MULT_SLOTS[cell_type]
         if re.fullmatch(r"DFFN?[CP]E?", cell_type):
             async_reset += number * count
     rows.append((path, count, local, async_reset))
+
+
+def cells(counts):
+    """The counts of a row in column order, the MULT column without a trailing .0."""
+    return tuple("%g" % counts[kind] for kind in KINDS)
+
+
+ROW = "%-37s %8s %8s %6s %6s %10s %5s %5s %7s"
 
 
 def main():
@@ -102,24 +126,25 @@ def main():
     total = {kind: sum(row[2][kind] for row in rows) for kind in KINDS}
     async_total = sum(row[3] for row in rows)
 
-    print("%-34s %8s %8s %6s %6s %10s %5s %7s" % (("module (its own cells, all instances)",) + KINDS + ("async",)))
+    print(ROW % (("module (its own cells, all instances)",) + KINDS + ("async",)))
     for path, count, local, async_reset in sorted(rows, key=lambda row: -row[2]["DFF"]):
         if all(100.0 * local[kind] < args.min_share * max(total[kind], 1) for kind in KINDS):
             continue
         label = path if count == 1 else "%s ×%d" % (path, count)
-        print("%-34s %8d %8d %6d %6d %10d %5d %7d" % ((label[-34:],) + tuple(local[k] for k in KINDS) + (async_reset,)))
-    print("%-34s %8d %8d %6d %6d %10d %5d %7d" % (("total (hierarchical synthesis)",) + tuple(total[k] for k in KINDS)
-                                               + (async_total,)))
+        print(ROW % ((label[-37:],) + cells(local) + (async_reset,)))
+    print(ROW % (("total (hierarchical synthesis)",) + cells(total) + (async_total,)))
 
     if args.placed:
         placed = placed_utilisation(args.placed)
         used = {kind: placed.get(name, (0, 0))[0] for kind, name in PLACED_NAMES.items()}
         available = {kind: placed.get(name, (0, 0))[1] for kind, name in PLACED_NAMES.items()}
-        cells = KINDS[:-1]
-        print("%-34s %8d %8d %6d %6d %10d" % (("placed (nextpnr)",) + tuple(used[k] for k in cells)))
-        print("%-34s %8d %8d %6d %6d %10d" % (("the chip has",) + tuple(available[k] for k in cells)))
-        print("%-34s %7.0f%% %7.0f%% %5.0f%% %5.0f%% %9.0f%%" % (("used",) + tuple(
-            100.0 * used[k] / available[k] if available[k] else 0 for k in cells)))
+        used["MULT"] = sum(u * MULT_SLOTS[name] for name, (u, a) in placed.items() if name in MULT_SLOTS)
+        available["MULT"] = MULT_POOL
+        columns = KINDS[:-2] + ("MULT",)
+        print("%-37s %8d %8d %6d %6d %10d %11g" % (("placed (nextpnr)",) + tuple(used[k] for k in columns)))
+        print("%-37s %8d %8d %6d %6d %10d %11d" % (("the chip has",) + tuple(available[k] for k in columns)))
+        print("%-37s %7.0f%% %7.0f%% %5.0f%% %5.0f%% %9.0f%% %10.0f%%" % (("used",) + tuple(
+            100.0 * used[k] / available[k] if available[k] else 0 for k in columns)))
         print("DSP placed: " + ", ".join("%s %d/%d" % (name, u, a) for name, (u, a) in placed.items()
                                          if kind_of(name) == "DSP" and u))
     return 0
