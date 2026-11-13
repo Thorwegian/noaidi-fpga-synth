@@ -79,8 +79,9 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module svf_tpt #(
-    parameter int IDXW   = 9,
-    parameter int GAIN_W = 18       // the partial's L and R gains, carried through (Q4.14)
+    parameter int IDXW      = 9,
+    parameter int GAIN_W    = 18,   // the partial's L and R gains, carried through (Q4.14)
+    parameter int LIMITER_W = 29    // the partial's resonance limiter state, carried through (partial_pipeline.sv)
 ) (
     input  wire                 clk,
     input  wire                 rst_n,
@@ -99,16 +100,21 @@ module svf_tpt #(
     input  wire signed [23:0]   in_phase,   // passthrough (osc phase)
     input  wire signed [GAIN_W-1:0] in_gain_l,
     input  wire signed [GAIN_W-1:0] in_gain_r,
+    input  wire [LIMITER_W-1:0] in_limiter,    // passthrough (the resonance limiter's state)
     output reg                  out_valid,
     output reg  [IDXW-1:0]      out_idx,
     output reg  signed [17:0]   out_sample,   // Q4.14
+    output reg  signed [35:0]   out_level,    // section 2's output word before its saturation, Q8.28
+                                              // (up to the state clamp): what the resonance
+                                              // limiter's detector reads in cascade mode
     output reg  signed [35:0]   out_ic1eq1n,
     output reg  signed [35:0]   out_ic2eq1n,
     output reg  signed [35:0]   out_ic1eq2n,
     output reg  signed [35:0]   out_ic2eq2n,
     output reg  signed [23:0]   out_phase,
     output reg  signed [GAIN_W-1:0] out_gain_l,
-    output reg  signed [GAIN_W-1:0] out_gain_r
+    output reg  signed [GAIN_W-1:0] out_gain_r,
+    output reg  [LIMITER_W-1:0] out_limiter
 );
     // reciprocal LUT: 256 x UQ0.16, h = 1/D for D in [1,2)
     reg [15:0] recip_lut [0:255];
@@ -378,8 +384,8 @@ module svf_tpt #(
     // SRAM (delay_line.sv), not in every stage's flip-flops. With the g
     // stage at t+1, section 1 at t+4 … t+10, section 2 at t+11 … t+16 and
     // the output registers at t+17:
-    //   A  the partial's index, cascade flag, phase and gains: the input to
-    //      the output registers, 16 clocks;
+    //   A  the partial's index, cascade flag, phase, gains and limiter
+    //      state: the input to the output registers, 16 clocks;
     //   B  section 2's input states: the input to section 2, 10 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
     //      section 2, section 1's 7 clocks (a register of its own, then 6
@@ -390,10 +396,11 @@ module svf_tpt #(
     wire                     mybp2_cascade;
     wire signed [23:0]       mybp2_phase;
     wire signed [GAIN_W-1:0] mybp2_gain_l, mybp2_gain_r;
-    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W), .DELAY (16)) u_delay_out (
+    wire [LIMITER_W-1:0]     mybp2_limiter;
+    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W + LIMITER_W), .DELAY (16)) u_delay_out (
         .clk (clk),
-        .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r}),
-        .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r}));
+        .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r, in_limiter}),
+        .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r, mybp2_limiter}));
 
     wire signed [35:0] y1_ic1eq2, y1_ic2eq2;
     delay_line #(.WIDTH (72), .DELAY (10)) u_delay_sec2_states (
@@ -522,6 +529,7 @@ module svf_tpt #(
     reg signed [40:0] mybp2;
     reg signed [35:0] mybp2_s1n, mybp2_s2b;
     reg signed [17:0] mybp2_other;
+    reg signed [35:0] mybp2_other_wide;  // the same word before its saturation, for out_level
     reg               mybp2_use_lp;
     reg [3:0] mybp2_oct;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -532,6 +540,7 @@ module svf_tpt #(
         mybp2 <= mantissa_product(ybp2_m, ybp2);
         mybp2_oct<=ybp2_oct;
         mybp2_other  <= ybp2_mode[1] ? sat_q414(ybp2_yhp) : sat_q414(ybp2);
+        mybp2_other_wide <= ybp2_mode[1] ? ybp2_yhp : ybp2;
         mybp2_use_lp <= (ybp2_mode[1] == ybp2_mode[0]);
         mybp2_s1n<=ybp2_s1n; mybp2_s2b<=ybp2_s2b;
     end
@@ -548,6 +557,7 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         out_idx    <= mybp2_idx;
         out_sample <= mybp2_cascade ? y2 : mybp2_y1;
+        out_level  <= mybp2_use_lp ? ylp2 : mybp2_other_wide;
         out_ic1eq1n<= sat_state(mybp2_s1an);
         out_ic2eq1n<= sat_state(mybp2_s2an);
         out_ic1eq2n<= sat_state(mybp2_s1n);
@@ -555,6 +565,7 @@ module svf_tpt #(
         out_phase  <= mybp2_phase;
         out_gain_l <= mybp2_gain_l;
         out_gain_r <= mybp2_gain_r;
+        out_limiter <= mybp2_limiter;
     end
 
 endmodule

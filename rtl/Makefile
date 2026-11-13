@@ -58,7 +58,6 @@ LUTS = \
 	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
-	dsp/reso_att_lut.hex \
 	dsp/sine_lut.hex \
 	dsp/halfband_lut.hex
 
@@ -74,9 +73,6 @@ dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
 dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
-	python3 $<
-
-dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
 dsp/sine_lut.hex: ../scripts/gen_sine_lut.py
@@ -387,12 +383,26 @@ obj_dir/tb_master_limiter/sim: dsp/master_limiter.sv tb/tb_master_limiter.sv Mak
 sim-master-limiter: obj_dir/tb_master_limiter/sim
 	$(call run_sim,$<,tb/sim-master-limiter.out)
 
+# The resonance limiter (#427): partial 0's saw through the filter with the
+# cutoff on one of its harmonics and the resonance high; after the
+# transient the output is held at the threshold and the gain does not
+# pump, the loop is idle without resonance, the release is the RC. The
+# transient's numbers (the peak, the samples at the rail, the gain the
+# loop settles to) are the attack margin's measurement, taken over
+# ATTACK_BASE with `-GATTACK_BASE=<n>` on the same files. About forty
+# seconds.
+obj_dir/tb_resonance_limiter/sim: $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_resonance_limiter.sv $(LUTS) Makefile
+	$(VERILATE) $(PKG) csp/csp_pkg.sv $(SINK) $(AUDIO) dsp/osc_core.sv dsp/timebase.sv tb/tb_resonance_limiter.sv
+
+sim-resonance-limiter: obj_dir/tb_resonance_limiter/sim
+	$(call run_sim,$<,tb/sim-resonance-limiter.out)
+
 # The benches `make sim` runs, one list: each `sim-<name>` target writes
 # tb/sim-<name>.out through run_sim, and the gate's log list is derived
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
 BENCHES = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
-          sim-pulse-dc sim-output-lpf sim-master-limiter sim-halfband
+          sim-pulse-dc sim-output-lpf sim-master-limiter sim-resonance-limiter sim-halfband
 
 # What the benches cover, checked rather than assumed (#376): every RTL
 # source outside tb/ verilated by some bench, every file under tb/ built by

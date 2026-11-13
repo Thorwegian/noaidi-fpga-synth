@@ -80,6 +80,11 @@ a bit count follows only where a reader needs it.
 - **half-band tap** — the 48 kHz TOSLINK output: the 96 kHz stream
   decimated by two through a 63-tap half-band FIR
   (`halfband_decimator.sv`, #308). The lab's capture path.
+- **resonance limiter** — the feedback limiter around each partial's filter
+  (`partial_pipeline.sv`, section L): the filter's output over a threshold
+  turns the oscillator down, in the master's form, with the attack matched to
+  the filter's ring-up and the release gated on the resonator's energy; it
+  replaced the resonance-indexed attenuation table (#427).
 - **limiter** — the master limiter on the mix (`master_limiter.sv`); the control
   panel's meter shows how hard it works.
 

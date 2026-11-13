@@ -24,10 +24,11 @@ harmonic series from colliding, so intermod products land in clear space.
 
 Model prediction under test: the failure corner is the cutoff sitting ON
 the fundamental, where the resonant peak catches the whole note
-instead of one weak harmonic -- the reso_att LUT is indexed by RESONANCE
-ONLY and is calibrated where the peak caught the 11th harmonic, so it
-under-attenuates by ~20 dB here. CC74 = 64 with 100% key tracking puts the
-cutoff on the key-tracked base, i.e. on the fundamental.
+instead of one weak harmonic -- the reso_att LUT (the attenuation table
+the per-partial resonance limiter replaced, #427) was indexed by
+RESONANCE ONLY and calibrated where the peak caught the 11th harmonic, so
+it under-attenuated by ~20 dB here. CC74 = 64 with 100% key tracking puts
+the cutoff on the key-tracked base, i.e. on the fundamental.
 
     ~/.noaidi-blenv/bin/python3 tools/lab/ble/hil_filter_imd.py [slope]
 
