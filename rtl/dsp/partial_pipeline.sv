@@ -26,8 +26,8 @@
 //       the gain products (voice word × channel word)
 //   S3D resonance attenuation multiply on registered operands (DSP);
 //       the gains scaled and clamped
-//   S4..S9  svf_tpt: 21 registered stages (1 input, 2 coefficient,
-//       9 per 2-pole section); its output is the partial output
+//   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
+//       7 per 2-pole section); its output is the partial output
 //   S10 gain multiply on registered operands                (DSP); its
 //       output is accumulated into the mix and the state written back
 //
@@ -53,7 +53,7 @@
 //              the channel's gains linear (see the effective parameters)
 //
 // State RAM is semi dual-port: the read address is issued with the
-// partial at F3, writeback happens about 29 cycles later — the read
+// partial at F3, writeback happens about 25 cycles later — the read
 // and write addresses can never collide.
 //
 // Reset (#309): in the pipeline stages only the *_valid registers have
@@ -557,7 +557,7 @@ module partial_pipeline #(
     //----------------------------------------------------------------
     // S3D -- the attenuation multiply, on REGISTERED operands. It sits
     // one stage after the waveform stage so that no cycle chains the
-    // waveform mux into a DSP. The state writeback lands 29 cycles
+    // waveform mux into a DSP. The state writeback lands 25 cycles
     // after the read, against a 256-slot half, so read and write still
     // cannot collide.
     //----------------------------------------------------------------
@@ -602,7 +602,7 @@ module partial_pipeline #(
     // SVF core (TPT), stages S4..S9.
     //   g = K>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
-    //   Streaming, latency 21; states/phase/gains carried through.
+    //   Streaming, latency 17; states/phase/gains carried through.
     //   See rtl/dsp/svf_tpt.sv.
     //----------------------------------------------------------------
     wire               s9_valid;
@@ -691,8 +691,8 @@ module partial_pipeline #(
     end
 
     // State writeback — sync-only process (BSRAM write port).
-    // Writeback lands 29 cycles after the read, so read and write
-    // addresses can never collide (29 < 256).
+    // Writeback lands 25 cycles after the read, so read and write
+    // addresses can never collide (25 < 256).
     always_ff @(posedge clk) begin
         if (s10_valid) begin
             phase_ram[s10_idx]  <= s10_phase;

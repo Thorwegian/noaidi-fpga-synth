@@ -7,9 +7,9 @@
 // A topology-preserving
 // transform SVF (JUCE StateVariableTPTFilter form) -- unconditionally
 // stable under cutoff modulation at resonance. Streaming,
-// one partial per cycle, fully pipelined; one multiply OR the adds OR a
-// shift per stage (the silicon timing rule, see partial_pipeline.sv).
-// Fixed-point locked.
+// one partial per cycle, fully pipelined; one multiply OR the adds per
+// stage (the silicon timing rule, see partial_pipeline.sv). Fixed-point
+// locked.
 //
 // Coefficients (per partial):
 //   K  = mantissa <<< (3 + octave)        (Q8.28, K = 2*pi*fc/fs: the cutoff
@@ -32,7 +32,7 @@
 // at a position set by the octave, so g*y is written as the mantissa
 // times the state (a 36 x 17, two of the chip's 48 multipliers, where the
 // 36 x 36 was a whole DSP block, four) and the octave shifts the product
-// in a stage of its own:
+// in the add stage that reads it:
 //   (g*y) >>> 28 = ((mantissa*y) <<< (2 + octave)) >>> 28
 //                = (mantissa*y) >>> (26 - octave)
 // exact for every octave, because g = mantissa * 2^(2 + octave) fits its
@@ -40,9 +40,11 @@
 // bits) and 2 + octave <= 17 < 28. The low 36 bits are the same either
 // way. 26 - octave = 11 + (15 - octave) = 11 + ~octave: the product's low
 // 11 bits never reach the result, so the product stage keeps
-// (mantissa*y) >>> 11, 41 bits, and the shift stage shifts by ~octave.
-// The s1*(g+R2) product multiplies by a sum that is as wide as it looks;
-// it stays a 36 x 36.
+// (mantissa*y) >>> 11, 41 bits, and the next stage shifts by ~octave
+// (a 4-level mux) in front of its adders. A stage of its own for the
+// shift cost 150 to 200 flip-flops a section at 79 % occupancy, and the
+// placer did not legalise it (#439). The s1*(g+R2) product multiplies by
+// a sum that is as wide as it looks; it stays a 36 x 36.
 //
 // Stages are named after the value each one produces, and a register
 // after the stage it stands in: t1_s2a is s2a as it stands at section 1's
@@ -50,21 +52,20 @@
 //   g       g from the mantissa and the octave, the operands registered
 //   gR2     g + R2, and the products g*g and R2*g for D
 //   h       D and h = 1/D
-//   section 1, then section 2 (the same nine, suffix 1 or 2):
+//   section 1, then section 2 (the same seven, suffix 1 or 2):
 //   ms      s1*(g+R2) >>> 28
 //   t       u - ms - s2
 //   yhp     h*t >>> 16
 //   myhp    mantissa*yHP, the product before its octave shift
-//   gyhp    the product shifted: g*yHP >>> 28
-//   ybp     yBP and s1'
+//   ybp     gyHP = the product shifted; yBP and s1'
 //   mybp    mantissa*yBP
-//   gybp    g*yBP >>> 28
-//   y       yLP, s2', the section's output selected and saturated
+//   y       gyBP = the product shifted; yLP, s2', the section's output
+//           selected and saturated
 //
-// Latency (in_* -> out_*): 1 (g) + 2 (gR2, h) + 9 (section 1) + 9 (section 2)
-// = 21 cycles. Well under the 256-slot half, so state read/write never
+// Latency (in_* -> out_*): 1 (g) + 2 (gR2, h) + 7 (section 1) + 7 (section 2)
+// = 17 cycles. Well under the 256-slot half, so state read/write never
 // collide. What a stage does not transform is not carried through it: it
-// waits in the shadow-SRAM delays (delay_line.sv, section THE DELAYS).
+// waits in four shadow-SRAM delays (delay_line.sv, section THE DELAYS).
 //
 // Reset (#309): only the *_valid registers have one. A datapath register
 // is meaningful only beside a valid bit, so it is a plain flip-flop with
@@ -136,8 +137,9 @@ module svf_tpt #(
         else                 sat_state = x;
     endfunction
 
-    // The g*y product of a section, two stages: the mantissa times the
-    // state, kept from bit 11 up, then the shift by ~octave (see the top).
+    // The g*y product of a section: the mantissa times the state, kept
+    // from bit 11 up, in the product stage; the shift by ~octave in the
+    // stage that adds it (see the top).
     function automatic logic signed [40:0] mantissa_product(input logic [15:0] mantissa,
                                                             input logic signed [35:0] y);
         logic signed [51:0] product;
@@ -295,39 +297,24 @@ module svf_tpt #(
         myhp1_mode<=yhp1_mode;
     end
 
-    // --- gyhp1 = g*yHP >>28, the product shifted by the octave ---
-    reg gyhp1_valid;
-    reg signed [35:0] gyhp1, gyhp1_yhp, gyhp1_s1a, gyhp1_s2a;
-    reg [15:0] gyhp1_m;  reg [3:0] gyhp1_oct;
-    reg [1:0] gyhp1_mode;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) gyhp1_valid <= 1'b0;
-        else        gyhp1_valid <= myhp1_valid;
-    end
-    always_ff @(posedge clk) begin
-        gyhp1 <= octave_shift(myhp1, myhp1_oct);
-        gyhp1_m<=myhp1_m; gyhp1_oct<=myhp1_oct;
-        gyhp1_yhp<=myhp1_yhp; gyhp1_s1a<=myhp1_s1a; gyhp1_s2a<=myhp1_s2a;
-        gyhp1_mode<=myhp1_mode;
-    end
-
-    // --- ybp1 = gyHP + s1a ; s1a' = yBP + gyHP ---
+    // --- ybp1: gyHP = g*yHP >>28 (the product shifted) ; yBP = gyHP + s1a ;
+    //     s1a' = yBP + gyHP = s1a + 2*gyHP, one adder (the same modulo 2^36) ---
     reg ybp1_valid;
     reg signed [35:0] ybp1, ybp1_s1n, ybp1_yhp, ybp1_s2a;
     reg [15:0] ybp1_m;  reg [3:0] ybp1_oct;
     reg [1:0] ybp1_mode;
 
+    wire signed [35:0] gyhp1 = octave_shift(myhp1, myhp1_oct);
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) ybp1_valid <= 1'b0;
-        else        ybp1_valid <= gyhp1_valid;
+        else        ybp1_valid <= myhp1_valid;
     end
     always_ff @(posedge clk) begin
-        ybp1     <= gyhp1 + gyhp1_s1a;
-        ybp1_s1n <= (gyhp1 + gyhp1_s1a) + gyhp1;   // yBP + gyHP
-        ybp1_m<=gyhp1_m; ybp1_oct<=gyhp1_oct;
-        ybp1_yhp<=gyhp1_yhp; ybp1_s2a<=gyhp1_s2a;
-        ybp1_mode<=gyhp1_mode;
+        ybp1     <= gyhp1 + myhp1_s1a;
+        ybp1_s1n <= myhp1_s1a + (gyhp1 <<< 1);
+        ybp1_m<=myhp1_m; ybp1_oct<=myhp1_oct;
+        ybp1_yhp<=myhp1_yhp; ybp1_s2a<=myhp1_s2a;
+        ybp1_mode<=myhp1_mode;
     end
 
     // --- mybp1 = mantissa*yBP, the g*yBP product before its octave shift ---
@@ -348,80 +335,60 @@ module svf_tpt #(
         mybp1_s2a<=ybp1_s2a; mybp1_mode<=ybp1_mode;
     end
 
-    // --- gybp1 = g*yBP >>28, the product shifted by the octave ---
-    reg gybp1_valid;
-    reg signed [35:0] gybp1, gybp1_ybp, gybp1_s1n, gybp1_yhp, gybp1_s2a;
-    reg [1:0] gybp1_mode;
-
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) gybp1_valid <= 1'b0;
-        else        gybp1_valid <= mybp1_valid;
-    end
-    always_ff @(posedge clk) begin
-        gybp1 <= octave_shift(mybp1, mybp1_oct);
-        gybp1_ybp<=mybp1_ybp; gybp1_s1n<=mybp1_s1n; gybp1_yhp<=mybp1_yhp;
-        gybp1_s2a<=mybp1_s2a; gybp1_mode<=mybp1_mode;
-    end
-
-    // --- y1: yLP = gyBP + s2a ; s2a' = yLP + gyBP ; y1 = sat(select) ---
+    // --- y1: gyBP = g*yBP >>28 (the product shifted) ; yLP = gyBP + s2a ;
+    //     s2a' = yLP + gyBP = s2a + 2*gyBP ; y1 = sat(select) ---
     reg y1_valid;
     reg signed [17:0] y1;                           // Q4.14
     reg signed [35:0] y1_s1n, y1_s2n;
 
+    wire signed [35:0] gybp1 = octave_shift(mybp1, mybp1_oct);
     logic signed [35:0] ylp1, y1_select;
     always_comb begin
-        ylp1 = gybp1 + gybp1_s2a;
-        case (gybp1_mode)
-            2'd1:    y1_select = gybp1_ybp;
-            2'd2:    y1_select = gybp1_yhp;
+        ylp1 = gybp1 + mybp1_s2a;
+        case (mybp1_mode)
+            2'd1:    y1_select = mybp1_ybp;
+            2'd2:    y1_select = mybp1_yhp;
             default: y1_select = ylp1;
         endcase
     end
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) y1_valid <= 1'b0;
-        else        y1_valid <= gybp1_valid;
+        else        y1_valid <= mybp1_valid;
     end
     always_ff @(posedge clk) begin
         y1     <= sat_q414(y1_select);
-        y1_s1n <= gybp1_s1n;
-        y1_s2n <= ylp1 + gybp1;
+        y1_s1n <= mybp1_s1n;
+        y1_s2n <= mybp1_s2a + (gybp1 <<< 1);
     end
 
     // ========================== SECTION 2 ===============================
     // Section 2 needs the partial's mantissa, octave, g+R2 and h too. They
     // are the same per partial, so it re-derives nothing: delay C below
-    // brings them from the h stage, matched to section 1's 9-stage latency.
+    // brings them from the h stage, matched to section 1's 7-stage latency.
     // ========================== THE DELAYS (#309) =========================
     // What the filter carries without transforming it waits in the shadow
     // SRAM (delay_line.sv), not in every stage's flip-flops. With the g
-    // stage at t+1, section 1 at t+4 … t+12, section 2 at t+13 … t+20 and
-    // the output registers at t+21:
+    // stage at t+1, section 1 at t+4 … t+10, section 2 at t+11 … t+16 and
+    // the output registers at t+17:
     //   A  the partial's index, cascade flag, phase and gains: the input to
-    //      the output registers, 20 clocks (a line holds 16 at most, so
-    //      two in series, 16 and 4);
-    //   B  section 2's input states: the input to section 2, 12 clocks;
+    //      the output registers, 16 clocks;
+    //   B  section 2's input states: the input to section 2, 10 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
-    //      section 2, section 1's 9 clocks (a register of its own, then 8
+    //      section 2, section 1's 7 clocks (a register of its own, then 6
     //      in the shadow SRAM);
     //   D  section 1's new states and its output: section 1 to the output
-    //      registers, section 2's 8 clocks.
-    localparam int CARRIED_W = IDXW + 1 + 24 + 2 * GAIN_W;
-    wire [CARRIED_W-1:0]     carried_16;
-    wire [IDXW-1:0]          gybp2_idx;
-    wire                     gybp2_cascade;
-    wire signed [23:0]       gybp2_phase;
-    wire signed [GAIN_W-1:0] gybp2_gain_l, gybp2_gain_r;
-    delay_line #(.WIDTH (CARRIED_W), .DELAY (16)) u_delay_out_16 (
+    //      registers, section 2's 6 clocks.
+    wire [IDXW-1:0]          mybp2_idx;
+    wire                     mybp2_cascade;
+    wire signed [23:0]       mybp2_phase;
+    wire signed [GAIN_W-1:0] mybp2_gain_l, mybp2_gain_r;
+    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W), .DELAY (16)) u_delay_out (
         .clk (clk),
         .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r}),
-        .q   (carried_16));
-    delay_line #(.WIDTH (CARRIED_W), .DELAY (4)) u_delay_out_4 (
-        .clk (clk),
-        .d   (carried_16),
-        .q   ({gybp2_idx, gybp2_cascade, gybp2_phase, gybp2_gain_l, gybp2_gain_r}));
+        .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r}));
 
     wire signed [35:0] y1_ic1eq2, y1_ic2eq2;
-    delay_line #(.WIDTH (72), .DELAY (12)) u_delay_sec2_states (
+    delay_line #(.WIDTH (72), .DELAY (10)) u_delay_sec2_states (
         .clk (clk), .d ({in_ic1eq2, in_ic2eq2}), .q ({y1_ic1eq2, y1_ic2eq2}));
 
     // C's cells take their data from registers of their own, a clock after
@@ -445,15 +412,15 @@ module svf_tpt #(
     wire signed [35:0] sec2_gR2;
     wire [17:0]        sec2_h;
     wire [1:0]         sec2_mode;
-    delay_line #(.WIDTH (16 + 4 + 36 + 18 + 2), .DELAY (8)) u_delay_coefficients (
+    delay_line #(.WIDTH (16 + 4 + 36 + 18 + 2), .DELAY (6)) u_delay_coefficients (
         .clk (clk),
         .d   ({coefficient_m, coefficient_oct, coefficient_gR2, coefficient_h, coefficient_mode}),
         .q   ({sec2_m, sec2_oct, sec2_gR2, sec2_h, sec2_mode}));
 
-    wire signed [35:0] gybp2_s1an, gybp2_s2an;
-    wire signed [17:0] gybp2_y1;
-    delay_line #(.WIDTH (36 + 36 + 18), .DELAY (8)) u_delay_sec1_out (
-        .clk (clk), .d ({y1_s1n, y1_s2n, y1}), .q ({gybp2_s1an, gybp2_s2an, gybp2_y1}));
+    wire signed [35:0] mybp2_s1an, mybp2_s2an;
+    wire signed [17:0] mybp2_y1;
+    delay_line #(.WIDTH (36 + 36 + 18), .DELAY (6)) u_delay_sec1_out (
+        .clk (clk), .d ({y1_s1n, y1_s2n, y1}), .q ({mybp2_s1an, mybp2_s2an, mybp2_y1}));
     wire signed [35:0] sec2_u = {{8{y1[17]}}, y1, 14'd0}; // y1<<<14
 
     // --- ms2 = s1b*(g+R2) >>28 ---
@@ -524,37 +491,22 @@ module svf_tpt #(
         myhp2_mode<=yhp2_mode;
     end
 
-    // --- gyhp2 = g*yHP >>28, the product shifted by the octave ---
-    reg gyhp2_valid;
-    reg signed [35:0] gyhp2, gyhp2_yhp, gyhp2_s1b, gyhp2_s2b;
-    reg [15:0] gyhp2_m;  reg [3:0] gyhp2_oct;
-    reg [1:0] gyhp2_mode;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) gyhp2_valid <= 1'b0;
-        else        gyhp2_valid <= myhp2_valid;
-    end
-    always_ff @(posedge clk) begin
-        gyhp2 <= octave_shift(myhp2, myhp2_oct);
-        gyhp2_m<=myhp2_m; gyhp2_oct<=myhp2_oct;
-        gyhp2_yhp<=myhp2_yhp; gyhp2_s1b<=myhp2_s1b; gyhp2_s2b<=myhp2_s2b;
-        gyhp2_mode<=myhp2_mode;
-    end
-
-    // --- ybp2 = gyHP + s1b ; s1b' = yBP + gyHP ---
+    // --- ybp2: gyHP = g*yHP >>28 ; yBP = gyHP + s1b ; s1b' = s1b + 2*gyHP ---
     reg ybp2_valid;
     reg signed [35:0] ybp2, ybp2_s1n, ybp2_yhp, ybp2_s2b;
     reg [15:0] ybp2_m;  reg [3:0] ybp2_oct;
     reg [1:0] ybp2_mode;
+    wire signed [35:0] gyhp2 = octave_shift(myhp2, myhp2_oct);
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) ybp2_valid <= 1'b0;
-        else        ybp2_valid <= gyhp2_valid;
+        else        ybp2_valid <= myhp2_valid;
     end
     always_ff @(posedge clk) begin
-        ybp2     <= gyhp2 + gyhp2_s1b;
-        ybp2_s1n <= (gyhp2 + gyhp2_s1b) + gyhp2;
-        ybp2_m<=gyhp2_m; ybp2_oct<=gyhp2_oct;
-        ybp2_yhp<=gyhp2_yhp; ybp2_s2b<=gyhp2_s2b;
-        ybp2_mode<=gyhp2_mode;
+        ybp2     <= gyhp2 + myhp2_s1b;
+        ybp2_s1n <= myhp2_s1b + (gyhp2 <<< 1);
+        ybp2_m<=myhp2_m; ybp2_oct<=myhp2_oct;
+        ybp2_yhp<=myhp2_yhp; ybp2_s2b<=myhp2_s2b;
+        ybp2_mode<=myhp2_mode;
     end
 
     // --- mybp2 = mantissa*yBP ---
@@ -574,44 +526,32 @@ module svf_tpt #(
         mybp2_s2b<=ybp2_s2b; mybp2_mode<=ybp2_mode;
     end
 
-    // --- gybp2 = g*yBP >>28, the product shifted by the octave ---
-    reg gybp2_valid;
-    reg signed [35:0] gybp2, gybp2_ybp, gybp2_s1n, gybp2_yhp, gybp2_s2b;
-    reg [1:0] gybp2_mode;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) gybp2_valid <= 1'b0;
-        else        gybp2_valid <= mybp2_valid;
-    end
-    always_ff @(posedge clk) begin
-        gybp2 <= octave_shift(mybp2, mybp2_oct);
-        gybp2_ybp<=mybp2_ybp; gybp2_s1n<=mybp2_s1n; gybp2_yhp<=mybp2_yhp;
-        gybp2_s2b<=mybp2_s2b; gybp2_mode<=mybp2_mode;
-    end
-
-    // --- y2: yLP = gyBP + s2b ; s2b' ; y2 = sat(select) ; the outputs ---
+    // --- y2: gyBP = g*yBP >>28 ; yLP = gyBP + s2b ; s2b' = s2b + 2*gyBP ;
+    //     y2 = sat(select) ; the outputs ---
+    wire signed [35:0] gybp2 = octave_shift(mybp2, mybp2_oct);
     logic signed [35:0] ylp2, y2_select;
     always_comb begin
-        ylp2 = gybp2 + gybp2_s2b;
-        case (gybp2_mode)
-            2'd1:    y2_select = gybp2_ybp;
-            2'd2:    y2_select = gybp2_yhp;
+        ylp2 = gybp2 + mybp2_s2b;
+        case (mybp2_mode)
+            2'd1:    y2_select = mybp2_ybp;
+            2'd2:    y2_select = mybp2_yhp;
             default: y2_select = ylp2;
         endcase
     end
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) out_valid <= 1'b0;
-        else        out_valid <= gybp2_valid;
+        else        out_valid <= mybp2_valid;
     end
     always_ff @(posedge clk) begin
-        out_idx    <= gybp2_idx;
-        out_sample <= gybp2_cascade ? sat_q414(y2_select) : gybp2_y1;
-        out_ic1eq1n<= sat_state(gybp2_s1an);
-        out_ic2eq1n<= sat_state(gybp2_s2an);
-        out_ic1eq2n<= sat_state(gybp2_s1n);
-        out_ic2eq2n<= sat_state(ylp2 + gybp2);
-        out_phase  <= gybp2_phase;
-        out_gain_l <= gybp2_gain_l;
-        out_gain_r <= gybp2_gain_r;
+        out_idx    <= mybp2_idx;
+        out_sample <= mybp2_cascade ? sat_q414(y2_select) : mybp2_y1;
+        out_ic1eq1n<= sat_state(mybp2_s1an);
+        out_ic2eq1n<= sat_state(mybp2_s2an);
+        out_ic1eq2n<= sat_state(mybp2_s1n);
+        out_ic2eq2n<= sat_state(mybp2_s2b + (gybp2 <<< 1));
+        out_phase  <= mybp2_phase;
+        out_gain_l <= mybp2_gain_l;
+        out_gain_r <= mybp2_gain_r;
     end
 
 endmodule
