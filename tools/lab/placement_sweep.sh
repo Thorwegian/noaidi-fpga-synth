@@ -80,7 +80,7 @@ run_seed() {
   # CPU time, not the clock, because these run at nice 19 and may wait. The
   # soft limit sends SIGXCPU (exit 152); the hard one a minute above is the
   # kernel's SIGKILL, which a soft limit equal to it would send instead.
-  (ulimit -St "$PNR_CPU_SECONDS"; ulimit -Ht $((PNR_CPU_SECONDS + 60)); exec nice -n 19 $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
+  (ulimit -St "$PNR_CPU_SECONDS"; ulimit -Ht $((PNR_CPU_SECONDS + 60)); ulimit -c 0; exec nice -n 19 $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
     --vopt cst=constraints.cst --placer-heap-beta 0.75 --report report_$s.json --freq 73.728 --seed $s) \
     > pnr_$s.log 2>&1
   rc=$?

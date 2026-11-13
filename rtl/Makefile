@@ -132,10 +132,11 @@ PLACER_BETA ?= 0.75
 # the cloud box 487 s, 13 Nov 2026); a legaliser that thrashes at this
 # occupancy (#343) runs 35 before the tool gives up. At 12 the kill is the verdict:
 # the soft limit's SIGXCPU (exit 152; the hard limit a minute above would be
-# a bare SIGKILL). Raise it on purpose for a run that is meant to be long.
+# a bare SIGKILL), with no core dump of a 400 MB process. Raise it on
+# purpose for a run that is meant to be long.
 PNR_CPU_SECONDS ?= 720
 pnr.json: yosys.json
-	set -o pipefail; ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); $(NEXTPNR) --json $< \
+	set -o pipefail; ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); ulimit -c 0; $(NEXTPNR) --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
@@ -176,7 +177,7 @@ SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
 	@mkdir -p obj_dir/sweep
 	@for s in $(SEEDS); do \
-		(ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); \
+		(ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); ulimit -c 0; \
 		exec $(NEXTPNR) --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
 			--vopt cst=constraints.cst --placer-heap-beta $(PLACER_BETA) \
