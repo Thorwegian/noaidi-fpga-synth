@@ -36,10 +36,17 @@ if [ -z "$SEEDS" ]; then
 fi
 cd "$(dirname "$0")/../.." || exit 1
 [ -f rtl/yosys.json ] || { echo "placement_sweep: rtl/yosys.json missing; make -C rtl yosys.json first" >&2; exit 2; }
+# The clock verdict comes from the report nextpnr writes after routing, never
+# from the log: the log prints a Max frequency block twice, the first from
+# the placer's estimated routing, and a grep on it called routed passes
+# failures (#375). Exit 0 when every clock in the report meets its constraint.
+CLOCK_MET='import json, sys
+fmax = json.load(open(sys.argv[1]))["fmax"]
+sys.exit(0 if fmax and all(c["achieved"] >= c["constraint"] for c in fmax.values()) else 1)'
 echo "placement_sweep: seeds $SEEDS"
 ssh -p "$PORT" -o BatchMode=yes "$LAB" "rm -rf $REMOTE && mkdir -p $REMOTE" || exit 1
 scp -P "$PORT" -q rtl/yosys.json rtl/constraints.cst "$LAB:$REMOTE/" || exit 1
-ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS NEXTPNR=\$HOME/$LABREPO/.tools/nextpnr/bin/nextpnr-himbaechel bash -s" <<'EOF'
+ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS CLOCK_MET='$CLOCK_MET' NEXTPNR=\$HOME/$LABREPO/.tools/nextpnr/bin/nextpnr-himbaechel bash -s" <<'EOF'
 [ -x "$NEXTPNR" ] || { echo "placement_sweep: no $NEXTPNR on the lab box; make tools there" >&2; exit 2; }
 run_seed() {
   s=$1
@@ -48,8 +55,8 @@ run_seed() {
     > pnr_$s.log 2>&1
   if grep -q "Unable to find legal placement" pnr_$s.log; then echo "seed $s: placement failed (rtl/obj_dir/sweep/pnr_$s.log)"
   elif grep -q "Routing design failed" pnr_$s.log; then echo "seed $s: routing failed (rtl/obj_dir/sweep/pnr_$s.log)"
-  elif grep -q "FAIL at" pnr_$s.log; then echo "seed $s: placed and routed, misses the clock (rtl/obj_dir/sweep/pnr_$s.log)"
   elif [ ! -f report_$s.json ]; then echo "seed $s: place and route failed (rtl/obj_dir/sweep/pnr_$s.log)"
+  elif ! python3 -c "$CLOCK_MET" report_$s.json; then echo "seed $s: placed and routed, misses the clock (rtl/obj_dir/sweep/pnr_$s.log)"
   fi
 }
 n=0
@@ -67,7 +74,7 @@ for s in $SEEDS; do
   total=$((total + 1))
   [ -f rtl/obj_dir/sweep/report_$s.json ] || continue
   routed=$((routed + 1)); reports="$reports rtl/obj_dir/sweep/report_$s.json"
-  grep -q "FAIL at" rtl/obj_dir/sweep/pnr_$s.log || met=$((met + 1))
+  python3 -c "$CLOCK_MET" rtl/obj_dir/sweep/report_$s.json && met=$((met + 1))
 done
 [ -n "$reports" ] && python3 tools/netlist/synth_report.py $reports
 echo "placement_sweep: $routed of $total seeds placed and routed, $met of $total meet the clock (seeds $SEEDS)"
