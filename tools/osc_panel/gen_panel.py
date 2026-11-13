@@ -63,6 +63,7 @@ def knob(cc, label, default=64, bipolar=False):
         "preArgs": [CH, cc],
         "target": TARGET,
         "range": {"min": 0, "max": 127},
+        "decimals": 0,       # MIDI CC is an integer: no "63.50" readout
         "default": default,
         "doubleTap": True,   # double-tap resets to default
         "expand": True,
