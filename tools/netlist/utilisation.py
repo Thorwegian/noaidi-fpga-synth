@@ -109,7 +109,7 @@ def cells(counts):
     return tuple("%g" % counts[kind] for kind in KINDS)
 
 
-ROW = "%-34s %8s %8s %6s %6s %10s %5s %5s %7s"
+ROW = "%-37s %8s %8s %6s %6s %10s %5s %5s %7s"
 
 
 def main():
@@ -131,7 +131,7 @@ def main():
         if all(100.0 * local[kind] < args.min_share * max(total[kind], 1) for kind in KINDS):
             continue
         label = path if count == 1 else "%s ×%d" % (path, count)
-        print(ROW % ((label[-34:],) + cells(local) + (async_reset,)))
+        print(ROW % ((label[-37:],) + cells(local) + (async_reset,)))
     print(ROW % (("total (hierarchical synthesis)",) + cells(total) + (async_total,)))
 
     if args.placed:
@@ -141,9 +141,9 @@ def main():
         used["MULT"] = sum(u * MULT_SLOTS[name] for name, (u, a) in placed.items() if name in MULT_SLOTS)
         available["MULT"] = MULT_POOL
         columns = KINDS[:-2] + ("MULT",)
-        print("%-34s %8d %8d %6d %6d %10d %11g" % (("placed (nextpnr)",) + tuple(used[k] for k in columns)))
-        print("%-34s %8d %8d %6d %6d %10d %11d" % (("the chip has",) + tuple(available[k] for k in columns)))
-        print("%-34s %7.0f%% %7.0f%% %5.0f%% %5.0f%% %9.0f%% %10.0f%%" % (("used",) + tuple(
+        print("%-37s %8d %8d %6d %6d %10d %11g" % (("placed (nextpnr)",) + tuple(used[k] for k in columns)))
+        print("%-37s %8d %8d %6d %6d %10d %11d" % (("the chip has",) + tuple(available[k] for k in columns)))
+        print("%-37s %7.0f%% %7.0f%% %5.0f%% %5.0f%% %9.0f%% %10.0f%%" % (("used",) + tuple(
             100.0 * used[k] / available[k] if available[k] else 0 for k in columns)))
         print("DSP placed: " + ", ".join("%s %d/%d" % (name, u, a) for name, (u, a) in placed.items()
                                          if kind_of(name) == "DSP" and u))
