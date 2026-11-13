@@ -76,7 +76,11 @@ package synth_pkg;
     parameter int STREAM_FRAME_WORDS = 64;
     parameter logic [31:0] STREAM_SYNC = 32'hB7E1_5A3C;
     parameter logic [31:0] STREAM_CRC_POLYNOMIAL = 32'h04C1_1DB7;  // IEEE 802.3, MSB first, no final inversion
+    // x^32 + x^22 + x^2 + x + 1: a maximal polynomial, period 2^32 - 1,
+    // shared with the noise source (rtl/dsp/noise_source.sv).
+    parameter logic [31:0] LFSR32_POLYNOMIAL = 32'h0040_0007;
     parameter logic [31:0] STREAM_LFSR_SEED = 32'h0000_0001;
+    parameter logic [31:0] NOISE_LFSR_SEED  = 32'h7A5C_3E91;   // any word but zero
     // The payload sources, chosen by CTRL[5:4].
     parameter int STREAM_SOURCE_W = CTRL_SOURCE_HIGH - CTRL_SOURCE_LOW + 1;
     parameter logic [STREAM_SOURCE_W-1:0] STREAM_SOURCE_LFSR    = 3'd0;   // a 32-bit maximal LFSR, 32 steps a word

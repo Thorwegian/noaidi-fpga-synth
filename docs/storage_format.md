@@ -186,7 +186,7 @@ preset loads.
 
 | Key | Unit | Range | Raw value |
 |---|---|---|---|
-| `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | | `wave` 0, 1, 2, 3 |
+| `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"`, `"noise"` | | `wave` 0, 1, 2, 3, 4 |
 | `tune` | semitones, decimals for the fine part | −48 … +48 | one pitch offset, round(value × 1024 / 12) |
 | `pulse_width` | percent of the cycle the pulse is high | 0 … 100 | `duty` = round((value − 50) / 100 × 2²⁴) |
 

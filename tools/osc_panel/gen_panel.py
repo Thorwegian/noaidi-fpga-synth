@@ -195,7 +195,8 @@ def section(title, widgets):
         ],
     }
 
-WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}
+WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96}              # an LFO's shapes
+OSC_WAVES = {"Saw": 0, "Pulse": 32, "Tri": 64, "Sine": 96, "Noise": 127}  # five-way: value × 5 / 128
 
 root_widgets = [
     {
@@ -211,13 +212,13 @@ root_widgets = [
             # so its Pitch dial reads center until first touched: the
             # double-tap home wins over boot-state display.
             section("Oscillator 1", [
-                switch(20, "Wave", WAVES, 0),
+                switch(20, "Wave", OSC_WAVES, 0),
                 knob(14, "Pitch", 64, bipolar=True),
                 knob(15, "Fine", 64, bipolar=True),
                 knob(25, "Pulse Width", 0),   # unipolar: 0=square, 127=5%
             ]),
             section("Oscillator 2", [
-                switch(21, "Wave", WAVES, 96),
+                switch(21, "Wave", OSC_WAVES, 96),
                 knob(22, "Pitch", 64, bipolar=True),
                 knob(23, "Fine", 64, bipolar=True),
                 knob(85, "Pulse Width", 0),   # unipolar

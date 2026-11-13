@@ -21,7 +21,8 @@
 //   S1  sink words and state in registers
 //   S2  the pitch and cutoff sums (voice word + channel word)
 //   S3  effective parameters: biases, clamps, LUT reads; phase_next
-//   S3B register phase_next / the cutoff word and octave / q1 / duty / wave;
+//   S3B register phase_next / the cutoff word and octave / q1 / duty / wave /
+//       the noise word;
 //       the resonance limiter's attack shift; its state RAM's read address
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux);
 //       the gain products (voice word × channel word); the limiter's state
@@ -154,6 +155,18 @@ module partial_pipeline #(
         $readmemh("dsp/q1_lut.hex", q1_lut);
         $readmemh("dsp/sine_lut.hex", sine_lut);
     end
+
+    //----------------------------------------------------------------
+    // The noise waveform's source: one generator for all 256 partials,
+    // a fresh word every clock (noise_source.sv); S3B registers the
+    // word the slot finds there, beside the phase.
+    //----------------------------------------------------------------
+    logic signed [15:0] noise_word;
+    noise_source u_noise (
+        .clk   (clk),
+        .rst_n (rst_n),
+        .word  (noise_word)
+    );
 
     //----------------------------------------------------------------
     // Per-partial internal state RAM — semi dual-port
@@ -370,7 +383,7 @@ module partial_pipeline #(
     logic signed [18:0] s2_pitch_sum, s2_cutoff_sum;
     logic signed [17:0] s2_gain_voice, s2_gain_left, s2_gain_right;
     logic signed [17:0] s2_duty, s2_resonance;
-    logic [1:0]  s2_wave;
+    logic [2:0]  s2_wave;
     logic        s2_cascade;
     logic [1:0]  s2_filter_mode;
     logic signed [23:0] s2_phase;
@@ -391,10 +404,10 @@ module partial_pipeline #(
         s2_gain_right <= s1_gain_right;
         s2_duty  <= s1_duty;
         s2_resonance <= s1_resonance;
-        // the mode word: [1:0] waveform, [2] cascade, [4:3] filter type
-        s2_wave  <= s1_mode[1:0];
-        s2_cascade  <= s1_mode[2];
-        s2_filter_mode <= s1_mode[4:3];
+        // the mode word: [2:0] waveform, [3] cascade, [5:4] filter type
+        s2_wave  <= s1_mode[2:0];
+        s2_cascade  <= s1_mode[3];
+        s2_filter_mode <= s1_mode[5:4];
         s2_phase <= s1_phase;
         s2_ic1eq1 <= s1_ic1eq1;
         s2_ic2eq1 <= s1_ic2eq1;
@@ -462,7 +475,7 @@ module partial_pipeline #(
     logic signed [23:0] s3_phase;
     logic [3:0]  s3_pitch_oct;
     logic [3:0]  s3_fc_oct;
-    logic [1:0]  s3_wave;
+    logic [2:0]  s3_wave;
     logic signed [23:0] s3_duty;
     logic signed [17:0] s3_gain_voice; // the voice's linear gain, clamped at unity
     logic        s3_gain_mute;
@@ -585,9 +598,10 @@ module partial_pipeline #(
     logic               s3b_cascade;  logic [1:0] s3b_filter_mode;
     logic signed [23:0] s3b_phase;
     logic signed [17:0] s3b_gain_voice, s3b_gain_left, s3b_gain_right;
-    logic signed [23:0] s3b_duty;  logic [1:0] s3b_wave;
+    logic signed [23:0] s3b_duty;  logic [2:0] s3b_wave;
     logic signed [24:0] s3b_pulse_max, s3b_pulse_min;   // the pulse's DC-corrected levels (osc_core: 2^23-1 - duty, -2^23 - duty)
     logic signed [15:0] s3b_sine;      // the sine at s3b_phase, the table's clocked read
+    logic signed [15:0] s3b_noise;     // the generator's word for this slot
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) s3b_valid <= 1'b0;
         else        s3b_valid <= s3_valid;
@@ -605,12 +619,13 @@ module partial_pipeline #(
         s3b_pulse_max <= 25'sd8388607  - 25'(s3_duty);
         s3b_pulse_min <= -25'sd8388608 - 25'(s3_duty);
         s3b_sine <= sine_lut[phase_next[23:14]];
+        s3b_noise <= noise_word;
     end
 
     // Waveform generation stands alone in its own stage, driven by the
-    // REGISTERED phase (the sine read in block RAM alongside it): a
-    // compare, a fold and a 4:1 mux, which must not be chained behind
-    // the phase adder.
+    // REGISTERED phase (the sine read in block RAM alongside it, the
+    // noise word registered beside it): a compare, a fold and a 5:1
+    // mux, which must not be chained behind the phase adder.
     osc_core u_osc (
         .phase_next (s3b_phase),
         .duty       (s3b_duty),
@@ -618,6 +633,7 @@ module partial_pipeline #(
         .pulse_min   (s3b_pulse_min),
         .wave       (s3b_wave),
         .sine       (s3b_sine),
+        .noise      (s3b_noise),
         .sample_out (osc_sample)
     );
 

@@ -176,13 +176,17 @@ pitch, retuned and regrouped every pass. On paper the compute is far
 beyond a polysynth's needs; spending it is the control program's job.
 
 **Per-partial chain** (26 stages): state/param RAM read → LUT reads
-→ oscillator (saw, pulse, triangle, sine; pitch, duty, phase reset) →
+→ oscillator (saw, pulse, triangle, sine, noise; pitch, duty, phase reset) →
 the resonance limiter's gain →
 SVF 1 → SVF 2 (shared type/cutoff/resonance; 12 dB/oct single section or
 24 dB/oct cascade — a separate filter per partial costs nothing in cycles) →
 stereo log attenuation (independent L/R, the mono→stereo point) → mix
 accumulate (26-bit, 8 guard bits) + state write-back. The pipeline
-publishes the raw stereo sum at the sample tick.
+publishes the raw stereo sum at the sample tick. Noise is a waveform like
+the other four, with no stage or state of its own: one free-running
+generator (`rtl/dsp/noise_source.sv`, a 32-bit maximal LFSR stepped 16
+bits a clock) hands every slot a fresh word, and a noise partial plays it
+through its filter, envelope and pan as a saw would, at the saw's level.
 
 **The resonance limiter** (`partial_pipeline.sv`, section L, #427): a
 feedback limiter per partial in the master's form, with the filter inside

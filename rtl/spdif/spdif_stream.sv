@@ -141,7 +141,7 @@ module spdif_stream (
             shifting   <= {shifting[30:0], 1'b0};
             // The LFSR advances with every payload word, whichever source is
             // sent, so that switching sources never repeats a word.
-            lfsr       <= {lfsr[30:0], 1'b0} ^ (lfsr_out ? 32'h0040_0007 : 32'd0);
+            lfsr       <= {lfsr[30:0], 1'b0} ^ (lfsr_out ? synth_pkg::LFSR32_POLYNOMIAL : 32'd0);
             steps_left <= steps_left - 1'b1;
         end
     end

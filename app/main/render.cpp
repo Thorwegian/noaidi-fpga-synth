@@ -437,12 +437,13 @@ void channel_sound(const preset_t &preset, Writes &writes) {
         put(writes, channel + cp::gain_left + slot, gain_of_code(codes.left));
         put(writes, channel + cp::gain_right + slot, gain_of_code(codes.right));
     }
-    // the oscillators: the mode word (waveform, cascade, filter type) and the
-    // pulse width, 1.0 being the rail (the program adds the LFOs)
+    // the oscillators: the mode word (waveform [2:0], cascade [3], filter
+    // type [5:4]) and the pulse width, 1.0 being the rail (the program adds
+    // the LFOs)
     for (int oscillator = 0; oscillator < 2; ++oscillator) {
         const osc_t &osc = preset.osc[oscillator];
-        const int mode   = (osc.wave & 3) | ((preset.filter.cascade & 1) << 2)
-                         | ((preset.filter.type & 3) << 3);
+        const int mode   = (osc.wave & 7) | ((preset.filter.cascade & 1) << 3)
+                         | ((preset.filter.type & 3) << 4);
         put(writes, channel + (oscillator ? cp::mode_1 : cp::mode_0), mode);
         put(writes,
             channel_register(oscillator ? cp::duty_base_1 : cp::duty_base_0),

@@ -63,7 +63,7 @@ units live in preset.h).
 **Oscillators**
 | CC | Target | Notes |
 |---|---|---|
-| 20 | osc 1 waveform | discrete, 4 of them: 0 saw / 1 pulse / 2 tri / 3 sine, a full-wave table in block RAM read with the phase (`scripts/gen_sine_lut.py`). None are bandlimited |
+| 20 | osc 1 waveform | discrete, 5 of them, the code value × 5 / 128 (0, 32, 64, 96, 127 on the panel): 0 saw / 1 pulse / 2 tri / 3 sine, a full-wave table in block RAM read with the phase (`scripts/gen_sine_lut.py`) / 4 noise, white, one generator shared by every partial (`rtl/dsp/noise_source.sv`), at the saw's level. None are bandlimited |
 | 21 | osc 2 waveform | discrete |
 | 14 | osc 1 coarse (interval) | ±12 semitones in whole-semitone steps, center 64; same mapping as CC 22. Coarse and fine both edit the oscillator's one pitch offset (`tune`): coarse sets the whole semitones and keeps the fine part |
 | 15 | osc 1 fine | full travel ±0.5 semitone, center 64; sets the part of `tune` beyond the whole semitones |
