@@ -105,6 +105,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `benchmark_compare.py` | a baseline recording against the benchmark take |
 | `release_tail.py` | the triad's release tail from a recording's envelope CSV: held level, levels after the release, slopes, time to 60 dB down — the shape that tells a dB release from a linear one (#176) |
 | `zipper_take.py` | the control-stepping stimulus (#268): fast attack and release, resonant sweep, five notes, recorded over S/PDIF |
+| `resonance_take.py` | the resonance limiter's take (#427): resonance at the top of the knob, the cutoff on the fundamental, the cascade then the single section, two notes and a triad, recorded over S/PDIF; what to listen for is in its docstring |
 | `zipper_compare.py` | two takes of that stimulus against each other: the energy and flatness above 10 kHz and in 4–10 kHz, the loudest high-band frame — step noise, if any |
 | `spdif_capture.py` | the S/PDIF output as a data pipe: capture and judge bit-exactness |
 | `alias_measure.py` | a held note's non-harmonic peaks on the 48 kHz path, each classified as a harmonic, the oscillator's 96 kHz folding, a 48 kHz product or a 24 kHz sideband (the CSP's pass); the probe is `init` at MIDI 120 (#308) |
