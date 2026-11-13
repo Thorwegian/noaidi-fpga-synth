@@ -9,7 +9,13 @@
 # upstream since 2026-10-16) arcs for LUT1..LUT3 cells, a third of the
 # LUTs of this design, which the pinned suite never timed, and the DSP
 # macro exclusion that stops a MULT18X18 sharing a MULTALU36X18's macro
-# (the "two arcs with same sink wire" router failures, #162, #183).
+# (the "two arcs with same sink wire" router failures, #162, #183), and
+# the DSP control-line fixes of #450: a control net leaves the macro's and
+# block's lists when its last cell does (offered upstream, YosysHQ/nextpnr
+# #1904), plus a project guard of one RESET net per block and one CLK and
+# one CE net per macro, because the pack suite's apicula writes only line
+# 0 (YosysHQ/apicula #603); the guard goes with the pin bump to a pack
+# suite carrying that fix (docs/gowin_oss_notes.md section 7).
 # Measured on main (d03e915), one netlist, the boot self-test per clock
 # step: the suite reports 119 MHz and the chip fails from 86; this
 # nextpnr reports 72-82 across seeds and the chip holds to 110
@@ -21,4 +27,4 @@
 # this commit: change it by editing commit= (the full SHA, which is what
 # git can fetch by) and running `make tools`.
 repository=HermesOracle/nextpnr
-commit=45a321efc21b6213d22cd6ac3c825ac361117b60
+commit=145c3392730b9bc649f8e158ba8b520c956b9339
