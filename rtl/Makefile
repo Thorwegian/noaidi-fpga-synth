@@ -175,7 +175,7 @@ timing-check: pnr.log
 # then the worst of each column. The build itself takes no seed.
 SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
-	@mkdir -p obj_dir/sweep
+	@mkdir -p obj_dir/sweep; rm -f $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
 	@for s in $(SEEDS); do \
 		(ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); ulimit -c 0; \
 		exec $(NEXTPNR) --json yosys.json --write /dev/null \
@@ -186,7 +186,10 @@ timing-sweep: yosys.json
 		[ $$rc -eq 152 ] && echo "seed $$s: gave up after $$(($(PNR_CPU_SECONDS) / 60)) CPU-minutes (the placer choking, #343; obj_dir/sweep/pnr_$$s.log)"; \
 		[ $$rc -ne 0 ] && [ $$rc -ne 152 ] && echo "seed $$s: place and route failed (obj_dir/sweep/pnr_$$s.log)"; \
 	done; true
-	python3 ../tools/netlist/synth_report.py $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
+	@reports=$$(ls $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS))) 2>/dev/null); \
+	[ -n "$$reports" ] && python3 ../tools/netlist/synth_report.py $$reports; \
+	echo "timing-sweep: $$(echo $$reports | wc -w) of $(words $(SEEDS)) seeds placed and routed (seeds $(SEEDS))"; \
+	[ "$$(echo $$reports | wc -w)" -eq $(words $(SEEDS)) ]
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<
