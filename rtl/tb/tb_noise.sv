@@ -17,7 +17,7 @@
 //   3. the correlation of consecutive clocks' words is near zero: two
 //      slots do not play the same noise a shift apart, which is what a
 //      one-step LFSR would give (the window then shares WORD_W - 1
-//      bits with its predecessor, and the correlation is about 0.5).
+//      bits with its predecessor; measured, the correlation is -0.25).
 //
 // Bounds: three standard errors of a correlation estimate over N pairs
 // are 3 / sqrt(N); 2^24 pairs give 0.0007 and 2^24 / 768 give 0.02.
