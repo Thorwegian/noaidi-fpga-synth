@@ -104,6 +104,9 @@ module svf_tpt #(
     output reg                  out_valid,
     output reg  [IDXW-1:0]      out_idx,
     output reg  signed [17:0]   out_sample,   // Q4.14
+    output reg  signed [35:0]   out_level,    // section 2's output word before its saturation, Q8.28
+                                              // (up to the state clamp): what the resonance
+                                              // limiter's detector reads in cascade mode
     output reg  signed [35:0]   out_ic1eq1n,
     output reg  signed [35:0]   out_ic2eq1n,
     output reg  signed [35:0]   out_ic1eq2n,
@@ -526,6 +529,7 @@ module svf_tpt #(
     reg signed [40:0] mybp2;
     reg signed [35:0] mybp2_s1n, mybp2_s2b;
     reg signed [17:0] mybp2_other;
+    reg signed [35:0] mybp2_other_wide;  // the same word before its saturation, for out_level
     reg               mybp2_use_lp;
     reg [3:0] mybp2_oct;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -536,6 +540,7 @@ module svf_tpt #(
         mybp2 <= mantissa_product(ybp2_m, ybp2);
         mybp2_oct<=ybp2_oct;
         mybp2_other  <= ybp2_mode[1] ? sat_q414(ybp2_yhp) : sat_q414(ybp2);
+        mybp2_other_wide <= ybp2_mode[1] ? ybp2_yhp : ybp2;
         mybp2_use_lp <= (ybp2_mode[1] == ybp2_mode[0]);
         mybp2_s1n<=ybp2_s1n; mybp2_s2b<=ybp2_s2b;
     end
@@ -552,6 +557,7 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         out_idx    <= mybp2_idx;
         out_sample <= mybp2_cascade ? y2 : mybp2_y1;
+        out_level  <= mybp2_use_lp ? ylp2 : mybp2_other_wide;
         out_ic1eq1n<= sat_state(mybp2_s1an);
         out_ic2eq1n<= sat_state(mybp2_s2an);
         out_ic1eq2n<= sat_state(mybp2_s1n);

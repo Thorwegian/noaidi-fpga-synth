@@ -82,11 +82,16 @@ module partial_pipeline #(
     // The attack shift for a partial whose resonance and cutoff octaves
     // are equal; each octave of Q adds one, each octave of cutoff takes
     // one (the attack follows the filter's ring-up, see section L).
-    parameter int          LIMITER_ATTACK_BASE = 27,
-    // The release: exponential in amplitude, 2^-RELEASE_SH nepers a
-    // sample (15: 25 dB a second), once the resonator's energy is down
-    // (section L).
-    parameter int          LIMITER_RELEASE_SH  = 15
+    // 26 from tb_resonance_limiter's sweep over 25 … 29: the Q 8 and
+    // the single-section corners land in the hold band with no ripple,
+    // the Q 32 onset at the rail is 23 ms.
+    parameter int          LIMITER_ATTACK_BASE = 26,
+    // The release: exponential in amplitude at 2^-(ATTACK_SH - K) nepers
+    // a sample, once the resonator's energy is down (section L). It
+    // moves 2^K / THRESHOLD nepers per attack time constant (13: 4.3 dB),
+    // and over the filter's lag, a third to two thirds of that, the
+    // overrun into the hold band stays inside the band's 3 dB.
+    parameter int          LIMITER_RELEASE_K   = 13
 ) (
     input  logic           clk,
     input  logic           rst_n,
@@ -536,7 +541,7 @@ module partial_pipeline #(
     // integer octaves (the resonance code's octave, the cutoff's), held
     // in SH_MIN … SH_MIN + 15 and carried as the count above SH_MIN.
     //----------------------------------------------------------------
-    localparam int LIMITER_ATTACK_SH_MIN = 18;
+    localparam int LIMITER_ATTACK_SH_MIN = 22;
     localparam int LIMITER_SHIFT_W       = 4;
     localparam int LIMITER_FLOOR_W       = 5;
     // What rides with the gain state to section L: the attack shift
@@ -544,9 +549,10 @@ module partial_pipeline #(
     // the output, section L) and the cascade flag.
     localparam int LIMITER_CONTEXT_W     = LIMITER_SHIFT_W + LIMITER_FLOOR_W + 1;
     // SH_MIN keeps the step under half the gain (section L): twice the
-    // largest overshoot, 2^17 - THRESHOLD, under 2^SH_MIN.
+    // largest overshoot, the state clamp's 96 less the threshold in
+    // Q4.14, under 2^SH_MIN.
     initial begin
-        if (2 * (2 ** 17 - int'(LIMITER_THRESHOLD)) >= 2 ** LIMITER_ATTACK_SH_MIN)
+        if (2 * (96 * 2 ** 14 - int'(LIMITER_THRESHOLD)) >= 2 ** LIMITER_ATTACK_SH_MIN)
             $error("partial_pipeline: the limiter's step can exceed half the gain at ATTACK_SH %0d",
                    LIMITER_ATTACK_SH_MIN);
         if (LIMITER_ATTACK_BASE < LIMITER_ATTACK_SH_MIN)
@@ -705,6 +711,7 @@ module partial_pipeline #(
     wire signed [23:0] s9_phase;
     wire signed [35:0] s9_ic1eq1n, s9_ic2eq1n, s9_ic1eq2n, s9_ic2eq2n;
     wire signed [17:0] s9_gain_l, s9_gain_r;
+    wire signed [35:0] s9_level_sec2;
     wire [LIMITER_W-1:0] s9_limiter_gain;
     wire [LIMITER_CONTEXT_W-1:0] s9_limiter_context;
 
@@ -717,7 +724,7 @@ module partial_pipeline #(
         .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
         .in_phase(s3d_phase), .in_gain_l(s3d_gain_left), .in_gain_r(s3d_gain_right),
         .in_limiter({s3d_limiter_gain, s3d_limiter_context}),
-        .out_valid(s9_valid), .out_idx(s9_idx), .out_sample(s9_sample),
+        .out_valid(s9_valid), .out_idx(s9_idx), .out_sample(s9_sample), .out_level(s9_level_sec2),
         .out_ic1eq1n(s9_ic1eq1n), .out_ic2eq1n(s9_ic2eq1n),
         .out_ic1eq2n(s9_ic1eq2n), .out_ic2eq2n(s9_ic2eq2n),
         .out_phase(s9_phase), .out_gain_l(s9_gain_l), .out_gain_r(s9_gain_r),
@@ -806,7 +813,8 @@ module partial_pipeline #(
     //
     // A feedback limiter per partial in the master's form
     // (master_limiter.sv), with the filter inside the loop: the
-    // detector reads the filter's output, and the gain it sets is
+    // detector reads the filter's output before its saturation (the
+    // cascade's, up to the state clamp), and the gain it sets is
     // applied to the oscillator at S3D, before the filter, one sample
     // later. The filter sees the oscillator at its nominal level (the
     // voice's gain comes after it, at S10), so what the output has over
@@ -824,9 +832,13 @@ module partial_pipeline #(
     //      2^ATTACK_SH / THRESHOLD samples. Never below the floor.
     //   the resonator quiet:           gain += (gain >> RELEASE_SH) + 1
     //      Exponential in amplitude, a constant number of dB a sample,
-    //      the envelopes' decay convention; the 1 keeps it moving where
-    //      the shift gives nothing; the sum is clamped at unity, where
-    //      the state starts.
+    //      the envelopes' decay convention, RELEASE_SH = ATTACK_SH - K:
+    //      the release follows the filter as the attack does, 1.5 to
+    //      3 dB per filter time constant on every partial, so the
+    //      overrun into the band (its rate times the filter's lag) is
+    //      the same on every partial and inside the band. The 1 keeps it moving where the
+    //      shift gives nothing; the sum is clamped at unity, where the
+    //      state starts.
     //   neither:                       the gain holds.
     //
     // The floor. The cascade's peak gain is at most Q squared, the single
@@ -853,11 +865,10 @@ module partial_pipeline #(
     // are under the oscillator's full scale (2^27 in Q8.28, the top
     // nine bits of each state agreeing), which a ring over 0.707 times
     // the threshold never is. In the band between, the gain holds, so
-    // the attack and the release never balance against each other and
-    // the release's constant is free: a release lifting the gain into
-    // the band overruns by its rate times the filter's lag, 2.6 dB at
-    // 100 Hz and Q 32 with RELEASE_SH 15. The states read are the
-    // section whose output the partial takes.
+    // the attack and the release never balance against each other. A
+    // release lifting the gain into the band overruns by its rate times
+    // the filter's lag, which is why the release follows the filter too.
+    // The states read are the section's whose output the partial takes.
     //
     // The attack follows the filter. The master's plant is a multiply,
     // instantaneous; here a gain change at the oscillator reaches the
@@ -870,9 +881,14 @@ module partial_pipeline #(
     // Q doubles the time constant, each octave of cutoff halves it.
     //
     // No cap on the attack step (the master caps at half the gain): the
-    // overshoot is at most 2^17 - THRESHOLD and ATTACK_SH at least
-    // SH_MIN, so the step is under half the gain by construction (the
-    // elaboration check at S3B), and the state never crosses zero.
+    // overshoot is at most the state clamp's 96 less the threshold and
+    // ATTACK_SH at least SH_MIN, so the step is under half the gain by
+    // construction (the elaboration check at S3B), and the state never
+    // crosses zero. Reading the level before the ±8 saturation is what
+    // makes the onset short: a ring at Q 32 is at the rail 16 samples
+    // into the note, and the way down is the clamped overshoot over
+    // 2^ATTACK_SH a sample; at 95 instead of 7 it is twelve times faster,
+    // with the loop gain near the threshold unchanged.
     //
     // The walk after the filter's output register (S9), one operation
     // class a stage:
@@ -886,22 +902,30 @@ module partial_pipeline #(
     //   addressed at S3B: on the other clock parity, so a read and a
     //   write never share a clock, and 24 < 256 slots.
     //----------------------------------------------------------------
-    localparam int OVERSHOOT_W = 17;                          // 2^17 - THRESHOLD fits
+    localparam int OVERSHOOT_W = 17;                          // (96 - 1) * 2^10 fits
+    localparam int OVERSHOOT_SCALE = 4;                       // the overshoot's units: Q4.14 >> 4
+    localparam int LIMITER_RELEASE_SH_MIN = LIMITER_ATTACK_SH_MIN - LIMITER_RELEASE_K;
     localparam int QUIET_TOP_BITS = 36 - 27;                  // a state under 2^27 (8192 Q4.14): its top nine bits agree
     initial begin
-        if (LIMITER_RELEASE_SH < 1 || LIMITER_RELEASE_SH > LIMITER_W - 2)
-            $error("partial_pipeline: LIMITER_RELEASE_SH %0d is outside the state's width", LIMITER_RELEASE_SH);
+        if (LIMITER_RELEASE_SH_MIN < 1 || LIMITER_RELEASE_SH_MIN + 15 > LIMITER_W - 2)
+            $error("partial_pipeline: LIMITER_RELEASE_K %0d puts the release shift outside 1 … %0d", LIMITER_RELEASE_K, LIMITER_W - 2);
     end
-
-    // |y| - THRESHOLD, signed: -THRESHOLD … 2^17 - THRESHOLD
-    wire [17:0]        s9_sample_bits = s9_sample;
-    wire [17:0]        s9_magnitude   = s9_sample[17] ? (~s9_sample_bits + 18'd1) : s9_sample_bits;
-    wire signed [18:0] s9_overshoot   = 19'($signed({1'b0, s9_magnitude})) - 19'($signed({1'b0, LIMITER_THRESHOLD}));
 
     // the resonator's energy: the states of the section the output comes from
     wire [LIMITER_SHIFT_W-1:0] s9_limiter_shift = s9_limiter_context[LIMITER_CONTEXT_W-1 -: LIMITER_SHIFT_W];
     wire [LIMITER_FLOOR_W-1:0] s9_limiter_floor = s9_limiter_context[LIMITER_FLOOR_W:1];
     wire                       s9_cascade       = s9_limiter_context[0];
+
+    // The level the detector reads: the cascade's output before its
+    // saturation (up to the ±96 state clamp, so a railed ring is seen
+    // for what it is and the oscillator comes down twelve times faster
+    // than the ±8 word would allow); the single section's saturated
+    // word, its peak growing as Q, at most 6 dB over the rail. The
+    // overshoot over the threshold is carried in units of 2^-10 (Q4.14
+    // >> 4) so that 95 fits the 17-bit DSP operand.
+    wire signed [35:0] s9_level     = s9_cascade ? s9_level_sec2 : (36'(s9_sample) <<< 14);
+    wire        [35:0] s9_level_mag = s9_level[35] ? (~s9_level + 36'd1) : s9_level;
+    wire signed [22:0] s9_overshoot_q414 = 23'($signed({1'b0, s9_level_mag[35:14]})) - 23'($signed({5'b0, LIMITER_THRESHOLD}));
     function automatic logic state_quiet(input logic signed [35:0] state);
         state_quiet = (state[35 -: QUIET_TOP_BITS] == '0) || (state[35 -: QUIET_TOP_BITS] == '1);
     endfunction
@@ -922,9 +946,9 @@ module partial_pipeline #(
     end
     always_ff @(posedge clk) begin
         l1_idx           <= s9_idx;
-        l1_over          <= s9_overshoot > 19'sd0;
+        l1_over          <= s9_overshoot_q414 > 23'sd0;
         l1_quiet         <= s9_quiet;
-        l1_overshoot     <= s9_overshoot[OVERSHOOT_W-1:0];
+        l1_overshoot     <= s9_overshoot_q414[OVERSHOOT_W+3:4];
         l1_limiter_gain  <= s9_limiter_gain;
         l1_limiter_shift <= s9_limiter_shift;
         l1_limiter_floor <= s9_limiter_floor;
@@ -952,20 +976,31 @@ module partial_pipeline #(
         l2_limiter_floor <= l1_limiter_floor;
     end
 
-    // L3: the candidates. The product carries the gain's top 17 bits, so
-    // the attack shift is ATTACK_SH - 16: SH_MIN - 16 fixed, then the
-    // partial's count (a 4-level mux in front of the subtractor). The
-    // release candidate is the gain itself unless the resonator is
-    // quiet: the step is masked, not the adder.
-    wire [33:0]          l2_step_floor   = l2_product >> (LIMITER_ATTACK_SH_MIN - LIMITER_GAIN_W + 1);
+    // L3: the candidates. The product carries the gain's top 17 bits and
+    // the overshoot's units are 2^-4, so the attack shift is ATTACK_SH -
+    // 20: SH_MIN - 20 fixed, then the partial's count (a 4-level mux in
+    // front of the subtractor); the release step is the gain shifted by
+    // RELEASE_SH_MIN, then the same count. The release candidate is the
+    // gain itself unless the resonator is quiet: the step is masked,
+    // not the adder.
+    wire [33:0]          l2_step_floor   = l2_product >> (LIMITER_ATTACK_SH_MIN - LIMITER_GAIN_W + 1 - OVERSHOOT_SCALE);
     wire [LIMITER_W-1:0] l2_attack_step  = LIMITER_W'(l2_step_floor >> l2_limiter_shift);
-    wire [LIMITER_W-1:0] l2_release_step = l2_quiet ? (l2_limiter_gain >> LIMITER_RELEASE_SH) : '0;
+    wire [LIMITER_W-1:0] l2_release_step = l2_quiet ? ((l2_limiter_gain >> LIMITER_RELEASE_SH_MIN) >> l2_limiter_shift) : '0;
+    // The floor is the power of two 2^(32 - floor shift); a value is
+    // under it when every bit from that one up is clear, which the mask
+    // of those bits tests with no compare chain (the mask is all ones
+    // shifted, the floor its lowest set bit). The attack stops at the
+    // floor from above; a gain already under it (the resonance word
+    // fell, and the floor rose past the gain) is left to the attack and
+    // the release, never lifted: a jump to the floor would be a step of
+    // tens of dB in one sample.
+    wire [LIMITER_W-1:0] l2_floor_mask = ~({LIMITER_W{1'b1}} >> (6'(l2_limiter_floor) + 6'd1));
     logic                 l3_valid;
     logic [VW-1:0]        l3_idx;
-    logic                 l3_over;
+    logic                 l3_over, l3_floored;
     logic [LIMITER_W-1:0] l3_attack_c;
     logic [LIMITER_W:0]   l3_release_c;                       // up to unity plus the step: a bit wider
-    logic [LIMITER_FLOOR_W-1:0] l3_limiter_floor;
+    logic [LIMITER_W-1:0] l3_floor_mask;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) l3_valid <= 1'b0;
         else        l3_valid <= l2_valid;
@@ -973,19 +1008,17 @@ module partial_pipeline #(
     always_ff @(posedge clk) begin
         l3_idx       <= l2_idx;
         l3_over      <= l2_over;
+        l3_floored   <= (l2_limiter_gain & l2_floor_mask) != '0;      // the gain is at or over the floor
         l3_attack_c  <= l2_limiter_gain - l2_attack_step;
         l3_release_c <= {1'b0, l2_limiter_gain} + {1'b0, l2_release_step} + (LIMITER_W + 1)'(l2_quiet);
-        l3_limiter_floor <= l2_limiter_floor;
+        l3_floor_mask <= l2_floor_mask;
     end
 
-    // L4: the new state, the gain for the next sample. The floor is the
-    // power of two 2^(32 - floor shift); the candidate is under it when
-    // every bit from that one up is clear. The release candidate is over
-    // unity when bit 32 is set with anything under it (unity is bit 32
-    // alone) or bit 33 is set. Neither test is a compare chain.
-    wire [LIMITER_W-1:0] floor_value     = LIMITER_UNITY >> l3_limiter_floor;
-    wire [LIMITER_W-1:0] floor_mask      = ~(floor_value - 1'b1);        // the bits at and above the floor's
-    wire attack_under_floor = (l3_attack_c & floor_mask) == '0;
+    // L4: the new state, the gain for the next sample. The release
+    // candidate is over unity when bit 32 is set with anything under it
+    // (unity is bit 32 alone) or bit 33 is set: no compare chain.
+    wire [LIMITER_W-1:0] l3_floor_value = l3_floor_mask & ~(l3_floor_mask << 1);   // the mask's lowest set bit
+    wire attack_under_floor = l3_floored && ((l3_attack_c & l3_floor_mask) == '0);
     wire release_over_unity = l3_release_c[LIMITER_W]
                             || (l3_release_c[LIMITER_W-1] && |l3_release_c[LIMITER_W-2:0]);
     logic                 l4_valid;
@@ -997,7 +1030,7 @@ module partial_pipeline #(
     end
     always_ff @(posedge clk) begin
         l4_idx          <= l3_idx;
-        l4_limiter_gain <= l3_over ? (attack_under_floor ? floor_value : l3_attack_c) :
+        l4_limiter_gain <= l3_over ? (attack_under_floor ? l3_floor_value : l3_attack_c) :
                            release_over_unity ? LIMITER_UNITY : l3_release_c[LIMITER_W-1:0];
     end
 

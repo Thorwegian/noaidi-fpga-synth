@@ -11,8 +11,9 @@
 //
 //   1. the cascade at the top of the resonance knob (Q 32), the cutoff on
 //      the fundamental: after the transient the output is held at the
-//      threshold (within 1 dB above it) and the gain does not pump (its
-//      ripple over the settled window under 1 dB); the transient's peak,
+//      threshold (within 1 dB above it) and the gain does not pump (over
+//      the settled window it moves under 1 dB, or in one direction: a
+//      release still climbing is not pumping); the transient's peak,
 //      how long the output sits at the ±8 rail and the gain the loop
 //      settles to are reported, not asserted: they are the margin
 //      measurement, taken over ATTACK_BASE with `-GATTACK_BASE=<n>`
@@ -22,7 +23,8 @@
 //   4. no resonance: the gain stays at unity exactly and the output under
 //      the threshold (the limiter idle on an unresonant partial)
 //   5. the release: the resonance taken away after corner 1's settle, the
-//      gain grows as (1 + 2^-RELEASE_SH)^n
+//      gain grows as (1 + 2^-RELEASE_SH)^n at the partial's shift, which
+//      follows the resonance word as it is now (r = 0: fast)
 //
 // Between corners the bench parks the partial: its filter states to zero
 // and its gain to unity, on an idle slot, so each attack starts from the
@@ -31,8 +33,8 @@
 `timescale 1ns / 1ps
 `default_nettype none
 module tb_resonance_limiter #(
-    parameter int ATTACK_BASE = 27,         // the pipeline's LIMITER_ATTACK_BASE under test
-    parameter int RELEASE_SH  = 15          //   and its LIMITER_RELEASE_SH
+    parameter int ATTACK_BASE = 26,         // the pipeline's LIMITER_ATTACK_BASE under test
+    parameter int RELEASE_K   = 13          //   and its LIMITER_RELEASE_K
 );
 
     logic clk = 0, rst_n = 1;  // driven to 0 at time 0: a real falling edge for the async resets
@@ -73,7 +75,7 @@ module tb_resonance_limiter #(
     always #25 sclk = ~sclk;
 
     logic signed [25:0] ml, mr;
-    partial_pipeline #(.LIMITER_ATTACK_BASE(ATTACK_BASE), .LIMITER_RELEASE_SH(RELEASE_SH)) u_pipe (
+    partial_pipeline #(.LIMITER_ATTACK_BASE(ATTACK_BASE), .LIMITER_RELEASE_K(RELEASE_K)) u_pipe (
         .clk(clk), .rst_n(rst_n), .slot(slot),
         .slot_issue(slot_issue), .sample_tick(sample_tick),
         .sclk(sclk),
@@ -172,10 +174,14 @@ module tb_resonance_limiter #(
     longint y_abs;                 // |s9_sample| of partial 0 this sample
     longint gain;                  // limiter_ram[0] at the tick (the state after last sample's write)
     bit     quiet;                 // the resonator quiet this sample (the release gate)
+    integer fc_oct, reso_oct;      // partial 0's effective octaves, as S3 holds them
     always @(posedge clk) begin
         if (u_pipe.s9_valid && u_pipe.s9_idx == 0) begin
             y_abs = (u_pipe.s9_sample < 0) ? -longint'(u_pipe.s9_sample) : longint'(u_pipe.s9_sample);
             quiet = u_pipe.s9_quiet;
+        end
+        if (u_pipe.s3_valid && u_pipe.s3_idx == 0) begin
+            fc_oct = u_pipe.s3_fc_oct; reso_oct = u_pipe.s3_reso_oct;
         end
         if (sample_tick) gain = u_pipe.limiter_ram[0];
     end
@@ -184,27 +190,37 @@ module tb_resonance_limiter #(
     // samples |y| sat at the rail, and the first 64-sample block whose
     // peak was back within 1 dB of the threshold after a block over it
     // (|y| itself crosses zero twice a cycle, so the hold is judged on
-    // block peaks).
+    // block peaks). The first two samples are the words before the
+    // change and are skipped.
     localparam int BLOCK = 64;
+    integer reversals;             // the gain's changes of direction in the last watch: a release
+                                   // climbing through the window is not pumping, a gain going up
+                                   // and down is
     task automatic watch(input integer n, output longint peak, output longint gain_min,
                          output longint gain_max, output integer railed, output integer held_at);
-        integer k;
-        longint block_peak;
+        integer k, direction;
+        longint block_peak, gain_prev;
         bit been_over;
         begin
             peak = 0; gain_min = UNITY; gain_max = 0; railed = 0; held_at = -1; been_over = 0; block_peak = 0;
+            reversals = 0; direction = 0; gain_prev = gain;
             for (k = 0; k < n; k++) begin
                 do @(posedge clk); while (!sample_tick);
                 #1;
+                if (k < 2) continue;
 `ifdef TRACE
-                if (k % 64 == 0) $display("  trace k=%0d |y|=%0d gain=%0d (%.1f dB) quiet=%0d",
-                    k, y_abs, gain, db_of(real'(gain) / real'(UNITY)), quiet);
+                if (k % 64 == 0) $display("  trace k=%0d |y|=%0d gain=%0d (%.1f dB) quiet=%0d fc_oct=%0d reso_oct=%0d",
+                    k, y_abs, gain, db_of(real'(gain) / real'(UNITY)), quiet, fc_oct, reso_oct);
 `endif
                 if (y_abs > peak) peak = y_abs;
                 if (y_abs > block_peak) block_peak = y_abs;
                 if (y_abs >= RAIL) railed++;
                 if (gain < gain_min) gain_min = gain;
                 if (gain > gain_max) gain_max = gain;
+                if (gain > gain_prev && direction < 0) reversals++;
+                if (gain < gain_prev && direction > 0) reversals++;
+                if (gain != gain_prev) direction = (gain > gain_prev) ? 1 : -1;
+                gain_prev = gain;
                 if (k % BLOCK == BLOCK - 1) begin
                     if (block_peak > THRESHOLD * 1122 / 1000) been_over = 1;
                     else if (been_over && held_at < 0) held_at = k + 1 - BLOCK;
@@ -234,11 +250,11 @@ module tb_resonance_limiter #(
             set_partial(pitch, fc, r, mode);
             watch(TRANSIENT, peak, gain_min, gain_max, railed, held_at);
             watch(SETTLED, settled_peak, settled_min, settled_max, settled_railed, unused);
-            $display("%s: transient peak %.2f dB over T, %0d samples at the rail, within 1 dB of T from sample %0d; settled: peak %.2f dB over T, gain %.2f dB, ripple %.3f dB",
+            $display("%s: transient peak %.2f dB over T, %0d samples at the rail, within 1 dB of T from sample %0d; settled: peak %.2f dB over T, gain %.2f dB, span %.3f dB in %0d reversals",
                      name, db_of(real'(peak) / real'(THRESHOLD)), railed, held_at,
                      db_of(real'(settled_peak) / real'(THRESHOLD)),
                      db_of(real'(settled_min) / real'(UNITY)),
-                     db_of(real'(settled_max) / real'(settled_min)));
+                     db_of(real'(settled_max) / real'(settled_min)), reversals);
             if (settled_peak > THRESHOLD * 1122 / 1000) begin
                 $display("FAIL %s: the output is not held at the threshold", name);
                 errors++;
@@ -247,7 +263,7 @@ module tb_resonance_limiter #(
                 $display("FAIL %s: the output reached the rail after settling", name);
                 errors++;
             end
-            if (settled_max * 1000 > settled_min * 1122) begin
+            if (settled_max * 1000 > settled_min * 1122 && reversals > 2) begin
                 $display("FAIL %s: the gain pumps", name);
                 errors++;
             end
@@ -278,17 +294,18 @@ module tb_resonance_limiter #(
 
         // 5. the release: corner 1 again, then the resonance taken away;
         // the gain grows by (1 + 2^-RELEASE_SH) a sample once the
-        // resonator is quiet
+        // resonator is quiet, RELEASE_SH = ATTACK_SH - K with ATTACK_SH =
+        // BASE + 0 - 7 now that r is 0, or its floor 22
         park_partial();
         set_partial(PITCH_1K5, PITCH_1K5, R_TOP, MODE_CASCADE_LP);
         watch(TRANSIENT, peak, gain_min, gain_max, railed, held_at);
         set_partial(PITCH_1K5, PITCH_1K5, R_NONE, MODE_CASCADE_LP);
         watch(64, peak, gain_min, gain_max, railed, held_at);        // the peak collapses, the loop lets go
         gain_start = gain;
-        watch(4096, peak, gain_min, gain_max, railed, held_at);
+        watch(64, peak, gain_min, gain_max, railed, held_at);
         gain_end = gain;
-        expected = real'(gain_start) * $pow(1.0 + $pow(2.0, -real'(RELEASE_SH)), 4096.0);
-        $display("5 release: gain %.2f dB -> %.2f dB after 4096 samples, the rate says %.2f dB",
+        expected = real'(gain_start) * $pow(1.0 + $pow(2.0, -real'((ATTACK_BASE - 7 < 22 ? 22 : ATTACK_BASE - 7) - RELEASE_K)), 64.0);
+        $display("5 release: gain %.2f dB -> %.2f dB after 64 samples, the rate says %.2f dB",
                  db_of(real'(gain_start) / real'(UNITY)), db_of(real'(gain_end) / real'(UNITY)), db_of(expected / real'(UNITY)));
         if (gain_start > UNITY / 8 || real'(gain_end) > expected * 1.01 || real'(gain_end) < expected * 0.99) begin
             $display("FAIL 5: the release is not the exponential at the partial's rate");

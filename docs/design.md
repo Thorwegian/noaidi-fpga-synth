@@ -189,23 +189,27 @@ feedback limiter per partial in the master's form, with the filter inside
 the loop. The filter sees the oscillator at its nominal level (the voice's
 gain comes after it), so whatever its output has over the oscillator's
 full scale is resonance; the detector reads the output after the filter,
-the gain reduction is applied to the oscillator before it, and the
-threshold holds resonance to at most +6 dB (twice the oscillator's full
-scale of 0.5, a constant: a designer's number, not a performer's). The
-gain state is one UQ0.32 word per partial in a block RAM of its own,
-read at S3B and written back 24 clocks later. The attack is the
-master's, `gain -= gain × overshoot >> ATTACK_SH`, with the shift matched
-to the partial's filter from the two log-domain words the pipeline holds:
-`ATTACK_SH = 27 + log2(Q) − log2(fc)` in octaves, so the attack's time
-constant tracks the filter's ring-up (Q / (π·fc)) on every partial, and
-the gain is never taken below what the resonance could have added (Q² for
-the cascade, Q for the section), which keeps the integrator from winding
-up while a railed ring decays. The release, exponential at 2^-15 a sample
-(25 dB/s), runs only while the resonator is quiet: the filter's two
-integrator states stand in quadrature at resonance, so a ring over 0.707
-of the threshold keeps one of them over the oscillator's level at every
-sample, and between that and the threshold the gain holds. It replaced
-`reso_att_lut`, an attenuation by the resonance code alone.
+before its saturation (the cascade's word up to the ±96 state clamp, so a
+railed ring is seen for what it is), the gain reduction is applied to the
+oscillator before the filter, and the threshold holds resonance to at
+most +6 dB (twice the oscillator's full scale of 0.5, a constant: a
+designer's number, not a performer's). The gain state is one UQ0.32 word
+per partial in a block RAM of its own, read at S3B and written back 24
+clocks later. The attack is the master's, `gain -= gain × overshoot >>
+ATTACK_SH`, with the shift matched to the partial's filter from the two
+log-domain words the pipeline holds: `ATTACK_SH = 26 + log2(Q) − log2(fc)`
+in octaves (22 at the least), so the attack's time constant tracks the
+filter's ring-up (Q / (π·fc)) on every partial, and the gain is never
+taken below what the resonance could have added (Q² for the cascade, Q
+for the section), which keeps the integrator from winding up while a
+railed ring decays. The release, exponential at `2^-(ATTACK_SH − 13)` a
+sample (the filter's own pace: 1.5 to 3 dB per filter time constant),
+runs only while the resonator is quiet: the filter's two integrator
+states stand in quadrature at resonance, so a ring over 0.707 of the
+threshold keeps one of them over the oscillator's level at every sample,
+and between that and the threshold the gain holds, so the attack and the
+release never balance against each other. It replaced `reso_att_lut`, an
+attenuation by the resonance code alone.
 
 **The post-mix chain** (`top.sv`, #416): blocks that each take and
 publish a stereo sample at the tick, an insert chain. First the master
