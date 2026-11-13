@@ -6,7 +6,7 @@ usage: resonance_take.py <out.wav> [--program N] [--port CLIENT:PORT] [--device 
 The case the attenuation table could not handle and the limiter is for:
 resonance at the top (CC 71 = 127, Q 32), the cutoff on the fundamental
 (CC 74 = 64 with 100 % key tracking, CC 31 = 64), the cascade (CC 30 =
-127), the amp attack fast (CC 73 = 127) so the onset is the filter's and
+127), the amp attack at its fastest (CC 73 = 0, knob up is longer) so the onset is the filter's and
 not the envelope's, the mod envelope's depth at the centre (CC 107 = 64)
 so the cutoff stays put. Four events, two seconds each with a second
 between: C3, G3, the C4 major triad, then C3 again on the single section
@@ -20,7 +20,7 @@ import subprocess
 import threading
 import time
 
-CONTROLS = [(71, 127), (74, 64), (31, 64), (30, 127), (73, 127), (107, 64)]
+CONTROLS = [(71, 127), (74, 64), (31, 64), (30, 127), (73, 0), (107, 64)]
 EVENTS = [([48], 127), ([55], 127), ([60, 64, 67], 127), ([48], 0)]   # the notes, and CC 30's value before them
 
 
