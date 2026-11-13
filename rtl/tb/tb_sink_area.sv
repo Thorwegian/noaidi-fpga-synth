@@ -9,6 +9,13 @@
 // the flip on with the pass's words, on all six ports at once; a write
 // during the next pass changes nothing the partials see until its flip.
 // The word nobody writes (1023) reads zero.
+//
+// A write takes the even ports of the page it lands in for one clock
+// (#358: a pair of blocks serves two ports, port A of each the write's):
+// the core's words take the shadow page's, which every port reads
+// through; the firmware's words (both pages) take the active page's too,
+// so the chip parks every port on the zero word for them, and the model
+// counts a word a port wanted that a write displaced.
 //------------------------------------------------------------------------
 `timescale 1ns / 1ps
 `default_nettype none
@@ -44,6 +51,16 @@ module tb_sink_area;
         repeat (2) @(posedge clk);
     endtask
 
+    // a firmware word, as the pass's window gives it: both pages, every port parked on the zero
+    // word as the pipeline leaves them between partials, and landed before the ports move on
+    task automatic write_firmware(input int address, input int value);
+        @(negedge clk) for (int port = 0; port < PORTS; port++) read_address[port] = synth_pkg::POINTER_ZERO;
+        write_both = 1;
+        write(address, value);
+        write_both = 0;
+        @(negedge clk);     // landed: the ports are free to move
+    endtask
+
     // every port reads `address` and must see `value`
     task automatic expect_all(input int address, input int value, input string what);
         for (int port = 0; port < PORTS; port++) read_address[port] = address[9:0];
@@ -54,6 +71,13 @@ module tb_sink_area;
                 $display("FAIL %s: port %0d reads %0d at word %0d, want %0d", what, port, read_data[port], address, value);
                 errors++;
             end
+        end
+    endtask
+
+    task automatic check(input bit ok, input string what);
+        if (!ok) begin
+            $display("FAIL %s", what);
+            errors++;
         end
     endtask
 
@@ -78,7 +102,7 @@ module tb_sink_area;
         $display("pass: the shadow page is published a pass later");
 
         $display("--- 3. a firmware word (both pages) survives the flips ---");
-        write_both = 1; write(9, 77); write_both = 0;
+        write_firmware(9, 77);
         expect_all(9, 77, "at once, on the page the partials read");
         flip();
         expect_all(9, 77, "after a flip");
@@ -89,6 +113,33 @@ module tb_sink_area;
         $display("--- 4. the word nobody writes reads zero ---");
         expect_all(1023, 0, "the zero word");
         $display("pass: word 1023 is zero");
+
+        $display("--- 5. the core's words take no port the partials read through ---");
+        // every port on word 3 of the active page (42) while the core writes word 3 of the shadow
+        // page, clock after clock: no port's word moves
+        for (int port = 0; port < PORTS; port++) read_address[port] = 10'd3;
+        repeat (3) @(posedge clk);
+        for (int round = 0; round < 4; round++) begin
+            @(negedge clk) begin write_enable = 1; write_address = 10'd3; write_data = 18'(500 + round); end
+        end
+        @(negedge clk) write_enable = 0;
+        #1;
+        for (int port = 0; port < PORTS; port++) check(int'(read_data[port]) == 42, $sformatf("port %0d read through the core's writes", port));
+        check(u_sink_area.read_taken_violations == 0, "the core's writes to the shadow page took no port");
+        flip();
+        expect_all(3, 503, "the last of the core's words, after the flip");
+        $display("pass: the shadow page's writes are invisible to the ports");
+
+        $display("--- 6. a firmware word while a port is not parked: the model counts it ---");
+        // the chip never does this; the instrument has to see it when it happens
+        for (int port = 0; port < PORTS; port++) read_address[port] = 10'd9;
+        repeat (3) @(posedge clk);
+        write_both = 1; write(10, 11); write_both = 0;
+        repeat (2) @(posedge clk);
+        #1;
+        check(u_sink_area.read_taken_violations == 1, $sformatf("the one clock counted, got %0d", u_sink_area.read_taken_violations));
+        expect_all(10, 11, "the word landed all the same");
+        $display("pass: a displaced read is counted");
 
         $display("");
         if (errors == 0) $display("ALL PASS");

@@ -26,6 +26,9 @@
 //      (the raw Q4.14 sum: the master limiter and the clip are the next
 //      block, master_limiter.sv, with their own bench)
 //  10. signal energy: the mix is not silent
+//  11. the probe: the data stream's sink word, read in the last port's
+//      idle clocks between the partials, follows the probe's address and
+//      the page it names
 //
 // Run from rtl/ via `make sim-partial` ($readmemh paths are relative to rtl/).
 //--------------------------------------------------------------------
@@ -65,6 +68,11 @@ module tb_partial_pipeline;
     logic [17:0]                   sink_write_data;
     logic [5:0][9:0]               sink_read_address;
     logic [5:0][17:0]              sink_read_data;
+    // paging: the word the CSP changes in the shadow page (a gain-left word), which the probe watches
+    localparam int CHANGED_WORD = 5 * 16 + 4;
+    localparam int CHANGED_VALUE = 20'sh1000;
+    logic [9:0]                    probe_address = CHANGED_WORD[9:0];   // the probe watches that word
+    logic [17:0]                   probe_word;
 
     csp_sink_area u_sink (
         .clk(clk), .reset_n(rst_n),
@@ -87,6 +95,7 @@ module tb_partial_pipeline;
         .pointer_write_data(pointer_write_data),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
+        .probe_address(probe_address), .probe_word(probe_word),
         .mix_left(mix_left), .mix_right(mix_right)
     );
 
@@ -232,7 +241,7 @@ module tb_partial_pipeline;
     // Test state
     //----------------------------------------------------------------
     integer errors = 0;
-    integer n_front = 0, n_param = 0, n_gain = 0, n_mix = 0, n_phase = 0, n_paged = 0;
+    integer n_front = 0, n_param = 0, n_gain = 0, n_mix = 0, n_phase = 0, n_paged = 0, n_probe = 0;
     integer period = 0;                // running count of sample periods
     integer adds_this_period = 0;      // partials entering the mix
 
@@ -246,10 +255,6 @@ module tb_partial_pipeline;
 
     // the gain multiply's operands, one register back
     integer prev_s9_sample = 0, prev_s9_gain_l = 0, prev_s9_gain_r = 0;
-
-    // paging: the word the CSP changes in the shadow page, and when
-    localparam int CHANGED_WORD = 5 * 16 + 4;     // a gain-left word
-    localparam int CHANGED_VALUE = 20'sh1000;
 
     //----------------------------------------------------------------
     // Main monitor
@@ -273,6 +278,18 @@ module tb_partial_pipeline;
                 $signed(u_pipe.s1_mode)           !== sink_word(p, 9)) begin
                 $display("FAIL front end: partial %0d period %0d", p, period);
                 errors = errors + 1;
+            end
+        end
+
+        // 11. the probe's word, once a period while the partials are being read, and once in
+        // the idle slots: the model's word for its address, a clock or two behind the flip
+        if (slot == 300 || slot == 700) begin
+            if (rst_n && period >= 1) begin
+                n_probe = n_probe + 1;
+                if ($signed(probe_word) !== sign_extend18(sink_model[probe_address])) begin
+                    $display("FAIL probe: period %0d slot %0d word %0d reads %0d, want %0d", period, slot, probe_address, $signed(probe_word), sign_extend18(sink_model[probe_address]));
+                    errors = errors + 1;
+                end
             end
         end
 
@@ -452,10 +469,10 @@ module tb_partial_pipeline;
     //----------------------------------------------------------------
     always @(posedge clk) begin
         if (period >= LAST_PERIOD && slot == 400) begin
-            $display("checked: %0d front end, %0d parameters, %0d gains, %0d mix periods, %0d phases, %0d after the flip",
-                     n_front, n_param, n_gain, n_mix, n_phase, n_paged);
-            if (errors == 0 && n_paged == 0)
-                $display("FAIL: the paging case never ran");
+            $display("checked: %0d front end, %0d parameters, %0d gains, %0d mix periods, %0d phases, %0d after the flip, %0d probe reads",
+                     n_front, n_param, n_gain, n_mix, n_phase, n_paged, n_probe);
+            if (errors == 0 && (n_paged == 0 || n_probe == 0))
+                $display("FAIL: the paging case or the probe never ran");
             else if (errors == 0)
                 $display("PASS: all partial pipeline checks passed");
             else

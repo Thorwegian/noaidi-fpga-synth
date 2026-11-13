@@ -324,10 +324,12 @@ gowin_pack, GW2AR-LV18QN88C8/I7).
 | 256 × 36 | 0 blocks — yosys picks LUT-RAM below roughly a block's worth |
 
 So a block with two read ports is **instantiated by hand**: the sink area is
-six `DPX9B` (`rtl/csp/csp_sink_area.sv`), the active page's block reading on
-both ports and the shadow page's taking the CSP's write on one of them, as
-the multiply-add dword's DSP is. Everything else is inferred as a semi
-dual-port block, one write and one read.
+six `DPX9B` (`rtl/csp/csp_sink_area.sv`), three pairs of pages, every block
+reading on both ports and a write taking port A of the block it lands in for
+one clock (the shadow page's at any time, since nothing listens to it; the
+active page's only in the pass's window, when the partials' ports are
+parked), as the multiply-add dword's DSP is. Everything else is inferred as
+a semi dual-port block, one write and one read.
 
 Place-and-route of the whole design (`make pack`): the blocks and their
 ports are `csp2_architecture.md` section 2, the flow its section 4, and the

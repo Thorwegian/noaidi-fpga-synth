@@ -27,6 +27,7 @@ Taken on issue #231; the text below is written to them.
 | 2026-10-18 | the row is a qword (72 bits), eight nonet slices | section 2 |
 | 2026-10-18 | no hardware interlock: the window's placement is the guarantee | section 8 |
 | 2026-10-18 | the sink area stays six replicas of two pages, twelve blocks | `csp2_architecture.md` section 2 |
+| 2026-11-13 | the sink area reads on both ports of its blocks: three pairs of pages, six blocks (#358) | `csp2_architecture.md` section 2 |
 | 2026-10-18 | the wire is in nines: a command nonet, an 18-bit address (two nonets), dwords of four nonets | `memory_map.md`, conventions |
 
 ## 1. A program

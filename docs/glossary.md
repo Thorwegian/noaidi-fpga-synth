@@ -160,11 +160,11 @@ control signal once a pass. The instruction set is
 - **the pipe** (also **the data stream**) — the 48 kHz S/PDIF output
   carrying data instead of audio (`CTRL[3]`): frames of 64 words with a
   sync word and a CRC, read by `spdif_capture.py`.
-- **sink area** — 1024 words the CSP publishes and the partials read, kept
-  as six **replicas** (the partials read six sinks a clock) of two
-  **pages**. **active page** — the one the partials read; **shadow page**
-  — the one the CSP and the firmware write; they **flip** at the pass
-  boundary. (Not shadow SRAM.)
+- **sink area** — 1024 words the CSP publishes and the partials read, in
+  two **pages**, each page three blocks (the partials read six sinks a
+  clock, two through each block's two ports). **active page** — the one
+  the partials read; **shadow page** — the one the CSP and the firmware
+  write; they **flip** at the pass boundary. (Not shadow SRAM.)
 - **source / sink** — the couple: the CSP's results are sources (an
   envelope, an LFO, a voice's pitch); the words the partials read are
   sinks; the control program wires one to the other.
