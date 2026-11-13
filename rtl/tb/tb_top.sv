@@ -561,6 +561,13 @@ module tb_top;
         check_silence("I2S right with the note hard left", i2s_r, note_i2s + 1, 64);
         read_status(MAP_DIAG_LIMITER, value);
         checkn("the limiter slot still the gain", value, dut.master_gain);
+        // the data stream's sink word: the pipeline reads the probe's row in its last port's
+        // idle clocks, between the partials' reads, while the note plays
+        write_dwords[0] = 36'(csp_pkg::SINK_BASE + 3);
+        write_burst(MAP_PROBE_ADDRESS, 1, 1);
+        #(40 * half);
+        checkn("the probe's sink word, the voice gain", dut.probe_sink_word, 4096);
+        checkn("no write took a read port a partial was using", dut.u_sink_area.read_taken_violations, 0);
 
         $display("");
         $display("%0d I2S words, %0d S/PDIF 96 kHz frames, %0d S/PDIF 48 kHz frames decoded", i2s_nl, frames96, frames48);

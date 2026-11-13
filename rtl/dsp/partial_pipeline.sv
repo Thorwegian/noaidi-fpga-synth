@@ -88,6 +88,12 @@ module partial_pipeline #(
     output logic [synth_pkg::SINK_READ_PORTS-1:0][9:0]  sink_read_address,
     input  logic [synth_pkg::SINK_READ_PORTS-1:0][17:0] sink_read_data,
 
+    // The data stream's view of a sink word (the probe's address, #236):
+    // the last port is addressed by a partial on odd slots only, so on
+    // every other clock it reads the probe's word, as the partials would.
+    input  logic [9:0]     probe_address,
+    output logic [17:0]    probe_word,
+
     output logic signed [25:0] mix_left,    // Q4.14 with 8 guard bits: the
                                              // raw stereo sum, published at
                                              // sample_tick and held for the
@@ -213,7 +219,12 @@ module partial_pipeline #(
 
     logic            f1_valid, f2_valid, f3_valid;
     logic [VW-1:0]   f1_idx, f2_idx, f3_idx;
-    logic [synth_pkg::POINTER_W-1:0] f2_pointer [synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS];
+    // the second group's ports, read in F2; the rest are first-group ports, and the last of
+    // them reads the probe's word in its other clocks
+    localparam int SECOND_GROUP_PORTS = synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS;
+    localparam int PROBE_PORT = synth_pkg::SINK_READ_PORTS - 1;
+    if (PROBE_PORT < SECOND_GROUP_PORTS) $error("partial_pipeline: the probe's port must be a first-group port");
+    logic [synth_pkg::POINTER_W-1:0] f2_pointer [SECOND_GROUP_PORTS];
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) f1_valid <= 1'b0;
@@ -235,9 +246,13 @@ module partial_pipeline #(
 
     // F1: the first six words. F2: the last four, with the pointers kept
     // from F1. A partial is in F1 on odd slots and in F2 on even ones, so
-    // the ports never serve two partials at once.
+    // the ports never serve two partials at once. A port no partial is
+    // using is parked on the zero word, the row nothing writes: the sink
+    // area's write takes a port's read for a clock (csp_sink_area), and
+    // the firmware's words take one of the page the partials read, in
+    // the pass's window, when every port is parked.
     always_ff @(posedge clk) begin
-        for (int second = 0; second < synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS; second++) begin
+        for (int second = 0; second < SECOND_GROUP_PORTS; second++) begin
             f2_pointer[second] <= pointer_of(f1_entry, synth_pkg::SINK_READ_PORTS + second);
         end
     end
@@ -246,12 +261,20 @@ module partial_pipeline #(
         for (int port = 0; port < synth_pkg::SINK_READ_PORTS; port++) begin
             if (f1_valid) begin
                 sink_read_address[port] = 10'(pointer_of(f1_entry, port));
-            end else if (port < synth_pkg::POINTERS_PER_PARTIAL - synth_pkg::SINK_READ_PORTS) begin
+            end else if (port < SECOND_GROUP_PORTS && f2_valid) begin
                 sink_read_address[port] = 10'(f2_pointer[port]);
+            end else if (port == PROBE_PORT) begin
+                sink_read_address[port] = probe_address;
             end else begin
-                sink_read_address[port] = '0;
+                sink_read_address[port] = synth_pkg::POINTER_ZERO;
             end
         end
+    end
+
+    // the probe's word: the one the probe's port read, which is the clock after any address
+    // that was not a partial's
+    always_ff @(posedge clk) begin
+        if (!f2_valid) probe_word <= sink_read_data[PROBE_PORT];
     end
 
     //----------------------------------------------------------------

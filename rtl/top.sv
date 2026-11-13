@@ -206,13 +206,12 @@ module top (
     // The sink area (#236): what the pass published, the pages flipping
     // with the pass, read by the partial pipeline through its pointers
     //----------------------------------------------------------------
-    // the partial pipeline's six read ports, and a seventh for the data stream: the sink word at
-    // the probe address's low ten bits, as the partials would read it (the debug port, #236)
-    localparam int SINK_PORTS = synth_pkg::SINK_READ_PORTS + 1;
-    localparam int SINK_DEBUG = synth_pkg::SINK_READ_PORTS;
-    logic [SINK_PORTS-1:0][csp_pkg::SINK_WORD_W-1:0] sink_read_address;
-    logic [SINK_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
-    assign sink_read_address[SINK_DEBUG] = probe_address_sync[csp_pkg::SINK_WORD_W-1:0];
+    // the partial pipeline's six read ports; the data stream's view of the sink word at the
+    // probe address's low ten bits, as the partials would read it (#236), is read by the
+    // pipeline in its last port's idle clocks
+    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::SINK_WORD_W-1:0] sink_read_address;
+    logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
+    logic [csp_pkg::WORD_W-1:0] probe_sink_word;
 
     // the partial pipeline's pointers from the bus (sclk domain, an entry at a time), its mix out
     logic        pointer_write_enable;
@@ -222,7 +221,7 @@ module top (
     logic signed [23:0] sample_left, sample_right;   // Q0.24, limited and clipped
     logic [18:0] master_gain;                        // the master limiter's applied gain, UQ0.18
 
-    csp_sink_area #(.READ_PORTS (SINK_PORTS)) u_sink_area (
+    csp_sink_area u_sink_area (
         .clk           (sysclk),
         .reset_n       (rst_n),
         .write_enable  (sink_write_enable),
@@ -248,8 +247,10 @@ module top (
         .pointer_write_enable (pointer_write_enable),
         .pointer_write_index  (pointer_write_index),
         .pointer_write_data   (pointer_write_data),
-        .sink_read_address    (sink_read_address[synth_pkg::SINK_READ_PORTS-1:0]),
-        .sink_read_data       (sink_read_data[synth_pkg::SINK_READ_PORTS-1:0]),
+        .sink_read_address    (sink_read_address),
+        .sink_read_data       (sink_read_data),
+        .probe_address        (probe_address_sync[csp_pkg::SINK_WORD_W-1:0]),
+        .probe_word           (probe_sink_word),
         .mix_left             (mix_left),
         .mix_right            (mix_right)
     );
@@ -370,7 +371,7 @@ module top (
         .sample_counter (pass_counter),
         .probe_pair     (probe_pair),
         .probe_register (probe_register),
-        .sink_word      (sink_read_data[SINK_DEBUG]),
+        .sink_word      (probe_sink_word),
         .mix_left       (sample_left),
         .mix_right      (sample_right),
         .word           (stream_word),
