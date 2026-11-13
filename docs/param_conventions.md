@@ -68,6 +68,7 @@ only.**
 | Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂, CC 74 ±8 oct around key-tracked base, KT amount CC 31 (0–200%, centre 64 = 100%) | ✓ |
 | Osc pitch/fine | semitone steps ±12 / fine ±0.5 semi, center detents | same | ✓ |
 | Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `val·5632/127` spans 0–5.5 oct of Q, equal Q ratio per step | **F5** — a stable top by design: CC 71 tops out at r = 5.5 oct (Q≈32), sharp but stable, rather than running into self-oscillation |
+| Resonance level | the peak's loudness grows with the knob (Minimoog: the passband drops as resonance rises, so the peak stays put) | a limiter per partial around the filter holds the peak at most 6 dB over the oscillator's level, whatever the knob and wherever the harmonics fall (`partial_pipeline.sv`, section L; a constant, not a CC) | ✓ the knob sets the timbre, the volume knob stops being a resonance compensator |
 | PW range | 50% ↔ ~5/95%, never 0/100 (silence) | unipolar equal-ratio log taper on the low time, 0 = 50% → 127 = 95% high (5% low), rails unreachable | ✓ |
 
 ## MODULATION — LFOs, depths, routing
