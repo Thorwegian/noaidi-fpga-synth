@@ -11,7 +11,8 @@ One rule decides the folder: what the thing needs.
   of what the simulation covers.
   `pin_audit.py` and `check_timing.py` run inside `make pack.fs` (`rtl/Makefile`);
   `synth_report.py` reads the place-and-route report; `utilisation.py` counts
-  each module's primitives (flip-flops, LUT4, ALU, BSRAM, RAM16SDP4, DSP)
+  each module's primitives (flip-flops, LUT4, ALU, BSRAM, RAM16SDP4, DSP, and
+  the DSP pool as 18 × 18 multiplier slots of the chip's 48)
   against the chip's capacity, and `make -C rtl report` runs both
   (`make -C rtl utilisation` alone); `pin_distance.py` and
   `placement_check.py` are run by hand on a routed nextpnr JSON;
