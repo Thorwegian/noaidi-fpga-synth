@@ -18,7 +18,7 @@
 # comparisons of two netlists on the same placements.
 #
 # usage: tools/lab/placement_sweep.sh [COUNT=4] [SEEDS="…"] [JOBS=4] [LAB=thor@home.thj.no]
-#                                     [PR=<n>] [WARN_MHZ=85]
+#                                     [PR=<n>] [WARN_MHZ=85] [PNR_CPU_SECONDS=720]
 #        (environment variables; run from the repo root after `make -C rtl yosys.json`;
 #        SEEDS names the seeds instead of drawing COUNT of them)
 #
@@ -36,7 +36,11 @@
 # sessions queue instead of sharing four cores; each run has its own remote
 # directory. The placements run at the lowest CPU priority (nice 19, #436):
 # a board take's placement, a synthesis or the desktop started on top of a
-# sweep gets the cores first, and the sweep stretches.
+# sweep gets the cores first, and the sweep stretches. Every placement has a
+# CPU-time limit, PNR_CPU_SECONDS (12 minutes, #440): one that ends has taken
+# 2 to 8 (the lab box's logs, 100 to 453 s with four at once; main on the cloud
+# box 487 s), a legaliser that thrashes would run 35 before giving up, so the
+# limit turns the wait into a verdict line ("gave up after 12 CPU-minutes").
 #
 # Four draws is a small sample: at a one-in-six give-up rate "4 of 4" comes up
 # half the time, so the count is read across sweeps, not as proof on its own.
@@ -48,6 +52,7 @@ LAB=${LAB:-thor@home.thj.no}
 PORT=${PORT:-23000}
 LABREPO=${LABREPO:-Documents/Code/noaidi-fpga-synth}
 WARN_MHZ=${WARN_MHZ:-85}
+PNR_CPU_SECONDS=${PNR_CPU_SECONDS:-720}
 REMOTE=.local/tmp/hermes/placement_sweep/$(date +%s)-$$
 LOCK=.local/tmp/hermes/placement_sweep.lock
 if [ -z "$SEEDS" ]; then
@@ -63,16 +68,24 @@ CLOCK_MET='import json, sys
 fmax = json.load(open(sys.argv[1]))["fmax"]
 sys.exit(0 if fmax and all(c["achieved"] >= c["constraint"] for c in fmax.values()) else 1)'
 echo "placement_sweep: seeds $SEEDS"
+mkdir -p rtl/obj_dir/sweep
 ssh -p "$PORT" -o BatchMode=yes "$LAB" "rm -rf $REMOTE && mkdir -p $REMOTE" || exit 1
 scp -P "$PORT" -q rtl/yosys.json rtl/constraints.cst "$LAB:$REMOTE/" || exit 1
-ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS CLOCK_MET='$CLOCK_MET' LOCK=\$HOME/$LOCK NEXTPNR=\$HOME/$LABREPO/.tools/nextpnr/bin/nextpnr-himbaechel bash -s" <<'EOF'
+ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS CLOCK_MET='$CLOCK_MET' PNR_CPU_SECONDS=$PNR_CPU_SECONDS LOCK=\$HOME/$LOCK NEXTPNR=\$HOME/$LABREPO/.tools/nextpnr/bin/nextpnr-himbaechel bash -s" <<'EOF' | tee rtl/obj_dir/sweep/seeds.txt
 [ -x "$NEXTPNR" ] || { echo "placement_sweep: no $NEXTPNR on the lab box; make tools there" >&2; exit 2; }
 run_seed() {
   s=$1
-  nice -n 19 $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
-    --vopt cst=constraints.cst --placer-heap-beta 0.75 --report report_$s.json --freq 73.728 --seed $s \
+  # A placement that ends has taken 2 to 8 CPU-minutes; a legaliser that
+  # thrashes runs 35 before the tool gives up (#440). The limit is on
+  # CPU time, not the clock, because these run at nice 19 and may wait. The
+  # soft limit sends SIGXCPU (exit 152); the hard one a minute above is the
+  # kernel's SIGKILL, which a soft limit equal to it would send instead.
+  (ulimit -St "$PNR_CPU_SECONDS"; ulimit -Ht $((PNR_CPU_SECONDS + 60)); ulimit -c 0; exec nice -n 19 $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
+    --vopt cst=constraints.cst --placer-heap-beta 0.75 --report report_$s.json --freq 73.728 --seed $s) \
     > pnr_$s.log 2>&1
-  if grep -q "Unable to find legal placement" pnr_$s.log; then echo "seed $s: placement failed (rtl/obj_dir/sweep/pnr_$s.log)"
+  rc=$?
+  if [ $rc -eq 152 ]; then echo "seed $s: gave up after $((PNR_CPU_SECONDS / 60)) CPU-minutes (the legaliser thrashing, #343; rtl/obj_dir/sweep/pnr_$s.log)"; rm -f report_$s.json
+  elif grep -q "Unable to find legal placement" pnr_$s.log; then echo "seed $s: placement failed (rtl/obj_dir/sweep/pnr_$s.log)"
   elif grep -q "Routing design failed" pnr_$s.log; then echo "seed $s: routing failed (rtl/obj_dir/sweep/pnr_$s.log)"
   elif [ ! -f report_$s.json ]; then echo "seed $s: place and route failed (rtl/obj_dir/sweep/pnr_$s.log)"
   elif ! python3 -c "$CLOCK_MET" report_$s.json; then echo "seed $s: placed and routed, misses the clock (rtl/obj_dir/sweep/pnr_$s.log)"
@@ -116,8 +129,10 @@ fi
 echo "$verdict (seeds $SEEDS)"
 echo "placement_sweep: $routed of $total seeds placed and routed, $met of $total meet the clock (seeds $SEEDS)"
 if [ -n "$PR" ]; then
-  printf '%s (seeds %s)\n\nRandom-seed sweep of `%s` (%s), %s draws on the lab box after the board take, the sweep as a monitor (#434). Logs and reports under `rtl/obj_dir/sweep/` of the sweeping checkout, by seed.\n\n```\n%s\n```\n' \
-    "$verdict" "$SEEDS" "$(git branch --show-current)" "$(git rev-parse --short HEAD)" "$total" "$summary" \
+  seedlines=$(grep '^seed ' rtl/obj_dir/sweep/seeds.txt 2>/dev/null || true)
+  printf '%s (seeds %s)\n\nRandom-seed sweep of `%s` (%s), %s draws on the lab box after the board take, the sweep as a monitor (#434). Logs and reports under `rtl/obj_dir/sweep/` of the sweeping checkout, by seed.\n\n```\n%s%s\n```\n' \
+    "$verdict" "$SEEDS" "$(git branch --show-current)" "$(git rev-parse --short HEAD)" "$total" "${seedlines:+$seedlines
+}" "$summary" \
     | gh pr comment "$PR" --body-file - >/dev/null && echo "placement_sweep: posted to PR #$PR"
 fi
 [ "$met" -eq "$total" ]

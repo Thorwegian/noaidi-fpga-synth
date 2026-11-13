@@ -127,15 +127,24 @@ PLACER_BETA ?= 0.75
 # pipefail here too: without it a failed place-and-route (the router giving
 # up, the timing verdict) exits 0 through tee, and a script that trusts make
 # goes on with no pnr.json or a stale one.
+# A CPU-time limit on nextpnr (#440): a placement that ends has taken 2 to 8
+# CPU-minutes (the lab box's logs, 100 to 453 s with four at once; main on
+# the cloud box 487 s, 13 Nov 2026); a legaliser that thrashes at this
+# occupancy (#343) runs 35 before the tool gives up. At 12 the kill is the verdict:
+# the soft limit's SIGXCPU (exit 152; the hard limit a minute above would be
+# a bare SIGKILL), with no core dump of a 400 MB process. Raise it on
+# purpose for a run that is meant to be long.
+PNR_CPU_SECONDS ?= 720
 pnr.json: yosys.json
-	set -o pipefail; $(NEXTPNR) --json $< \
+	set -o pipefail; ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); ulimit -c 0; $(NEXTPNR) --json $< \
 		--write $@ \
 		--device GW2AR-LV18QN88C8/I7 \
 		--vopt family=GW2A-18C \
 		--vopt cst=constraints.cst \
 		--placer-heap-beta $(PLACER_BETA) \
 		--report pnr_report.json \
-		--freq 73.728 2>&1 | tee pnr.log
+		--freq 73.728 2>&1 | tee pnr.log \
+		|| { rc=$$?; [ $$rc -eq 152 ] && echo "pnr: nextpnr gave up after $$(($(PNR_CPU_SECONDS) / 60)) CPU-minutes: the placer is choking (#343), not slow" >&2; exit $$rc; }
 
 pack.fs: pnr.json
 	$(PACK_SUITE)/bin/gowin_pack -d GW2A-18C -o $@ $<
@@ -166,16 +175,21 @@ timing-check: pnr.log
 # then the worst of each column. The build itself takes no seed.
 SEEDS ?= 1 2 3 4 5 6 7 8
 timing-sweep: yosys.json
-	@mkdir -p obj_dir/sweep
+	@mkdir -p obj_dir/sweep; rm -f $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
 	@for s in $(SEEDS); do \
-		$(NEXTPNR) --json yosys.json --write /dev/null \
+		(ulimit -St $(PNR_CPU_SECONDS); ulimit -Ht $$(($(PNR_CPU_SECONDS) + 60)); ulimit -c 0; \
+		exec $(NEXTPNR) --json yosys.json --write /dev/null \
 			--device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
 			--vopt cst=constraints.cst --placer-heap-beta $(PLACER_BETA) \
 			--report obj_dir/sweep/report_$$s.json \
-			--freq 73.728 --seed $$s > obj_dir/sweep/pnr_$$s.log 2>&1 \
-			|| echo "seed $$s: place and route failed (obj_dir/sweep/pnr_$$s.log)"; \
-	done
-	python3 ../tools/netlist/synth_report.py $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS)))
+			--freq 73.728 --seed $$s) > obj_dir/sweep/pnr_$$s.log 2>&1; rc=$$?; \
+		[ $$rc -eq 152 ] && echo "seed $$s: gave up after $$(($(PNR_CPU_SECONDS) / 60)) CPU-minutes (the placer choking, #343; obj_dir/sweep/pnr_$$s.log)"; \
+		[ $$rc -ne 0 ] && [ $$rc -ne 152 ] && echo "seed $$s: place and route failed (obj_dir/sweep/pnr_$$s.log)"; \
+	done; true
+	@reports=$$(ls $(addprefix obj_dir/sweep/report_,$(addsuffix .json,$(SEEDS))) 2>/dev/null); \
+	[ -n "$$reports" ] && python3 ../tools/netlist/synth_report.py $$reports; \
+	echo "timing-sweep: $$(echo $$reports | wc -w) of $(words $(SEEDS)) seeds placed and routed (seeds $(SEEDS))"; \
+	[ "$$(echo $$reports | wc -w)" -eq $(words $(SEEDS)) ]
 
 sram: pack.fs
 	openFPGALoader -b tangnano20k -m $<
