@@ -45,6 +45,18 @@ def main():
             stop.wait(0.25)
 
     threading.Thread(target=keepalive, daemon=True).start()
+    # The kernel opens a USB MIDI port's device only while some client is
+    # subscribed to it, and drops a direct event to an unsubscribed port
+    # without an error (baseline_recording.py, #337): hold a subscription.
+    subprocess.run(["aconnect", "14:0", args.port], capture_output=True)
+    try:
+        take(args, midi)
+    finally:
+        stop.set()
+        subprocess.run(["aconnect", "-d", "14:0", args.port], capture_output=True)
+
+
+def take(args, midi):
     midi("FE")
     time.sleep(0.3)
     midi("C0 %02X" % args.program)
@@ -64,7 +76,6 @@ def main():
     time.sleep(args.tail)
     recorder.terminate()
     recorder.wait()
-    stop.set()
     midi("B0 7B 00")
     print("resonance take %s: program %d, %d events" % (args.out, args.program, len(EVENTS)))
 
