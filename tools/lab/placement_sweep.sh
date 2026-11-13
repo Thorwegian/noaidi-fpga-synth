@@ -34,7 +34,9 @@
 # A WARNING or FAIL on a merged PR becomes an issue under #363. The lab box
 # runs one sweep at a time (a lock around the placements), so overlapping
 # sessions queue instead of sharing four cores; each run has its own remote
-# directory.
+# directory. The placements run at the lowest CPU priority (nice 19, #436):
+# a board take's placement, a synthesis or the desktop started on top of a
+# sweep gets the cores first, and the sweep stretches.
 #
 # Four draws is a small sample: at a one-in-six give-up rate "4 of 4" comes up
 # half the time, so the count is read across sweeps, not as proof on its own.
@@ -67,7 +69,7 @@ ssh -p "$PORT" -o BatchMode=yes "$LAB" "cd $REMOTE && SEEDS='$SEEDS' JOBS=$JOBS 
 [ -x "$NEXTPNR" ] || { echo "placement_sweep: no $NEXTPNR on the lab box; make tools there" >&2; exit 2; }
 run_seed() {
   s=$1
-  $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
+  nice -n 19 $NEXTPNR --json yosys.json --write /dev/null --device GW2AR-LV18QN88C8/I7 --vopt family=GW2A-18C \
     --vopt cst=constraints.cst --placer-heap-beta 0.75 --report report_$s.json --freq 73.728 --seed $s \
     > pnr_$s.log 2>&1
   if grep -q "Unable to find legal placement" pnr_$s.log; then echo "seed $s: placement failed (rtl/obj_dir/sweep/pnr_$s.log)"
