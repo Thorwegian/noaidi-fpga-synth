@@ -43,10 +43,11 @@ module noise_source #(
     end
 
     function automatic logic [31:0] advanced(input logic [31:0] state);
-        logic [31:0] s = state;
+        logic [31:0] s;
+        s = state;
         for (int step = 0; step < WORD_W; step++)
             s = {s[30:0], 1'b0} ^ (s[31] ? synth_pkg::LFSR32_POLYNOMIAL : 32'd0);
-        return s;
+        advanced = s;
     endfunction
 
     // Reset to the seed: a datapath register otherwise, but the zero
