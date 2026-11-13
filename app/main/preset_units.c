@@ -400,15 +400,15 @@ static int32_t raw_slope(const preset_t *p, int i, double v) {
 
 // ── Names ───────────────────────────────────────────────────────────
 static const char *const s_structures[] = {"1+1", "7+1", "4+4", NULL};
-static const char *const s_osc_waves[]  = {"saw", "pulse", "triangle", "sine",
-                                           "noise", NULL};
+static const char *const s_osc_waves[]  = {"saw",  "pulse", "triangle",
+                                           "sine", "noise", NULL};
 static const char *const s_lfo_shapes[] = {"saw", "pulse", "triangle", "sine",
                                            NULL};
-static const char *const s_filters[]   = {"lowpass", "bandpass", "highpass",
-                                          NULL};
-static const char *const s_mod_dests[] = {"cutoff", NULL};
-static const char *const s_lfo_dests[] = {"pulse_width", "resonance", "pitch",
-                                          "cutoff", NULL};
+static const char *const s_filters[]    = {"lowpass", "bandpass", "highpass",
+                                           NULL};
+static const char *const s_mod_dests[]  = {"cutoff", NULL};
+static const char *const s_lfo_dests[]  = {"pulse_width", "resonance", "pitch",
+                                           "cutoff", NULL};
 
 // ── The table, in the order the loader applies it ───────────────────
 #define NUM(tbl, k, n, acc, conv)                                              \

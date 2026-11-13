@@ -279,7 +279,8 @@ Part apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     // ---- the oscillators and the voice structure ----
     case 20:
     case 21:
-        preset.osc[cc - 20].wave = static_cast<waveform_t>(five_way_index(value));
+        preset.osc[cc - 20].wave =
+                static_cast<waveform_t>(five_way_index(value));
         return Part::voices;
     case 14:
     case 22:
