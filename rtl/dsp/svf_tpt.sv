@@ -45,7 +45,7 @@
 // it stays a 36 x 36.
 //
 // Stages are named after the value each one produces, and a register
-// after the stage it stands in: t1_h is h as it stands at section 1's
+// after the stage it stands in: t1_s2a is s2a as it stands at section 1's
 // t stage. The stages, in order:
 //   g       g from the mantissa and the octave, the operands registered
 //   gR2     g + R2, and the products g*g and R2*g for D
@@ -64,9 +64,7 @@
 // Latency (in_* -> out_*): 1 (g) + 2 (gR2, h) + 9 (section 1) + 9 (section 2)
 // = 21 cycles. Well under the 256-slot half, so state read/write never
 // collide. What a stage does not transform is not carried through it: it
-// waits in the shadow-SRAM delays (delay_line.sv, section THE DELAYS); a
-// state read twice (s1 by the ms multiply and the ybp adds, s2 by the t
-// subtract and the y stage) has a line to each reader.
+// waits in the shadow-SRAM delays (delay_line.sv, section THE DELAYS).
 //
 // Reset (#309): only the *_valid registers have one. A datapath register
 // is meaningful only beside a valid bit, so it is a plain flip-flop with
@@ -158,6 +156,8 @@ module svf_tpt #(
     reg signed [17:0]   g_q1;     // R2 (Q2.16)
     reg [15:0]          g_m;      // the mantissa and the octave, for the g*y products
     reg [3:0]           g_oct;
+    reg signed [35:0]   g_u;      // osc <<< 12 (Q8.28)  -- section 1 input
+    reg signed [35:0]   g_s1a, g_s2a;
     reg [1:0]           g_mode;
 
     wire signed [35:0] k = $signed({20'd0, in_k_mantissa}) <<< (3 + in_k_octave);   // Q8.28, at most 34 bits
@@ -171,6 +171,8 @@ module svf_tpt #(
         g_q1   <= in_q1;
         g_m    <= in_k_mantissa;
         g_oct  <= in_k_octave;
+        g_u    <= {{6{in_osc[17]}}, in_osc, 12'd0};    // Q2.16<<12
+        g_s1a<=in_ic1eq1; g_s2a<=in_ic2eq1;
         g_mode<=in_filter_mode;
     end
 
@@ -178,6 +180,7 @@ module svf_tpt #(
     reg                 gR2_valid;
     reg signed [35:0]   gR2;                     // g + (R2<<12)  (Q8.28)
     reg [15:0]          gR2_m;  reg [3:0] gR2_oct;
+    reg signed [35:0]   gR2_u, gR2_s1a, gR2_s2a;
     reg [1:0]           gR2_mode;
     reg [17:0]          gR2_g2, gR2_r2g;         // Q.16 (unsigned range ok)
 
@@ -191,6 +194,7 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         gR2 <= g + {{6{g_q1[17]}}, g_q1, 12'd0};
         gR2_m<=g_m; gR2_oct<=g_oct;
+        gR2_u<=g_u; gR2_s1a<=g_s1a; gR2_s2a<=g_s2a;
         gR2_mode<=g_mode;
         gR2_g2  <= mul_g2[33:16];             // >>16 -> Q.16
         gR2_r2g <= mul_r2g[33:16];
@@ -199,8 +203,9 @@ module svf_tpt #(
     // ================= h: D = 1 + g2 + r2g, h = 1/D =====================
     reg                 h_valid;
     reg [17:0]          h;                       // UQ0.16
-    reg signed [35:0]   h_gR2;
+    reg signed [35:0]   h_gR2, h_u;
     reg [15:0]          h_m;  reg [3:0] h_oct;
+    reg signed [35:0]   h_s1a, h_s2a;
     reg [1:0]           h_mode;
 
     wire [17:0] D16 = 18'h10000 + {2'b0, gR2_g2[15:0]} + {2'b0, gR2_r2g[15:0]};
@@ -212,17 +217,16 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         h <= {2'b0, recip_lut[D16[15:8]]};
         h_gR2<=gR2; h_m<=gR2_m; h_oct<=gR2_oct;
+        h_u<=gR2_u; h_s1a<=gR2_s1a; h_s2a<=gR2_s2a;
         h_mode<=gR2_mode;
     end
 
     // ========================== SECTION 1 ===============================
-    // A value a stage only carries is not in its registers: the states and
-    // the input arrive from the delays (THE DELAYS below) at the stage that
-    // uses them, named for that stage (h_s1a is s1a as the ms1 multiply
-    // reads it, beside the h registers).
+    // Section 1 carries its own s1a/s2a and the running new-states; section
+    // 2's input states and the passthrough context wait in the delays.
     // --- ms1 = s1a*(g+R2) >>28 ---
     reg ms1_valid;
-    reg signed [35:0] ms1;
+    reg signed [35:0] ms1, ms1_u, ms1_s1a, ms1_s2a;
     reg [15:0] ms1_m;  reg [3:0] ms1_oct;
     reg [17:0] ms1_h;  reg [1:0] ms1_mode;
 
@@ -234,13 +238,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         ms1 <= mul_ms1 >>> 28;
         ms1_m<=h_m; ms1_oct<=h_oct;
-        ms1_h<=h;
+        ms1_u<=h_u; ms1_s1a<=h_s1a; ms1_s2a<=h_s2a; ms1_h<=h;
         ms1_mode<=h_mode;
     end
 
     // --- t1 = u - ms1 - s2a ---
     reg t1_valid;
-    reg signed [35:0] t1;
+    reg signed [35:0] t1, t1_s1a, t1_s2a;
     reg [15:0] t1_m;  reg [3:0] t1_oct;
     reg [17:0] t1_h;  reg [1:0] t1_mode;
 
@@ -251,13 +255,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         t1 <= ms1_u - ms1 - ms1_s2a;
         t1_m<=ms1_m; t1_oct<=ms1_oct;
-        t1_h<=ms1_h;
+        t1_s1a<=ms1_s1a; t1_s2a<=ms1_s2a; t1_h<=ms1_h;
         t1_mode<=ms1_mode;
     end
 
     // --- yhp1 = h*t >>16 ---
     reg yhp1_valid;
-    reg signed [35:0] yhp1;
+    reg signed [35:0] yhp1, yhp1_s1a, yhp1_s2a;
     reg [15:0] yhp1_m;  reg [3:0] yhp1_oct;
     reg [1:0] yhp1_mode;
 
@@ -269,13 +273,14 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         yhp1 <= mul_yhp1 >>> 16;
         yhp1_m<=t1_m; yhp1_oct<=t1_oct;
+        yhp1_s1a<=t1_s1a; yhp1_s2a<=t1_s2a;
         yhp1_mode<=t1_mode;
     end
 
     // --- myhp1 = mantissa*yHP, the g*yHP product before its octave shift ---
     reg myhp1_valid;
     reg signed [40:0] myhp1;
-    reg signed [35:0] myhp1_yhp;
+    reg signed [35:0] myhp1_yhp, myhp1_s1a, myhp1_s2a;
     reg [15:0] myhp1_m;  reg [3:0] myhp1_oct;
     reg [1:0] myhp1_mode;
 
@@ -286,13 +291,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         myhp1 <= mantissa_product(yhp1_m, yhp1);
         myhp1_m<=yhp1_m; myhp1_oct<=yhp1_oct;
-        myhp1_yhp<=yhp1;
+        myhp1_yhp<=yhp1; myhp1_s1a<=yhp1_s1a; myhp1_s2a<=yhp1_s2a;
         myhp1_mode<=yhp1_mode;
     end
 
     // --- gyhp1 = g*yHP >>28, the product shifted by the octave ---
     reg gyhp1_valid;
-    reg signed [35:0] gyhp1;
+    reg signed [35:0] gyhp1, gyhp1_yhp, gyhp1_s1a, gyhp1_s2a;
     reg [15:0] gyhp1_m;  reg [3:0] gyhp1_oct;
     reg [1:0] gyhp1_mode;
 
@@ -303,12 +308,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         gyhp1 <= octave_shift(myhp1, myhp1_oct);
         gyhp1_m<=myhp1_m; gyhp1_oct<=myhp1_oct;
+        gyhp1_yhp<=myhp1_yhp; gyhp1_s1a<=myhp1_s1a; gyhp1_s2a<=myhp1_s2a;
         gyhp1_mode<=myhp1_mode;
     end
 
     // --- ybp1 = gyHP + s1a ; s1a' = yBP + gyHP ---
     reg ybp1_valid;
-    reg signed [35:0] ybp1, ybp1_s1n;
+    reg signed [35:0] ybp1, ybp1_s1n, ybp1_yhp, ybp1_s2a;
     reg [15:0] ybp1_m;  reg [3:0] ybp1_oct;
     reg [1:0] ybp1_mode;
 
@@ -320,13 +326,14 @@ module svf_tpt #(
         ybp1     <= gyhp1 + gyhp1_s1a;
         ybp1_s1n <= (gyhp1 + gyhp1_s1a) + gyhp1;   // yBP + gyHP
         ybp1_m<=gyhp1_m; ybp1_oct<=gyhp1_oct;
+        ybp1_yhp<=gyhp1_yhp; ybp1_s2a<=gyhp1_s2a;
         ybp1_mode<=gyhp1_mode;
     end
 
     // --- mybp1 = mantissa*yBP, the g*yBP product before its octave shift ---
     reg mybp1_valid;
     reg signed [40:0] mybp1;
-    reg signed [35:0] mybp1_ybp;
+    reg signed [35:0] mybp1_ybp, mybp1_s1n, mybp1_yhp, mybp1_s2a;
     reg [3:0] mybp1_oct;
     reg [1:0] mybp1_mode;
 
@@ -337,13 +344,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         mybp1 <= mantissa_product(ybp1_m, ybp1);
         mybp1_oct<=ybp1_oct;
-        mybp1_ybp<=ybp1;
-        mybp1_mode<=ybp1_mode;
+        mybp1_ybp<=ybp1; mybp1_s1n<=ybp1_s1n; mybp1_yhp<=ybp1_yhp;
+        mybp1_s2a<=ybp1_s2a; mybp1_mode<=ybp1_mode;
     end
 
     // --- gybp1 = g*yBP >>28, the product shifted by the octave ---
     reg gybp1_valid;
-    reg signed [35:0] gybp1, gybp1_ybp;
+    reg signed [35:0] gybp1, gybp1_ybp, gybp1_s1n, gybp1_yhp, gybp1_s2a;
     reg [1:0] gybp1_mode;
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -352,14 +359,14 @@ module svf_tpt #(
     end
     always_ff @(posedge clk) begin
         gybp1 <= octave_shift(mybp1, mybp1_oct);
-        gybp1_ybp<=mybp1_ybp;
-        gybp1_mode<=mybp1_mode;
+        gybp1_ybp<=mybp1_ybp; gybp1_s1n<=mybp1_s1n; gybp1_yhp<=mybp1_yhp;
+        gybp1_s2a<=mybp1_s2a; gybp1_mode<=mybp1_mode;
     end
 
     // --- y1: yLP = gyBP + s2a ; s2a' = yLP + gyBP ; y1 = sat(select) ---
     reg y1_valid;
     reg signed [17:0] y1;                           // Q4.14
-    reg signed [35:0] y1_s2n;
+    reg signed [35:0] y1_s1n, y1_s2n;
 
     logic signed [35:0] ylp1, y1_select;
     always_comb begin
@@ -376,6 +383,7 @@ module svf_tpt #(
     end
     always_ff @(posedge clk) begin
         y1     <= sat_q414(y1_select);
+        y1_s1n <= gybp1_s1n;
         y1_s2n <= ylp1 + gybp1;
     end
 
@@ -383,8 +391,6 @@ module svf_tpt #(
     // Section 2 needs the partial's mantissa, octave, g+R2 and h too. They
     // are the same per partial, so it re-derives nothing: delay C below
     // brings them from the h stage, matched to section 1's 9-stage latency.
-    // The delays are declared here, after section 1, because the readers
-    // in section 1 are named for the stages they feed.
     // ========================== THE DELAYS (#309) =========================
     // What the filter carries without transforming it waits in the shadow
     // SRAM (delay_line.sv), not in every stage's flip-flops. With the g
@@ -393,25 +399,12 @@ module svf_tpt #(
     //   A  the partial's index, cascade flag, phase and gains: the input to
     //      the output registers, 20 clocks (a line holds 16 at most, so
     //      two in series, 16 and 4);
-    //   B  section 2's s1: the input to section 2's ms2 multiply, 12 clocks;
+    //   B  section 2's input states: the input to section 2, 12 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
     //      section 2, section 1's 9 clocks (a register of its own, then 8
     //      in the shadow SRAM);
-    //   D  section 1's new s2 and its output: section 1 to the output
-    //      registers, section 2's 8 clocks; its new s1 from the ybp1 stage
-    //      that forms it, 11 clocks;
-    //   E  section 1's s1, to its two readers: the ms1 multiply (3 clocks)
-    //      and the ybp1 adds (8);
-    //   F  section 1's s2, to its two readers: the t1 subtract (4 clocks)
-    //      and the y1 stage (11);
-    //   G  section 1's input u, to the t1 subtract (4 clocks);
-    //   H  section 2's s2, to its two readers: the t2 subtract (13 clocks)
-    //      and the y2 stage (20: a second line of 7 behind the first);
-    //   I  section 2's s1, from the ms2 stage's register to the ybp2 adds,
-    //      4 clocks (the line B register feeds the multiply, so it may not
-    //      feed the cells too, #238);
-    //   J  each section's yHP, from the myhp stage's register to the y
-    //      stage's select, 4 clocks (the yhp register feeds the multiply).
+    //   D  section 1's new states and its output: section 1 to the output
+    //      registers, section 2's 8 clocks.
     localparam int CARRIED_W = IDXW + 1 + 24 + 2 * GAIN_W;
     wire [CARRIED_W-1:0]     carried_16;
     wire [IDXW-1:0]          gybp2_idx;
@@ -427,32 +420,9 @@ module svf_tpt #(
         .d   (carried_16),
         .q   ({gybp2_idx, gybp2_cascade, gybp2_phase, gybp2_gain_l, gybp2_gain_r}));
 
-    wire signed [35:0] y1_ic1eq2;
-    delay_line #(.WIDTH (36), .DELAY (12)) u_delay_sec2_s1 (
-        .clk (clk), .d (in_ic1eq2), .q (y1_ic1eq2));
-
-    wire signed [35:0] h_s1a, gyhp1_s1a;
-    delay_line #(.WIDTH (36), .DELAY (3)) u_delay_s1a_ms (
-        .clk (clk), .d (in_ic1eq1), .q (h_s1a));
-    delay_line #(.WIDTH (36), .DELAY (8)) u_delay_s1a_ybp (
-        .clk (clk), .d (in_ic1eq1), .q (gyhp1_s1a));
-
-    wire signed [35:0] ms1_s2a, gybp1_s2a;
-    delay_line #(.WIDTH (36), .DELAY (4)) u_delay_s2a_t (
-        .clk (clk), .d (in_ic2eq1), .q (ms1_s2a));
-    delay_line #(.WIDTH (36), .DELAY (11)) u_delay_s2a_y (
-        .clk (clk), .d (in_ic2eq1), .q (gybp1_s2a));
-
-    wire signed [17:0] ms1_osc;
-    delay_line #(.WIDTH (18), .DELAY (4)) u_delay_u (
-        .clk (clk), .d (in_osc), .q (ms1_osc));
-    wire signed [35:0] ms1_u = {{6{ms1_osc[17]}}, ms1_osc, 12'd0};    // Q2.16<<12, section 1's input
-
-    wire signed [35:0] ms2_s2b, gybp2_s2b;
-    delay_line #(.WIDTH (36), .DELAY (13)) u_delay_s2b_t (
-        .clk (clk), .d (in_ic2eq2), .q (ms2_s2b));
-    delay_line #(.WIDTH (36), .DELAY (7)) u_delay_s2b_y (
-        .clk (clk), .d (ms2_s2b), .q (gybp2_s2b));
+    wire signed [35:0] y1_ic1eq2, y1_ic2eq2;
+    delay_line #(.WIDTH (72), .DELAY (12)) u_delay_sec2_states (
+        .clk (clk), .d ({in_ic1eq2, in_ic2eq2}), .q ({y1_ic1eq2, y1_ic2eq2}));
 
     // C's cells take their data from registers of their own, a clock after
     // the h stage: h_gR2 also feeds a multiplier, and h is the reciprocal
@@ -482,25 +452,13 @@ module svf_tpt #(
 
     wire signed [35:0] gybp2_s1an, gybp2_s2an;
     wire signed [17:0] gybp2_y1;
-    delay_line #(.WIDTH (36), .DELAY (11)) u_delay_sec1_s1n (
-        .clk (clk), .d (ybp1_s1n), .q (gybp2_s1an));
-    delay_line #(.WIDTH (36 + 18), .DELAY (8)) u_delay_sec1_out (
-        .clk (clk), .d ({y1_s2n, y1}), .q ({gybp2_s2an, gybp2_y1}));
-
-    wire signed [35:0] gyhp2_s1b;
-    delay_line #(.WIDTH (36), .DELAY (4)) u_delay_s1b_ybp (
-        .clk (clk), .d (ms2_s1b), .q (gyhp2_s1b));
-
-    wire signed [35:0] gybp1_yhp, gybp2_yhp;
-    delay_line #(.WIDTH (36), .DELAY (4)) u_delay_yhp1_y (
-        .clk (clk), .d (myhp1_yhp), .q (gybp1_yhp));
-    delay_line #(.WIDTH (36), .DELAY (4)) u_delay_yhp2_y (
-        .clk (clk), .d (myhp2_yhp), .q (gybp2_yhp));
+    delay_line #(.WIDTH (36 + 36 + 18), .DELAY (8)) u_delay_sec1_out (
+        .clk (clk), .d ({y1_s1n, y1_s2n, y1}), .q ({gybp2_s1an, gybp2_s2an, gybp2_y1}));
     wire signed [35:0] sec2_u = {{8{y1[17]}}, y1, 14'd0}; // y1<<<14
 
     // --- ms2 = s1b*(g+R2) >>28 ---
     reg ms2_valid;
-    reg signed [35:0] ms2, ms2_u, ms2_s1b;
+    reg signed [35:0] ms2, ms2_u, ms2_s1b, ms2_s2b;
     reg [15:0] ms2_m;  reg [3:0] ms2_oct;
     reg [17:0] ms2_h;  reg [1:0] ms2_mode;
     wire signed [71:0] mul_ms2 = y1_ic1eq2 * sec2_gR2;
@@ -511,14 +469,14 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         ms2 <= mul_ms2 >>> 28;
         ms2_m<=sec2_m; ms2_oct<=sec2_oct;
-        ms2_u<=sec2_u; ms2_s1b<=y1_ic1eq2;
+        ms2_u<=sec2_u; ms2_s1b<=y1_ic1eq2; ms2_s2b<=y1_ic2eq2;
         ms2_h<=sec2_h;
         ms2_mode<=sec2_mode;
     end
 
     // --- t2 = u - ms2 - s2b ---
     reg t2_valid;
-    reg signed [35:0] t2;
+    reg signed [35:0] t2, t2_s1b, t2_s2b;
     reg [15:0] t2_m;  reg [3:0] t2_oct;
     reg [17:0] t2_h;  reg [1:0] t2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -528,12 +486,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         t2 <= ms2_u - ms2 - ms2_s2b;
         t2_m<=ms2_m; t2_oct<=ms2_oct;
+        t2_s1b<=ms2_s1b; t2_s2b<=ms2_s2b;
         t2_h<=ms2_h; t2_mode<=ms2_mode;
     end
 
     // --- yhp2 = h*t >>16 ---
     reg yhp2_valid;
-    reg signed [35:0] yhp2;
+    reg signed [35:0] yhp2, yhp2_s1b, yhp2_s2b;
     reg [15:0] yhp2_m;  reg [3:0] yhp2_oct;
     reg [1:0] yhp2_mode;
     wire signed [54:0] mul_yhp2 = $signed({1'b0, t2_h}) * t2;
@@ -544,13 +503,14 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         yhp2 <= mul_yhp2 >>> 16;
         yhp2_m<=t2_m; yhp2_oct<=t2_oct;
+        yhp2_s1b<=t2_s1b; yhp2_s2b<=t2_s2b;
         yhp2_mode<=t2_mode;
     end
 
     // --- myhp2 = mantissa*yHP ---
     reg myhp2_valid;
     reg signed [40:0] myhp2;
-    reg signed [35:0] myhp2_yhp;
+    reg signed [35:0] myhp2_yhp, myhp2_s1b, myhp2_s2b;
     reg [15:0] myhp2_m;  reg [3:0] myhp2_oct;
     reg [1:0] myhp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -560,13 +520,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         myhp2 <= mantissa_product(yhp2_m, yhp2);
         myhp2_m<=yhp2_m; myhp2_oct<=yhp2_oct;
-        myhp2_yhp<=yhp2;
+        myhp2_yhp<=yhp2; myhp2_s1b<=yhp2_s1b; myhp2_s2b<=yhp2_s2b;
         myhp2_mode<=yhp2_mode;
     end
 
     // --- gyhp2 = g*yHP >>28, the product shifted by the octave ---
     reg gyhp2_valid;
-    reg signed [35:0] gyhp2;
+    reg signed [35:0] gyhp2, gyhp2_yhp, gyhp2_s1b, gyhp2_s2b;
     reg [15:0] gyhp2_m;  reg [3:0] gyhp2_oct;
     reg [1:0] gyhp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -576,12 +536,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         gyhp2 <= octave_shift(myhp2, myhp2_oct);
         gyhp2_m<=myhp2_m; gyhp2_oct<=myhp2_oct;
+        gyhp2_yhp<=myhp2_yhp; gyhp2_s1b<=myhp2_s1b; gyhp2_s2b<=myhp2_s2b;
         gyhp2_mode<=myhp2_mode;
     end
 
     // --- ybp2 = gyHP + s1b ; s1b' = yBP + gyHP ---
     reg ybp2_valid;
-    reg signed [35:0] ybp2, ybp2_s1n;
+    reg signed [35:0] ybp2, ybp2_s1n, ybp2_yhp, ybp2_s2b;
     reg [15:0] ybp2_m;  reg [3:0] ybp2_oct;
     reg [1:0] ybp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -592,13 +553,14 @@ module svf_tpt #(
         ybp2     <= gyhp2 + gyhp2_s1b;
         ybp2_s1n <= (gyhp2 + gyhp2_s1b) + gyhp2;
         ybp2_m<=gyhp2_m; ybp2_oct<=gyhp2_oct;
+        ybp2_yhp<=gyhp2_yhp; ybp2_s2b<=gyhp2_s2b;
         ybp2_mode<=gyhp2_mode;
     end
 
     // --- mybp2 = mantissa*yBP ---
     reg mybp2_valid;
     reg signed [40:0] mybp2;
-    reg signed [35:0] mybp2_ybp, mybp2_s1n;
+    reg signed [35:0] mybp2_ybp, mybp2_s1n, mybp2_yhp, mybp2_s2b;
     reg [3:0] mybp2_oct;
     reg [1:0] mybp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
@@ -608,13 +570,13 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         mybp2 <= mantissa_product(ybp2_m, ybp2);
         mybp2_oct<=ybp2_oct;
-        mybp2_ybp<=ybp2; mybp2_s1n<=ybp2_s1n;
-        mybp2_mode<=ybp2_mode;
+        mybp2_ybp<=ybp2; mybp2_s1n<=ybp2_s1n; mybp2_yhp<=ybp2_yhp;
+        mybp2_s2b<=ybp2_s2b; mybp2_mode<=ybp2_mode;
     end
 
     // --- gybp2 = g*yBP >>28, the product shifted by the octave ---
     reg gybp2_valid;
-    reg signed [35:0] gybp2, gybp2_ybp, gybp2_s1n;
+    reg signed [35:0] gybp2, gybp2_ybp, gybp2_s1n, gybp2_yhp, gybp2_s2b;
     reg [1:0] gybp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) gybp2_valid <= 1'b0;
@@ -622,8 +584,8 @@ module svf_tpt #(
     end
     always_ff @(posedge clk) begin
         gybp2 <= octave_shift(mybp2, mybp2_oct);
-        gybp2_ybp<=mybp2_ybp; gybp2_s1n<=mybp2_s1n;
-        gybp2_mode<=mybp2_mode;
+        gybp2_ybp<=mybp2_ybp; gybp2_s1n<=mybp2_s1n; gybp2_yhp<=mybp2_yhp;
+        gybp2_s2b<=mybp2_s2b; gybp2_mode<=mybp2_mode;
     end
 
     // --- y2: yLP = gyBP + s2b ; s2b' ; y2 = sat(select) ; the outputs ---
