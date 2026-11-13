@@ -615,7 +615,83 @@ tool.
 ### 6.6 Where the tool is now
 
 `tools/nextpnr.version` pins HermesOracle/nextpnr (upstream `937c770c`
-with the port B address arcs, the DSP arcs and the DSP macro exclusion;
-the LUT1..3 arcs are upstream's), built by `make tools` into
-`.tools/nextpnr` on both machines (`scripts/nextpnr.sh`). The fork's own
-changes are offered upstream as YosysHQ/nextpnr #1890, #1891 and #1892.
+with the port B address arcs, the DSP arcs, the DSP macro exclusion and
+the DSP control-line fix and guard of section 7; the LUT1..3 arcs are
+upstream's), built by `make tools` into `.tools/nextpnr` on both machines
+(`scripts/nextpnr.sh`). The fork's own changes are offered upstream as
+YosysHQ/nextpnr #1890, #1891, #1892 and #1904.
+
+## 7. The dead core was the DSP control line (2026-11-13)
+
+The dead-core class (#324's a52de6a build, #351's limiter split, #450's
+default placement of the resonance limiter) is one mechanism in two
+tools, found on #450 because it was the first instance with live
+siblings of the same netlist to diff against.
+
+### 7.1 The mechanism
+
+A Gowin DSP block has four clock, four enable and four reset inputs; each
+register in it selects one by a mux fuse. nextpnr assigns the line after
+placement (`adjust_dsp_pin_mapping`): per macro for CLK and CE, per block
+for RESET, a cell's pin becomes `CLK<i>`/`CE<i>`/`RESET<i>` where `i` is
+the position of its net in a list the placer keeps of the nets seen there,
+and `i` is written as a cell attribute for the packer. Two faults:
+
+- nextpnr's list never forgot a net whose cells had moved on
+  (`notifyBelChange` decremented the count and kept the entry), so the
+  line followed placement history: the CSP's multiply-add, alone in its
+  macro at the end, got line 1 because a ground-tied multiplier had passed
+  through during the analytic placer's iterations. Fixed in the fork
+  (`2cc3bf77`, offered upstream as YosysHQ/nextpnr #1904): an entry leaves
+  the list at count zero.
+- apicula's `gowin_pack` handed the mux attributes the index as an
+  integer, which matches none of its table values (they are named
+  `CEIN1..3`, `CLKIN1..3`, `RSTIN1..3`), and `add_attr_val` drops an
+  unknown pair silently. Every DSP register was therefore packed on line 0
+  whatever line the router drove. Offered upstream as YosysHQ/apicula
+  #603; the pinned pack suite (apicula 0.35.dev6) still has it, so the
+  fork carries a guard (`145c3392`): one RESET net per block, one CLK and
+  one CE net per macro, which keeps every cell on line 0. It costs the two
+  18x18 halves beside the multiply-add (36 of 48 in use) and goes with the
+  pin bump to a pack suite carrying #603.
+
+### 7.2 The evidence
+
+Six placements of one netlist (main at 6cbbf25), five booting and one
+dead: block RAM sites and modes, the slice rules and the global nets were
+identical in kind across all six; the one difference was the multiply-add's
+`CLK=1, CE=1, RESET=1` attributes on the dead build against `0, 0, 0` on
+the five. Three bitstreams of the dead placement settle it:
+
+- the dead `pack.fs`: self-test 0 passes, every check `got 0`, at 73.728
+  and at 50 MHz;
+- the same `yosys.json` and seed re-placed with the fork fix (placement
+  identical, 0 cells moved, only DSP control attributes changed): 9 of 9
+  self-test checks, "the chip does what the model says";
+- the dead `pnr.json` packed with the apicula fix: 42 bits differ from
+  the dead bitstream, all DSP fuses in the multiply-add's block, no routing
+  change, and it boots the same 9 of 9. So the chip's line-1 inputs work;
+  the packer never selected them.
+
+The vendor's placer never produced the case: its resource count prices a
+`MULTALU36X18` at a whole block (`DSP 2.5/24` for one of them and a
+`MULT18X18`), and asked to put a second clocked cell beside one it moved
+the cell to another block. The fork gives the cell one macro; that
+difference is open and separate.
+
+### 7.3 What this changes
+
+- The "functional fault in the bitstream" of section 6.5's last bullet has
+  its cause. A dead core with the pass tick running is the DSP control
+  line until shown otherwise: read the routed JSON's DSP cells for a
+  `CLK`/`CE`/`RESET` attribute above 0 before any other instrument.
+- The partial-product registers of #351 probably need not be free-running
+  for the chip's sake: if yosys folded the enabled registers into the DSP
+  cells there (not verified against that branch's `yosys.json`), the shape
+  was avoiding this fault without knowing it.
+- Instruments (lab box, `~/.local/tmp/hermes/wt-450/`): `placement_diff.py`
+  (a routed JSON against live ones: cells, block RAM, DSP, globals),
+  `slice_check.py` (the slice rules), `dsp_macros.py` (DSP tiles with
+  their control nets), `fs_tilediff.py` (two bitstreams tile by tile,
+  differing bits mapped to the DSP fuse tables), `dsp_logicinfo.py` (which
+  attribute values apicula can pack).
