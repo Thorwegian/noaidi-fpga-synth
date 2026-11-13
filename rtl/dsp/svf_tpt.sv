@@ -58,9 +58,14 @@
 //   yhp     h*t >>> 16
 //   myhp    mantissa*yHP, the product before its octave shift
 //   ybp     gyHP = the product shifted; yBP and s1'
-//   mybp    mantissa*yBP
-//   y       gyBP = the product shifted; yLP, s2', the section's output
-//           selected and saturated
+//   mybp    mantissa*yBP; the output in BP or HP mode (yBP or yHP, both
+//           known here) selected and saturated
+//   y       gyBP = the product shifted; yLP, s2'; the section's output:
+//           yLP saturated, or the word the mybp stage made
+//
+// The saturations read the top bits of their operand (sat_q414, sat_state
+// below), never a compare: a compare of a sum is a second carry chain
+// behind the adder's, and it was 4.9 ns of the y stage's 12.9 (#446).
 //
 // Latency (in_* -> out_*): 1 (g) + 2 (gR2, h) + 7 (section 1) + 7 (section 2)
 // = 17 cycles. Well under the 256-slot half, so state read/write never
@@ -109,14 +114,15 @@ module svf_tpt #(
     reg [15:0] recip_lut [0:255];
     initial $readmemh("dsp/recip_lut.hex", recip_lut);
 
+    // Q8.28 -> Q4.14, saturated. x >>> 14 fits 18 bits exactly when x's
+    // top five bits agree (x in [-2^31, 2^31)); outside, the sign names
+    // the rail. The range test reads those five bits, two LUT levels:
+    // written as the compare `(x >>> 14) > 131071` it was a second carry
+    // chain fed by the adder's, 4.9 ns of the y stage's 12.9 (#446).
     function automatic logic signed [17:0] sat_q414(input logic signed [35:0] x);
-        logic signed [35:0] s;
-        begin
-            s = x >>> 14;                         // Q8.28 -> Q8.14
-            if (s > 36'sd131071)        sat_q414 = 18'sd131071;
-            else if (s < -36'sd131072)  sat_q414 = -18'sd131072;
-            else                        sat_q414 = s[17:0];
-        end
+        if (x[35:31] == 5'b00000 || x[35:31] == 5'b11111) sat_q414 = x[31:14];
+        else if (x[35])                                    sat_q414 = -18'sd131072;
+        else                                               sat_q414 = 18'sd131071;
     endfunction
 
     // State saturator: the integrator state is the one datapath node
@@ -129,12 +135,17 @@ module svf_tpt #(
     // quarter-range below the +-128 register rail so the section's own 36-bit
     // intermediate sums (t, s1n, ...) can't wrap either (clamping at the
     // exact rail reintroduces the static). Bit-identical below the clamp.
+    // The rails are 6 * 2^32 - 1 and -6 * 2^32, so the test reads the top
+    // three bits: 011 is at or above the ceiling (x >= 6 * 2^32), 100 is
+    // below the floor (x < -6 * 2^32), no compare chain (#446).
     localparam signed [35:0] STATE_MAX =  36'sd25769803775;  // largest Q8.28 value below +96.0
     localparam signed [35:0] STATE_MIN = -36'sd25769803776;  // -96.0
     function automatic logic signed [35:0] sat_state(input logic signed [35:0] x);
-        if (x > STATE_MAX)      sat_state = STATE_MAX;
-        else if (x < STATE_MIN) sat_state = STATE_MIN;
-        else                 sat_state = x;
+        case (x[35:33])
+            3'b011:  sat_state = STATE_MAX;
+            3'b100:  sat_state = STATE_MIN;
+            default: sat_state = x;
+        endcase
     endfunction
 
     // The g*y product of a section: the mantissa times the state, kept
@@ -317,12 +328,16 @@ module svf_tpt #(
         ybp1_mode<=myhp1_mode;
     end
 
-    // --- mybp1 = mantissa*yBP, the g*yBP product before its octave shift ---
+    // --- mybp1 = mantissa*yBP, the g*yBP product before its octave shift.
+    //     The output in BP and HP mode is yBP or yHP, both known here, so it
+    //     is selected and saturated now: the y stage then picks between two
+    //     words and saturates only the sum it makes ---
     reg mybp1_valid;
     reg signed [40:0] mybp1;
-    reg signed [35:0] mybp1_ybp, mybp1_s1n, mybp1_yhp, mybp1_s2a;
+    reg signed [35:0] mybp1_s1n, mybp1_s2a;
+    reg signed [17:0] mybp1_other;      // sat(yBP) in BP mode, sat(yHP) in HP mode (Q4.14)
+    reg               mybp1_use_lp;     // LP mode: the output is sat(yLP), made in the y stage
     reg [3:0] mybp1_oct;
-    reg [1:0] mybp1_mode;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) mybp1_valid <= 1'b0;
@@ -331,32 +346,25 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         mybp1 <= mantissa_product(ybp1_m, ybp1);
         mybp1_oct<=ybp1_oct;
-        mybp1_ybp<=ybp1; mybp1_s1n<=ybp1_s1n; mybp1_yhp<=ybp1_yhp;
-        mybp1_s2a<=ybp1_s2a; mybp1_mode<=ybp1_mode;
+        mybp1_other  <= ybp1_mode[1] ? sat_q414(ybp1_yhp) : sat_q414(ybp1);
+        mybp1_use_lp <= (ybp1_mode[1] == ybp1_mode[0]);   // modes 0 and 3 are LP
+        mybp1_s1n<=ybp1_s1n; mybp1_s2a<=ybp1_s2a;
     end
 
     // --- y1: gyBP = g*yBP >>28 (the product shifted) ; yLP = gyBP + s2a ;
-    //     s2a' = yLP + gyBP = s2a + 2*gyBP ; y1 = sat(select) ---
+    //     s2a' = yLP + gyBP = s2a + 2*gyBP ; y1 = sat(yLP) or the other mode's word ---
     reg y1_valid;
     reg signed [17:0] y1;                           // Q4.14
     reg signed [35:0] y1_s1n, y1_s2n;
 
     wire signed [35:0] gybp1 = octave_shift(mybp1, mybp1_oct);
-    logic signed [35:0] ylp1, y1_select;
-    always_comb begin
-        ylp1 = gybp1 + mybp1_s2a;
-        case (mybp1_mode)
-            2'd1:    y1_select = mybp1_ybp;
-            2'd2:    y1_select = mybp1_yhp;
-            default: y1_select = ylp1;
-        endcase
-    end
+    wire signed [35:0] ylp1  = gybp1 + mybp1_s2a;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) y1_valid <= 1'b0;
         else        y1_valid <= mybp1_valid;
     end
     always_ff @(posedge clk) begin
-        y1     <= sat_q414(y1_select);
+        y1     <= mybp1_use_lp ? sat_q414(ylp1) : mybp1_other;
         y1_s1n <= mybp1_s1n;
         y1_s2n <= mybp1_s2a + (gybp1 <<< 1);
     end
@@ -509,12 +517,13 @@ module svf_tpt #(
         ybp2_mode<=myhp2_mode;
     end
 
-    // --- mybp2 = mantissa*yBP ---
+    // --- mybp2 = mantissa*yBP; the BP / HP output selected and saturated, as in section 1 ---
     reg mybp2_valid;
     reg signed [40:0] mybp2;
-    reg signed [35:0] mybp2_ybp, mybp2_s1n, mybp2_yhp, mybp2_s2b;
+    reg signed [35:0] mybp2_s1n, mybp2_s2b;
+    reg signed [17:0] mybp2_other;
+    reg               mybp2_use_lp;
     reg [3:0] mybp2_oct;
-    reg [1:0] mybp2_mode;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) mybp2_valid <= 1'b0;
         else        mybp2_valid <= ybp2_valid;
@@ -522,29 +531,23 @@ module svf_tpt #(
     always_ff @(posedge clk) begin
         mybp2 <= mantissa_product(ybp2_m, ybp2);
         mybp2_oct<=ybp2_oct;
-        mybp2_ybp<=ybp2; mybp2_s1n<=ybp2_s1n; mybp2_yhp<=ybp2_yhp;
-        mybp2_s2b<=ybp2_s2b; mybp2_mode<=ybp2_mode;
+        mybp2_other  <= ybp2_mode[1] ? sat_q414(ybp2_yhp) : sat_q414(ybp2);
+        mybp2_use_lp <= (ybp2_mode[1] == ybp2_mode[0]);
+        mybp2_s1n<=ybp2_s1n; mybp2_s2b<=ybp2_s2b;
     end
 
     // --- y2: gyBP = g*yBP >>28 ; yLP = gyBP + s2b ; s2b' = s2b + 2*gyBP ;
-    //     y2 = sat(select) ; the outputs ---
+    //     y2 = sat(yLP) or the other mode's word ; the outputs ---
     wire signed [35:0] gybp2 = octave_shift(mybp2, mybp2_oct);
-    logic signed [35:0] ylp2, y2_select;
-    always_comb begin
-        ylp2 = gybp2 + mybp2_s2b;
-        case (mybp2_mode)
-            2'd1:    y2_select = mybp2_ybp;
-            2'd2:    y2_select = mybp2_yhp;
-            default: y2_select = ylp2;
-        endcase
-    end
+    wire signed [35:0] ylp2  = gybp2 + mybp2_s2b;
+    wire signed [17:0] y2    = mybp2_use_lp ? sat_q414(ylp2) : mybp2_other;
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) out_valid <= 1'b0;
         else        out_valid <= mybp2_valid;
     end
     always_ff @(posedge clk) begin
         out_idx    <= mybp2_idx;
-        out_sample <= mybp2_cascade ? sat_q414(y2_select) : mybp2_y1;
+        out_sample <= mybp2_cascade ? y2 : mybp2_y1;
         out_ic1eq1n<= sat_state(mybp2_s1an);
         out_ic2eq1n<= sat_state(mybp2_s2an);
         out_ic1eq2n<= sat_state(mybp2_s1n);
