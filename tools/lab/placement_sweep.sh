@@ -18,20 +18,25 @@
 # comparisons of two netlists on the same placements.
 #
 # usage: tools/lab/placement_sweep.sh [COUNT=4] [SEEDS="…"] [JOBS=4] [LAB=thor@home.thj.no]
-#                                     [PR=<n>] [WARN_MHZ=85] [PNR_CPU_SECONDS=720]
+#                                     [REPORT=1] [WARN_MHZ=85] [PNR_CPU_SECONDS=720]
 #        (environment variables; run from the repo root after `make -C rtl yosys.json`;
 #        SEEDS names the seeds instead of drawing COUNT of them)
 #
 # The sweep is a monitor, not a gate (#434): an rtl PR's board take goes on
 # the default-seed placement, and the sweep runs after it in the background,
-# `PR=<n> nohup tools/lab/placement_sweep.sh > rtl/obj_dir/sweep/sweep.log 2>&1 &`.
-# With PR set the result is posted as a comment on that PR when the sweep
-# ends (gh on this box), its first line the verdict in a fixed form:
+# `REPORT=1 nohup tools/lab/placement_sweep.sh > rtl/obj_dir/sweep/sweep.log 2>&1 &`.
+# With REPORT set the verdict goes to GitHub as a commit status on the commit
+# the checkout is at (context `sweep`, #443): `success` or `failure` with the
+# verdict as its description, the tick or cross on the commit and on any PR
+# whose head it is, and a line in the chat through the relay's `status` route.
+# A WARNING or FAIL also opens an issue under #363 with the per-seed lines and
+# the frequency summary, since the status holds 140 characters and an issue is
+# where work starts; a clean sweep leaves only the status. The verdict's forms:
 #   sweep: 4 of 4, floor 86.9 MHz            every draw placed, routed, met the clock, floor at or over WARN_MHZ
 #   sweep WARNING: 3 of 4 placed and routed  a draw failed to place or route
 #   sweep WARNING: floor 80.1 MHz under 85   the lowest draw under the line (#338's definition of done)
 #   sweep FAIL: 3 of 4 meet the clock        a draw under the clock
-# A WARNING or FAIL on a merged PR becomes an issue under #363. The lab box
+# The lab box
 # runs one sweep at a time (a lock around the placements), so overlapping
 # sessions queue instead of sharing four cores; each run has its own remote
 # directory. The placements run at the lowest CPU priority (nice 19, #436):
@@ -128,11 +133,29 @@ fi
 [ -n "$summary" ] && echo "$summary"
 echo "$verdict (seeds $SEEDS)"
 echo "placement_sweep: $routed of $total seeds placed and routed, $met of $total meet the clock (seeds $SEEDS)"
-if [ -n "$PR" ]; then
-  seedlines=$(grep '^seed ' rtl/obj_dir/sweep/seeds.txt 2>/dev/null || true)
-  printf '%s (seeds %s)\n\nRandom-seed sweep of `%s` (%s), %s draws on the lab box after the board take, the sweep as a monitor (#434). Logs and reports under `rtl/obj_dir/sweep/` of the sweeping checkout, by seed.\n\n```\n%s%s\n```\n' \
-    "$verdict" "$SEEDS" "$(git branch --show-current)" "$(git rev-parse --short HEAD)" "$total" "${seedlines:+$seedlines
-}" "$summary" \
-    | gh pr comment "$PR" --body-file - >/dev/null && echo "placement_sweep: posted to PR #$PR"
+if [ -n "$REPORT" ]; then
+  repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+  sha=$(git rev-parse HEAD)
+  branch=$(git branch --show-current)
+  case "$verdict" in
+    "sweep: "*) state=success ;;
+    *)          state=failure ;;
+  esac
+  target=""
+  if [ "$state" = failure ]; then
+    # the table: the per-seed lines (a choke, a legaliser give-up, a routing
+    # failure) above the frequency summary, as an issue under #363
+    seedlines=$(grep '^seed ' rtl/obj_dir/sweep/seeds.txt 2>/dev/null || true)
+    body=$(printf '%s (seeds %s)\n\nRandom-seed sweep of `%s` (%s), %s draws on the lab box, the sweep as a monitor (#434, #443). Logs and reports under `rtl/obj_dir/sweep/` of the sweeping checkout, by seed. The warning line is %s MHz (#338'"'"'s definition of done); the clock is 73.728.\n\n```\n%s%s\n```\n' \
+      "$verdict" "$SEEDS" "$branch" "${sha:0:7}" "$total" "$WARN_MHZ" "${seedlines:+$seedlines
+}" "$summary")
+    target=$(printf '%s' "$body" | gh issue create --title "$verdict on $branch (${sha:0:7})" --label bug --body-file -)
+    issue_id=$(gh api "repos/$repo/issues/${target##*/}" --jq .id)
+    gh api -X POST "repos/$repo/issues/363/sub_issues" -F sub_issue_id="$issue_id" >/dev/null
+    echo "placement_sweep: opened $target under #363"
+  fi
+  gh api -X POST "repos/$repo/statuses/$sha" -f state="$state" -f context=sweep \
+    -f description="$verdict" ${target:+-f target_url="$target"} >/dev/null \
+    && echo "placement_sweep: status $state on ${sha:0:7}"
 fi
 [ "$met" -eq "$total" ]
