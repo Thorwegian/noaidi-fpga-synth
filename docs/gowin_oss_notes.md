@@ -65,7 +65,7 @@ tCOIR_DSP 2.40 ns, tCO_CFU 0.38 ns, and no setup, hold or clock-network
 skew. These magnitudes cannot explain the failures measured below; the
 observations stand, the explanation "untimed" is only right for `ADB`
 and the DSP. Issue #230 carries the patch work (fork
-`Thorwegian/nextpnr`).
+`HermesOracle/nextpnr`).
 
 - **No path that starts or ends at a block RAM's or a DSP's pin shows
   in a report** (see the correction above: the block RAM's are timed with
