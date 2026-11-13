@@ -143,8 +143,8 @@ module tb_partial_pipeline;
                 word_of_kind = (j == 14) ? 18'sh1FFFF : (j == 15) ? -131072 : (r % 32769) - 16384;
             synth_pkg::POINTER_RESONANCE:      // 0 … 4 octaves of Q; below zero; the top
                 word_of_kind = (j == 15) ? -3000 : (j == 14) ? 18'sh1FFFF : r % 65537;
-            default:                            // mode: waveform, cascade, filter type
-                word_of_kind = r % 32;
+            default:                            // mode: waveform [2:0], cascade [3], filter type [5:4]
+                word_of_kind = r % 64;
         endcase
     endfunction
 
@@ -319,9 +319,9 @@ module tb_partial_pipeline;
                          $signed(u_pipe.s3_duty), exp_duty(p));
                 errors = errors + 1;
             end
-            if (u_pipe.s3_wave !== sink_word(p, 9)[1:0] ||
-                u_pipe.s3_cascade !== sink_word(p, 9)[2] ||
-                u_pipe.s3_filter_mode !== sink_word(p, 9)[4:3]) begin
+            if (u_pipe.s3_wave !== sink_word(p, 9)[2:0] ||
+                u_pipe.s3_cascade !== sink_word(p, 9)[3] ||
+                u_pipe.s3_filter_mode !== sink_word(p, 9)[5:4]) begin
                 $display("FAIL mode: partial %0d", p);
                 errors = errors + 1;
             end

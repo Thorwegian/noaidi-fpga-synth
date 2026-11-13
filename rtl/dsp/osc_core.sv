@@ -17,6 +17,11 @@
 // only be built from LUTs (741 of them) with a 24-bit negate after it:
 // eleven LUT levels, the longest path of the oscillator stage.
 //
+// The noise comes in the same way (noise, Q2.16): one generator in the
+// caller (noise_source.sv) serves every partial, and the caller
+// registers its word beside the phase. Noise has no phase; the
+// caller's phase advances as for any waveform, untouched by the choice.
+//
 // The phase adder belongs to the CALLER, not to this module, for two
 // reasons. The caller needs the advanced phase anyway, for the state
 // writeback, so holding the adder here would mean two 24-bit adders
@@ -35,9 +40,13 @@ module osc_core (
                                             // removed: 2^23-1 - duty, by the caller a
                                             // stage earlier (see the pulse section)
     input  logic signed [24:0] pulse_min,   // its low level, -2^23 - duty, likewise
-    input  logic        [1:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine
+    input  logic        [2:0]  wave,       // 0 saw, 1 pulse, 2 tri, 3 sine, 4 noise
     input  logic signed [15:0] sine,       // the sine at phase_next, Q2.16, from
                                            // the caller's block RAM read
+    input  logic signed [15:0] noise,      // the noise word for this slot, Q2.16,
+                                           // from the caller's shared generator
+                                           // (noise_source.sv), registered like
+                                           // the phase
 
     output logic signed [17:0] sample_out  // Q2.16
 );
@@ -101,14 +110,16 @@ module osc_core (
     // Waveform select
     //----------------------------------------------------------------
     // 25 bits so the DC-corrected pulse survives the mux; the other
-    // three are sign-extended and unchanged. The sine is already the
-    // output word, so it enters at bit 8 and the >>> 8 returns it.
+    // three are sign-extended and unchanged. The sine and the noise are
+    // already output words, so they enter at bit 8 and the >>> 8
+    // returns them. Codes 5 to 7 are unassigned and read as the sine.
     logic signed [24:0] muxed;
     always_comb begin
         case (wave)
-            2'd0:    muxed = 25'(saw);
-            2'd1:    muxed = pulse;
-            2'd2:    muxed = 25'(triangle);
+            3'd0:    muxed = 25'(saw);
+            3'd1:    muxed = pulse;
+            3'd2:    muxed = 25'(triangle);
+            3'd4:    muxed = 25'(signed'({noise, 8'b0}));
             default: muxed = 25'(signed'({sine, 8'b0}));
         endcase
     end

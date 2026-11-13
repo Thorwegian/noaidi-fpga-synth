@@ -31,7 +31,8 @@ module tb_pulse_dc;
     localparam int TOL   = 4;             // raw Q2.16 value: truncation + grid only
 
     logic signed [23:0] phase, duty;
-    logic        [1:0]  wave;
+    logic        [2:0]  wave;
+    logic signed [15:0] noise;
     wire  signed [17:0] sample;
 
     // What partial_pipeline registers at S3B alongside the phase: the
@@ -47,12 +48,13 @@ module tb_pulse_dc;
 
     osc_core u_dut (.phase_next(phase), .duty(duty),
                     .pulse_max(pulse_max), .pulse_min(pulse_min),
-                    .wave(wave), .sine(sine), .sample_out(sample));
+                    .wave(wave), .sine(sine), .noise(noise),
+                    .sample_out(sample));
 
     integer errors = 0;
 
     // Average sample_out over one whole cycle at the given duty.
-    task automatic mean_at(input logic [1:0] w, input logic signed [23:0] d,
+    task automatic mean_at(input logic [2:0] w, input logic signed [23:0] d,
                            output real m);
         integer i;
         real acc;
@@ -74,6 +76,7 @@ module tb_pulse_dc;
     logic signed [23:0] duties [0:8];
 
     initial begin
+        noise = 16'sh5A3C;               // held: the pulse and the waveforms ignore it
         duties[0] = 24'sd0;              // square
         duties[1] =  24'sd1048576;       // +1/8
         duties[2] = -24'sd1048576;       // -1/8
@@ -87,7 +90,7 @@ module tb_pulse_dc;
         $display("  pulse time-average must be 0 at every duty");
         $display("    duty          mean(raw Q2.16)");
         for (k = 0; k <= 8; k = k + 1) begin
-            mean_at(2'd1, duties[k], m);
+            mean_at(3'd1, duties[k], m);
             $display("    %11d  %12.2f%s", $signed(duties[k]), m,
                      (absr(m) <= TOL) ? "" : "   ** DC **");
             if (absr(m) > TOL) errors = errors + 1;
@@ -97,7 +100,7 @@ module tb_pulse_dc;
         $display("");
         for (k = 0; k < 4; k = k + 1) begin
             if (k != 1) begin
-                mean_at(2'(k), 24'sd0, m);
+                mean_at(3'(k), 24'sd0, m);
                 $display("    wave %0d (duty 0) mean %10.2f%s", k, m,
                          (absr(m) <= TOL) ? "" : "   ** DC **");
                 if (absr(m) > TOL) errors = errors + 1;
@@ -109,7 +112,7 @@ module tb_pulse_dc;
         // which is easy to get backwards and then blame on the RTL: the
         // comparator is `phase < duty`, so the LOW half of the phase range
         // is the HIGH output.
-        wave = 2'd1; duty = 24'sd0;
+        wave = 3'd1; duty = 24'sd0;
         phase = -24'sd8388608; #1;
         if ($signed(sample) !== 18'sd32767) begin
             errors = errors + 1;
@@ -121,6 +124,16 @@ module tb_pulse_dc;
             errors = errors + 1;
             $display("    FAILURE: square at phase +2^23-1 is %0d, expected -32768",
                      $signed(sample));
+        end
+
+        // The noise waveform is the generator's word, as the sine is the
+        // table's: the output is the word itself, whatever the phase.
+        wave = 3'd4; duty = 24'sd0;
+        phase = 24'sd1234567; #1;
+        if ($signed(sample) !== 18'(noise)) begin
+            errors = errors + 1;
+            $display("    FAILURE: noise at phase %0d is %0d, expected the word %0d",
+                     $signed(phase), $signed(sample), $signed(noise));
         end
 
         $display("");

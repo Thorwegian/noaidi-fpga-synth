@@ -51,9 +51,18 @@ uint8_t clamp_cc(int64_t value) {
 }
 
 // A discrete selector's value as the panel shows it: a four-way switch at
-// 0, 32, 64, 96 (the index shifted by five), a three-way at 0, 64, 127.
+// 0, 32, 64, 96 (the index shifted by five), a three-way at 0, 64, 127,
+// a five-way at the four-way's positions and 127 (the index is
+// value × 5 / 128, so the four-way's positions keep their meaning).
 uint8_t four_way(int index) {
     return static_cast<uint8_t>((index & 3) << 5);
+}
+uint8_t five_way(int index) {
+    static constexpr uint8_t positions[5] = {0, 32, 64, 96, 127};
+    return positions[std::clamp(index, 0, 4)];
+}
+int five_way_index(uint8_t value) {
+    return (value * 5) >> 7;
 }
 uint8_t three_way(int index) {
     static constexpr uint8_t positions[3] = {0, 64, 127};
@@ -270,7 +279,8 @@ Part apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     // ---- the oscillators and the voice structure ----
     case 20:
     case 21:
-        preset.osc[cc - 20].wave = static_cast<waveform_t>(value >> 5);
+        preset.osc[cc - 20].wave =
+                static_cast<waveform_t>(five_way_index(value));
         return Part::voices;
     case 14:
     case 22:
@@ -433,7 +443,7 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
     // the oscillators
     for (int i = 0; i < 2; ++i) {
         const osc_t &osc = preset.osc[i];
-        emit(i == 0 ? 20 : 21, four_way(osc.wave), user);
+        emit(i == 0 ? 20 : 21, five_way(osc.wave), user);
         emit(i == 0 ? 14 : 22, cc_of_tune_coarse(osc.tune), user);
         emit(i == 0 ? 15 : 23, cc_of_tune_fine(osc.tune), user);
         emit(i == 0 ? 25 : 85, nearest(duty_of, osc.duty), user);

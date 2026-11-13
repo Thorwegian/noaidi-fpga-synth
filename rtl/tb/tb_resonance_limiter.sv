@@ -144,7 +144,7 @@ module tb_resonance_limiter #(
     end
 
     // pitch and cutoff: UQ4.10 codes; r: octaves of Q above Butterworth, UQ4.10;
-    // mode: [2] cascade, [4:3] the filter type (0 LP), [1:0] the saw
+    // mode: [3] cascade, [5:4] the filter type (0 LP), [2:0] the saw
     task automatic set_partial(input [13:0] pitch, input [13:0] fc, input [13:0] r, input integer mode);
         begin
             write_word(WORD_PITCH, octave_word(pitch));
@@ -242,7 +242,7 @@ module tb_resonance_limiter #(
     // the codes: 1.5 kHz is octave 7.519 (0x1E13), 500 Hz 5.934 (0x17BD)
     localparam [13:0] PITCH_1K5 = 14'h1E13, PITCH_500 = 14'h17BD;
     localparam [13:0] R_TOP = 14'h1600, R_8 = 14'h0E00, R_NONE = 14'h0000;   // 5.5, 3.5, 0 octaves of Q
-    localparam int MODE_CASCADE_LP = 4, MODE_SINGLE_LP = 0;
+    localparam int MODE_CASCADE_LP = 8, MODE_SINGLE_LP = 0;
 
     task automatic corner(input string name, input [13:0] pitch, input [13:0] fc, input [13:0] r, input integer mode);
         begin

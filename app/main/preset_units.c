@@ -400,12 +400,15 @@ static int32_t raw_slope(const preset_t *p, int i, double v) {
 
 // ── Names ───────────────────────────────────────────────────────────
 static const char *const s_structures[] = {"1+1", "7+1", "4+4", NULL};
-static const char *const s_waves[] = {"saw", "pulse", "triangle", "sine", NULL};
-static const char *const s_filters[]   = {"lowpass", "bandpass", "highpass",
-                                          NULL};
-static const char *const s_mod_dests[] = {"cutoff", NULL};
-static const char *const s_lfo_dests[] = {"pulse_width", "resonance", "pitch",
-                                          "cutoff", NULL};
+static const char *const s_osc_waves[]  = {"saw",  "pulse", "triangle",
+                                           "sine", "noise", NULL};
+static const char *const s_lfo_shapes[] = {"saw", "pulse", "triangle", "sine",
+                                           NULL};
+static const char *const s_filters[]    = {"lowpass", "bandpass", "highpass",
+                                           NULL};
+static const char *const s_mod_dests[]  = {"cutoff", NULL};
+static const char *const s_lfo_dests[]  = {"pulse_width", "resonance", "pitch",
+                                           "cutoff", NULL};
 
 // ── The table, in the order the loader applies it ───────────────────
 #define NUM(tbl, k, n, acc, conv)                                              \
@@ -427,7 +430,7 @@ static const preset_field_t s_fields[] = {
         NUM("voice", "unison_detune", 1, unison_detune, detune),
         NUM("voice", "unison_stereo", 1, unison_stereo, pct127),
 
-        NAME("osc", "wave", PRESET_NUM_OSC, wave, s_waves),
+        NAME("osc", "wave", PRESET_NUM_OSC, wave, s_osc_waves),
         NUM("osc", "tune", PRESET_NUM_OSC, tune, tune),
         NUM("osc", "pulse_width", PRESET_NUM_OSC, duty, duty),
 
@@ -454,7 +457,7 @@ static const preset_field_t s_fields[] = {
         NUM("mod_env", "depth", 1, mod_depth, mod_depth),
 
         // destination before depth: depth's unit depends on it
-        NAME("lfo", "shape", PRESET_NUM_LFO, lfo_shape, s_waves),
+        NAME("lfo", "shape", PRESET_NUM_LFO, lfo_shape, s_lfo_shapes),
         NUM("lfo", "rate", PRESET_NUM_LFO, lfo_rate, lfo_rate),
         NAME("lfo", "destination", PRESET_NUM_LFO, lfo_dest, s_lfo_dests),
         NUM("lfo", "depth", PRESET_NUM_LFO, lfo_depth, lfo_depth),

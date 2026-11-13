@@ -242,7 +242,7 @@ The ten words, as the partial pipeline reads them (all Q4.14):
 | resonance | one | octaves of Q above Butterworth, never below zero |
 | duty | one | pulse width, 1.0 being the rail (`2^23`) |
 | gain | voice × (left, right) | all linear (#176): the voice's word is the gain itself (the envelope's level × the velocity's amount), clamped at unity, silent at zero and below; the channel's left and right are linear; the product signed, clamped to ±8.0. Loudness laws (velocity, sustain) are the firmware's, computed once |
-| mode | one | `[1:0]` waveform (0 saw, 1 pulse, 2 triangle, 3 sine), `[2]` cascade (24 dB/oct), `[4:3]` filter type (0 LP, 1 BP, 2 HP) |
+| mode | one | `[2:0]` waveform (0 saw, 1 pulse, 2 triangle, 3 sine, 4 noise; 5 to 7 unassigned, read as the sine), `[3]` cascade (24 dB/oct), `[5:4]` filter type (0 LP, 1 BP, 2 HP) |
 
 The partial pipeline takes two cycles a partial (512 of the sample's 768
 cycles) because it reads all ten words through the sink area's six read
@@ -305,7 +305,6 @@ ports.
   (TDM) partial pipeline — voices never see each other's state.
 - **Long effects delays need external memory**: total FPGA BSRAM is
   828 kbit. A 1 s stereo delay at 96 kHz/24-bit is ~4.6 Mbit.
-- **Noise oscillator** (reserved type 4+) needs a small global LFSR (#216).
 - Everything else standard (glide, key tracking, pan, unison detune and
   spread, velocity curves, splits/layers, arpeggiator, chord memory,
   damper/sostenuto) is firmware-side and fully supported by this map.

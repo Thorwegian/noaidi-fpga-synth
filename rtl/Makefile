@@ -35,7 +35,7 @@ PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
-AUDIO = dsp/partial_pipeline.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/master_limiter.sv dsp/output_lpf.sv
+AUDIO = dsp/partial_pipeline.sv dsp/noise_source.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/master_limiter.sv dsp/output_lpf.sv
 MOD = \
 	$(CSP) \
 	$(SINK) \
@@ -358,6 +358,14 @@ obj_dir/tb_pulse_dc/sim: tb/tb_pulse_dc.sv $(PKG) dsp/osc_core.sv dsp/sine_lut.h
 sim-pulse-dc: obj_dir/tb_pulse_dc/sim
 	$(call run_sim,$<,tb/sim-pulse-dc.out)
 
+# The shared noise source: a flat histogram, no tone in one slot's words, no
+# correlation between adjacent slots' words. 2^24 clocks.
+obj_dir/tb_noise/sim: tb/tb_noise.sv $(PKG) dsp/noise_source.sv Makefile
+	$(VERILATE) $(PKG) dsp/noise_source.sv tb/tb_noise.sv
+
+sim-noise: obj_dir/tb_noise/sim
+	$(call run_sim,$<,tb/sim-noise.out)
+
 # Output low-pass error feedback: exact-zero convergence on silence,
 # exact-value convergence on DC, both polarities.
 obj_dir/tb_output_lpf/sim: dsp/output_lpf.sv tb/tb_output_lpf.sv Makefile
@@ -402,7 +410,7 @@ sim-resonance-limiter: obj_dir/tb_resonance_limiter/sim
 # from the same names, so a bench cannot be run without being read (#381:
 # sim-partial was in `sim` for weeks with its log in nobody's grep).
 BENCHES = sim-bus sim-fifo sim-fifo-random sim-memories sim-csp-cosim sim-sink sim-partial sim-svf-stability sim-stream sim-spdif sim-spdif48 sim-i2s sim-top \
-          sim-pulse-dc sim-output-lpf sim-master-limiter sim-resonance-limiter sim-halfband
+          sim-pulse-dc sim-noise sim-output-lpf sim-master-limiter sim-resonance-limiter sim-halfband
 
 # What the benches cover, checked rather than assumed (#376): every RTL
 # source outside tb/ verilated by some bench, every file under tb/ built by

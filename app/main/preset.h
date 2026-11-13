@@ -30,12 +30,14 @@ extern "C" {
 #define PRESET_NUM_ENV 2
 
 // ── Oscillator ──────────────────────────────────────────────────────
-typedef enum { // matches OSC word waveform field
+typedef enum { // matches the mode word's waveform field
     WAVE_SAW = 0,
     WAVE_PULSE,
     WAVE_TRI,
-    WAVE_SINE, // idx 3 = true sine LUT
-    // future gateware waveforms: noise, and a real parabola as its own type
+    WAVE_SINE,  // the full-wave table in block RAM
+    WAVE_NOISE, // white, from the gateware's shared generator; osc only
+                // (an LFO's shape stops at the sine)
+    // a future gateware waveform: a real parabola as its own type
 } waveform_t;
 
 // Voice structure — how the 2 oscillators map onto the 8 partials

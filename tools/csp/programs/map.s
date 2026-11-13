@@ -158,7 +158,7 @@
         .field CUTOFF_OFFSET, 8     ; cutoff: the tracking of tune and spread, in octaves
         .field GAIN_LEFT, 8         ; the pan, the spread and the oscillator mix, linear
         .field GAIN_RIGHT, 8
-        .field MODE_0, 1            ; per oscillator: waveform [1:0], cascade [2], filter type [4:3]
+        .field MODE_0, 1            ; per oscillator: waveform [2:0], cascade [3], filter type [5:4]
         .field MODE_1, 1
         .field SPARE_SINKS, 10      ; a channel's block is 48 words
         .end
