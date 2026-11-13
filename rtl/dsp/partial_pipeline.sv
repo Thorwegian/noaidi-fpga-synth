@@ -21,7 +21,7 @@
 //   S1  sink words and state in registers
 //   S2  the pitch and cutoff sums (voice word + channel word)
 //   S3  effective parameters: biases, clamps, LUT reads; phase_next
-//   S3B register phase_next / barrel-shifted K / q1 / duty / wave
+//   S3B register phase_next / the cutoff word and octave / q1 / duty / wave
 //   S3C oscillator waveform from the REGISTERED phase (sine LUT + mux);
 //       the gain products (voice word × channel word)
 //   S3D resonance attenuation multiply on registered operands (DSP);
@@ -447,14 +447,15 @@ module partial_pipeline #(
 
     // S3 combinational datapath
     logic signed [23:0] phase_inc;
-    logic signed [35:0] k;
     logic signed [17:0] osc_sample;
 
     assign phase_inc = $signed(s3_phase_inc_lut) >>> (11 - s3_pitch_oct);
-    // K stays full-width — do NOT narrow to 18-bit to save DSPs: the
-    // LUT+shift expands to ~22+ bits of real precision, needed later
-    // for the noise oscillator and whistling-filter melodies.
-    assign k     = $signed({20'd0, s3_svf_fc_lut}) <<< (3 + s3_fc_oct);
+    // The cutoff coefficient K = word <<< (3 + octave) in Q8.28 is formed
+    // in the filter: its g*state products take the 16-bit word and shift
+    // the product by the octave instead (svf_tpt.sv, #428), the same bits
+    // for two multipliers where K's full width took four. K is NOT
+    // narrowed: the LUT+shift expands to ~22+ bits of real precision,
+    // needed later for the noise oscillator and whistling-filter melodies.
     // Resonance decode: q1 = sqrt(2) * 2^-r in Q2.16. Same
     // LUT+barrel-shift shape as K; registered into S3B before the
     // S4 multiply (the silicon timing rule). At high octaves the
@@ -488,7 +489,7 @@ module partial_pipeline #(
     // waveform is generated from the registered value in S3B->S3C.
     logic               s3b_valid;   logic [VW-1:0] s3b_idx;
     logic [15:0] s3b_att;
-    logic signed [35:0] s3b_k;     logic signed [17:0] s3b_q1;
+    logic [15:0] s3b_fc_mantissa;  logic [3:0] s3b_fc_oct;  logic signed [17:0] s3b_q1;
     logic signed [35:0] s3b_ic1eq1, s3b_ic2eq1, s3b_ic1eq2, s3b_ic2eq2;
     logic               s3b_cascade;  logic [1:0] s3b_filter_mode;
     logic signed [23:0] s3b_phase;
@@ -502,7 +503,7 @@ module partial_pipeline #(
     end
     always_ff @(posedge clk) begin
         s3b_idx<=s3_idx;
-        s3b_att<=s3_reso_att; s3b_k<=k; s3b_q1<=q1_decoded;
+        s3b_att<=s3_reso_att; s3b_fc_mantissa<=s3_svf_fc_lut; s3b_fc_oct<=s3_fc_oct; s3b_q1<=q1_decoded;
         s3b_ic1eq1<=s3_ic1eq1; s3b_ic2eq1<=s3_ic2eq1;
         s3b_ic1eq2<=s3_ic1eq2; s3b_ic2eq2<=s3_ic2eq2;
         s3b_cascade<=s3_cascade; s3b_filter_mode<=s3_filter_mode;
@@ -532,7 +533,7 @@ module partial_pipeline #(
     // multiply moves to S3D so nothing chains a mux into a DSP.
     logic               s3c_valid;   logic [VW-1:0] s3c_idx;
     logic signed [17:0] s3c_osc;   logic [15:0] s3c_att;
-    logic signed [35:0] s3c_k;     logic signed [17:0] s3c_q1;
+    logic [15:0] s3c_fc_mantissa;  logic [3:0] s3c_fc_oct;  logic signed [17:0] s3c_q1;
     logic signed [35:0] s3c_ic1eq1, s3c_ic2eq1, s3c_ic1eq2, s3c_ic2eq2;
     logic               s3c_cascade;  logic [1:0] s3c_filter_mode;
     logic signed [23:0] s3c_phase;
@@ -544,7 +545,7 @@ module partial_pipeline #(
     always_ff @(posedge clk) begin
         s3c_idx<=s3b_idx;
         s3c_osc <= osc_sample; s3c_att <= s3b_att;
-        s3c_k<=s3b_k; s3c_q1<=s3b_q1;
+        s3c_fc_mantissa<=s3b_fc_mantissa; s3c_fc_oct<=s3b_fc_oct; s3c_q1<=s3b_q1;
         s3c_ic1eq1<=s3b_ic1eq1; s3c_ic2eq1<=s3b_ic2eq1;
         s3c_ic1eq2<=s3b_ic1eq2; s3c_ic2eq2<=s3b_ic2eq2;
         s3c_cascade<=s3b_cascade; s3c_filter_mode<=s3b_filter_mode;
@@ -576,7 +577,7 @@ module partial_pipeline #(
     wire signed [35:0] osc_mul = s3c_osc * $signed({1'b0, s3c_att});
     logic               s3d_valid;   logic [VW-1:0] s3d_idx;
     logic signed [17:0] s3d_osc;
-    logic signed [35:0] s3d_k;     logic signed [17:0] s3d_q1;
+    logic [15:0] s3d_fc_mantissa;  logic [3:0] s3d_fc_oct;  logic signed [17:0] s3d_q1;
     logic signed [35:0] s3d_ic1eq1, s3d_ic2eq1, s3d_ic1eq2, s3d_ic2eq2;
     logic               s3d_cascade;  logic [1:0] s3d_filter_mode;
     logic signed [23:0] s3d_phase;
@@ -588,7 +589,7 @@ module partial_pipeline #(
     always_ff @(posedge clk) begin
         s3d_idx<=s3c_idx;
         s3d_osc <= 18'($signed(osc_mul >>> 16));
-        s3d_k<=s3c_k; s3d_q1<=s3c_q1;
+        s3d_fc_mantissa<=s3c_fc_mantissa; s3d_fc_oct<=s3c_fc_oct; s3d_q1<=s3c_q1;
         s3d_ic1eq1<=s3c_ic1eq1; s3d_ic2eq1<=s3c_ic2eq1;
         s3d_ic1eq2<=s3c_ic1eq2; s3d_ic2eq2<=s3c_ic2eq2;
         s3d_cascade<=s3c_cascade; s3d_filter_mode<=s3c_filter_mode;
@@ -599,7 +600,7 @@ module partial_pipeline #(
 
     //----------------------------------------------------------------
     // SVF core (TPT), stages S4..S9.
-    //   g = k>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
+    //   g = K>>1 (= pi*fc/fs), R2 = q1, h = 1/D via reciprocal LUT.
     //   Unconditionally stable under cutoff-modulation-at-resonance.
     //   Streaming, latency 17; states/phase/gains carried through.
     //   See rtl/dsp/svf_tpt.sv.
@@ -614,7 +615,7 @@ module partial_pipeline #(
     svf_tpt #(.IDXW(VW)) u_svf (
         .clk(clk), .rst_n(rst_n),
         .in_valid(s3d_valid), .in_idx(s3d_idx),
-        .in_osc(s3d_osc), .in_k(s3d_k), .in_q1(s3d_q1),
+        .in_osc(s3d_osc), .in_k_mantissa(s3d_fc_mantissa), .in_k_octave(s3d_fc_oct), .in_q1(s3d_q1),
         .in_ic1eq1(s3d_ic1eq1), .in_ic2eq1(s3d_ic2eq1),
         .in_ic1eq2(s3d_ic1eq2), .in_ic2eq2(s3d_ic2eq2),
         .in_cascade(s3d_cascade), .in_filter_mode(s3d_filter_mode),
