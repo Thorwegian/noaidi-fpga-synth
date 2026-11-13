@@ -58,7 +58,6 @@ LUTS = \
 	dsp/svf_fc_lut.hex \
 	dsp/q1_lut.hex \
 	dsp/recip_lut.hex \
-	dsp/reso_att_lut.hex \
 	dsp/sine_lut.hex \
 	dsp/halfband_lut.hex
 
@@ -74,9 +73,6 @@ dsp/q1_lut.hex: ../scripts/gen_q1_lut.py
 	python3 $<
 
 dsp/recip_lut.hex: ../scripts/gen_recip_lut.py
-	python3 $<
-
-dsp/reso_att_lut.hex: ../scripts/gen_reso_att_lut.py
 	python3 $<
 
 dsp/sine_lut.hex: ../scripts/gen_sine_lut.py

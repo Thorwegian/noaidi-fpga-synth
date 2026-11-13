@@ -79,8 +79,9 @@
 //------------------------------------------------------------------------
 `default_nettype none
 module svf_tpt #(
-    parameter int IDXW   = 9,
-    parameter int GAIN_W = 18       // the partial's L and R gains, carried through (Q4.14)
+    parameter int IDXW      = 9,
+    parameter int GAIN_W    = 18,   // the partial's L and R gains, carried through (Q4.14)
+    parameter int LIMITER_W = 29    // the partial's resonance limiter state, carried through (partial_pipeline.sv)
 ) (
     input  wire                 clk,
     input  wire                 rst_n,
@@ -99,6 +100,7 @@ module svf_tpt #(
     input  wire signed [23:0]   in_phase,   // passthrough (osc phase)
     input  wire signed [GAIN_W-1:0] in_gain_l,
     input  wire signed [GAIN_W-1:0] in_gain_r,
+    input  wire [LIMITER_W-1:0] in_limiter,    // passthrough (the resonance limiter's state)
     output reg                  out_valid,
     output reg  [IDXW-1:0]      out_idx,
     output reg  signed [17:0]   out_sample,   // Q4.14
@@ -108,7 +110,8 @@ module svf_tpt #(
     output reg  signed [35:0]   out_ic2eq2n,
     output reg  signed [23:0]   out_phase,
     output reg  signed [GAIN_W-1:0] out_gain_l,
-    output reg  signed [GAIN_W-1:0] out_gain_r
+    output reg  signed [GAIN_W-1:0] out_gain_r,
+    output reg  [LIMITER_W-1:0] out_limiter
 );
     // reciprocal LUT: 256 x UQ0.16, h = 1/D for D in [1,2)
     reg [15:0] recip_lut [0:255];
@@ -378,8 +381,8 @@ module svf_tpt #(
     // SRAM (delay_line.sv), not in every stage's flip-flops. With the g
     // stage at t+1, section 1 at t+4 … t+10, section 2 at t+11 … t+16 and
     // the output registers at t+17:
-    //   A  the partial's index, cascade flag, phase and gains: the input to
-    //      the output registers, 16 clocks;
+    //   A  the partial's index, cascade flag, phase, gains and limiter
+    //      state: the input to the output registers, 16 clocks;
     //   B  section 2's input states: the input to section 2, 10 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
     //      section 2, section 1's 7 clocks (a register of its own, then 6
@@ -390,10 +393,11 @@ module svf_tpt #(
     wire                     mybp2_cascade;
     wire signed [23:0]       mybp2_phase;
     wire signed [GAIN_W-1:0] mybp2_gain_l, mybp2_gain_r;
-    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W), .DELAY (16)) u_delay_out (
+    wire [LIMITER_W-1:0]     mybp2_limiter;
+    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W + LIMITER_W), .DELAY (16)) u_delay_out (
         .clk (clk),
-        .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r}),
-        .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r}));
+        .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r, in_limiter}),
+        .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r, mybp2_limiter}));
 
     wire signed [35:0] y1_ic1eq2, y1_ic2eq2;
     delay_line #(.WIDTH (72), .DELAY (10)) u_delay_sec2_states (
@@ -555,6 +559,7 @@ module svf_tpt #(
         out_phase  <= mybp2_phase;
         out_gain_l <= mybp2_gain_l;
         out_gain_r <= mybp2_gain_r;
+        out_limiter <= mybp2_limiter;
     end
 
 endmodule
