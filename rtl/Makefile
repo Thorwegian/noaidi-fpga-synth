@@ -35,7 +35,7 @@ PKG = synth_pkg.sv
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
-AUDIO = dsp/partial_pipeline.sv dsp/noise_source.sv dsp/delay_line.sv dsp/svf_tpt.sv dsp/master_limiter.sv dsp/output_lpf.sv
+AUDIO = dsp/partial_pipeline.sv dsp/noise_source.sv dsp/delay_line.sv dsp/block_delay_line.sv dsp/svf_tpt.sv dsp/master_limiter.sv dsp/output_lpf.sv
 MOD = \
 	$(CSP) \
 	$(SINK) \

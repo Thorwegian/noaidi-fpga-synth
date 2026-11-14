@@ -379,25 +379,33 @@ module svf_tpt #(
     // Section 2 needs the partial's mantissa, octave, g+R2 and h too. They
     // are the same per partial, so it re-derives nothing: delay C below
     // brings them from the h stage, matched to section 1's 7-stage latency.
-    // ========================== THE DELAYS (#309) =========================
-    // What the filter carries without transforming it waits in the shadow
-    // SRAM (delay_line.sv), not in every stage's flip-flops. With the g
+    // ========================== THE DELAYS (#309, #343) ===================
+    // What the filter carries without transforming it waits in memory
+    // (delay_line.sv in the shadow SRAM, block_delay_line.sv in block
+    // RAM), not in every stage's flip-flops. With the g
     // stage at t+1, section 1 at t+4 … t+10, section 2 at t+11 … t+16 and
     // the output registers at t+17:
     //   A  the partial's index, cascade flag, phase, gains and limiter
-    //      state: the input to the output registers, 16 clocks;
+    //      state: the input to the output registers, 16 clocks, in
+    //      three blocks and a cell (#343: its 112 bits were 28 shadow-SRAM
+    //      cells and their 336 flip-flops);
     //   B  section 2's input states: the input to section 2, 10 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
     //      section 2, section 1's 7 clocks (a register of its own, then 6
     //      in the shadow SRAM);
     //   D  section 1's new states and its output: section 1 to the output
-    //      registers, section 2's 6 clocks.
+    //      registers, section 2's 6 clocks, in three blocks (#343: 90 bits,
+    //      274 flip-flops as 23 cells).
+    // B and C stay in the shadow SRAM: their words go onto the ms2
+    // multiplier's pins, and a block's output register straight into a
+    // DSP is a path no board has measured; A's and D's words land in
+    // fabric registers.
     wire [IDXW-1:0]          mybp2_idx;
     wire                     mybp2_cascade;
     wire signed [23:0]       mybp2_phase;
     wire signed [GAIN_W-1:0] mybp2_gain_l, mybp2_gain_r;
     wire [LIMITER_W-1:0]     mybp2_limiter;
-    delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W + LIMITER_W), .DELAY (16)) u_delay_out (
+    block_delay_line #(.WIDTH (IDXW + 1 + 24 + 2 * GAIN_W + LIMITER_W), .DELAY (16)) u_delay_out (
         .clk (clk),
         .d   ({in_idx, in_cascade, in_phase, in_gain_l, in_gain_r, in_limiter}),
         .q   ({mybp2_idx, mybp2_cascade, mybp2_phase, mybp2_gain_l, mybp2_gain_r, mybp2_limiter}));
@@ -434,7 +442,7 @@ module svf_tpt #(
 
     wire signed [35:0] mybp2_s1an, mybp2_s2an;
     wire signed [17:0] mybp2_y1;
-    delay_line #(.WIDTH (36 + 36 + 18), .DELAY (6)) u_delay_sec1_out (
+    block_delay_line #(.WIDTH (36 + 36 + 18), .DELAY (6)) u_delay_sec1_out (
         .clk (clk), .d ({y1_s1n, y1_s2n, y1}), .q ({mybp2_s1an, mybp2_s2an, mybp2_y1}));
     wire signed [35:0] sec2_u = {{8{y1[17]}}, y1, 14'd0}; // y1<<<14
 

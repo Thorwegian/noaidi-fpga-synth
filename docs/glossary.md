@@ -76,7 +76,8 @@ a bit count follows only where a reader needs it.
   register per partial. Not the shadow *page* below: the two "shadow"s
   are unrelated.
 - **delay line** — a fixed delay of N clocks built in shadow SRAM
-  (`delay_line.sv`).
+  (`delay_line.sv`) or, where the width pays for a block, in block RAM
+  (`block_delay_line.sv`, #343).
 - **half-band tap** — the 48 kHz TOSLINK output: the 96 kHz stream
   decimated by two through a 63-tap half-band FIR
   (`halfband_decimator.sv`, #308). The lab's capture path.
