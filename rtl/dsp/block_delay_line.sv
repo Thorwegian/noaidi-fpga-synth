@@ -16,14 +16,17 @@
 // pins and no other's (docs/gowin_oss_notes.md, #238). Nothing else is
 // in logic: the block's output register stands where delay_line keeps
 // an output flip-flop per cell, so a block gives back about 100
-// flip-flops of a 36-bit slice of a delay_line (12 a 4-bit cell).
+// flip-flops of a 36-bit slice of a delay_line (12 a 4-bit cell). A
+// remainder of up to TAIL_MAX bits over the last block is not worth a
+// block: it rides in one delay_line cell (12 flip-flops) instead.
 //
 // The pointers start anywhere and need no reset: the read pointer is the
 // write pointer plus a constant, kept every clock. The rows hold nothing
 // until DELAY clocks after the first write, and the pipeline's valid bits
-// say when q means something (#309). DELAY is 3 … 17: at 2 the row read
-// would be the row written in the same clock, which a semi-dual-port
-// block does not define (UG285-1.4E p24 note 1).
+// say when q means something (#309). DELAY is 3 … 17 (16 with a tail
+// cell, delay_line's limit): at 2 the row read would be the row written
+// in the same clock, which a semi-dual-port block does not define
+// (UG285-1.4E p24 note 1).
 //------------------------------------------------------------------------
 `default_nettype none
 module block_delay_line #(
@@ -39,15 +42,26 @@ module block_delay_line #(
     localparam int READ_CLOCKS = 2;                               // address in, word in the output register
     localparam logic [ROW_W-1:0] DISTANCE = ROW_W'(DELAY - READ_CLOCKS);
     localparam int BLOCK_W = 36;
-    localparam int BLOCKS  = (WIDTH + BLOCK_W - 1) / BLOCK_W;
+    localparam int TAIL_MAX = 4;                                  // one shadow-SRAM cell
+    localparam int REMAINDER = WIDTH % BLOCK_W;
+    localparam int TAIL_W  = (REMAINDER > 0 && REMAINDER <= TAIL_MAX) ? REMAINDER : 0;
+    localparam int BLOCK_BITS = WIDTH - TAIL_W;
+    localparam int BLOCKS  = (BLOCK_BITS + BLOCK_W - 1) / BLOCK_W;
     localparam int PADDED_W = BLOCKS * BLOCK_W;
 
     initial begin
         if (DELAY < READ_CLOCKS + 1 || DELAY > READ_CLOCKS + (1 << ROW_W) - 1)
             $error("block_delay_line: DELAY %0d is outside %0d … %0d", DELAY, READ_CLOCKS + 1, READ_CLOCKS + (1 << ROW_W) - 1);
+        if (TAIL_W > 0 && DELAY > (1 << ROW_W))
+            $error("block_delay_line: DELAY %0d is over delay_line's 16 for the %0d-bit tail", DELAY, TAIL_W);
     end
 
-    wire  [PADDED_W-1:0] d_padded = PADDED_W'(d);
+    if (TAIL_W > 0) begin : g_tail
+        delay_line #(.WIDTH (TAIL_W), .DELAY (DELAY)) u_cell (
+            .clk (clk), .d (d[WIDTH-1 -: TAIL_W]), .q (q[WIDTH-1 -: TAIL_W]));
+    end
+
+    wire  [PADDED_W-1:0] d_padded = PADDED_W'(d[BLOCK_BITS-1:0]);
     logic [PADDED_W-1:0] q_padded;
     for (genvar block = 0; block < BLOCKS; block++) begin : g_block
         logic [ROW_W-1:0] write_row, read_row;
@@ -94,7 +108,7 @@ module block_delay_line #(
         end
 `endif
     end
-    assign q = q_padded[WIDTH-1:0];
+    assign q[BLOCK_BITS-1:0] = q_padded[BLOCK_BITS-1:0];
 
 endmodule
 `default_nettype wire

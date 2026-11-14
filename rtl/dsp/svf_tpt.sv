@@ -387,15 +387,15 @@ module svf_tpt #(
     // the output registers at t+17:
     //   A  the partial's index, cascade flag, phase, gains and limiter
     //      state: the input to the output registers, 16 clocks, in
-    //      three blocks (#343: its 99 bits were 25 shadow-SRAM cells and
-    //      their 274 flip-flops);
+    //      three blocks and a cell (#343: its 112 bits were 28 shadow-SRAM
+    //      cells and their 336 flip-flops);
     //   B  section 2's input states: the input to section 2, 10 clocks;
     //   C  the mantissa, the octave, g+R2, h and the mode: the h stage to
     //      section 2, section 1's 7 clocks (a register of its own, then 6
     //      in the shadow SRAM);
     //   D  section 1's new states and its output: section 1 to the output
     //      registers, section 2's 6 clocks, in three blocks (#343: 90 bits,
-    //      276 flip-flops as 23 cells).
+    //      274 flip-flops as 23 cells).
     // B and C stay in the shadow SRAM: their words go onto the ms2
     // multiplier's pins, and a block's output register straight into a
     // DSP is a path no board has measured; A's and D's words land in
