@@ -139,21 +139,27 @@ and the DSP. Issue #230 carries the patch work (fork
   The input side of a block is as invisible as its output side: a
   memory's address and data pins, a DSP's operands, must come from a
   register with nothing between. The LUT-RAM cells (`RAM16SDP4`) are
-  treated the same: small arrays in the core are flip-flops
-  (`ram_style = "logic"`), and where LUT-RAM is used each cell has
-  address registers of its own. **Measured 2026-10-28 (#309):** the
-  filter's delays in 82 RAM16SDP4, one pair of pointer registers per
-  delay line, so each pointer bit fed the address pins of 18–23 cells:
-  the CSP ran no pass at all, at 73.728 MHz. The same RTL with the
-  delays as register chains ran; with a pointer pair per cell
-  (`rtl/dsp/delay_line.sv`) it ran and passed the acceptance.
-  (Possibly stale after the tooling patches: the measurement predates
-  the project's nextpnr fork, `tools/nextpnr.version`, with the DSP
-  timing arcs, the macro exclusion and the #450 control-line fix, and
-  the pack suite's apicula has moved since; a dead core of that date
-  can have been the fork-era bitstream faults rather than the chip
-  refusing a shared pointer. The rule stands until one board boot of a
-  shared-pointer delay line on a current build says otherwise, #343.)
+  treated the same for the register itself: small arrays in the core are
+  flip-flops (`ram_style = "logic"`), and where LUT-RAM is used the
+  address comes from a register. **The per-cell copy of that register is
+  retired (#343, 2026-11-14).** The rule came from one measurement,
+  2026-10-28 (#309): the filter's delays in 82 RAM16SDP4, one pair of
+  pointer registers per delay line, so each pointer bit fed the address
+  pins of 18–23 cells, and the CSP ran no pass at all at 73.728 MHz; the
+  same RTL with the delays as register chains ran, and with a pointer pair
+  per cell it ran and passed the acceptance. That build predates the
+  project's nextpnr fork (`tools/nextpnr.version`: the DSP timing arcs,
+  the macro exclusion, the #450 control-line fix) and the pack suite's
+  apicula of today. On the current toolchain, `delay_line.sv` with one
+  pointer pair per ten cells (the #336 fan-out bound) placed at the
+  default seed (87.91 MHz), booted the self-test nine times of nine,
+  passed csp-verify and the Galaxy acceptance (`~/.local/tmp/hermes/acc-343s`
+  on the lab box, branch `dsp/343-shared-pointers` 4c5b78c). The chip never
+  refused a shared pointer; the 28 October build died of a toolchain
+  fault of its day. What that boot does not cover: a net over ten sinks
+  (the global router's segmented nets, #336, a routing question), and the
+  block RAM and DSP pin rules above, which stand on their own
+  measurements.
 - **Bypass mode is the slow kind.** A block inferred from
   `q <= mem[addr]` reads asynchronously after the registered address; its
   clock-to-out plus any logic eats most of a 13.5 ns cycle. The pipeline

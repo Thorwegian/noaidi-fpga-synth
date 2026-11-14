@@ -16,14 +16,14 @@
 //
 // The pointers are shared: one pair per group of up to MAX_SINKS cells,
 // so a pointer bit feeds at most ten cells' address pins (the global
-// router takes nets over that onto its locked long wires, #336). This is
-// the #343 test of the per-cell rule: with one pair for all 23 cells of
-// a line, the chip's CSP did not run a single pass (#309, 28 Oct), and
-// each cell got pointers of its own (#238). That boot predates the
-// project's nextpnr fork and the #450 control-line fix, so the rule is
-// possibly stale after the tooling patches; this file is the
-// shared-pointer line the note in docs/gowin_oss_notes.md asks to boot
-// on a current build. The
+// router takes nets over that onto its locked long wires, #336). Until
+// #343 every cell had a pair of its own, after one boot (#309, 28 Oct):
+// with one pair for all 23 cells of a line, the chip's CSP did not run a
+// single pass. That build predates the project's nextpnr fork and the
+// #450 control-line fix, and on the current toolchain this file, one pair
+// per ten cells, booted nine of nine and passed the acceptance
+// (docs/gowin_oss_notes.md, the retired rule): the chip never refused a
+// shared pointer. The
 // read pointer is a register at a fixed distance behind the write
 // pointer, so a cell's address comes from a register (the lab's
 // dut_lutram measured this path, its data out into a register, clean to
@@ -52,7 +52,7 @@ module delay_line #(
     end
 
     // One lane a RAM16SDP4, 4 bits wide; one pointer pair per group of up to
-    // MAX_SINKS lanes (#343, the shared-pointer test; #336 for the bound).
+    // MAX_SINKS lanes (#343; #336 for the bound).
     // (* keep *) on the block stops yosys merging the groups' identical
     // copies into one register for all.
     localparam int LANES = (WIDTH + 3) / 4;

@@ -14,9 +14,12 @@
 // Every cell's pins come from registers of that cell's own, none shared
 // (docs/gowin_oss_notes.md, the rule for every block's pins; measured on
 // the shadow SRAM in #309: one pointer register feeding 23 cells' address
-// pins killed the chip while the build met timing; possibly stale after
-// the tooling patches, since that boot predates the nextpnr fork and the
-// #450 control-line fix, see the note there and #343). So each cell holds its
+// pins killed the chip while the build met timing). That per-cell rule is
+// retired for RAM16SDP4 address pins (#343, 2026-11-14: delay_line.sv
+// with one pointer pair per ten cells booted nine of nine and passed the
+// acceptance on the current toolchain; the #309 build died of a
+// toolchain fault of its day), so the per-cell stage here can go, #457;
+// until then each cell holds its
 // own copy of the write row, the write enable (its bank's) and the read
 // row; `keep` on the block stops yosys merging the identical
 // copies, and the cell is the RAM16SDP4 primitive itself, because a memory
