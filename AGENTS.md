@@ -24,6 +24,8 @@
 
 - Agents *must* update comments and docs so they match the code before *every* commit.
 
+- Files in the repository document *state*: what the code and the design are and why they are so. They never say what something was before, what it replaced, or when and by whom it changed. Change is recorded where it happens: in the chat, the issue, the pull request and the commit message, and Git keeps the log. The only file that lists changes is one that is a changelog by name.
+
 - Variable names *must* be descriptive and use industry standard textbook terminology.
 
 - Raw values are raw values. There is no such unit as "LSB".
