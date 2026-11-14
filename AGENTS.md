@@ -45,9 +45,9 @@ License: CERN-OHL-S v2
 
 # Division of labour
 
-The top agent is Claude Fable, with Deepseek V4 Pro as the fallback. Subagents run on DeepSeek Flash. Deepseek V4 Pro has already failed on this codebase's RTL, so work is split by what it can be trusted with.
+The top agent is Claude Fable, with DeepSeek V4 Flash as the fallback. Subagents run on DeepSeek V4 Flash. Work is split by what it can be trusted with.
 
-Suitable for DeepSeek Flash:
+Suitable for DeepSeek V4 Flash:
 - Web and datasheet research.
 - Log and build-output digging.
 - Running make/test targets and reporting the numbers.
