@@ -147,6 +147,13 @@ and the DSP. Issue #230 carries the patch work (fork
   the CSP ran no pass at all, at 73.728 MHz. The same RTL with the
   delays as register chains ran; with a pointer pair per cell
   (`rtl/dsp/delay_line.sv`) it ran and passed the acceptance.
+  (Possibly stale after the tooling patches: the measurement predates
+  the project's nextpnr fork, `tools/nextpnr.version`, with the DSP
+  timing arcs, the macro exclusion and the #450 control-line fix, and
+  the pack suite's apicula has moved since; a dead core of that date
+  can have been the fork-era bitstream faults rather than the chip
+  refusing a shared pointer. The rule stands until one board boot of a
+  shared-pointer delay line on a current build says otherwise, #343.)
 - **Bypass mode is the slow kind.** A block inferred from
   `q <= mem[addr]` reads asynchronously after the registered address; its
   clock-to-out plus any logic eats most of a 13.5 ns cycle. The pipeline
