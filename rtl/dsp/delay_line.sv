@@ -16,7 +16,10 @@
 //
 // Each cell has its own pair of pointers, so no register feeds two cells'
 // pins (#238): with one pair for all, a pointer bit drove the address
-// pins of 23 cells, and the chip's CSP did not run a single pass. The
+// pins of 23 cells, and the chip's CSP did not run a single pass. (That
+// boot predates the project's nextpnr fork and the #450 control-line
+// fix, so the rule is possibly stale after the tooling patches; it holds
+// until a shared-pointer line boots on a current build, #343.) The
 // read pointer is a register at a fixed distance behind the write
 // pointer, so a cell's address comes from a register (the lab's
 // dut_lutram measured this path, its data out into a register, clean to
