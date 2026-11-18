@@ -9,15 +9,14 @@
 ;
 ;   pitch  = NOTE + CH_PITCH                        octaves
 ;   cutoff = 4 × U_M × MOD_AMOUNT + NOTE × KEY_TRACK + CH_CUTOFF   octaves
-;   gain   = OUT_A                                  the fraction of the
-;                                                   pipeline's 60 dB span
+;   gain   = OUT_A                                  the voice's linear gain
 ;                                                   (the amp envelope ×
 ;                                                   velocity, envelope.s)
 ;
 ; written to the voice's three sinks, the words the program owns for a voice.
-; The partial pipeline takes the gain's exponential, as the old engine's
-; attenuation LUT did, so the envelope's level moves the gain in dB and the
-; preset's volume is in the channel's left and right gains. The scratch fields
+; The gain is linear (#176): the partial pipeline multiplies it by the
+; channel's left and right gains, which hold the preset's volume, and the
+; loudness laws are the firmware's (app/main/render.cpp). The scratch fields
 ; hold the pitch and the cutoff (U_A, U_M) until the sinks are addressed: j
 ; points at the channel first, then at the sinks.
 
