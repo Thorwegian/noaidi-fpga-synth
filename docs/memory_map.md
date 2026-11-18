@@ -21,8 +21,9 @@ a MIDI-to-CV converter). Consequences:
   writes** to the CSP (`app/main/render.cpp`).
 - **Envelopes, LFOs, pitch and cutoff arithmetic run in the FPGA**, as the
   control program the CSP executes once per pass (four samples, 24 kHz — #268):
-  `tools/csp/programs`, in the firmware as
-  `app/main/csp/control_program.hpp`. The instruction set is
+  the firmware generates it at boot (`app/main/csp/generator.cpp`) and the
+  engine link loads it; `tools/csp/programs` is the same program as
+  assembly. The instruction set is
   [csp2_isa.md](csp2_isa.md), the machine
   [csp2_architecture.md](csp2_architecture.md).
 - A partial is **pointers only**: ten pointers into the **sink area**, which

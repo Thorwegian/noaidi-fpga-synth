@@ -1335,12 +1335,8 @@ int first_difference(const csp::Image &image, const Rows &rows) {
 // which this target holds current with tools/csp/programs.
 void test_generator_gives_the_firmware_image() {
     namespace cp = csp::control;
-    csp::Graph graph;
-    graph.lfos_a_half   = {cp::saws_a_half, cp::squares_a_half,
-                           cp::triangles_a_half, cp::sines_a_half};
-    graph.channel_count = cp::channel_count;
-    graph.voice_count   = cp::voice_count;
-    const csp::ProgramBuilder::Built built = csp::generate(graph);
+    csp::ProgramBuilder::Built built;
+    csp::generate(csp::control_graph(), built);
     check(built.ok, "the generator builds the firmware's graph");
     check_equal(built.image.length, static_cast<int64_t>(cp::rows.size()),
                 "the generator's rows are as many as control_program.hpp's");
@@ -1364,20 +1360,23 @@ void test_generator_gives_the_firmware_image() {
 
 // Other graphs against the assembler with the same counts: no LFOs, every
 // shape, more of a shape than a round holds, loops shorter than the result
-// latency, and a program that does not fit a pass, which both refuse.
+// latency, and a program that does not fit a pass, which both refuse. The
+// generator builds into one result throughout, as the firmware does: a
+// build leaves nothing of the one before.
 void test_generator_gives_the_assembled_image() {
     struct Counts {
         int saws, squares, triangles, sines, channels, voices;
     };
+    csp::ProgramBuilder::Built built;
     for (const Counts &counts : {Counts{0, 0, 0, 0, 16, 32},
                                  {1, 1, 1, 1, 16, 32},
                                  {3, 3, 3, 3, 16, 32},
+                                 {1, 1, 1, 1, 16, 200},
                                  {6, 6, 0, 0, 16, 32},
                                  {0, 0, 0, 12, 16, 32},
                                  {2, 0, 1, 5, 1, 32},
                                  {1, 1, 1, 1, 16, 5},
-                                 {0, 2, 17, 0, 3, 19},
-                                 {1, 1, 1, 1, 16, 200}}) {
+                                 {0, 2, 17, 0, 3, 19}}) {
         const std::string what =
                 "graph of " + std::to_string(counts.saws) + "/"
                 + std::to_string(counts.squares) + "/"
@@ -1393,7 +1392,7 @@ void test_generator_gives_the_assembled_image() {
                                counts.sines};
         graph.channel_count = counts.channels;
         graph.voice_count   = counts.voices;
-        const csp::ProgramBuilder::Built built = csp::generate(graph);
+        csp::generate(graph, built);
         check_equal(built.ok, assembled.ok,
                     what + "the generator builds what the assembler does");
         if (!built.ok || !assembled.ok) {

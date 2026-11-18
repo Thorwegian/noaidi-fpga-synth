@@ -340,13 +340,22 @@ void emit_voices(ProgramBuilder &program, const Graph &graph) {
 
 } // namespace
 
-ProgramBuilder::Built generate(const Graph &graph) {
+void generate(const Graph &graph, ProgramBuilder::Built &built) {
     ProgramBuilder program;
     emit_lfos(program, graph);
     emit_channels(program, graph);
     emit_envelopes(program, graph);
     emit_voices(program, graph);
-    return program.build();
+    program.build(built);
+}
+
+Graph control_graph() {
+    Graph graph;
+    graph.lfos_a_half   = {cp::saws_a_half, cp::squares_a_half,
+                           cp::triangles_a_half, cp::sines_a_half};
+    graph.channel_count = cp::channel_count;
+    graph.voice_count   = cp::voice_count;
+    return graph;
 }
 
 } // namespace csp

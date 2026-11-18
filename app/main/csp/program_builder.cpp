@@ -316,7 +316,19 @@ constexpr size_t wait_nop = static_cast<size_t>(-1);
 
 ProgramBuilder::Built ProgramBuilder::build() const {
     Built built;
-    built.issues = issues_;
+    build(built);
+    return built;
+}
+
+void ProgramBuilder::build(Built &built) const {
+    built.image.rows.fill(Row{});
+    built.image.rom.fill(0);
+    built.image.length   = 0;
+    built.image.rom_used = 1;
+    built.issues         = issues_;
+    built.position.clear();
+    built.cycles = 0;
+    built.ok     = true;
 
     // ---- the whole-program checks ----
     std::vector<size_t> loop_end(instructions_.size(), 0);
@@ -391,7 +403,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         }
     }
     if (!built.ok) {
-        return built;
+        return;
     }
 
     // ---- the schedule ----
@@ -806,7 +818,7 @@ ProgramBuilder::Built ProgramBuilder::build() const {
         built.ok = false;
     }
     if (!built.ok) {
-        return built;
+        return;
     }
 
     // ---- the rows and the ROM ----
@@ -901,7 +913,6 @@ ProgramBuilder::Built ProgramBuilder::build() const {
     end.op = rom_row(control_of(Op::end, false, ASource::zero));
     built.image.rows[placed.size()] = end.encode();
     built.image.length              = static_cast<int>(placed.size()) + 1;
-    return built;
 }
 
 } // namespace csp

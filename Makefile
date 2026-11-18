@@ -25,11 +25,14 @@
 #                   writes the rows and the ROM as hex for a bench, which
 #                   rtl/Makefile does for tb_top's boot self-test)
 #   make csp-test   host tests of the CSP reference model and assembler, that
-#                   the firmware's generator (app/main/csp/generator.cpp)
-#                   gives the assembled control program's image, and that
-#                   the firmware's control_program.hpp is current
+#                   the firmware's generator (app/main/csp/generator.cpp),
+#                   whose image the firmware loads, gives the assembled
+#                   control program's image, and that control_program.hpp
+#                   is current
 #   make csp-header regenerate app/main/csp/control_program.hpp from
-#                   tools/csp/programs (the firmware's copy of the program)
+#                   tools/csp/programs (the register map's names for the
+#                   firmware, and the assembled program the generator is
+#                   held to)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  fail on any source that is not formatted; fw,

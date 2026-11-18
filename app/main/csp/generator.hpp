@@ -7,8 +7,8 @@
 // emits the program through csp::ProgramBuilder, one emitter for each kind
 // of node, in the order the values depend on each other: the LFOs, the
 // channels, the envelopes, the voices. The builder schedules, counts the
-// pass's cycles and encodes; what comes back is its result, the image
-// the engine link loads and the issues of a graph whose program does not
+// pass's cycles and encodes into `built`, which the caller keeps: the image
+// the engine link loads, and the issues of a graph whose program does not
 // fit a pass.
 //
 // The registers the program works on are those of the control program's map
@@ -23,6 +23,10 @@
 
 namespace csp {
 
-ProgramBuilder::Built generate(const Graph &graph);
+void generate(const Graph &graph, ProgramBuilder::Built &built);
+
+// The graph the firmware runs: every channel and voice the map holds, and
+// the LFOs of tools/csp/programs/counts.s.
+Graph control_graph();
 
 } // namespace csp
