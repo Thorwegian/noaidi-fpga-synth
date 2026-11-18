@@ -24,8 +24,10 @@
 #                   (app/build/host/csp asm|sim|image program.s; `image`
 #                   writes the rows and the ROM as hex for a bench, which
 #                   rtl/Makefile does for tb_top's boot self-test)
-#   make csp-test   host tests of the CSP reference model and assembler, and
-#                   that the firmware's control_program.hpp is current
+#   make csp-test   host tests of the CSP reference model and assembler, that
+#                   the firmware's generator (app/main/csp/generator.cpp)
+#                   gives the assembled control program's image, and that
+#                   the firmware's control_program.hpp is current
 #   make csp-header regenerate app/main/csp/control_program.hpp from
 #                   tools/csp/programs (the firmware's copy of the program)
 #   make format     reformat our C and C++ sources (.clang-format: the
@@ -90,6 +92,10 @@ CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp
               $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test
+# The firmware's generator names the registers by control_program.hpp, which
+# the tool writes: the test builds with it, the tool does not.
+CSP_GENERATOR     = app/main/csp/generator.cpp
+CSP_GENERATOR_HDR = app/main/csp/generator.hpp app/main/csp/graph.hpp
 
 all: pack fw
 
@@ -195,9 +201,9 @@ csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
 	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
 	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
 
-csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GENERATOR) $(CSP_GENERATOR_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_GENERATOR) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
 	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
 	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
