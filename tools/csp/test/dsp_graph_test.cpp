@@ -311,6 +311,350 @@ void test_refusals() {
     }
 }
 
+// A record's field with one reader by a fixed wire, a sum that works on its
+// operand in place: the field keeps its word, since what reads it through a
+// pointer is to get the field and not the sum.
+void test_a_field_summed_onto() {
+    Graph graph;
+    const Wire a = graph.source(), b = graph.source();
+    const Wire field = graph.sum({}, a, b);
+    const std::vector<Field> fields{field};
+    const Record record = graph.record(fields);
+    graph.sink(csp::sink_base, graph.sum(field, a));
+    const std::vector<Record> records{record};
+    const Wire pointer = graph.pointer(records);
+    graph.sink(csp::sink_base + 1, graph.multiply(graph.through(pointer, 0),
+                                                  graph.constant(q(1.0))));
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, "the field summed onto")) {
+        return;
+    }
+    csp::Processor processor;
+    processor.write(graph.address(a), q(0.5));
+    processor.write(graph.address(b), q(0.25));
+    processor.write(graph.address(pointer), graph.address(record));
+    start(processor, built.image);
+    pass(processor, "the field summed onto");
+    check_equal(processor.sink(0), q(1.25), "a sum onto a record's field");
+    check_equal(processor.sink(1), q(0.75),
+                "the field through a pointer, a sum onto it made");
+}
+
+// ---- copies and loops -------------------------------------------------------------
+//
+// A small circuit made `count` times over by an ordinary loop, as the top
+// makes its voices: two selects that take the flags in turn, one of them
+// reading through a pointer; a chain of products through one pointer,
+// through another, and through the first again; a field with three readers;
+// a word that all the copies share; a counter. Built at counts the graph
+// loops over and at counts it does not, every sink has the value worked out
+// here, before and after the wires are moved.
+
+constexpr int copy_sinks = 8; // a copy's block of sinks
+enum {
+    sink_larger,
+    sink_smaller,
+    sink_chain,
+    sink_twice,
+    sink_shared,
+    sink_counter
+};
+
+void test_copies(int count, bool looped, int body_rows) {
+    const std::string what = std::to_string(count) + " copies";
+    const double gains[3] = {0.5, 1.0, 1.5}, levels[3] = {0.25, 0.5, 1.0};
+    const double scales[2] = {0.5, 2.0};
+    const double shared    = 0.5;
+    auto a_of              = [](int c) {
+        return 0.125 * (1 + c % 5);
+    };
+    auto b_of = [](int c) {
+        return 0.25 * (1 + c * 3 % 7);
+    };
+
+    Graph graph;
+    struct Target {
+        Wire gain, level;
+        Record record;
+    } targets[3];
+    std::vector<Record> target_records;
+    for (Target &target : targets) {
+        target.gain  = graph.source();
+        target.level = graph.source();
+        const std::vector<Field> fields{target.gain, target.level};
+        target.record = graph.record(fields);
+        target_records.push_back(target.record);
+    }
+    struct Scale {
+        Wire scale;
+        Record record;
+    } scalers[2];
+    std::vector<Record> scale_records;
+    for (Scale &scaler : scalers) {
+        scaler.scale = graph.source();
+        const std::vector<Field> fields{scaler.scale};
+        scaler.record = graph.record(fields);
+        scale_records.push_back(scaler.record);
+    }
+    const Wire master = graph.source();
+    struct Copy {
+        Wire a, b, target, scaler;
+    };
+    std::vector<Copy> copies(static_cast<size_t>(count));
+    for (int c = 0; c < count; ++c) {
+        Copy &copy       = copies[static_cast<size_t>(c)];
+        copy.a           = graph.source();
+        copy.b           = graph.source();
+        copy.target      = graph.pointer(target_records);
+        copy.scaler      = graph.pointer(scale_records);
+        const Wire gain  = graph.through(copy.target, 0);
+        const Wire level = graph.through(copy.target, 1);
+        const Wire scale = graph.through(copy.scaler, 0);
+        const int sinks  = csp::sink_base + copy_sinks * c;
+        // b where a is the smaller, else the gain behind the pointer
+        graph.sink(sinks + sink_larger,
+                   graph.select(copy.a, copy.b, csp::Condition::negative, gain,
+                                copy.b));
+        graph.sink(sinks + sink_smaller,
+                   graph.select(copy.b, copy.a, csp::Condition::negative,
+                                copy.a, copy.b));
+        graph.sink(sinks + sink_chain,
+                   graph.multiply(
+                           graph.multiply(graph.multiply(copy.a, gain), scale),
+                           level));
+        graph.sink(sinks + sink_twice,
+                   graph.sum({}, graph.multiply(copy.a, level),
+                             graph.multiply(copy.b, level)));
+        graph.sink(sinks + sink_shared, graph.multiply(copy.b, master));
+        const Wire counted  = graph.delay();
+        const Wire counting = graph.sum(counted, copy.a);
+        graph.connect(counted, counting);
+        graph.sink(sinks + sink_counter, counting);
+    }
+
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, what)) {
+        return;
+    }
+    bool found = false;
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        if (set.copies != count) {
+            continue;
+        }
+        found = true;
+        check(set.looped == looped,
+              what
+                      + (looped ? " are a vector loop"
+                                : " are straight-line code"));
+        if (looped) {
+            check_equal(set.rows, body_rows,
+                        what + ": the instruction rows of the loop body");
+        }
+    }
+    check(found, what + " are found");
+    check_equal(static_cast<int64_t>(graph.initial_values().size()),
+                looped ? count : 0,
+                what + ": pointers to sinks for the firmware to set");
+
+    auto processor = std::make_unique<csp::Processor>();
+    auto point     = [&](int moved) {
+        for (int c = 0; c < count; ++c) {
+            const Copy &copy = copies[static_cast<size_t>(c)];
+            processor->write(graph.address(copy.target),
+                                 graph.address(targets[(c + moved) % 3].record));
+            processor->write(graph.address(copy.scaler),
+                                 graph.address(scalers[(c + moved) % 2].record));
+        }
+    };
+    for (int t = 0; t < 3; ++t) {
+        processor->write(graph.address(targets[t].gain), q(gains[t]));
+        processor->write(graph.address(targets[t].level), q(levels[t]));
+    }
+    for (int s = 0; s < 2; ++s) {
+        processor->write(graph.address(scalers[s].scale), q(scales[s]));
+    }
+    processor->write(graph.address(master), q(shared));
+    for (int c = 0; c < count; ++c) {
+        processor->write(graph.address(copies[static_cast<size_t>(c)].a),
+                         q(a_of(c)));
+        processor->write(graph.address(copies[static_cast<size_t>(c)].b),
+                         q(b_of(c)));
+    }
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor->write(initial.address, initial.value);
+    }
+    point(0);
+    start(*processor, built.image);
+
+    int passes  = 0;
+    auto expect = [&](int moved) {
+        int wrong = 0;
+        for (int c = 0; c < count; ++c) {
+            const double a = a_of(c), b = b_of(c);
+            const double gain   = gains[(c + moved) % 3];
+            const double level  = levels[(c + moved) % 3];
+            const double scale  = scales[(c + moved) % 2];
+            const double want[] = {a - b < 0 ? b : gain,
+                                   b - a < 0 ? b : a,
+                                   a * gain * scale * level,
+                                   a * level + b * level,
+                                   b * shared,
+                                   passes * a};
+            for (int k = 0; k <= sink_counter; ++k) {
+                const int32_t got = processor->sink(copy_sinks * c + k);
+                if (got != q(want[k]) && wrong++ < 3) {
+                    std::printf("  %s, copy %d sink %d: %d, want %d\n",
+                                what.c_str(), c, k, got, q(want[k]));
+                }
+            }
+        }
+        return wrong;
+    };
+    for (; passes < 2; ++passes) {
+        pass(*processor, what);
+    }
+    check_equal(expect(0), 0, what + ": sinks that are wrong");
+    point(1); // every wire moved
+    processor->swap();
+    do { // the firmware's writes land a queue's share a pass
+        pass(*processor, what);
+        ++passes;
+    } while (processor->queued_writes() > 0);
+    for (int settled = 0; settled < 2; ++settled, ++passes) {
+        pass(*processor, what);
+    }
+    check_equal(expect(1), 0, what + ": sinks that are wrong, the wires moved");
+}
+
+// Two like parts in one circuit, each a running total of its own gain. The
+// graph tells copies by their wiring; which of two like nodes is which it
+// takes from the order they were made in, and compares the circuits node by
+// node on that. One copy here makes its two parts in the other order: it is
+// no copy to the graph, stays straight-line code beside the loop over the
+// rest, and every total is right.
+void test_a_copy_made_otherwise() {
+    constexpr int count = 10, otherwise = 4, parts = 2;
+    const double gains[parts] = {0.5, 1.5};
+    auto a_of                 = [](int c) {
+        return 0.25 * (1 + c % 3);
+    };
+    Graph graph;
+    struct Twin {
+        Wire a, gain[parts], total[parts];
+    } twins[count];
+    for (int c = 0; c < count; ++c) {
+        Twin &twin = twins[c];
+        twin.a     = graph.source();
+        for (Wire &gain : twin.gain) {
+            gain = graph.source();
+        }
+        for (int made = 0; made < parts; ++made) {
+            const int part  = c == otherwise ? parts - 1 - made : made;
+            const Wire held = graph.delay();
+            twin.total[part] =
+                    graph.multiply_add(held, twin.a, twin.gain[part]);
+            graph.connect(held, twin.total[part]);
+        }
+    }
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, "the copy made otherwise")) {
+        return;
+    }
+    check(graph.copy_sets().size() == 1
+                  && graph.copy_sets().front().copies == count - 1
+                  && graph.copy_sets().front().looped,
+          "the copies made alike are a vector loop, without the one made otherwise");
+
+    auto processor = std::make_unique<csp::Processor>();
+    for (int c = 0; c < count; ++c) {
+        processor->write(graph.address(twins[c].a), q(a_of(c)));
+        for (int part = 0; part < parts; ++part) {
+            processor->write(graph.address(twins[c].gain[part]),
+                             q(gains[part]));
+        }
+    }
+    start(*processor, built.image);
+    constexpr int passes = 3;
+    for (int at = 0; at < passes; ++at) {
+        pass(*processor, "the copy made otherwise");
+    }
+    int wrong = 0;
+    for (int c = 0; c < count; ++c) {
+        for (int part = 0; part < parts; ++part) {
+            wrong += processor->read(graph.address(twins[c].total[part]))
+                                     != q(passes * a_of(c) * gains[part])
+                             ? 1
+                             : 0;
+        }
+    }
+    check_equal(
+            wrong, 0,
+            "totals that are wrong, of the loop's copies and the one made otherwise");
+}
+
+// Copies whose pointers point at each other: every copy counts, and adds
+// to its own input what the counter of the copy it points at was a pass
+// ago. An element of a vector loop reads no word that another element
+// writes, so these are no loop, however many they are.
+void test_copies_that_point_at_each_other() {
+    constexpr int count = 12, sinks_from = 512;
+    auto a_of = [](int c) {
+        return 0.125 * (1 + c % 4);
+    };
+    Graph graph;
+    struct Counter {
+        Wire a, held, other;
+        Record record;
+    } counters[count];
+    std::vector<Record> records;
+    for (Counter &counter : counters) {
+        counter.a    = graph.source();
+        counter.held = graph.delay();
+        const std::vector<Field> fields{counter.held};
+        counter.record = graph.record(fields);
+        records.push_back(counter.record);
+    }
+    // the readers of every counter as it was, then the counters' renewal
+    for (int c = 0; c < count; ++c) {
+        counters[c].other = graph.pointer(records);
+        graph.sink(
+                csp::sink_base + sinks_from + c,
+                graph.sum(counters[c].a, graph.through(counters[c].other, 0)));
+    }
+    for (Counter &counter : counters) {
+        graph.connect(counter.held, graph.sum(counter.held, counter.a));
+    }
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, "copies that point at each other")) {
+        return;
+    }
+    check(graph.copy_sets().size() == 1
+                  && graph.copy_sets().front().copies == count
+                  && !graph.copy_sets().front().looped,
+          "copies that point at each other are found, and are straight-line code");
+    auto processor = std::make_unique<csp::Processor>();
+    for (int c = 0; c < count; ++c) {
+        processor->write(graph.address(counters[c].a), q(a_of(c)));
+        processor->write(graph.address(counters[c].other),
+                         graph.address(counters[(c + 5) % count].record));
+    }
+    start(*processor, built.image);
+    constexpr int passes = 3;
+    for (int at = 0; at < passes; ++at) {
+        pass(*processor, "copies that point at each other");
+    }
+    int wrong = 0;
+    for (int c = 0; c < count; ++c) {
+        wrong += processor->sink(sinks_from + c)
+                                 != q(a_of(c)
+                                      + (passes - 1) * a_of((c + 5) % count))
+                         ? 1
+                         : 0;
+    }
+    check_equal(wrong, 0,
+                "sums that are wrong, of copies that point at each other");
+}
+
 // ---- today's wiring ---------------------------------------------------------------
 //
 // What generator.cpp's program computes, as sources, operators and sinks.
@@ -671,7 +1015,7 @@ void test_todays_synth() {
             "today's control program (vector loops): %d rows, %d decode rows, %d cycles a pass\n",
             today.image.length, today.image.rom_used, today.cycles);
     std::printf(
-            "today's synth from the graph (straight-line): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
+            "today's synth from the graph (the loops it finds): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
             graphed.image.length, graphed.image.rom_used, graphed.cycles,
             graphed.position.size(),
             graphed.image.length - static_cast<int>(graphed.position.size()));
@@ -693,7 +1037,51 @@ void test_todays_synth() {
     check(graph.address(rig->synth.channels[3].record) % 32 == 0,
           "a channel's record is aligned to its size");
 
+    // the copies, which the wiring above never named: the voices and the
+    // channels, each a vector loop, and the LFOs two of a shape, too few
+    // for a loop
+    std::vector<std::pair<int, bool>> copies;
+    std::string found;
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        copies.push_back({set.copies, set.looped});
+        found += (found.empty() ? "" : ", ") + std::to_string(set.copies)
+                 + " of " + std::to_string(set.nodes) + " nodes"
+                 + (set.looped ? " (a loop, " + std::to_string(set.rows)
+                                         + " rows in its body)"
+                               : "");
+    }
+    std::printf("the graph's copies: %s\n", found.c_str());
+    std::sort(copies.begin(), copies.end());
+    check(copies
+                  == std::vector<std::pair<int, bool>>{{2, false},
+                                                       {2, false},
+                                                       {2, false},
+                                                       {2, false},
+                                                       {channel_count, true},
+                                                       {voice_count, true}},
+          "the graph finds its voices and its channels, and loops over them, and its pairs of LFOs");
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        if (set.looped) {
+            check_equal(set.rows, set.copies == voice_count ? 23 : 17,
+                        "the instruction rows in the loop body of "
+                                + std::to_string(set.copies) + " copies");
+        }
+    }
+    check(graphed.cycles < today.cycles
+                  && graphed.image.length < today.image.length,
+          "the graph's program is shorter than today's, in rows and in cycles");
+    check_equal(
+            static_cast<int64_t>(graph.initial_values().size()),
+            channel_count + voice_count,
+            "words the graph has the firmware set at load: a pointer to its sinks for each element");
+    check(graph.writer(graph.initial_values().front().address)
+                  == Graph::Writer::firmware,
+          "such a word is the firmware's");
+
     rig->set_up();
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        rig->graphed.write(initial.address, initial.value);
+    }
     start(rig->today, today.image);
     start(rig->graphed, graphed.image);
     int differences = 0, early = 0, stale = 0, cycles = 0, todays_errors = 0;
@@ -783,6 +1171,15 @@ void test_todays_synth() {
 int main() {
     test_operators();
     test_refusals();
+    test_a_field_summed_onto();
+    constexpr int body_rows = 20; // of test_copies' circuit as a loop
+    test_copies(16, true, body_rows);
+    test_copies(32, true, body_rows);
+    test_copies(9, true, body_rows);
+    test_copies(8, false, 0);  // too few for a round
+    test_copies(20, false, 0); // a round of sixteen and one of four
+    test_a_copy_made_otherwise();
+    test_copies_that_point_at_each_other();
     test_todays_synth();
     std::printf("dsp graph: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
