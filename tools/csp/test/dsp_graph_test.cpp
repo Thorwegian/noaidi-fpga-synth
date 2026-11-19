@@ -4,13 +4,13 @@
 // License: CERN-OHL-S v2
 //
 // Two things. Each operator and each kind of connection in a small graph,
-// its image run on the reference model and every value checked. And today's
-// Noaidi wiring as a graph (8 LFOs, 16 channels, 32 voices, the copies made
-// by loops), its image run on the reference model beside today's control
-// program (app/main/csp/generator.cpp) on the same notes and controller
-// values, wires moved while it plays: every sink holds the same value, pass
-// for pass, and the model reports no read before ready. The test prints the
-// image's rows and the pass's cycles.
+// its image run on the reference model and every value checked. And the
+// Noaidi's wiring (app/main/wiring.cpp: 8 LFOs, 16 channels, 32 voices, the
+// copies made by loops), its image run on the reference model beside today's
+// control program (app/main/csp/generator.cpp) on the same notes and
+// controller values, wires moved while it plays: every sink holds the same
+// value, pass for pass, and the model reports no read before ready. The test
+// prints the image's rows and the pass's cycles.
 //
 //   make csp-test
 
@@ -26,6 +26,7 @@
 #include "csp/control_program.hpp"
 #include "csp/dsp_graph.hpp"
 #include "csp/generator.hpp"
+#include "wiring.hpp"
 
 namespace {
 
@@ -655,209 +656,23 @@ void test_copies_that_point_at_each_other() {
                 "sums that are wrong, of copies that point at each other");
 }
 
-// ---- today's wiring ---------------------------------------------------------------
+// ---- the Noaidi's wiring -------------------------------------------------------------
 //
-// What generator.cpp's program computes, as sources, operators and sinks.
-// An LFO is a phase and the wave of its shape; a channel takes two LFOs
-// through movable wires onto its pitch, cutoff, pulse width and resonance;
-// a voice has two envelopes and reaches its channel through a movable wire.
+// The synth the firmware wires (app/main/wiring.cpp): what generator.cpp's
+// program computes, as sources, operators and sinks.
 
-constexpr int lfo_count      = 8;
-constexpr int channel_count  = 16;
-constexpr int voice_count    = 32;
-constexpr int stage_count    = 3; // attack, decay, release
-constexpr int envelope_count = 2; // amp, mod
+using wiring::channel_count;
+using wiring::envelope_count;
+using wiring::lfo_count;
+using wiring::moved_count;
+using wiring::stage_count;
+using wiring::voice_count;
 
-enum { moves_pitch, moves_cutoff, moves_duty, moves_resonance, moved_count };
-
-struct Lfo {
-    Wire step, depth, neg_depth, gain; // the firmware's
-    Wire out;
-    Record record; // what a channel's pointer holds
-};
-
-// An envelope's segment: where the level heads and how fast.
-struct Segment {
-    Wire target, rate; // the firmware's
-    Record record;
-};
-enum { field_target, field_rate };
-
-struct Channel {
-    Wire lfo[2]; // movable
-    Wire depth[2][moved_count];
-    Wire bend, cutoff_base, key_track, mod_amount;
-    Wire duty_base[2], resonance_base;
-    Segment segments[envelope_count][stage_count];
-    Wire pitch, cutoff; // for its voices
-    Record record;      // what a voice's pointer holds
-};
-// the channel record's fields behind its six segments
-enum {
-    field_pitch = envelope_count * stage_count,
-    field_cutoff,
-    field_mod_amount,
-    field_key_track
-};
-
-struct Voice {
-    Wire channel; // movable
-    Wire note, velocity[envelope_count];
-    Wire stage[envelope_count]; // the program's, and the firmware's at a note
-};
-
-struct Synth {
-    Graph graph;
-    Lfo lfos[lfo_count];
-    Channel channels[channel_count];
-    Voice voices[voice_count];
-};
-
-void wire_lfo(Graph &graph, Lfo &lfo, int shape) {
-    lfo.step          = graph.source(Width::dword);
-    lfo.depth         = graph.source();
-    lfo.neg_depth     = graph.source();
-    lfo.gain          = graph.source();
-    const Wire before = graph.delay(Width::dword);
-    const Wire phase  = graph.sum(before, lfo.step, {}, Overflow::wrap);
-    graph.connect(before, phase);
-    switch (shape) {
-    case 0: // saw
-        lfo.out = graph.multiply(phase, lfo.gain);
-        break;
-    case 1: // square
-        lfo.out = graph.select(phase, {}, csp::Condition::negative,
-                               lfo.neg_depth, lfo.depth);
-        break;
-    case 2: // triangle
-        lfo.out = graph.sum(graph.multiply(graph.absolute(phase), lfo.gain),
-                            lfo.neg_depth);
-        break;
-    default: { // sine: a parabola, and a correction of its own square
-        const Wire p = graph.multiply(phase, graph.constant(cp::eighth));
-        Wire t       = graph.multiply(graph.absolute(p), p);
-        t            = graph.multiply(t, graph.constant(cp::minus_four));
-        t            = graph.multiply_add(t, p, graph.constant(cp::four));
-        const Wire z = graph.multiply(t, graph.absolute(t));
-        Wire wave = graph.multiply(t, graph.constant(cp::one_minus_correction));
-        wave      = graph.multiply_add(wave, z, graph.constant(cp::correction));
-        lfo.out   = graph.multiply(wave, lfo.depth);
-        break;
-    }
-    }
-    const std::vector<Field> fields{lfo.out};
-    lfo.record = graph.record(fields);
-}
-
-void wire_channel(Synth &synth, int c) {
-    Graph &graph     = synth.graph;
-    Channel &channel = synth.channels[c];
-    std::vector<Record> lfo_records;
-    for (const Lfo &lfo : synth.lfos) {
-        lfo_records.push_back(lfo.record);
-    }
-    Wire moved[moved_count];
-    for (int l = 0; l < 2; ++l) {
-        channel.lfo[l] = graph.pointer(lfo_records);
-        const Wire lfo = graph.through(channel.lfo[l], 0);
-        for (int k = 0; k < moved_count; ++k) {
-            channel.depth[l][k] = graph.source();
-            moved[k] = graph.multiply_add(moved[k], lfo, channel.depth[l][k]);
-        }
-    }
-    channel.bend        = graph.source();
-    channel.cutoff_base = graph.source();
-    channel.key_track   = graph.source();
-    channel.mod_amount  = graph.source();
-    channel.pitch       = graph.sum({}, moved[moves_pitch], channel.bend);
-    channel.cutoff =
-            graph.sum(graph.multiply_add(moved[moves_cutoff], channel.bend,
-                                         channel.key_track),
-                      channel.cutoff_base);
-    const int sinks = cp::channel_sinks + cp::channel_sink_size * c;
-    for (int half = 0; half < 2; ++half) {
-        channel.duty_base[half] = graph.source();
-        graph.sink(sinks + (half == 0 ? cp::duty_0 : cp::duty_1),
-                   graph.sum({}, moved[moves_duty], channel.duty_base[half]));
-    }
-    channel.resonance_base = graph.source();
-    graph.sink(sinks + cp::resonance,
-               graph.sum({}, moved[moves_resonance], channel.resonance_base));
-
-    std::vector<Field> fields;
-    for (auto &envelope : channel.segments) {
-        for (Segment &segment : envelope) {
-            segment.target = graph.source(Width::dword);
-            segment.rate   = graph.source(Width::dword);
-            const std::vector<Field> pair{segment.target, segment.rate};
-            segment.record = graph.record(pair);
-            fields.push_back(segment.record);
-        }
-    }
-    fields.push_back(channel.pitch);
-    fields.push_back(channel.cutoff);
-    fields.push_back(channel.mod_amount);
-    fields.push_back(channel.key_track);
-    channel.record = graph.record(fields);
-}
-
-void wire_voice(Synth &synth, int v) {
-    Graph &graph = synth.graph;
-    Voice &voice = synth.voices[v];
-    std::vector<Record> channel_records;
-    for (const Channel &channel : synth.channels) {
-        channel_records.push_back(channel.record);
-    }
-    voice.channel = graph.pointer(channel_records);
-    voice.note    = graph.source();
-    Wire envelope[envelope_count];
-    for (int e = 0; e < envelope_count; ++e) {
-        voice.velocity[e] = graph.source();
-        // the stage is the offset of a segment in the channel's record; the
-        // attack ends when the level is full, and the decay is the next
-        const Wire stage  = graph.delay();
-        const Wire before = graph.delay(Width::dword);
-        const Wire decay =
-                graph.offset_of(synth.channels[0].segments[e][1].record);
-        const Wire now = graph.select(before, graph.constant(cp::full),
-                                      csp::Condition::negative,
-                                      graph.maximum(stage, decay), stage);
-        graph.connect(stage, now);
-        voice.stage[e] = stage;
-        // the level goes a rate's share of its distance to the target
-        const Wire distance = graph.difference(
-                graph.through(voice.channel, now, field_target), before);
-        const Wire level = graph.multiply_add(
-                before, distance,
-                graph.through(voice.channel, now, field_rate));
-        graph.connect(before, level);
-        envelope[e] = graph.multiply(level, voice.velocity[e]);
-    }
-    const Wire pitch =
-            graph.sum(voice.note, graph.through(voice.channel, field_pitch));
-    Wire cutoff = graph.multiply(
-            envelope[1], graph.through(voice.channel, field_mod_amount));
-    cutoff = graph.shift(cutoff, 2);
-    cutoff = graph.multiply_add(cutoff, voice.note,
-                                graph.through(voice.channel, field_key_track));
-    cutoff = graph.sum(cutoff, graph.through(voice.channel, field_cutoff));
-    const int sinks = cp::sinks + cp::voice_sinks_size * v;
-    graph.sink(sinks + cp::sink_pitch, pitch);
-    graph.sink(sinks + cp::sink_cutoff, cutoff);
-    graph.sink(sinks + cp::sink_gain, envelope[0]);
-}
-
-void wire(Synth &synth) {
-    for (int l = 0; l < lfo_count; ++l) {
-        wire_lfo(synth.graph, synth.lfos[l], l % 4);
-    }
-    for (int c = 0; c < channel_count; ++c) {
-        wire_channel(synth, c);
-    }
-    for (int v = 0; v < voice_count; ++v) {
-        wire_voice(synth, v);
-    }
-}
+using Synth   = wiring::Synth;
+using Lfo     = wiring::Lfo;
+using Segment = wiring::Segment;
+using Channel = wiring::Channel;
+using Voice   = wiring::Voice;
 
 // ---- both programs on the model ------------------------------------------------------
 
@@ -995,7 +810,7 @@ void test_todays_synth() {
     check(today.ok, "today's control program builds");
 
     auto rig = std::make_unique<Rig>();
-    wire(rig->synth);
+    wiring::wire(rig->synth);
     csp::ProgramBuilder::Built graphed;
     const auto began = std::chrono::steady_clock::now();
     const bool built =
