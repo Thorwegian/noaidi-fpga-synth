@@ -25,19 +25,16 @@
 #                   writes the rows and the ROM as hex for a bench, which
 #                   rtl/Makefile does for tb_top's boot self-test)
 #   make csp-test   host tests of the CSP reference model and assembler, that
-#                   the firmware's generator (app/main/csp/generator.cpp),
-#                   whose image the firmware loads, gives the assembled
-#                   control program's image, that control_program.hpp
-#                   is current, and of the DSP graph
-#                   (app/main/csp/dsp_graph.cpp): the Noaidi's program from
-#                   the graph (app/main/wiring.cpp) holds every sink the
-#                   graph has to the interpreter of the graph
+#                   selftest_program.hpp is current, and of the DSP graph
+#                   (app/main/csp/dsp_graph.cpp): the Noaidi's wiring
+#                   (app/main/wiring.cpp) gives its formulas' sinks on the
+#                   model, and its program holds every sink to the
+#                   interpreter of the graph
 #                   (tools/csp/test/graph_evaluator.cpp), pass for pass;
 #                   prints the rows and cycles of the graph's program
-#   make csp-header regenerate app/main/csp/control_program.hpp from
-#                   tools/csp/programs (the register map's names for the
-#                   firmware, and the assembled program the generator is
-#                   held to)
+#   make csp-header regenerate app/main/csp/selftest_program.hpp from
+#                   tools/csp/programs/selftest.s (the boot self-test the
+#                   firmware loads, and its registers' names)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  fail on any source that is not formatted; fw,
@@ -100,10 +97,6 @@ CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp
               $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test
-# The firmware's generator names the registers by control_program.hpp, which
-# the tool writes: the test builds with it, the tool does not.
-CSP_GENERATOR     = app/main/csp/generator.cpp
-CSP_GENERATOR_HDR = app/main/csp/generator.hpp app/main/csp/graph.hpp
 # The DSP graph, the Noaidi's wiring as one, and their test: the wiring's
 # program from the graph, its every sink held to the graph's interpreter.
 CSP_GRAPH      = app/main/csp/dsp_graph.cpp app/main/wiring.cpp
@@ -207,28 +200,21 @@ $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/perf
 
 csp: $(CSP_TOOL)
 
-# The control program, in the order its parts are joined (map.s first).
-CSP_PROGRAM_FILES = $(addprefix $(CSP_DIR)/programs/,map.s counts.s lfo.s channel.s envelope.s voice.s)
-CSP_CONTROL_HEADER = app/main/csp/control_program.hpp
-
 CSP_SELFTEST_FILES = $(CSP_DIR)/programs/selftest.s
 CSP_SELFTEST_HEADER = app/main/csp/selftest_program.hpp
 
-csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
-	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
-	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
+csp-header: $(CSP_TOOL) $(CSP_SELFTEST_FILES)
+	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) > $(CSP_SELFTEST_HEADER)
 
-csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GENERATOR) $(CSP_GENERATOR_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) $(CSP_EVALUATOR_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) $(CSP_EVALUATOR_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL) $(CSP_SELFTEST_FILES)
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_GENERATOR) $(CSP_DIR)/test/csp_test.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_GRAPH_TEST) $(CSP_SRC) $(CSP_GRAPH) $(CSP_EVALUATOR) $(CSP_DIR)/test/dsp_graph_test.cpp
 	$(CSP_GRAPH_TEST)
-	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
-	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
-	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
+	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
 	    || { echo "FAIL $(CSP_SELFTEST_HEADER) is stale: make csp-header"; exit 1; }
-	@echo "$(CSP_CONTROL_HEADER) is current"
+	@echo "$(CSP_SELFTEST_HEADER) is current"
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage

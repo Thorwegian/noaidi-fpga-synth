@@ -260,7 +260,8 @@ CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/c
                 ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp \
                 ../app/main/csp/dsp_graph.cpp ../app/main/wiring.cpp
 CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp \
-                ../app/main/csp/dsp_graph.hpp ../app/main/wiring.hpp ../tools/csp/performance.hpp
+                ../app/main/csp/dsp_graph.hpp ../app/main/csp/dsp_graph_netlist.hpp ../app/main/wiring.hpp \
+                ../tools/csp/performance.hpp
 obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
                        $(wildcard ../tools/csp/programs/*.s) Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \
