@@ -101,8 +101,8 @@ void test_operators() {
     Graph graph;
     const Wire a = graph.source(), b = graph.source(), c = graph.source();
     const Wire large = graph.source(), larger = graph.source();
-    int sinks        = 0;
-    auto sink        = [&](Wire value) {
+    int sinks = 0;
+    auto sink = [&](Wire value) {
         graph.sink(csp::sink_base + sinks, value);
         return sinks++;
     };
@@ -129,9 +129,9 @@ void test_operators() {
     const int was       = sink(graph.sum({}, count, {}));
     const Wire counting = graph.sum(count, graph.constant(q(0.25)));
     graph.connect(count, counting);
-    const int counted = sink(graph.multiply(
-            graph.multiply(counting, graph.constant(q(2.0))),
-            graph.constant(q(0.5))));
+    const int counted = sink(
+            graph.multiply(graph.multiply(counting, graph.constant(q(2.0))),
+                           graph.constant(q(0.5))));
 
     // a dword onto its own delayed output: steps of a × step
     const Wire step      = graph.source(Width::dword);
@@ -156,8 +156,7 @@ void test_operators() {
         const std::vector<Field> highs{target.high};
         target.lows  = graph.record(lows);
         target.highs = graph.record(highs);
-        const std::vector<Field> fields{target.gain, target.lows,
-                                        target.highs};
+        const std::vector<Field> fields{target.gain, target.lows, target.highs};
         target.record = graph.record(fields);
         records.push_back(target.record);
     }
@@ -319,10 +318,10 @@ void test_refusals() {
 // through movable wires onto its pitch, cutoff, pulse width and resonance;
 // a voice has two envelopes and reaches its channel through a movable wire.
 
-constexpr int lfo_count     = 8;
-constexpr int channel_count = 16;
-constexpr int voice_count   = 32;
-constexpr int stage_count   = 3; // attack, decay, release
+constexpr int lfo_count      = 8;
+constexpr int channel_count  = 16;
+constexpr int voice_count    = 32;
+constexpr int stage_count    = 3; // attack, decay, release
 constexpr int envelope_count = 2; // amp, mod
 
 enum { moves_pitch, moves_cutoff, moves_duty, moves_resonance, moved_count };
@@ -371,10 +370,10 @@ struct Synth {
 };
 
 void wire_lfo(Graph &graph, Lfo &lfo, int shape) {
-    lfo.step      = graph.source(Width::dword);
-    lfo.depth     = graph.source();
-    lfo.neg_depth = graph.source();
-    lfo.gain      = graph.source();
+    lfo.step          = graph.source(Width::dword);
+    lfo.depth         = graph.source();
+    lfo.neg_depth     = graph.source();
+    lfo.gain          = graph.source();
     const Wire before = graph.delay(Width::dword);
     const Wire phase  = graph.sum(before, lfo.step, {}, Overflow::wrap);
     graph.connect(before, phase);
@@ -387,9 +386,8 @@ void wire_lfo(Graph &graph, Lfo &lfo, int shape) {
                                lfo.neg_depth, lfo.depth);
         break;
     case 2: // triangle
-        lfo.out = graph.sum(
-                graph.multiply(graph.absolute(phase), lfo.gain),
-                lfo.neg_depth);
+        lfo.out = graph.sum(graph.multiply(graph.absolute(phase), lfo.gain),
+                            lfo.neg_depth);
         break;
     default: { // sine: a parabola, and a correction of its own square
         const Wire p = graph.multiply(phase, graph.constant(cp::eighth));
@@ -397,10 +395,9 @@ void wire_lfo(Graph &graph, Lfo &lfo, int shape) {
         t            = graph.multiply(t, graph.constant(cp::minus_four));
         t            = graph.multiply_add(t, p, graph.constant(cp::four));
         const Wire z = graph.multiply(t, graph.absolute(t));
-        Wire wave =
-                graph.multiply(t, graph.constant(cp::one_minus_correction));
-        wave    = graph.multiply_add(wave, z, graph.constant(cp::correction));
-        lfo.out = graph.multiply(wave, lfo.depth);
+        Wire wave = graph.multiply(t, graph.constant(cp::one_minus_correction));
+        wave      = graph.multiply_add(wave, z, graph.constant(cp::correction));
+        lfo.out   = graph.multiply(wave, lfo.depth);
         break;
     }
     }
@@ -429,10 +426,10 @@ void wire_channel(Synth &synth, int c) {
     channel.key_track   = graph.source();
     channel.mod_amount  = graph.source();
     channel.pitch       = graph.sum({}, moved[moves_pitch], channel.bend);
-    channel.cutoff      = graph.sum(
-            graph.multiply_add(moved[moves_cutoff], channel.bend,
-                               channel.key_track),
-            channel.cutoff_base);
+    channel.cutoff =
+            graph.sum(graph.multiply_add(moved[moves_cutoff], channel.bend,
+                                         channel.key_track),
+                      channel.cutoff_base);
     const int sinks = cp::channel_sinks + cp::channel_sink_size * c;
     for (int half = 0; half < 2; ++half) {
         channel.duty_base[half] = graph.source();
@@ -476,7 +473,7 @@ void wire_voice(Synth &synth, int v) {
         // attack ends when the level is full, and the decay is the next
         const Wire stage  = graph.delay();
         const Wire before = graph.delay(Width::dword);
-        const Wire decay  =
+        const Wire decay =
                 graph.offset_of(synth.channels[0].segments[e][1].record);
         const Wire now = graph.select(before, graph.constant(cp::full),
                                       csp::Condition::negative,
@@ -497,9 +494,8 @@ void wire_voice(Synth &synth, int v) {
     Wire cutoff = graph.multiply(
             envelope[1], graph.through(voice.channel, field_mod_amount));
     cutoff = graph.shift(cutoff, 2);
-    cutoff = graph.multiply_add(
-            cutoff, voice.note,
-            graph.through(voice.channel, field_key_track));
+    cutoff = graph.multiply_add(cutoff, voice.note,
+                                graph.through(voice.channel, field_key_track));
     cutoff = graph.sum(cutoff, graph.through(voice.channel, field_cutoff));
     const int sinks = cp::sinks + cp::voice_sinks_size * v;
     graph.sink(sinks + cp::sink_pitch, pitch);
@@ -571,10 +567,9 @@ struct Rig {
         for (int e = 0; e < envelope_count; ++e) {
             today.write(today_voice(v) + today_stage[e],
                         (e * 4 + stage) * cp::segment_size);
-            graphed.write(
-                    address(synth.voices[v].stage[e]),
-                    synth.graph.offset(
-                            synth.channels[0].segments[e][stage].record));
+            graphed.write(address(synth.voices[v].stage[e]),
+                          synth.graph.offset(
+                                  synth.channels[0].segments[e][stage].record));
         }
     }
 
@@ -614,8 +609,7 @@ struct Rig {
                  q(0.5 + 0.1 * (c % 5)));
             word(at + cp::key_track, channel.key_track, q(0.25 * (c % 5)));
             word(at + cp::mod_amount, channel.mod_amount, q(0.1 + 0.03 * c));
-            word(at + cp::duty_base_0, channel.duty_base[0],
-                 q(0.1 + 0.02 * c));
+            word(at + cp::duty_base_0, channel.duty_base[0], q(0.1 + 0.02 * c));
             word(at + cp::duty_base_1, channel.duty_base[1],
                  q(-0.3 + 0.03 * c));
             word(at + cp::resonance_base, channel.resonance_base,
@@ -629,8 +623,8 @@ struct Rig {
                     {0.05, 0.002 + 0.001 * c, 0.02}};
             for (int e = 0; e < envelope_count; ++e) {
                 for (int s = 0; s < stage_count; ++s) {
-                    const int row = at + cp::envelopes
-                                    + (e * 4 + s) * cp::segment_size;
+                    const int row =
+                            at + cp::envelopes + (e * 4 + s) * cp::segment_size;
                     const Segment &segment = channel.segments[e][s];
                     dword(row + cp::target, segment.target,
                           q_wide(targets[e][s]));
@@ -660,8 +654,9 @@ void test_todays_synth() {
     wire(rig->synth);
     csp::ProgramBuilder::Built graphed;
     const auto began = std::chrono::steady_clock::now();
-    const bool built = build(rig->synth.graph, graphed, "today's synth as a graph");
-    const auto took  = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const bool built =
+            build(rig->synth.graph, graphed, "today's synth as a graph");
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - began);
     if (!built) {
         return;
@@ -672,14 +667,17 @@ void test_todays_synth() {
             ++(address < csp::direct_reach ? direct : upper);
         }
     }
-    std::printf("today's control program (vector loops): %d rows, %d decode rows, %d cycles a pass\n",
-                today.image.length, today.image.rom_used, today.cycles);
-    std::printf("today's synth from the graph (straight-line): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
-                graphed.image.length, graphed.image.rom_used, graphed.cycles,
-                graphed.position.size(),
-                graphed.image.length - static_cast<int>(graphed.position.size()));
-    std::printf("the graph's words: %d in the direct half, %d in the upper half; built in %lld ms on this host\n",
-                direct, upper, static_cast<long long>(took.count()));
+    std::printf(
+            "today's control program (vector loops): %d rows, %d decode rows, %d cycles a pass\n",
+            today.image.length, today.image.rom_used, today.cycles);
+    std::printf(
+            "today's synth from the graph (straight-line): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
+            graphed.image.length, graphed.image.rom_used, graphed.cycles,
+            graphed.position.size(),
+            graphed.image.length - static_cast<int>(graphed.position.size()));
+    std::printf(
+            "the graph's words: %d in the direct half, %d in the upper half; built in %lld ms on this host\n",
+            direct, upper, static_cast<long long>(took.count()));
     check(graphed.image.length <= csp::program_limit,
           "the graph's program fits IMEM");
     check(graphed.cycles <= csp::pass_cycle_limit,
@@ -734,14 +732,15 @@ void test_todays_synth() {
             }
         }
         stale += static_cast<int>(report.stale_sinks.size());
-        cycles = std::max(cycles, report.cycles);
+        cycles       = std::max(cycles, report.cycles);
         auto compare = [&](int address, const char *what, int index, int k) {
             const int offset   = address - csp::sink_base;
             const int32_t want = rig->today.sink(offset);
             const int32_t got  = rig->graphed.sink(offset);
             if (want != got && differences++ < 5) {
-                std::printf("  pass %d, %s %d sink %d: %d, today's program has %d\n",
-                            at, what, index, k, got, want);
+                std::printf(
+                        "  pass %d, %s %d sink %d: %d, today's program has %d\n",
+                        at, what, index, k, got, want);
             }
         };
         for (int v = 0; v < voice_count; ++v) {
@@ -761,7 +760,8 @@ void test_todays_synth() {
     check_equal(differences, 0,
                 "sinks that differ from today's program over "
                         + std::to_string(passes) + " passes");
-    check_equal(todays_errors, 0, "complaints of the model about today's program");
+    check_equal(todays_errors, 0,
+                "complaints of the model about today's program");
     check_equal(early, 0, "reads before ready reported by the model");
     check_equal(stale, 0, "sinks the graph's program left unwritten");
     check_equal(cycles, graphed.cycles,
