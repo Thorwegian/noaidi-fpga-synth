@@ -373,7 +373,7 @@ void test_sound() {
     check(state.at(sinks + cp::gain_left + 7)
                   == state.at(sinks + cp::gain_right + 7),
           "the plain oscillator is centred");
-    check(state.at(sinks + cp::mode_0) == (preset.osc[0].wave | (1 << 2)),
+    check(state.at(sinks + cp::mode_0) == (preset.osc[0].wave | (1 << 3)),
           "the mode word: waveform and cascade");
 
     // two plain partials; the make-up lifts them by 8 steps
