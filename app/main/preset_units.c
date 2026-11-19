@@ -48,7 +48,7 @@ static int32_t nearest_by_ratio(double value, double step, int32_t lo_raw,
 }
 
 // ── Envelope times ──────────────────────────────────────────────────
-// The CSP's envelope (envelope.s) is a one-pole RC with a wide level: each
+// The CSP's envelope (wiring.cpp) is a one-pole RC with a wide level: each
 // pass moves the level toward its target by the fraction RATE of the
 // distance left, RATE being the per-sample coefficient's share of the
 // pass's samples (csp::envelope_rate; four since #268, so a code means the

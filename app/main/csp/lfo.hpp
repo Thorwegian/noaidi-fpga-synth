@@ -3,10 +3,10 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The LFO program (tools/csp/programs/lfo.s) adds a dword RATE register to a
-// dword phase register once per update; a cycle is the phase's whole 36-bit
-// range. The old LFO added a 16-bit increment to a 25-bit phase each 96 kHz
-// sample, so a cycle took 2^25 / increment samples.
+// The LFO (wiring.cpp) adds a dword step to a dword phase register once per
+// pass; a cycle is the phase's whole 36-bit range. The old LFO added a 16-bit
+// increment to a 25-bit phase each 96 kHz sample, so a cycle took
+// 2^25 / increment samples.
 
 #pragma once
 
@@ -17,9 +17,9 @@
 namespace csp {
 
 // The raw 36-bit RATE for an old increment, when the program updates the LFO
-// every `passes_per_update` passes (1 since #268: the pass is 24 kHz and
-// lfo.s runs both halves of the pool every pass; 2 was the halves taking
-// turns at the 48 kHz pass): the same cycles a second.
+// every `passes_per_update` passes (1: the pass is 24 kHz and the graph runs
+// every LFO every pass; 2 for an LFO updated every other pass): the same
+// cycles a second.
 constexpr int64_t lfo_rate(uint32_t increment, int passes_per_update) {
     // cycles per sample = increment / 2^25; a pass is samples_per_pass samples
     // (csp.hpp); the raw phase has 2^36 to a cycle

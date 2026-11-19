@@ -255,7 +255,7 @@ the filter is barely damped, are left out.
 | `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
 | `depth` | semitones of cutoff | −129 … +129 | `mod_env_depth` = round(value × 1024 / 12) |
 
-**Envelope times.** The CSP's envelope (`envelope.s`) is a one-pole RC
+**Envelope times.** The CSP's envelope (`app/main/wiring.cpp`) is a one-pole RC
 with a wide level: once a pass, at 48 kHz, a segment moves its level
 toward the target by the fraction `RATE` of the distance left, and
 `RATE` is the per-sample coefficient's share of two samples

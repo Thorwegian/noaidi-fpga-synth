@@ -6,10 +6,6 @@
 //   csp asm program.s...
 //       assemble; print each row (a qword as two dwords, hex) with
 //       its source line, then the decode ROM's rows and the pass's cycles
-//   csp header program.s... [-n name]
-//       assemble and print a C++ header: the rows, the ROM and every name (registers, blocks, fields) as a constant, for the
-//       firmware (app/main/csp/control_program.hpp); the names are in
-//       namespace csp::name (default control)
 //   csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]... [-d]
 //       assemble and run on the reference model: load the program with the
 //       CSP held, release it, run `passes` passes (default 4) and print the
@@ -22,7 +18,7 @@
 //       rows, the register writes given, csp go. -f first fills every
 //       register but the inputs with the firmware's csp burst pattern,
 //       (address × 37 + seed) & 0x1FFFF, so the chip and the model start
-//       alike whatever the chip held. The dev box's claude_chipcheck.py sends
+//       alike whatever the chip held. tools/lab/chip_check.py sends
 //       the lines and reads the registers back.
 //   csp match program.s... -c chip.txt [-f seed] [-w address=raw]...
 //       the chip's registers (csp peek's lines, every pair) against the
@@ -30,34 +26,48 @@
 //       which the program counts in RUN_COUNT (0x3FE): the differing
 //       registers, or none.
 //
-// Several program files are joined into one, in order (map.s first).
+// Several program files are joined into one, in order.
+//
+// `--noaidi` in place of the program files of asm, image, script and match is
+// the program the firmware runs: the synth of app/main/wiring.cpp, built by
+// its graph. Its script and its match load a set-up with it (performance.hpp:
+// a value for every source, every pointer and stage one the program can
+// follow), and for them the program counts its passes as well, in a word of
+// the graph's own choosing, which match knows. `--selftest` in the same place
+// is the boot self-test the firmware builds (app/main/csp/selftest.cpp).
+//
 // Diagnostics go to stderr as file:line: error|warning: message; the exit
 // status is 1 if there was an error, or if the model reported one.
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "assembler.hpp"
+#include "csp/selftest.hpp"
+#include "performance.hpp"
 #include "processor.hpp"
+#include "wiring.hpp"
 
 namespace {
 
 int usage() {
     std::fputs(
             "usage: csp asm program.s...\n"
-            "       csp header program.s... [-n name]\n"
             "       csp image program.s... -o prefix     (prefix.imem.hex, prefix.rom.hex for $readmemh)\n"
             "       csp sim program.s... [-n passes] [-w name]... [-s name=value@pass]... [-d]\n"
             "       csp script program.s... [-f seed] [-w address=raw]...\n"
             "       csp match program.s... -c chip.txt [-f seed] [-w address=raw]...\n"
-            "       (several program files are joined into one, in order)\n",
+            "       (several program files are joined into one, in order;\n"
+            "        --noaidi in their place for asm, image, script and match\n"
+            "        is the program the firmware runs, --selftest its boot\n"
+            "        self-test)\n",
             stderr);
     return 2;
 }
@@ -101,23 +111,25 @@ bool report(const Sources &sources, const csp::Program &program) {
     return program.ok;
 }
 
+// A row's source line in a listing: a wait the scheduler laid has none, and
+// neither has a row of a program that was built, not assembled.
+constexpr int wait_row  = 0;
+constexpr int built_row = -1;
+
 int assemble_command(const csp::Program &program) {
     const csp::Image &image = program.image;
     for (int row = 0; row < image.length; ++row) {
-        const csp::Word word =
-                csp::Word::decode(image.rows[static_cast<size_t>(row)]);
         const int line = program.source_lines[static_cast<size_t>(row)];
         std::printf("%04x  %09llx %09llx  %-6s", row,
                     static_cast<unsigned long long>(
                             image.rows[static_cast<size_t>(row)].high),
                     static_cast<unsigned long long>(
                             image.rows[static_cast<size_t>(row)].low),
-                    line > 0 ? "" : "wait");
+                    line == wait_row ? "wait" : "");
         if (line > 0) {
             std::printf(" ; line %d", line);
         }
         std::printf("\n");
-        (void) word;
     }
     for (int row = 0; row < image.rom_used; ++row) {
         const csp::Control control =
@@ -135,15 +147,6 @@ int assemble_command(const csp::Program &program) {
     std::printf("%d rows, %d decode rows, %d cycles a pass\n", image.length,
                 image.rom_used, program.cycles);
     return 0;
-}
-
-// A symbol as a C++ constant name: NAME_LIKE_THIS → name_like_this.
-std::string constant_name(const std::string &symbol) {
-    std::string name = symbol;
-    std::ranges::transform(name, name.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return name;
 }
 
 // The image as a bench loads it over the bus ($readmemh): <prefix>.imem.hex
@@ -170,74 +173,6 @@ int image_command(const csp::Program &program, const std::string &prefix) {
         rom << std::setfill('0') << std::setw(9)
             << image.rom[static_cast<size_t>(row)] << '\n';
     }
-    return 0;
-}
-
-// The header the firmware loads the program from. The format is the
-// repository's (Java Code Conventions): `make format` leaves it be.
-int header_command(const csp::Program &program,
-                   const std::vector<std::string> &files,
-                   const std::string &name_space) {
-    const csp::Image &image = program.image;
-    const bool control      = name_space == "control";
-    std::printf(
-            "// %s_program.hpp — the CSP's %s, as machine code\n"
-            "//\n"
-            "// Copyright © 2026 Thor H. Linløkken <thj@thj.no>\n"
-            "// License: CERN-OHL-S v2\n"
-            "//\n"
-            "// Generated by `csp header` (make csp-header) from, in this order:\n",
-            control ? "control" : name_space.c_str(),
-            control ? "control program" : "boot self-test");
-    for (const std::string &file : files) {
-        std::printf("//   %s\n", file.c_str());
-    }
-    std::printf(
-            "// Do not edit: make csp-test checks that it is current.\n"
-            "// The names are those of tools/csp/programs/map.s, in lower case;\n"
-            "// the labels of the code are left out.\n\n"
-            "#pragma once\n\n"
-            "// clang-format off\n"
-            "#include <array>\n"
-            "#include <cstdint>\n\n"
-            "#include \"csp.hpp\"\n\n"
-            "namespace csp::%s {\n\n",
-            name_space.c_str());
-    std::printf("// The pass's cycles, as scheduled.\n"
-                "inline constexpr int cycles = %d;\n\n"
-                "// The rows: a qword each, bits 71:36 then 35:0.\n"
-                "inline constexpr std::array<Row, %d> rows{{\n",
-                program.cycles, image.length);
-    for (int row = 0; row < image.length; ++row) {
-        const csp::Row &bits = image.rows[static_cast<size_t>(row)];
-        std::printf("    {0x%09llxull, 0x%09llxull},\n",
-                    static_cast<unsigned long long>(bits.high),
-                    static_cast<unsigned long long>(bits.low));
-    }
-    std::printf("}};\n\n"
-                "// The decode ROM: one control word a row, row 0 the NOP.\n"
-                "inline constexpr std::array<uint32_t, %d> rom{\n",
-                image.rom_used);
-    for (int row = 0; row < image.rom_used; row += 8) {
-        std::printf("   ");
-        for (int k = row; k < std::min(row + 8, image.rom_used); ++k) {
-            std::printf(" 0x%05x,", image.rom[static_cast<size_t>(k)]);
-        }
-        std::printf("\n");
-    }
-    std::printf("};\n\n// Registers, blocks and fields.\n");
-    for (const auto &[name, value] : program.symbols) {
-        const bool label = std::ranges::any_of(name, [](unsigned char c) {
-            return std::islower(c);
-        });
-        if (!label) {
-            std::printf("inline constexpr int %s = %d;\n",
-                        constant_name(name).c_str(), value);
-        }
-    }
-    std::printf("\n} // namespace csp::%s\n"
-                "// clang-format on\n",
-                name_space.c_str());
     return 0;
 }
 
@@ -320,6 +255,79 @@ int32_t fill_value(int address, int seed) {
             csp::word_bits));
 }
 
+// Where a check program counts its passes (RUN_COUNT, in every program of
+// programs/checks; the boot self-test counts in the same register).
+constexpr int assembled_run_count = 0x3FE;
+
+// ---- the programs the firmware builds ------------------------------------------------
+//
+// A built image as `csp` takes a program: each row the builder's own, or a
+// wait it laid.
+csp::Program program_of(const csp::ProgramBuilder::Built &built) {
+    csp::Program program;
+    program.image  = built.image;
+    program.ok     = built.ok;
+    program.cycles = built.cycles;
+    program.source_lines.assign(static_cast<size_t>(built.image.length),
+                                wait_row);
+    for (const size_t row : built.position) {
+        program.source_lines[row] = built_row;
+    }
+    return program;
+}
+
+// The synth the firmware wires and the program its graph builds, as `csp`
+// takes a program: the image, the register writes of its load and where it
+// counts its passes. A program that counts its passes, for the chip check,
+// has the one thing added to the firmware's graph: a sum onto its own delayed
+// output of a word the load sets to one raw step, wrapping, so that it counts
+// from whatever the fill left in its word. The graph keeps what a sink
+// reads, so a spare word of the first voice's block of sinks reads the count.
+struct Noaidi {
+    csp::Program program;
+    std::vector<RawWrite> writes;
+    int run_count = 0;
+};
+
+constexpr int run_count_sink =
+        wiring::voice_sink::base + wiring::voice_sink::block - 1;
+
+bool build_noaidi(Noaidi &noaidi, bool counts_passes) {
+    using Graph      = csp::DspGraph;
+    const auto synth = std::make_unique<wiring::Synth>();
+    const auto built = std::make_unique<csp::ProgramBuilder::Built>();
+    wiring::wire(*synth);
+    Graph &graph = synth->graph;
+    Graph::Wire step, count;
+    if (counts_passes) {
+        step                      = graph.source();
+        const Graph::Wire counted = graph.delay();
+        count = graph.sum(counted, step, {}, Graph::Overflow::wrap);
+        graph.connect(counted, count);
+        graph.sink(run_count_sink, count);
+    }
+    if (!graph.build(*built)) {
+        for (const Graph::Issue &issue : graph.issues()) {
+            std::fprintf(stderr, "the Noaidi's graph: error: %s\n",
+                         issue.message.c_str());
+        }
+        return false;
+    }
+    noaidi.program = program_of(*built);
+    for (const performance::Write &write :
+         performance::writes(*synth, performance::set_up(*synth))) {
+        noaidi.writes.push_back({write.address, write.raw});
+    }
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        noaidi.writes.push_back({initial.address, initial.value});
+    }
+    if (counts_passes) {
+        noaidi.writes.push_back({graph.address(step), 1});
+        noaidi.run_count = graph.address(count);
+    }
+    return true;
+}
+
 // `csp script`: the console commands that put the program and its registers on the chip.
 int script_command(const csp::Program &program, int fill,
                    const std::vector<RawWrite> &writes) {
@@ -346,9 +354,11 @@ int script_command(const csp::Program &program, int fill,
 }
 
 // `csp match`: the chip's registers against the model's, after the same load and as many
-// passes as the chip ran. chip.txt holds csp peek's lines, "  aaa: hhhhh (d)   aaa: hhhhh (d) ...".
+// passes as the chip ran, which the program counts in the register `run_count`. chip.txt holds
+// csp peek's lines, "  aaa: hhhhh (d)   aaa: hhhhh (d) ...".
 int match_command(const csp::Program &program, const std::string &chip_path,
-                  int fill, const std::vector<RawWrite> &writes) {
+                  int fill, const std::vector<RawWrite> &writes,
+                  int run_count) {
     std::ifstream in(chip_path);
     if (!in) {
         std::fprintf(stderr, "cannot read %s\n", chip_path.c_str());
@@ -426,11 +436,11 @@ int match_command(const csp::Program &program, const std::string &chip_path,
         model.pass(); // held: the window applies the writes
     }
     model.release();
-    // The passes the chip ran: every check program counts them in RUN_COUNT (0x3FE, wrapping) from
-    // the fill's value, which the model holds too.
-    constexpr int run_count = 0x3FE;
-    if (!seen[run_count]) {
-        std::printf("the chip's registers hold no RUN_COUNT (0x3fe)\n");
+    // The passes the chip ran: the program counts them, wrapping, from the fill's value,
+    // which the model holds too.
+    if (!seen[static_cast<size_t>(run_count)]) {
+        std::printf("the chip's registers hold no pass count (0x%03x)\n",
+                    run_count);
         return 2;
     }
     const int passes = static_cast<int>(
@@ -482,45 +492,70 @@ int main(int argc, char **argv) {
         return usage();
     }
     const std::string command = argv[1];
-    // the program: every leading argument that is a file, joined
+    // the program: one the firmware builds, the Noaidi's or the boot
+    // self-test, or every leading argument that is a file, joined and
+    // assembled
     Sources sources;
-    int arg = 2;
-    for (; arg < argc && argv[arg][0] != '-'; ++arg) {
-        std::string text;
-        if (!read_file(argv[arg], text)) {
-            std::fprintf(stderr, "cannot read %s\n", argv[arg]);
-            return 2;
+    csp::Program program;
+    std::vector<RawWrite> load_writes; // for script and match
+    int run_count           = assembled_run_count;
+    int arg                 = 2;
+    const std::string first = argv[arg];
+    if (first == "--noaidi" || first == "--selftest") {
+        if (command != "asm" && command != "image" && command != "script"
+            && command != "match") {
+            return usage();
         }
-        const int first_line =
-                1 + static_cast<int>(std::ranges::count(sources.text, '\n'));
-        sources.parts.push_back({argv[arg], first_line});
-        sources.text += text;
-        if (!text.empty() && text.back() != '\n') {
-            sources.text += '\n';
+        if (first == "--noaidi") {
+            const bool chip_check = command == "script" || command == "match";
+            const auto noaidi     = std::make_unique<Noaidi>();
+            if (!build_noaidi(*noaidi, chip_check)) {
+                return 1;
+            }
+            program     = noaidi->program;
+            load_writes = noaidi->writes;
+            run_count   = noaidi->run_count;
+        } else {
+            const auto built = std::make_unique<csp::ProgramBuilder::Built>();
+            csp::selftest::build(*built);
+            for (const csp::BuildIssue &issue : built->issues) {
+                std::fprintf(stderr, "the boot self-test: %s: %s\n",
+                             issue.error ? "error" : "warning",
+                             issue.message.c_str());
+            }
+            if (!built->ok) {
+                return 1;
+            }
+            program   = program_of(*built);
+            run_count = csp::selftest::run_count;
         }
-    }
-    if (sources.parts.empty()) {
-        return usage();
-    }
-    const csp::Program program = csp::assemble(sources.text);
-    if (!report(sources, program)) {
-        return 1;
+        ++arg;
+    } else {
+        for (; arg < argc && argv[arg][0] != '-'; ++arg) {
+            std::string text;
+            if (!read_file(argv[arg], text)) {
+                std::fprintf(stderr, "cannot read %s\n", argv[arg]);
+                return 2;
+            }
+            const int first_line =
+                    1
+                    + static_cast<int>(std::ranges::count(sources.text, '\n'));
+            sources.parts.push_back({argv[arg], first_line});
+            sources.text += text;
+            if (!text.empty() && text.back() != '\n') {
+                sources.text += '\n';
+            }
+        }
+        if (sources.parts.empty()) {
+            return usage();
+        }
+        program = csp::assemble(sources.text);
+        if (!report(sources, program)) {
+            return 1;
+        }
     }
     if (command == "asm") {
         return assemble_command(program);
-    }
-    if (command == "header") {
-        std::vector<std::string> files;
-        for (const Sources::Part &part : sources.parts) {
-            files.push_back(part.path);
-        }
-        std::string name_space = "control";
-        for (; arg + 1 < argc; arg += 2) {
-            if (std::string(argv[arg]) == "-n") {
-                name_space = argv[arg + 1];
-            }
-        }
-        return header_command(program, files, name_space);
     }
     if (command == "image") {
         if (arg + 1 < argc && std::string(argv[arg]) == "-o") {
@@ -529,14 +564,13 @@ int main(int argc, char **argv) {
         return usage();
     }
     if (command == "script" || command == "match") {
-        std::vector<RawWrite> writes;
         std::string chip_path;
         int fill = no_fill;
         for (; arg + 1 < argc; arg += 2) {
             const std::string option = argv[arg];
             RawWrite write{};
             if (option == "-w" && parse_write(argv[arg + 1], write)) {
-                writes.push_back(write);
+                load_writes.push_back(write);
             } else if (option == "-c") {
                 chip_path = argv[arg + 1];
             } else if (option == "-f") {
@@ -546,12 +580,12 @@ int main(int argc, char **argv) {
             }
         }
         if (command == "script") {
-            return script_command(program, fill, writes);
+            return script_command(program, fill, load_writes);
         }
         if (chip_path.empty()) {
             return usage();
         }
-        return match_command(program, chip_path, fill, writes);
+        return match_command(program, chip_path, fill, load_writes, run_count);
     }
     if (command != "sim") {
         return usage();

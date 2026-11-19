@@ -3,18 +3,23 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Two things. Each operator and each kind of connection in a small graph,
-// its image run on the reference model and every value checked. And today's
-// Noaidi wiring as a graph (8 LFOs, 16 channels, 32 voices, the copies made
-// by loops), its image run on the reference model beside today's control
-// program (app/main/csp/generator.cpp) on the same notes and controller
-// values, wires moved while it plays: every sink holds the same value, pass
-// for pass, and the model reports no read before ready. The test prints the
-// image's rows and the pass's cycles.
+// Three things. Each operator and each kind of connection in a small graph,
+// its image run on the reference model beside the graph's interpreter
+// (graph_evaluator.hpp), every value checked as it was worked out by hand and
+// every sink equal in both. And the Noaidi's wiring (app/main/wiring.cpp: 8
+// LFOs, 16 channels, 32 voices, the copies made by loops), its image run on
+// the reference model beside the interpreter on the same performance
+// (tools/csp/performance.hpp) of notes and controller values, wires moved
+// while it plays: every sink the graph has holds the same value, pass for
+// pass, and the model reports no read before ready. The test prints the
+// image's rows and the pass's cycles. And that wiring by the Noaidi's
+// formulas in floating point: every sink with the LFOs standing at phases of
+// their own, and an envelope from a note on to its release, pass for pass.
 //
 //   make csp-test
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -22,14 +27,13 @@
 #include <string>
 #include <vector>
 
+#include "../performance.hpp"
 #include "../processor.hpp"
-#include "csp/control_program.hpp"
 #include "csp/dsp_graph.hpp"
-#include "csp/generator.hpp"
+#include "graph_evaluator.hpp"
+#include "wiring.hpp"
 
 namespace {
-
-namespace cp = csp::control;
 
 using Graph    = csp::DspGraph;
 using Wire     = Graph::Wire;
@@ -92,6 +96,16 @@ void pass(csp::Processor &processor, const std::string &what) {
     const csp::PassReport report = processor.pass();
     for (const std::string &error : report.errors) {
         check(false, what + ": " + error);
+    }
+}
+
+// Every sink the graph has, the interpreter's against the model's.
+void compare_sinks(const csp::GraphEvaluator &evaluator,
+                   const csp::Processor &processor, const std::string &what) {
+    for (const int address : evaluator.sink_addresses()) {
+        check_equal(evaluator.sink(address),
+                    processor.sink(address - csp::sink_base),
+                    what + ": sink " + std::to_string(address));
     }
 }
 
@@ -195,22 +209,40 @@ void test_operators() {
           "a word the graph did not lay out is nobody's");
 
     csp::Processor processor;
-    processor.write(graph.address(a), q(0.5));
-    processor.write(graph.address(b), q(0.25));
-    processor.write(graph.address(c), q(2.0));
-    processor.write(graph.address(large), q(6.0));
-    processor.write(graph.address(larger), q(5.0));
-    processor.write_wide(graph.address(step), q_wide(0.75));
+    csp::GraphEvaluator evaluator(graph);
+    auto set_word = [&](Wire wire, int32_t raw) {
+        processor.write(graph.address(wire), raw);
+        evaluator.set_word(wire, raw);
+    };
+    auto set_dword = [&](Wire wire, int64_t raw) {
+        processor.write_wide(graph.address(wire), raw);
+        evaluator.set_dword(wire, raw);
+    };
+    auto set_pointer = [&](Wire wire, Record record) {
+        processor.write(graph.address(wire), graph.address(record));
+        evaluator.set_pointer(wire, record);
+    };
+    auto set_offset = [&](Wire wire, Record inner) {
+        processor.write(graph.address(wire), graph.offset(inner));
+        evaluator.set_offset(wire, inner);
+    };
+    set_word(a, q(0.5));
+    set_word(b, q(0.25));
+    set_word(c, q(2.0));
+    set_word(large, q(6.0));
+    set_word(larger, q(5.0));
+    set_dword(step, q_wide(0.75));
     for (int t = 0; t < 3; ++t) {
-        processor.write(graph.address(targets[t].gain), q(0.5 * (t + 1)));
-        processor.write(graph.address(targets[t].low), q(-1.0 - t));
-        processor.write(graph.address(targets[t].high), q(1.0 + t));
+        set_word(targets[t].gain, q(0.5 * (t + 1)));
+        set_word(targets[t].low, q(-1.0 - t));
+        set_word(targets[t].high, q(1.0 + t));
     }
-    processor.write(graph.address(pointer), graph.address(targets[0].record));
-    processor.write(graph.address(which), graph.offset(targets[0].lows));
+    set_pointer(pointer, targets[0].record);
+    set_offset(which, targets[0].lows);
     start(processor, built.image);
 
     pass(processor, "the small graph");
+    evaluator.pass();
     check_equal(processor.sink(sum_of_two), q(0.75), "a sum of two");
     check_equal(processor.sink(sum_of_three), q(2.75), "a sum of three");
     check_equal(processor.sink(product), q(0.125), "a product");
@@ -235,9 +267,12 @@ void test_operators() {
                 "a field of a record inside it");
     check_equal(processor.sink(straight), q(0.5),
                 "a field through the pointer straight to a sink");
+    compare_sinks(evaluator, processor, "the small graph");
 
     pass(processor, "the small graph");
+    evaluator.pass();
     pass(processor, "the small graph");
+    evaluator.pass();
     check_equal(processor.sink(was), q(0.5),
                 "a delay's output is its input's value of the pass before");
     check_equal(processor.sink(counted), q(0.75),
@@ -246,18 +281,29 @@ void test_operators() {
                 "a dword multiply-add onto its own delayed output");
     check_equal(processor.sink(totalled), q(1.125),
                 "an operator of words reads a dword's upper word");
+    check_equal(evaluator.probe(totalling), q_wide(1.125),
+                "the interpreter's dword accumulation is the model's, whole");
+    compare_sinks(evaluator, processor, "the small graph");
 
     // the wire moved: one write of the pointer, one of the offset
     processor.write(graph.address(pointer), graph.address(targets[2].record));
     processor.write(graph.address(which), graph.offset(targets[2].highs));
     processor.swap();
     pass(processor, "the small graph");
+    evaluator.pass();
+    compare_sinks(evaluator, processor, "the small graph");
+    // the writes land in the model at the end of the pass they are swapped
+    // before: the interpreter takes them for the pass after
+    evaluator.set_pointer(pointer, targets[2].record);
+    evaluator.set_offset(which, targets[2].highs);
     pass(processor, "the small graph");
+    evaluator.pass();
     check_equal(processor.sink(pointed), q(0.75),
                 "the pointer moved, the field follows");
     check_equal(processor.sink(inside), q(3.5),
                 "the offset moved, the record inside follows");
     check_equal(processor.sink(straight), q(1.5), "and the sink's");
+    compare_sinks(evaluator, processor, "the small graph");
 }
 
 // What the graph refuses.
@@ -333,11 +379,17 @@ void test_a_field_summed_onto() {
     processor.write(graph.address(a), q(0.5));
     processor.write(graph.address(b), q(0.25));
     processor.write(graph.address(pointer), graph.address(record));
+    csp::GraphEvaluator evaluator(graph);
+    evaluator.set_word(a, q(0.5));
+    evaluator.set_word(b, q(0.25));
+    evaluator.set_pointer(pointer, record);
     start(processor, built.image);
     pass(processor, "the field summed onto");
+    evaluator.pass();
     check_equal(processor.sink(0), q(1.25), "a sum onto a record's field");
     check_equal(processor.sink(1), q(0.75),
                 "the field through a pointer, a sum onto it made");
+    compare_sinks(evaluator, processor, "the field summed onto");
 }
 
 // ---- copies and loops -------------------------------------------------------------
@@ -457,33 +509,44 @@ void test_copies(int count, bool looped, int body_rows) {
                 what + ": pointers to sinks for the firmware to set");
 
     auto processor = std::make_unique<csp::Processor>();
-    auto point     = [&](int moved) {
+    csp::GraphEvaluator evaluator(graph);
+    auto word = [&](Wire wire, int32_t raw) {
+        processor->write(graph.address(wire), raw);
+        evaluator.set_word(wire, raw);
+    };
+    auto point_model = [&](int moved) {
         for (int c = 0; c < count; ++c) {
             const Copy &copy = copies[static_cast<size_t>(c)];
             processor->write(graph.address(copy.target),
-                                 graph.address(targets[(c + moved) % 3].record));
+                             graph.address(targets[(c + moved) % 3].record));
             processor->write(graph.address(copy.scaler),
-                                 graph.address(scalers[(c + moved) % 2].record));
+                             graph.address(scalers[(c + moved) % 2].record));
+        }
+    };
+    auto point_graph = [&](int moved) {
+        for (int c = 0; c < count; ++c) {
+            const Copy &copy = copies[static_cast<size_t>(c)];
+            evaluator.set_pointer(copy.target, targets[(c + moved) % 3].record);
+            evaluator.set_pointer(copy.scaler, scalers[(c + moved) % 2].record);
         }
     };
     for (int t = 0; t < 3; ++t) {
-        processor->write(graph.address(targets[t].gain), q(gains[t]));
-        processor->write(graph.address(targets[t].level), q(levels[t]));
+        word(targets[t].gain, q(gains[t]));
+        word(targets[t].level, q(levels[t]));
     }
     for (int s = 0; s < 2; ++s) {
-        processor->write(graph.address(scalers[s].scale), q(scales[s]));
+        word(scalers[s].scale, q(scales[s]));
     }
-    processor->write(graph.address(master), q(shared));
+    word(master, q(shared));
     for (int c = 0; c < count; ++c) {
-        processor->write(graph.address(copies[static_cast<size_t>(c)].a),
-                         q(a_of(c)));
-        processor->write(graph.address(copies[static_cast<size_t>(c)].b),
-                         q(b_of(c)));
+        word(copies[static_cast<size_t>(c)].a, q(a_of(c)));
+        word(copies[static_cast<size_t>(c)].b, q(b_of(c)));
     }
     for (const Graph::InitialValue &initial : graph.initial_values()) {
         processor->write(initial.address, initial.value);
     }
-    point(0);
+    point_model(0);
+    point_graph(0);
     start(*processor, built.image);
 
     int passes  = 0;
@@ -512,18 +575,30 @@ void test_copies(int count, bool looped, int body_rows) {
     };
     for (; passes < 2; ++passes) {
         pass(*processor, what);
+        evaluator.pass();
     }
     check_equal(expect(0), 0, what + ": sinks that are wrong");
-    point(1); // every wire moved
+    compare_sinks(evaluator, *processor, what);
+    point_model(1); // every wire moved
     processor->swap();
-    do { // the firmware's writes land a queue's share a pass
+    // the writes land a share a pass, the first at the end of this one: the
+    // interpreter takes them all for the pass after
+    pass(*processor, what);
+    evaluator.pass();
+    ++passes;
+    compare_sinks(evaluator, *processor, what);
+    point_graph(1);
+    while (processor->queued_writes() > 0) {
         pass(*processor, what);
+        evaluator.pass();
         ++passes;
-    } while (processor->queued_writes() > 0);
+    }
     for (int settled = 0; settled < 2; ++settled, ++passes) {
         pass(*processor, what);
+        evaluator.pass();
     }
     check_equal(expect(1), 0, what + ": sinks that are wrong, the wires moved");
+    compare_sinks(evaluator, *processor, what);
 }
 
 // Two like parts in one circuit, each a running total of its own gain. The
@@ -633,15 +708,21 @@ void test_copies_that_point_at_each_other() {
                   && !graph.copy_sets().front().looped,
           "copies that point at each other are found, and are straight-line code");
     auto processor = std::make_unique<csp::Processor>();
+    csp::GraphEvaluator evaluator(graph);
     for (int c = 0; c < count; ++c) {
         processor->write(graph.address(counters[c].a), q(a_of(c)));
         processor->write(graph.address(counters[c].other),
                          graph.address(counters[(c + 5) % count].record));
+        evaluator.set_word(counters[c].a, q(a_of(c)));
+        evaluator.set_pointer(counters[c].other,
+                              counters[(c + 5) % count].record);
     }
     start(*processor, built.image);
     constexpr int passes = 3;
     for (int at = 0; at < passes; ++at) {
         pass(*processor, "copies that point at each other");
+        evaluator.pass();
+        compare_sinks(evaluator, *processor, "copies that point at each other");
     }
     int wrong = 0;
     for (int c = 0; c < count; ++c) {
@@ -655,365 +736,203 @@ void test_copies_that_point_at_each_other() {
                 "sums that are wrong, of copies that point at each other");
 }
 
-// ---- today's wiring ---------------------------------------------------------------
+// ---- the interpreter's arithmetic --------------------------------------------------
 //
-// What generator.cpp's program computes, as sources, operators and sinks.
-// An LFO is a phase and the wave of its shape; a channel takes two LFOs
-// through movable wires onto its pitch, cutoff, pulse width and resonance;
-// a voice has two envelopes and reaches its channel through a movable wire.
+// The corners the Noaidi's graph does not reach, on the model and on the
+// interpreter both: a dword sum and a dword multiply-add onto their own
+// delayed outputs (they take x as a word, 18 bits below the sum), a wrapping
+// dword accumulation, a shift and a sum that run out of range in both
+// directions, the absolute value of the most negative word, a compare whose
+// difference saturates and the select that reads its overflow flag, and a
+// pointer and an offset moved while it runs.
 
-constexpr int lfo_count      = 8;
-constexpr int channel_count  = 16;
-constexpr int voice_count    = 32;
-constexpr int stage_count    = 3; // attack, decay, release
-constexpr int envelope_count = 2; // amp, mod
-
-enum { moves_pitch, moves_cutoff, moves_duty, moves_resonance, moved_count };
-
-struct Lfo {
-    Wire step, depth, neg_depth, gain; // the firmware's
-    Wire out;
-    Record record; // what a channel's pointer holds
-};
-
-// An envelope's segment: where the level heads and how fast.
-struct Segment {
-    Wire target, rate; // the firmware's
-    Record record;
-};
-enum { field_target, field_rate };
-
-struct Channel {
-    Wire lfo[2]; // movable
-    Wire depth[2][moved_count];
-    Wire bend, cutoff_base, key_track, mod_amount;
-    Wire duty_base[2], resonance_base;
-    Segment segments[envelope_count][stage_count];
-    Wire pitch, cutoff; // for its voices
-    Record record;      // what a voice's pointer holds
-};
-// the channel record's fields behind its six segments
-enum {
-    field_pitch = envelope_count * stage_count,
-    field_cutoff,
-    field_mod_amount,
-    field_key_track
-};
-
-struct Voice {
-    Wire channel; // movable
-    Wire note, velocity[envelope_count];
-    Wire stage[envelope_count]; // the program's, and the firmware's at a note
-};
-
-struct Synth {
+void test_the_interpreter() {
     Graph graph;
-    Lfo lfos[lfo_count];
-    Channel channels[channel_count];
-    Voice voices[voice_count];
-};
+    const Wire word  = graph.source();             // a word, 0.25
+    const Wire big   = graph.source();             // a word, 6.0
+    const Wire step  = graph.source(Width::dword); // a dword step, 0.75
+    const Wire least = graph.constant(csp::smallest(csp::word_bits));
+    const Wire one   = graph.constant(q(1.0));
+    int sinks        = 0;
+    auto sink        = [&](Wire value) {
+        graph.sink(csp::sink_base + sinks, value);
+        return sinks++;
+    };
+    // onto its own delayed output, a dword sum adds the word 18 bits up
+    const Wire level     = graph.delay(Width::dword);
+    const Wire levelling = graph.sum(level, word);
+    graph.connect(level, levelling);
+    const int level_word = sink(graph.multiply(levelling, one));
+    // and a wrapping dword multiply-add runs past 8.0 and comes back
+    const Wire phase   = graph.delay(Width::dword);
+    const Wire phasing = graph.multiply_add(phase, one, step, Overflow::wrap);
+    graph.connect(phase, phasing);
+    const int phase_word = sink(graph.multiply(phasing, one));
 
-void wire_lfo(Graph &graph, Lfo &lfo, int shape) {
-    lfo.step          = graph.source(Width::dword);
-    lfo.depth         = graph.source();
-    lfo.neg_depth     = graph.source();
-    lfo.gain          = graph.source();
-    const Wire before = graph.delay(Width::dword);
-    const Wire phase  = graph.sum(before, lfo.step, {}, Overflow::wrap);
-    graph.connect(before, phase);
-    switch (shape) {
-    case 0: // saw
-        lfo.out = graph.multiply(phase, lfo.gain);
-        break;
-    case 1: // square
-        lfo.out = graph.select(phase, {}, csp::Condition::negative,
-                               lfo.neg_depth, lfo.depth);
-        break;
-    case 2: // triangle
-        lfo.out = graph.sum(graph.multiply(graph.absolute(phase), lfo.gain),
-                            lfo.neg_depth);
-        break;
-    default: { // sine: a parabola, and a correction of its own square
-        const Wire p = graph.multiply(phase, graph.constant(cp::eighth));
-        Wire t       = graph.multiply(graph.absolute(p), p);
-        t            = graph.multiply(t, graph.constant(cp::minus_four));
-        t            = graph.multiply_add(t, p, graph.constant(cp::four));
-        const Wire z = graph.multiply(t, graph.absolute(t));
-        Wire wave = graph.multiply(t, graph.constant(cp::one_minus_correction));
-        wave      = graph.multiply_add(wave, z, graph.constant(cp::correction));
-        lfo.out   = graph.multiply(wave, lfo.depth);
-        break;
+    const int shifted_out    = sink(graph.shift(big, 4));
+    const int absolute_least = sink(graph.absolute(least));
+    const int saturated_add  = sink(graph.sum(big, big));
+    const int wrapped_add    = sink(graph.sum(big, big, {}, Overflow::wrap));
+    // 6.0 − (−8.0) is 14.0: the CMP saturates it and flags the overflow
+    const int overflowed =
+            sink(graph.select(big, least, csp::Condition::overflow, word, big));
+    // 0.25 − 6.0 is in range and flags nothing
+    const int not_overflowed =
+            sink(graph.select(word, big, csp::Condition::overflow, word, big));
+    // −8.0 − 6.0 saturates to the most negative word: negative holds
+    const int saturated_difference =
+            sink(graph.select(least, big, csp::Condition::negative, word, big));
+
+    // a movable wire, and a record inside it
+    struct Target {
+        Wire gain, low, high;
+        Record lows, highs, record;
+    } targets[2];
+    std::vector<Record> records;
+    for (Target &target : targets) {
+        target.gain = graph.source();
+        target.low  = graph.source();
+        target.high = graph.source();
+        const std::vector<Field> lows{target.low};
+        const std::vector<Field> highs{target.high};
+        target.lows  = graph.record(lows);
+        target.highs = graph.record(highs);
+        const std::vector<Field> fields{target.gain, target.lows, target.highs};
+        target.record = graph.record(fields);
+        records.push_back(target.record);
     }
+    const Wire pointer = graph.pointer(records);
+    const Wire which   = graph.source();
+    const int straight = sink(graph.through(pointer, 0));
+    const int inside   = sink(graph.through(pointer, which, 0));
+
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, "the interpreter's corners")) {
+        return;
     }
-    const std::vector<Field> fields{lfo.out};
-    lfo.record = graph.record(fields);
+    csp::Processor processor;
+    csp::GraphEvaluator evaluator(graph);
+    auto set_word = [&](Wire wire, int32_t raw) {
+        processor.write(graph.address(wire), raw);
+        evaluator.set_word(wire, raw);
+    };
+    set_word(word, q(0.25));
+    set_word(big, q(6.0));
+    processor.write_wide(graph.address(step), q_wide(0.75));
+    evaluator.set_dword(step, q_wide(0.75));
+    const double gains[2] = {0.5, -1.5}, lows[2] = {-1.0, 2.0},
+                 highs[2] = {1.0, -2.0};
+    for (int t = 0; t < 2; ++t) {
+        set_word(targets[t].gain, q(gains[t]));
+        set_word(targets[t].low, q(lows[t]));
+        set_word(targets[t].high, q(highs[t]));
+    }
+    processor.write(graph.address(pointer), graph.address(targets[0].record));
+    processor.write(graph.address(which), graph.offset(targets[0].lows));
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor.write(initial.address, initial.value);
+    }
+    evaluator.set_pointer(pointer, targets[0].record);
+    evaluator.set_offset(which, targets[0].lows);
+    start(processor, built.image);
+
+    constexpr int moves_after = 6, passes = 12;
+    for (int at = 1; at <= passes; ++at) {
+        if (at == moves_after + 1) {
+            // the wire and the offset move: the model takes the writes at
+            // the end of this pass, the interpreter for the pass after
+            processor.write(graph.address(pointer),
+                            graph.address(targets[1].record));
+            processor.write(graph.address(which),
+                            graph.offset(targets[1].highs));
+            processor.swap();
+        }
+        pass(processor, "the interpreter's corners");
+        evaluator.pass();
+        if (at == moves_after + 1) {
+            evaluator.set_pointer(pointer, targets[1].record);
+            evaluator.set_offset(which, targets[1].highs);
+        }
+        compare_sinks(evaluator, processor, "the interpreter's corners");
+    }
+
+    // the same arithmetic worked out here
+    check_equal(processor.sink(level_word), q(3.0),
+                "a dword sum adds the word 18 bits up");
+    check_equal(processor.sink(phase_word), q(-7.0),
+                "a wrapping dword multiply-add wraps past 8.0");
+    check_equal(evaluator.probe(levelling), q_wide(3.0),
+                "the interpreter's dword sum, whole");
+    check_equal(evaluator.probe(phasing), q_wide(-7.0),
+                "the interpreter's wrapping dword multiply-add, whole");
+    check_equal(processor.sink(shifted_out), csp::largest(csp::word_bits),
+                "a shift out of range saturates");
+    check_equal(processor.sink(absolute_least), csp::largest(csp::word_bits),
+                "the least word's absolute value saturates");
+    check_equal(processor.sink(saturated_add), csp::largest(csp::word_bits),
+                "a saturating sum saturates");
+    check_equal(processor.sink(wrapped_add), q(-4.0), "a wrapping sum wraps");
+    check_equal(processor.sink(overflowed), q(6.0),
+                "a compare that overflows takes the set value");
+    check_equal(processor.sink(not_overflowed), q(0.25),
+                "a compare that does not takes the clear value");
+    check_equal(processor.sink(saturated_difference), q(6.0),
+                "a difference that saturates negative is negative");
+    check_equal(processor.sink(straight), q(-1.5),
+                "the pointer moved, the field follows");
+    check_equal(processor.sink(inside), q(-2.0),
+                "the offset moved, the record inside follows");
 }
 
-void wire_channel(Synth &synth, int c) {
-    Graph &graph     = synth.graph;
-    Channel &channel = synth.channels[c];
-    std::vector<Record> lfo_records;
-    for (const Lfo &lfo : synth.lfos) {
-        lfo_records.push_back(lfo.record);
-    }
-    Wire moved[moved_count];
-    for (int l = 0; l < 2; ++l) {
-        channel.lfo[l] = graph.pointer(lfo_records);
-        const Wire lfo = graph.through(channel.lfo[l], 0);
-        for (int k = 0; k < moved_count; ++k) {
-            channel.depth[l][k] = graph.source();
-            moved[k] = graph.multiply_add(moved[k], lfo, channel.depth[l][k]);
-        }
-    }
-    channel.bend        = graph.source();
-    channel.cutoff_base = graph.source();
-    channel.key_track   = graph.source();
-    channel.mod_amount  = graph.source();
-    channel.pitch       = graph.sum({}, moved[moves_pitch], channel.bend);
-    channel.cutoff =
-            graph.sum(graph.multiply_add(moved[moves_cutoff], channel.bend,
-                                         channel.key_track),
-                      channel.cutoff_base);
-    const int sinks = cp::channel_sinks + cp::channel_sink_size * c;
-    for (int half = 0; half < 2; ++half) {
-        channel.duty_base[half] = graph.source();
-        graph.sink(sinks + (half == 0 ? cp::duty_0 : cp::duty_1),
-                   graph.sum({}, moved[moves_duty], channel.duty_base[half]));
-    }
-    channel.resonance_base = graph.source();
-    graph.sink(sinks + cp::resonance,
-               graph.sum({}, moved[moves_resonance], channel.resonance_base));
+// ---- the Noaidi's wiring -------------------------------------------------------------
+//
+// The synth the firmware wires (app/main/wiring.cpp) and the performance it
+// plays (tools/csp/performance.hpp): the settings on a processor, which runs
+// the graph's program, and on the interpreter, which reads the graph itself.
+// Every sink the graph has is checked, pass for pass.
 
-    std::vector<Field> fields;
-    for (auto &envelope : channel.segments) {
-        for (Segment &segment : envelope) {
-            segment.target = graph.source(Width::dword);
-            segment.rate   = graph.source(Width::dword);
-            const std::vector<Field> pair{segment.target, segment.rate};
-            segment.record = graph.record(pair);
-            fields.push_back(segment.record);
-        }
-    }
-    fields.push_back(channel.pitch);
-    fields.push_back(channel.cutoff);
-    fields.push_back(channel.mod_amount);
-    fields.push_back(channel.key_track);
-    channel.record = graph.record(fields);
-}
+using wiring::channel_count;
+using wiring::voice_count;
 
-void wire_voice(Synth &synth, int v) {
-    Graph &graph = synth.graph;
-    Voice &voice = synth.voices[v];
-    std::vector<Record> channel_records;
-    for (const Channel &channel : synth.channels) {
-        channel_records.push_back(channel.record);
-    }
-    voice.channel = graph.pointer(channel_records);
-    voice.note    = graph.source();
-    Wire envelope[envelope_count];
-    for (int e = 0; e < envelope_count; ++e) {
-        voice.velocity[e] = graph.source();
-        // the stage is the offset of a segment in the channel's record; the
-        // attack ends when the level is full, and the decay is the next
-        const Wire stage  = graph.delay();
-        const Wire before = graph.delay(Width::dword);
-        const Wire decay =
-                graph.offset_of(synth.channels[0].segments[e][1].record);
-        const Wire now = graph.select(before, graph.constant(cp::full),
-                                      csp::Condition::negative,
-                                      graph.maximum(stage, decay), stage);
-        graph.connect(stage, now);
-        voice.stage[e] = stage;
-        // the level goes a rate's share of its distance to the target
-        const Wire distance = graph.difference(
-                graph.through(voice.channel, now, field_target), before);
-        const Wire level = graph.multiply_add(
-                before, distance,
-                graph.through(voice.channel, now, field_rate));
-        graph.connect(before, level);
-        envelope[e] = graph.multiply(level, voice.velocity[e]);
-    }
-    const Wire pitch =
-            graph.sum(voice.note, graph.through(voice.channel, field_pitch));
-    Wire cutoff = graph.multiply(
-            envelope[1], graph.through(voice.channel, field_mod_amount));
-    cutoff = graph.shift(cutoff, 2);
-    cutoff = graph.multiply_add(cutoff, voice.note,
-                                graph.through(voice.channel, field_key_track));
-    cutoff = graph.sum(cutoff, graph.through(voice.channel, field_cutoff));
-    const int sinks = cp::sinks + cp::voice_sinks_size * v;
-    graph.sink(sinks + cp::sink_pitch, pitch);
-    graph.sink(sinks + cp::sink_cutoff, cutoff);
-    graph.sink(sinks + cp::sink_gain, envelope[0]);
-}
+using Synth = wiring::Synth;
 
-void wire(Synth &synth) {
-    for (int l = 0; l < lfo_count; ++l) {
-        wire_lfo(synth.graph, synth.lfos[l], l % 4);
-    }
-    for (int c = 0; c < channel_count; ++c) {
-        wire_channel(synth, c);
-    }
-    for (int v = 0; v < voice_count; ++v) {
-        wire_voice(synth, v);
+// A setting on the interpreter: the number, the record or the inner record
+// the firmware's write carries.
+void set(csp::GraphEvaluator &evaluator, const performance::Setting &setting) {
+    switch (setting.kind) {
+    case performance::Setting::Kind::word:
+        evaluator.set_word(setting.wire, static_cast<int32_t>(setting.raw));
+        break;
+    case performance::Setting::Kind::dword:
+        evaluator.set_dword(setting.wire, setting.raw);
+        break;
+    case performance::Setting::Kind::pointer:
+        evaluator.set_pointer(setting.wire, setting.record);
+        break;
+    case performance::Setting::Kind::offset:
+        evaluator.set_offset(setting.wire, setting.record);
+        break;
     }
 }
-
-// ---- both programs on the model ------------------------------------------------------
-
-// Today's program and the graph's, each on a processor of its own, set by
-// one hand: every value goes to its word in today's map and to the word the
-// graph says.
-struct Rig {
-    Synth synth;
-    csp::Processor today, graphed;
-
-    int address(Wire wire) const {
-        return synth.graph.address(wire);
-    }
-    void word(int today_address, Wire wire, int32_t raw) {
-        today.write(today_address, raw);
-        graphed.write(address(wire), raw);
-    }
-    void dword(int today_address, Wire wire, int64_t raw) {
-        today.write_wide(today_address, raw);
-        graphed.write_wide(address(wire), raw);
-    }
-    void swap() {
-        today.swap();
-        graphed.swap();
-    }
-
-    static int today_lfo(int l) {
-        return cp::lfos + ((l / 4) * cp::lfos_a_half + l % 4) * cp::lfo_size;
-    }
-    static int today_channel(int c) {
-        return cp::channels + c * cp::channel_size;
-    }
-    static int today_voice(int v) {
-        return cp::voices + v * cp::voice_size;
-    }
-
-    // the movable wires
-    void voice_channel(int v, int c) {
-        today.write(today_voice(v) + cp::channel, today_channel(c));
-        graphed.write(address(synth.voices[v].channel),
-                      synth.graph.address(synth.channels[c].record));
-    }
-    void channel_lfo(int c, int which, int l) {
-        today.write(today_channel(c) + cp::lfo1 + which, today_lfo(l));
-        graphed.write(address(synth.channels[c].lfo[which]),
-                      synth.graph.address(synth.lfos[l].record));
-    }
-    // a note on (stage 0) or off (stage 2) for both envelopes
-    void voice_stage(int v, int stage) {
-        const int today_stage[envelope_count] = {cp::stage_a, cp::stage_m};
-        for (int e = 0; e < envelope_count; ++e) {
-            today.write(today_voice(v) + today_stage[e],
-                        (e * 4 + stage) * cp::segment_size);
-            graphed.write(address(synth.voices[v].stage[e]),
-                          synth.graph.offset(
-                                  synth.channels[0].segments[e][stage].record));
-        }
-    }
-
-    void set_up() {
-        for (int half = 0; half < 2; ++half) {
-            today.write(cp::lfo_sets + half * cp::set_size + cp::base,
-                        cp::lfos + half * cp::lfos_a_half * cp::lfo_size);
-        }
-        for (int l = 0; l < lfo_count; ++l) {
-            const double depth = 0.3 + 0.05 * l;
-            const int at       = today_lfo(l);
-            const Lfo &lfo     = synth.lfos[l];
-            dword(at + cp::phase_step, lfo.step,
-                  q_wide(0.0031 * (l + 1) * 16.0));
-            word(at + cp::depth, lfo.depth, q(depth));
-            word(at + cp::neg_depth, lfo.neg_depth, q(-depth));
-            word(at + cp::gain, lfo.gain,
-                 q(l % 4 == 2 ? depth / 4 : depth / 8));
-        }
-        for (int c = 0; c < channel_count; ++c) {
-            const int at           = today_channel(c);
-            const Channel &channel = synth.channels[c];
-            word(at + cp::bend, channel.bend, q(0.02 * (c - 8)));
-            const int today_depth[2][moved_count] = {
-                    {cp::lfo1_pitch, cp::lfo1_cutoff, cp::lfo1_duty,
-                     cp::lfo1_resonance},
-                    {cp::lfo2_pitch, cp::lfo2_cutoff, cp::lfo2_duty,
-                     cp::lfo2_resonance}};
-            for (int l = 0; l < 2; ++l) {
-                for (int k = 0; k < moved_count; ++k) {
-                    word(at + today_depth[l][k], channel.depth[l][k],
-                         q(0.05 * ((c + 3 * l + k) % 7) - 0.1));
-                }
-                channel_lfo(c, l, (3 * c + 5 * l + 1) % lfo_count);
-            }
-            word(at + cp::cutoff_base, channel.cutoff_base,
-                 q(0.5 + 0.1 * (c % 5)));
-            word(at + cp::key_track, channel.key_track, q(0.25 * (c % 5)));
-            word(at + cp::mod_amount, channel.mod_amount, q(0.1 + 0.03 * c));
-            word(at + cp::duty_base_0, channel.duty_base[0], q(0.1 + 0.02 * c));
-            word(at + cp::duty_base_1, channel.duty_base[1],
-                 q(-0.3 + 0.03 * c));
-            word(at + cp::resonance_base, channel.resonance_base,
-                 q(0.5 + 0.1 * (c % 7)));
-            today.write(at + cp::sink_block,
-                        cp::channel_sinks + c * cp::channel_sink_size);
-            const double targets[envelope_count][stage_count] = {
-                    {1.25, 0.4 + 0.02 * c, 0.0}, {1.25, 0.2 + 0.03 * c, 0.0}};
-            const double rates[envelope_count][stage_count] = {
-                    {0.02 + 0.004 * c, 0.004, 0.008},
-                    {0.05, 0.002 + 0.001 * c, 0.02}};
-            for (int e = 0; e < envelope_count; ++e) {
-                for (int s = 0; s < stage_count; ++s) {
-                    const int row =
-                            at + cp::envelopes + (e * 4 + s) * cp::segment_size;
-                    const Segment &segment = channel.segments[e][s];
-                    dword(row + cp::target, segment.target,
-                          q_wide(targets[e][s]));
-                    dword(row + cp::rate, segment.rate, q_wide(rates[e][s]));
-                }
-            }
-        }
-        for (int v = 0; v < voice_count; ++v) {
-            const int at       = today_voice(v);
-            const Voice &voice = synth.voices[v];
-            word(at + cp::note, voice.note, q(-1.0 + 0.1 * v));
-            word(at + cp::velocity, voice.velocity[0], q(0.3 + 0.02 * v));
-            word(at + cp::velocity_m, voice.velocity[1], q(1.0 - 0.01 * v));
-            today.write(at + cp::sink, cp::sinks + v * cp::voice_sinks_size);
-            voice_channel(v, (5 * v + 1) % channel_count);
-            voice_stage(v, v % 3 == 0 ? 2 : 0); // idle, or in its attack
-        }
-    }
-};
 
 void test_todays_synth() {
-    csp::ProgramBuilder::Built today;
-    csp::generate(csp::control_graph(), today);
-    check(today.ok, "today's control program builds");
-
-    auto rig = std::make_unique<Rig>();
-    wire(rig->synth);
+    auto synth   = std::make_unique<Synth>();
+    Graph &graph = synth->graph;
+    wiring::wire(*synth);
     csp::ProgramBuilder::Built graphed;
     const auto began = std::chrono::steady_clock::now();
-    const bool built =
-            build(rig->synth.graph, graphed, "today's synth as a graph");
-    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+    const bool built = build(graph, graphed, "today's synth as a graph");
+    const auto took  = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - began);
     if (!built) {
         return;
     }
     int direct = 0, upper = 0;
     for (int address = 0; address < csp::register_count; ++address) {
-        if (rig->synth.graph.writer(address) != Graph::Writer::nobody) {
+        if (graph.writer(address) != Graph::Writer::nobody) {
             ++(address < csp::direct_reach ? direct : upper);
         }
     }
-    std::printf(
-            "today's control program (vector loops): %d rows, %d decode rows, %d cycles a pass\n",
-            today.image.length, today.image.rom_used, today.cycles);
     std::printf(
             "today's synth from the graph (the loops it finds): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
             graphed.image.length, graphed.image.rom_used, graphed.cycles,
@@ -1027,14 +946,13 @@ void test_todays_synth() {
     check(graphed.cycles <= csp::pass_cycle_limit,
           "the graph's program fits the pass");
 
-    Graph &graph = rig->synth.graph;
-    check(graph.writer(graph.address(rig->synth.voices[5].note))
+    check(graph.writer(graph.address(synth->voices[5].note))
                   == Graph::Writer::firmware,
           "a voice's note is the firmware's word");
-    check(graph.writer(graph.address(rig->synth.voices[5].stage[1]))
+    check(graph.writer(graph.address(synth->voices[5].stage[1]))
                   == Graph::Writer::program,
           "a voice's stage is a word the program writes");
-    check(graph.address(rig->synth.channels[3].record) % 32 == 0,
+    check(graph.address(synth->channels[3].record) % 32 == 0,
           "a channel's record is aligned to its size");
 
     // the copies, which the wiring above never named: the voices and the
@@ -1067,9 +985,6 @@ void test_todays_synth() {
                                 + std::to_string(set.copies) + " copies");
         }
     }
-    check(graphed.cycles < today.cycles
-                  && graphed.image.length < today.image.length,
-          "the graph's program is shorter than today's, in rows and in cycles");
     check_equal(
             static_cast<int64_t>(graph.initial_values().size()),
             channel_count + voice_count,
@@ -1078,92 +993,513 @@ void test_todays_synth() {
                   == Graph::Writer::firmware,
           "such a word is the firmware's");
 
-    rig->set_up();
-    for (const Graph::InitialValue &initial : graph.initial_values()) {
-        rig->graphed.write(initial.address, initial.value);
+    // the set-up: the same performance on the model and on the interpreter
+    csp::Processor processor;
+    for (const performance::Write &write :
+         performance::writes(*synth, performance::set_up(*synth))) {
+        processor.write(write.address, write.raw);
     }
-    start(rig->today, today.image);
-    start(rig->graphed, graphed.image);
-    int differences = 0, early = 0, stale = 0, cycles = 0, todays_errors = 0;
-    const int passes = 600;
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor.write(initial.address, initial.value);
+    }
+    auto evaluator = std::make_unique<csp::GraphEvaluator>(graph);
+    for (const performance::Setting &setting : performance::set_up(*synth)) {
+        set(*evaluator, setting);
+    }
+    start(processor, graphed.image);
+
+    int differences = 0, early = 0, stale = 0, cycles = 0;
+    const int passes = performance::passes;
     for (int at = 1; at <= passes; ++at) {
         // the performance: wires moved and notes played while it runs
-        if (at == 120) {
-            for (int v = 0; v < voice_count; v += 2) {
-                rig->voice_channel(v, (7 * v + 3) % channel_count);
-            }
-            rig->swap();
+        const performance::Settings changes =
+                performance::before_pass(*synth, at);
+        for (const performance::Write &write :
+             performance::writes(*synth, changes)) {
+            processor.write(write.address, write.raw);
         }
-        if (at == 200) {
-            for (int v = 1; v < voice_count; v += 2) {
-                rig->voice_stage(v, 2); // note off
-            }
-            rig->swap();
-        }
-        if (at == 300) {
-            for (int c = 0; c < channel_count; ++c) {
-                rig->channel_lfo(c, c % 2, (c + 2) % lfo_count);
-            }
-            rig->swap();
-        }
-        if (at == 380) {
-            for (int v = 0; v < voice_count; v += 3) {
-                rig->voice_stage(v, 0); // note on
-            }
-            rig->swap();
-        }
-        todays_errors += static_cast<int>(rig->today.pass().errors.size());
-        const csp::PassReport report = rig->graphed.pass();
+        processor.swap();
+        const csp::PassReport report = processor.pass();
         for (const std::string &error : report.errors) {
             if (early++ < 3) {
                 std::printf("  pass %d: %s\n", at, error.c_str());
             }
         }
         stale += static_cast<int>(report.stale_sinks.size());
-        cycles       = std::max(cycles, report.cycles);
-        auto compare = [&](int address, const char *what, int index, int k) {
-            const int offset   = address - csp::sink_base;
-            const int32_t want = rig->today.sink(offset);
-            const int32_t got  = rig->graphed.sink(offset);
-            if (want != got && differences++ < 5) {
-                std::printf(
-                        "  pass %d, %s %d sink %d: %d, today's program has %d\n",
-                        at, what, index, k, got, want);
-            }
-        };
-        for (int v = 0; v < voice_count; ++v) {
-            for (const int k :
-                 {cp::sink_pitch, cp::sink_cutoff, cp::sink_gain}) {
-                compare(cp::sinks + v * cp::voice_sinks_size + k, "voice", v,
-                        k);
+        cycles = std::max(cycles, report.cycles);
+        evaluator->pass();
+        // the writes land in the model at the end of this pass, so the
+        // interpreter takes them for the pass after
+        if (report.writes_applied > 0) {
+            for (const performance::Setting &setting : changes) {
+                set(*evaluator, setting);
             }
         }
-        for (int c = 0; c < channel_count; ++c) {
-            for (const int k : {cp::duty_0, cp::duty_1, cp::resonance}) {
-                compare(cp::channel_sinks + c * cp::channel_sink_size + k,
-                        "channel", c, k);
+        for (const int address : evaluator->sink_addresses()) {
+            const int32_t from_program =
+                    processor.sink(address - csp::sink_base);
+            const int32_t from_graph = evaluator->sink(address);
+            if (from_program != from_graph && differences++ < 5) {
+                std::printf(
+                        "  pass %d, sink 0x%03x: the interpreter has %d, the "
+                        "program %d\n",
+                        at, address, from_graph, from_program);
             }
         }
     }
     check_equal(differences, 0,
-                "sinks that differ from today's program over "
-                        + std::to_string(passes) + " passes");
-    check_equal(todays_errors, 0,
-                "complaints of the model about today's program");
+                "sinks where the interpreter and the graph's program differ "
+                "over " + std::to_string(passes)
+                        + " passes");
     check_equal(early, 0, "reads before ready reported by the model");
     check_equal(stale, 0, "sinks the graph's program left unwritten");
     check_equal(cycles, graphed.cycles,
                 "the model runs the cycles the builder counted");
 
+    // the sinks are the layout's, and the comparison above was of all of
+    // them: three for each voice, three for each channel
+    const std::vector<int> sinks = evaluator->sink_addresses();
+    auto has                     = [&](int address) {
+        return std::find(sinks.begin(), sinks.end(), address) != sinks.end();
+    };
+    bool laid_out = true;
+    for (int v = 0; v < voice_count; ++v) {
+        for (const int k :
+             {wiring::voice_sink::pitch, wiring::voice_sink::cutoff,
+              wiring::voice_sink::gain}) {
+            laid_out = laid_out
+                       && has(wiring::voice_sink::base
+                              + v * wiring::voice_sink::block + k);
+        }
+    }
+    for (int c = 0; c < channel_count; ++c) {
+        for (const int k :
+             {wiring::channel_sink::duty_0, wiring::channel_sink::duty_1,
+              wiring::channel_sink::resonance}) {
+            laid_out = laid_out
+                       && has(wiring::channel_sink::base
+                              + c * wiring::channel_sink::block + k);
+        }
+    }
+    check_equal(static_cast<int64_t>(sinks.size()),
+                3LL * (voice_count + channel_count),
+                "sinks: three for each voice and three for each channel");
+    check(laid_out, "every sink is where wiring.hpp lays it out");
+
     // that the comparison is of live values: sinks move, and differ by voice
-    const int32_t gain_1 =
-            rig->graphed.sink(cp::sinks - csp::sink_base
-                              + 1 * cp::voice_sinks_size + cp::sink_gain);
-    const int32_t gain_2 =
-            rig->graphed.sink(cp::sinks - csp::sink_base
-                              + 2 * cp::voice_sinks_size + cp::sink_gain);
+    const int32_t gain_1 = evaluator->sink(wiring::voice_sink::base
+                                           + 1 * wiring::voice_sink::block
+                                           + wiring::voice_sink::gain);
+    const int32_t gain_2 = evaluator->sink(wiring::voice_sink::base
+                                           + 2 * wiring::voice_sink::block
+                                           + wiring::voice_sink::gain);
     check(gain_1 != 0 && gain_2 != 0 && gain_1 != gain_2,
           "the voices' gains are alive at the end");
+}
+
+// ---- the Noaidi by its formulas -------------------------------------------------
+
+// The Noaidi wired and built, on the reference model, set by wire as the
+// firmware sets it. A write is in the registers from the pass after the one
+// it was sent before: the model applies the queue at a pass's end.
+struct Played {
+    std::unique_ptr<wiring::Synth> synth = std::make_unique<wiring::Synth>();
+    std::unique_ptr<csp::ProgramBuilder::Built> built =
+            std::make_unique<csp::ProgramBuilder::Built>();
+    std::unique_ptr<csp::Processor> processor =
+            std::make_unique<csp::Processor>();
+    performance::Settings settings;
+
+    bool wire_and_build(const std::string &what) {
+        wiring::wire(*synth);
+        if (!build(synth->graph, *built, what)) {
+            return false;
+        }
+        for (const Graph::InitialValue &initial :
+             synth->graph.initial_values()) {
+            processor->write(initial.address, initial.value);
+        }
+        return true;
+    }
+
+    void word(Wire wire, double value) {
+        settings.push_back(
+                {performance::Setting::Kind::word, wire, q(value), {}});
+    }
+    void dword(Wire wire, double value) {
+        settings.push_back(
+                {performance::Setting::Kind::dword, wire, q_wide(value), {}});
+    }
+    void pointer(Wire wire, Record record) {
+        settings.push_back(
+                {performance::Setting::Kind::pointer, wire, 0, record});
+    }
+    void stage(Wire wire, Record segment) {
+        settings.push_back(
+                {performance::Setting::Kind::offset, wire, 0, segment});
+    }
+    void send() {
+        for (const performance::Write &write :
+             performance::writes(*synth, settings)) {
+            processor->write(write.address, write.raw);
+        }
+        settings.clear();
+        processor->swap();
+    }
+
+    double sink(int address) const {
+        return processor->sink(address - csp::sink_base)
+               / static_cast<double>(csp::word_one);
+    }
+    int address(Wire wire) const {
+        return synth->graph.address(wire);
+    }
+};
+
+// An LFO's wave at a phase, −8 … +8 a cycle.
+double lfo_wave(int shape, double phase, double depth, double neg_depth,
+                double gain) {
+    switch (shape) {
+    case wiring::shape_saw:
+        return phase * gain;
+    case wiring::shape_square:
+        return phase < 0 ? depth : neg_depth;
+    case wiring::shape_triangle:
+        return std::fabs(phase) * gain + neg_depth;
+    default: {
+        const double p        = phase / 8;
+        const double parabola = 4 * p * (1 - std::fabs(p));
+        return (0.775 * parabola + 0.225 * parabola * std::fabs(parabola))
+               * depth;
+    }
+    }
+}
+
+// Every sink by its formula, in floating point: the LFOs held at phases of
+// their own, each channel listening to two of them by depths of its own, each
+// voice on a channel with its levels held.
+void test_the_noaidis_formulas() {
+    Played played;
+    if (!played.wire_and_build("the Noaidi, for its formulas")) {
+        return;
+    }
+    const wiring::Synth &synth = *played.synth;
+
+    // the LFOs step for five passes and then stand: one of them wraps
+    constexpr int stepping_passes                        = 5;
+    constexpr std::array<double, wiring::lfo_count> step = {
+            1.8, -1.02, -0.64, -0.26, 0.12, 0.5, 0.88, 1.26};
+    std::array<double, wiring::lfo_count> lfo_out;
+    for (int k = 0; k < wiring::lfo_count; ++k) {
+        const wiring::Lfo &lfo = synth.lfos[static_cast<size_t>(k)];
+        const double depth     = 0.5 + 0.05 * k;
+        const double neg_depth = -0.4 + 0.03 * k;
+        const double gain      = 0.1 + 0.01 * k;
+        played.dword(lfo.step, step[static_cast<size_t>(k)]);
+        played.word(lfo.depth, depth);
+        played.word(lfo.neg_depth, neg_depth);
+        played.word(lfo.gain, gain);
+        const double phase = std::remainder(
+                stepping_passes * step[static_cast<size_t>(k)], 16.0);
+        lfo_out[static_cast<size_t>(k)] = lfo_wave(
+                k % wiring::lfo_shape_count, phase, depth, neg_depth, gain);
+    }
+
+    struct Channel {
+        double bend, p1, c1, p2, c2, base, track, amount;
+        int lfo1, lfo2;
+        double d1, d2, r1, r2, duty0, duty1, resonance;
+    };
+    std::vector<Channel> channel(wiring::channel_count);
+    for (int c = 0; c < wiring::channel_count; ++c) {
+        Channel &a = channel[static_cast<size_t>(c)];
+        a          = {0.02 * (c - 8),
+                      0.1 + 0.01 * c,
+                      -0.2 + 0.03 * c,
+                      0.05 * (c % 4),
+                      0.4 - 0.02 * c,
+                      0.5 + 0.1 * (c % 5),
+                      0.25 * (c % 5),
+                      0.3 + 0.05 * c,
+                      (3 * c) % wiring::lfo_count,
+                      (7 * c + 5) % wiring::lfo_count,
+                      0.03 * (c % 5),
+                      -0.02 * (c % 3),
+                      0.1 * (c % 4),
+                      0.05 * (c % 6),
+                      0.1 + 0.02 * c,
+                      -0.3 + 0.03 * c,
+                      0.5 + 0.1 * (c % 7)};
+        // the first channels' resonance sinks are an LFO each, bare
+        if (c < wiring::lfo_count) {
+            a.lfo1      = c;
+            a.r1        = 1.0;
+            a.r2        = 0;
+            a.resonance = 0;
+        }
+        const wiring::Channel &wired = synth.channels[static_cast<size_t>(c)];
+        played.pointer(wired.lfo[0],
+                       synth.lfos[static_cast<size_t>(a.lfo1)].record);
+        played.pointer(wired.lfo[1],
+                       synth.lfos[static_cast<size_t>(a.lfo2)].record);
+        played.word(wired.depth[0][wiring::moves_pitch], a.p1);
+        played.word(wired.depth[1][wiring::moves_pitch], a.p2);
+        played.word(wired.depth[0][wiring::moves_cutoff], a.c1);
+        played.word(wired.depth[1][wiring::moves_cutoff], a.c2);
+        played.word(wired.depth[0][wiring::moves_duty], a.d1);
+        played.word(wired.depth[1][wiring::moves_duty], a.d2);
+        played.word(wired.depth[0][wiring::moves_resonance], a.r1);
+        played.word(wired.depth[1][wiring::moves_resonance], a.r2);
+        played.word(wired.bend, a.bend);
+        played.word(wired.cutoff_base, a.base);
+        played.word(wired.key_track, a.track);
+        played.word(wired.mod_amount, a.amount);
+        played.word(wired.duty_base[0], a.duty0);
+        played.word(wired.duty_base[1], a.duty1);
+        played.word(wired.resonance_base, a.resonance);
+    }
+
+    struct Voice {
+        double note, level_amp, level_mod, velocity;
+        int channel;
+    };
+    std::vector<Voice> voice(wiring::voice_count);
+    for (int v = 0; v < wiring::voice_count; ++v) {
+        Voice &a = voice[static_cast<size_t>(v)];
+        a = {-1.0 + 0.1 * v, 0.1 + 0.02 * v, 0.9 - 0.02 * v, 0.3 + 0.02 * v,
+             (5 * v + 1) % wiring::channel_count};
+        const wiring::Voice &wired = synth.voices[static_cast<size_t>(v)];
+        played.pointer(wired.channel,
+                       synth.channels[static_cast<size_t>(a.channel)].record);
+        played.word(wired.note, a.note);
+        played.word(wired.velocity[wiring::envelope_amp], a.velocity);
+        played.word(wired.velocity[wiring::envelope_mod], 1.0);
+        played.dword(wired.level[wiring::envelope_amp], a.level_amp);
+        played.dword(wired.level[wiring::envelope_mod], a.level_mod);
+        // in the decay, whose rate is 0: the levels stand
+        for (int e = 0; e < wiring::envelope_count; ++e) {
+            played.stage(wired.stage[static_cast<size_t>(e)],
+                         synth.channels[0]
+                                 .segments[static_cast<size_t>(e)]
+                                          [wiring::stage_decay]
+                                 .record);
+        }
+    }
+    played.send();
+    csp::Processor &processor = *played.processor;
+    start(processor, played.built->image);
+
+    // the write that stops the LFOs is in the registers after the pass it
+    // was sent before, which is a step too
+    for (int n = 1; n < stepping_passes; ++n) {
+        pass(processor, "the Noaidi's formulas, stepping");
+    }
+    for (const wiring::Lfo &lfo : synth.lfos) {
+        played.dword(lfo.step, 0);
+    }
+    played.send();
+    pass(processor, "the Noaidi's formulas, the last step");
+    check_equal(processor.queued_writes(), 0, "the LFOs' steps are written");
+    for (int n = 0; n < 3; ++n) {
+        pass(processor, "the Noaidi's formulas, standing");
+    }
+
+    double worst_lfo = 0;
+    for (int k = 0; k < wiring::lfo_count; ++k) {
+        const int sinks =
+                wiring::channel_sink::base + wiring::channel_sink::block * k;
+        worst_lfo = std::max(
+                worst_lfo,
+                std::fabs(played.sink(sinks + wiring::channel_sink::resonance)
+                          - lfo_out[static_cast<size_t>(k)]));
+    }
+    // a few raw units of the words' rounding, through the sine's eight products
+    check(worst_lfo <= 4.0 / csp::word_one,
+          "every LFO's wave is its shape's formula at its phase: largest difference "
+                  + std::to_string(worst_lfo));
+
+    double worst_channel = 0;
+    for (int c = 0; c < wiring::channel_count; ++c) {
+        const Channel &a     = channel[static_cast<size_t>(c)];
+        const double lfo1    = lfo_out[static_cast<size_t>(a.lfo1)];
+        const double lfo2    = lfo_out[static_cast<size_t>(a.lfo2)];
+        const double duty    = lfo1 * a.d1 + lfo2 * a.d2;
+        const double want[3] = {a.duty0 + duty, a.duty1 + duty,
+                                a.resonance + lfo1 * a.r1 + lfo2 * a.r2};
+        const int fields[3]  = {wiring::channel_sink::duty_0,
+                                wiring::channel_sink::duty_1,
+                                wiring::channel_sink::resonance};
+        const int sinks =
+                wiring::channel_sink::base + wiring::channel_sink::block * c;
+        for (int k = 0; k < 3; ++k) {
+            worst_channel = std::max(
+                    worst_channel,
+                    std::fabs(played.sink(sinks + fields[k]) - want[k]));
+        }
+    }
+    check(worst_channel <= 6.0 / csp::word_one,
+          "the channels' pulse width and resonance sinks match their formulas: largest difference "
+                  + std::to_string(worst_channel));
+
+    double worst_voice = 0;
+    for (int v = 0; v < wiring::voice_count; ++v) {
+        const Voice &a             = voice[static_cast<size_t>(v)];
+        const Channel &c           = channel[static_cast<size_t>(a.channel)];
+        const double lfo1          = lfo_out[static_cast<size_t>(c.lfo1)];
+        const double lfo2          = lfo_out[static_cast<size_t>(c.lfo2)];
+        const double channel_pitch = c.bend + lfo1 * c.p1 + lfo2 * c.p2;
+        // the cutoff tracks the bend and the note, not the pitch LFOs: an
+        // LFO on the pitch does not sweep the filter too
+        const double channel_cutoff =
+                c.base + lfo1 * c.c1 + lfo2 * c.c2 + c.track * c.bend;
+        const double want[3] = {a.note + channel_pitch,
+                                4 * a.level_mod * c.amount + a.note * c.track
+                                        + channel_cutoff,
+                                a.level_amp * a.velocity};
+        const int fields[3]  = {wiring::voice_sink::pitch,
+                                wiring::voice_sink::cutoff,
+                                wiring::voice_sink::gain};
+        const int sinks =
+                wiring::voice_sink::base + wiring::voice_sink::block * v;
+        for (int k = 0; k < 3; ++k) {
+            worst_voice = std::max(
+                    worst_voice,
+                    std::fabs(played.sink(sinks + fields[k]) - want[k]));
+        }
+    }
+    // the mod envelope's term is multiplied by 4
+    check(worst_voice <= 16.0 / csp::word_one,
+          "the voices' pitch, cutoff and gain sinks match their formulas: largest difference "
+                  + std::to_string(worst_voice));
+}
+
+// An envelope from a note on to its release, pass for pass by its formula:
+// the level goes a rate's share of its distance to the segment's target, and
+// the attack ends in the decay when the level is full.
+void test_the_noaidis_envelope() {
+    Played played;
+    if (!played.wire_and_build("the Noaidi, for an envelope")) {
+        return;
+    }
+    const wiring::Synth &synth     = *played.synth;
+    const wiring::Channel &channel = synth.channels[0];
+    constexpr int amp              = wiring::envelope_amp;
+    // attack to 1.3 × full, decay to a sustain of 0.5, release to 0
+    constexpr std::array<double, wiring::stage_count> target = {1.3, 0.5, 0.0};
+    constexpr std::array<double, wiring::stage_count> rate = {0.1, 0.05, 0.05};
+    for (int e = 0; e < wiring::envelope_count; ++e) {
+        for (int s = 0; s < wiring::stage_count; ++s) {
+            const wiring::Segment &segment =
+                    channel.segments[static_cast<size_t>(e)]
+                                    [static_cast<size_t>(s)];
+            played.dword(segment.target, target[static_cast<size_t>(s)]);
+            played.dword(segment.rate, rate[static_cast<size_t>(s)]);
+        }
+    }
+    auto segment_of = [&](int e, int stage) {
+        return channel
+                .segments[static_cast<size_t>(e)][static_cast<size_t>(stage)]
+                .record;
+    };
+    // every voice idle on the channel, in release at zero; the first struck
+    for (const wiring::Voice &voice : synth.voices) {
+        played.pointer(voice.channel, channel.record);
+        for (int e = 0; e < wiring::envelope_count; ++e) {
+            played.word(voice.velocity[static_cast<size_t>(e)], 1.0);
+            played.stage(voice.stage[static_cast<size_t>(e)],
+                         segment_of(e, wiring::stage_release));
+        }
+    }
+    const wiring::Voice &struck = synth.voices[0];
+    const wiring::Voice &idle   = synth.voices[1];
+    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_attack));
+    played.send();
+    csp::Processor &processor = *played.processor;
+    start(processor, played.built->image);
+
+    const Graph &graph = synth.graph;
+    auto offset_of     = [&](int stage) {
+        return graph.offset(segment_of(amp, stage));
+    };
+    auto gain_of = [&](int v) {
+        return played.sink(wiring::voice_sink::base
+                           + wiring::voice_sink::block * v
+                           + wiring::voice_sink::gain);
+    };
+
+    // the formula, beside the model
+    int stage      = wiring::stage_attack;
+    double level   = 0;
+    double worst   = 0;
+    double highest = 0;
+    auto one_pass  = [&](const std::string &what) {
+        pass(processor, what);
+        if (level >= 1.0) {
+            stage = std::max(stage, static_cast<int>(wiring::stage_decay));
+        }
+        level += (target[static_cast<size_t>(stage)] - level)
+                 * rate[static_cast<size_t>(stage)];
+        worst   = std::max(worst, std::fabs(gain_of(0) - level));
+        highest = std::max(highest, level);
+    };
+    auto stage_word = [&] {
+        return processor.read(played.address(struck.stage[amp]));
+    };
+
+    int passes_to_decay = 0;
+    while (passes_to_decay < 200
+           && stage_word() == offset_of(wiring::stage_attack)) {
+        one_pass("the attack");
+        ++passes_to_decay;
+    }
+    check_equal(stage_word(), offset_of(wiring::stage_decay),
+                "the attack ends in the decay");
+    check_equal(stage, wiring::stage_decay, "in the pass the formula says");
+    check(highest >= 1.0, "with the level at full scale");
+    check_equal(processor.read(played.address(idle.stage[amp])),
+                offset_of(wiring::stage_release),
+                "a voice never struck stays in release");
+    check_equal(processor.read_wide(played.address(idle.level[amp])), 0,
+                "at zero");
+
+    for (int n = 0; n < 400; ++n) {
+        one_pass("the decay");
+    }
+    check(std::fabs(gain_of(0) - 0.5) < 0.001,
+          "the decay settles at the sustain level");
+
+    // struck again while it sounds: the level climbs on from where it is
+    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_attack));
+    played.send();
+    one_pass("the note on lands");
+    stage = wiring::stage_attack;
+    one_pass("struck again");
+    check_equal(stage_word(), offset_of(wiring::stage_attack),
+                "a voice struck again is in the attack");
+    check(gain_of(0) > 0.5 && gain_of(0) < 1.0,
+          "and climbs on from the sustain level: "
+                  + std::to_string(gain_of(0)));
+    for (int n = 0; n < 100 && stage_word() == offset_of(wiring::stage_attack);
+         ++n) {
+        one_pass("the second attack");
+    }
+    check_equal(stage_word(), offset_of(wiring::stage_decay),
+                "and ends in the decay at full scale");
+
+    // let go: the firmware writes the release, and the program leaves it
+    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_release));
+    played.send();
+    one_pass("the note off lands");
+    stage = wiring::stage_release;
+    for (int n = 0; n < 400; ++n) {
+        one_pass("the release");
+    }
+    check_equal(stage_word(), offset_of(wiring::stage_release),
+                "let go: the program leaves the release alone");
+    check(gain_of(0) < 0.001, "the release falls to zero");
+    check(worst <= 2.0 / csp::word_one,
+          "the gain sink follows the envelope's formula pass for pass: largest difference "
+                  + std::to_string(worst));
 }
 
 } // namespace
@@ -1180,7 +1516,10 @@ int main() {
     test_copies(20, false, 0); // a round of sixteen and one of four
     test_a_copy_made_otherwise();
     test_copies_that_point_at_each_other();
+    test_the_interpreter();
     test_todays_synth();
+    test_the_noaidis_formulas();
+    test_the_noaidis_envelope();
     std::printf("dsp graph: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;

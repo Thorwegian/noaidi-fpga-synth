@@ -63,26 +63,33 @@ int op_peek(int argc, char **argv) {
 }
 
 // Every register the image knows, read back through the probe: how many
-// differ from the image, and the first of them. A sounding voice's levels
-// and stages differ legitimately (the CSP writes them); verify a silent synth.
+// differ from the image, the first of them, and whose each is. A word the
+// program writes too (a sounding voice's levels and stages) differs
+// legitimately; a word that is the firmware's alone and differs is a write
+// that did not land (tools/lab/verify_filter.py reads the lines).
 int op_verify(int, char **) {
     constexpr int limit = 24;
     int registers[limit];
     int32_t wanted[limit], held[limit];
-    const int differing = engine_link_verify(registers, wanted, held, limit);
+    int firmware_owned = 0;
+    const int differing =
+            engine_link_verify(registers, wanted, held, limit, &firmware_owned);
     if (differing < 0) {
         std::printf("  the link is not running\n");
         return 1;
     }
     for (int i = 0; i < differing && i < limit; ++i) {
-        std::printf("  %03x: image %05lx (%ld), chip %05lx (%ld)\n",
+        std::printf("  %03x: image %05lx (%ld), chip %05lx (%ld), the %s's\n",
                     registers[i], static_cast<unsigned long>(wanted[i]),
                     static_cast<long>(signed_word(wanted[i])),
                     static_cast<unsigned long>(held[i]),
-                    static_cast<long>(signed_word(held[i])));
+                    static_cast<long>(signed_word(held[i])),
+                    engine_link_program_writes(registers[i]) ? "program"
+                                                             : "firmware");
     }
-    std::printf("  verified: %d register(s) differ from the image\n",
-                differing);
+    std::printf(
+            "  verified: %d register(s) differ from the image, %d of them the firmware's own\n",
+            differing, firmware_owned);
     return differing ? 1 : 0;
 }
 
@@ -106,9 +113,9 @@ int op_diag(int, char **) {
 
 // The voice table, live (#238): the firmware's view of each sounding voice —
 // a stuck note shows as HELD (or sustained) that the player has let go. Read
-// alongside csp peek of the voice's stage words (0x600 + 16*v + 2 and + 10;
-// 8 and 24 are release) to see whether the release never issued (firmware
-// bug) or issued but did not land (link).
+// alongside `csp verify` and `csp peek` of the voice's stage words to see
+// whether the release never issued (firmware bug) or issued but did not land
+// (link).
 int op_voices(int, char **) {
     voice_diag_t v[32];
     const int n                           = voice_alloc_diag(v, 32);
@@ -139,9 +146,24 @@ int op_voices(int, char **) {
 unsigned s_words_written;
 unsigned s_checksum;
 
+// The write queue holds 511 dwords and its door drops what does not fit, so
+// register writes are committed a chunk at a time: the held CSP's window
+// applies a committed chunk within a few passes.
+constexpr unsigned commit_chunk =
+        static_cast<unsigned>(fpga_map::queue_depth / 2);
+unsigned s_uncommitted; // register writes queued since the last commit
+
+void commit_queue() {
+    engine_link_raw_write(fpga_map::ctrl,
+                          fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    s_uncommitted = 0;
+}
+
 int op_hold(int, char **) {
     s_words_written = 0;
     s_checksum      = 0;
+    s_uncommitted   = 0;
     engine_link_pause(true);
     engine_link_raw_write(fpga_map::ctrl, fpga_map::ctrl_hold);
     engine_link_raw_write(fpga_map::ctrl,
@@ -222,14 +244,16 @@ int op_const(int argc, char **argv) {
     ++s_words_written;
     s_checksum = s_checksum * 31u + address * 5u
                  + (static_cast<unsigned>(raw) & 0x3FFFFu);
+    if (++s_uncommitted >= commit_chunk) {
+        commit_queue();
+    }
     return 0;
 }
 
 // csp burst <first register> <count> <seed>: the registers' test values
 // (register × 37 + seed) through the write queue, in bursts of up to 8
 // consecutive dwords and committed a chunk at a time, as the engine loads the
-// boot image: the window applies only committed dwords, the queue holds 511
-// of them, and a held CSP applies a committed chunk within a few passes.
+// boot image.
 int op_burst(int argc, char **argv) {
     if (argc != 4) {
         std::printf("usage: csp burst <first register> <count> <seed>\n");
@@ -242,9 +266,6 @@ int op_burst(int argc, char **argv) {
     const unsigned seed =
             static_cast<unsigned>(std::strtoul(argv[3], nullptr, 0));
     constexpr unsigned burst_dwords = 8;
-    constexpr unsigned chunk_dwords =
-            static_cast<unsigned>(fpga_map::queue_depth / 2);
-    unsigned since_commit = 0;
     for (unsigned at = 0; at < count; at += burst_dwords) {
         uint64_t dwords[burst_dwords];
         const unsigned n = std::min(burst_dwords, count - at);
@@ -255,16 +276,13 @@ int op_burst(int argc, char **argv) {
         }
         engine_link_raw_write_burst(fpga_map::fifo_door, dwords,
                                     static_cast<int>(n), false);
-        since_commit += n;
-        if (since_commit >= chunk_dwords || at + n == count) {
-            engine_link_raw_write(fpga_map::ctrl,
-                                  fpga_map::ctrl_hold | fpga_map::ctrl_swap);
-            vTaskDelay(pdMS_TO_TICKS(2));
-            since_commit = 0;
+        s_uncommitted += n;
+        if (s_uncommitted >= commit_chunk || at + n == count) {
+            commit_queue();
         }
     }
     std::printf("  queued %u words, committed %u a chunk\n", count,
-                chunk_dwords);
+                commit_chunk);
     return 0;
 }
 

@@ -121,7 +121,9 @@ public:
     // shift works on in place where nothing else reads it, and may be left
     // unconnected; a constant goes in x or y, one to an operator.
 
-    // a + x + y
+    // a + x + y; a wrapping sum is of a and x alone. With a dword `a` the
+    // output is a dword: a saturating sum takes x as a word and y as a
+    // dword, a wrapping sum x as a dword.
     Wire sum(Wire a, Wire x, Wire y = {},
              Overflow overflow = Overflow::saturate);
     // x × y
@@ -221,6 +223,9 @@ public:
     ~DspGraph();
 
 private:
+    // The host test's interpreter of a built graph (tools/csp/test).
+    friend class GraphEvaluator;
+
     struct Node;
     struct RecordLayout;
     struct Shape;    // a set of copies, node by node

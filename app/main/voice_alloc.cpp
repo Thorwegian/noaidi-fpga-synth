@@ -7,8 +7,8 @@
 // the active preset's changes (preset.h) and into notes, and hands both to
 // render.cpp, which says what the CSP's registers and sinks must hold; the
 // engine link sends it. The sound's arithmetic (the envelopes, the LFOs, the
-// pitch and cutoff of every voice) is the CSP's, running the control program
-// (tools/csp/programs).
+// pitch and cutoff of every voice) is the CSP's, running the program of the
+// graph that wiring.cpp wires.
 
 #include "voice_alloc.h"
 
@@ -140,7 +140,8 @@ void refresh_velocities() {
     render::Writes writes;
     for (int v = 0; v < voice_count; ++v) {
         if (s_voices[v].state == V_HELD) {
-            render::velocity_amounts(g_preset, v, s_voices[v].vel, writes);
+            render::velocity_amounts(engine_link_synth(), g_preset, v,
+                                     s_voices[v].vel, writes);
         }
     }
     send(writes);
@@ -148,21 +149,21 @@ void refresh_velocities() {
 
 void update_amp_env() {
     render::Writes writes;
-    render::amp_envelope(g_preset, writes);
+    render::amp_envelope(engine_link_synth(), g_preset, writes);
     send(writes);
     refresh_velocities();
 }
 
 void update_mod_env() {
     render::Writes writes;
-    render::mod_envelope(g_preset, writes);
+    render::mod_envelope(engine_link_synth(), g_preset, writes);
     send(writes);
     refresh_velocities();
 }
 
 void update_cutoff() {
     render::Writes writes;
-    render::cutoff(g_preset, s_controllers, writes);
+    render::cutoff(engine_link_synth(), g_preset, s_controllers, writes);
     send(writes);
 }
 
@@ -170,21 +171,22 @@ void update_cutoff() {
 // voicing's own terms.
 void update_volume() {
     render::Writes writes;
-    render::channel_sound(g_preset, writes);
+    render::channel_sound(engine_link_synth(), g_preset, writes);
     send(writes);
 }
 
 void update_lfo(int i) {
     render::Writes writes;
-    render::lfo(g_preset, i, writes);
+    render::lfo(engine_link_synth(), g_preset, i, writes);
     send(writes);
 }
 
 // The partials follow the preset's voicing, tuning, panning and modes.
 void update_voices() {
     render::Writes writes;
-    render::channel_sound(g_preset, writes);
-    render::cutoff(g_preset, s_controllers, writes); // the key tracking
+    render::channel_sound(engine_link_synth(), g_preset, writes);
+    render::cutoff(engine_link_synth(), g_preset, s_controllers,
+                   writes); // the key tracking
     send(writes);
     if (g_preset.voice_struct != s_pointed_struct) {
         point_partials();
@@ -279,7 +281,7 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     // The pitch and the velocity's amounts go in with the attack, in one
     // swap, so the attack's first pass already has them.
     render::Writes writes;
-    render::note_on(g_preset, pick, note, vel, writes);
+    render::note_on(engine_link_synth(), g_preset, pick, note, vel, writes);
     send(writes);
 }
 
@@ -294,7 +296,7 @@ void pitch_bend_update(uint16_t bend14) {
     }
     s_controllers.bend = raw;
     render::Writes writes;
-    render::pitch_bend(g_preset, s_controllers, writes);
+    render::pitch_bend(engine_link_synth(), s_controllers, writes);
     send(writes);
 }
 
@@ -304,7 +306,7 @@ void release_voice(int v) {
     s_voices[v].sustained   = false;
     s_voices[v].released_at = esp_timer_get_time();
     render::Writes writes;
-    render::release(v, writes);
+    render::release(engine_link_synth(), v, writes);
     send(writes);
 }
 
@@ -419,7 +421,7 @@ bool handle_cc(uint8_t num, uint8_t val) {
             if (s_voices[v].state != V_IDLE) {
                 s_voices[v].state     = V_IDLE;
                 s_voices[v].sustained = false;
-                render::silence(v, writes);
+                render::silence(engine_link_synth(), v, writes);
             }
         }
         send(writes);

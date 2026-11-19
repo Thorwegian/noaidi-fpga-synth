@@ -3,9 +3,9 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Loads tools/csp/programs/selftest.s (instructions in dependent chains, as
-// the assembler scheduled them, and counters that follow the pass counter),
-// lets it run, and reads its registers back through the probe
+// Loads the self-test's program (csp/selftest.hpp: instructions in dependent
+// chains, as the builder scheduled them, and counters that follow the pass
+// counter), lets it run, and reads its registers back through the probe
 // (docs/memory_map.md): does the chip do what the model says? The firmware
 // runs it on the board at boot and logs what it finds; the co-simulation
 // (#235) runs the same program on the simulated chip.
@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "csp/csp.hpp"
 
 // How the test reaches the chip.
 class SelfTestPort {
@@ -34,6 +36,7 @@ struct SelfTestResult {
     std::vector<std::string> lines; // what was checked, one line each
 };
 
+// Runs the self-test whose built image is `image` (csp::selftest::build).
 // Leaves the CSP held, with the self-test's program in its memory; the caller
 // loads the control program over it.
-SelfTestResult run_selftest(SelfTestPort &port);
+SelfTestResult run_selftest(SelfTestPort &port, const csp::Image &image);

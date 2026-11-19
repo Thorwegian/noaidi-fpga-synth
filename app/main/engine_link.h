@@ -19,9 +19,9 @@
 extern "C" {
 #endif
 
-// Hold the CSP, load its control program and its decode ROM, write the
-// static wiring (render::setup), release it, and start the 1 kHz tick task.
-// Call after spi_link_init().
+// Hold the CSP, wire the Noaidi's graph and build its program, load the
+// program and its decode ROM, write the static wiring (render::setup),
+// release it, and start the 1 kHz tick task. Call after spi_link_init().
 void engine_link_init(void);
 
 // Queue one write to a CSP register or sink word (0x000–0xBFF). The raw
@@ -32,12 +32,16 @@ bool engine_link_write(int address, int32_t raw);
 
 // Read every register the image knows back through the probe and compare:
 // returns how many differ, and fills up to `limit` of them (register,
-// what the image says, what the chip holds). Takes a few seconds; the
-// registers the CSP writes itself (a sounding voice's levels and stages)
-// differ legitimately, so verify a silent synth. -1 if the link is not
-// running.
+// what the image says, what the chip holds). `firmware_owned` gets how many
+// of them the program does not write: a word the CSP writes itself (a
+// sounding voice's levels and stages) differs legitimately, any other that
+// differs is a write that did not land. Takes a few seconds. -1 if the link
+// is not running.
 int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
-                       int limit);
+                       int limit, int *firmware_owned);
+
+// Whether the control program writes a register, by the graph's layout.
+bool engine_link_program_writes(int address);
 
 // Point a partial's ten sink pointers (indices into the sink area, 10 bits
 // each) at once: the FPGA takes the whole entry atomically.
@@ -72,7 +76,12 @@ void engine_link_data_stream(bool on, int source);
 }
 
 #include "render.hpp"
+#include "wiring.hpp"
 
 // All the writes of a list, in order.
 bool engine_link_write_all(const render::Writes &writes);
+
+// The Noaidi as the graph engine_link_init() wired and built: where every
+// write of render.hpp finds its word.
+const wiring::Synth &engine_link_synth();
 #endif

@@ -7,27 +7,23 @@
 // flags), the rules a program can see (the index registers, loops,
 // the write queue and swap, the hold, pass limits, sink pages), the
 // schedule the builder lays out (checked by the model's scoreboard), the
-// assembler's checks, and the programs in tools/csp/programs.
+// assembler's checks, and the boot self-test (app/main/csp/selftest.cpp).
 //
 //   make csp-test
 
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "../assembler.hpp"
 #include "../processor.hpp"
-#include "csp/control_program.hpp"
 #include "csp/envelope.hpp"
-#include "csp/generator.hpp"
 #include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
+#include "csp/selftest.hpp"
 
 namespace {
 
@@ -1041,7 +1037,7 @@ const char *envelope_program = R"(
         CMP     ZERO, [i+LEVEL], FULL       ;   …full scale is reached
         SEL     [i+STAGE], [i+U], [i+STAGE] ;   (SEL reads the CMP's flags)
         CMP     [i+U], [j+TARGET], [i+LEVEL]   ;   U ← target − level (the distance)
-        MAC.d   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate (as envelope.s does it)
+        MAC.d   [i+LEVEL], [i+U], [j+RATE]     ;   level ← level + U × rate
 done:
 )";
 
@@ -1209,424 +1205,65 @@ void test_lfo_rate() {
           "lfo_rate: the fastest LFO is below half a cycle an update");
 }
 
-// ---- the control program ----------------------------------------------------
+// ---- the boot self-test ------------------------------------------------------
 
-std::string read_program(const char *part) {
-    std::ifstream file(std::string("tools/csp/programs/") + part);
-    check(static_cast<bool>(file), std::string("reads ") + part);
-    std::stringstream text;
-    text << file.rdbuf();
-    return text.str() + "\n";
-}
-
-// tools/csp/programs: the map, the loop counts (the test's own), and the
-// parts, joined in order.
-std::string control_program(int saws, int squares, int triangles, int sines,
-                            int channels = 16, int voices = 32) {
-    std::string source = read_program("map.s");
-    source += "        .equ CHANNEL_COUNT, " + std::to_string(channels) + "\n";
-    source += "        .equ VOICE_COUNT, " + std::to_string(voices) + "\n";
-    source += "        .equ SAWS_A_HALF, " + std::to_string(saws) + "\n";
-    source += "        .equ SQUARES_A_HALF, " + std::to_string(squares) + "\n";
-    source += "        .equ TRIANGLES_A_HALF, " + std::to_string(triangles)
-              + "\n";
-    source += "        .equ SINES_A_HALF, " + std::to_string(sines) + "\n";
-    for (const char *part : {"lfo.s", "channel.s", "envelope.s", "voice.s"}) {
-        source += read_program(part);
-    }
-    return source;
-}
-
-// The self-test program: what the firmware checks at boot, on the model.
+// The self-test's program (app/main/csp/selftest.cpp): what the firmware
+// checks at boot, on the model.
 void test_selftest_program() {
-    Machine m(read_program("map.s") + read_program("selftest.s"));
-    m.start();
+    namespace st     = csp::selftest;
+    const auto built = std::make_unique<csp::ProgramBuilder::Built>();
+    st::build(*built);
+    check(built->ok && built->issues.empty(),
+          "the self-test builds without issues");
+    csp::Processor processor;
+    check(processor.load(built->image), "the self-test loads while held");
+    processor.release();
     // the pass counter's register holds 0 in the first pass after reset (nothing wrote it yet)
     // and the pass's number from the second on; the program sees that value
     int odd_passes = 0;
     for (int pass = 1; pass <= 4; ++pass) {
-        const csp::PassReport report = m.run();
+        const csp::PassReport report = processor.pass();
+        for (const std::string &error : report.errors) {
+            std::printf("  model: %s\n", error.c_str());
+        }
         check(report.errors.empty(), "the self-test runs without early reads");
         const int seen = pass == 1 ? 0 : pass;
         const int bit  = seen & 1;
         odd_passes += bit;
-        check_equal(m.get("RES_PASS_BIT"), bit,
-                    "RES_PASS_BIT follows the pass counter");
-        check_equal(m.get("RES_HALF"), bit * 8, "RES_HALF is the bit × 8");
-        check_equal(m.get("RES_CHAIN"), bit ? 0x808 : 0x4000,
-                    "RES_CHAIN reads the table through IDX");
-        check_equal(m.get("RES_ABS"), q(4.0), "ABS of −4.0");
-        check_equal(m.get("RES_MAC"), q(0.5), "MAC after it, 4.0 × 0.125");
-        check_equal(m.get("RES_ADD3"), q(-3.5), "ADD3 after that, 0.5 − 4.0");
-        check_equal(m.get("RES_SEL"), q(0.125), "SEL after a CMP");
-        check_equal(m.get("COUNT_TOTAL"), pass,
-                    "COUNT_TOTAL counts the passes");
-        check_equal(m.get("COUNT_PASSES"), pass,
-                    "COUNT_PASSES, which wraps, counts them too");
-        check_equal(m.get("PASS_VIA_LOGIC"), seen,
+        check_equal(processor.read(st::res_pass_bit), bit,
+                    "res_pass_bit follows the pass counter");
+        check_equal(processor.read(st::res_half), bit * 8,
+                    "res_half is the bit × 8");
+        check_equal(processor.read(st::res_chain), bit ? 0x808 : 0x4000,
+                    "res_chain reads the table through IDX");
+        check_equal(processor.read(st::res_abs), q(4.0), "ABS of −4.0");
+        check_equal(processor.read(st::res_mac), q(0.5),
+                    "MAC after it, 4.0 × 0.125");
+        check_equal(processor.read(st::res_add3), q(-3.5),
+                    "ADD3 after that, 0.5 − 4.0");
+        check_equal(processor.read(st::res_sel), q(0.125), "SEL after a CMP");
+        check_equal(processor.read(st::res_max), q(4.0), "MAX of 4.0 and −4.0");
+        check_equal(processor.read(st::res_min), q(-4.0),
+                    "MIN of 4.0 and −4.0");
+        check_equal(processor.read(st::count_total), pass,
+                    "count_total counts the passes");
+        check_equal(processor.read(st::count_passes), pass,
+                    "count_passes, which wraps, counts them too");
+        check_equal(processor.read(st::pass_via_logic), seen,
                     "the logic unit's copy of the pass counter");
-        check_equal(m.get("PASS_VIA_DSP"), seen, "the multiply-add's copy");
-        check_equal(m.get("PASS_VIA_LOGIC_A"), seen,
+        check_equal(processor.read(st::pass_via_dsp), seen,
+                    "the multiply-add's copy");
+        check_equal(processor.read(st::pass_via_logic_a), seen,
                     "the logic unit's second copy");
-        check_equal(m.get("PASS_VIA_LOGIC_B"), seen, "and its third");
+        check_equal(processor.read(st::pass_via_logic_b), seen,
+                    "and its third");
     }
-    check_equal(m.get("COUNT_ODD"), odd_passes,
-                "COUNT_ODD counts the odd passes");
-    check_equal(m.get("COUNT_HALF_ODD"), odd_passes, "COUNT_HALF_ODD agrees");
-    check_equal(m.get("COUNT_CHAIN_ODD"), odd_passes, "COUNT_CHAIN_ODD agrees");
-}
-
-// The whole program on 16 channels and 32 voices, every one different. The
-// envelopes' rates are 0, so their levels stay where they are set, and the
-// LFOs' outputs are set directly (with no LFO in the loops), so that every
-// sink has a value to check against the formulas in voice.s and channel.s.
-void test_control_program() {
-    Machine m(control_program(0, 0, 0, 0));
-    csp::Processor &cpu    = m.processor;
-    const int channels     = m.address("CHANNELS");
-    const int voices       = m.address("VOICES");
-    const int sinks        = m.address("SINKS");
-    const int lfos         = m.address("LFOS");
-    const int channel_size = m.address("CHANNEL_SIZE");
-    const int voice_size   = m.address("VOICE_SIZE");
-    const int lfo_size     = m.address("LFO_SIZE");
-    const int lfo_count    = 2 * m.address("LFOS_A_HALF");
-    auto at                = [&](int base, const char *field) {
-        return base + m.address(field);
-    };
-
-    // the LFOs, with outputs between -1 and 1
-    std::vector<double> lfo_out(static_cast<size_t>(lfo_count));
-    for (int k = 0; k < lfo_count; ++k) {
-        lfo_out[static_cast<size_t>(k)] = std::sin(0.7 * k);
-        cpu.write(at(lfos + k * lfo_size, "OUT"),
-                  q(lfo_out[static_cast<size_t>(k)]));
-    }
-    for (int half = 0; half < 2; ++half) {
-        cpu.write(at(m.address("LFO_SETS") + half * m.address("SET_SIZE"),
-                     "BASE"),
-                  lfos + half * m.address("LFOS_A_HALF") * lfo_size);
-    }
-    struct Channel {
-        double bend, p1, c1, p2, c2, base, track, amount;
-        int lfo1, lfo2;
-        double d1, d2, r1, r2, duty0, duty1, resonance; // the pulse width and Q
-    };
-    const int channel_sinks = m.address("CHANNEL_SINKS");
-    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
-    std::vector<Channel> channel(16);
-    for (int c = 0; c < 16; ++c) {
-        channel[c]     = {0.02 * (c - 8),      0.1 + 0.01 * c,
-                          -0.2 + 0.03 * c,     0.05 * (c % 4),
-                          0.4 - 0.02 * c,      0.5 + 0.1 * (c % 5),
-                          0.25 * (c % 5),      0.3 + 0.05 * c,
-                          (3 * c) % lfo_count, (7 * c + 5) % lfo_count,
-                          0.03 * (c % 5),      -0.02 * (c % 3),
-                          0.1 * (c % 4),       0.05 * (c % 6),
-                          0.1 + 0.02 * c,      -0.3 + 0.03 * c,
-                          0.5 + 0.1 * (c % 7)};
-        const int base = channels + c * channel_size;
-        cpu.write(at(base, "LFO1_DUTY"), q(channel[c].d1));
-        cpu.write(at(base, "LFO2_DUTY"), q(channel[c].d2));
-        cpu.write(at(base, "LFO1_RESONANCE"), q(channel[c].r1));
-        cpu.write(at(base, "LFO2_RESONANCE"), q(channel[c].r2));
-        cpu.write(at(base, "DUTY_BASE_0"), q(channel[c].duty0));
-        cpu.write(at(base, "DUTY_BASE_1"), q(channel[c].duty1));
-        cpu.write(at(base, "RESONANCE_BASE"), q(channel[c].resonance));
-        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
-        cpu.write(at(base, "BEND"), q(channel[c].bend));
-        cpu.write(at(base, "LFO1_PITCH"), q(channel[c].p1));
-        cpu.write(at(base, "LFO1_CUTOFF"), q(channel[c].c1));
-        cpu.write(at(base, "LFO2_PITCH"), q(channel[c].p2));
-        cpu.write(at(base, "LFO2_CUTOFF"), q(channel[c].c2));
-        cpu.write(at(base, "CUTOFF_BASE"), q(channel[c].base));
-        cpu.write(at(base, "KEY_TRACK"), q(channel[c].track));
-        cpu.write(at(base, "MOD_AMOUNT"), q(channel[c].amount));
-        cpu.write(at(base, "LFO1"), lfos + channel[c].lfo1 * lfo_size);
-        cpu.write(at(base, "LFO2"), lfos + channel[c].lfo2 * lfo_size);
-    }
-    struct Voice {
-        double note, level_a, level_m, velocity;
-        int channel;
-    };
-    std::vector<Voice> voice(32);
-    for (int v = 0; v < 32; ++v) {
-        voice[v]       = {-1.0 + 0.1 * v, 0.1 + 0.02 * v, 0.9 - 0.02 * v,
-                          0.3 + 0.02 * v, (5 * v + 1) % 16};
-        const int base = voices + v * voice_size;
-        cpu.write(at(base, "NOTE"), q(voice[v].note));
-        cpu.write_wide(at(base, "LEVEL_A"), q_wide(voice[v].level_a));
-        cpu.write_wide(at(base, "LEVEL_M"), q_wide(voice[v].level_m));
-        cpu.write(at(base, "VELOCITY"), q(voice[v].velocity));
-        cpu.write(at(base, "VELOCITY_M"), q(1.0));
-        cpu.write(at(base, "STAGE_A"), 4); // decay row: rate 0
-        cpu.write(at(base, "STAGE_M"), 20);
-        cpu.write(at(base, "CHANNEL"),
-                  channels + voice[v].channel * channel_size);
-        cpu.write(at(base, "SINK"), sinks + v * 8);
-    }
-    m.start();
-    // two passes: the second sees the channel values the first computed
-    m.run();
-    if (std::getenv("CSP_TRACE")) {
-        cpu.trace(true);
-    }
-    const csp::PassReport report = m.run();
-    check(report.errors.empty(), "the control program runs without errors");
-    check(report.stale_sinks.empty(), "every sink is written every pass");
-    check(report.cycles <= csp::pass_cycle_limit,
-          "the control program fits a pass: " + std::to_string(report.cycles));
-    check_equal(report.cycles, m.program.cycles,
-                "the model counts the cycles the assembler scheduled");
-    std::printf(
-            "control program (no LFOs in the loops): %d cycles a pass, %d rows\n",
-            report.cycles, m.program.image.length);
-
-    // the formulas; the program's sinks are those published at the pass's end
-    double worst = 0;
-    for (int v = 0; v < 32; ++v) {
-        const Voice &a   = voice[v];
-        const Channel &c = channel[a.channel];
-        const double ch_pitch =
-                c.bend + lfo_out[c.lfo1] * c.p1 + lfo_out[c.lfo2] * c.p2;
-        // the cutoff key-tracks the bend, not the pitch LFO: an LFO on pitch
-        // must not also sweep the filter, or the two routings are not independent
-        const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
-                                 + lfo_out[c.lfo2] * c.c2 + c.track * c.bend;
-        // the gain sink is the amp envelope's level × velocity: the voice's
-        // linear gain (#176)
-        const double want[3]        = {a.note + ch_pitch,
-                                       4 * a.level_m * c.amount + a.note * c.track
-                                               + ch_cutoff,
-                                       a.level_a * a.velocity};
-        const char *const fields[3] = {"SINK_PITCH", "SINK_CUTOFF",
-                                       "SINK_GAIN"};
-        for (int k = 0; k < 3; ++k) {
-            const int offset =
-                    (sinks - csp::sink_base) + v * 8 + m.address(fields[k]);
-            const double got = cpu.sink(offset) / 16384.0;
-            worst            = std::max(worst, std::fabs(got - want[k]));
-        }
-    }
-    // a few raw units of the words' rounding, through up to seven operations
-    check(worst <= 24.0 / 16384.0, // the mod envelope's term is multiplied by 4
-          "the voices' sinks match their formulas: largest difference "
-                  + std::to_string(worst));
-
-    // the channels' own sinks: the pulse widths and the resonance
-    double worst_channel = 0;
-    for (int c = 0; c < 16; ++c) {
-        const Channel &a     = channel[c];
-        const double duty    = lfo_out[a.lfo1] * a.d1 + lfo_out[a.lfo2] * a.d2;
-        const double reso    = lfo_out[a.lfo1] * a.r1 + lfo_out[a.lfo2] * a.r2;
-        const double want[3] = {a.duty0 + duty, a.duty1 + duty,
-                                a.resonance + reso};
-        const char *const fields[3] = {"DUTY_0", "DUTY_1", "RESONANCE"};
-        for (int k = 0; k < 3; ++k) {
-            const int offset = (channel_sinks - csp::sink_base) + c * sink_size
-                               + m.address(fields[k]);
-            worst_channel =
-                    std::max(worst_channel,
-                             std::fabs(cpu.sink(offset) / 16384.0 - want[k]));
-        }
-    }
-    check(worst_channel <= 6.0 / 16384.0,
-          "the channels' duty and resonance sinks match their formulas: largest difference "
-                  + std::to_string(worst_channel));
-}
-
-// The LFOs in their worst case, all sines, as many a half as fit a pass
-// beside 16 channels and 32 voices (the budget #237's generator works to;
-// the full half is reported): both halves every pass (#268).
-constexpr int sines_that_fit = 12;
-void test_control_program_lfos() {
-    {
-        // the full half of sines, as a finding: how far over or under the pass it is
-        const csp::Program full = csp::assemble(control_program(0, 0, 0, 12));
-        std::string verdict     = full.ok ? "fits a pass at "
-                                                + std::to_string(full.cycles)
-                                                + " cycles"
-                                          : "does not fit a pass:";
-        for (const csp::Diagnostic &d : full.diagnostics) {
-            if (d.error) {
-                verdict += " " + d.message;
-            }
-        }
-        std::printf(
-                "control program (12 sine LFOs a pass, 16 channels, 32 voices): %s\n",
-                verdict.c_str());
-    }
-    Machine m(control_program(0, 0, 0, sines_that_fit));
-    csp::Processor &cpu = m.processor;
-    const int lfos      = m.address("LFOS");
-    const int lfo_size  = m.address("LFO_SIZE");
-    const int a_half =
-            sines_that_fit; // records a half in the loops; the pool holds LFOS_A_HALF
-    const int set_size = m.address("SET_SIZE");
-    const int sets     = m.address("LFO_SETS");
-    auto at            = [&](int base, const char *field) {
-        return base + m.address(field);
-    };
-    for (int half = 0; half < 2; ++half) {
-        cpu.write(at(sets + half * set_size, "BASE"),
-                  lfos + half * m.address("LFOS_A_HALF") * lfo_size);
-    }
-    // the pointers, so that no two voices or channels share a register
-    const int channels      = m.address("CHANNELS");
-    const int voices        = m.address("VOICES");
-    const int sinks         = m.address("SINKS");
-    const int channel_size  = m.address("CHANNEL_SIZE");
-    const int voice_size    = m.address("VOICE_SIZE");
-    const int channel_sinks = m.address("CHANNEL_SINKS");
-    const int sink_size     = m.address("CHANNEL_SINK_SIZE");
-    for (int c = 0; c < 16; ++c) {
-        const int base = channels + c * channel_size;
-        cpu.write(at(base, "LFO1"),
-                  lfos
-                          + ((3 * c) % (2 * a_half))
-                                    * lfo_size); // any record: only OUT is read
-        cpu.write(at(base, "LFO2"),
-                  lfos + ((7 * c + 5) % (2 * a_half)) * lfo_size);
-        cpu.write(at(base, "SINK_BLOCK"), channel_sinks + c * sink_size);
-    }
-    for (int v = 0; v < 32; ++v) {
-        const int base = voices + v * voice_size;
-        cpu.write(at(base, "CHANNEL"),
-                  channels + ((5 * v + 1) % 16) * channel_size);
-        cpu.write(at(base, "SINK"), sinks + v * 8);
-        cpu.write(at(base, "STAGE_A"), 4);
-        cpu.write(at(base, "STAGE_M"), 20);
-    }
-    const int pool_half = m.address("LFOS_A_HALF");
-    auto record_of      = [&](int k) {
-        return lfos + ((k / a_half) * pool_half + k % a_half) * lfo_size;
-    };
-    const double step = 0.01; // of a cycle an update
-    for (int k = 0; k < 2 * a_half; ++k) {
-        const int record = record_of(k);
-        cpu.write_wide(at(record, "PHASE_STEP"), q_wide(step * 16.0));
-        cpu.write(at(record, "DEPTH"), q(1.0));
-    }
-    m.start();
-    int worst = 0;
-    for (int pass = 1; pass <= 4; ++pass) {
-        const csp::PassReport report = m.run();
-        worst                        = std::max(worst, report.cycles);
-        check(report.errors.empty(),
-              "the control program with LFOs runs without errors");
-    }
-    std::printf(
-            "control program (%d sine LFOs a pass): %d cycles a pass, %d rows\n",
-            a_half, worst, m.program.image.length);
-    check(worst <= csp::pass_cycle_limit,
-          "the control program with the sines fits a pass: "
-                  + std::to_string(worst));
-    check_equal(worst, m.program.cycles,
-                "the model counts the cycles the assembler scheduled");
-    // both halves update every pass (#268: the pass is 24 kHz, so the halves
-    // no longer take turns): four passes, four steps on every record
-    for (int k = 0; k < 2 * a_half; ++k) {
-        const int64_t phase = cpu.read_wide(at(record_of(k), "PHASE"));
-        check_equal(phase, 4 * q_wide(step * 16.0),
-                    "LFO " + std::to_string(k) + " updated every pass");
-    }
-}
-
-// ---- the firmware's generator -------------------------------------------------
-
-// The generator (app/main/csp/generator.cpp) emits the control program from
-// a graph; the assembler assembles it from tools/csp/programs. For the same
-// counts the two are one image: the rows, the decode ROM and the pass's
-// cycles.
-
-// The index of the first row two images differ at, or -1.
-template <typename Rows>
-int first_difference(const csp::Image &image, const Rows &rows) {
-    for (size_t row = 0; row < rows.size(); ++row) {
-        if (!(image.rows[row] == rows[row])) {
-            return static_cast<int>(row);
-        }
-    }
-    return -1;
-}
-
-// The graph of the program the firmware loads gives control_program.hpp,
-// which this target holds current with tools/csp/programs.
-void test_generator_gives_the_firmware_image() {
-    namespace cp = csp::control;
-    csp::ProgramBuilder::Built built;
-    csp::generate(csp::control_graph(), built);
-    check(built.ok, "the generator builds the firmware's graph");
-    check_equal(built.image.length, static_cast<int64_t>(cp::rows.size()),
-                "the generator's rows are as many as control_program.hpp's");
-    check_equal(
-            first_difference(built.image, cp::rows), -1,
-            "the first row the generator's image and control_program.hpp differ at");
-    check_equal(
-            built.image.rom_used, static_cast<int64_t>(cp::rom.size()),
-            "the generator's decode rows are as many as control_program.hpp's");
-    bool rom_same = true;
-    for (size_t row = 0; row < cp::rom.size(); ++row) {
-        rom_same = rom_same && built.image.rom[row] == cp::rom[row];
-    }
-    check(rom_same, "the generator's decode ROM is control_program.hpp's");
-    check_equal(built.cycles, cp::cycles,
-                "the generator's pass is as long as control_program.hpp's");
-    std::printf(
-            "generator (the firmware's graph): %d rows, %d decode rows, %d cycles a pass\n",
-            built.image.length, built.image.rom_used, built.cycles);
-}
-
-// Other graphs against the assembler with the same counts: no LFOs, every
-// shape, more of a shape than a round holds, loops shorter than the result
-// latency, and a program that does not fit a pass, which both refuse. The
-// generator builds into one result throughout, as the firmware does: a
-// build leaves nothing of the one before.
-void test_generator_gives_the_assembled_image() {
-    struct Counts {
-        int saws, squares, triangles, sines, channels, voices;
-    };
-    csp::ProgramBuilder::Built built;
-    for (const Counts &counts : {Counts{0, 0, 0, 0, 16, 32},
-                                 {1, 1, 1, 1, 16, 32},
-                                 {3, 3, 3, 3, 16, 32},
-                                 {1, 1, 1, 1, 16, 200},
-                                 {6, 6, 0, 0, 16, 32},
-                                 {0, 0, 0, 12, 16, 32},
-                                 {2, 0, 1, 5, 1, 32},
-                                 {1, 1, 1, 1, 16, 5},
-                                 {0, 2, 17, 0, 3, 19}}) {
-        const std::string what =
-                "graph of " + std::to_string(counts.saws) + "/"
-                + std::to_string(counts.squares) + "/"
-                + std::to_string(counts.triangles) + "/"
-                + std::to_string(counts.sines) + " LFOs a half, "
-                + std::to_string(counts.channels) + " channels, "
-                + std::to_string(counts.voices) + " voices: ";
-        const csp::Program assembled = csp::assemble(
-                control_program(counts.saws, counts.squares, counts.triangles,
-                                counts.sines, counts.channels, counts.voices));
-        csp::Graph graph;
-        graph.lfos_a_half   = {counts.saws, counts.squares, counts.triangles,
-                               counts.sines};
-        graph.channel_count = counts.channels;
-        graph.voice_count   = counts.voices;
-        csp::generate(graph, built);
-        check_equal(built.ok, assembled.ok,
-                    what + "the generator builds what the assembler does");
-        if (!built.ok || !assembled.ok) {
-            continue;
-        }
-        check_equal(built.image.length, assembled.image.length,
-                    what + "as many rows");
-        check_equal(first_difference(built.image, assembled.image.rows), -1,
-                    what + "the first row the two images differ at");
-        check_equal(built.image.rom_used, assembled.image.rom_used,
-                    what + "as many decode rows");
-        check(built.image.rom == assembled.image.rom,
-              what + "the same decode ROM");
-        check_equal(built.cycles, assembled.cycles, what + "the same cycles");
-    }
+    check_equal(processor.read(st::count_odd), odd_passes,
+                "count_odd counts the odd passes");
+    check_equal(processor.read(st::count_half_odd), odd_passes,
+                "count_half_odd agrees");
+    check_equal(processor.read(st::count_chain_odd), odd_passes,
+                "count_chain_odd agrees");
 }
 
 } // namespace
@@ -1657,10 +1294,6 @@ int main() {
     test_envelope_rates();
     test_lfo_rate();
     test_selftest_program();
-    test_control_program();
-    test_control_program_lfos();
-    test_generator_gives_the_firmware_image();
-    test_generator_gives_the_assembled_image();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;

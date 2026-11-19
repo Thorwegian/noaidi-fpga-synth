@@ -21,9 +21,9 @@ a MIDI-to-CV converter). Consequences:
   writes** to the CSP (`app/main/render.cpp`).
 - **Envelopes, LFOs, pitch and cutoff arithmetic run in the FPGA**, as the
   control program the CSP executes once per pass (four samples, 24 kHz — #268):
-  the firmware generates it at boot (`app/main/csp/generator.cpp`) and the
-  engine link loads it; `tools/csp/programs` is the same program as
-  assembly. The instruction set is
+  the firmware generates it at boot from the DSP graph
+  (`app/main/csp/dsp_graph.hpp`, wired in `app/main/wiring.cpp`) and the
+  engine link loads it. The instruction set is
   [csp2_isa.md](csp2_isa.md), the machine
   [csp2_architecture.md](csp2_architecture.md).
 - A partial is **pointers only**: ten pointers into the **sink area**, which
@@ -163,17 +163,16 @@ in its 512 × 36 configuration:
 
 | `a` | What |
 |---|---|
-| `0x001–0x03F` | free: the first revision's constant pool; the second revision's constants are immediates in the word |
+| `0x001–0x03F` | free: constants are immediates in the row, and the graph lays nothing here |
 | `0x040–0x05F` | inputs (read only; a write is dropped) |
-| `0x060–0x07F` | globals: the LFOs' sets, the channel count |
-| `0x080–0x1FF` | the LFO pool |
-| `0x200–0x5FF` | channels: 16 × 64 registers |
-| `0x600–0x7FF` | voices: 32 × 16 registers |
+| `0x060–0x7FF` | the graph's: a source the firmware sets, an operator's output, a record |
 | `0x800–0x8FF` | voice sinks (the CSP's): 32 × 8 |
 | `0x900–0xBFF` | channel sinks (the firmware's, with the exceptions below): 16 × 48 |
 
-The layout of every block is `tools/csp/programs/map.s`, the one definition;
-`csp header` writes it into `app/main/csp/control_program.hpp`. Sink words the
+Where a word of the register file lives is the graph's to say
+(`app/main/csp/dsp_graph.hpp`): a direct operand reaches the first 1024
+words, and a loop's copies lie in records of one layout from the top of DMEM
+down. The sink area's layout is `app/main/wiring.hpp`'s. Sink words the
 firmware writes land on the sink area's shadow page, like the CSP's own, and
 are taken over at the page flip; a partial never reads a page being written
 (`csp2_architecture.md` rule 2). The CSP's own sink words are written every
@@ -318,8 +317,8 @@ ports.
 - Traffic: a note-on is a handful of words; a re-render of the preset is the
   words that changed; envelopes, LFOs, pitch and cutoff cost no SPI traffic.
   The boot is the program (two dwords a row) and the decode ROM (one a row),
-  the wiring (~400 dwords; constants are immediates in the word), and 256
-  pointer entries.
+  the wiring (a word for each source, pointer and stage the firmware sets),
+  and 256 pointer entries.
 
 ## Known limits vs a full polysynth
 

@@ -32,7 +32,7 @@
 //      extremes within 1 % of the tone's
 //   8. the data stream on the 48 kHz output: the frames slot climbs as
 //      the transmitter counts, and the output is no longer silence
-//   9. the boot self-test (tools/csp/programs/selftest.s, assembled by the
+//   9. the boot self-test (app/main/csp/selftest.cpp, built by the
 //      host tool into obj_dir/tb_top/selftest.*.hex) loaded over the bus
 //      as the firmware loads it, the CSP released: passes count, and the
 //      probe reads the results the model computes
@@ -498,7 +498,7 @@ module tb_top;
             $display("FAIL: %0d passes counted over three pass times", passes_after - passes_before);
             errors = errors + 1;
         end else $display("pass: %0d passes counted over three pass times (and the reads' own time)", passes_after - passes_before);
-        // the self-test's results (tools/csp/programs/selftest.s), as the model computes them:
+        // the self-test's results (app/main/csp/selftest.cpp), as the model computes them:
         // |-4.0| = 4.0, 4.0 x 0.125 = 0.5, 0.5 - 4.0 = -3.5, in Q4.14; the probe reads the
         // pair at a pass's end and the status slot has it two SPI clocks later
         write_dwords[0] = 36'h068;                         // RES_ABS, the even of its pair

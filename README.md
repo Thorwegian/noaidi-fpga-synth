@@ -38,7 +38,9 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   that runs a fixed program every fourth sample, a pass of 3072 cycles at
   24 kHz ([docs/csp2_architecture.md](docs/csp2_architecture.md) section 5),
   and computes envelopes, LFOs, pitch, cutoff and gain from the registers
-  the firmware writes. The program is `tools/csp/programs`.
+  the firmware writes. The program is a DSP graph the firmware wires at
+  boot (`app/main/wiring.cpp`); the graph lays it out and builds the rows
+  (`app/main/csp/dsp_graph.hpp`).
   The instruction set is [docs/csp2_isa.md](docs/csp2_isa.md), the
   machine [docs/csp2_architecture.md](docs/csp2_architecture.md).
 - **Firmware** (ESP-IDF, `app/`): MIDI in on two DIN inputs and BLE, an event bus,
@@ -145,7 +147,7 @@ make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
 make fw-console  # attach the console with screen (see Console above)
 make fw-test     # host tests of preset files and banks (about a minute)
-make csp-test    # host tests of the CSP reference model, the assembler (tools/csp), the firmware's code generator and the DSP graph
+make csp-test    # host tests of the CSP reference model, the assembler (tools/csp), the DSP graph and the Noaidi's wiring by its formulas
 make format      # reformat our C and C++ sources (.clang-format)
 make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
 ```

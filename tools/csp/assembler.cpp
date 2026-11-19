@@ -4,7 +4,7 @@
 // License: CERN-OHL-S v2
 //
 // A text front end to csp::ProgramBuilder (app/main/csp), which the
-// firmware's generator uses directly: this file parses and names, the
+// firmware's graph uses directly: this file parses and names, the
 // builder checks, schedules and encodes. One pass over the source; names
 // must be defined before use, except labels, which a LOOP may
 // name before they appear.
