@@ -18,8 +18,10 @@
 #   make fw-test    host test: every preset-file value loads back exactly,
 #                   banks.toml reads and writes back, the factory presets
 #                   and banks read back exactly and are in the writer's own
-#                   form (comment lines aside), and the writes a
-#                   preset renders to the CSP are the arithmetic they should be
+#                   form (comment lines aside), the writes a preset renders
+#                   to the CSP are the arithmetic they should be, and the
+#                   sound engine (app/main/sound_engine.cpp) sends what its
+#                   parameters, commits, notes and voices should
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim|image program.s; `image`
 #                   writes the rows and the ROM as hex for a bench, which
@@ -81,6 +83,8 @@ FW_TEST_C   = app/lib/tomlc17/src/tomlc17.c
 FW_TEST_CXX = app/test/preset_units_test.cpp app/main/preset.cpp app/main/preset_units.cpp app/main/preset_file.cpp app/main/safe_file.cpp
 RENDER_TEST = $(HOST_DIR)/render_test
 RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/preset.cpp $(CSP_SHARED) $(CSP_GRAPH)
+SOUND_ENGINE_TEST = $(HOST_DIR)/sound_engine_test
+SOUND_ENGINE_TEST_CXX = app/test/sound_engine_test.cpp app/main/sound_engine.cpp app/main/preset.cpp $(CSP_SHARED) app/main/csp/dsp_graph.cpp
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 PARSER_TEST = $(HOST_DIR)/midi_parser_test
@@ -163,6 +167,8 @@ fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	$(BANKS_TEST) app/storage/banks.toml
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(RENDER_TEST) $(RENDER_TEST_CXX)
 	$(RENDER_TEST)
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(SOUND_ENGINE_TEST) $(SOUND_ENGINE_TEST_CXX)
+	$(SOUND_ENGINE_TEST)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(CC_MAP_TEST) $(CC_MAP_TEST_CXX) \
 	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(CC_MAP_TEST) $(shell find app/storage/Presets -name '*.toml')
