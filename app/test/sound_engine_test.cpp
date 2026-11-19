@@ -196,7 +196,8 @@ void test_set_up() {
                       && played.dword(voice.level[Wiring::envelope_mod]) == 0,
               "every voice starts at zero");
     }
-    check(link.state.at(Wiring::zero_sink) == 0,
+    check(link.state.count(Wiring::zero_sink) == 1
+                  && link.state.at(Wiring::zero_sink) == 0,
           "the zero sink is written zero");
     for (const Write &write : link.swaps.front()) {
         check(write.address > 0 && write.address < 0xC00,
@@ -859,12 +860,14 @@ void test_voices() {
     {
         Played played;
         SoundEngine &engine = played.engine;
-        engine.note_on(0, 60, 1.0f);
-        engine.note_on(0, 64, 1.0f);
         engine.note_on(2, 60, 1.0f);
         const int other = played.struck_last();
+        engine.note_on(0, 60, 1.0f);
+        const int own = played.struck_last();
+        engine.note_on(0, 64, 1.0f);
         engine.note_off(0, 60);
-        check(engine.voices()[other].state == Voice::State::held,
+        check(engine.voices()[other].state == Voice::State::held
+                      && engine.voices()[own].state == Voice::State::releasing,
               "a note off is its channel's");
         const size_t swaps = played.link.swaps.size();
         engine.note_on(0, 67, 1.0f);

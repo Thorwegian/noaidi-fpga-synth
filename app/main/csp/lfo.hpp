@@ -3,7 +3,7 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The LFO (wiring.cpp) adds a dword step to a dword phase once a pass
+// The LFO (sound_engine.cpp) adds a dword step to a dword phase once a pass
 // (24 kHz, #268); a cycle is the phase's whole 36-bit range.
 
 #pragma once

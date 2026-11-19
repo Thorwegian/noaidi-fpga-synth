@@ -18,11 +18,11 @@ a MIDI-to-CV converter). Consequences:
 
 - ESP32 does voice allocation, unison grouping, CC→parameter mapping and
   velocity scaling, and expresses the results as **register and sink-word
-  writes** to the CSP (`app/main/render.cpp`).
+  writes** to the CSP (`app/main/sound_engine.cpp`).
 - **Envelopes, LFOs, pitch and cutoff arithmetic run in the FPGA**, as the
   control program the CSP executes once per pass (four samples, 24 kHz — #268):
   the firmware generates it at boot from the DSP graph
-  (`app/main/csp/dsp_graph.hpp`, wired in `app/main/wiring.cpp`) and the
+  (`app/main/csp/dsp_graph.hpp`, wired in `app/main/sound_engine.cpp`) and the
   engine link loads it. The instruction set is
   [csp2_isa.md](csp2_isa.md), the machine
   [csp2_architecture.md](csp2_architecture.md).
@@ -170,7 +170,7 @@ in its 512 × 36 configuration:
 Where a word of the register file lives is the graph's to say
 (`app/main/csp/dsp_graph.hpp`): a direct operand reaches the first 1024
 words, and a loop's copies lie in records of one layout from the top of DMEM
-down. The sink area's layout is `app/main/wiring.hpp`'s. Sink words the
+down. The sink area's layout is `app/main/sound_engine.hpp`'s. Sink words the
 firmware writes land on the sink area's shadow page, like the CSP's own, and
 are taken over at the page flip; a partial never reads a page being written
 (`csp2_architecture.md` rule 2). The CSP's own sink words are written every

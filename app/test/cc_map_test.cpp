@@ -213,11 +213,10 @@ void test_round_trip() {
             continue; // the RPN is applied by the firmware, not the map
         }
         for (int value = 0; value < 128; ++value) {
-            preset_t preset         = init;
-            cc_map::Knobs knobs     = cc_map::knobs_of(preset);
-            const cc_map::Part part = cc_map::apply(
-                    preset, knobs, which.cc, static_cast<uint8_t>(value));
-            check(part != cc_map::Part::none,
+            preset_t preset     = init;
+            cc_map::Knobs knobs = cc_map::knobs_of(preset);
+            check(cc_map::apply(preset, knobs, which.cc,
+                                static_cast<uint8_t>(value)),
                   "CC " + std::to_string(which.cc) + " is a preset CC");
             const preset_t back    = preset_of(dump_of(preset, knobs));
             const std::string diff = differences(preset, back);

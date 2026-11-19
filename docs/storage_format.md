@@ -128,8 +128,8 @@ describes format 1.
 Files hold musical units, and so does the firmware: the preset in memory
 (`preset_t`, `app/main/preset.h`) has the file's tables and keys, and
 every number in it is a `float` in the key's unit. Nothing is converted
-between a file and the preset in memory, and `app/main/render.cpp` makes
-the CSP's words straight from the units.
+between a file and the preset in memory, and the sound engine
+(`app/main/sound_engine.cpp`) makes the CSP's words straight from the units.
 
 - **Load:** a number becomes the nearest `float`.
   - A value outside a key's range is clamped to the range. The ranges
@@ -253,7 +253,7 @@ between, where the filter is barely damped, are left out.
 | `destination` | name: `"cutoff"` | |
 | `depth` | semitones of cutoff | −129 … +129 |
 
-**Envelope times.** The CSP's envelope (`app/main/wiring.cpp`) is a one-pole RC
+**Envelope times.** The CSP's envelope (`app/main/sound_engine.cpp`) is a one-pole RC
 with a wide level: once a pass, at 24 kHz, a segment moves its level
 toward the target by the fraction `RATE` of the distance left. The step
 is `D × RATE` in 2⁻³² — there

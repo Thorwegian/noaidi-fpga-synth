@@ -6,7 +6,7 @@
 // Three things. Each operator and each kind of connection in a small graph,
 // its image run on the reference model beside the graph's interpreter
 // (graph_evaluator.hpp), every value checked as it was worked out by hand and
-// every sink equal in both. And the Noaidi's wiring (app/main/wiring.cpp: 8
+// every sink equal in both. And the Noaidi's wiring (app/main/sound_engine.cpp: 8
 // LFOs, 16 channels, 32 voices, the copies made by loops), its image run on
 // the reference model beside the interpreter on the same performance
 // (tools/csp/performance.hpp) of notes and controller values, wires moved
@@ -31,7 +31,7 @@
 #include "../processor.hpp"
 #include "csp/dsp_graph.hpp"
 #include "graph_evaluator.hpp"
-#include "wiring.hpp"
+#include "sound_engine.hpp"
 
 namespace {
 
@@ -886,15 +886,15 @@ void test_the_interpreter() {
 
 // ---- the Noaidi's wiring -------------------------------------------------------------
 //
-// The synth the firmware wires (app/main/wiring.cpp) and the performance it
+// The synth the sound engine wires (app/main/sound_engine.cpp) and the performance it
 // plays (tools/csp/performance.hpp): the settings on a processor, which runs
 // the graph's program, and on the interpreter, which reads the graph itself.
 // Every sink the graph has is checked, pass for pass.
 
-using wiring::channel_count;
-using wiring::voice_count;
+using Wiring = SoundEngine::Wiring;
 
-using Synth = wiring::Synth;
+constexpr int channel_count = SoundEngine::channel_count;
+constexpr int voice_count   = SoundEngine::voice_count;
 
 // A setting on the interpreter: the number, the record or the inner record
 // the firmware's write carries.
@@ -916,9 +916,9 @@ void set(csp::GraphEvaluator &evaluator, const performance::Setting &setting) {
 }
 
 void test_todays_synth() {
-    auto synth   = std::make_unique<Synth>();
-    Graph &graph = synth->graph;
-    wiring::wire(*synth);
+    performance::Unplayed link;
+    auto synth   = std::make_unique<SoundEngine>(link);
+    Graph &graph = synth->graph();
     csp::ProgramBuilder::Built graphed;
     const auto began = std::chrono::steady_clock::now();
     const bool built = build(graph, graphed, "today's synth as a graph");
@@ -946,13 +946,13 @@ void test_todays_synth() {
     check(graphed.cycles <= csp::pass_cycle_limit,
           "the graph's program fits the pass");
 
-    check(graph.writer(graph.address(synth->voices[5].note))
+    check(graph.writer(graph.address(synth->wiring().voices[5].note))
                   == Graph::Writer::firmware,
           "a voice's note is the firmware's word");
-    check(graph.writer(graph.address(synth->voices[5].stage[1]))
+    check(graph.writer(graph.address(synth->wiring().voices[5].stage[1]))
                   == Graph::Writer::program,
           "a voice's stage is a word the program writes");
-    check(graph.address(synth->channels[3].record) % 32 == 0,
+    check(graph.address(synth->wiring().channels[3].record) % 32 == 0,
           "a channel's record is aligned to its size");
 
     // the copies, which the wiring above never named: the voices and the
@@ -1064,35 +1064,34 @@ void test_todays_synth() {
     };
     bool laid_out = true;
     for (int v = 0; v < voice_count; ++v) {
-        for (const int k :
-             {wiring::voice_sink::pitch, wiring::voice_sink::cutoff,
-              wiring::voice_sink::gain}) {
+        for (const int k : {Wiring::VoiceSink::pitch, Wiring::VoiceSink::cutoff,
+                            Wiring::VoiceSink::gain}) {
             laid_out = laid_out
-                       && has(wiring::voice_sink::base
-                              + v * wiring::voice_sink::block + k);
+                       && has(Wiring::VoiceSink::base
+                              + v * Wiring::VoiceSink::block + k);
         }
     }
     for (int c = 0; c < channel_count; ++c) {
         for (const int k :
-             {wiring::channel_sink::duty_0, wiring::channel_sink::duty_1,
-              wiring::channel_sink::resonance}) {
+             {Wiring::ChannelSink::duty_0, Wiring::ChannelSink::duty_1,
+              Wiring::ChannelSink::resonance}) {
             laid_out = laid_out
-                       && has(wiring::channel_sink::base
-                              + c * wiring::channel_sink::block + k);
+                       && has(Wiring::ChannelSink::base
+                              + c * Wiring::ChannelSink::block + k);
         }
     }
     check_equal(static_cast<int64_t>(sinks.size()),
                 3LL * (voice_count + channel_count),
                 "sinks: three for each voice and three for each channel");
-    check(laid_out, "every sink is where wiring.hpp lays it out");
+    check(laid_out, "every sink is where the engine lays it out");
 
     // that the comparison is of live values: sinks move, and differ by voice
-    const int32_t gain_1 = evaluator->sink(wiring::voice_sink::base
-                                           + 1 * wiring::voice_sink::block
-                                           + wiring::voice_sink::gain);
-    const int32_t gain_2 = evaluator->sink(wiring::voice_sink::base
-                                           + 2 * wiring::voice_sink::block
-                                           + wiring::voice_sink::gain);
+    const int32_t gain_1 = evaluator->sink(Wiring::VoiceSink::base
+                                           + 1 * Wiring::VoiceSink::block
+                                           + Wiring::VoiceSink::gain);
+    const int32_t gain_2 = evaluator->sink(Wiring::VoiceSink::base
+                                           + 2 * Wiring::VoiceSink::block
+                                           + Wiring::VoiceSink::gain);
     check(gain_1 != 0 && gain_2 != 0 && gain_1 != gain_2,
           "the voices' gains are alive at the end");
 }
@@ -1103,7 +1102,8 @@ void test_todays_synth() {
 // firmware sets it. A write is in the registers from the pass after the one
 // it was sent before: the model applies the queue at a pass's end.
 struct Played {
-    std::unique_ptr<wiring::Synth> synth = std::make_unique<wiring::Synth>();
+    performance::Unplayed link;
+    std::unique_ptr<SoundEngine> synth = std::make_unique<SoundEngine>(link);
     std::unique_ptr<csp::ProgramBuilder::Built> built =
             std::make_unique<csp::ProgramBuilder::Built>();
     std::unique_ptr<csp::Processor> processor =
@@ -1111,12 +1111,11 @@ struct Played {
     performance::Settings settings;
 
     bool wire_and_build(const std::string &what) {
-        wiring::wire(*synth);
-        if (!build(synth->graph, *built, what)) {
+        if (!build(synth->graph(), *built, what)) {
             return false;
         }
         for (const Graph::InitialValue &initial :
-             synth->graph.initial_values()) {
+             synth->graph().initial_values()) {
             processor->write(initial.address, initial.value);
         }
         return true;
@@ -1152,7 +1151,7 @@ struct Played {
                / static_cast<double>(csp::word_one);
     }
     int address(Wire wire) const {
-        return synth->graph.address(wire);
+        return synth->graph().address(wire);
     }
 };
 
@@ -1160,11 +1159,11 @@ struct Played {
 double lfo_wave(int shape, double phase, double depth, double neg_depth,
                 double gain) {
     switch (shape) {
-    case wiring::shape_saw:
+    case Wiring::shape_saw:
         return phase * gain;
-    case wiring::shape_square:
+    case Wiring::shape_square:
         return phase < 0 ? depth : neg_depth;
-    case wiring::shape_triangle:
+    case Wiring::shape_triangle:
         return std::fabs(phase) * gain + neg_depth;
     default: {
         const double p        = phase / 8;
@@ -1183,15 +1182,15 @@ void test_the_noaidis_formulas() {
     if (!played.wire_and_build("the Noaidi, for its formulas")) {
         return;
     }
-    const wiring::Synth &synth = *played.synth;
+    const SoundEngine &synth = *played.synth;
 
     // the LFOs step for five passes and then stand: one of them wraps
     constexpr int stepping_passes                        = 5;
-    constexpr std::array<double, wiring::lfo_count> step = {
+    constexpr std::array<double, Wiring::lfo_count> step = {
             1.8, -1.02, -0.64, -0.26, 0.12, 0.5, 0.88, 1.26};
-    std::array<double, wiring::lfo_count> lfo_out;
-    for (int k = 0; k < wiring::lfo_count; ++k) {
-        const wiring::Lfo &lfo = synth.lfos[static_cast<size_t>(k)];
+    std::array<double, Wiring::lfo_count> lfo_out;
+    for (int k = 0; k < Wiring::lfo_count; ++k) {
+        const Wiring::Lfo &lfo = synth.wiring().lfos[static_cast<size_t>(k)];
         const double depth     = 0.5 + 0.05 * k;
         const double neg_depth = -0.4 + 0.03 * k;
         const double gain      = 0.1 + 0.01 * k;
@@ -1202,7 +1201,7 @@ void test_the_noaidis_formulas() {
         const double phase = std::remainder(
                 stepping_passes * step[static_cast<size_t>(k)], 16.0);
         lfo_out[static_cast<size_t>(k)] = lfo_wave(
-                k % wiring::lfo_shape_count, phase, depth, neg_depth, gain);
+                k % Wiring::lfo_shape_count, phase, depth, neg_depth, gain);
     }
 
     struct Channel {
@@ -1210,8 +1209,8 @@ void test_the_noaidis_formulas() {
         int lfo1, lfo2;
         double d1, d2, r1, r2, duty0, duty1, resonance;
     };
-    std::vector<Channel> channel(wiring::channel_count);
-    for (int c = 0; c < wiring::channel_count; ++c) {
+    std::vector<Channel> channel(SoundEngine::channel_count);
+    for (int c = 0; c < SoundEngine::channel_count; ++c) {
         Channel &a = channel[static_cast<size_t>(c)];
         a          = {0.02 * (c - 8),
                       0.1 + 0.01 * c,
@@ -1221,8 +1220,8 @@ void test_the_noaidis_formulas() {
                       0.5 + 0.1 * (c % 5),
                       0.25 * (c % 5),
                       0.3 + 0.05 * c,
-                      (3 * c) % wiring::lfo_count,
-                      (7 * c + 5) % wiring::lfo_count,
+                      (3 * c) % Wiring::lfo_count,
+                      (7 * c + 5) % Wiring::lfo_count,
                       0.03 * (c % 5),
                       -0.02 * (c % 3),
                       0.1 * (c % 4),
@@ -1231,25 +1230,26 @@ void test_the_noaidis_formulas() {
                       -0.3 + 0.03 * c,
                       0.5 + 0.1 * (c % 7)};
         // the first channels' resonance sinks are an LFO each, bare
-        if (c < wiring::lfo_count) {
+        if (c < Wiring::lfo_count) {
             a.lfo1      = c;
             a.r1        = 1.0;
             a.r2        = 0;
             a.resonance = 0;
         }
-        const wiring::Channel &wired = synth.channels[static_cast<size_t>(c)];
+        const Wiring::Channel &wired =
+                synth.wiring().channels[static_cast<size_t>(c)];
         played.pointer(wired.lfo[0],
-                       synth.lfos[static_cast<size_t>(a.lfo1)].record);
+                       synth.wiring().lfos[static_cast<size_t>(a.lfo1)].record);
         played.pointer(wired.lfo[1],
-                       synth.lfos[static_cast<size_t>(a.lfo2)].record);
-        played.word(wired.depth[0][wiring::moves_pitch], a.p1);
-        played.word(wired.depth[1][wiring::moves_pitch], a.p2);
-        played.word(wired.depth[0][wiring::moves_cutoff], a.c1);
-        played.word(wired.depth[1][wiring::moves_cutoff], a.c2);
-        played.word(wired.depth[0][wiring::moves_duty], a.d1);
-        played.word(wired.depth[1][wiring::moves_duty], a.d2);
-        played.word(wired.depth[0][wiring::moves_resonance], a.r1);
-        played.word(wired.depth[1][wiring::moves_resonance], a.r2);
+                       synth.wiring().lfos[static_cast<size_t>(a.lfo2)].record);
+        played.word(wired.depth[0][Wiring::moves_pitch], a.p1);
+        played.word(wired.depth[1][Wiring::moves_pitch], a.p2);
+        played.word(wired.depth[0][Wiring::moves_cutoff], a.c1);
+        played.word(wired.depth[1][Wiring::moves_cutoff], a.c2);
+        played.word(wired.depth[0][Wiring::moves_duty], a.d1);
+        played.word(wired.depth[1][Wiring::moves_duty], a.d2);
+        played.word(wired.depth[0][Wiring::moves_resonance], a.r1);
+        played.word(wired.depth[1][Wiring::moves_resonance], a.r2);
         played.word(wired.bend, a.bend);
         played.word(wired.cutoff_base, a.base);
         played.word(wired.key_track, a.track);
@@ -1263,25 +1263,28 @@ void test_the_noaidis_formulas() {
         double note, level_amp, level_mod, velocity;
         int channel;
     };
-    std::vector<Voice> voice(wiring::voice_count);
-    for (int v = 0; v < wiring::voice_count; ++v) {
+    std::vector<Voice> voice(SoundEngine::voice_count);
+    for (int v = 0; v < SoundEngine::voice_count; ++v) {
         Voice &a = voice[static_cast<size_t>(v)];
         a = {-1.0 + 0.1 * v, 0.1 + 0.02 * v, 0.9 - 0.02 * v, 0.3 + 0.02 * v,
-             (5 * v + 1) % wiring::channel_count};
-        const wiring::Voice &wired = synth.voices[static_cast<size_t>(v)];
-        played.pointer(wired.channel,
-                       synth.channels[static_cast<size_t>(a.channel)].record);
+             (5 * v + 1) % SoundEngine::channel_count};
+        const Wiring::Voice &wired =
+                synth.wiring().voices[static_cast<size_t>(v)];
+        played.pointer(
+                wired.channel,
+                synth.wiring().channels[static_cast<size_t>(a.channel)].record);
         played.word(wired.note, a.note);
-        played.word(wired.velocity[wiring::envelope_amp], a.velocity);
-        played.word(wired.velocity[wiring::envelope_mod], 1.0);
-        played.dword(wired.level[wiring::envelope_amp], a.level_amp);
-        played.dword(wired.level[wiring::envelope_mod], a.level_mod);
+        played.word(wired.velocity[Wiring::envelope_amp], a.velocity);
+        played.word(wired.velocity[Wiring::envelope_mod], 1.0);
+        played.dword(wired.level[Wiring::envelope_amp], a.level_amp);
+        played.dword(wired.level[Wiring::envelope_mod], a.level_mod);
         // in the decay, whose rate is 0: the levels stand
-        for (int e = 0; e < wiring::envelope_count; ++e) {
+        for (int e = 0; e < Wiring::envelope_count; ++e) {
             played.stage(wired.stage[static_cast<size_t>(e)],
-                         synth.channels[0]
+                         synth.wiring()
+                                 .channels[0]
                                  .segments[static_cast<size_t>(e)]
-                                          [wiring::stage_decay]
+                                          [Wiring::stage_decay]
                                  .record);
         }
     }
@@ -1294,7 +1297,7 @@ void test_the_noaidis_formulas() {
     for (int n = 1; n < stepping_passes; ++n) {
         pass(processor, "the Noaidi's formulas, stepping");
     }
-    for (const wiring::Lfo &lfo : synth.lfos) {
+    for (const Wiring::Lfo &lfo : synth.wiring().lfos) {
         played.dword(lfo.step, 0);
     }
     played.send();
@@ -1305,12 +1308,12 @@ void test_the_noaidis_formulas() {
     }
 
     double worst_lfo = 0;
-    for (int k = 0; k < wiring::lfo_count; ++k) {
+    for (int k = 0; k < Wiring::lfo_count; ++k) {
         const int sinks =
-                wiring::channel_sink::base + wiring::channel_sink::block * k;
+                Wiring::ChannelSink::base + Wiring::ChannelSink::block * k;
         worst_lfo = std::max(
                 worst_lfo,
-                std::fabs(played.sink(sinks + wiring::channel_sink::resonance)
+                std::fabs(played.sink(sinks + Wiring::ChannelSink::resonance)
                           - lfo_out[static_cast<size_t>(k)]));
     }
     // a few raw units of the words' rounding, through the sine's eight products
@@ -1319,18 +1322,18 @@ void test_the_noaidis_formulas() {
                   + std::to_string(worst_lfo));
 
     double worst_channel = 0;
-    for (int c = 0; c < wiring::channel_count; ++c) {
+    for (int c = 0; c < SoundEngine::channel_count; ++c) {
         const Channel &a     = channel[static_cast<size_t>(c)];
         const double lfo1    = lfo_out[static_cast<size_t>(a.lfo1)];
         const double lfo2    = lfo_out[static_cast<size_t>(a.lfo2)];
         const double duty    = lfo1 * a.d1 + lfo2 * a.d2;
         const double want[3] = {a.duty0 + duty, a.duty1 + duty,
                                 a.resonance + lfo1 * a.r1 + lfo2 * a.r2};
-        const int fields[3]  = {wiring::channel_sink::duty_0,
-                                wiring::channel_sink::duty_1,
-                                wiring::channel_sink::resonance};
+        const int fields[3]  = {Wiring::ChannelSink::duty_0,
+                                Wiring::ChannelSink::duty_1,
+                                Wiring::ChannelSink::resonance};
         const int sinks =
-                wiring::channel_sink::base + wiring::channel_sink::block * c;
+                Wiring::ChannelSink::base + Wiring::ChannelSink::block * c;
         for (int k = 0; k < 3; ++k) {
             worst_channel = std::max(
                     worst_channel,
@@ -1342,7 +1345,7 @@ void test_the_noaidis_formulas() {
                   + std::to_string(worst_channel));
 
     double worst_voice = 0;
-    for (int v = 0; v < wiring::voice_count; ++v) {
+    for (int v = 0; v < SoundEngine::voice_count; ++v) {
         const Voice &a             = voice[static_cast<size_t>(v)];
         const Channel &c           = channel[static_cast<size_t>(a.channel)];
         const double lfo1          = lfo_out[static_cast<size_t>(c.lfo1)];
@@ -1356,11 +1359,11 @@ void test_the_noaidis_formulas() {
                                 4 * a.level_mod * c.amount + a.note * c.track
                                         + channel_cutoff,
                                 a.level_amp * a.velocity};
-        const int fields[3]  = {wiring::voice_sink::pitch,
-                                wiring::voice_sink::cutoff,
-                                wiring::voice_sink::gain};
+        const int fields[3]  = {Wiring::VoiceSink::pitch,
+                                Wiring::VoiceSink::cutoff,
+                                Wiring::VoiceSink::gain};
         const int sinks =
-                wiring::voice_sink::base + wiring::voice_sink::block * v;
+                Wiring::VoiceSink::base + Wiring::VoiceSink::block * v;
         for (int k = 0; k < 3; ++k) {
             worst_voice = std::max(
                     worst_voice,
@@ -1381,15 +1384,15 @@ void test_the_noaidis_envelope() {
     if (!played.wire_and_build("the Noaidi, for an envelope")) {
         return;
     }
-    const wiring::Synth &synth     = *played.synth;
-    const wiring::Channel &channel = synth.channels[0];
-    constexpr int amp              = wiring::envelope_amp;
+    const SoundEngine &synth       = *played.synth;
+    const Wiring::Channel &channel = synth.wiring().channels[0];
+    constexpr int amp              = Wiring::envelope_amp;
     // attack to 1.3 × full, decay to a sustain of 0.5, release to 0
-    constexpr std::array<double, wiring::stage_count> target = {1.3, 0.5, 0.0};
-    constexpr std::array<double, wiring::stage_count> rate = {0.1, 0.05, 0.05};
-    for (int e = 0; e < wiring::envelope_count; ++e) {
-        for (int s = 0; s < wiring::stage_count; ++s) {
-            const wiring::Segment &segment =
+    constexpr std::array<double, Wiring::stage_count> target = {1.3, 0.5, 0.0};
+    constexpr std::array<double, Wiring::stage_count> rate = {0.1, 0.05, 0.05};
+    for (int e = 0; e < Wiring::envelope_count; ++e) {
+        for (int s = 0; s < Wiring::stage_count; ++s) {
+            const Wiring::Segment &segment =
                     channel.segments[static_cast<size_t>(e)]
                                     [static_cast<size_t>(s)];
             played.dword(segment.target, target[static_cast<size_t>(s)]);
@@ -1402,40 +1405,40 @@ void test_the_noaidis_envelope() {
                 .record;
     };
     // every voice idle on the channel, in release at zero; the first struck
-    for (const wiring::Voice &voice : synth.voices) {
+    for (const Wiring::Voice &voice : synth.wiring().voices) {
         played.pointer(voice.channel, channel.record);
-        for (int e = 0; e < wiring::envelope_count; ++e) {
+        for (int e = 0; e < Wiring::envelope_count; ++e) {
             played.word(voice.velocity[static_cast<size_t>(e)], 1.0);
             played.stage(voice.stage[static_cast<size_t>(e)],
-                         segment_of(e, wiring::stage_release));
+                         segment_of(e, Wiring::stage_release));
         }
     }
-    const wiring::Voice &struck = synth.voices[0];
-    const wiring::Voice &idle   = synth.voices[1];
-    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_attack));
+    const Wiring::Voice &struck = synth.wiring().voices[0];
+    const Wiring::Voice &idle   = synth.wiring().voices[1];
+    played.stage(struck.stage[amp], segment_of(amp, Wiring::stage_attack));
     played.send();
     csp::Processor &processor = *played.processor;
     start(processor, played.built->image);
 
-    const Graph &graph = synth.graph;
+    const Graph &graph = synth.graph();
     auto offset_of     = [&](int stage) {
         return graph.offset(segment_of(amp, stage));
     };
     auto gain_of = [&](int v) {
-        return played.sink(wiring::voice_sink::base
-                           + wiring::voice_sink::block * v
-                           + wiring::voice_sink::gain);
+        return played.sink(Wiring::VoiceSink::base
+                           + Wiring::VoiceSink::block * v
+                           + Wiring::VoiceSink::gain);
     };
 
     // the formula, beside the model
-    int stage      = wiring::stage_attack;
+    int stage      = Wiring::stage_attack;
     double level   = 0;
     double worst   = 0;
     double highest = 0;
     auto one_pass  = [&](const std::string &what) {
         pass(processor, what);
         if (level >= 1.0) {
-            stage = std::max(stage, static_cast<int>(wiring::stage_decay));
+            stage = std::max(stage, static_cast<int>(Wiring::stage_decay));
         }
         level += (target[static_cast<size_t>(stage)] - level)
                  * rate[static_cast<size_t>(stage)];
@@ -1448,16 +1451,16 @@ void test_the_noaidis_envelope() {
 
     int passes_to_decay = 0;
     while (passes_to_decay < 200
-           && stage_word() == offset_of(wiring::stage_attack)) {
+           && stage_word() == offset_of(Wiring::stage_attack)) {
         one_pass("the attack");
         ++passes_to_decay;
     }
-    check_equal(stage_word(), offset_of(wiring::stage_decay),
+    check_equal(stage_word(), offset_of(Wiring::stage_decay),
                 "the attack ends in the decay");
-    check_equal(stage, wiring::stage_decay, "in the pass the formula says");
+    check_equal(stage, Wiring::stage_decay, "in the pass the formula says");
     check(highest >= 1.0, "with the level at full scale");
     check_equal(processor.read(played.address(idle.stage[amp])),
-                offset_of(wiring::stage_release),
+                offset_of(Wiring::stage_release),
                 "a voice never struck stays in release");
     check_equal(processor.read_wide(played.address(idle.level[amp])), 0,
                 "at zero");
@@ -1469,32 +1472,32 @@ void test_the_noaidis_envelope() {
           "the decay settles at the sustain level");
 
     // struck again while it sounds: the level climbs on from where it is
-    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_attack));
+    played.stage(struck.stage[amp], segment_of(amp, Wiring::stage_attack));
     played.send();
     one_pass("the note on lands");
-    stage = wiring::stage_attack;
+    stage = Wiring::stage_attack;
     one_pass("struck again");
-    check_equal(stage_word(), offset_of(wiring::stage_attack),
+    check_equal(stage_word(), offset_of(Wiring::stage_attack),
                 "a voice struck again is in the attack");
     check(gain_of(0) > 0.5 && gain_of(0) < 1.0,
           "and climbs on from the sustain level: "
                   + std::to_string(gain_of(0)));
-    for (int n = 0; n < 100 && stage_word() == offset_of(wiring::stage_attack);
+    for (int n = 0; n < 100 && stage_word() == offset_of(Wiring::stage_attack);
          ++n) {
         one_pass("the second attack");
     }
-    check_equal(stage_word(), offset_of(wiring::stage_decay),
+    check_equal(stage_word(), offset_of(Wiring::stage_decay),
                 "and ends in the decay at full scale");
 
     // let go: the firmware writes the release, and the program leaves it
-    played.stage(struck.stage[amp], segment_of(amp, wiring::stage_release));
+    played.stage(struck.stage[amp], segment_of(amp, Wiring::stage_release));
     played.send();
     one_pass("the note off lands");
-    stage = wiring::stage_release;
+    stage = Wiring::stage_release;
     for (int n = 0; n < 400; ++n) {
         one_pass("the release");
     }
-    check_equal(stage_word(), offset_of(wiring::stage_release),
+    check_equal(stage_word(), offset_of(Wiring::stage_release),
                 "let go: the program leaves the release alone");
     check(gain_of(0) < 0.001, "the release falls to zero");
     check(worst <= 2.0 / csp::word_one,

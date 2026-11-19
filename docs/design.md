@@ -150,7 +150,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 | Pitch / cutoff | UQ4.10 log₂ | 4-bit octave + 10-bit fraction; linearized via BSRAM LUTs (24-bit phase-delta LUT, 16-bit compressed cutoff-coefficient LUT `svf_fc_lut`), recycled per octave via barrel shifts |
 | Resonance | UQ4.10 log₂ | octaves of Q above Butterworth ("break with convention"); q1 = √2·2⁻ʳ via 17-bit q1_lut + barrel shift; 0 = Butterworth, top of range = self-oscillation |
 | Phase accumulators | UQ0.24 | |
-| Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the preset's volume, in dB, and what the voicing takes off it are turned into linear words in firmware (`render.cpp`) |
+| Gains | Q4.14 linear | a partial's gain on each side is its voice's word × its channel's, signed, clamped to ±8.0; the preset's volume, in dB, and what the voicing takes off it are turned into linear words in firmware (`sound_engine.cpp`) |
 | Envelope rates | Q4.32 | the fraction of the distance left that a pass covers; the preset holds a segment's time in seconds, and `csp::envelope_rate` makes the program's dword rate of its time constant |
 
 ## The partial pipeline
@@ -287,7 +287,7 @@ its gain the product of its voice's and its channel's, each saturating into
 the parameter's legal range; the extremes clamp, nothing wraps. One format
 (signed Q4.14 words; octaves for pitch, cutoff and resonance, linear for
 gain). Velocity and other per-note values are firmware writes to a voice's
-registers. The firmware's side is `app/main/render.cpp`; the chip-level bench
+registers. The firmware's side is `app/main/sound_engine.cpp`; the chip-level bench
 (`make -C rtl sim-top`, `rtl/tb/tb_top.sv`) plays bus writes on the Verilated
 chip.
 

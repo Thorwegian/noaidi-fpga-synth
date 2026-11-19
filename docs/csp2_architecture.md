@@ -253,7 +253,7 @@ releases; the wire is in nines (a command nonet, an 18-bit address,
 one block. The register file outlives the firmware's reset, so the boot
 zeroes every register between the self-test and the image, and the image
 wires every channel and voice the program's loops run (their counts are
-the graph's, `app/main/wiring.hpp`), used or not: a loop runs every element
+the sound engine's, `app/main/sound_engine.hpp`), used or not: a loop runs every element
 with whatever its registers hold. Then, before the first note:
 
 1. the **self-test**: a program of its own, built at boot as the control

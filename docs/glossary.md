@@ -209,8 +209,11 @@ control signal once a pass. The instruction set is
 - **engine link** — the firmware module that is the sole owner of the SPI
   bus: loads the image, sends what changed, commits with one swap
   ([firmware_architecture.md](firmware_architecture.md)).
-- **render** — `render.cpp`: a preset expressed as register and sink
-  writes.
+- **sound engine** — `SoundEngine` (`sound_engine.cpp`): the class the
+  synth model plays. Its parameters are a tree of floats in musical units,
+  a preset for each channel, which take effect on a commit; its events are
+  the notes; it keeps the voices, wires the DSP graph and makes the
+  register and sink writes.
 - **event bus** — `midi_in` to the synth model's path for MIDI events.
 - **console** — the firmware's serial command line
   ([README.md](../README.md), Console).

@@ -29,7 +29,7 @@
 // Several program files are joined into one, in order.
 //
 // `--noaidi` in place of the program files of asm, image, script and match is
-// the program the firmware runs: the synth of app/main/wiring.cpp, built by
+// the program the firmware runs: the synth app/main/sound_engine.cpp wires, built by
 // its graph. Its script and its match load a set-up with it (performance.hpp:
 // a value for every source, every pointer and stage one the program can
 // follow), and for them the program counts its passes as well, in a word of
@@ -53,7 +53,7 @@
 #include "csp/selftest.hpp"
 #include "performance.hpp"
 #include "processor.hpp"
-#include "wiring.hpp"
+#include "sound_engine.hpp"
 
 namespace {
 
@@ -289,15 +289,15 @@ struct Noaidi {
     int run_count = 0;
 };
 
-constexpr int run_count_sink =
-        wiring::voice_sink::base + wiring::voice_sink::block - 1;
+constexpr int run_count_sink = SoundEngine::Wiring::VoiceSink::base
+                               + SoundEngine::Wiring::VoiceSink::block - 1;
 
 bool build_noaidi(Noaidi &noaidi, bool counts_passes) {
-    using Graph      = csp::DspGraph;
-    const auto synth = std::make_unique<wiring::Synth>();
+    using Graph = csp::DspGraph;
+    performance::Unplayed link;
+    const auto synth = std::make_unique<SoundEngine>(link);
     const auto built = std::make_unique<csp::ProgramBuilder::Built>();
-    wiring::wire(*synth);
-    Graph &graph = synth->graph;
+    Graph &graph     = synth->graph();
     Graph::Wire step, count;
     if (counts_passes) {
         step                      = graph.source();

@@ -227,7 +227,7 @@ regions have a fixed meaning:
 | `0x800–0xBFF` | sinks: what the partials read | write only; the architecture's page rule |
 
 Register 0 reads zero and takes no write. The sink area's layout is the
-firmware's (`app/main/wiring.hpp`).
+firmware's (`app/main/sound_engine.hpp`).
 
 ## 8. Latencies and the schedule
 

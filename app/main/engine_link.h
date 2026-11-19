@@ -5,11 +5,11 @@
 //
 // Everything the synth engine hears goes through here. The CSP computes the
 // control signals the partial pipeline reads from registers and sink words
-// (docs/memory_map.md); the firmware's writes to them wait in an image of
-// those words here, and a fixed 1 kHz tick sends what changed through the
-// FPGA's write queue and commits it with one swap, from which the CSP
-// applies them, together, at the end of its next pass. Nothing else in the
-// firmware may use the SPI link once this is initialized.
+// (docs/memory_map.md); the sound engine's writes to them (sound_engine.hpp)
+// wait in an image of those words here, and a fixed 1 kHz tick sends what
+// changed through the FPGA's write queue and commits it with one swap, from
+// which the CSP applies them, together, at the end of its next pass. Nothing
+// else in the firmware may use the SPI link once this is initialized.
 
 #pragma once
 #include <stdbool.h>
@@ -18,17 +18,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Hold the CSP, wire the Noaidi's graph and build its program, load the
-// program and its decode ROM, write the static wiring (render::setup),
-// release it, and start the 1 kHz tick task. Call after spi_link_init().
-void engine_link_init(void);
-
-// Queue one write to a CSP register or sink word (0x000–0xBFF). The raw
-// value is a Q4.14 word (18 bits, signed). Non-blocking; a write of the
-// value already there is dropped. False if the address is out of range or
-// the link is not running.
-bool engine_link_write(int address, int32_t raw);
 
 // Read every register the image knows back through the probe and compare:
 // returns how many differ, and fills up to `limit` of them (register,
@@ -42,10 +31,6 @@ int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
 
 // Whether the control program writes a register, by the graph's layout.
 bool engine_link_program_writes(int address);
-
-// Point a partial's ten sink pointers (indices into the sink area, 10 bits
-// each) at once: the FPGA takes the whole entry atomically.
-bool engine_link_point(int partial, const int *pointers);
 
 // A CSP register pair as the probe reads it (docs/memory_map.md): `address`
 // (even) is the even register, in bits 35:18 of the result; the odd one is in
@@ -75,13 +60,19 @@ void engine_link_data_stream(bool on, int source);
 #ifdef __cplusplus
 }
 
-#include "render.hpp"
-#include "wiring.hpp"
+#include "sound_engine.hpp"
 
-// All the writes of a list, in order.
-bool engine_link_write_all(const render::Writes &writes);
+// The link as the sound engine sends through it. A batch of writes goes into
+// the image at once, so a tick sends all of it with one swap (a batch larger
+// than a tick's share takes the next tick too); a write of the value already
+// there is dropped. A partial's pointers go straight to the FPGA, which
+// takes the whole entry atomically.
+SoundEngine::Link &engine_link();
 
-// The Noaidi as the graph engine_link_init() wired and built: where every
-// write of render.hpp finds its word.
-const wiring::Synth &engine_link_synth();
+// Hold the CSP and run the boot self-test; build the engine's program and
+// load it with its decode ROM; send the engine's first commit, the words the
+// program starts from and the parameters set so far, and read it back;
+// release the CSP and start the 1 kHz tick task. Call after spi_link_init().
+// The link asks the engine's graph who writes a word for as long as it runs.
+void engine_link_init(SoundEngine &engine);
 #endif

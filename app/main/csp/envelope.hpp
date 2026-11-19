@@ -3,10 +3,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The envelope (wiring.cpp) is a one-pole RC with a dword level: once a pass
-// (24 kHz, #268) a segment moves its level toward its target by a dword RATE
-// (Q4.32) times the distance left. A segment's speed is the time constant of
-// that exponential, and a time a player reads is a number of time constants:
+// The envelope (sound_engine.cpp) is a one-pole RC with a dword level: once a
+// pass (24 kHz, #268) a segment moves its level toward its target by a dword
+// RATE (Q4.32) times the distance left. A segment's speed is the time
+// constant of that exponential, and a time a player reads is a number of
+// time constants:
 //
 //   a fall (a decay, a release) is over 60 dB down the distance it had to
 //   go, which takes ln(1000) of them from any distance;

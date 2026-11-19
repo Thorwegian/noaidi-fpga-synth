@@ -3,13 +3,14 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-Three modules on the existing event bus;
-one owner for SPI and the page-swap discipline; one output back to the
-surfaces.
+Four modules in a row behind the event bus: the synth model plays the
+sound engine, the sound engine sends through the engine link, the one owner
+of SPI and the page-swap discipline; one output goes back to the surfaces.
 
 ```
-din1/2 ─► midi_in ──event bus──► synth model ──cmd queue──► engine link ──SPI──► FPGA
-BLE   ──► ble_midi               (musical state)            (transport + swap)
+din1/2 ─► midi_in ──event bus──► synth model ──► sound engine ──► engine link ──SPI──► FPGA
+BLE   ──► ble_midi               (presets,       (parameters,     (transport + swap)
+                                  MIDI)           events, voices)
                      └──► midi_log, display, ... (other subscribers)
                                  └──► midi_out ──► BLE notifications (the surfaces)
 ```
@@ -48,11 +49,55 @@ second output on the same queue.
 
 ## synth model
 
-Subscribes to MIDI events. Owns **all musical state** and every
-musical decision: voice allocation (which of the 256 partials plays which
-note), unison grouping, detune/pan baking, CC → parameter mapping,
-channel programs. Emits abstract engine commands ("voice 17: these
-params, gate on") into a FreeRTOS queue.
+`voice_alloc.cpp`. Subscribes to MIDI events and plays the sound engine with
+them. It owns what is MIDI's and the presets': the CCs' laws and the pairing
+of a coarse and a fine CC (`cc_map`), the RPN mechanism, Bank Select and
+Program Change, the preset loader, the sustain pedal, panic, and the
+feedback to the surfaces. A CC that edits the preset sets its value on the
+engine's tree; a note on or off is the engine's event.
+
+- **Omni.** Every MIDI channel plays the engine's first channel, and that
+  channel's part of the engine's tree is the active preset.
+- **One task.** The model's task alone sets the engine's parameters, commits
+  and sends its events; the preset loader and the console hand their presets
+  to it through its queue, so a commit never sends another task's half-set
+  values.
+- **Commits.** CC edits and the wheel are committed at most 66 times a
+  second, whatever the CC rate, so a controller sweep cannot flood the link.
+  A pitch bend and a loaded preset are committed at once.
+- **Sustain pedal** (CC 64): while it is down, a note off is held back,
+  counted by its note, and the engine's voice stays held, its envelopes
+  where they are. Pedal up sends every note off it held back; a key struck
+  again while the pedal holds its last strike gets a voice of its own, and
+  the note offs release the strikes oldest first.
+
+## sound engine
+
+`SoundEngine` (`sound_engine.hpp`): the sound engine as one class, between
+the synth model and the engine link. Nothing above it names a word of the
+CSP's memory or holds a voice number.
+
+- **Parameters.** A tree of `float`s in musical units that follows the
+  preset file's tables: `engine.channel[0].lfo[1].rate`. A channel's part of
+  the tree is a `preset_t` with the performance's state beside it (the bend
+  in semitones, the wheel from 0 to 1), so loading a preset is an
+  assignment. What is set on the tree takes effect on `commit()`: the engine
+  compares each channel with what it committed last, converts what changed
+  to words and hands them to the link as one batch, which is one swap.
+- **Events.** `note_on(channel, note, velocity)`, `note_off(channel, note)`,
+  `all_notes_off(channel)` and `all_sound_off(channel)`. An event is sent at
+  once, with the parameters last committed.
+- **Voices.** The engine keeps the voices (Voice lifecycle, below): it picks
+  the voice for a note, pairs a note off with its note on, gates the
+  envelopes, moves the voice's wire to its channel and points its partials at
+  that channel's sinks.
+- **Wiring.** Its constructor builds the DSP graph (`csp/dsp_graph.hpp`)
+  with loops, and the synth's sizes are its: 16 channels, 32 voices of 8
+  partials. The channels share the synth's LFOs, an LFO of every shape for
+  each of a channel's two: an LFO of one shape has one rate, and an LFO with
+  no depth takes none of them.
+- **The link.** The words go out through `SoundEngine::Link`, which the
+  engine link implements and a host test records (`make fw-test`).
 
 ## engine link
 
@@ -61,23 +106,26 @@ Nothing else in the firmware may call `fpga_word_write`/`fpga_swap`
 once `engine_link_init()` has run (`main.c`'s boot SPI self-test
 writes directly before that).
 
-- Generates the CSP's control program at boot from the DSP graph
-  (`csp/dsp_graph.cpp`, wired in `wiring.cpp`, through `csp::ProgramBuilder`)
+- Has the sound engine build its graph's control program at boot
+  (`csp/dsp_graph.cpp` through `csp::ProgramBuilder`)
   into a static image, loads it with the decode ROM while the CSP is held,
-  writes the graph's set-up and reads it back. The boot log has the wiring's
+  takes the engine's first commit, the words the program starts from and
+  the startup preset, and reads it back. The boot log has the wiring's
   time, the build's time, the PSRAM they hold and the stack left.
-- Keeps a full RAM image of the parameter space. Commands mutate the
-  image; the link writes dirty words to the shadow page and swaps.
+- Keeps a full RAM image of the parameter space. The engine's writes change
+  the image; the link writes dirty words to the shadow page and swaps.
 - The mirror-both-pages rule ("after a swap the new shadow page is
   one write batch behind") is implemented here, in exactly one place:
   after a swap, the link re-writes the words dirtied by the previous
   write batch. Callers never think about pages.
 - Runs on a **fixed 1 kHz tick** (matches MIDI's practical event
-  ceiling): each tick drains the queue, coalesces writes, performs one
-  write-batch + swap if anything changed. Bounded swap rate, natural
-  batching, at most 1 ms of tick latency.
+  ceiling): each tick sends the image's pending words, at most 480 of
+  them, and commits them with one swap if there were any. Bounded swap
+  rate, natural batching, at most 1 ms of tick latency.
 
 ## Voice lifecycle
+
+The voices are the sound engine's (`SoundEngine::Voice`).
 
 **A voice is an instance of a keystroke, not a key.** Hitting the
 same key again does NOT deallocate or recycle the voice still
@@ -89,31 +137,27 @@ different facts:
 
 | State | Meaning |
 |---|---|
-| `V_HELD` | key down (or held by the sustain pedal), the voice's envelopes started and not yet released |
-| `V_RELEASING` | key up, the envelopes in their release segment; available again, the longest released first |
-| `V_IDLE` | never struck, or silenced (CC 120) — free for allocation |
+| `held` | key down (or its note off held back by the sustain pedal), the voice's envelopes started and not yet released |
+| `releasing` | key up, the envelopes in their release segment; available again, the longest released first |
+| `idle` | never struck, or silenced (CC 120) — free for allocation |
 
-- **Allocation preference** (note-on): least-recently-used IDLE →
-  the RELEASING voice whose key came up earliest → steal oldest HELD.
+- **Allocation preference** (note-on): least-recently-used idle →
+  the releasing voice whose key came up earliest → steal oldest held.
 - **Tail end**: the firmware does not estimate it (#264). The sound's
   end is the pipeline's: the voice's gain word is the envelope's level,
   a linear gain (#176) that falls at a constant number of dB a second
   and is silent at zero and below. A released voice is simply ranked by
-  the time of its key-up, a fact; when all 32 are in use the one
+  the order of its key-up, a fact; when all 32 are in use the one
   released longest ago is reused, and its new attack starts from
   whatever level its tail is at — the normal poly-synth steal.
-- **Note-off pairing**: FIFO — release the oldest HELD voice carrying
-  that note. A stolen voice carries a new note and is skipped; its
-  orphaned note-off is ignored.
-- **Sustain pedal** (CC 64): while it is down, a note-off marks the
-  voice `sustained` instead of releasing it, so it stays HELD, its
-  envelopes where they are. Note-off pairing skips sustained voices, so
-  a key struck again pairs with its new voice. Pedal up releases every
-  sustained voice. For stealing, sustained voices count as HELD.
+- **Note-off pairing**: FIFO — release the oldest held voice carrying
+  that note on that channel. A stolen voice carries a new note and is
+  skipped; its orphaned note-off finds nothing, unless the same key is
+  held again by then, whose voice it releases.
 - **The envelopes' stages are the firmware's** (#267): a note-on writes
   attack to both of a voice's envelopes, a note-off writes release, and
   the CSP owns only the attack's end at full scale. There is no
-  level-sensitive gate, so a voice stolen while HELD gets a new attack
+  level-sensitive gate, so a voice stolen while held gets a new attack
   like any other, from the level it is at, whichever preset or channel
   takes it.
 
@@ -155,14 +199,16 @@ column per 0.375 dB of the master limiter's gain reduction.
 
 ## Sequencers / arpeggiators
 
-A sequencer or arpeggiator is just another producer into the same
-command queue. Producers own their timing (esp_timer); the engine link
-stays a dumb, fast executor. No special path.
+A sequencer or arpeggiator is just another source of notes for the sound
+engine, through the synth model's queue. Producers own their timing
+(esp_timer); the engine link stays a dumb, fast executor. No special path.
 
-## Command format
+## What the sound engine sends
 
-- Commands are `engine_param_cmd_t {partial, word, value}` structs
-  (`engine_link.h`); the engine link translates partial and word to
-  addresses.
-- The command queue holds 1024 entries; on overflow
-  `engine_link_write()` drops the command.
+- A batch of `SoundEngine::Write {address, raw, force}`: a register or a
+  sink word of the CSP (0x000–0xBFF) and its raw value. The engine link
+  drops a write of the value its image already holds, unless the write is
+  forced: an envelope's stage and level are the CSP's to change, so the
+  image is only as good as the last write.
+- A partial's ten sink pointers (`SoundEngine::Pointers`), which go
+  straight to the FPGA: it takes the whole entry atomically.

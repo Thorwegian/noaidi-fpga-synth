@@ -295,138 +295,138 @@ void set_tune(osc_t &osc, uint8_t value, bool fine) {
 
 } // namespace
 
-Part apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
+bool apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     switch (cc) {
     // ---- global ----
     case 7:
         preset.part.volume = volume_of(value);
-        return Part::volume;
+        return true;
     case 10:
         preset.part.pan = balance_of(value);
-        return Part::voices;
+        return true;
     case 31:
         preset.filter.key_track = key_track_of(value);
-        return Part::voices;
+        return true;
 
     // ---- the oscillators and the voice structure ----
     case 20:
     case 21:
         preset.osc[cc - 20].wave =
                 static_cast<waveform_t>(five_way_index(value));
-        return Part::voices;
+        return true;
     case 14:
     case 22:
         set_tune(preset.osc[cc == 14 ? 0 : 1], value, false);
-        return Part::voices;
+        return true;
     case 15:
     case 23:
         set_tune(preset.osc[cc == 15 ? 0 : 1], value, true);
-        return Part::voices;
+        return true;
     case 24:
         preset.voice.osc_mix = balance_of(value);
-        return Part::voices;
+        return true;
     case 25:
     case 85:
         preset.osc[cc == 25 ? 0 : 1].pulse_width = pulse_width_of(value);
-        return Part::voices;
+        return true;
     case 26:
         preset.voice.structure =
                 static_cast<voice_struct_t>(std::min((value * 3) >> 7, 2));
-        return Part::voices;
+        return true;
     case 27:
         preset.voice.unison_detune = detune_of(value);
-        return Part::voices;
+        return true;
     case 28:
         preset.voice.unison_stereo = percent_of(value);
-        return Part::voices;
+        return true;
 
     // ---- the filter ----
     case 29:
         preset.filter.type =
                 static_cast<filter_type_t>((value * 3) >> 7); // LP, BP, HP
-        return Part::voices;
+        return true;
     case 30:
         preset.filter.slope = value >= 64 ? preset_units::slope.high
                                           : preset_units::slope.low;
-        return Part::voices;
+        return true;
     case 71:
         preset.filter.resonance = resonance_of(value);
-        return Part::voices;
+        return true;
     case 74:
         knobs.cutoff_msb     = value;
         preset.filter.cutoff = cutoff_of(knobs);
-        return Part::cutoff;
+        return true;
     case 106:
         knobs.cutoff_lsb     = value;
         preset.filter.cutoff = cutoff_of(knobs);
-        return Part::cutoff;
+        return true;
 
     // ---- the amp envelope ----
     case 73:
         preset.amp_env.attack = attack_of(value);
-        return Part::amp_env;
+        return true;
     case 75:
         preset.amp_env.decay = amp_fall_of(value);
-        return Part::amp_env;
+        return true;
     case 79:
         preset.amp_env.sustain = amp_sustain_of(value);
-        return Part::amp_env;
+        return true;
     case 72:
         preset.amp_env.release = amp_fall_of(value);
-        return Part::amp_env;
+        return true;
     case 86:
         preset.amp_env.velocity = percent_of(value);
-        return Part::amp_env;
+        return true;
 
     // ---- the mod envelope ----
     case 102:
         preset.mod_env.attack = attack_of(value);
-        return Part::mod_env;
+        return true;
     case 103:
         preset.mod_env.decay = fall_of(value);
-        return Part::mod_env;
+        return true;
     case 104:
         preset.mod_env.sustain = mod_sustain_of(value);
-        return Part::mod_env;
+        return true;
     case 105:
         preset.mod_env.release = fall_of(value);
-        return Part::mod_env;
+        return true;
     case 107:
         preset.mod_env.depth = mod_depth_of(value);
-        return Part::mod_env;
+        return true;
     case 108:
         // the cutoff is the one destination there is
         preset.mod_env.destination = MOD_ENV_DEST_CUTOFF;
-        return Part::mod_env;
+        return true;
     case 87:
         preset.mod_env.velocity = percent_of(value);
-        return Part::mod_env;
+        return true;
 
     // ---- the LFOs ----
     case 76:
     case 109:
         preset.lfo[cc == 76 ? 0 : 1].rate = lfo_rate_of(value);
-        return cc == 76 ? Part::lfo1 : Part::lfo2;
+        return true;
     case 77:
     case 110:
         set_lfo_depth(preset, knobs, cc == 77 ? 0 : 1, value, false);
-        return cc == 77 ? Part::lfo1 : Part::lfo2;
+        return true;
     case 115:
     case 116:
         set_lfo_depth(preset, knobs, cc == 115 ? 0 : 1, value, true);
-        return cc == 115 ? Part::lfo1 : Part::lfo2;
+        return true;
     case 113:
     case 111:
         preset.lfo[cc == 113 ? 0 : 1].shape =
                 static_cast<waveform_t>(value >> 5);
-        return cc == 113 ? Part::lfo1 : Part::lfo2;
+        return true;
     case 114:
     case 112:
         set_lfo_destination(preset, knobs, cc == 114 ? 0 : 1, value);
-        return cc == 114 ? Part::lfo1 : Part::lfo2;
+        return true;
 
     default:
-        return Part::none;
+        return false;
     }
 }
 

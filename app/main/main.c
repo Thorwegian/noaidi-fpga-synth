@@ -16,7 +16,6 @@
 #include "midi_log.h"
 #include "midi_out.h"
 #include "event_bus.h"
-#include "engine_link.h"
 #include "voice_alloc.h"
 #include "console.h"
 #include "cli.h"
@@ -93,11 +92,11 @@ void app_main(void) {
     spi_link_boot_check();
 
     // ── The synth proper ────────────────────────────────────────────
-    // engine_link takes sole ownership of the SPI link from here on
-    // (it loads the CSP's control program), then voice_alloc turns MIDI into
-    // voices of 8 partials.
+    // voice_alloc makes the sound engine and starts the engine link with it,
+    // which takes sole ownership of the SPI link from here on (it loads the
+    // CSP's control program); then it turns MIDI into the engine's
+    // parameters and notes.
     printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
-    engine_link_init();
     voice_alloc_init();
     midi_in_start(); // subscribers are registered: start publishing
     // NVS holds the BLE bonds. A full or version-mismatched partition is
