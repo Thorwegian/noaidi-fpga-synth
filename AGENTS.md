@@ -1,8 +1,22 @@
 # Rules
 
-  - Git policies: Agents have GitHub accounts. `gh` access tokens and SSH keys are set up in their home directories. Agents pay attention to what is going on at GitHub as they work: new comments and notifications on the issues and pull requests they are working on. Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Issues form a tree, read as a Makefile: a sub-issue is a prerequisite of its parent, and the issue to work on has no open sub-issues. Sub-issues of one parent are independent of each other. `blocked_by` is only for a prerequisite that several issues share. GitHub allows one parent and eight levels. An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`. Relations live in GitHub's fields, never in prose. A PR's relation to its issue is `Fixes #n` in the PR body. When an agent pull request is approved, the agent must remove the branch it created for it.
+  - Git policies: Agents have GitHub accounts. `gh` access tokens and SSH keys are set up in their home directories. Agents pay attention to what is going on at GitHub as they work: new comments and notifications on the issues and pull requests they are working on. Agents *always* liveblog their progress directly to the comments sections of the GitHub issues and pull requests they are working on. Issues form a tree, read as a Makefile: a sub-issue is a prerequisite of its parent, and the issue to work on has no open sub-issues. Sub-issues of one parent are independent of each other. `blocked_by` is only for a prerequisite that several issues share. GitHub allows one parent and eight levels. An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`. Issue relations live in GitHub's fields, never in prose. A PR's relation to its issue is `Fixes #n` in the PR body. When an agent pull request is approved, the agent must remove the branch it created for it.
 
 - Time-consuming tasks (builds, synthesis, simulations, PNR, recordings, etc.) are performed with `run_in_background=true`.
+
+- Parallel sessions never share a working tree. Every session's work, a one-line docs PR included, happens in its own worktree. The checkouts rest on `main` and are only ever pulled.
+
+- A bitstream is never built on the cloud box. The lab box synthesises (yosys) and packs (`gowin_pack`). Place and route (nextpnr) runs on the Mac, always.
+
+- Every job on the Mac is started with `nice -n 20`. The job is given the low priority, never the SSH service.
+
+- Everything that is not a bitstream runs on the cloud box: the Verilator sims, `make csp-test` and the cosim, the firmware build, the checks.
+
+- An rtl PR's chain is synthesis, one placement at the default seed, `pack.fs`, the board take, and the PR comment with the take and the utilisation lines that moved.
+
+- Seeds are a diagnostic of the tool, never part of the build. The seed sweep is a monitor, not a gate (#434): it starts after the board take, in the background.
+
+- Agents never source ESP-IDF's `export.sh`.
 
 - Agents write elegant and highly structured code at a senior developer level.
 
@@ -16,7 +30,7 @@
 
 - Canonical SystemVerilog is *always* preferred over janky Verilog hacks. Agents *will* change Verilog constructs to canonical SystemVerilog constructs at every chance (dependencies excepted).
 
-- Always look for dead code, duplicates, similar code in two places that could live in one and inconsistent code patterns, and bring these to the attention of the user.
+- Always look for and fix dead code, duplicates, similar code in two places that could live in one and inconsistent code patterns.
 
 - When designing an IP core (such as the CSP), rely mostly on Berkley, Princeton and Stanford research.
 
@@ -50,7 +64,6 @@ License: CERN-OHL-S v2
 ## The words
 
 - `docs/glossary.md` defines every term the project uses in its own sense.
-- A term that changes meaning changes there in the same PR.
 
 ## The instrument
 
@@ -66,41 +79,17 @@ License: CERN-OHL-S v2
 
 - `tools/README.md` says what lives where by what it needs.
 - `tools/lab/README.md` is the guide to driving the board.
-- The build finds ESP-IDF and the CAD suite itself. Never source `export.sh`.
-- `tools/esp_idf.sh idf.py …` runs any idf.py command.
+- The build finds ESP-IDF and the CAD suite itself. `tools/esp_idf.sh idf.py …` runs any idf.py command.
+- `tools/lab/placement_sweep.sh` is the seed sweep. Its heading says how it runs and where its verdict goes.
 
 ## Three machines
 
-- The cloud box (thj.no): this repo, builds, no board.
+- The cloud box (thj.no): this repo, where the agent lives, no board.
 - The lab box (`ssh -p 23000 thor@home.thj.no`): the same repo under `~/Documents/Code/noaidi-fpga-synth`, the boards, the audio capture.
 - The Mac (`ssh -p 23456 hermes@home.thj.no`): an M2 Pro with six performance cores, and the machine Thor works at.
   - The agent's account there has no administrator rights. Its home is `/Volumes/Media/Hermes`.
-  - It holds the pinned nextpnr, built by hand, in `~/nextpnr-bench/install`, and no checkout of this repo.
-- Both checkouts rest on `main` and are only ever pulled.
-- Parallel sessions never share a working tree. Every session's work, a one-line docs PR included, happens in its own worktree: `git worktree add ~/wt/wt-<issue> -b <branch> main`, under `~/wt` on both boxes.
-- A worktree holds its own `rtl/obj_dir`, `yosys.json` and `pnr.log`.
-- The session that made a worktree removes it when its PR merges.
-
-## Division of labour
-
-- The cloud box is where the agent lives. Everything that is not a bitstream runs there: the Verilator sims, `make csp-test` and the cosim, the firmware build, the checks, the chat.
-- The lab box builds every bitstream (`make pack.fs`: yosys, nextpnr, gowin_pack) and holds the board.
-  - A seed sweep and a board test's bitstream are made there, never built on the cloud box and shipped over.
-  - The cloud box places only when the lab box is down.
-- Place and route is the Mac's work.
-  - The build places on the machine it runs on (#465), so a placement for the Mac is carried there by hand: `yosys.json` and `constraints.cst` over, nextpnr with the Makefile's options, `pnr.json` back to the lab box for `gowin_pack` and the take.
-  - Every job on the Mac is started with `nice -n 20`. The job is given the low priority, never the SSH service.
-  - The Mac's nextpnr places against the lab box's `chipdb-GW2A-18C.bin`, copied over the one its own build generates.
-- A seed names a placement only on the machine that ran it. Seeds are a diagnostic of the tool, never part of the build.
-- An rtl PR's chain runs on the lab box:
-  1. Synthesis.
-  2. One placement at the default seed.
-  3. `pack.fs`.
-  4. The board take.
-  5. The PR comment with the take and the utilisation lines that moved.
-- The sweep (`tools/lab/placement_sweep.sh`, four random seeds at once) is a monitor, not a gate (#434).
-  - It starts after the take, in the background: `REPORT=1 nohup tools/lab/placement_sweep.sh … &`.
-  - When it ends, the script posts its verdict as a commit status on the swept commit (context `sweep`). The agent relays it to the chat.
-  - A `sweep WARNING` (a draw that failed to place or route, or a floor under 85 MHz) or a `sweep FAIL` (a draw under the clock) also opens an issue under #363, by the script (#443).
-  - Nothing about a sweep goes on a PR as a comment.
-  - Its placements run at the lowest CPU priority, so a take started during one is not slowed.
+  - The pinned nextpnr, built by hand, is in `~/nextpnr-bench/install`. There is no checkout of this repo.
+  - It places against the lab box's `chipdb-GW2A-18C.bin`, copied over the one its own build generates.
+  - The build places on the machine it runs on, so a placement is carried to the Mac by hand: `yosys.json` and `constraints.cst` over, nextpnr with the Makefile's options, `pnr.json` back to the lab box for `gowin_pack` and the take.
+- Worktrees live under `~/wt` on the cloud box and the lab box: `git worktree add ~/wt/wt-<issue> -b <branch> main`. A worktree holds its own `rtl/obj_dir`, `yosys.json` and `pnr.log`.
+- A seed names a placement only on the machine that ran it.
