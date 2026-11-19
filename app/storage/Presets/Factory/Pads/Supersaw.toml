@@ -7,7 +7,7 @@ format = 1
 [voice]
 structure = "7+1"
 osc_mix = 0
-unison_detune = 0.07
+unison_detune = 0.070312
 unison_stereo = 100
 
 [[osc]]
@@ -23,35 +23,35 @@ pulse_width = 50
 [filter]
 type = "lowpass"
 slope = 24
-cutoff = 261.6
+cutoff = 261.63
 resonance = 1
 key_track = 100
 
 [amp_env]
-attack = 0.042
-sustain = -3.76
-decay = 3
-release = 9
-velocity = 61.4
+attack = 0.041702
+sustain = -3.7077
+decay = 3.018
+release = 8.8766
+velocity = 61.417
 
 [mod_env]
-attack = 0.042
+attack = 0.041702
 sustain = 93.75
-decay = 3
-release = 25
+decay = 3.018
+release = 25.15
 velocity = 100
 destination = "cutoff"
 depth = 24
 
 [[lfo]]
 shape = "triangle"
-rate = 1
+rate = 1.0014
 destination = "pitch"
-depth = 0.094
+depth = 0.09375
 
 [[lfo]]
 shape = "triangle"
-rate = 1
+rate = 1.0014
 destination = "pulse_width"
 depth = 0
 
