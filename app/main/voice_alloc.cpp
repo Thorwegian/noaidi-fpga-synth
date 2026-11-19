@@ -7,8 +7,8 @@
 // the active preset's changes (preset.h) and into notes, and hands both to
 // render.cpp, which says what the CSP's registers and sinks must hold; the
 // engine link sends it. The sound's arithmetic (the envelopes, the LFOs, the
-// pitch and cutoff of every voice) is the CSP's, running the control program
-// (tools/csp/programs).
+// pitch and cutoff of every voice) is the CSP's, running the program of the
+// graph that wiring.cpp wires.
 
 #include "voice_alloc.h"
 
