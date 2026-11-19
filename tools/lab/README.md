@@ -66,7 +66,7 @@ port. The synth's own preset saves are bare TOML without the copyright header
   connected to the CH345 (`alsa_midi`, `port.connect_to(...)`, as
   `midi_tx_check.py` does); for an ad-hoc `aseqsend` session first
   `aconnect 14:0 16:0` (Midi Through → CH345) and `aconnect -d 14:0 16:0`
-  after. O.S.C.'s standing subscription used to hide this.
+  after.
   `aseqsend -p 16:0 "90 3C 64"` — the hex bytes are the
   **positional** argument; `-s` means "send this *file*". Several messages may
   go in one call as one byte stream. Send Active Sensing (`FE`) every quarter
