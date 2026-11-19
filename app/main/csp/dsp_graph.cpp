@@ -932,8 +932,6 @@ struct DspGraph::Lowering {
     struct Loop : Block {
         int32_t shape = none;
         int count     = 0;
-        int elements  = 0; // in the shortest round
-        int rows      = 0; // of the body, the waits counted
         int stride    = 0;
         int base      = none; // the first copy's record
         // each word's offset in the record, by the position of its node
@@ -959,7 +957,10 @@ struct DspGraph::Lowering {
         std::vector<int> reads, writes;
     };
 
-    // A round of fewer elements hides none of a result's latency.
+    // A set of fewer copies is straight-line code. A round of fewer
+    // elements than a result's latency does not hide it: the body would
+    // wait, a cycle for every element, where straight-line code fills one
+    // copy's waits with another's rows.
     static constexpr int fewest_looped = result_latency;
     // The largest power of two a loop can step by.
     static constexpr int widest_stride = (loop_stride_max + 1) / 2;
@@ -1103,7 +1104,6 @@ struct DspGraph::Lowering {
             // The rounds are of sixteen and the last of what is left. The
             // builder spaces a body for the first round (#489), so a loop
             // here is of one round or of whole rounds.
-            loop.elements = std::min(loop.count, vector_round);
             if (kept_straight[index] || loop.count < fewest_looped
                 || loop.count > loop_count_max
                 || (loop.count > vector_round && loop.count % vector_round != 0)
@@ -1789,57 +1789,50 @@ struct DspGraph::Lowering {
         }
     }
 
-    // The body's rows in the order they issue, a row of the body at a time.
-    // An element's rows are a round apart, so a latency of cycles is one of
-    // rows: a round of sixteen hides them all. Every row that may issue is a
-    // candidate: first the SEL the flags wait for, then the rows that read
-    // through the pointer j holds, then the others by their height. When
-    // none may, j goes to the pointer whose rows can go on: its IDX issues,
-    // again if j was another's in between.
+    // The body's rows in the order they issue. A round is of
+    // `fewest_looped` elements at the least, so an element's rows are a
+    // result's latency apart in whatever order they come: the order is one
+    // of what is behind what, and of whose turn it is with j and with the
+    // flags. Every row that may issue is a candidate: first the SEL the
+    // flags wait for, then the rows that read through the pointer j holds,
+    // then the others by their height. When none may, j goes to the pointer
+    // whose rows can go on: its IDX issues, again if j was another's in
+    // between.
     void order_body(Loop &loop) {
-        std::vector<Instruction> &code = loop.code;
-        const auto count               = static_cast<int32_t>(code.size());
-        auto rows_for                  = [&](int cycles) {
-            return (cycles + loop.elements - 1) / loop.elements;
+        static_assert(fewest_looped >= result_latency,
+                      "a body is ordered with every latency hidden");
+        const std::vector<Instruction> &code = loop.code;
+        const auto count = static_cast<int32_t>(code.size());
+        std::vector<bool> issued(static_cast<size_t>(count), false);
+        auto may_issue = [&](const Instruction &row) {
+            return std::all_of(
+                    row.behind.begin(), row.behind.end(),
+                    [&](const auto &earlier) {
+                        return issued[static_cast<size_t>(earlier.first)];
+                    });
         };
-        std::vector<int> issued_at(static_cast<size_t>(count), -1);
-        auto may_issue = [&](const Instruction &row, int by) {
-            for (const auto &[other, cycles] : row.behind) {
-                const int at = issued_at[static_cast<size_t>(other)];
-                if (at < 0 || at + rows_for(cycles) > by) {
-                    return false;
-                }
-            }
-            return true;
-        };
-        int left = 0;
-        for (const Instruction &row : code) {
-            left += row.is_idx ? 0 : 1;
-        }
+        auto rows_left     = std::count_if(code.begin(), code.end(),
+                                           [](const Instruction &row) {
+                                           return !row.is_idx;
+                                       });
         int32_t open_group = none, open_compare = none;
-        int index_lands = 0, at_row = 0, idle = 0;
-        while (left > 0) {
+        while (rows_left > 0) {
             int32_t best = none, best_rank = 99, best_height = -1;
             int32_t next_group = none, next_height = -1;
-            bool index_awaited = false;
             for (int32_t at = 0; at < count; ++at) {
                 const Instruction &row = code[static_cast<size_t>(at)];
-                if (row.is_idx || issued_at[static_cast<size_t>(at)] >= 0
-                    || !may_issue(row, at_row)
+                if (row.is_idx || issued[static_cast<size_t>(at)]
+                    || !may_issue(row)
                     || (row.sets_flags && open_compare != none)) {
                     continue;
                 }
                 if (row.group != none && row.group != open_group) {
                     const Instruction &idx = code[static_cast<size_t>(
                             groups[static_cast<size_t>(row.group)].idx)];
-                    if (may_issue(idx, at_row) && row.height > next_height) {
+                    if (may_issue(idx) && row.height > next_height) {
                         next_group  = row.group;
                         next_height = row.height;
                     }
-                    continue;
-                }
-                if (row.group != none && at_row < index_lands) {
-                    index_awaited = true;
                     continue;
                 }
                 const int rank = row.compare != none ? 0
@@ -1854,31 +1847,24 @@ struct DspGraph::Lowering {
             }
             if (best != none) {
                 const Instruction &row = code[static_cast<size_t>(best)];
-                issued_at[static_cast<size_t>(best)] = at_row++;
+                issued[static_cast<size_t>(best)] = true;
                 loop.order.push_back(best);
-                --left;
-                idle = 0;
+                --rows_left;
                 if (row.sets_flags) {
                     open_compare = best;
                 }
                 if (row.compare != none) {
                     open_compare = none;
                 }
-            } else if (next_group != none && !index_awaited) {
+            } else if (next_group != none) {
                 const int32_t idx = groups[static_cast<size_t>(next_group)].idx;
                 loop.order.push_back(idx);
-                issued_at[static_cast<size_t>(idx)] = at_row;
-                open_group                          = next_group;
-                index_lands = at_row++ + rows_for(index_latency);
-                idle        = 0;
-            } else if (++idle > result_latency) {
+                open_group = next_group;
+            } else {
                 graph.issue("a loop's body cannot be ordered");
                 return;
-            } else {
-                ++at_row; // a wait, which the builder lays
             }
         }
-        loop.rows = at_row;
     }
 
     // The record of a copy: the records the top made of its fields, the
@@ -2286,8 +2272,9 @@ struct DspGraph::Lowering {
         for (size_t index = 0; index < loops.size(); ++index) {
             const Loop &loop = loops[index];
             Instruction whole;
-            whole.loop   = static_cast<int32_t>(index);
-            whole.cycles = 2 + loop.rows * loop.count; // its row, a bubble
+            whole.loop = static_cast<int32_t>(index);
+            // its row, a bubble, and the body for every element
+            whole.cycles = 2 + static_cast<int>(loop.order.size()) * loop.count;
             Accesses touched;
             for (const Instruction &row : loop.code) {
                 for (const Operand *operand : {&row.r, &row.x, &row.y}) {
@@ -2659,6 +2646,8 @@ struct DspGraph::Lowering {
             if (!graph.issues_.empty()) {
                 return false;
             }
+            graph.copy_sets_[static_cast<size_t>(loop.shape)].rows =
+                    static_cast<int>(loop.order.size());
             if (!lay_element(loop, accesses)) {
                 outgrown = loop.shape;
                 return false;

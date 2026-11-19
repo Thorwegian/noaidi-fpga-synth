@@ -204,6 +204,7 @@ public:
         int copies  = 0;     // how many circuits
         int nodes   = 0;     // the nodes of each
         bool looped = false; // the copies are the elements of a vector loop
+        int rows    = 0;     // the instruction rows of that loop's body
     };
     const std::vector<CopySet> &copy_sets() const;
 
