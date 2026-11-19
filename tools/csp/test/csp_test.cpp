@@ -1239,7 +1239,7 @@ std::string control_program(int saws, int squares, int triangles, int sines,
 
 // The self-test program: what the firmware checks at boot, on the model.
 void test_selftest_program() {
-    Machine m(read_program("map.s") + read_program("selftest.s"));
+    Machine m(read_program("selftest.s"));
     m.start();
     // the pass counter's register holds 0 in the first pass after reset (nothing wrote it yet)
     // and the pass's number from the second on; the program sees that value
