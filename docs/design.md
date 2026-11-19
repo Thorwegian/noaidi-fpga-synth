@@ -253,8 +253,7 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 
 - **The wire is in nines.** Every block RAM on the chip is 9, 18 or 36
   bits wide, so the link is too: an 18-bit address that counts dwords,
-  then 36-bit payload dwords, nothing straddling a boundary. (The first revision's
-  32-bit wire carried 18 useful bits in 32 clocks; gone since #235.)
+  then 36-bit payload dwords, nothing straddling a boundary.
 - Transaction: the command nonet (`[8]` R/W, `[7]` auto-increment), two
   address nonets, then dwords of four nonets each, streaming while CS
   stays low. MISO's first nonet is always the ID nonet, a link check on
@@ -279,7 +278,7 @@ Authoritative detail: [memory_map.md](memory_map.md). Key stances:
 [csp2_architecture.md](csp2_architecture.md) (the machine). In brief:
 partials are dumb sinks — a waveform, a filter type and ten pointers into the
 sink area. Every dynamic value is computed by the CSP, a processor with 2048
-registers running a fixed program once per pass (3072 cycles, 24 kHz since #268): the
+registers running a fixed program once per pass (3072 cycles, 24 kHz): the
 envelopes (RC, one step a pass), the LFOs (four shapes), and each voice's
 pitch (note + bend + pitch LFOs + tune), cutoff (envelope + key tracking +
 cutoff knob) and gain (envelope × velocity × volume). A partial's effective
