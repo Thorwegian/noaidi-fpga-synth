@@ -74,8 +74,8 @@ std::array<int, pointer_count> pointers_of(int voice, int slot,
 // ---- the writes -----------------------------------------------------------------
 
 // Everything that does not depend on the preset: the words the graph has
-// the firmware set at load, every word the firmware owns at zero, each LFO
-// of every channel listening to the saw that runs for it, every voice idle on
+// the firmware set at load, every word the firmware owns at zero, every
+// channel listening to the first LFO of each half, every voice idle on
 // channel 0, the sink that stays zero. Once, at start-up. A pointer or a
 // stage nobody has written sends the program's reads anywhere, so the CSP
 // is let go after these are in.

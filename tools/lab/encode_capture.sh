@@ -1,7 +1,8 @@
 #!/bin/bash
 # Encode an audio capture for listening review: an MP3 at 320 kbps next to
 # the capture, to send over chat (the Discord thread where the work is
-# discussed).
+# discussed). (Release assets, then a served folder on the cloud box, were
+# the earlier homes; both are gone, #368.)
 #
 #   Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 #   License: CERN-OHL-S v2

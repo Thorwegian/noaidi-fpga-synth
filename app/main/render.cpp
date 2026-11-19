@@ -127,8 +127,8 @@ double velocity_scale(uint8_t velocity, uint8_t amount) {
 }
 
 // The loudness span the amp envelope's static amounts are laid out over: the
-// velocity's amount and the sustain are fractions of a 60 dB span
-// (`param_conventions.md`), and since the pipeline's gain is linear
+// velocity's amount and the sustain are fractions of 60 dB (the old engine's
+// span; `param_conventions.md`), and since the pipeline's gain is linear
 // (#176) the exponential is taken here, once per note or per preset, not
 // in gateware. A fraction f is 2^(span × (f − 1)) of amplitude: 0 is −60 dB,
 // 1 is unity.
@@ -323,9 +323,9 @@ void setup(const wiring::Synth &synth, Writes &writes) {
         put(writes, initial.address, initial.value);
     }
     for (const wiring::Channel &channel : synth.channels) {
-        for (int l = 0; l < wiring::channel_lfo_count; ++l) {
-            put(writes, word_of(synth, channel.lfo[static_cast<size_t>(l)]),
-                graph.address(synth.lfo(l, wiring::shape_saw).record));
+        for (int half = 0; half < wiring::lfo_half_count; ++half) {
+            put(writes, word_of(synth, channel.lfo[static_cast<size_t>(half)]),
+                graph.address(synth.lfo(half, wiring::shape_saw).record));
         }
     }
     // a voice with no note is in release, at zero
@@ -390,9 +390,9 @@ void lfo(const wiring::Synth &synth, const preset_t &preset, int i,
     const lfo_t &l                 = preset.lfo[i];
     const int shape                = lfo_shape(l.shape);
     const wiring::Channel &channel = channel_of(synth);
-    // The LFO of the preset's shape among the four that run for LFO i; the
-    // channel listens to this one, below. Its output is ±depth, which the
-    // channel scales by the destination's depth.
+    // The half's LFO of the preset's shape. All four of a half run every
+    // pass; the channel listens to this one, below. Its output is ±depth,
+    // which the channel scales by the destination's depth.
     const wiring::Lfo &wave = synth.lfo(i, shape);
     wide(writes, word_of(synth, wave.step),
          csp::lfo_rate(l.rate, 1)); // every pass (#268)
