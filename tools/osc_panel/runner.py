@@ -15,7 +15,9 @@ the runner owns the synth's side of the link:
     everything the synth sends is relayed to O.S.C.'s subscription;
   - the Noaidi kept trusted and a persistent bluetoothctl session that
     reconnects it whenever its port is gone (BlueZ drops a connection nobody
-    references; the session is the reference);
+    references; the session is the reference). BlueZ connects only to a
+    device it has seen advertise, so a board it does not hold yet (a new one,
+    or one its cache has dropped) is scanned for first;
   - the sequencer's announce port watched for the "Noaidi Bluetooth" client
     appearing and vanishing: when it appears the runner waits LINK_DELAY
     (BlueZ's plugin subscribes to the synth's notifications about a second after
@@ -24,7 +26,10 @@ the runner owns the synth's side of the link:
     (a SysEx state request, docs/midi_schema.md), so the panel's knobs move to the loaded preset;
   - every reconnect logged with the time it took.
 
-    ~/.noaidi-blenv/bin/python3 tools/osc_panel/runner.py [--mac 10:00:3B:B0:4D:A6]
+    ~/.noaidi-blenv/bin/python3 tools/osc_panel/runner.py [--mac 44:BD:8D:6C:87:5E]
+
+The address is the board's: the ESP32-S3's base MAC, which its USB serial
+number shows, plus two.
 
 Needs alsa_midi (the lab box's ~/.noaidi-blenv) and bluetoothctl. run.sh starts
 it beside O.S.C.
@@ -34,7 +39,7 @@ import subprocess
 import sys
 import time
 
-NOAIDI_MAC = "10:00:3B:B0:4D:A6"
+NOAIDI_MAC = "44:BD:8D:6C:87:5E"
 LINK_DELAY = 3.0      # seconds after the Noaidi's ALSA port appears, before linking to it
 RECONNECT_EVERY = 5.0 # seconds between connect attempts while the port is gone
 ASK_DELAY = 2.0       # seconds after both the link and a surface are there, before asking: O.S.C. opens its port before its server routes what arrives
@@ -62,13 +67,34 @@ class Runner:
         self.link_at = None       # when to link, after the port appeared
         self.gone_since = None    # when the port vanished (for the reconnect timing)
         self.next_connect = 0.0
+        self.scanning = False     # the bluetoothctl session holds a discovery
         self.btctl = subprocess.Popen(["bluetoothctl"], stdin=subprocess.PIPE,
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
-        self.bt(f"trust {mac}")
 
     def bt(self, command):
         self.btctl.stdin.write(command + "\n")
         self.btctl.stdin.flush()
+
+    def known_to_bluez(self):
+        """Whether BlueZ holds the Noaidi: it has seen it advertise and not dropped it since."""
+        info = subprocess.run(["bluetoothctl", "info", self.mac], capture_output=True, text=True, timeout=10)
+        return f"Device {self.mac}" in info.stdout and "not available" not in info.stdout
+
+    def scan(self, wanted):
+        if wanted != self.scanning:
+            self.bt("scan on" if wanted else "scan off")
+            self.scanning = wanted
+
+    def connect(self):
+        """One attempt at the connection: a scan while BlueZ does not hold the Noaidi, the connect once it does."""
+        if not self.known_to_bluez():
+            if not self.scanning:
+                log(f"BlueZ does not hold {self.mac}: scanning for it")
+            self.scan(True)
+            return
+        self.scan(False)
+        self.bt(f"trust {self.mac}")
+        self.bt(f"connect {self.mac}")
 
     def noaidi_port(self):
         for p in self.client.list_ports():
@@ -219,7 +245,7 @@ class Runner:
                     self.unlinked()
             if self.noaidi is None and self.link_at is None and now >= self.next_connect:
                 self.next_connect = now + RECONNECT_EVERY
-                self.bt(f"connect {self.mac}")
+                self.connect()
 
 
 def main():

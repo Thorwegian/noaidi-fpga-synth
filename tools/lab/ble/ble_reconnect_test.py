@@ -21,7 +21,7 @@ import subprocess
 import threading
 import time
 
-NOAIDI_MAC = "10:00:3B:B0:4D:A6"
+NOAIDI_MAC = "44:BD:8D:6C:87:5E"
 
 
 class SerialCapture(threading.Thread):

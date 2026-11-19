@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 
-NOAIDI_MAC = "10:00:3B:B0:4D:A6"
+NOAIDI_MAC = "44:BD:8D:6C:87:5E"
 RATE = 48000
 N = 1024                 # FFT size: 1500 Hz -> bin 32 exactly
 FUND_BIN = 32
