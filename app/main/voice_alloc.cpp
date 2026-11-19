@@ -660,7 +660,8 @@ void voice_alloc_task(void *) {
         const int64_t now = esp_timer_get_time();
         flush_pending_edits(now); // coalesced CC edits
 
-        // Single-core backpressure. The ESP32-C3 has one core; a sustained MIDI
+        // Single-core backpressure. The firmware runs on one core
+        // (CONFIG_FREERTOS_UNICORE); a sustained MIDI
         // flood keeps this queue non-empty, so the receive above never blocks
         // and IDLE (priority 0) is never scheduled → task watchdog. If we have
         // run this long without blocking, yield a tick so IDLE runs. Free in

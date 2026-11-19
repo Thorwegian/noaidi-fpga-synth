@@ -17,17 +17,18 @@ the device is plain text in a FAT file system.
 | Filename encoding | UTF-8 (`CONFIG_FATFS_API_ENCODING_UTF_8`) |
 | Mount point | `/storage` |
 
-On the ESP32-C3 Super Mini's 4 MB flash the partition table is:
+On the ESP32-S3 module's 16 MB flash the partition table is:
 
 | Name | Type | Subtype | Offset | Size |
 |---|---|---|---|---|
 | `nvs` | data | nvs | `0x9000` | `0x6000` |
 | `phy_init` | data | phy | `0xF000` | `0x1000` |
-| `factory` | app | factory | `0x10000` | `0x100000` (1 MB) |
-| `storage` | data | fat | `0x110000` | `0x2F0000` (2.9 MB) |
+| `factory` | app | factory | `0x10000` | `0x300000` (3 MB) |
+| `storage` | data | fat | `0x310000` | `0x2F0000` (2.9 MB) |
 
-The format does not depend on the partition size. A board with more
-flash gets a larger `storage` partition and nothing else changes.
+The flash from `0x600000` up is unallocated. The format does not depend
+on the partition size: a larger `storage` partition changes nothing
+else.
 
 **Capacity.** A file takes whole clusters. A preset file is about 650
 bytes, two 512-byte clusters, plus up to about 200 bytes of directory
@@ -42,16 +43,17 @@ not matter. Safety mode keeps a copy of the flash sector while it is
 rewritten, so a power loss mid-write loses no neighbouring data.
 
 ### Reaching the files from a computer
-- **ESP32-C3:** no USB OTG. `make fw-storage-read DIR=folder` reads
-  the partition over serial and unpacks it into a folder;
+- **Over serial:** `make fw-storage-read DIR=folder` reads
+  the partition and unpacks it into a folder;
   `make fw-storage-write DIR=folder` packs a folder and writes it back.
   Both use `tools/storage/storage_image.py`. That tool runs ESP-IDF's
   own FatFs on the computer, because ESP-IDF's image generator
   (`wl_fatfsgen.py`) upper-cases folder names and lower-cases long
   names. It also handles the wear-levelling layer, including a
   partition the synth has been writing to.
-- **ESP32-S3:** USB OTG presents the partition to the computer as a USB
-  drive. The firmware unmounts it while the computer has it.
+- **As a USB drive:** not implemented. The ESP32-S3's USB OTG can present
+  the partition to the computer as a drive, the firmware unmounting it
+  while the computer has it.
 
 ## Layout
 

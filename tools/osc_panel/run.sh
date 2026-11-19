@@ -12,7 +12,7 @@
 # runner's port "Noaidi O.S.C.:surface" (runner.py, #287), which keeps the
 # Noaidi trusted and connected, re-links to BlueZ's port whenever it comes
 # back and asks the synth for its state, so a board reset costs nothing but a
-# few seconds. The CH345 USB-MIDI adapter into the panel port stays free for
+# few seconds. The CH345 USB-MIDI adapter into din1 stays free for
 # the test scripts (tools/lab/README.md).
 #
 # The .deb ships an Electron binary that needs X; ELECTRON_RUN_AS_NODE

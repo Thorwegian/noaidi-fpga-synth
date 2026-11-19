@@ -51,7 +51,7 @@ def main():
             stop.wait(0.25)
 
     threading.Thread(target=keepalive, daemon=True).start()
-    # The first message after a silence can be lost (the panel input's
+    # The first message after a silence can be lost (a DIN input's
     # silence reset flushes the UART; tools/lab/README.md), and the keepalive
     # thread's first FE races the first message below: send one FE now and
     # let it land before anything that matters.

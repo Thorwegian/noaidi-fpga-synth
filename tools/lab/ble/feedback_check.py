@@ -5,15 +5,15 @@
     License: CERN-OHL-S v2
 
 Over the real Linux path (BlueZ's MIDI plugin, the ALSA port "Noaidi
-Bluetooth"), with the CH345 into the panel port as the keyboard's side:
+Bluetooth"), with the CH345 into a DIN input as the keyboard's side:
 
-  1. A Program Change sent into the panel port makes the synth send the whole
+  1. A Program Change sent into the DIN input makes the synth send the whole
      preset as CCs on BLE: every preset CC of docs/midi_schema.md exactly once
      (the RPN's select bytes twice), within 2 s.
   2. The values are the loaded preset's: the fields with plain laws (waves,
      filter type and slope, voice mode, volume, velocity amounts) are read
      from the program's .toml and compared.
-  3. A preset CC sent into the panel port comes back out on BLE (feedback to
+  3. A preset CC sent into the DIN input comes back out on BLE (feedback to
      the other surface); one sent over BLE does not (no echo).
 
 The dump's CC list below is cc_map::dump()'s order; the test reports what is
@@ -95,7 +95,7 @@ def main():
         print(f"[ble] connecting {NOAIDI_MAC}, {CONNECT_SECONDS:.0f} s for BlueZ ...")
         bt(f"connect {NOAIDI_MAC}", btctl)
         time.sleep(CONNECT_SECONDS)
-        client, panel, out, inp = open_ports()
+        client, din, out, inp = open_ports()
 
         def send(port, ev):
             client.event_output(ev, port=port)
@@ -103,8 +103,8 @@ def main():
 
         received(client, 1.0)  # nothing is sent on connect; drain what BlueZ's setup left
 
-        # 1. the Program Change into the panel port: the whole preset on BLE
-        send(panel, ProgramChangeEvent(channel=0, value=args.program))
+        # 1. the Program Change into the DIN input: the whole preset on BLE
+        send(din, ProgramChangeEvent(channel=0, value=args.program))
         events = received(client, 2.5)
         got = [(e.param, e.value) for e in events if isinstance(e, ControlChangeEvent)]
         print(f"[dump] program {args.program}: {len(got)} CCs on BLE within 2.5 s (want {len(DUMP)})")
@@ -130,13 +130,13 @@ def main():
         if want:
             print(f"[values] {len(want)} fields compared with {args.toml}")
 
-        # 3. feedback of a CC from the panel port, no echo of one over BLE
+        # 3. feedback of a CC from the DIN input, no echo of one over BLE
         received(client, 0.2)
-        send(panel, ControlChangeEvent(channel=0, param=74, value=90))
+        send(din, ControlChangeEvent(channel=0, param=74, value=90))
         back = [describe(e) for e in received(client, 1.5)]
-        print(f"[fwd] panel cc 74=90 -> BLE got {back or 'nothing'}")
+        print(f"[fwd] din cc 74=90 -> BLE got {back or 'nothing'}")
         if "cc 74=90" not in back:
-            failures.append("a CC from the panel port was not sent on to BLE")
+            failures.append("a CC from the DIN input was not sent on to BLE")
         send(out, ControlChangeEvent(channel=0, param=71, value=20))
         echo = [describe(e) for e in received(client, 1.0)]
         print(f"[echo] BLE cc 71=20 -> BLE got {echo or 'nothing'}")

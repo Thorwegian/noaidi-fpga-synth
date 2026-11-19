@@ -42,8 +42,8 @@ typedef enum {
 // other source's surface (parameter feedback, #279), never back to its own.
 typedef enum {
     MIDI_SOURCE_INTERNAL = 0, // the firmware itself: the console, a rule
-    MIDI_SOURCE_DIN,          // UART1, the DIN jack
-    MIDI_SOURCE_PANEL,        // UART0, the dev host's panel port
+    MIDI_SOURCE_DIN1,         // UART1, the first DIN input
+    MIDI_SOURCE_DIN2,         // UART2, the second DIN input
     MIDI_SOURCE_BLE,          // MIDI over Bluetooth LE
 } midi_source_t;
 

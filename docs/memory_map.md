@@ -3,7 +3,7 @@
 Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
-The ESP32-C3 ↔ FPGA SPI control interface: wire protocol, address map, and
+The ESP32-S3 ↔ FPGA SPI control interface: wire protocol, address map, and
 what the words mean. The map is in `rtl/synth_pkg.sv` and
 `app/main/fpga_map.hpp`; the decoder is `rtl/spi/spi_bus.sv`, and
 `rtl/tb/tb_spi_bus.sv` is its bench.
@@ -40,7 +40,7 @@ a MIDI-to-CV converter). Consequences:
 
 ```mermaid
 flowchart TD
-    MIDI["MIDI source / .mid file"] --> ESP["ESP32-C3 firmware<br/>MIDI parse · voice allocation<br/>preset → registers and sinks"]
+    MIDI["MIDI source / .mid file"] --> ESP["ESP32-S3 firmware<br/>MIDI parse · voice allocation<br/>preset → registers and sinks"]
     ESP -- "SPI (10–40 MHz)" --> BUS["spi_bus"]
     subgraph FG["Tang Nano 20K"]
         BUS --> Q["write FIFO<br/>511 dwords of 36 bits"]
@@ -277,17 +277,40 @@ ports.
 
 - Firmware default: **10 MHz**, one CS frame per transaction
   (`spi_link::init`'s rate).
-- **Measured on hardware with the wire in nines (#233, 2026-10-18): clean at
+- **Measured on hardware with the wire in nines (#233, 2026-10-18), an
+  ESP32-C3 as the master: clean at
   10, 20, 26.7 and 40 MHz** — a thousand rounds of five scratch dwords each,
   singly and in a burst, at every rate: no dword wrong and the ID nonet on
   every frame. (The ESP32 divides its 80 MHz: 30 asked gives 26.7.)
-- **Measured earlier with the first revision's 32-bit wire: clean at
+- **Measured earlier with the first revision's 32-bit wire and the same
+  master: clean at
   every rate from 1 MHz to 40 MHz.** 88/88 transactions correct — write four registers, burst-read
   them back, check the ID byte and all four values, ×8 repetitions at each
   of 11 rates. 40 MHz is the ESP32-C3's ceiling for SPI2 through the GPIO
-  matrix (the configured pins are not the IOMUX ones), not a limit of the
+  matrix (its pins were not the IOMUX ones), not a limit of the
   link: nothing had started to degrade. The jumper wiring, suspected here
   as the likely limiter, is not one.
+- **The ESP32-S3 as the master, on SPI2's own IO_MUX pins, through the
+  prototype's jumper cable (2026-11-19): the link depends on the pads'
+  drive, not on the rate.** Four scratch dwords written singly and read
+  back, a thousand rounds at 10 MHz and a hundred at 1 MHz, with MOSI,
+  SCLK and CS at each of the chip's four drive strengths (about 5, 10, 20
+  and 40 mA: ESP32-S3 datasheet, the pin table's DRV column):
+
+  | drive | wrong at 10 MHz, of 4000 | wrong at 1 MHz, of 400 |
+  |---|---|---|
+  | 40 mA | 4000 | 400 |
+  | 20 mA, the chip's default | 3838 | 7 |
+  | 10 mA | 0 | 0 |
+  | 5 mA | 434 | 93 |
+
+  The wrong dwords are shifted by a bit from some point on: the edges ring
+  on the cable, and the slave, clocked by SCLK itself, takes the ringing
+  for clock edges. `spi_link::init` therefore sets the three pads to
+  10 mA. One step either way fails, so this cable has no margin to spare.
+  At 10 mA a thousand rounds are also clean at 5 and at 20 MHz; at 40 MHz
+  48 of 4000 dwords are wrong with every ID nonet right, so the limit
+  there is the read's timing, not ringing.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the

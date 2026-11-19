@@ -33,10 +33,10 @@ static int s_sub_id = -1;
 // (the lab's scripts) is not moved by it.
 static const char *source_name(uint8_t source) {
     switch (source) {
-    case MIDI_SOURCE_DIN:
-        return "din";
-    case MIDI_SOURCE_PANEL:
-        return "panel";
+    case MIDI_SOURCE_DIN1:
+        return "din1";
+    case MIDI_SOURCE_DIN2:
+        return "din2";
     case MIDI_SOURCE_BLE:
         return "ble";
     default:

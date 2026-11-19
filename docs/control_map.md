@@ -29,7 +29,8 @@ Controllers:
 - aftertouch and expression pedal as mod sources
 
 Input transports:
-- **Wired MIDI** (5-pin DIN → optocoupler → UART1 on GPIO0) is the
+- **Wired MIDI** (5-pin DIN → optocoupler → `din1`, UART1 on GPIO18, or
+  `din2`, UART2 on GPIO1) is the
   primary PLAYING input.
 - **BLE MIDI** is for control surfaces — up to 3 bonded devices
   (one active connection at a time, `MAX_BONDS=3`,

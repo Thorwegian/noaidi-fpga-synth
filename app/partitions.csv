@@ -1,10 +1,11 @@
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
 #
-# Flash layout for the ESP32-C3 Super Mini's 4 MB flash. "storage" holds
-# the presets and settings (docs/storage_format.md).
+# Flash layout on the ESP32-S3 module's 16 MB flash. "storage" holds the
+# presets and settings (docs/storage_format.md). The flash above it, from
+# 0x600000, is unallocated.
 # Name,     Type, SubType, Offset,   Size
 nvs,        data, nvs,     0x9000,   0x6000
 phy_init,   data, phy,     0xF000,   0x1000
-factory,    app,  factory, 0x10000,  0x100000
-storage,    data, fat,     0x110000, 0x2F0000
+factory,    app,  factory, 0x10000,  0x300000
+storage,    data, fat,     0x310000, 0x2F0000

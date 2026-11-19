@@ -5,12 +5,12 @@
     License: CERN-OHL-S v2
 
 Over the real Linux path (BlueZ's MIDI plugin exposes the Noaidi as the ALSA
-port "Noaidi Bluetooth", both directions), with the CH345 into the panel
-port as the other source:
+port "Noaidi Bluetooth", both directions), with the CH345 into a DIN
+input as the other source:
 
-  1. TX: a CC sent into the panel port comes out on the BLE port, the synth's
+  1. TX: a CC sent into the DIN input comes out on the BLE port, the synth's
      parameter feedback to another surface (three CCs, each within 2 s).
-  2. No THRU: a note sent into the panel port does not come out on BLE.
+  2. No THRU: a note sent into the DIN input does not come out on BLE.
   3. RX intact, no echo: a CC and a note sent over BLE reach the firmware
      (the console's MIDI trace names their source "ble") and nothing comes
      back on BLE, since a surface never hears itself.
@@ -95,14 +95,14 @@ def open_ports():
         raise RuntimeError("CH345 ALSA port not found")
     if noaidi is None:
         raise RuntimeError("Noaidi ALSA port not found: BlueZ did not expose the MIDI profile")
-    panel = client.create_port("panel")
-    panel.connect_to(ch345)
+    din = client.create_port("din")
+    din.connect_to(ch345)
     out = client.create_port("ble out")
     out.connect_to(noaidi)
     inp = client.create_port("ble in", caps=PortCaps.WRITE | PortCaps.SUBS_WRITE)
     inp.connect_from(noaidi)
     print(f"[midi] '{ch345.client_name}' held; '{noaidi.client_name}:{noaidi.name}' connected both ways")
-    return client, panel, out, inp
+    return client, din, out, inp
 
 
 def received(client, seconds):
@@ -148,7 +148,7 @@ def main():
         print(f"[ble] connecting {NOAIDI_MAC}, {CONNECT_SECONDS:.0f} s for BlueZ ...")
         bt(f"connect {NOAIDI_MAC}", btctl)
         time.sleep(CONNECT_SECONDS)
-        client, panel, out, inp = open_ports()
+        client, din, out, inp = open_ports()
         for ln in cap.lines:
             if "ble_midi" in ln:
                 print(f"[fw] {ln.strip()}")
@@ -157,22 +157,22 @@ def main():
             client.event_output(ev, port=port)
             client.drain_output()
 
-        # 1. TX: a CC into the panel port comes out on BLE
+        # 1. TX: a CC into the DIN input comes out on BLE
         for num, val in ((74, 100), (71, 12), (7, 103)):
             received(client, 0.2)  # drain
-            send(panel, ControlChangeEvent(channel=0, param=num, value=val))
+            send(din, ControlChangeEvent(channel=0, param=num, value=val))
             got = [describe(e) for e in received(client, 2.0)]
-            print(f"[tx] panel cc {num}={val} -> BLE got {got or 'nothing'}")
+            print(f"[tx] din cc {num}={val} -> BLE got {got or 'nothing'}")
             if f"cc {num}={val}" not in got:
-                failures.append(f"CC {num}={val} from the panel port did not come out on BLE")
+                failures.append(f"CC {num}={val} from the DIN input did not come out on BLE")
 
-        # 2. no THRU: a note into the panel port stays off BLE
-        send(panel, NoteOnEvent(note=60, channel=0, velocity=100))
+        # 2. no THRU: a note into the DIN input stays off BLE
+        send(din, NoteOnEvent(note=60, channel=0, velocity=100))
         got = [describe(e) for e in received(client, 1.0)]
-        send(panel, NoteOffEvent(note=60, channel=0, velocity=64))
-        print(f"[thru] panel note -> BLE got {got or 'nothing'}")
+        send(din, NoteOffEvent(note=60, channel=0, velocity=64))
+        print(f"[thru] din note -> BLE got {got or 'nothing'}")
         if got:
-            failures.append(f"a note from the panel port came out on BLE: {got}")
+            failures.append(f"a note from the DIN input came out on BLE: {got}")
 
         # 3. RX intact, no echo: a CC and a note over BLE reach the firmware,
         #    nothing comes back
@@ -193,7 +193,7 @@ def main():
         if got:
             failures.append(f"the BLE surface heard itself: {got}")
 
-        send(panel, ControlChangeEvent(channel=0, param=123, value=0))  # notes off, whatever happened
+        send(din, ControlChangeEvent(channel=0, param=123, value=0))  # notes off, whatever happened
 
         # The firmware logs the central's subscription; the CCs arriving is the
         # direct evidence of it, the line is the record.
