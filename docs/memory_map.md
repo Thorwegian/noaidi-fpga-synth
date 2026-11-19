@@ -290,8 +290,27 @@ ports.
   matrix (its pins were not the IOMUX ones), not a limit of the
   link: nothing had started to degrade. The jumper wiring, suspected here
   as the likely limiter, is not one.
-- The ESP32-S3 drives the link from SPI2's own IO_MUX pins. With it as the
-  master no rate has been measured in this way.
+- **The ESP32-S3 as the master, on SPI2's own IO_MUX pins, through the
+  prototype's jumper cable (2026-11-19): the link depends on the pads'
+  drive, not on the rate.** Four scratch dwords written singly and read
+  back, a thousand rounds at 10 MHz and a hundred at 1 MHz, with MOSI,
+  SCLK and CS at each of the chip's four drive strengths (about 5, 10, 20
+  and 40 mA: ESP32-S3 datasheet, the pin table's DRV column):
+
+  | drive | wrong at 10 MHz, of 4000 | wrong at 1 MHz, of 400 |
+  |---|---|---|
+  | 40 mA | 4000 | 400 |
+  | 20 mA, the chip's default | 3729 | 6 |
+  | 10 mA | 0 | 0 |
+  | 5 mA | 310 | 100 |
+
+  The wrong dwords are shifted by a bit from some point on: the edges ring
+  on the cable, and the slave, clocked by SCLK itself, takes the ringing
+  for clock edges. `spi_link::init` therefore sets the three pads to
+  10 mA. One step either way fails, so this cable has no margin to spare.
+  At 10 mA a thousand rounds are also clean at 5 and at 20 MHz; at 40 MHz
+  270 of 4000 dwords are wrong with every ID nonet right, so the limit
+  there is the read's timing, not ringing.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the

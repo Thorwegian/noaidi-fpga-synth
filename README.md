@@ -282,7 +282,10 @@ so the prototype and the base board run one firmware.
 | CS (active low) | 10 | 28 |
 
 (These four are SPI2's own IO_MUX pins on the ESP32-S3, so the link
-does not pass through the GPIO matrix.)
+does not pass through the GPIO matrix. The firmware drives MOSI, SCLK
+and CS at about 10 mA, one step under the chip's default: at the
+default the edges ring on the prototype's cable, `docs/memory_map.md`,
+"SPI speed budget".)
 
 **ESP32-S3 peripherals:**
 

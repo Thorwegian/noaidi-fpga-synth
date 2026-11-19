@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdio>
 
+#include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
 
@@ -16,6 +17,14 @@ namespace spi_link {
 namespace {
 
 constexpr const char *tag = "spi_link";
+
+// The drive of the pads that carry the master's edges: about 10 mA, one step
+// under the chip's default of about 20 mA (ESP32-S3 datasheet, the pin
+// table's DRV column). At the default the edges ring on the prototype's
+// cable, and the slave, clocked by SCLK itself, takes the ringing for clock
+// edges: dwords come back shifted by a bit. Measured in
+// docs/memory_map.md, "SPI speed budget".
+constexpr gpio_drive_cap_t pad_drive = GPIO_DRIVE_CAP_1;
 
 constexpr int command_nonets    = 1;
 constexpr int address_nonets    = address_bits / nonet_bits;
@@ -121,6 +130,10 @@ void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
 
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_DISABLED));
     add_device(cs_pin, frequency_hz);
+    for (const int pin : {mosi_pin, sclk_pin, cs_pin}) {
+        ESP_ERROR_CHECK(gpio_set_drive_capability(static_cast<gpio_num_t>(pin),
+                                                  pad_drive));
+    }
     ESP_LOGI(tag, "SPI in nines: MOSI %d MISO %d SCLK %d CS %d at %lu Hz",
              mosi_pin, miso_pin, sclk_pin, cs_pin,
              static_cast<unsigned long>(frequency_hz));

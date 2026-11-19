@@ -39,7 +39,7 @@ using dword_t = uint64_t;
 
 // Bring up the ESP-IDF SPI master on these pins at this clock. With SPI2's
 // own IO_MUX pins (CS 10, MOSI 11, SCLK 12, MISO 13) the driver bypasses the
-// GPIO matrix.
+// GPIO matrix. The three pads the master drives are set to about 10 mA.
 void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
           uint32_t frequency_hz);
 
