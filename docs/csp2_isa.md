@@ -91,12 +91,12 @@ An operand field is a 2-bit mode and 10 bits:
 
 **Indexed addresses are made by concatenation, not addition.** An index
 register holds the address of a *block* — a voice, a channel, an LFO
-record — and every block has a **power-of-two stride** (16, 64, 16
-words), so the block's address has zeros in its low bits and the offset
-fits them: the operand's address is the index's high bits with the
-offset's low bits beside them, wiring, no carry chain. The assembler
-checks that an offset fits its block's stride; `map.s` declares the
-strides and is the one definition of the layout (section 7).
+record — and every block has a **power-of-two stride**, so the block's
+address has zeros in its low bits and the offset fits them: the
+operand's address is the index's high bits with the offset's low bits
+beside them, wiring, no carry chain. The offset is a ten-bit field, and
+the graph keeps every block a loop walks at a power-of-two stride, which
+is the layout's rule (section 7).
 
 The **index registers `i` and `j`** hold full addresses, reach the whole
 file and the sink area, and are set by `IDX` (section 4) or stepped by
@@ -174,7 +174,7 @@ count in `x`'s immediate mode, the stride in `y`'s.
 A repeat costs four cycles (the four rows behind the last body row are in
 flight, in the registered front end, and are discarded). **A loop whose count is 0 is not assembled**:
 neither its row nor its body is in the image, since the chip cannot skip
-a body for free and the count is a number the generator knows.
+a body for free and the count is known when the program is built.
 
 **Vector loops** (`LOOP.vi`, `LOOP.vj`) run their body across the loop's
 elements, instruction by instruction, every element in turn — the first
@@ -213,21 +213,23 @@ chosen, not control flow, so there is no skip.
 
 ## 7. The register map
 
-`map.s` is the one definition, as before, with one rule added: a block a
-loop walks has a power-of-two stride. The file, 2048 words of 18 bits
-(the first revision's three read copies kept):
+Where a value's word lives is the program's choice: the graph lays the
+file out by reach, and says where each value is and who writes it
+(`app/main/csp/dsp_graph.hpp`). A direct operand reaches the first 1024
+words; a loop's copies lie in records of one layout from the top of
+DMEM down, a power-of-two stride apart. The file is 2048 words of 18
+bits (the first revision's three read copies kept), and only these
+regions have a fixed meaning:
 
 | region | contents | rule |
 |---|---|---|
-| `0x000–0x03F` | the firmware's constants (fewer: immediates are in the row) | written once, read anywhere |
-| `0x040–0x05F` | inputs: noise, the pass counter, the test tone | read only; the two last words are the read ports' parking row |
-| `0x060–0x07F` | globals: the LFO sets | |
-| `0x080–0x1FF` | the LFO pool: records of **16** words (was 12) | stride 16 |
-| `0x200–0x5FF` | channels: 16 × 64 | stride 64 |
-| `0x600–0x7FF` | voices: 32 × 16 | stride 16 |
+| `0x000–0x03F` | free: constants are immediates in the row, and the graph lays nothing here | |
+| `0x040–0x05F` | inputs: the pass counter's low word, and the rows an idle read port parks on | read only |
+| `0x060–0x7FF` | the graph's: a source the firmware sets, an operator's output, a record | laid out by reach |
 | `0x800–0xBFF` | sinks: what the partials read | write only; the architecture's page rule |
 
-Register 0 reads zero and takes no write.
+Register 0 reads zero and takes no write. The sink area's layout is the
+firmware's (`app/main/wiring.hpp`).
 
 ## 8. Latencies and the schedule
 

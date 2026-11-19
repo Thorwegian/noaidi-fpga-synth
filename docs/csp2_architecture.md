@@ -253,8 +253,8 @@ releases; the wire is in nines (a command nonet, an 18-bit address,
 one block. The register file outlives the firmware's reset, so the boot
 zeroes every register between the self-test and the image, and the image
 wires every channel and voice the program's loops run (their counts are
-the program's, `counts.s`), used or not: a loop runs every element with
-whatever its registers hold. Then, before the first note:
+the graph's, `app/main/wiring.hpp`), used or not: a loop runs every element
+with whatever its registers hold. Then, before the first note:
 
 1. the **self-test**: a program of its own in the same image, run from
    the ROM, whose checks use operands that change every pass (`SHIFT`,

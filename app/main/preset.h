@@ -77,8 +77,8 @@ typedef struct {
 } adsr_t;
 
 // ── Envelope rates ──────────────────────────────────────────
-// The CSP's envelope program (tools/csp/programs/envelope.s) moves a level
-// toward a target by a rate times the distance left each pass. Firmware does
+// The CSP's envelope (wiring.cpp) moves a level toward a target by a rate
+// times the distance left each pass. Firmware does
 // the decode of the preset's rate bytes, which is control-rate work and
 // belongs on this side: preset_adsr_rate_coeff gives an 18-bit coefficient k,
 // the fraction k / 2^24 of the distance an RC envelope covers each 96 kHz

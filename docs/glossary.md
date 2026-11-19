@@ -100,15 +100,8 @@ control signal once a pass. The instruction set is
   (#268). The pass's tail holds the drain, the write window, the pass
   counter and the probe.
 - **control program** — the program the CSP runs every pass: the wiring
-  between sources and sinks. The firmware generates it at boot and loads
-  it; `tools/csp/programs` holds the same program as assembly, assembled
-  into `control_program.hpp`, whose names are the register map.
-- **control graph** — the firmware's model of the control program
-  (`app/main/csp/graph.hpp`): the LFOs, the channels and the voices as
-  nodes, and how many of each the program runs. The **code generator**
-  (`app/main/csp/generator.cpp`) emits the program for a graph through the
-  program builder; `make csp-test` holds its image equal to the assembled
-  one.
+  between sources and sinks. The firmware generates it at boot from the
+  DSP graph and loads it; where each value's word lives is the graph's.
 - **DSP graph** — the classic DSP flowchart as a flat netlist
   (`app/main/csp/dsp_graph.hpp`): sources the firmware sets, constants,
   operators (sum, multiply, multiply-add, difference, absolute value,
@@ -122,9 +115,8 @@ control signal once a pass. The instruction set is
   of enough copies runs as the elements of a vector loop, and the rest is
   **straight-line code**, an instruction for every operator. It picks the
   order the instructions issue in so that few waits are left. `make
-  csp-test` wires today's synth as a graph and holds its
-  sinks equal to the control program's on the reference model, pass for
-  pass. The firmware does not load the graph's program.
+  csp-test` wires today's synth as a graph and holds its sinks equal to a
+  node-by-node evaluation of the graph, with no layout, schedule or loops.
 - **row** — one instruction, a qword in IMEM; "row" because the memories
   are rows and the chip knows nothing else. A **wait** is a NOP row the
   assembler lays so an operand is ready; the **END row** is the last,
@@ -139,8 +131,8 @@ control signal once a pass. The instruction set is
   of 2048 × 9. **DMEM** — the data memory, the **register file**: 2048
   words, kept as three copies (one per read port R, X, Y), each an even
   and an odd **bank** for the pairs.
-- **register** — a word of the file, named in `map.s` with `.reg`; a
-  **register pair** is a dword at an even address.
+- **register** — a word of the file, at the address the graph laid out for
+  it; a **register pair** is a dword at an even address.
 - **index registers `i`, `j`** — hold the address of a block (a voice, a
   channel, an LFO record); an indexed operand is the index's high bits
   beside the offset's low bits, concatenation, not addition, so every
