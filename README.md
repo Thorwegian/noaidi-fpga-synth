@@ -17,7 +17,7 @@ plus 48 kHz TOSLINK (for automated lab tests).
 ## Architecture
 
 ```
-MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
+MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
             (MIDI parse, voice        └─ 256 time-multiplexed
              allocation, CC/SysEx        partials: osc → 2× SVF →
              mapping — "firmware")       stereo gain, behind the CSP:
@@ -50,9 +50,11 @@ MIDI in ──► ESP32-C3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   [docs/memory_map.md](docs/memory_map.md); MIDI/user mapping (in
   design): [docs/midi_schema.md](docs/midi_schema.md); consolidated
   design: [docs/design.md](docs/design.md).
-- **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-C3
-  Super Mini with 4 MB of flash. The firmware's partition table
-  (`app/partitions.csv`) assumes the 4 MB.
+- **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-S3
+  module in the ESP32-S3-DevKitC-1's shape, with an ESP32-S3R8 (8 MB of
+  PSRAM) and 16 MB of flash (`docs/esp32s3_hw678.md`). The firmware's
+  partition table (`app/partitions.csv`) uses the first 6 MB of the
+  flash.
 
 ## Console
 
@@ -230,7 +232,7 @@ not fetch them.
 - **Gowin's simulation models** for `make sim`: only
   `IDE/simlib/gw2a/prim_sim.v` from Gowin EDA, pointed to by `GOWIN_SIM`
   (default `/opt/gowin-eda/IDE/simlib/gw2a/prim_sim.v`)
-- **ESP-IDF v6** for the ESP32-C3 firmware
+- **ESP-IDF v6** for the ESP32-S3 firmware
 - **Python 3** for the LUT/boot-image generators (`scripts/`); the lab
   tools (`tools/lab`) also need **NumPy**, **Matplotlib**, **pySerial**
   and, for the audio checks, **Essentia**
@@ -264,25 +266,30 @@ no ESP-IDF found, the script says so and stops.
 
 ## Wiring
 
-**Inter-board SPI** (ESP32-C3 Super Mini master ↔ Tang Nano 20K
-slave, Mode 0, 10 MHz — measured clean to 40):
+The ESP32-S3's pins are the ones the base board gives the same signals
+(`docs/pins.md` in
+[noaidi-fpga-synth-kicad](https://github.com/Thorwegian/noaidi-fpga-synth-kicad)),
+so the prototype and the base board run one firmware.
 
-| Signal | ESP32-C3 GPIO | Tang Nano 20K pin |
+**Inter-board SPI** (ESP32-S3 master ↔ Tang Nano 20K slave, Mode 0,
+10 MHz):
+
+| Signal | ESP32-S3 GPIO | Tang Nano 20K pin |
 |---|---|---|
-| MOSI | 6 | 26 |
-| MISO | 5 | 29 |
-| SCLK | 4 | 25 |
-| CS (active low) | 7 | 28 |
+| MOSI | 11 | 26 |
+| MISO | 13 | 29 |
+| SCLK | 12 | 25 |
+| CS (active low) | 10 | 28 |
 
-(GPIO7 doubles as UART1's default TX, which is why MIDI UART init
-runs before SPI init in `main.c` — the SPI driver re-claims the pin.)
+(These four are SPI2's own IO_MUX pins on the ESP32-S3, so the link
+does not pass through the GPIO matrix.)
 
-**ESP32-C3 peripherals:**
+**ESP32-S3 peripherals:**
 
 | Signal | GPIO | Description |
 |---|---|---|
-| MIDI in (DIN) | 0 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
-| Panel MIDI in | 2 | UART0 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
+| MIDI in (DIN) | 18 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
+| Panel MIDI in | 1 | UART2 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 

@@ -76,17 +76,18 @@ void app_main(void) {
     midi_out_init();
     midi_log_init();
 
-    // UART1 RX must init before SPI: UART1's default TX pin (GPIO7) is
-    // the SPI CS pin, so the SPI init must run last and re-claim it.
-    midi_in_init(0);
+    // The pins are the base board's (docs/pins.md in the KiCad repository).
 
-    // Panel MIDI: UART0 on GPIO2, from the dev host via USB-MIDI.
-    // Open Stage Control exclusively — test scripts stay on BLE/DIN.
-    midi_panel_init(2);
+    // DIN MIDI, the keyboard: UART1 RX on GPIO18.
+    midi_in_init(18);
 
-    // 10 MHz: the link is measured clean to 40; at 1 MHz a note-on's
+    // The second MIDI input, from the dev host through a USB-MIDI
+    // adapter: UART2 RX on GPIO1.
+    midi_panel_init(1);
+
+    // SPI2 on its own IO_MUX pins. 10 MHz: at 1 MHz a note-on's
     // 32 dwords (~130 us each) would blow the engine's 1 ms tick.
-    spi_link_init(6, 5, 4, 7, 10000000); // MOSI, MISO, SCLK, CS
+    spi_link_init(11, 13, 12, 10, 10000000); // MOSI, MISO, SCLK, CS
 
     // The link in nines, checked as tb_spi_bus.sv checks the slave, so that
     // firmware and RTL agree on the same evidence.

@@ -1,4 +1,4 @@
-// midi_in.c — MIDI input processes (UART1 = DIN, UART0 = panel)
+// midi_in.c — MIDI input processes (UART1 = DIN, UART2 = panel)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -9,10 +9,9 @@
 // and publishes complete messages to the event bus. Never prints in
 // the hot path and never blocks on a consumer.
 //
-// Port roles: UART1/GPIO0 is the DIN MIDI jack (keyboard);
-// UART0/GPIO2 is the dev-host panel port, reserved for Open Stage
-// Control exclusively — test scripts stay on
-// BLE/DIN so panel traffic never contends with them.
+// Port roles: UART1/GPIO18 is the DIN MIDI jack (keyboard);
+// UART2/GPIO1 is the second optocoupler input, the dev-host panel
+// port, fed through a USB-MIDI adapter.
 
 #include "midi_in.h"
 
@@ -62,7 +61,7 @@ typedef struct {
 static midi_port_t s_din_port = {
         .uart = UART_NUM_1, .name = "midi_in", .source = MIDI_SOURCE_DIN};
 static midi_port_t s_panel_port = {
-        .uart = UART_NUM_0, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
+        .uart = UART_NUM_2, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
@@ -203,11 +202,8 @@ void midi_in_init(int rx_pin) {
 }
 
 void midi_panel_init(int rx_pin) {
-    // UART0 is free for this since the console moved wholly to the
-    // USB-Serial/JTAG controller (sdkconfig: ESP_CONSOLE_UART_NUM=-1).
-    // RX moves to rx_pin (GPIO2 — idles high via the
-    // MIDI opto, which suits the C3 strap sampling at reset); TX stays
-    // on UART0's default pin, unused.
+    // The panel port is UART2, which has no default pins: RX is routed
+    // to rx_pin, TX is left unrouted.
     //
     // Idle-polarity preflight: a standard MIDI-IN (opto, non-inverting)
     // idles HIGH (UART mark). Sample the pin before the UART claims it;

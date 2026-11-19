@@ -37,8 +37,9 @@ constexpr int burst_max = 8;
 // A 36-bit dword, in the low bits of a 64-bit integer.
 using dword_t = uint64_t;
 
-// Bring up the ESP-IDF SPI master on these pins at this clock (the link is
-// measured clean to 40 MHz, the ESP32-C3's ceiling through the GPIO matrix).
+// Bring up the ESP-IDF SPI master on these pins at this clock. With SPI2's
+// own IO_MUX pins (CS 10, MOSI 11, SCLK 12, MISO 13) the driver bypasses the
+// GPIO matrix.
 void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
           uint32_t frequency_hz);
 

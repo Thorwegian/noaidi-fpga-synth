@@ -1,3 +1,29 @@
+# The target: an ESP32-S3R8 module (docs/esp32s3_hw678.md) with 16 MB of
+# QIO flash, both memories at 80 MHz and the CPU at 240 MHz.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# The module's 8 MB of octal PSRAM joins the heap: malloc() places a block
+# there when it is larger than CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16 KiB)
+# or the internal RAM has no room for it. The component esp_psram must be in
+# the build (main/CMakeLists.txt requires it): without it the minimal build
+# drops these options silently.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# One of the chip's two cores. The firmware is written for one core, where
+# only one task runs at a time; whether the state its tasks share holds with
+# two of them running at once has not been examined.
+CONFIG_FREERTOS_UNICORE=y
+
+# The console is on the chip's USB-Serial/JTAG controller (console.c).
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
 # BLE MIDI: NimBLE peripheral hosting the standard
 # MIDI 1.0 over BLE service (03B80E5A-EDE8-4B33-A751-6CE34EC4C700).
 CONFIG_BT_ENABLED=y
@@ -18,12 +44,8 @@ CONFIG_BT_NIMBLE_STATIC_TO_DYNAMIC=n
 # 1 kHz FreeRTOS tick.
 CONFIG_FREERTOS_HZ=1000
 
-# Debug instrumentation for the engine_link watchdog crash.
-# RISC-V backtraces are only usable with frame pointers, and
 # TASK_WDT_PANIC turns the task watchdog from a warn-and-limp into a
-# clean panic + full stack dump of the stuck task. (Debug aids — the
-# frame pointer costs a little size/speed; revisit before release.)
-CONFIG_ESP_SYSTEM_USE_FRAME_POINTER=y
+# clean panic with the backtrace of the stuck task.
 CONFIG_ESP_TASK_WDT_PANIC=y
 
 # app_main loads the startup preset (TOML parsing) before the tasks take
@@ -35,13 +57,10 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 
-# The ESP32-C3 Super Mini has 4 MB of flash.
-#
 # Preset storage (docs/storage_format.md): a FAT partition on the
 # wear-levelling layer, 512-byte sectors so a ~650-byte preset takes
 # two sectors instead of a 4 KB one, safety mode so a power loss
 # mid-write keeps the rest of the flash sector, and long UTF-8 names.
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_WL_SECTOR_SIZE_512=y

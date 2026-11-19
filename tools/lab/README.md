@@ -12,7 +12,7 @@ each carry their own docstring; this is the index and the facts around them.
 ```mermaid
 flowchart LR
     cloud[cloud build box<br/>no board: builds, host tests, cosim] -. ssh -p 23000 .-> lab[lab computer<br/>the repo checkout, the board]
-    lab -- /dev/ttyACM0 115200<br/>console, firmware flash --> esp[ESP32-C3<br/>firmware]
+    lab -- /dev/ttyACM0 115200<br/>console, firmware flash --> esp[ESP32-S3<br/>firmware]
     lab -- /dev/ttyUSB0 and 1<br/>FTDI: openFPGALoader, BL616 CLI --> fpga[Tang Nano 20K<br/>GW2AR-18C gateware]
     lab -- ALSA 16:0 CH345<br/>USB-MIDI to the DIN jack --> esp
     osc[Open Stage Control] -- BLE MIDI<br/>the synth's single connection --> esp
@@ -57,7 +57,7 @@ port. The synth's own preset saves are bare TOML without the copyright header
 ## MIDI into the synth
 
 - **USB → the panel port (use this).** The CH345 adapter is ALSA `16:0`,
-  cabled into the panel port (UART0; the trace names its source `panel`);
+  cabled into the panel port (UART2; the trace names its source `panel`);
   the keyboard is on the DIN jack. **The adapter drops what a one-shot sender
   queues:** the kernel bridge opens the USB device only while a client is
   subscribed to the port, and `aseqsend` subscribes, writes and unsubscribes
