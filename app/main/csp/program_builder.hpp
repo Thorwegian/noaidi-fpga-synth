@@ -107,7 +107,9 @@ public:
 
     // Schedule and encode: the image, and the issues found while emitting
     // plus the whole-program checks. A program with an error builds an
-    // empty image.
+    // empty image. The result is filled in where the caller keeps it: an
+    // image is larger than a task's stack on the chip, so the firmware's is
+    // a static object. The host's tools take it by value.
     struct Built {
         Image image;
         std::vector<BuildIssue> issues;
@@ -116,6 +118,7 @@ public:
         int cycles = 0;   // the pass's cycles, the waits included
         bool ok    = true;
     };
+    void build(Built &built) const;
     Built build() const;
 
 private:

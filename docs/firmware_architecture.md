@@ -61,6 +61,10 @@ Nothing else in the firmware may call `fpga_word_write`/`fpga_swap`
 once `engine_link_init()` has run (`main.c`'s boot SPI self-test
 writes directly before that).
 
+- Generates the CSP's control program at boot from the control graph
+  (`csp/generator.cpp`, through `csp::ProgramBuilder`) into a static
+  image, loads it while the CSP is held and reads it back. The boot log
+  has the generation's time, the heap around it and the stack left.
 - Keeps a full RAM image of the parameter space. Commands mutate the
   image; the link writes dirty words to the shadow page and swaps.
 - The mirror-both-pages rule ("after a swap the new shadow page is

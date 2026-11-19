@@ -14,12 +14,14 @@
 #include <string>
 
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "csp/control_program.hpp"
+#include "csp/generator.hpp"
 #include "console.h"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
@@ -402,21 +404,46 @@ void engine_task(void *) {
     }
 }
 
-// The dword at `index` of the program image as the firmware sends it: a row
-// is two dwords, bits 71:36 then 35:0, NOP rows past the program's end.
-fpga_map::dword_t program_dword(size_t index) {
-    const size_t pc = index / 2;
-    if (pc >= csp::control::rows.size()) {
-        return 0;
+// The control program, as the generator builds it at boot from the
+// firmware's graph. Static: an image is larger than a task's stack, and so
+// the linker sizes it with the rest of the firmware's memory.
+csp::ProgramBuilder::Built program;
+
+// Generate the control program, and say what it cost: the time, the heap
+// (what was free before, and the least that has been free since boot: the
+// difference is the builder's schedule at its most, unless the boot had
+// been lower already) and the stack the calling task has never used.
+// False if the graph's program does not build, with the builder's reasons
+// in the log.
+bool generate_program() {
+    const uint32_t free_before = esp_get_free_heap_size();
+    const int64_t started      = esp_timer_get_time();
+    csp::generate(csp::control_graph(), program);
+    const int64_t microseconds = esp_timer_get_time() - started;
+    ESP_LOGI(
+            tag,
+            "control program generated in %lld us: heap %lu bytes free before, %lu at the least since boot; stack %lu bytes never used",
+            static_cast<long long>(microseconds),
+            static_cast<unsigned long>(free_before),
+            static_cast<unsigned long>(esp_get_minimum_free_heap_size()),
+            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
+    for (const csp::BuildIssue &issue : program.issues) {
+        ESP_LOGE(tag, "control program: %s", issue.message.c_str());
     }
-    const csp::Row &row = csp::control::rows[pc];
+    return program.ok;
+}
+
+// The dword at `index` of the program image as the firmware sends it: a row
+// is two dwords, bits 71:36 then 35:0.
+fpga_map::dword_t program_dword(size_t index) {
+    const csp::Row &row = program.image.rows[index / 2];
     return index % 2 == 0 ? row.high : row.low;
 }
 
 // The dword at `index` of the decode ROM image: one control word a row,
 // NOP rows (0) past the program's.
 fpga_map::dword_t rom_dword(size_t index) {
-    return index < csp::control::rom.size() ? csp::control::rom[index] : 0;
+    return program.image.rom[index];
 }
 
 // Send `count` dwords from `base` in bursts, and read them back through the
@@ -450,15 +477,15 @@ int send_and_verify(uint32_t base, size_t count, Dword dword_at) {
 void load_program() {
     // the program's rows only, END included: the chip's fetch parks on END, so
     // what IMEM holds past them never runs (#271)
+    const size_t rows = static_cast<size_t>(program.image.length);
     const int rows_differing =
-            send_and_verify(fpga_map::program_base,
-                            2 * csp::control::rows.size(), program_dword);
+            send_and_verify(fpga_map::program_base, 2 * rows, program_dword);
     const int rom_differing =
             send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_dword);
     if (rows_differing == 0 && rom_differing == 0) {
         ESP_LOGI(tag,
                  "program image: every dword as sent (%u rows, %u decode rows)",
-                 static_cast<unsigned>(csp::control::rows.size()),
+                 static_cast<unsigned>(rows),
                  static_cast<unsigned>(fpga_map::rom_rows));
     } else {
         ESP_LOGE(
@@ -514,6 +541,7 @@ void engine_link_init(void) {
     // Nothing of the test, or of what ran before this chip was reset, under
     // the image: every register zero, then the program and the image.
     clear_registers();
+    const bool generated = generate_program();
     load_program();
 
     // The program's constants are immediates in its rows; the register image
@@ -532,7 +560,13 @@ void engine_link_init(void) {
     // read back while the CSP is still held: once released, the program rewrites
     // the registers that hold its state, which the image set too
     verify_boot_image();
-    if (hold_after_boot) {
+    if (!generated) {
+        // IMEM still holds the self-test: released, it would run on the image
+        paused = true;
+        ESP_LOGE(
+                tag,
+                "no control program: the CSP stays held and the synth is silent");
+    } else if (hold_after_boot) {
         paused = true;
         ESP_LOGW(tag,
                  "hold_after_boot: the CSP stays held, the tick is paused");
@@ -542,9 +576,8 @@ void engine_link_init(void) {
     ESP_LOGI(
             tag,
             "control program loaded: %u rows, %u decode rows, %d cycles a pass",
-            static_cast<unsigned>(csp::control::rows.size()),
-            static_cast<unsigned>(csp::control::rom.size()),
-            csp::control::cycles);
+            static_cast<unsigned>(program.image.length),
+            static_cast<unsigned>(program.image.rom_used), program.cycles);
 
     if (xTaskCreate(engine_task, "engine_link", task_stack, nullptr,
                     task_priority, &task)

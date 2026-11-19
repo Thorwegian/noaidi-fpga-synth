@@ -99,9 +99,16 @@ control signal once a pass. The instruction set is
   24 kHz, 3072 cycles, of which instructions issue in the first 3008
   (#268). The pass's tail holds the drain, the write window, the pass
   counter and the probe.
-- **control program** — the program the CSP runs every pass:
-  `tools/csp/programs`, in the firmware as `control_program.hpp`. The
-  wiring between sources and sinks.
+- **control program** — the program the CSP runs every pass: the wiring
+  between sources and sinks. The firmware generates it at boot and loads
+  it; `tools/csp/programs` holds the same program as assembly, assembled
+  into `control_program.hpp`, whose names are the register map.
+- **control graph** — the firmware's model of the control program
+  (`app/main/csp/graph.hpp`): the LFOs, the channels and the voices as
+  nodes, and how many of each the program runs. The **code generator**
+  (`app/main/csp/generator.cpp`) emits the program for a graph through the
+  program builder; `make csp-test` holds its image equal to the assembled
+  one.
 - **row** — one instruction, a qword in IMEM; "row" because the memories
   are rows and the chip knows nothing else. A **wait** is a NOP row the
   assembler lays so an operand is ready; the **END row** is the last,

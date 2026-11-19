@@ -23,7 +23,9 @@
 
 #include "../assembler.hpp"
 #include "../processor.hpp"
+#include "csp/control_program.hpp"
 #include "csp/envelope.hpp"
+#include "csp/generator.hpp"
 #include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
 
@@ -1000,10 +1002,11 @@ std::string read_program(const char *part) {
 
 // tools/csp/programs: the map, the loop counts (the test's own), and the
 // parts, joined in order.
-std::string control_program(int saws, int squares, int triangles, int sines) {
+std::string control_program(int saws, int squares, int triangles, int sines,
+                            int channels = 16, int voices = 32) {
     std::string source = read_program("map.s");
-    source += "        .equ CHANNEL_COUNT, 16\n";
-    source += "        .equ VOICE_COUNT, 32\n";
+    source += "        .equ CHANNEL_COUNT, " + std::to_string(channels) + "\n";
+    source += "        .equ VOICE_COUNT, " + std::to_string(voices) + "\n";
     source += "        .equ SAWS_A_HALF, " + std::to_string(saws) + "\n";
     source += "        .equ SQUARES_A_HALF, " + std::to_string(squares) + "\n";
     source += "        .equ TRIANGLES_A_HALF, " + std::to_string(triangles)
@@ -1171,8 +1174,8 @@ void test_control_program() {
         // must not also sweep the filter, or the two routings are not independent
         const double ch_cutoff = c.base + lfo_out[c.lfo1] * c.c1
                                  + lfo_out[c.lfo2] * c.c2 + c.track * c.bend;
-        // the gain sink is the amp envelope's level × velocity, the fraction of
-        // the pipeline's span: the pipeline takes the exponential
+        // the gain sink is the amp envelope's level × velocity: the voice's
+        // linear gain (#176)
         const double want[3]        = {a.note + ch_pitch,
                                        4 * a.level_m * c.amount + a.note * c.track
                                                + ch_cutoff,
@@ -1310,6 +1313,103 @@ void test_control_program_lfos() {
     }
 }
 
+// ---- the firmware's generator -------------------------------------------------
+
+// The generator (app/main/csp/generator.cpp) emits the control program from
+// a graph; the assembler assembles it from tools/csp/programs. For the same
+// counts the two are one image: the rows, the decode ROM and the pass's
+// cycles.
+
+// The index of the first row two images differ at, or -1.
+template <typename Rows>
+int first_difference(const csp::Image &image, const Rows &rows) {
+    for (size_t row = 0; row < rows.size(); ++row) {
+        if (!(image.rows[row] == rows[row])) {
+            return static_cast<int>(row);
+        }
+    }
+    return -1;
+}
+
+// The graph of the program the firmware loads gives control_program.hpp,
+// which this target holds current with tools/csp/programs.
+void test_generator_gives_the_firmware_image() {
+    namespace cp = csp::control;
+    csp::ProgramBuilder::Built built;
+    csp::generate(csp::control_graph(), built);
+    check(built.ok, "the generator builds the firmware's graph");
+    check_equal(built.image.length, static_cast<int64_t>(cp::rows.size()),
+                "the generator's rows are as many as control_program.hpp's");
+    check_equal(
+            first_difference(built.image, cp::rows), -1,
+            "the first row the generator's image and control_program.hpp differ at");
+    check_equal(
+            built.image.rom_used, static_cast<int64_t>(cp::rom.size()),
+            "the generator's decode rows are as many as control_program.hpp's");
+    bool rom_same = true;
+    for (size_t row = 0; row < cp::rom.size(); ++row) {
+        rom_same = rom_same && built.image.rom[row] == cp::rom[row];
+    }
+    check(rom_same, "the generator's decode ROM is control_program.hpp's");
+    check_equal(built.cycles, cp::cycles,
+                "the generator's pass is as long as control_program.hpp's");
+    std::printf(
+            "generator (the firmware's graph): %d rows, %d decode rows, %d cycles a pass\n",
+            built.image.length, built.image.rom_used, built.cycles);
+}
+
+// Other graphs against the assembler with the same counts: no LFOs, every
+// shape, more of a shape than a round holds, loops shorter than the result
+// latency, and a program that does not fit a pass, which both refuse. The
+// generator builds into one result throughout, as the firmware does: a
+// build leaves nothing of the one before.
+void test_generator_gives_the_assembled_image() {
+    struct Counts {
+        int saws, squares, triangles, sines, channels, voices;
+    };
+    csp::ProgramBuilder::Built built;
+    for (const Counts &counts : {Counts{0, 0, 0, 0, 16, 32},
+                                 {1, 1, 1, 1, 16, 32},
+                                 {3, 3, 3, 3, 16, 32},
+                                 {1, 1, 1, 1, 16, 200},
+                                 {6, 6, 0, 0, 16, 32},
+                                 {0, 0, 0, 12, 16, 32},
+                                 {2, 0, 1, 5, 1, 32},
+                                 {1, 1, 1, 1, 16, 5},
+                                 {0, 2, 17, 0, 3, 19}}) {
+        const std::string what =
+                "graph of " + std::to_string(counts.saws) + "/"
+                + std::to_string(counts.squares) + "/"
+                + std::to_string(counts.triangles) + "/"
+                + std::to_string(counts.sines) + " LFOs a half, "
+                + std::to_string(counts.channels) + " channels, "
+                + std::to_string(counts.voices) + " voices: ";
+        const csp::Program assembled = csp::assemble(
+                control_program(counts.saws, counts.squares, counts.triangles,
+                                counts.sines, counts.channels, counts.voices));
+        csp::Graph graph;
+        graph.lfos_a_half   = {counts.saws, counts.squares, counts.triangles,
+                               counts.sines};
+        graph.channel_count = counts.channels;
+        graph.voice_count   = counts.voices;
+        csp::generate(graph, built);
+        check_equal(built.ok, assembled.ok,
+                    what + "the generator builds what the assembler does");
+        if (!built.ok || !assembled.ok) {
+            continue;
+        }
+        check_equal(built.image.length, assembled.image.length,
+                    what + "as many rows");
+        check_equal(first_difference(built.image, assembled.image.rows), -1,
+                    what + "the first row the two images differ at");
+        check_equal(built.image.rom_used, assembled.image.rom_used,
+                    what + "as many decode rows");
+        check(built.image.rom == assembled.image.rom,
+              what + "the same decode ROM");
+        check_equal(built.cycles, assembled.cycles, what + "the same cycles");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -1339,6 +1439,8 @@ int main() {
     test_selftest_program();
     test_control_program();
     test_control_program_lfos();
+    test_generator_gives_the_firmware_image();
+    test_generator_gives_the_assembled_image();
     std::printf("csp: %s (%d checks, %d failures)\n",
                 failures ? "FAIL" : "ALL PASS", checks, failures);
     return failures ? 1 : 0;
