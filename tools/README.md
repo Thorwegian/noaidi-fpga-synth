@@ -26,7 +26,9 @@ One rule decides the folder: what the thing needs.
 - **`tools/csp/`** — the CSP's assembler, reference model and host tests.
   **`tools/storage/`** — the storage partition image, for the Makefile.
   **`tools/docs/`** — `mermaid_check.mjs`, which parses every Mermaid graph in
-  the Markdown. **`tools/osc_panel/`** — the Open Stage Control surface.
+  the Markdown, and `veroboard_wiring.py`, which draws the README's wiring
+  picture of the prototype (`docs/images/veroboard-wiring.svg`).
+  **`tools/osc_panel/`** — the Open Stage Control surface.
 - **`tools/lab/`** — everything that needs the board or the lab computer:
   driving the console and MIDI, the acceptances, the recordings and their
   Essentia analysis (the recordings only exist because of the lab), the
