@@ -2109,6 +2109,6 @@
 <text x="802" y="1132" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#333" text-anchor="start" font-weight="normal">joint (wires that only cross are not joined)</text>
 <text x="60" y="1158" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">Tang Nano numbers are FPGA package pins. ESP32 numbers are GPIOs, as printed on the boards.</text>
 <text x="60" y="1178" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">Each MIDI input is the 6N138 circuit of docs/thirdparty/MIDI-circuit-6N138.png, built without its diode and fed from the ESP32&#x27;s 3.3 V.</text>
-<text x="60" y="1198" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">The potentiometer&#x27;s wiper ends at the socket: the jumper cable has no wire for it.</text>
+<text x="60" y="1198" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">The slide potentiometer was used during early testing and was later abandoned: the jumper cable has no wire for its wiper.</text>
 </g>
 </svg>

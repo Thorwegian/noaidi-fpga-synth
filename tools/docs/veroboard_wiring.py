@@ -313,7 +313,7 @@ top.append(f'<circle cx="790" cy="1128" r="3.6" fill="{COLOURS["blue"][1]}"/>')
 text(top, 802, 1132, "joint (wires that only cross are not joined)", 11.5, "#333")
 text(top, 60, 1158, "Tang Nano numbers are FPGA package pins. ESP32 numbers are GPIOs, as printed on the boards.", 11.5, "#555")
 text(top, 60, 1178, "Each MIDI input is the 6N138 circuit of docs/thirdparty/MIDI-circuit-6N138.png, built without its diode and fed from the ESP32's 3.3 V.", 11.5, "#555")
-text(top, 60, 1198, "The potentiometer's wiper ends at the socket: the jumper cable has no wire for it.", 11.5, "#555")
+text(top, 60, 1198, "The slide potentiometer was used during early testing and was later abandoned: the jumper cable has no wire for its wiper.", 11.5, "#555")
 
 # Title
 TITLE = "Noaidi Synth prototype: veroboard wiring"
