@@ -1269,14 +1269,15 @@ struct DspGraph::Lowering {
 
     // Whether `taker`, an operator, can work in place on the word of its
     // operand a: a's output is read by nothing else, and neither is read by
-    // a delay, which needs its word untouched until its own row.
+    // a delay, which needs its word untouched until its own row. A field of
+    // a record is read through pointers as well, and keeps its word.
     bool takes_word_of(const Node &taker, int32_t a) {
         const Node &given   = nodes[static_cast<size_t>(a)];
         const bool has_word = given.is_operator()
                               || (given.kind == Kind::through && given.fetched);
         return has_word && given.readers == 1 && !given.delayed
                && !taker.delayed && given.width == taker.width
-               && (given.record == none || taker.record == none);
+               && given.record == none;
     }
 
     void decide_storage() {

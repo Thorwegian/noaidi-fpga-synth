@@ -311,6 +311,35 @@ void test_refusals() {
     }
 }
 
+// A record's field with one reader by a fixed wire, a sum that works on its
+// operand in place: the field keeps its word, since what reads it through a
+// pointer is to get the field and not the sum.
+void test_a_field_summed_onto() {
+    Graph graph;
+    const Wire a = graph.source(), b = graph.source();
+    const Wire field = graph.sum({}, a, b);
+    const std::vector<Field> fields{field};
+    const Record record = graph.record(fields);
+    graph.sink(csp::sink_base, graph.sum(field, a));
+    const std::vector<Record> records{record};
+    const Wire pointer = graph.pointer(records);
+    graph.sink(csp::sink_base + 1, graph.multiply(graph.through(pointer, 0),
+                                                  graph.constant(q(1.0))));
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, "the field summed onto")) {
+        return;
+    }
+    csp::Processor processor;
+    processor.write(graph.address(a), q(0.5));
+    processor.write(graph.address(b), q(0.25));
+    processor.write(graph.address(pointer), graph.address(record));
+    start(processor, built.image);
+    pass(processor, "the field summed onto");
+    check_equal(processor.sink(0), q(1.25), "a sum onto a record's field");
+    check_equal(processor.sink(1), q(0.75),
+                "the field through a pointer, a sum onto it made");
+}
+
 // ---- copies and loops -------------------------------------------------------------
 //
 // A small circuit made `count` times over by an ordinary loop, as the top
@@ -1142,6 +1171,7 @@ void test_todays_synth() {
 int main() {
     test_operators();
     test_refusals();
+    test_a_field_summed_onto();
     constexpr int body_rows = 20; // of test_copies' circuit as a loop
     test_copies(16, true, body_rows);
     test_copies(32, true, body_rows);
