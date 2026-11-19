@@ -5,10 +5,13 @@
 //
 // The synth's graph as arithmetic, without a program: one value per node,
 // computed in the order the nodes were made, with a delay's output the value
-// its input had at the end of the pass before. It reads the netlist alone
-// (app/main/csp/dsp_graph_netlist.hpp), never an address, the layout, the
-// schedule or the loops, so the host test holds the graph's program to a
-// second statement of what the graph means.
+// its input had at the end of the pass before. It reads the netlist
+// (app/main/csp/dsp_graph_netlist.hpp): a node's kind, its operands and its
+// width, and a record's fields in order. Of what build() works out it takes
+// one number, the offset of a record inside another, which is a value in the
+// graph (a voice's stage); no word's address, no row of the schedule and no
+// loop. So the host test holds the graph's program to a second statement of
+// what the graph means.
 //
 // The firmware's writes are settings: a source's word or dword, the record a
 // pointer holds, the inner record an offset wire names, and a delay's held
