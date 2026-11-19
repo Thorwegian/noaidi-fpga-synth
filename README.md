@@ -1,8 +1,8 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
-![A 3D render of the circuit board: sockets for the Tang Nano 20K and an ESP32-S3 module, two DIN MIDI inputs, an I2S DAC module, RCA and USB-C](https://thj.no/synth/images/pcb-iso.jpg)
+![A 3D render of the circuit board: sockets for the Tang Nano 20K and an ESP32-S3 module, two DIN MIDI inputs, an I2S DAC module, RCA and USB-C](docs/images/pcb-iso.jpg)
 
-<a href="https://thj.no/synth/"><img src="https://thj.no/synth/images/button-website-v5.png" width="177" height="48" alt="Official website"></a>
+<a href="https://thj.no/synth/"><img src="docs/images/button-website-v5.png" width="177" height="48" alt="Official website"></a>
 
 A hardware **virtual analog synthesizer with a massive sound**, built
 from a [Sipeed Tang Nano 20K](https://wiki.sipeed.com/tang-nano-20k)
@@ -58,7 +58,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 ## Console
 
-![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](https://thj.no/synth/images/firmware-console.png)
+![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](docs/images/firmware-console.png)
 
 `make fw-console` attaches `screen` to the ESP32's USB serial port
 (`ESPPORT` overrides the port it finds). **Press Return** to bring up
@@ -113,7 +113,7 @@ working that hard.
 
 ## Control panel
 
-![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](https://thj.no/synth/images/open-stage-control.png)
+![The Open Stage Control panel: oscillators, mix and unison, filter, the two envelopes, LFOs and global controls](docs/images/open-stage-control.png)
 
 The development control surface: an [Open Stage
 Control](https://openstagecontrol.ammd.net/) panel in the browser, every
@@ -265,6 +265,16 @@ ESP-IDF it found, `tools/esp_idf.sh --shell` for an activated shell.
 no ESP-IDF found, the script says so and stops.
 
 ## Wiring
+
+![The prototype's veroboard: the Tang Nano 20K, the socket made for an ESP32-C3 Super Mini with a ten-wire jumper cable to the ESP32-S3 module, two DIN MIDI inputs through 6N138 optocouplers, the coaxial S/PDIF output, the LED of the optical output and a slide potentiometer](docs/images/veroboard-wiring.svg)
+
+The first prototype is a veroboard that carries the Tang Nano 20K and a
+socket made for an ESP32-C3 Super Mini; the ESP32-S3 module sits beside
+it on a jumper cable plugged into that socket. The earliest mention of
+the board in this repository is commit `1d14326` of 29 August 2026,
+where a new Tang Nano "sits in the same veroboard slot with unchanged
+wiring": the board is older than its first mention.
+`tools/docs/veroboard_wiring.py` draws the picture.
 
 The ESP32-S3's pins are the ones the base board gives the same signals
 (`docs/pins.md` in
