@@ -33,7 +33,8 @@
 
 namespace wiring {
 
-constexpr int lfo_shape_count = 4; // saw, square, triangle, sine
+// An LFO's shapes, in the order of a half's LFOs.
+enum { shape_saw, shape_square, shape_triangle, shape_sine, lfo_shape_count };
 // The LFOs are two halves, a channel's LFO 1 from the first and its LFO 2
 // from the second, each half one LFO of every shape.
 constexpr int lfo_half_count = 2;

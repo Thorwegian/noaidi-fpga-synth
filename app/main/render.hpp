@@ -5,11 +5,12 @@
 //
 // The synth's sound is the active preset (preset.h), and the CSP computes
 // everything the partial pipeline reads from the registers and sinks the
-// firmware sets (docs/memory_map.md, tools/csp/programs/map.s). This is the
-// translation, and nothing else: a preset and the controllers in, a list of
-// writes out. It touches no hardware and no RTOS, so the host tests run it,
-// and so does the system bench, which programs the Verilated synthesizer
-// with it.
+// firmware sets. This is the translation, and nothing else: a preset and
+// the controllers in, a list of writes out. Where a value's word lives is
+// the graph's to say: every function takes the wired synth (wiring.hpp),
+// built, and asks its graph for the address of each wire it sets. The sink
+// area's layout is wiring.hpp's. It touches no hardware and no RTOS, so the
+// host tests run it.
 //
 // Words are Q4.14; pitch, cutoff and resonance are octaves, so the preset's
 // raw 1024 to the octave is 16 to a raw word.
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include "preset.h"
+#include "wiring.hpp"
 
 namespace render {
 
@@ -35,7 +37,7 @@ struct Write {
 
 using Writes = std::vector<Write>;
 
-constexpr int voice_count        = 32;
+constexpr int voice_count        = wiring::voice_count;
 constexpr int partials_per_voice = 8;
 constexpr int pointer_count      = 10; // a partial's sink pointers
 
@@ -71,45 +73,51 @@ std::array<int, pointer_count> pointers_of(int voice, int slot,
 
 // ---- the writes -----------------------------------------------------------------
 
-// Everything that does not depend on the preset: every voice idle on channel
-// 0, every channel's wiring (the program runs them all; the unused ones at
-// zero depth into their own sinks), the LFOs', the sinks that stay zero. Once,
-// at start-up, after the constants.
-void setup(Writes &writes);
+// Everything that does not depend on the preset: the words the graph has
+// the firmware set at load, every word the firmware owns at zero, every
+// channel listening to the first LFO of each half, every voice idle on
+// channel 0, the sink that stays zero. Once, at start-up. A pointer or a
+// stage nobody has written sends the program's reads anywhere, so the CSP
+// is let go after these are in.
+void setup(const wiring::Synth &synth, Writes &writes);
 
-void amp_envelope(const preset_t &preset, Writes &writes);
-void mod_envelope(const preset_t &preset, Writes &writes);
+void amp_envelope(const wiring::Synth &synth, const preset_t &preset,
+                  Writes &writes);
+void mod_envelope(const wiring::Synth &synth, const preset_t &preset,
+                  Writes &writes);
 
 // The cutoff knob and the wheel, the key tracking and the mod envelope's depth.
-void cutoff(const preset_t &preset, const Controllers &controllers,
-            Writes &writes);
+void cutoff(const wiring::Synth &synth, const preset_t &preset,
+            const Controllers &controllers, Writes &writes);
 
-void pitch_bend(const preset_t &preset, const Controllers &controllers,
+void pitch_bend(const wiring::Synth &synth, const Controllers &controllers,
                 Writes &writes);
 
 // LFO i: the shape, rate, destination and depth.
-void lfo(const preset_t &preset, int i, Writes &writes);
+void lfo(const wiring::Synth &synth, const preset_t &preset, int i,
+         Writes &writes);
 
 // The preset's sound in the channel's sinks and registers that depend on the
 // voice structure: each partial's detune, cutoff offset and gain on each
 // side (the preset's volume is in these), the oscillators' modes and pulse
 // widths, the resonance.
-void channel_sound(const preset_t &preset, Writes &writes);
+void channel_sound(const wiring::Synth &synth, const preset_t &preset,
+                   Writes &writes);
 
 // A note struck on a voice: its pitch, its velocity's amounts, and both
 // envelopes in attack from the level they are at (a stolen voice retriggers).
-void note_on(const preset_t &preset, int voice, uint8_t note, uint8_t velocity,
-             Writes &writes);
+void note_on(const wiring::Synth &synth, const preset_t &preset, int voice,
+             uint8_t note, uint8_t velocity, Writes &writes);
 
 // The velocity's amounts alone, for a voice that sounds on after the preset's
 // sensitivities changed.
-void velocity_amounts(const preset_t &preset, int voice, uint8_t velocity,
-                      Writes &writes);
+void velocity_amounts(const wiring::Synth &synth, const preset_t &preset,
+                      int voice, uint8_t velocity, Writes &writes);
 
 // A note let go: both envelopes in release.
-void release(int voice, Writes &writes);
+void release(const wiring::Synth &synth, int voice, Writes &writes);
 
 // At once: both envelopes at zero, in release.
-void silence(int voice, Writes &writes);
+void silence(const wiring::Synth &synth, int voice, Writes &writes);
 
 } // namespace render

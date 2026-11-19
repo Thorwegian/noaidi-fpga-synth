@@ -7,18 +7,17 @@
 
 #include <algorithm>
 #include <cmath>
-#include <initializer_list>
 
-#include "csp/control_program.hpp"
 #include "csp/csp.hpp"
 #include "csp/envelope.hpp"
 #include "csp/lfo.hpp"
 
-namespace cp = csp::control;
-
 namespace render {
 
 namespace {
+
+using Graph = csp::DspGraph;
+using Wire  = Graph::Wire;
 
 constexpr int32_t word_one = csp::word_one;         // 1.0
 constexpr int32_t word_max = (1 << 17) - 1;         // the largest word
@@ -30,16 +29,8 @@ constexpr int32_t middle_c = 5 * raw_octave;        // MIDI note 60, UQ4.10
 // UQ4.4 volume codes: 0xFF is loudest, 16 steps an octave.
 constexpr int volume_mute = 0x00;
 
-// The envelopes' segments, as the program's table lays them out.
-constexpr int amp_attack   = 0;
-constexpr int amp_decay    = 4;
-constexpr int amp_release  = 8;
-constexpr int mod_attack   = 16;
-constexpr int mod_decay    = 20;
-constexpr int mod_release  = 24;
-constexpr int idle_amp     = amp_release; // a voice with no note is in release
-constexpr int idle_mod     = mod_release;
-constexpr int level_22_one = 0x400000; // full scale of the 22-bit level
+// An envelope's level is 22 bits in the preset's scale, 0x400000 full.
+constexpr int level_one = 0x400000;
 constexpr int attack_target =
         0x533333; // 1.3 of full scale: the RC charge's aim
 
@@ -88,14 +79,40 @@ void put(Writes &writes, int address, int32_t raw, bool force = false) {
 
 // ---- the channel and the voices ---------------------------------------------------------------
 
-constexpr int channel_base = cp::channels; // the one channel, omni
-
-int channel_register(int field) {
-    return channel_base + field;
+// The word the graph gave a wire.
+int word_of(const wiring::Synth &synth, Wire wire) {
+    return synth.graph.address(wire);
 }
 
-int voice_register(int voice, int field) {
-    return cp::voices + voice * cp::voice_size + field;
+// The one channel every voice plays on: the synth is omni.
+const wiring::Channel &channel_of(const wiring::Synth &synth) {
+    return synth.channels[0];
+}
+
+const wiring::Voice &voice_of(const wiring::Synth &synth, int voice) {
+    return synth.voices[static_cast<size_t>(voice)];
+}
+
+// What a voice's stage word holds in a stage of an envelope: the offset of
+// that segment in a channel's record, the same in every channel's.
+int stage_offset(const wiring::Synth &synth, int envelope, int stage) {
+    return synth.graph.offset(synth.channels[0]
+                                      .segments[static_cast<size_t>(envelope)]
+                                               [static_cast<size_t>(stage)]
+                                      .record);
+}
+
+// Both envelopes of a voice into a stage. The stages are the CSP's to change
+// (an attack ends in decay at full scale), so the writes are forced: the
+// chip may hold decay where the firmware last wrote attack, and a retrigger
+// must still go out.
+void enter(const wiring::Synth &synth, int voice, int stage, Writes &writes) {
+    for (int envelope = 0; envelope < wiring::envelope_count; ++envelope) {
+        put(writes,
+            word_of(synth, voice_of(synth, voice)
+                                   .stage[static_cast<size_t>(envelope)]),
+            stage_offset(synth, envelope, stage), true);
+    }
 }
 
 // Velocity scales an envelope's amount. c(vel) is linear; g falls from 1 at
@@ -152,26 +169,41 @@ int32_t note_word(uint8_t note) {
     return octaves(raw - middle_c);
 }
 
-// An envelope's rows: attack aims past full scale, decay at the sustain level,
-// release at zero; each with the preset's rate. The amp envelope's level is
-// the voice's linear gain (#176), so a decay or a release is an RC fall in
-// amplitude — a constant number of dB a second, the analog envelope — and a
-// released tail reaches the floor in the segment's time (60 dB down,
+// An envelope's segments: attack aims past full scale, decay at the sustain
+// level, release at zero; each with the preset's rate. The amp envelope's
+// level is the voice's linear gain (#176), so a decay or a release is an RC
+// fall in amplitude — a constant number of dB a second, the analog envelope —
+// and a released tail reaches the floor in the segment's time (60 dB down,
 // `storage_format.md`); the mod envelope's level is the cutoff in octaves.
-// `sustain` is the level the decay aims at, in the 22-bit scale of the level
-// (0x400000 is full scale).
-void envelope(const adsr_t &env, int sustain, int attack, int decay,
-              int release, Writes &writes) {
-    auto row = [&](int segment, int64_t target22, uint8_t rate_code) {
-        const int base = channel_register(cp::envelopes + segment);
+// `sustain` is the level the decay aims at, in the 22-bit scale of the level.
+void envelope(const wiring::Synth &synth, int which, const adsr_t &env,
+              int64_t sustain, Writes &writes) {
+    auto segment = [&](int stage, int64_t target22, uint8_t rate_code) {
+        const wiring::Segment &words =
+                channel_of(synth).segments[static_cast<size_t>(which)]
+                                          [static_cast<size_t>(stage)];
         const uint32_t k =
                 preset_adsr_rate_coeff(preset_adsr_rate_byte(rate_code));
-        wide(writes, base + cp::target, target22 << 10);
-        wide(writes, base + cp::rate, csp::envelope_rate(k));
+        wide(writes, word_of(synth, words.target), target22 << 10);
+        wide(writes, word_of(synth, words.rate), csp::envelope_rate(k));
     };
-    row(attack, attack_target, env.attack);
-    row(decay, sustain, env.decay);
-    row(release, 0, env.release);
+    segment(wiring::stage_attack, attack_target, env.attack);
+    segment(wiring::stage_decay, sustain, env.decay);
+    segment(wiring::stage_release, 0, env.release);
+}
+
+// The wiring's shape for a preset's LFO waveform.
+int lfo_shape(uint8_t wave) {
+    switch (wave & 3) {
+    case WAVE_SAW:
+        return wiring::shape_saw;
+    case WAVE_PULSE:
+        return wiring::shape_square;
+    case WAVE_TRI:
+        return wiring::shape_triangle;
+    default:
+        return wiring::shape_sine;
+    }
 }
 
 // The voicing's gains for one partial, as UQ4.4 codes: the volume anchor and
@@ -257,185 +289,159 @@ std::array<int, pointer_count> pointers_of(int voice, int slot,
     auto index = [](int address) {
         return address - csp::sink_base;
     };
-    const int voice_sinks = cp::sinks + voice * cp::voice_sinks_size;
-    const int channel     = cp::channel_sinks;
+    namespace vs          = wiring::voice_sink;
+    namespace cs          = wiring::channel_sink;
+    const int voice_sinks = vs::base + voice * vs::block;
+    const int channel     = cs::base; // the one channel's block
     const bool second     = partial.oscillator != 0;
     return {
-            index(voice_sinks + cp::sink_pitch),
-            index(channel + cp::detune + slot),
-            index(voice_sinks + cp::sink_cutoff),
-            index(channel + cp::cutoff_offset + slot),
-            index(voice_sinks + cp::sink_gain),
-            index(channel + cp::gain_left + slot),
-            index(channel + cp::gain_right + slot),
-            index(channel + (second ? cp::duty_1 : cp::duty_0)),
-            index(channel + cp::resonance),
-            index(channel + (second ? cp::mode_1 : cp::mode_0)),
+            index(voice_sinks + vs::pitch),
+            index(channel + cs::detune + slot),
+            index(voice_sinks + vs::cutoff),
+            index(channel + cs::cutoff_offset + slot),
+            index(voice_sinks + vs::gain),
+            index(channel + cs::gain_left + slot),
+            index(channel + cs::gain_right + slot),
+            index(channel + (second ? cs::duty_1 : cs::duty_0)),
+            index(channel + cs::resonance),
+            index(channel + (second ? cs::mode_1 : cs::mode_0)),
     };
 }
 
-void setup(Writes &writes) {
-    put(writes, cp::channels_in_use, 1);
-    // Every channel the program's loop runs (the count is fixed in the
-    // program, counts.s), used or not: its LFOs the first record of each half
-    // of the pool, its sinks its own block, and the bend, every depth and
-    // every base zero, so that a channel the firmware does not use computes
-    // zeros into its own block and nothing else, whatever the register file
-    // held before (issue #238: a chip check's pointers left in channels 1–15
-    // ran its fill, shaped by the LFOs, into channel 0's duty and resonance
-    // sinks). A register the program reads is in the image, and the boot's
-    // verify covers it.
-    static_assert(voice_count == cp::voice_count,
-                  "the voices the program runs");
-    for (int channel = 0; channel < cp::channel_count; ++channel) {
-        const int record = cp::channels + channel * cp::channel_size;
-        put(writes, record + cp::lfo1, cp::lfos);
-        put(writes, record + cp::lfo2,
-            cp::lfos + cp::lfos_a_half * cp::lfo_size);
-        put(writes, record + cp::sink_block,
-            cp::channel_sinks + channel * cp::channel_sink_size);
-        for (const int field :
-             {cp::bend, cp::lfo1_pitch, cp::lfo1_cutoff, cp::lfo2_pitch,
-              cp::lfo2_cutoff, cp::cutoff_base, cp::key_track, cp::mod_amount,
-              cp::lfo1_duty, cp::lfo2_duty, cp::lfo1_resonance,
-              cp::lfo2_resonance, cp::duty_base_0, cp::duty_base_1,
-              cp::resonance_base}) {
-            put(writes, record + field, 0);
+void setup(const wiring::Synth &synth, Writes &writes) {
+    const Graph &graph = synth.graph;
+    // Every word the firmware owns, at zero: a source the program reads is
+    // in the image whatever the register file held before, so a channel
+    // nobody plays on computes zeros into its own sinks (issue #238), and
+    // the boot's verify covers it.
+    for (int address = 0; address < csp::register_count; ++address) {
+        if (graph.writer(address) == Graph::Writer::firmware) {
+            put(writes, address, 0);
         }
     }
-
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        put(writes, initial.address, initial.value);
+    }
+    for (const wiring::Channel &channel : synth.channels) {
+        for (int half = 0; half < wiring::lfo_half_count; ++half) {
+            put(writes, word_of(synth, channel.lfo[static_cast<size_t>(half)]),
+                graph.address(synth.lfo(half, wiring::shape_saw).record));
+        }
+    }
+    // a voice with no note is in release, at zero
     for (int voice = 0; voice < voice_count; ++voice) {
-        put(writes, voice_register(voice, cp::channel), channel_base);
-        put(writes, voice_register(voice, cp::sink),
-            cp::sinks + voice * cp::voice_sinks_size);
-        put(writes, voice_register(voice, cp::stage_a), idle_amp);
-        put(writes, voice_register(voice, cp::stage_m), idle_mod);
-        put(writes, voice_register(voice, cp::note), 0);
-        put(writes, voice_register(voice, cp::velocity), 0);
-        put(writes, voice_register(voice, cp::velocity_m), 0);
-        wide(writes, voice_register(voice, cp::level_a), 0);
-        wide(writes, voice_register(voice, cp::level_m), 0);
+        put(writes, word_of(synth, voice_of(synth, voice).channel),
+            graph.address(channel_of(synth).record));
+        silence(synth, voice, writes);
     }
     // the sink area's zero word: where a partial that points nowhere points
-    put(writes, cp::zero_sink, 0);
+    put(writes, wiring::zero_sink, 0);
 }
 
-void amp_envelope(const preset_t &preset, Writes &writes) {
+void amp_envelope(const wiring::Synth &synth, const preset_t &preset,
+                  Writes &writes) {
     // the sustain knob is a fraction of the 60 dB span, as it always was; the
     // level it aims at is that loudness as an amplitude, the gain being linear
     const double sustain =
             std::min<uint16_t>(preset.env[0].sustain, 0x3FF) / double{0x3FF};
-    envelope(preset.env[0],
-             std::lround(amplitude_of_fraction(sustain) * double{0x400000}),
-             amp_attack, amp_decay, amp_release, writes);
+    envelope(synth, wiring::envelope_amp, preset.env[0],
+             std::lround(amplitude_of_fraction(sustain) * double{level_one}),
+             writes);
 }
 
-void mod_envelope(const preset_t &preset, Writes &writes) {
+void mod_envelope(const wiring::Synth &synth, const preset_t &preset,
+                  Writes &writes) {
     // linear in octaves of cutoff: the sustain is a fraction of the depth
-    envelope(preset.env[1],
-             std::min<uint16_t>(preset.env[1].sustain, 0x3FF) << 12, mod_attack,
-             mod_decay, mod_release, writes);
+    envelope(synth, wiring::envelope_mod, preset.env[1],
+             std::min<uint16_t>(preset.env[1].sustain, 0x3FF) << 12, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
-    // program takes MOD_AMOUNT as a quarter of the depth and multiplies by
-    // four after the envelope (voice.s: a depth reaches 32 octaves, a word
-    // holds 8). Written whole, Galaxy's 2.85 octaves became eleven, the
+    // wiring takes the mod amount as a quarter of the depth and multiplies
+    // by four after the envelope (wiring.cpp: a depth reaches 32 octaves, a
+    // word holds 8). Written whole, Galaxy's 2.85 octaves became eleven, the
     // cutoff pinned at the top and the pad an octave brighter than the old
     // engine's (issue #222: the centroid 3960 Hz against the benchmark's
     // 1561 on a C5, 729 with the word zeroed).
-    put(writes, channel_register(cp::mod_amount),
+    put(writes, word_of(synth, channel_of(synth).mod_amount),
         octaves(preset.mod_env_depth / 4));
 }
 
-void cutoff(const preset_t &preset, const Controllers &controllers,
-            Writes &writes) {
+void cutoff(const wiring::Synth &synth, const preset_t &preset,
+            const Controllers &controllers, Writes &writes) {
     // The knob, the wheel (up to 5 octaves), and the half octave that puts a
     // note's cutoff above its pitch when the tracking is 100 %.
     constexpr int half_octave = raw_octave / 2;
     constexpr int wheel_step  = 40; // raw octave steps a wheel step
-    put(writes, channel_register(cp::cutoff_base),
+    put(writes, word_of(synth, channel_of(synth).cutoff_base),
         octaves(preset.filter.cutoff + half_octave
                 + controllers.wheel * wheel_step));
     // 64 is 100 %
-    put(writes, channel_register(cp::key_track),
+    put(writes, word_of(synth, channel_of(synth).key_track),
         clamp_word(int64_t{preset.filter.key_track} * word_one / 64));
 }
 
-void pitch_bend(const preset_t &preset, const Controllers &controllers,
+void pitch_bend(const wiring::Synth &synth, const Controllers &controllers,
                 Writes &writes) {
-    (void) preset;
-    put(writes, channel_register(cp::bend), octaves(controllers.bend));
+    put(writes, word_of(synth, channel_of(synth).bend),
+        octaves(controllers.bend));
 }
 
-void lfo(const preset_t &preset, int i, Writes &writes) {
-    const lfo_t &l  = preset.lfo[i];
-    const int set   = cp::lfo_sets + i * cp::set_size;
-    const int shape = l.shape & 3;
-
-    // The half's pool, and where in it a record of this shape sits. The
-    // program (lfo.s) walks the half from BASE in shape order — saws, then
-    // squares, triangles, sines, each as many as counts.s fixes — so a
-    // record's shape is its place in that order. One of each shape a half
-    // (counts.s): the saw at the pool's start, the square after the saws, and
-    // so on. The channel reads the record of the preset's shape, below.
-    const int base   = cp::lfos + i * cp::lfos_a_half * cp::lfo_size;
-    const int offset = shape == WAVE_SAW     ? 0
-                       : shape == WAVE_PULSE ? cp::saws_a_half
-                       : shape == WAVE_TRI
-                               ? cp::saws_a_half + cp::squares_a_half
-                               : cp::saws_a_half + cp::squares_a_half
-                                         + cp::triangles_a_half;
-    const int record = base + offset * cp::lfo_size;
-
-    // the record: the half's LFO of this shape; the program's output is
-    // ±depth, which the channel scales by the destination's depth
-    wide(writes, record + cp::phase_step,
+void lfo(const wiring::Synth &synth, const preset_t &preset, int i,
+         Writes &writes) {
+    const lfo_t &l                 = preset.lfo[i];
+    const int shape                = lfo_shape(l.shape);
+    const wiring::Channel &channel = channel_of(synth);
+    // The half's LFO of the preset's shape. All four of a half run every
+    // pass; the channel listens to this one, below. Its output is ±depth,
+    // which the channel scales by the destination's depth.
+    const wiring::Lfo &wave = synth.lfo(i, shape);
+    wide(writes, word_of(synth, wave.step),
          csp::lfo_rate(l.rate, 1)); // every pass (#268)
-    put(writes, record + cp::depth, word_one);
-    put(writes, record + cp::neg_depth, -word_one);
-    put(writes, record + cp::gain,
-        shape == WAVE_SAW   ? word_one / 8
-        : shape == WAVE_TRI ? word_one / 4
-                            : 0);
-    put(writes, set + cp::base, base); // the program walks the half from here
-
-    // the channel reads its LFO from the record of the preset's shape
-    put(writes, channel_register(i == 0 ? cp::lfo1 : cp::lfo2), record);
+    put(writes, word_of(synth, wave.depth), word_one);
+    put(writes, word_of(synth, wave.neg_depth), -word_one);
+    put(writes, word_of(synth, wave.gain),
+        shape == wiring::shape_saw        ? word_one / 8
+        : shape == wiring::shape_triangle ? word_one / 4
+                                          : 0);
+    put(writes, word_of(synth, channel.lfo[static_cast<size_t>(i)]),
+        synth.graph.address(wave.record));
 
     // The depth swings the destination by ±depth/2 of the preset's raw
     // units (1024 to the octave, or to 1.0 of a pulse width): a word of
     // depth × 8. Only the chosen destination carries it.
     const int32_t amount = octaves(int64_t{l.depth} / 2);
-    const int pitch      = i == 0 ? cp::lfo1_pitch : cp::lfo2_pitch;
-    const int cutoff_    = i == 0 ? cp::lfo1_cutoff : cp::lfo2_cutoff;
-    const int duty       = i == 0 ? cp::lfo1_duty : cp::lfo2_duty;
-    const int resonance  = i == 0 ? cp::lfo1_resonance : cp::lfo2_resonance;
-    put(writes, channel_register(pitch), l.dest == LFO_DEST_PITCH ? amount : 0);
-    put(writes, channel_register(cutoff_),
-        l.dest == LFO_DEST_CUTOFF ? amount : 0);
-    put(writes, channel_register(duty), l.dest == LFO_DEST_DUTY ? amount : 0);
-    put(writes, channel_register(resonance),
-        l.dest == LFO_DEST_RESONANCE ? amount : 0);
+    auto depth           = [&](int moved, int destination) {
+        put(writes,
+                      word_of(synth, channel.depth[static_cast<size_t>(i)]
+                                                  [static_cast<size_t>(moved)]),
+            l.dest == destination ? amount : 0);
+    };
+    depth(wiring::moves_pitch, LFO_DEST_PITCH);
+    depth(wiring::moves_cutoff, LFO_DEST_CUTOFF);
+    depth(wiring::moves_duty, LFO_DEST_DUTY);
+    depth(wiring::moves_resonance, LFO_DEST_RESONANCE);
 }
 
-void channel_sound(const preset_t &preset, Writes &writes) {
+void channel_sound(const wiring::Synth &synth, const preset_t &preset,
+                   Writes &writes) {
+    namespace cs = wiring::channel_sink;
     VoicePlan plan;
     const int sounding = voicing(preset, plan);
-    const int channel  = cp::channel_sinks;
+    const int channel  = cs::base;
     for (int slot = 0; slot < partials_per_voice; ++slot) {
         const Voicing &partial = plan[slot];
         const int tune         = preset.osc[partial.oscillator].tune;
         const int pitch        = partial.active ? tune + partial.detune : 0;
-        put(writes, channel + cp::detune + slot, octaves(pitch));
+        put(writes, channel + cs::detune + slot, octaves(pitch));
         // the cutoff follows the partial's own tune and spread at the
         // tracking's ratio; the note and the bend follow it in the voices
-        put(writes, channel + cp::cutoff_offset + slot,
+        put(writes, channel + cs::cutoff_offset + slot,
             clamp_word(int64_t{pitch} * preset.filter.key_track * word_per_raw
                        / 64));
         const Codes codes = partial.active
                                     ? gain_codes(preset, partial, sounding)
                                     : Codes{volume_mute, volume_mute};
-        put(writes, channel + cp::gain_left + slot, gain_of_code(codes.left));
-        put(writes, channel + cp::gain_right + slot, gain_of_code(codes.right));
+        put(writes, channel + cs::gain_left + slot, gain_of_code(codes.left));
+        put(writes, channel + cs::gain_right + slot, gain_of_code(codes.right));
     }
     // the oscillators: the mode word (waveform [2:0], cascade [3], filter
     // type [5:4]) and the pulse width, 1.0 being the rail (the program adds
@@ -444,45 +450,42 @@ void channel_sound(const preset_t &preset, Writes &writes) {
         const osc_t &osc = preset.osc[oscillator];
         const int mode   = (osc.wave & 7) | ((preset.filter.cascade & 1) << 3)
                          | ((preset.filter.type & 3) << 4);
-        put(writes, channel + (oscillator ? cp::mode_1 : cp::mode_0), mode);
+        put(writes, channel + (oscillator ? cs::mode_1 : cs::mode_0), mode);
         put(writes,
-            channel_register(oscillator ? cp::duty_base_1 : cp::duty_base_0),
+            word_of(synth, channel_of(synth)
+                                   .duty_base[static_cast<size_t>(oscillator)]),
             clamp_word(osc.duty >> 9));
     }
-    put(writes, channel_register(cp::resonance_base),
+    put(writes, word_of(synth, channel_of(synth).resonance_base),
         octaves(preset.filter.resonance));
 }
 
-void velocity_amounts(const preset_t &preset, int voice, uint8_t velocity,
-                      Writes &writes) {
-    put(writes, voice_register(voice, cp::velocity),
+void velocity_amounts(const wiring::Synth &synth, const preset_t &preset,
+                      int voice, uint8_t velocity, Writes &writes) {
+    const wiring::Voice &words = voice_of(synth, voice);
+    put(writes, word_of(synth, words.velocity[wiring::envelope_amp]),
         fraction(amp_amount(preset, velocity)));
-    put(writes, voice_register(voice, cp::velocity_m),
+    put(writes, word_of(synth, words.velocity[wiring::envelope_mod]),
         fraction(mod_amount(preset, velocity)));
 }
 
-// The stages are the CSP's to change (an attack ends in decay at full
-// scale), so every stage write is forced: the chip may hold decay where the
-// firmware last wrote attack, and a retrigger must still go out.
-void note_on(const preset_t &preset, int voice, uint8_t note, uint8_t velocity,
-             Writes &writes) {
-    put(writes, voice_register(voice, cp::note), note_word(note));
-    velocity_amounts(preset, voice, velocity, writes);
-    put(writes, voice_register(voice, cp::stage_a), amp_attack, true);
-    put(writes, voice_register(voice, cp::stage_m), mod_attack, true);
+void note_on(const wiring::Synth &synth, const preset_t &preset, int voice,
+             uint8_t note, uint8_t velocity, Writes &writes) {
+    put(writes, word_of(synth, voice_of(synth, voice).note), note_word(note));
+    velocity_amounts(synth, preset, voice, velocity, writes);
+    enter(synth, voice, wiring::stage_attack, writes);
 }
 
-void release(int voice, Writes &writes) {
-    put(writes, voice_register(voice, cp::stage_a), amp_release, true);
-    put(writes, voice_register(voice, cp::stage_m), mod_release, true);
+void release(const wiring::Synth &synth, int voice, Writes &writes) {
+    enter(synth, voice, wiring::stage_release, writes);
 }
 
-void silence(int voice, Writes &writes) {
+void silence(const wiring::Synth &synth, int voice, Writes &writes) {
     // the levels too are the CSP's: send them whatever the image says
-    wide(writes, voice_register(voice, cp::level_a), 0, true);
-    wide(writes, voice_register(voice, cp::level_m), 0, true);
-    release(voice, writes);
+    for (const Wire level : voice_of(synth, voice).level) {
+        wide(writes, word_of(synth, level), 0, true);
+    }
+    release(synth, voice, writes);
 }
-
 
 } // namespace render

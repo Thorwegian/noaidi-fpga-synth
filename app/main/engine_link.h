@@ -19,9 +19,9 @@
 extern "C" {
 #endif
 
-// Hold the CSP, load its control program and its decode ROM, write the
-// static wiring (render::setup), release it, and start the 1 kHz tick task.
-// Call after spi_link_init().
+// Hold the CSP, wire the Noaidi's graph and build its program, load the
+// program and its decode ROM, write the static wiring (render::setup),
+// release it, and start the 1 kHz tick task. Call after spi_link_init().
 void engine_link_init(void);
 
 // Queue one write to a CSP register or sink word (0x000–0xBFF). The raw
@@ -72,7 +72,12 @@ void engine_link_data_stream(bool on, int source);
 }
 
 #include "render.hpp"
+#include "wiring.hpp"
 
 // All the writes of a list, in order.
 bool engine_link_write_all(const render::Writes &writes);
+
+// The Noaidi as the graph engine_link_init() wired and built: where every
+// write of render.hpp finds its word.
+const wiring::Synth &engine_link_synth();
 #endif

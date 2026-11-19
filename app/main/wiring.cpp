@@ -31,8 +31,6 @@ constexpr int32_t minus_four           = word(-4.0);
 constexpr int32_t correction           = word(0.225);
 constexpr int32_t one_minus_correction = word(1.0) - correction;
 
-enum { shape_saw, shape_square, shape_triangle, shape_sine };
-
 // A segment's fields in its record, and a channel's fields behind its
 // segments.
 enum { field_target, field_rate };

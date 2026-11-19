@@ -13,21 +13,22 @@
 #include <cstring>
 #include <string>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
-#include "csp/control_program.hpp"
-#include "csp/generator.hpp"
 #include "console.h"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
 #include "fpga_map.hpp"
 #include "render.hpp"
 #include "spi_link.hpp"
+#include "wiring.hpp"
 
 namespace {
 
@@ -214,11 +215,6 @@ public:
     }
 };
 
-// The LFO probe log below is a diagnostic: its SPI traffic every few seconds
-// is off unless this is set (a lab run of 480 queued writes lost a run of
-// them each time the probe fired).
-constexpr bool log_lfo_probe = false;
-
 // Diagnostic: leave the CSP held and the tick paused after the boot image is
 // in, to snapshot the chip before its program has run (tools/lab/snapshot.py).
 constexpr bool hold_after_boot = false;
@@ -245,58 +241,6 @@ void meter_task(void *) {
         if (columns != shown) {
             shown = columns;
             console_set_meter(columns);
-        }
-    }
-}
-
-// Every few seconds, log what the CSP holds for the LFOs: the pass counter
-// and, for each LFO, its record (phase, step, depth and its negative, gain
-// and output) and its set (where it starts, how many of each shape). What the
-// simulator cannot show of a board that does not modulate.
-void probe_task(void *) {
-    namespace cp = csp::control;
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        const unsigned long pass =
-                static_cast<unsigned long>(probe_pair(0x040) >> 18);
-        ESP_LOGI(tag, "probe: pass %lu", pass);
-        // the pass counter's low bit, sampled eight times: it should show
-        // both values (the LFO pool's PARITY went with #268: both halves run
-        // every pass)
-        std::array<unsigned, 8> pass_low_bit{};
-        for (size_t sample = 0; sample < pass_low_bit.size(); ++sample) {
-            pass_low_bit[sample] =
-                    static_cast<unsigned>((probe_pair(0x040) >> 18) & 1);
-        }
-        ESP_LOGI(tag, "probe: PASS bit 0 %u %u %u %u %u %u %u %u",
-                 pass_low_bit[0], pass_low_bit[1], pass_low_bit[2],
-                 pass_low_bit[3], pass_low_bit[4], pass_low_bit[5],
-                 pass_low_bit[6], pass_low_bit[7]);
-        for (int lfo = 0; lfo < 2; ++lfo) {
-            const int record           = cp::lfos + lfo * 16 * cp::lfo_size;
-            const int set              = cp::lfo_sets + lfo * cp::set_size;
-            const uint64_t phase       = probe_pair(record + cp::phase);
-            const uint64_t step        = probe_pair(record + cp::phase_step);
-            const uint64_t depth       = probe_pair(record + cp::depth);
-            const uint64_t gain        = probe_pair(record + cp::gain);
-            const uint64_t set_a       = probe_pair(set + cp::base);
-            const uint64_t set_b       = probe_pair(set + cp::n_saw + 1);
-            const uint64_t set_c       = probe_pair(set + cp::n_saw + 3);
-            const uint64_t scratch_p_t = probe_pair(record + cp::p);
-            const uint64_t scratch_z   = probe_pair(record + cp::z);
-            ESP_LOGI(
-                    tag,
-                    "probe: LFO%d phase %09llx step %09llx depth/neg %09llx gain/out %09llx "
-                    "set %09llx %09llx %09llx P/T %09llx Z %09llx",
-                    lfo + 1, static_cast<unsigned long long>(phase),
-                    static_cast<unsigned long long>(step),
-                    static_cast<unsigned long long>(depth),
-                    static_cast<unsigned long long>(gain),
-                    static_cast<unsigned long long>(set_a),
-                    static_cast<unsigned long long>(set_b),
-                    static_cast<unsigned long long>(set_c),
-                    static_cast<unsigned long long>(scratch_p_t),
-                    static_cast<unsigned long long>(scratch_z));
         }
     }
 }
@@ -404,33 +348,68 @@ void engine_task(void *) {
     }
 }
 
-// The control program, as the generator builds it at boot from the
-// firmware's graph. Static: an image is larger than a task's stack, and so
-// the linker sizes it with the rest of the firmware's memory.
+// The Noaidi as a DSP graph, wired at boot (wiring.hpp), and the program
+// the graph builds. Every word the firmware writes is one it asks the
+// graph for, so the synth lives as long as the firmware plays. Static: an
+// image is larger than a task's stack, and so the linker sizes it with the
+// rest of the firmware's memory. The graph's own memory is the heap's.
+wiring::Synth synth;
 csp::ProgramBuilder::Built program;
 
-// Generate the control program, and say what it cost: the time, the heap
-// (what was free before, and the least that has been free since boot: the
-// difference is the builder's schedule at its most, unless the boot had
-// been lower already) and the stack the calling task has never used.
-// False if the graph's program does not build, with the builder's reasons
-// in the log.
+// While one of these lives, malloc() places every block in the PSRAM, the
+// small ones too: the graph and what its build needs, which the internal
+// RAM has no room for beside the firmware's own
+// (docs.espressif.com, "Support for External RAM": the size limit under
+// which a block goes to internal memory first).
+class ExternalHeap {
+public:
+    ExternalHeap() {
+        heap_caps_malloc_extmem_enable(0);
+    }
+    ~ExternalHeap() {
+        heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+    }
+    ExternalHeap(const ExternalHeap &)            = delete;
+    ExternalHeap &operator=(const ExternalHeap &) = delete;
+};
+
+// Every LFO, channel and voice wired into the graph and the graph's program
+// built, and what it cost: the time of each, the PSRAM the graph holds now
+// and what the build took beside it at its most (from the least that has
+// been free since boot), what the internal heap gave, and the stack the
+// calling task has never used. False if the graph's program does not
+// build, with the graph's reasons in the log.
 bool generate_program() {
-    const uint32_t free_before = esp_get_free_heap_size();
-    const int64_t started      = esp_timer_get_time();
-    csp::generate(csp::control_graph(), program);
-    const int64_t microseconds = esp_timer_get_time() - started;
+    const size_t external_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    const int64_t started        = esp_timer_get_time();
+    int64_t wired                = 0;
+    bool built                   = false;
+    {
+        const ExternalHeap external;
+        wiring::wire(synth);
+        wired = esp_timer_get_time();
+        built = synth.graph.build(program);
+    }
+    const int64_t finished      = esp_timer_get_time();
+    const size_t external_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(
             tag,
-            "control program generated in %lld us: heap %lu bytes free before, %lu at the least since boot; stack %lu bytes never used",
-            static_cast<long long>(microseconds),
-            static_cast<unsigned long>(free_before),
-            static_cast<unsigned long>(esp_get_minimum_free_heap_size()),
+            "graph wired in %lld us, its program built in %lld us: %u bytes of PSRAM held, %u more at the build's most; %d bytes of internal heap held; stack %lu bytes never used",
+            static_cast<long long>(wired - started),
+            static_cast<long long>(finished - wired),
+            static_cast<unsigned>(external_before - external_after),
+            static_cast<unsigned>(
+                    external_after
+                    - heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+            static_cast<int>(internal_before)
+                    - static_cast<int>(
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
             static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
-    for (const csp::BuildIssue &issue : program.issues) {
+    for (const csp::DspGraph::Issue &issue : synth.graph.issues()) {
         ESP_LOGE(tag, "control program: %s", issue.message.c_str());
     }
-    return program.ok;
+    return built;
 }
 
 // The dword at `index` of the program image as the firmware sends it: a row
@@ -545,9 +524,11 @@ void engine_link_init(void) {
     load_program();
 
     // The program's constants are immediates in its rows; the register image
-    // starts from what the renderer sets up.
+    // starts from what the renderer sets up, in the words the graph laid out.
     render::Writes writes;
-    render::setup(writes);
+    if (generated) {
+        render::setup(synth, writes);
+    }
     for (const render::Write &write : writes) {
         image.set(write.address, write.raw);
     }
@@ -584,9 +565,6 @@ void engine_link_init(void) {
         != pdPASS) {
         ESP_LOGE(tag, "failed to create task");
         return;
-    }
-    if (log_lfo_probe) {
-        xTaskCreate(probe_task, "engine_probe", 3072, nullptr, 2, nullptr);
     }
     xTaskCreate(meter_task, "engine_meter", 3072, nullptr, 1, nullptr);
     esp_timer_create_args_t timer_args = {};
@@ -685,6 +663,10 @@ bool engine_link_write_all(const render::Writes &writes) {
     }
     xSemaphoreGive(lock);
     return ok;
+}
+
+const wiring::Synth &engine_link_synth() {
+    return synth;
 }
 
 bool engine_link_point(int partial, const int *pointers) {
