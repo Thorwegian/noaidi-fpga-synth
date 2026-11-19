@@ -3,8 +3,8 @@
 ; Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 ; License: CERN-OHL-S v2
 ;
-; The envelope's loop (envelope.s) compares a level, selects a stage by the
-; flags, points j at the stage's row through an IDX and accumulates a dword
+; A voice's envelope (app/main/wiring.cpp) compares a level, selects a stage
+; by the flags, reads the stage's segment through j and accumulates a dword
 ; level from what j reads: the per-element flags and the per-element other
 ; index, which vloop.s and the four micro-programs never touch. The same
 ; shapes over four items whose fill puts two elements below the threshold
