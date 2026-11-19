@@ -295,6 +295,9 @@ and the DSP. Issue #230 carries the patch work (fork
 - Placement varies a lot between seeds (82–124 MHz on the same netlist),
   and the untimed paths get no placement care at all, so their delay is
   placement luck too: a fault can appear and vanish between seeds.
+- A seed names a placement only on the machine that ran it: the same
+  netlist, seeds and chip database gave different post-placement
+  estimates on the Mac and on the lab box (#465).
 - **Rule (Thor, #222, 2026-10-17): whether the RTL works must not depend
   on the seed.** Seeds are tried for three reasons, in this order: to find
   the critical paths, by asking *why* one seed gives a working instrument
@@ -506,6 +509,8 @@ they pay:
    Measured 2026-11-06 on the control program as the builder schedules
    it: 1 460 cycles; `result_latency` 9 → 10 makes it 1 500,
    `state_latency` 5 → 6 makes it 1 462 (#330).
+9. **Before cloning SystemVerilog arrays for parallel access, remember
+   that B-SRAM banks are dual-ported and dual-clocked.**
 
 ## 6. What the tool did not time at all: LUT1, LUT2 and LUT3 (2026-11-06)
 
