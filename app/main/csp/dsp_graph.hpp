@@ -32,10 +32,13 @@
 // A sum saturates or wraps, by its kind: the hardware has both (MAC and
 // MACW), and a phase needs the one where a level needs the other.
 //
-// An output is a word unless it is made a dword. The hardware does dword
-// arithmetic in place alone, so a dword is a source, a delay, or a sum or
-// multiply-add onto its own delayed output (a phase, a level). An operator
-// of words that reads a dword gets its upper word.
+// An output is a word (Q4.14) unless it is made a dword (Q4.32). A dword is
+// for a value that needs the finer resolution, one that moves by less than
+// a word's smallest step a pass: a phase and its step, a level and its rate.
+// The hardware does dword arithmetic in place alone, and that limits what a
+// dword can be: a source, a delay, or a sum or multiply-add onto its own
+// delayed output. An operator of words that reads a dword gets its upper
+// word.
 //
 // The program is straight-line code: an instruction for every operator, no
 // loop. The graph picks the order the instructions issue in, each cycle one
