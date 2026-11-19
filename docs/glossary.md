@@ -139,7 +139,7 @@ control signal once a pass. The instruction set is
   beside the offset's low bits, concatenation, not addition, so every
   block has a **power-of-two stride**.
 - **immediate** — a constant in the row itself (`=0.5` a Q4.14 value,
-  `=#3` a raw integer); a constant takes no register.
+  `=#3` a raw integer); constants no longer live in registers.
 - **scalar loop** (`LOOP.i`, `LOOP.j`) — repeats a body a fixed count of
   times stepping an index; a **vector loop** (`LOOP.vi`, `LOOP.vj`) runs
   its body across the loop's **elements** in **rounds** of sixteen, each
