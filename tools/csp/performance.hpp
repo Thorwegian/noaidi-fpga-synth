@@ -146,7 +146,7 @@ inline Settings set_up(const wiring::Synth &synth) {
     for (int c = 0; c < channel_count; ++c) {
         const wiring::Channel &channel = synth.channels[static_cast<size_t>(c)];
         word(channel.bend, 0.02 * (c - 8));
-        for (int l = 0; l < wiring::lfo_half_count; ++l) {
+        for (int l = 0; l < wiring::channel_lfo_count; ++l) {
             for (int k = 0; k < wiring::moved_count; ++k) {
                 word(channel.depth[static_cast<size_t>(l)]
                                   [static_cast<size_t>(k)],
