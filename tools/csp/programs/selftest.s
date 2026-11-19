@@ -4,15 +4,20 @@
 ; Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 ; License: CERN-OHL-S v2
 ;
-; After map.s. Scalar code only (#235): instructions that sit in dependent
-; chains, worked a pass at a time into registers of their own, and counters
-; that follow the pass counter's low bit through ANDXOR, SHIFT and IDX. The
-; firmware reads them back through the probe and compares:
-; engine_selftest.cpp. The schedule the assembler lays out is part of what
-; is tested: the chip runs the rows as placed, with no interlock, so a wrong
-; latency shows as a wrong result. Only registers the control program does
-; not keep anything in are used (0x062 … 0x06F, 0x100 … 0x119 and the pass
-; count at 0x3FD, 0x3FE).
+; Scalar code only (#235): instructions that sit in dependent chains, worked
+; a pass at a time into registers of their own, and counters that follow the
+; pass counter's low bit through ANDXOR, SHIFT and IDX. The firmware reads
+; them back through the probe and compares: engine_selftest.cpp. The
+; schedule the assembler lays out is part of what is tested: the chip runs
+; the rows as placed, with no interlock, so a wrong latency shows as a wrong
+; result. The registers are the test's own choice (0x062 … 0x06F, 0x100 …
+; 0x119 and the pass count at 0x3FD, 0x3FE): the firmware clears every
+; register after the test, before the control program's image goes in.
+
+        .const ONE, 1.0
+        .const EIGHTH, 0.125
+        .const MINUS_FOUR, -4.0
+        .reg   PASS, 0x040              ; the pass counter, an input
 
         .reg   RES_PASS_BIT, 0x062      ; the pass counter's low bit
         .reg   RES_HALF,     0x064      ; the half's choice, 0 or 8

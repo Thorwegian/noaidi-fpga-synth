@@ -344,7 +344,7 @@ obj_dir/tb_top/sim: $(PKG) $(MOD) tb/tb_top.sv $(LUTS) Makefile
 # the firmware's is: the rows and the decode ROM as hex for $readmemh (a count,
 # then the words), loaded over the bus the way the firmware loads them.
 CSP_TOOL     = ../app/build/host/csp
-CSP_SELFTEST = ../tools/csp/programs/map.s ../tools/csp/programs/selftest.s
+CSP_SELFTEST = ../tools/csp/programs/selftest.s
 obj_dir/tb_top/selftest.imem.hex: $(CSP_SELFTEST) ../tools/csp/main.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.hpp
 	$(MAKE) -C .. csp
 	mkdir -p $(@D) && $(CSP_TOOL) image $(CSP_SELFTEST) -o $(@D)/selftest

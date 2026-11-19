@@ -277,9 +277,8 @@ int run_image(VerilatedContext &context, const char *name,
 
 void run_directed(VerilatedContext &context) {
     const std::vector<FirmwareWrite> setup = directed_setup();
-    const std::string map                  = program_file("map.s");
     const std::vector<Directed> programs   = {
-            {"selftest", map + program_file("selftest.s"), 24},
+            {"selftest", program_file("selftest.s"), 24},
             // the chip check's one-path programs (tools/csp/programs/checks, #235): the scalar loops'
             // repeat, one vector loop, the dword's write and read
             {"loop", program_file("checks/loop.s"), 24},

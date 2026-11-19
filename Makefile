@@ -206,7 +206,7 @@ csp: $(CSP_TOOL)
 CSP_PROGRAM_FILES = $(addprefix $(CSP_DIR)/programs/,map.s counts.s lfo.s channel.s envelope.s voice.s)
 CSP_CONTROL_HEADER = app/main/csp/control_program.hpp
 
-CSP_SELFTEST_FILES = $(addprefix $(CSP_DIR)/programs/,map.s selftest.s)
+CSP_SELFTEST_FILES = $(CSP_DIR)/programs/selftest.s
 CSP_SELFTEST_HEADER = app/main/csp/selftest_program.hpp
 
 csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)

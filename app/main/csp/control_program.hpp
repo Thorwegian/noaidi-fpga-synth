@@ -11,8 +11,8 @@
 //   tools/csp/programs/envelope.s
 //   tools/csp/programs/voice.s
 // Do not edit: make csp-test checks that it is current.
-// The names are those of tools/csp/programs/map.s, in lower case;
-// the labels of the code are left out.
+// The names are the program's own, in lower case; the labels of the
+// code are left out.
 
 #pragma once
 

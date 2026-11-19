@@ -209,8 +209,8 @@ int header_command(const csp::Program &program,
     }
     std::printf(
             "// Do not edit: make csp-test checks that it is current.\n"
-            "// The names are those of tools/csp/programs/map.s, in lower case;\n"
-            "// the labels of the code are left out.\n\n"
+            "// The names are the program's own, in lower case; the labels of the\n"
+            "// code are left out.\n\n"
             "#pragma once\n\n"
             "// clang-format off\n"
             "#include <array>\n"
