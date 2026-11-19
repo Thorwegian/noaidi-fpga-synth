@@ -8,7 +8,7 @@
 
 - A bitstream is never built on the cloud box. The lab box synthesises (yosys) and packs (`gowin_pack`). Place and route (nextpnr) runs on the Mac, always.
 
-- Every job on the Mac is started with `nice -n 20`. The job is given the low priority, never the SSH service.
+- Every job on the Mac is started with `nice -n 20`.
 
 - Everything that is not a bitstream runs on the cloud box: the Verilator sims, `make csp-test` and the cosim, the firmware build, the checks.
 
@@ -41,12 +41,6 @@
 - Files in the repository document *state*: what the code and the design are and why they are so. They never say what something was before, what it replaced, or when and by whom it changed. Change is recorded where it happens: in the chat, the issue, the pull request and the commit message, and Git keeps the log. The only file that lists changes is one that is a changelog by name.
 
 - Variable names *must* be descriptive and use industry standard textbook terminology.
-
-- Raw values are raw values. There is no such unit as "LSB".
-
-- A stored or loaded sound is a *preset*. "Patch" means a change to code or a tool, never a sound (#300).
-
-- Before cloning SystemVerilog arrays for parallel access, remember that B-SRAM banks are dual-ported and dual-clocked.
 
 - B-SRAM blocks can be used as a large LUT with 10 inputs and 18 outputs to replace complex logic.
 
@@ -92,4 +86,3 @@ License: CERN-OHL-S v2
   - It places against the lab box's `chipdb-GW2A-18C.bin`, copied over the one its own build generates.
   - The build places on the machine it runs on, so a placement is carried to the Mac by hand: `yosys.json` and `constraints.cst` over, nextpnr with the Makefile's options, `pnr.json` back to the lab box for `gowin_pack` and the take.
 - Worktrees live under `~/wt` on the cloud box and the lab box: `git worktree add ~/wt/wt-<issue> -b <branch> main`. A worktree holds its own `rtl/obj_dir`, `yosys.json` and `pnr.log`.
-- A seed names a placement only on the machine that ran it.
