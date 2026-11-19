@@ -66,9 +66,7 @@ flowchart TD
   wide, so the link is too: a command nonet, two address nonets (18 bits)
   and 36-bit payload dwords, MSB first, nothing straddling a boundary. The
   ESP32's SPI master clocks any number of bits per transfer; the slave counts
-  to nine. (The first revision's 32-bit wire carried 18 useful bits in 32
-  clocks and split a 36-bit instruction over a high-bits register; that is
-  gone.)
+  to nine.
 - **A dword is 36 bits**: a register or sink write is one dword (`[35:24]` the
   12-bit address, `[23:6]` the 18-bit word, `[5:0]` spare); a register pair is
   two dwords, the pair's halves; an instruction row is two dwords; a decode ROM
@@ -265,8 +263,8 @@ ports.
   (`preset_adsr_rate_coeff`) the envelope program's rate is made from
   (`csp::envelope_rate`).
 - Velocity scales the amp envelope's amount in dB (a soft note is as many dB
-  down as the preset's sensitivity says: the old 60 dB span, taken as an
-  amplitude by the firmware since the gain is linear) and the mod
+  down as the preset's sensitivity says: a 60 dB span, which the firmware
+  takes as an amplitude, the gain being linear) and the mod
   envelope's depth linearly. Key tracking follows each partial's own pitch
   (note, tune, unison detune) and the channel's bend and pitch LFOs.
 - Controllers are one register write per event; a "global" control is a

@@ -127,8 +127,8 @@ double velocity_scale(uint8_t velocity, uint8_t amount) {
 }
 
 // The loudness span the amp envelope's static amounts are laid out over: the
-// velocity's amount and the sustain are fractions of 60 dB (the old engine's
-// span; `param_conventions.md`), and since the pipeline's gain is linear
+// velocity's amount and the sustain are fractions of a 60 dB span
+// (`param_conventions.md`), and since the pipeline's gain is linear
 // (#176) the exponential is taken here, once per note or per preset, not
 // in gateware. A fraction f is 2^(span × (f − 1)) of amplitude: 0 is −60 dB,
 // 1 is unity.
