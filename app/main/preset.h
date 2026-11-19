@@ -1,23 +1,16 @@
-// preset.h — the currently-active sound, in RAM.
+// preset.h — the active sound, in RAM
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// This is the single source of truth for the active sound: the
-// CC/SysEx handlers MUTATE a preset_t, and voice_alloc/engine_link
-// RENDER it to the CSP's registers and sink words (render.cpp). Stored presets are files
-// in the format of docs/storage_format.md; loading and saving one
-// converts between that file and an instance of this. Multi-timbral layering / key split (channel awareness) is an
-// array of parts, each a preset_t — see performance_t at the bottom.
-//
-// Fields mirror docs/control_map.md and docs/midi_schema.md. Units
-// are the ENGINE's (log2 UQ4.10 pitch/cutoff/resonance, UQ4.4
-// volume, 8-bit log2 ADSR rates) so rendering is add-not-convert;
-// MIDI scaling happens in the CC handlers, not here.
+// The single source of truth for the active sound: the CC handlers set its
+// fields (cc_map.cpp), and render.cpp makes the CSP's words of them. A stored
+// preset is a file in the format of docs/storage_format.md, and this struct
+// is that file in memory: the same tables, the same keys, and every number a
+// float in the file's unit (seconds, Hz, semitones, percent, dB, Q). A key
+// that holds a name is an enumeration. Each key's range is preset_units.hpp's.
 
 #pragma once
-#include <stdint.h>
-#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,155 +18,114 @@ extern "C" {
 
 #define PRESET_NUM_OSC 2
 #define PRESET_NUM_LFO 2
-// env 0 = amp (fixed to gain), env 1 = MOD (routable, default -> filter
-// cutoff)
-#define PRESET_NUM_ENV 2
 
-// ── Oscillator ──────────────────────────────────────────────────────
-typedef enum { // matches the mode word's waveform field
+// ── [voice] ─────────────────────────────────────────────────────────
+// How the two oscillators sit on a voice's eight partials (control_map.md
+// decision 2). Unison is a structure, whatever the waveform.
+typedef enum {
+    VOICE_2_PLAIN = 0, // osc 1 and osc 2, a partial each
+    VOICE_7_PLUS_1,    // osc 1 in unison on seven partials, osc 2 on one
+    VOICE_4_PLUS_4,    // both oscillators in unison on four partials
+} voice_struct_t;
+
+typedef struct {
+    voice_struct_t structure;
+    float osc_mix;       // percent: −100 is osc 1 alone, +100 osc 2 alone
+    float unison_detune; // semitones between neighbours of a unison group
+    float unison_stereo; // percent: how far a unison group spreads in stereo
+} preset_voice_t;
+
+// ── [[osc]] ─────────────────────────────────────────────────────────
+typedef enum { // the mode word's waveform field
     WAVE_SAW = 0,
     WAVE_PULSE,
     WAVE_TRI,
     WAVE_SINE,  // the full-wave table in block RAM
-    WAVE_NOISE, // white, from the gateware's shared generator; osc only
-                // (an LFO's shape stops at the sine)
-    // a future gateware waveform: a real parabola as its own type
+    WAVE_NOISE, // white, from the gateware's shared generator; an
+                // oscillator's alone (an LFO's shape stops at the sine)
 } waveform_t;
-
-// Voice structure — how the 2 oscillators map onto the 8 partials
-// (control_map.md decision 2). UNISON is a mode, any waveform.
-typedef enum {
-    VOICE_2_PLAIN = 0, // 2 partials/voice (osc1 + osc2, no unison)
-    VOICE_7_PLUS_1,    // osc1 x7 unison + osc2 plain = 8 partials
-    VOICE_4_PLUS_4,    // both oscillators x4 unison = 8 partials
-} voice_struct_t;
 
 typedef struct {
     waveform_t wave;
-    int16_t tune; // pitch offset, raw (1024 per octave); the
-                  // coarse and fine CCs both edit it
-    int32_t duty; // pulse width / parabola skew, full Q0.24
-                  // signed (needs 24 bits — int16 truncated
-                  // CC 25's <<17 to zero)
+    float tune;        // semitones from the note; the coarse and fine CCs
+                       // both edit it
+    float pulse_width; // percent of the cycle the pulse is high
 } osc_t;
 
-// ── Filter ──────────────────────────────────────────────────────────
+// ── [filter] ────────────────────────────────────────────────────────
+typedef enum {
+    FILTER_LOWPASS = 0,
+    FILTER_BANDPASS,
+    FILTER_HIGHPASS,
+} filter_type_t;
+
 typedef struct {
-    int16_t cutoff;     // offset from the key-tracked base, raw
-                        // (1024 per octave; CC 74 coarse + CC 106 fine)
-    uint16_t resonance; // effective code, UQ4.10 log2 (r octaves of Q
-                        // above Butterworth); 0x3FFF self-oscillates
-    uint8_t type;       // 0 LP .. (FILTER/GAIN mode field)
-    uint8_t cascade;    // 12/24 dB
-    int16_t key_track;  // cutoff-follows-pitch amount (per channel)
+    filter_type_t type;
+    float slope;     // dB/octave: 12 or 24
+    float cutoff;    // Hz, for MIDI note 60 with no tune and no modulation
+    float resonance; // Q; +infinity self-oscillates
+    float key_track; // percent: how far the cutoff follows the pitch
 } filter_t;
 
-// ── Envelope (ADSR) ─────────────────────────────────────────────────
-// Rates are 8-bit log2 in the PRESET; the wire format is linear.
+// ── [amp_env] and [mod_env] ─────────────────────────────────────────
 typedef struct {
-    uint8_t attack, decay; // 8-bit log2 rate codes
-    uint16_t sustain;      // 10-bit level: sustain / 1024 of full scale
-    uint8_t release;
-} adsr_t;
+    float attack;   // seconds, zero to full scale
+    float sustain;  // dB, relative to the peak
+    float decay;    // seconds, for 60 dB of the way to the sustain
+    float release;  // seconds, for a fall of 60 dB
+    float velocity; // percent: how far a soft note scales the amount
+} amp_env_t;
 
-// ── Envelope rates ──────────────────────────────────────────
-// The CSP's envelope (wiring.cpp) moves a level toward a target by a rate
-// times the distance left each pass. Firmware does
-// the decode of the preset's rate bytes, which is control-rate work and
-// belongs on this side: preset_adsr_rate_coeff gives an 18-bit coefficient k,
-// the fraction k / 2^24 of the distance an RC envelope covers each 96 kHz
-// sample (the gateware's original unit), and csp::envelope_rate
-// (csp/envelope.hpp) makes the program's wide rate of it.
-//
-// k spans 1..253952 (18 bits). Of the 256 rate codes, 224 land bit-exactly on
-// the coefficient grid; the worst error is 10% on a ~39 s release, affecting
-// only settings slower than ~11 s.
-#define ADSR_K_SHIFT 24u // k is a fraction of 2^24
+// What the mod envelope moves.
+typedef enum { MOD_ENV_DEST_CUTOFF = 0 } mod_env_dest_t;
 
-uint8_t preset_adsr_rate_byte(uint8_t preset_rate);
-// One rate byte -> the 18-bit coefficient k.
-uint32_t preset_adsr_rate_coeff(uint8_t rate_byte);
-
-// ── LFO ─────────────────────────────────────────────────────────────
 typedef struct {
-    uint8_t shape; // osc_core shape (saw/pulse/tri/sine)
-    uint16_t rate; // phase increment per sample, in 2^-25 of a
-                   // cycle (subsonic..control rate)
-    int16_t depth; // signed: the LFO swings its destination by ±depth/2
-                   // raw units (1024 to an octave, or to the full pulse
-                   // width)
-    uint8_t dest;  // LFO_DEST_*: what it drives
+    float attack;   // seconds, as the amp envelope's
+    float sustain;  // percent of the depth
+    float decay;    // seconds
+    float release;  // seconds
+    float velocity; // percent
+    mod_env_dest_t destination;
+    float depth; // semitones of cutoff, signed
+} mod_env_t;
+
+// ── [[lfo]] ─────────────────────────────────────────────────────────
+// What an LFO moves. Both LFOs take any of them.
+typedef enum {
+    LFO_DEST_DUTY = 0, // the pulse width of both oscillators
+    LFO_DEST_RESONANCE,
+    LFO_DEST_PITCH,
+    LFO_DEST_CUTOFF,
+} lfo_dest_t;
+
+typedef struct {
+    waveform_t shape; // saw, pulse, triangle or sine
+    float rate;       // Hz
+    lfo_dest_t destination;
+    float depth; // the destination's unit, peak: percentage points of pulse
+                 // width, octaves of Q, semitones of pitch or of cutoff
 } lfo_t;
 
-// LFO destinations. Both LFOs take any of them.
-enum { LFO_DEST_DUTY = 0, LFO_DEST_RESONANCE, LFO_DEST_PITCH, LFO_DEST_CUTOFF };
-
-// ── Modulation routing (the staged mod matrix) ──────────────────────
-// Fixed-function stage exposes only a few; the full matrix is the
-// deferred config structure. dest is a sink selector, amount signed.
+// ── [part] ──────────────────────────────────────────────────────────
+// What belongs to the part that plays the preset.
 typedef struct {
-    uint8_t source; // MOD_SRC_* (wheel, aftertouch, expr, MOD env, lfo0..)
-    uint8_t dest;   // sink selector
-    int16_t amount; // signed
-} mod_route_t;
+    float volume;     // dB, 0 is unity; −infinity is off
+    float pan;        // percent: −100 is left, +100 right
+    float bend_range; // semitones the pitch wheel reaches, whole
+} preset_part_t;
 
-#define PRESET_MOD_ROUTES 8 // matrix slots (Prophet-ish); stage 1 fills few
-
-// ── Arpeggiator / step sequencer ────────────────────────────────────
-typedef enum { CLOCK_AUTO = 0, CLOCK_INTERNAL } clock_mode_t;
-
-typedef struct {
-    bool enabled;
-    uint8_t mode;  // up/down/updown/random/pattern/chord-aware
-    uint16_t rate; // steps per beat (synced to clock)
-    uint8_t octaves;
-    clock_mode_t clock; // Auto (ext if present) / Internal
-    // pattern/step data: grows via structured SysEx (schema follow-up)
-} arp_seq_t;
-
-// ── The preset ───────────────────────────────────────────────────────
+// ── The preset ──────────────────────────────────────────────────────
 typedef struct preset_s {
+    preset_voice_t voice;
     osc_t osc[PRESET_NUM_OSC];
-    voice_struct_t voice_struct;
-    int8_t osc_mix;        // osc1<->osc2 balance (CC 24), 0=center
-    int16_t unison_detune; // spread within a unison group
-    int16_t unison_stereo; // stereo spread of the group
-
     filter_t filter;
-    adsr_t env[PRESET_NUM_ENV]; // [0]=amp, [1]=MOD
-    uint8_t mod_env_dest;       // MOD env destination (def: cutoff)
-    int16_t mod_env_depth;      // MOD env depth, signed raw octave steps
-                                // (the CSP's COEF is signed 18-bit;
-                                // ±4096 = ±4 octaves of cutoff)
+    amp_env_t amp_env;
+    mod_env_t mod_env;
     lfo_t lfo[PRESET_NUM_LFO];
-
-    mod_route_t mod[PRESET_MOD_ROUTES];
-
-    // Velocity sensitivity: 64 = the historical hardwired feel,
-    // 0 = OFF (full amount on every note, isolation testing),
-    // 127 = full velocity scaling. CC 86/87.
-    uint8_t vel_amp_amt; // CC 86: vel -> amp-env AMOUNT
-    uint8_t vel_mod_amt; // CC 87: vel -> MOD-env AMOUNT
-
-    uint8_t bend_range; // 1..12 semitones
-    uint8_t volume;     // per-channel/part volume (UQ4.4)
-    int8_t pan;         // per-channel/part pan
-
-    arp_seq_t arp;
+    preset_part_t part;
 } preset_t;
 
-// ── Performance: per-MIDI-channel parts (layering / key split) ───────
-// Channel awareness is cheap (control_map.md decision 5) and this is
-// where layering lives: one preset_t per part, plus split/layer
-// routing. Single-timbre today = one active part; omni writes it.
-#define PERF_NUM_PARTS 16 // one per MIDI channel
-
-typedef struct {
-    preset_t part[PERF_NUM_PARTS];
-    // key/velocity split ranges, layer enables: TBD with the feature
-} performance_t;
-
-// ── The active preset ────────────────────────────────────
+// ── The active preset ───────────────────────────────────────────────
 extern preset_t g_preset;
 // The init preset: one saw, open filter, organ envelope, no modulation.
 void preset_init(preset_t *p);

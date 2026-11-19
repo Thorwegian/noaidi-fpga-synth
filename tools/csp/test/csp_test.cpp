@@ -1164,45 +1164,49 @@ void test_lfo() {
     check(lowest == q(-1.0) && highest >= q(0.75), "the triangle spans ±depth");
 }
 
-// An envelope coefficient (per 96 kHz sample) as a dword rate for a pass: the
-// same fraction of the distance in the pass's samples (four, #268).
+// A segment's time constant as a dword rate for a pass: the fraction of the
+// distance the exponential covers in a pass, a 24 000th of a second (#268).
 void test_envelope_rates() {
-    const uint32_t coefficients[] = {1,    7,     100,   250,    1000,
-                                     4096, 16384, 65535, 131071, 262143};
-    for (const uint32_t k : coefficients) {
-        const double sample = static_cast<double>(k) / (1 << 24);
-        const double want = 1.0 - std::pow(1.0 - sample, csp::samples_per_pass);
-        const double got  = static_cast<double>(csp::envelope_rate(k))
+    const float time_constants[] = {0.0002f, 0.001f, 0.01f, 0.1f,
+                                    1.0f,    10.0f,  30.0f};
+    int64_t previous             = int64_t{1} << 32;
+    for (const float time_constant : time_constants) {
+        const double want =
+                1.0
+                - std::exp(-1.0
+                           / (static_cast<double>(time_constant) * 24000.0));
+        const int64_t rate = csp::envelope_rate(time_constant);
+        const double got   = static_cast<double>(rate)
                            / static_cast<double>(int64_t{1} << 32);
-        const std::string name = "k=" + std::to_string(k);
+        const std::string name =
+                "time constant " + std::to_string(time_constant);
         // within a unit of the rate's last place, 2^-32
         check(std::fabs(got - want)
                       <= 1.0 / static_cast<double>(int64_t{1} << 32),
               name + ": fraction " + std::to_string(got) + ", want "
                       + std::to_string(want));
-        check(csp::envelope_rate(k) < (int64_t{1} << 35),
-              name + ": a rate below 8");
+        check(rate > 0 && rate < previous,
+              name + ": a slower segment is a smaller step, and still a step");
+        previous = rate;
     }
-    check_equal(csp::envelope_rate(0), 0, "k=0: no movement");
 }
 
-// An LFO's old increment as a RATE: the same cycles a second.
+// An LFO's cycles a second as a dword step: the phase's 36 bits are a cycle,
+// stepped once a pass.
 void test_lfo_rate() {
-    // 1000 per sample at 96 kHz is 1000 / 2^25 of a cycle: 2.861 Hz
-    const double old_hertz = 1000.0 * 96000.0 / (1 << 25);
-    for (const int passes : {1, 2}) {
-        const int64_t rate = csp::lfo_rate(1000, passes);
-        const double passes_a_second =
-                96000.0 / csp::samples_per_pass; // 24 kHz (#268)
-        const double hertz = static_cast<double>(rate)
-                             / static_cast<double>(int64_t{1} << 36)
-                             * (passes_a_second / passes);
-        check(std::fabs(hertz / old_hertz - 1.0) < 1e-12,
-              "lfo_rate: " + std::to_string(passes) + " pass(es) an update");
+    const double passes_a_second =
+            96000.0 / csp::samples_per_pass; // 24 kHz (#268)
+    for (const float hertz : {0.0029f, 1.0f, 2.861f, 187.0f}) {
+        const double exact = static_cast<double>(hertz) / passes_a_second
+                             * static_cast<double>(int64_t{1} << 36);
+        check(std::fabs(static_cast<double>(csp::lfo_rate(hertz)) - exact)
+                      <= 0.5,
+              "lfo_rate: " + std::to_string(hertz)
+                      + " Hz, to the nearest step");
     }
-    check_equal(csp::lfo_rate(0, 2), 0, "lfo_rate: a stopped LFO");
-    check(csp::lfo_rate(65535, 2) < (int64_t{1} << 35),
-          "lfo_rate: the fastest LFO is below half a cycle an update");
+    check_equal(csp::lfo_rate(0.0f), 0, "lfo_rate: a stopped LFO");
+    check(csp::lfo_rate(187.0f) < (int64_t{1} << 35),
+          "lfo_rate: the fastest LFO is below half a cycle a pass");
 }
 
 // ---- the boot self-test ------------------------------------------------------

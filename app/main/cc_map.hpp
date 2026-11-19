@@ -4,8 +4,9 @@
 // License: CERN-OHL-S v2
 //
 // Every CC that edits the preset is one entry here, with its law in both
-// directions: a controller's value into the preset's field (apply), and the
-// field back into the value a controller would show (dump). The second
+// directions: a controller's value into the preset's field, in the field's
+// own unit (apply), and the field back into the value a controller would
+// show (dump). The second
 // direction is parameter feedback (#279): the synth tells the surfaces its
 // state as the CCs they already speak, so a Program Change moves their knobs.
 // Built for the host too: the test round-trips every value of every CC.
@@ -15,10 +16,10 @@
 // 110/116). The knobs' last positions are kept beside the preset (Knobs), so
 // moving one knob keeps the other's part; a loaded preset implies them.
 //
-// A law that loses resolution (a 7-bit knob into a 4-way switch, a rate into
-// a 16-bit increment) reads back as the value whose law lands nearest the
-// field, the field's own value when one does: applying what dump() says
-// gives the preset back exactly, which is what the test checks.
+// A knob has 128 positions and a field is a float, so a field a file or
+// another surface set reads back as the value whose law lands nearest it, the
+// field's own value when one does: applying what dump() says gives a preset
+// the knobs made back exactly, which is what the test checks.
 #pragma once
 
 #include <cstdint>

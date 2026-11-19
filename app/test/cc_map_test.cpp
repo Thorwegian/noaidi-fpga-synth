@@ -68,8 +68,8 @@ preset_t preset_of(const std::vector<Message> &messages) {
     cc_map::Knobs knobs = cc_map::knobs_of(preset);
     for (const Message &m : messages) {
         if (m.cc == 6) {
-            preset.bend_range =
-                    m.value; // RPN 0/0 data entry: the caller's, in the firmware
+            // RPN 0/0 data entry: the caller's, in the firmware
+            preset.part.bend_range = m.value;
         } else {
             cc_map::apply(preset, knobs, m.cc, m.value);
         }
@@ -80,48 +80,50 @@ preset_t preset_of(const std::vector<Message> &messages) {
 // The fields the schema reaches that differ, as one line; empty when none do.
 std::string differences(const preset_t &a, const preset_t &b) {
     std::string out;
-    auto field = [&](const char *name, long long x, long long y) {
+    auto field = [&](const std::string &name, double x, double y) {
         if (x != y) {
-            out += (out.empty() ? "" : ", ") + std::string(name) + " "
-                   + std::to_string(x) + " vs " + std::to_string(y);
+            char values[64];
+            std::snprintf(values, sizeof values, " %.9g vs %.9g", x, y);
+            out += (out.empty() ? "" : ", ") + name + values;
         }
     };
+    field("voice.structure", a.voice.structure, b.voice.structure);
+    field("voice.osc_mix", a.voice.osc_mix, b.voice.osc_mix);
+    field("voice.unison_detune", a.voice.unison_detune, b.voice.unison_detune);
+    field("voice.unison_stereo", a.voice.unison_stereo, b.voice.unison_stereo);
     for (int i = 0; i < 2; ++i) {
         const std::string o = "osc" + std::to_string(i + 1) + ".";
-        field((o + "wave").c_str(), a.osc[i].wave, b.osc[i].wave);
-        field((o + "tune").c_str(), a.osc[i].tune, b.osc[i].tune);
-        field((o + "duty").c_str(), a.osc[i].duty, b.osc[i].duty);
+        field(o + "wave", a.osc[i].wave, b.osc[i].wave);
+        field(o + "tune", a.osc[i].tune, b.osc[i].tune);
+        field(o + "pulse_width", a.osc[i].pulse_width, b.osc[i].pulse_width);
     }
-    field("voice_struct", a.voice_struct, b.voice_struct);
-    field("osc_mix", a.osc_mix, b.osc_mix);
-    field("unison_detune", a.unison_detune, b.unison_detune);
-    field("unison_stereo", a.unison_stereo, b.unison_stereo);
+    field("filter.type", a.filter.type, b.filter.type);
+    field("filter.slope", a.filter.slope, b.filter.slope);
     field("filter.cutoff", a.filter.cutoff, b.filter.cutoff);
     field("filter.resonance", a.filter.resonance, b.filter.resonance);
-    field("filter.type", a.filter.type, b.filter.type);
-    field("filter.cascade", a.filter.cascade, b.filter.cascade);
     field("filter.key_track", a.filter.key_track, b.filter.key_track);
-    for (int i = 0; i < 2; ++i) {
-        const std::string e = "env" + std::to_string(i + 1) + ".";
-        field((e + "attack").c_str(), a.env[i].attack, b.env[i].attack);
-        field((e + "decay").c_str(), a.env[i].decay, b.env[i].decay);
-        field((e + "sustain").c_str(), a.env[i].sustain, b.env[i].sustain);
-        field((e + "release").c_str(), a.env[i].release, b.env[i].release);
-    }
-    field("mod_env_dest", a.mod_env_dest, b.mod_env_dest);
-    field("mod_env_depth", a.mod_env_depth, b.mod_env_depth);
+    field("amp_env.attack", a.amp_env.attack, b.amp_env.attack);
+    field("amp_env.sustain", a.amp_env.sustain, b.amp_env.sustain);
+    field("amp_env.decay", a.amp_env.decay, b.amp_env.decay);
+    field("amp_env.release", a.amp_env.release, b.amp_env.release);
+    field("amp_env.velocity", a.amp_env.velocity, b.amp_env.velocity);
+    field("mod_env.attack", a.mod_env.attack, b.mod_env.attack);
+    field("mod_env.sustain", a.mod_env.sustain, b.mod_env.sustain);
+    field("mod_env.decay", a.mod_env.decay, b.mod_env.decay);
+    field("mod_env.release", a.mod_env.release, b.mod_env.release);
+    field("mod_env.velocity", a.mod_env.velocity, b.mod_env.velocity);
+    field("mod_env.destination", a.mod_env.destination, b.mod_env.destination);
+    field("mod_env.depth", a.mod_env.depth, b.mod_env.depth);
     for (int i = 0; i < 2; ++i) {
         const std::string l = "lfo" + std::to_string(i + 1) + ".";
-        field((l + "shape").c_str(), a.lfo[i].shape, b.lfo[i].shape);
-        field((l + "rate").c_str(), a.lfo[i].rate, b.lfo[i].rate);
-        field((l + "depth").c_str(), a.lfo[i].depth, b.lfo[i].depth);
-        field((l + "dest").c_str(), a.lfo[i].dest, b.lfo[i].dest);
+        field(l + "shape", a.lfo[i].shape, b.lfo[i].shape);
+        field(l + "rate", a.lfo[i].rate, b.lfo[i].rate);
+        field(l + "destination", a.lfo[i].destination, b.lfo[i].destination);
+        field(l + "depth", a.lfo[i].depth, b.lfo[i].depth);
     }
-    field("vel_amp_amt", a.vel_amp_amt, b.vel_amp_amt);
-    field("vel_mod_amt", a.vel_mod_amt, b.vel_mod_amt);
-    field("bend_range", a.bend_range, b.bend_range);
-    field("volume", a.volume, b.volume);
-    field("pan", a.pan, b.pan);
+    field("part.volume", a.part.volume, b.part.volume);
+    field("part.pan", a.part.pan, b.part.pan);
+    field("part.bend_range", a.part.bend_range, b.part.bend_range);
     return out;
 }
 
@@ -190,9 +192,9 @@ void test_dump_shape() {
 
 void test_round_trip() {
     // The baseline is the init preset within the knobs' reach: preset_init()
-    // holds a few values no knob lands on (an odd rate code, a sustain of
-    // 1023 where the knob steps by eight), which is the file's resolution,
-    // not the map's. One dump and apply brings it onto the knobs' grid.
+    // holds a few values no knob lands on (a decay of 0.59 s where the knob's
+    // nearest is another), which is the file's resolution, not the map's.
+    // One dump and apply brings it onto the knobs' positions.
     preset_t raw;
     preset_init(&raw);
     const preset_t init = preset_of(dump_of(raw, cc_map::knobs_of(raw)));

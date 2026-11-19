@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -85,6 +86,11 @@ int64_t wide_at(const std::map<int, int32_t> &state, int address) {
 
 double octaves_at(const std::map<int, int32_t> &state, int address) {
     return state.at(address) / 16384.0;
+}
+
+// A dword rate as the fraction of the distance a pass covers.
+double fraction_of(int64_t rate) {
+    return static_cast<double>(rate) / static_cast<double>(int64_t{1} << 32);
 }
 
 void test_setup() {
@@ -167,7 +173,12 @@ void test_stages() {
 void test_envelope() {
     preset_t preset;
     preset_init(&preset);
-    preset.env[0] = {0x80, 0xA0, 0x200, 0xC0};
+    // half the envelope's ten octaves of gain down: 2^-5 of full scale
+    const float five_octaves_down = -5.0f * 6.0205999f;
+    preset.amp_env.attack         = 0.5f;
+    preset.amp_env.sustain        = five_octaves_down;
+    preset.amp_env.decay          = 0.2f;
+    preset.amp_env.release        = 2.0f;
     render::Writes writes;
     render::amp_envelope(synth(), preset, writes);
     const auto state = state_of(writes);
@@ -175,40 +186,53 @@ void test_envelope() {
     check(wide_at(state, at(amp[wiring::stage_attack].target))
                   == int64_t{0x533333} << 10,
           "attack aims at 1.3");
-    // the gain is linear (#176): the sustain knob, a fraction of the 60 dB
-    // span, aims the decay at that loudness as an amplitude — half the span
-    // is 30 dB down, 2^-5 of full scale
-    const double half_span = std::exp2(10.0 * (0x200 / 1023.0 - 1.0));
-    check(wide_at(state, at(amp[wiring::stage_decay].target))
-                  == std::lround(half_span * 4194304.0) << 10,
+    // the gain is linear (#176): the sustain, a loudness below the peak, is
+    // the amplitude the decay aims at
+    const double sustain_level =
+            fraction_of(wide_at(state, at(amp[wiring::stage_decay].target)));
+    check(std::fabs(sustain_level / std::exp2(-5.0) - 1.0) < 1e-6,
           "decay aims at the sustain's loudness, as an amplitude");
     check(wide_at(state, at(amp[wiring::stage_release].target)) == 0,
           "release aims at zero");
-    const uint32_t k = preset_adsr_rate_coeff(preset_adsr_rate_byte(0x80));
-    check(wide_at(state, at(amp[wiring::stage_attack].rate))
-                  == csp::envelope_rate(k),
-          "attack rate is the coefficient, per pass");
-    check(wide_at(state, at(amp[wiring::stage_release].rate))
-                  == csp::envelope_rate(
-                          preset_adsr_rate_coeff(preset_adsr_rate_byte(0xC0))),
-          "release rate: the preset's, the level being the linear gain");
-    // faster codes are faster
-    check(csp::envelope_rate(
-                  preset_adsr_rate_coeff(preset_adsr_rate_byte(0xF0)))
-                  > csp::envelope_rate(
-                          preset_adsr_rate_coeff(preset_adsr_rate_byte(0x40))),
-          "a higher rate byte is a bigger step");
+    // The times are the player's: a pass covers the rate's fraction of the
+    // distance left, at 24 kHz, so after an attack's time a charge toward
+    // 1.3 stands at full scale, and after a fall's time a thousandth of the
+    // distance is left (60 dB).
+    const double passes_a_second = 24000.0;
+    const double attack_left     = std::pow(
+            1.0
+                    - fraction_of(
+                            wide_at(state, at(amp[wiring::stage_attack].rate))),
+            0.5 * passes_a_second);
+    check(std::fabs(1.3 * (1.0 - attack_left) - 1.0) < 1e-5,
+          "an attack reaches full scale in its time");
+    const double decay_left =
+            std::pow(1.0
+                             - fraction_of(wide_at(
+                                     state, at(amp[wiring::stage_decay].rate))),
+                     0.2 * passes_a_second);
+    check(std::fabs(decay_left * 1000.0 - 1.0) < 1e-4,
+          "a decay covers 60 dB of the way in its time");
+    const double release_left = std::pow(
+            1.0
+                    - fraction_of(wide_at(state,
+                                          at(amp[wiring::stage_release].rate))),
+            2.0 * passes_a_second);
+    check(std::fabs(release_left * 1000.0 - 1.0) < 1e-4,
+          "a release falls 60 dB in its time");
+    check(wide_at(state, at(amp[wiring::stage_decay].rate))
+                  > wide_at(state, at(amp[wiring::stage_release].rate)),
+          "a shorter time is a bigger step");
 
     render::Writes mod;
-    preset.mod_env_depth = 2048;
+    preset.mod_env.sustain = 25.0f;
+    preset.mod_env.depth   = 24.0f; // two octaves
     render::mod_envelope(synth(), preset, mod);
-    const auto mod_state = state_of(mod);
-    check(mod_state.count(at(
-                  channel()
-                          .segments[wiring::envelope_mod][wiring::stage_attack]
-                          .target))
-                  == 1,
-          "the mod envelope's segments");
+    const auto mod_state  = state_of(mod);
+    const auto &mod_words = channel().segments[wiring::envelope_mod];
+    check(wide_at(mod_state, at(mod_words[wiring::stage_decay].target))
+                  == int64_t{1} << 30,
+          "the mod envelope's sustain is a share of the depth");
     // The mod amount is a quarter of the depth: the wiring multiplies by
     // four after the envelope, so that a depth of up to 32 octaves fits a
     // word that holds 8.
@@ -228,11 +252,11 @@ void test_notes() {
     check(note_word(60) == 0, "middle C is octave zero");
     check(note_word(72) == 16384, "an octave up");
     check(note_word(48) == -16384, "an octave down");
-    check(std::abs(note_word(69) - 12288) <= 16,
-          "A is nine semitones up (within a raw step)");
+    check(note_word(69) == 12288, "A is nine semitones up");
+    check(note_word(61) == 1365, "a semitone, to the nearest raw word");
 
-    preset.vel_amp_amt = 127;
-    preset.vel_mod_amt = 127;
+    preset.amp_env.velocity = 100.0f;
+    preset.mod_env.velocity = 100.0f;
     render::Writes full, soft;
     render::note_on(synth(), preset, 0, 60, 127, full);
     render::note_on(synth(), preset, 0, 60, 64, soft);
@@ -257,30 +281,31 @@ void test_notes() {
             check(write.force, "a stage write is forced");
         }
     }
-    // the velocity's fraction of the 60 dB span, as an amplitude (#176): a
-    // velocity of 64 at full sensitivity is 2^(10 × (64/127 − 1)), about −30 dB
+    // the velocity's share of the ten octaves of gain, as an amplitude (#176):
+    // a velocity of 64 at full sensitivity is 2^(10 × (64/127 − 1)), about
+    // −30 dB
     const double amp = soft_state.at(velocity) / 16384.0;
     check(std::fabs(amp - std::exp2(10.0 * (64.0 / 127.0 - 1.0))) < 1e-3,
           "a soft note's amp amount is the velocity's loudness, as an amplitude");
-    // The mod env's velocity sensitivity is deeper (#244): CC 127 scales by
-    // twice the velocity, CC 64 by the velocity once, CC 0 not at all.
+    // The mod env's velocity sensitivity is deeper (#244): 100 % scales by
+    // twice the velocity, 50 % by the velocity once, 0 % not at all.
     const double v_soft = 64.0 / 127.0;
     check(std::fabs(full_state.at(velocity_mod) / 16384.0 - 2.0) < 1e-3,
-          "mod env, CC 127, full velocity: twice");
+          "mod env, 100 %, full velocity: twice");
     check(std::fabs(soft_state.at(velocity_mod) / 16384.0 - 2.0 * v_soft)
                   < 1e-3,
-          "mod env, CC 127, soft note: twice the velocity");
-    preset.vel_mod_amt = 64;
+          "mod env, 100 %, soft note: twice the velocity");
+    preset.mod_env.velocity = 50.0f;
     render::Writes mid;
     render::note_on(synth(), preset, 0, 60, 64, mid);
-    check(std::fabs(state_of(mid).at(velocity_mod) / 16384.0 - v_soft) < 0.01,
-          "mod env, CC 64: the velocity once");
-    preset.vel_mod_amt = 0;
+    check(std::fabs(state_of(mid).at(velocity_mod) / 16384.0 - v_soft) < 1e-3,
+          "mod env, 50 %: the velocity once");
+    preset.mod_env.velocity = 0.0f;
     render::Writes modflat;
     render::note_on(synth(), preset, 0, 60, 64, modflat);
     check(std::fabs(state_of(modflat).at(velocity_mod) / 16384.0 - 1.0) < 1e-3,
-          "mod env, CC 0: full regardless of velocity");
-    preset.vel_amp_amt = 0;
+          "mod env, 0 %: full regardless of velocity");
+    preset.amp_env.velocity = 0.0f;
     render::Writes off;
     render::note_on(synth(), preset, 0, 1, 1, off);
     check(state_of(off).at(velocity) == 16384,
@@ -322,39 +347,44 @@ void test_notes() {
 void test_controllers() {
     preset_t preset;
     preset_init(&preset);
-    preset.filter.cutoff    = 1024;
-    preset.filter.key_track = 64;
-    preset.mod_env_depth    = -3072;
-    preset.volume           = 0xCF;
+    const float middle_c_hz = 261.62557f;
+    preset.filter.cutoff    = middle_c_hz * 2.0f; // an octave above middle C
+    preset.filter.key_track = 100.0f;
     render::Controllers controllers;
-    controllers.wheel = 25; // 1000 raw: nearly an octave
-    controllers.bend  = -170;
+    controllers.wheel = 0.5f;
+    controllers.bend  = -2.0f;
     render::Writes writes;
     render::cutoff(synth(), preset, controllers, writes);
     render::pitch_bend(synth(), controllers, writes);
     const auto state = state_of(writes);
-    // the knob (1 octave), the wheel (1000/1024) and the half octave
+    // the preset's octave and the wheel's half of its 4.96
     check(std::fabs(octaves_at(state, at(channel().cutoff_base))
-                    - (1024 + 1000 + 512) / 1024.0)
+                    - (1.0 + 0.5 * 127.0 * 40.0 / 1024.0))
                   < 1e-3,
-          "the cutoff is the knob, the wheel and the half octave");
+          "the cutoff is the preset's, from middle C, and the wheel");
     check(state.at(at(channel().key_track)) == 16384,
-          "key tracking 64 is 100 %");
-    check(std::fabs(octaves_at(state, at(channel().bend)) - (-170 / 1024.0))
-                  < 1e-3,
-          "bend");
+          "key tracking of 100 % is 1.0");
+    check(std::fabs(octaves_at(state, at(channel().bend)) - (-2.0 / 12.0))
+                  < 1e-4,
+          "the bend, in octaves");
     // the preset's volume is in the channel's gains (the voice's gain word is
-    // the envelope's): 16 steps are 6 dB
+    // the envelope's): an octave of gain is 6.02 dB
     render::Writes sound;
     render::channel_sound(synth(), preset, sound);
     const int32_t reference_left = state_of(sound).at(cs::base + cs::gain_left);
-    preset.volume                = 0xCF + 16;
+    preset.part.volume           = 6.0205999f;
     render::Writes louder;
     render::channel_sound(synth(), preset, louder);
     check(std::abs(state_of(louder).at(cs::base + cs::gain_left)
                    - 2 * reference_left)
                   <= 2,
-          "16 steps of volume are 6 dB");
+          "6 dB of volume double the gain");
+    preset.part.volume = -std::numeric_limits<float>::infinity();
+    render::Writes off;
+    render::channel_sound(synth(), preset, off);
+    check(state_of(off).at(cs::base + cs::gain_left) == 0
+                  && state_of(off).at(cs::base + cs::gain_right) == 0,
+          "a volume of minus infinity is off");
 }
 
 void test_lfo() {
@@ -365,7 +395,7 @@ void test_lfo() {
     // depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
     // does; the square and sine carry the depth itself, not a gain.
     struct Case {
-        uint8_t wave;
+        waveform_t wave;
         int shape;
         int32_t gain;
         const char *name;
@@ -380,10 +410,10 @@ void test_lfo() {
         for (const Case &shape : cases) {
             preset_t preset;
             preset_init(&preset);
-            preset.lfo[i].shape = shape.wave;
-            preset.lfo[i].rate  = 1000;
-            preset.lfo[i].depth = 512;
-            preset.lfo[i].dest  = LFO_DEST_RESONANCE;
+            preset.lfo[i].shape       = shape.wave;
+            preset.lfo[i].rate        = 24000.0f / 65536.0f;
+            preset.lfo[i].depth       = 0.25f;
+            preset.lfo[i].destination = LFO_DEST_RESONANCE;
             render::Writes writes;
             render::lfo(synth(), preset, i, writes);
             const auto state        = state_of(writes);
@@ -395,56 +425,75 @@ void test_lfo() {
             check(state.at(at(wave.depth)) == 16384
                           && state.at(at(wave.neg_depth)) == -16384,
                   "the wave is ±1 before the channel's depth");
-            check(wide_at(state, at(wave.step))
-                          == csp::lfo_rate(1000, 1), // every pass (#268)
-                  "the rate, at the LFO");
+            // the phase's 36 bits are a cycle, and it steps once a pass, at
+            // 24 kHz: the rate is a cycle every 65536 passes
+            check(wide_at(state, at(wave.step)) == int64_t{1} << 20,
+                  "the rate, in cycles a second");
         }
     }
 
     // the depth reaches its one destination and nothing else
-    preset_t preset;
-    preset_init(&preset);
-    preset.lfo[1].shape = WAVE_SAW;
-    preset.lfo[1].depth = 512; // ±256 raw: a quarter octave
-    preset.lfo[1].dest  = LFO_DEST_RESONANCE;
-    render::Writes writes;
-    render::lfo(synth(), preset, 1, writes);
-    const auto state  = state_of(writes);
-    const auto &depth = channel().depth[1];
-    check(std::fabs(octaves_at(state, at(depth[wiring::moves_resonance]))
-                    - 0.25)
-                  < 1e-4,
-          "the depth swings ±depth/2 raw on the resonance");
-    check(state.at(at(depth[wiring::moves_pitch])) == 0
-                  && state.at(at(depth[wiring::moves_cutoff])) == 0
-                  && state.at(at(depth[wiring::moves_duty])) == 0,
-          "and on nothing else");
+    struct Reach {
+        lfo_dest_t destination;
+        int moved;
+        float depth;
+        double word; // what the depth is of the destination's 1.0
+        const char *name;
+    };
+    const Reach reaches[] = {
+            {LFO_DEST_RESONANCE, wiring::moves_resonance, 0.25f, 0.25,
+             "a quarter octave of Q"},
+            {LFO_DEST_PITCH, wiring::moves_pitch, 3.0f, 0.25,
+             "three semitones of pitch are a quarter octave"},
+            {LFO_DEST_CUTOFF, wiring::moves_cutoff, -24.0f, -2.0,
+             "24 semitones of cutoff are two octaves"},
+            {LFO_DEST_DUTY, wiring::moves_duty, 12.5f, 0.25,
+             "12.5 points of pulse width are a quarter of the way to the rail"},
+    };
+    for (const Reach &reach : reaches) {
+        preset_t preset;
+        preset_init(&preset);
+        preset.lfo[1].shape       = WAVE_SAW;
+        preset.lfo[1].depth       = reach.depth;
+        preset.lfo[1].destination = reach.destination;
+        render::Writes writes;
+        render::lfo(synth(), preset, 1, writes);
+        const auto state  = state_of(writes);
+        const auto &depth = channel().depth[1];
+        for (int moved = 0; moved < wiring::moved_count; ++moved) {
+            const double want = moved == reach.moved ? reach.word : 0.0;
+            check(std::fabs(octaves_at(state, at(depth[moved])) - want) < 1e-4,
+                  reach.name);
+        }
+    }
 }
 
 void test_sound() {
     preset_t preset;
     preset_init(&preset);
-    preset.voice_struct     = VOICE_7_PLUS_1;
-    preset.osc_mix          = 0;
-    preset.unison_detune    = 5;
-    preset.unison_stereo    = 127;
-    preset.osc[1].tune      = 512;
-    preset.filter.key_track = 128; // 200 %
-    preset.pan              = 0;
+    preset.voice.structure     = VOICE_7_PLUS_1;
+    preset.voice.osc_mix       = 0.0f;
+    preset.voice.unison_detune = 0.06f;
+    preset.voice.unison_stereo = 100.0f;
+    preset.osc[1].tune         = 6.0f;
+    preset.filter.key_track    = 200.0f;
+    preset.part.pan            = 0.0f;
     render::VoicePlan plan;
     check(render::voicing(preset, plan) == 8, "seven and one: eight partials");
     render::Writes writes;
     render::channel_sound(synth(), preset, writes);
     const auto state = state_of(writes);
     const int sinks  = cs::base;
-    check(state.at(sinks + cs::detune + 0) == -3 * 5 * 16,
+    check(std::fabs(octaves_at(state, sinks + cs::detune + 0)
+                    - (-3 * 0.06 / 12.0))
+                  < 1e-4,
           "the first unison partial, three steps down");
     check(state.at(sinks + cs::detune + 3) == 0, "the middle one is in tune");
-    check(state.at(sinks + cs::detune + 7) == 512 * 16,
-          "the second oscillator is tuned");
-    check(state.at(sinks + cs::cutoff_offset + 7) == 512 * 16 * 2,
+    check(state.at(sinks + cs::detune + 7) == 8192,
+          "the second oscillator is tuned: six semitones are half an octave");
+    check(state.at(sinks + cs::cutoff_offset + 7) == 16384,
           "and its cutoff follows twice as far");
-    // the stereo spread of 127 mutes the far side of a leaning partial
+    // a stereo spread of 100 % mutes the far side of a leaning partial
     check(state.at(sinks + cs::gain_left + 0) > 0
                   && state.at(sinks + cs::gain_right + 0) == 0,
           "a partial leaning left is silent on the right at full spread");
@@ -456,28 +505,77 @@ void test_sound() {
           "the plain oscillator is centred");
     check(state.at(sinks + cs::mode_0) == (preset.osc[0].wave | (1 << 3)),
           "the mode word: waveform and cascade");
-    check(state.count(at(channel().duty_base[0])) == 1
-                  && state.count(at(channel().duty_base[1])) == 1
-                  && state.count(at(channel().resonance_base)) == 1,
-          "the pulse widths and the resonance, before the LFOs");
+    check(state.at(at(channel().duty_base[0])) == 0
+                  && state.at(at(channel().resonance_base)) == 0,
+          "a square and Butterworth are zero, before the LFOs");
 
-    // two plain partials; the make-up lifts them by 8 steps
-    preset.voice_struct = VOICE_2_PLAIN;
+    // half the spread: the far side is there, 11.9 dB under the near one
+    preset.voice.unison_stereo = 50.0f;
+    render::Writes half_spread;
+    render::channel_sound(synth(), preset, half_spread);
+    const auto half_state = state_of(half_spread);
+    check(std::fabs(20.0
+                            * std::log10(
+                                    static_cast<double>(half_state.at(
+                                            sinks + cs::gain_left + 0))
+                                    / half_state.at(sinks + cs::gain_right + 0))
+                    - 0.5 * 63.0 / 16.0 * 6.0206)
+                  < 0.05,
+          "half the spread takes half its span off the far side");
+
+    // the pulse width from the square, the resonance in octaves of Q above
+    // Butterworth, the slope and the filter's type in the mode word
+    preset.osc[0].wave        = WAVE_PULSE;
+    preset.osc[0].pulse_width = 75.0f;
+    preset.osc[1].pulse_width = 25.0f;
+    preset.filter.resonance   = 0.70710678f * 4.0f;
+    preset.filter.slope       = 12.0f;
+    preset.filter.type        = FILTER_HIGHPASS;
+    render::Writes shaped;
+    render::channel_sound(synth(), preset, shaped);
+    const auto shaped_state = state_of(shaped);
+    check(shaped_state.at(at(channel().duty_base[0])) == 8192
+                  && shaped_state.at(at(channel().duty_base[1])) == -8192,
+          "a pulse width is its distance from the square, the rail being 1.0");
+    check(std::abs(shaped_state.at(at(channel().resonance_base)) - 2 * 16384)
+                  <= 1,
+          "a Q four times Butterworth's is two octaves");
+    check(shaped_state.at(sinks + cs::mode_0)
+                  == (WAVE_PULSE | (FILTER_HIGHPASS << 4)),
+          "the mode word: one section, highpass");
+    preset.filter.resonance = std::numeric_limits<float>::infinity();
+    render::Writes ringing;
+    render::channel_sound(synth(), preset, ringing);
+    check(state_of(ringing).at(at(channel().resonance_base)) == (1 << 17) - 1,
+          "a Q of infinity is the largest word");
+
+    // two plain partials; the make-up lifts them by half an octave of gain
+    // over the volume's eighth of full scale
+    preset.voice.structure = VOICE_2_PLAIN;
     render::Writes plain;
     render::channel_sound(synth(), preset, plain);
     const auto plain_state = state_of(plain);
-    const int expected =
-            std::lround(std::exp2((0xCF + 8 - 255) / 16.0) * 16384.0);
-    check(plain_state.at(sinks + cs::gain_left + 0) == expected,
+    const int expected     = std::lround(std::exp2(-2.5) * 16384.0);
+    check(std::abs(plain_state.at(sinks + cs::gain_left + 0) - expected) <= 1,
           "the volume anchor and the make-up");
     check(plain_state.at(sinks + cs::gain_left + 2) == 0,
           "unused slots are silent");
 
-    preset.pan = 63;
+    preset.part.pan = 100.0f;
     render::Writes panned;
     render::channel_sound(synth(), preset, panned);
     check(state_of(panned).at(sinks + cs::gain_left + 0) == 0,
           "pan hard right mutes the left");
+
+    // the balance: all the way to osc 2 mutes osc 1 and leaves osc 2 as it was
+    preset.part.pan      = 0.0f;
+    preset.voice.osc_mix = 100.0f;
+    render::Writes second_only;
+    render::channel_sound(synth(), preset, second_only);
+    check(state_of(second_only).at(sinks + cs::gain_left + 0) == 0
+                  && state_of(second_only).at(sinks + cs::gain_left + 1)
+                             == plain_state.at(sinks + cs::gain_left + 1),
+          "the balance at +100 % is osc 2 alone, at its own level");
 }
 
 void test_pointers() {

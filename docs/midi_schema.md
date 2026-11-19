@@ -16,11 +16,12 @@ the unconventional machinery stays under the hood.
 
 ## Principles
 
-- **Perceptual linearity via log encode / exp decode.** Controllers
-  map through the log₂ encodings the gateware already speaks. The
-  canonical rate mapping is **`cc << 1`** (7-bit CC → 8-bit log₂ rate
-  byte): every CC step is one equal-ratio step on the uniform ladder
-  (the rule behind the fractional-level decode).
+- **Perceptual linearity.** A knob's law is laid out by ear: equal ratios
+  a step for what is heard as a ratio (times, rates, Q, the pulse's low
+  time). What a law gives is the preset's field in the field's own unit
+  (seconds, Hz, semitones, percent, dB, Q:
+  [storage_format.md](storage_format.md)); the laws are
+  `app/main/cc_map.cpp`'s, each with its inverse.
 - **All musical mapping lives in the synth model** — the FPGA sees
   only parameter/DMEM/instruction writes through the engine link
   ([firmware_architecture.md](firmware_architecture.md)).
@@ -42,18 +43,18 @@ without SysEx** — the whole of preset.h reachable from a controller.
 Standard/quasi-standard CC numbers where they exist; the MIDI
 undefined block (20–31, 102–119) for everything else. All 7-bit
 unless a fine partner is listed. Discrete selectors take a small
-integer value; continuous params scale in the CC handler (engine
-units live in preset.h).
+integer value; continuous params scale in the CC's law (the preset's
+units are [storage_format.md](storage_format.md)'s).
 
 **Global / performance**
 | CC | Target | Notes |
 |---|---|---|
-| 7 | part volume | standard Channel Volume → per-part `volume` |
+| 7 | part volume | standard Channel Volume → the part's `volume`: 0.75 dB a step, unity (0 dB) at 103.5, +17.7 dB at 127; 0 is off |
 | 10 | pan | per-side log-gain attenuation baked into the partial L/R GAIN words; full deflection mutes the far side |
 | 0 / 32 | Bank Select MSB / LSB | sets the channel's bank, MSB × 128 + LSB, for its next Program Change; no sound changes until then ([storage_format.md](storage_format.md) "Banks") |
 | Program Change | load a program | loads the channel's current bank's program from `banks.toml`; sounding notes switch at once. A missing bank, program or file is logged and changes nothing |
 | 64 | sustain (damper) pedal | ≥64 = down. A note-off while the pedal is down keeps the voice sounding (no release); pedal up releases every voice the pedal was holding. A key struck again while sustained gets a new voice. Omni for now |
-| 1 | mod wheel | fixed route to cutoff: 0 to ~+5 octaves (raw value wheel·40 on the channel's cutoff register) |
+| 1 | mod wheel | fixed route to cutoff: 0 to +4.96 octaves on the channel's cutoff |
 | RPN 0/0 | pitch-bend range | CC 101/100 select, CC 6 sets 1–12 semitones (clamped), NRPN/null deselects; CC 38 (cents) ignored |
 | 86 | vel→amp-env AMOUNT | OB-8 "Vol": scales the amp ADSR's COEF word at note-on by `g(vel) = 1 − (amt/127)·(1 − vel/127)`. One-sided, no neutral point — full velocity = full amount, softer = proportionally **smaller excursion** from the same silent floor, so a soft note also has a shorter perceived attack. **0 = velocity OFF**, every note gets the full preset amount (isolation testing) |
 | 87 | vel→MOD-env AMOUNT | OB-8 "Filt": scales the MOD env's signed COEF word at note-on by the same `g(vel)`, so velocity sets how far the MOD envelope travels in octaves rather than offsetting where it starts. **0 = OFF**; a voice has no cutoff offset of its own |
@@ -73,15 +74,15 @@ units live in preset.h).
 | 25 | osc 1 pulse width / duty | UNIPOLAR log taper (the bipolar halves sound identical): 0 = square (50%), 127 = 5% pulse, equal duty ratio per step, never the degenerate 0/100%. Pulse only (saw/tri/sine ignore duty) |
 | 85 | osc 2 pulse width / duty | same mapping as CC 25, for osc 2 |
 | 26 | voice/unison mode | discrete: 2-plain / 7+1 / 4+4 |
-| 27 | unison detune | spread within a unison group |
-| 28 | unison stereo spread | CONTINUOUS: 0 = centered, far side attenuated `spread>>1` × 0.375 dB (≈0.19 dB per CC step; 126 = −23.6 dB), 127 = hard pan / exact far-side mute (the default) |
+| 27 | unison detune | spread within a unison group: 0 … 0.37 semitone between neighbours, `val × 3/1024` |
+| 28 | unison stereo spread | CONTINUOUS: 0 = centred; the far side of each leaning partial is down by 23.7 dB × `val/127` (0.19 dB per CC step), and at 127 muted: hard pan (the default) |
 
 **Filter**
 | CC | Target | Notes |
 |---|---|---|
 | 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
 | 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing); optional |
-| 71 | resonance | log₂ resonance code `val·5632/127`: 0 = Butterworth, 127 = r 5.5 oct (Q≈32, sharp but stable), equal Q ratio per step; drives the channel's resonance register |
+| 71 | resonance | Q = 2^(5.5 × `val/127`) / √2: 0 = Butterworth, 127 = 5.5 octaves of Q above it (Q 32, sharp but stable), equal Q ratio per step; drives the channel's resonance register |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete: single section (12 dB/oct) / cascade (two 2-pole sections, 24 dB/oct) |
 | 31 | key tracking amount | 0..200% with CENTER 64 = 100% (the default); 0 = cutoff fixed at the C4 reference; above center overtracks (convention). Tracks the FINAL pitch: note, oscillator tune, unison detune, pitch bend and pitch LFOs, so at 100 % an octave of pitch is an octave of cutoff |
@@ -89,27 +90,29 @@ units live in preset.h).
 **Envelopes** — the amp envelope (standard sound-controller CCs) and
 the MOD envelope (undefined block; standard CCs only ever covered one envelope).
 All four ADSR CCs per envelope invert — knob up = longer/louder
-(panel convention), which keeps every step on the
-equal-ratio ladder.
+(panel convention). The times walk a ladder of speeds, two rungs a CC
+step and sixteen rungs to the octave, with a straight line between an
+octave's ends (`cc_map.cpp`, `time_constant_of_rung`); the fastest eight
+CC values share the top rung, 21 of them for the amp envelope's D and R.
 | CC | Target | Notes |
 |---|---|---|
-| 73 / 75 / 72 | amp env A / D / R | `(127 − cc) << 1` — rates, knob up = longer; D and R add 25 codes (3× faster, #176): the gain is linear, so a fall is a straight line in dB and the knob's position gives the shape it gave under the old dB decode down to −45 dB |
-| 79 | amp env S | `cc << 3` into the 10-bit sustain — sustain is a LEVEL (higher = louder), NOT inverted; knob up = louder |
-| 102 / 103 / 105 | MOD env A / D / R | `(127 − cc) << 1` |
-| 104 | MOD env S | `cc << 3` (10-bit level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule). The CSP's COEF word is signed |
-| 108 | MOD env destination | STORED ONLY: the MOD env always drives cutoff |
+| 73 / 75 / 72 | amp env A / D / R | times, knob up = longer: A 1 ms … 32 s; D and R start 25 rungs up the ladder (3× faster, #176), 4.7 ms … 48 s: the gain is linear, so a fall is a straight line in dB and the knob's position gives the shape it gave under the old dB decode down to −45 dB |
+| 79 | amp env S | −60.2 dB × (1 − `cc/128`), 0.47 dB a step — sustain is a LEVEL (higher = louder), NOT inverted; knob up = louder |
+| 102 / 103 / 105 | MOD env A / D / R | the same ladder: A 1 ms … 32 s, D and R 4.7 ms … 151 s |
+| 104 | MOD env S | `cc/128` of the depth (a level, not inverted) |
+| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper, d·\|d\|·3/64 semitones with d = `cc − 64`: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule) |
+| 108 | MOD env destination | the MOD env drives the cutoff, its one destination, whatever the value |
 
 **LFOs** (2)
 | CC | Target | Notes |
 |---|---|---|
-| 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map (log2): ~0.03 Hz .. ~30 Hz, one equal freq ratio per CC step — the gateware increment is linear in freq, so the perceptual curve lives in the CC handler (`lfo_rate_from_cc`) |
-| 77 | LFO 1 depth, coarse | standard "vibrato depth". LINEAR in the span, with Fine (CC 115) on top (`lfo_depth_from_knobs`): Coarse counts whole units of the span from low to high, Fine the 128ths between. On PITCH the unit is a SEMITONE, four knob steps each: raw depth = ((coarse >> 2) + fine/128) × 1024/12, so 48 = one octave, 96 = two, 127 = 31 semitones (Coarse and Fine both at the top: just under 32). On CUTOFF and RESONANCE the unit is an OCTAVE (of cutoff, of Q), sixteen knob steps each: raw depth = ((coarse >> 4) + fine/128) × 1024, so 16 = one octave of span, 127 = just under eight (±4 octaves of swing; #256 — the raw law before reached ±¼). On duty/PWM: `val<<2` + `fine>>5`, raw 511 at the top (±0.25 of the width). A destination change (CC 114) works the depth out again from both knobs' last positions |
-| 115 | LFO 1 depth, fine | the steps between Coarse's: on pitch 0…127/128 of a semitone of span (vibrato lives here, Coarse at 0), on cutoff and resonance 0…127/128 of an octave, on duty 0…3 raw |
+| 76 | LFO 1 rate | standard "vibrato rate". EXPONENTIAL map: 0.03 Hz .. 30 Hz, one equal freq ratio per CC step (`lfo_rate_of`) |
+| 77 | LFO 1 depth, coarse | standard "vibrato depth". LINEAR in the span, with Fine (CC 115) on top (`lfo_depth_of`): Coarse counts whole units of the span from low to high, Fine the 128ths between; the preset's `depth` is the peak, half the span. On PITCH the unit is a SEMITONE, four knob steps each: span = (coarse >> 2) + fine/128 semitones, so 48 = one octave, 96 = two, 127 = 31 semitones (Coarse and Fine both at the top: just under 32). On CUTOFF and RESONANCE the unit is an OCTAVE (of cutoff, of Q), sixteen knob steps each: span = (coarse >> 4) + fine/128 octaves, so 16 = one octave of span, 127 = just under eight (±4 octaves of swing; #256). On pulse width the unit is 25/128 of a percentage point, a knob step each: span = (coarse + fine/128) × 25/128, just under 25 points at the top (±12.5 of swing). A destination change (CC 114) works the depth out again from both knobs' last positions |
+| 115 | LFO 1 depth, fine | the steps between Coarse's: on pitch 0…127/128 of a semitone of span (vibrato lives here, Coarse at 0), on cutoff and resonance 0…127/128 of an octave, on pulse width 0…127/128 of a Coarse step |
 | 113 | LFO 1 shape | discrete (saw/pulse/tri/sine), `val >> 5` |
 | 114 | LFO 1 destination | 4-way `(val*4)>>7`, as CC 112: duty/PWM / resonance / PITCH / **CUTOFF** |
 | 109 | LFO 2 rate | same exponential 0.03–30 Hz map as CC 76 |
-| 110 | LFO 2 depth, coarse | as CC 77: whole semitones of span on pitch, whole octaves on cutoff and resonance, `val<<2` on duty; worked out again on a CC 112 change |
+| 110 | LFO 2 depth, coarse | as CC 77: whole semitones of span on pitch, whole octaves on cutoff and resonance, 25/128 of a percentage point a step on pulse width; worked out again on a CC 112 change |
 | 116 | LFO 2 depth, fine | as CC 115 |
 | 111 | LFO 2 shape | discrete, `val >> 5` |
 | 112 | LFO 2 destination | 4-way `(val*4)>>7`: duty/PWM / resonance / PITCH / **CUTOFF** (the channel's cutoff, which the control program adds to every voice's). Both LFOs on one destination sum (dual vibrato on pitch) |
@@ -127,12 +130,15 @@ env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 Amp-envelope CCs re-render the channel's envelope rows (one page swap);
 nothing in the firmware times a tail from them (#264).
 
-**Cutoff resolution.** Cutoff base is UQ4.10; CC 74 (coarse, high 7
-bits) + CC 106 (fine, low 7 bits) give the full 14 bits, per the MIDI
-coarse/fine convention. Fine is
+**Cutoff resolution.** CC 74 (coarse, high 7
+bits) + CC 106 (fine, low 7 bits) make 14 bits, 1024 steps to the
+octave, per the MIDI
+coarse/fine convention, centred on 370 Hz for middle C: the half octave
+above the note that puts its cutoff above its pitch when the tracking is
+100 %. Fine is
 optional — coarse alone (≈1/8 octave steps) is already musical, and
-a controller that only sends 74 still works. Rates and sustain stay
-7-bit by construction.
+a controller that only sends 74 still works. The other knobs are
+7-bit.
 
 ## Parameter feedback
 
@@ -160,8 +166,7 @@ the way a hardware synth's panel does.
   100 = 127). Coarse before fine, a destination before the depth it
   scales. `app/test/cc_map_test.cpp` round-trips all 128 values of every
   preset CC: apply, dump, apply, the same preset.
-- **Not sent.** Bank Select, `mod_env_dest` is sent but stored only,
-  arp CCs (not implemented).
+- **Not sent.** Bank Select, arp CCs (not implemented).
 
 ## SysEx
 

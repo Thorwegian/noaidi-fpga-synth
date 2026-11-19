@@ -76,7 +76,8 @@ Prophet-capable engine:
    "part" that holds its own preset.
 6. **Active-preset data structure**: the in-RAM `preset_t` `g_preset`
    (`app/main/preset.h`/`preset.cpp`) holds the whole currently-active
-   sound — the single source of truth the CC handlers MUTATE and
+   sound, in the preset file's tables and units — the single source of
+   truth the CC handlers MUTATE and
    voice_alloc/render.cpp/engine_link RENDER to the CSP's registers and sink words.
    Stored presets are TOML files in the format of
    [storage_format.md](storage_format.md); Bank Select and

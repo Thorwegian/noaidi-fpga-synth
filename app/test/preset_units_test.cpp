@@ -1,18 +1,19 @@
-// preset_units_test.cpp — host test: every raw value of every preset file
-// key loads back exactly from the value the writer gives it
+// preset_units_test.cpp — host test: a preset file gives its preset back
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// For each key and each raw value its preset_t field can hold, the test
-// writes the value as the writer does, reads the text back as the
-// loader does, and checks
-//   - the loaded raw value is the canonical form of the written one, and
-//   - the canonical form is stable (writing and loading it again changes
-//     nothing),
-// which together make load → save → load exact. A key whose conversion
-// depends on another key (the LFO depth on its destination) is checked
-// across that key's values.
+// A preset's numbers are floats in the file's units, so the writer and the
+// loader convert nothing, and the test holds them to it:
+//   - every value a field can hold is written so that it loads back as the
+//     same float: presets drawn at random over every key's range (its ends,
+//     its infinity, the round figures a hand types, any float between) are
+//     saved and loaded, and the loaded preset is the saved one, and saves
+//     as the same text;
+//   - a number outside its key's range loads as the range's end, one between
+//     two steps as the nearer, and what is no number or no name of the key
+//     leaves the key as it was;
+//   - a value typed by hand is written back as it was typed.
 //
 // Then it writes the init preset (preset_init) as a preset file and reads it
 // back, which must give the init preset. Each factory file given as an
@@ -25,8 +26,10 @@
 //
 //   make fw-test
 
+#include <cmath>
 #include <filesystem>
-#include <math.h>
+#include <random>
+#include <span>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,111 +37,250 @@
 #include <string_view>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 #include "preset.h"
 #include "preset_file.h"
-#include "preset_units.h"
+#include "preset_units.hpp"
+
+using preset_units::Range;
+using Names = std::span<const char *const>;
 
 static int s_failures;
-
-// What the loader does with one written value.
-static void load_text(const preset_field_t *f, int i, preset_t *p,
-                      const char *text) {
-    if (f->kind == PF_NAME) {
-        char name[32];
-        size_t n = strlen(text);
-        snprintf(name, sizeof name, "%.*s", (int) (n - 2),
-                 text + 1); // strip quotes
-        preset_field_set_name(f, i, p, name);
-        return;
-    }
-    double v = strcmp(text, "inf") == 0    ? INFINITY
-               : strcmp(text, "-inf") == 0 ? -INFINITY
-                                           : strtod(text, NULL);
-    preset_field_set_number(f, i, p, v);
-}
-
-static void check_raw(const preset_field_t *f, int i, preset_t *p,
-                      int32_t raw) {
-    f->set(p, i, raw);
-    raw           = f->get(p, i); // as the field stores it
-    int32_t canon = preset_field_canonical(f, i, p, raw);
-
-    char text[64];
-    preset_field_format(f, i, p, text, sizeof text);
-    load_text(f, i, p, text);
-    int32_t loaded = f->get(p, i);
-
-    char again[64];
-    preset_field_format(f, i, p, again, sizeof again);
-    load_text(f, i, p, again);
-    int32_t reloaded = f->get(p, i);
-
-    if (loaded != canon || reloaded != loaded || strcmp(text, again) != 0) {
-        if (s_failures < 20) {
-            printf("FAIL %s.%s[%d]: raw %ld -> \"%s\" -> %ld (canonical %ld), "
-                   "again \"%s\" -> %ld\n",
-                   f->table, f->key, i, (long) raw, text, (long) loaded,
-                   (long) canon, again, (long) reloaded);
-        }
-        s_failures++;
-    }
-}
-
-// The raw values a field can hold.
-static void raw_range(const preset_field_t *f, int32_t *lo, int32_t *hi) {
-    const char *k = f->key;
-    if (f->kind == PF_NAME) {
-        int32_t n = 0;
-        while (f->names[n]) {
-            n++;
-        }
-        *lo = 0;
-        *hi = n - 1;
-    } else if (!strcmp(k, "pulse_width")) {
-        *lo = -8388608;
-        *hi = 8388608;
-    } else if (!strcmp(k, "attack") || !strcmp(k, "decay")
-               || !strcmp(k, "release") || !strcmp(k, "velocity")
-               || !strcmp(k, "volume") || !strcmp(k, "bend_range")) {
-        *lo = 0;
-        *hi = 255;
-    } else if (!strcmp(k, "sustain")) {
-        *lo = 0;
-        *hi = 1023;
-    } else if (!strcmp(k, "osc_mix") || !strcmp(k, "pan")) {
-        *lo = -128;
-        *hi = 127;
-    } else if (!strcmp(k, "slope")) {
-        *lo = 0;
-        *hi = 1;
-    } else if (!strcmp(k, "rate")) {
-        *lo = 0;
-        *hi = 65535;
-    } else if (!strcmp(k, "resonance")) {
-        *lo = 0;
-        *hi = 0x3FFF;
-    } else {
-        *lo = -32768;
-        *hi = 32767; // int16 fields
-    }
-}
-
-// Every raw value for the first element. The conversions are the same
-// for every element, so later elements only check the accessor, on a
-// spread of values.
-static void check_field(const preset_field_t *f, int i, preset_t *p) {
-    int32_t lo, hi;
-    raw_range(f, &lo, &hi);
-    int32_t step = (i == 0) ? 1 : (hi - lo) / 997 + 1;
-    for (int32_t r = lo; r <= hi; r += step) {
-        check_raw(f, i, p, r);
-    }
-}
 
 static void fail(const char *what) {
     printf("FAIL %s\n", what);
     s_failures++;
+}
+
+static void check(bool ok, const char *what) {
+    if (!ok) {
+        fail(what);
+    }
+}
+
+// Every field of a preset, a name as its enumerator: two presets with the
+// same fields are the same preset.
+class Fields {
+public:
+    void table(const char *) {}
+    void element(const char *, int) {}
+    void number(const char *, const float &field, const Range &) {
+        fields_.push_back(field);
+    }
+    template <typename Name>
+    void name(const char *, const Name &field, Names) {
+        fields_.push_back(static_cast<float>(field));
+    }
+
+    static std::vector<float> of(const preset_t &preset) {
+        Fields fields;
+        preset_units::visit(preset, fields);
+        return fields.fields_;
+    }
+
+private:
+    std::vector<float> fields_;
+};
+
+// A preset drawn at random: each number over its key's range, each name
+// from its key's list.
+class Draw {
+public:
+    explicit Draw(std::mt19937 &random) : random_(random) {}
+
+    void table(const char *) {}
+    void element(const char *, int) {}
+
+    void number(const char *, float &field, const Range &range) {
+        switch (pick(6)) {
+        case 0:
+            field = range.low;
+            break;
+        case 1:
+            field = range.high;
+            break;
+        case 2:
+            field = range.infinity != 0.0f ? range.infinity : range.low;
+            break;
+        case 3: // a round figure, as a hand types it
+            field = preset_units::within(
+                    range, std::round(between(range) * 100.0) / 100.0);
+            break;
+        default:
+            field = preset_units::within(range, between(range));
+            break;
+        }
+    }
+
+    template <typename Name>
+    void name(const char *, Name &field, Names names) {
+        field = static_cast<Name>(pick(static_cast<int>(names.size())));
+    }
+
+private:
+    int pick(int count) {
+        return std::uniform_int_distribution<int>(0, count - 1)(random_);
+    }
+
+    // Any value of the range: evenly over it, or, where it is all above
+    // zero, as often evenly over its ratio, so that the small ones come too.
+    double between(const Range &range) {
+        const double share =
+                std::uniform_real_distribution<double>(0.0, 1.0)(random_);
+        if (range.low > 0.0f && pick(2) == 0) {
+            return range.low * std::pow(range.high / range.low, share);
+        }
+        return range.low + share * (range.high - range.low);
+    }
+
+    std::mt19937 &random_;
+};
+
+// What a range does to a number from a file.
+class Limits {
+public:
+    void table(const char *) {}
+    void element(const char *, int) {}
+
+    void number(const char *key, const float &, const Range &range) {
+        using preset_units::infinity;
+        using preset_units::within;
+        const double low = range.low, high = range.high;
+        bool ok = within(range, low - 1.0) == range.low
+                  && within(range, high + 1.0) == range.high
+                  && within(range, 1e300) == range.high
+                  && within(range, -1e300) == range.low
+                  && within(range, infinity)
+                             == (range.infinity > 0.0f ? infinity : range.high)
+                  && within(range, -infinity)
+                             == (range.infinity < 0.0f ? -infinity : range.low);
+        if (range.step != 0.0f) {
+            // the nearer step, a tie away from zero (no range with steps
+            // starts below it)
+            const double step = range.step;
+            ok = ok && within(range, low + 0.49 * step) == range.low
+                 && within(range, low + 0.5 * step) == range.low + range.step
+                 && within(range, low + 0.51 * step) == range.low + range.step;
+        } else {
+            const double middle = (low + high) / 2.0;
+            ok = ok && within(range, middle) == static_cast<float>(middle);
+        }
+        if (!ok) {
+            printf("FAIL %s: a value does not load into its range\n", key);
+            s_failures++;
+        }
+    }
+
+    template <typename Name>
+    void name(const char *, const Name &, Names) {}
+};
+
+static void check_round_trips() {
+    constexpr int presets = 2000;
+    std::mt19937 random(471);
+    int shown = 0;
+    for (int n = 0; n < presets; n++) {
+        preset_t drawn, loaded;
+        preset_init(&drawn);
+        preset_units::visit(drawn, Draw(random));
+        const std::string text = preset_file::to_text(drawn);
+        std::string error;
+        if (!preset_file::parse(text, loaded, error)) {
+            printf("FAIL a written preset does not read: %s\n%s", error.c_str(),
+                   text.c_str());
+            s_failures++;
+            return;
+        }
+        if (Fields::of(loaded) != Fields::of(drawn)
+            || preset_file::to_text(loaded) != text) {
+            if (shown++ < 5) {
+                printf("FAIL a preset loads back different:\n");
+                preset_file_diff(stdout, &drawn, &loaded);
+            }
+            s_failures++;
+        }
+    }
+    printf("%d presets drawn over every key's range: %s\n", presets,
+           s_failures ? "see above" : "each loads back as it was saved");
+}
+
+static void check_loading() {
+    preset_t init;
+    preset_init(&init);
+    preset_units::visit(init, Limits());
+
+    // values out of range, between steps, infinite and of the wrong kind
+    const std::string_view odd = "format = 1\n"
+                                 "[[osc]]\n"
+                                 "wave = \"noise\"\n"
+                                 "tune = 7\n"
+                                 "[[osc]]\n"
+                                 "wave = \"square\"\n"
+                                 "tune = \"high\"\n"
+                                 "[filter]\n"
+                                 "slope = 18\n"
+                                 "cutoff = 1e9\n"
+                                 "resonance = inf\n"
+                                 "[amp_env]\n"
+                                 "attack = nan\n"
+                                 "sustain = 3\n"
+                                 "[[lfo]]\n"
+                                 "destination = \"cutoff\"\n"
+                                 "depth = 200\n"
+                                 "[part]\n"
+                                 "volume = -inf\n"
+                                 "bend_range = 2.5\n";
+    preset_t p;
+    std::string error;
+    if (!preset_file::parse(odd, p, error)) {
+        printf("FAIL %s\n", error.c_str());
+        s_failures++;
+        return;
+    }
+    check(p.osc[0].wave == WAVE_NOISE, "a name is its enumerator");
+    check(p.osc[0].tune == 7.0f, "a whole number is a number");
+    check(p.osc[1].wave == init.osc[1].wave,
+          "a name the key does not have leaves the init preset's");
+    check(p.osc[1].tune == init.osc[1].tune,
+          "a string for a number leaves the init preset's");
+    check(p.filter.slope == 24.0f, "a slope between the two is the nearer");
+    check(p.filter.cutoff == preset_units::cutoff.high,
+          "a cutoff above the range is the range's top");
+    check(std::isinf(p.filter.resonance) && p.filter.resonance > 0.0f,
+          "a resonance of infinity stays");
+    check(p.amp_env.attack == init.amp_env.attack,
+          "what is not a number leaves the init preset's");
+    check(p.amp_env.sustain == 0.0f, "a sustain above the peak is the peak");
+    check(p.lfo[0].depth == preset_units::lfo_depth(LFO_DEST_CUTOFF).high,
+          "an LFO's depth has its destination's range, read before it");
+    check(std::isinf(p.part.volume) && p.part.volume < 0.0f,
+          "a volume of minus infinity stays");
+    check(p.part.bend_range == 3.0f, "a tie between steps goes from zero");
+
+    // a value typed by hand is written back as typed
+    const char *const typed[] = {
+            "cutoff = 1000\n",          "release = 7.2\n",
+            "tune = -12.07\n",          "resonance = 2.146\n",
+            "pulse_width = 84.61282\n", "rate = 0.1\n"};
+    const std::string hand = "format = 1\n[[osc]]\ntune = -12.07\n"
+                             "pulse_width = 84.61282\n[filter]\n"
+                             "cutoff = 1000\nresonance = 2.146\n[amp_env]\n"
+                             "release = 7.2\n[[lfo]]\nrate = 0.1\n";
+    if (!preset_file::parse(hand, p, error)) {
+        printf("FAIL %s\n", error.c_str());
+        s_failures++;
+        return;
+    }
+    const std::string written = preset_file::to_text(p);
+    for (const char *line : typed) {
+        if (written.find(line) == std::string::npos) {
+            printf("FAIL a typed value is not written back as typed: %s", line);
+            s_failures++;
+        }
+    }
+    printf("ranges, steps, infinities, names, typed values: %s\n",
+           s_failures ? "see above" : "ok");
 }
 
 static bool exists(const char *path) {
@@ -198,7 +340,7 @@ static void check_saving(void) {
     preset_t init, other, back;
     preset_init(&init);
     preset_init(&other);
-    other.filter.resonance = 1024;
+    other.filter.resonance = 2.0f;
 
     // a plain save: the file reads back, no .new remains
     if (!preset_file_save(a, &init, err, sizeof err)) {
@@ -315,25 +457,8 @@ static void check_saving(void) {
 }
 
 int main(int argc, char **argv) {
-    size_t n;
-    const preset_field_t *fields = preset_fields(&n);
-    preset_t p;
-
-    for (size_t k = 0; k < n; k++) {
-        const preset_field_t *f = &fields[k];
-        for (int i = 0; i < f->count; i++) {
-            preset_init(&p);
-            if (!strcmp(f->table, "lfo") && !strcmp(f->key, "depth")) {
-                for (uint8_t d = 0; d < 4; d++) {
-                    p.lfo[i].dest = d;
-                    check_field(f, i, &p);
-                }
-            } else {
-                check_field(f, i, &p);
-            }
-        }
-        printf("%-8s %-14s %s\n", f->table, f->key, s_failures ? "..." : "ok");
-    }
+    check_round_trips();
+    check_loading();
 
     // The init preset, written and read back.
     preset_t init, back;
@@ -347,7 +472,8 @@ int main(int argc, char **argv) {
     if (!preset_file_parse(text, text_len, &back, err, sizeof err)) {
         printf("FAIL reading the written init preset: %s\n", err);
         s_failures++;
-    } else if (preset_file_diff(stdout, &init, &back) != 0) {
+    } else if (Fields::of(back) != Fields::of(init)) {
+        preset_file_diff(stdout, &init, &back);
         printf("FAIL the written init preset reads back different (above)\n");
         s_failures++;
     }
@@ -370,7 +496,8 @@ int main(int argc, char **argv) {
             printf("FAIL %s: the writer's text does not read: %s\n", argv[a],
                    err);
             s_failures++;
-        } else if (preset_file_diff(stdout, &factory, &back) != 0) {
+        } else if (Fields::of(back) != Fields::of(factory)) {
+            preset_file_diff(stdout, &factory, &back);
             printf("FAIL %s reads back different through the writer (above)\n",
                    argv[a]);
             s_failures++;

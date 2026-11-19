@@ -11,7 +11,7 @@ unison_stereo = 0
 [[osc]]
 wave = "pulse"
 tune = 0
-pulse_width = 84.61282
+pulse_width = 84.613
 
 [[osc]]
 wave = "saw"
@@ -22,39 +22,39 @@ pulse_width = 50
 type = "lowpass"
 slope = 24
 cutoff = 14388
-resonance = 0.7
+resonance = 0.70711
 key_track = 0
 
 [amp_env]
-attack = 0
-sustain = -6.1
-decay = 0.014
-release = 0.007
+attack = 0.0010014
+sustain = -6.0618
+decay = 0.013999
+release = 0.0069814
 velocity = 0
 
 [mod_env]
-attack = 0
-sustain = 99.2
-decay = 1.35
-release = 25
+attack = 0.0010014
+sustain = 99.219
+decay = 1.3473
+release = 25.15
 velocity = 0
 destination = "cutoff"
 depth = 0
 
 [[lfo]]
 shape = "triangle"
-rate = 1.087
+rate = 1.0872
 destination = "pulse_width"
-depth = 12.4
+depth = 12.402
 
 [[lfo]]
 shape = "triangle"
-rate = 2.33
+rate = 2.3289
 destination = "pulse_width"
 depth = 0
 
 [part]
-volume = -0.4
+volume = -0.37629
 pan = 0
 bend_range = 2
 # end
