@@ -40,16 +40,30 @@
 // delayed output. An operator of words that reads a dword gets its upper
 // word.
 //
-// The program is straight-line code: an instruction for every operator, no
-// loop. The graph picks the order the instructions issue in, each cycle one
-// whose operands are ready, with the index registers and the flags handed
-// from one user to the next, so the builder has few waits left to lay
-// (docs/csp2_isa.md section 8).
+// The program is a vector loop for every set of copies, and straight-line
+// code for the rest. The graph finds the circuits of one shape among its
+// nodes by itself: the top wires its copies with ordinary loops and says
+// nothing of them. A set of enough copies runs as the elements of one
+// vector loop, whose body is one copy's instruction rows, each issued once
+// for every element. In the body an element reads a movable wire through
+// its own index register, and writes its sinks through it. A set of few
+// copies, and a circuit that is the only one of its shape, is straight-line
+// code: an instruction row for every operator. The graph picks the order
+// the rows issue in, in a body and in the program, each cycle one whose
+// operands are ready, with the index registers and the flags handed from
+// one user to the next, so the builder has few waits left to lay
+// (docs/csp2_isa.md sections 5 and 8).
 //
-// The layout goes by reach. A direct operand reaches DMEM's first 1024
-// words, which go to what fixed wires read and write; a record is reached
-// through a pointer and lies in the upper half; the sinks are written
-// through an index register at the end of the pass.
+// The layout goes by reach. A loop's copies lie in records of one layout, a
+// power-of-two stride apart, from the top of DMEM down. The loop's index
+// register reaches the element's record, in which a word holds one value
+// after another where their lives do not meet. An element's block of sinks
+// is reached through a pointer in its record, a word the firmware sets when
+// it loads the program (initial_values()). A direct operand reaches DMEM's
+// first 1024 words, which go to what straight-line code reads and writes.
+// In a program without a loop a record is reached through a pointer and
+// lies in the upper half, and the sinks are written through an index
+// register at the end of the pass.
 //
 // Built without exceptions or RTTI, as the firmware is.
 
@@ -187,10 +201,20 @@ public:
 
     // Circuits of one shape that the build found among the graph's nodes.
     struct CopySet {
-        int copies = 0; // how many circuits
-        int nodes  = 0; // the nodes of each
+        int copies  = 0;     // how many circuits
+        int nodes   = 0;     // the nodes of each
+        bool looped = false; // the copies are the elements of a vector loop
     };
     const std::vector<CopySet> &copy_sets() const;
+
+    // A word whose value the graph chose and the program does not change:
+    // the pointer to an element's block of sinks. The firmware writes these
+    // when it loads the program.
+    struct InitialValue {
+        int address   = 0;
+        int32_t value = 0;
+    };
+    const std::vector<InitialValue> &initial_values() const;
 
     DspGraph();
     ~DspGraph();
@@ -212,6 +236,7 @@ private:
     std::vector<Writer> writers_;                   // by DMEM address
     std::vector<Shape> shapes_;
     std::vector<CopySet> copy_sets_; // what copy_sets() reports of them
+    std::vector<InitialValue> initial_values_;
     std::vector<Issue> issues_;
 };
 

@@ -671,7 +671,7 @@ void test_todays_synth() {
             "today's control program (vector loops): %d rows, %d decode rows, %d cycles a pass\n",
             today.image.length, today.image.rom_used, today.cycles);
     std::printf(
-            "today's synth from the graph (straight-line): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
+            "today's synth from the graph (the loops it finds): %d rows, %d decode rows, %d cycles a pass; %zu instructions, %d rows of waiting\n",
             graphed.image.length, graphed.image.rom_used, graphed.cycles,
             graphed.position.size(),
             graphed.image.length - static_cast<int>(graphed.position.size()));
@@ -693,21 +693,39 @@ void test_todays_synth() {
     check(graph.address(rig->synth.channels[3].record) % 32 == 0,
           "a channel's record is aligned to its size");
 
-    // the copies, which the wiring above never named: the voices, the
-    // channels, and the LFOs two of a shape
-    std::vector<int> copies;
+    // the copies, which the wiring above never named: the voices and the
+    // channels, each a vector loop, and the LFOs two of a shape, too few
+    // for a loop
+    std::vector<std::pair<int, bool>> copies;
     std::string found;
     for (const Graph::CopySet &set : graph.copy_sets()) {
-        copies.push_back(set.copies);
+        copies.push_back({set.copies, set.looped});
         found += (found.empty() ? "" : ", ") + std::to_string(set.copies)
-                 + " of " + std::to_string(set.nodes) + " nodes";
+                 + " of " + std::to_string(set.nodes) + " nodes"
+                 + (set.looped ? " (a loop)" : "");
     }
     std::printf("the graph's copies: %s\n", found.c_str());
     std::sort(copies.begin(), copies.end());
-    check(copies == std::vector<int>{2, 2, 2, 2, channel_count, voice_count},
-          "the graph finds its voices, its channels and its pairs of LFOs");
+    check(copies
+                  == std::vector<std::pair<int, bool>>{{2, false},
+                                                       {2, false},
+                                                       {2, false},
+                                                       {2, false},
+                                                       {channel_count, true},
+                                                       {voice_count, true}},
+          "the graph finds its voices and its channels, and loops over them, and its pairs of LFOs");
+    check_equal(
+            static_cast<int64_t>(graph.initial_values().size()),
+            channel_count + voice_count,
+            "words the graph has the firmware set at load: a pointer to its sinks for each element");
+    check(graph.writer(graph.initial_values().front().address)
+                  == Graph::Writer::firmware,
+          "such a word is the firmware's");
 
     rig->set_up();
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        rig->graphed.write(initial.address, initial.value);
+    }
     start(rig->today, today.image);
     start(rig->graphed, graphed.image);
     int differences = 0, early = 0, stale = 0, cycles = 0, todays_errors = 0;

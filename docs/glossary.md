@@ -117,9 +117,12 @@ control signal once a pass. The instruction set is
   (z⁻¹: last pass's value) or **movable** (read through a pointer the
   firmware writes, to a field of a **record**). The graph lays out CSP
   memory by reach, says where each value lives and who writes it, and
-  emits itself through the program builder as **straight-line code**, an
-  instruction for every operator, in an order it picks so that few waits
-  are left. `make csp-test` wires today's synth as a graph and holds its
+  emits itself through the program builder. It finds the circuits of one
+  shape among its nodes, its **copies**, from its structure alone; a set
+  of enough copies runs as the elements of a vector loop, and the rest is
+  **straight-line code**, an instruction for every operator. It picks the
+  order the instructions issue in so that few waits are left. `make
+  csp-test` wires today's synth as a graph and holds its
   sinks equal to the control program's on the reference model, pass for
   pass. The firmware does not load the graph's program.
 - **row** — one instruction, a qword in IMEM; "row" because the memories
