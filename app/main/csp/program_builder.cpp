@@ -198,6 +198,20 @@ size_t ProgramBuilder::idx(IndexRegister which, Source x, Source y) {
     return at;
 }
 
+size_t ProgramBuilder::idx(IndexRegister which, Source x, Source y,
+                           IndexTargets targets) {
+    const size_t at           = idx(which, x, y);
+    instructions_[at].targets = targets;
+    return at;
+}
+
+IndexTargets ProgramBuilder::targets(std::span<const int> addresses) {
+    const IndexTargets targets{target_addresses_.size(), addresses.size()};
+    target_addresses_.insert(target_addresses_.end(), addresses.begin(),
+                             addresses.end());
+    return targets;
+}
+
 size_t ProgramBuilder::open_loop(IndexRegister which, int count, int stride,
                                  bool vector) {
     if (count < 0 || count > loop_count_max) {
@@ -272,10 +286,12 @@ struct Board {
 };
 
 // What an index register is known to hold: an address, when it was set
-// from an immediate alone; otherwise anything.
+// from an immediate alone; one of a list, when its IDX named the list;
+// otherwise anything.
 struct IndexState {
     bool known_base = false;
     int base        = 0;
+    std::span<const int> may_hold; // empty: nothing is said
 };
 
 // The addresses an operand may name, as the scheduler sees them.
@@ -298,6 +314,11 @@ Access access_of(const Operand &operand, const IndexState (&index)[2]) {
     if (state.known_base) {
         access.addresses.push_back((state.base | operand.value)
                                    & (address_space - 1));
+    } else if (!state.may_hold.empty()) {
+        for (const int base : state.may_hold) {
+            access.addresses.push_back((base | operand.value)
+                                       & (address_space - 1));
+        }
     } else {
         access.any = true;
     }
@@ -459,6 +480,21 @@ void ProgramBuilder::build(Built &built) const {
         return cycle;
     };
 
+    // What an index register holds after an IDX, as the scheduler knows it.
+    auto index_after = [&](const Entry &entry) -> IndexState {
+        IndexState state;
+        if (entry.x.mode == Operand::Mode::immediate
+            && entry.y.mode == Operand::Mode::direct && entry.y.value == 0) {
+            state.known_base = true;
+            state.base       = entry.immediate & (address_space - 1);
+        } else {
+            state.may_hold =
+                    std::span<const int>(target_addresses_)
+                            .subspan(entry.targets.first, entry.targets.count);
+        }
+        return state;
+    };
+
     auto note_writes = [&](const Entry &entry, Board &at_board,
                            IndexState(&at_index)[2], int64_t cycle) {
         if (writes_register(entry.op)
@@ -483,15 +519,8 @@ void ProgramBuilder::build(Built &built) const {
             at_board.state = std::max(at_board.state, cycle + state_latency);
         }
         if (entry.op == Op::idx) {
-            IndexState &state =
-                    at_index[entry.which == IndexRegister::j ? 1 : 0];
-            state.known_base = false;
-            if (entry.x.mode == Operand::Mode::immediate
-                && entry.y.mode == Operand::Mode::direct
-                && entry.y.value == 0) {
-                state.known_base = true;
-                state.base       = entry.immediate & (address_space - 1);
-            }
+            at_index[entry.which == IndexRegister::j ? 1 : 0] =
+                    index_after(entry);
         }
     };
 
@@ -532,8 +561,8 @@ void ProgramBuilder::build(Built &built) const {
                 Board body_board         = at_board;
                 IndexState body_index[2] = {at_index[0], at_index[1]};
                 // the loop's index register walks on from the base it holds
-                body_index[entry.which == IndexRegister::j ? 1 : 0].known_base =
-                        false;
+                body_index[entry.which == IndexRegister::j ? 1 : 0] =
+                        IndexState{};
                 int64_t body_start = cycle + 1;
                 std::vector<Placed> body;
                 int64_t body_end = 0;
@@ -588,8 +617,8 @@ void ProgramBuilder::build(Built &built) const {
                 at_board    = body_board;
                 at_index[0] = body_index[0];
                 at_index[1] = body_index[1];
-                at_index[entry.which == IndexRegister::j ? 1 : 0].known_base =
-                        false;
+                at_index[entry.which == IndexRegister::j ? 1 : 0] =
+                        IndexState{};
                 next = last_start + body_cycles;
                 at   = entry.end;
                 continue;
@@ -607,8 +636,8 @@ void ProgramBuilder::build(Built &built) const {
                 const int rounds   = (count + vector_round - 1) / vector_round;
                 const int elements = std::min(count, vector_round);
                 IndexState body_index[2] = {at_index[0], at_index[1]};
-                body_index[entry.which == IndexRegister::j ? 1 : 0].known_base =
-                        false;
+                body_index[entry.which == IndexRegister::j ? 1 : 0] =
+                        IndexState{};
                 // the body's waits, in instructions: a dependent pair needs
                 // ceil(latency / elements) instructions between, less one
                 std::vector<size_t> body_rows;
@@ -736,8 +765,12 @@ void ProgramBuilder::build(Built &built) const {
                         row_state = row;
                     }
                     if (body_entry.op == Op::idx) {
-                        body_index[body_entry.which == IndexRegister::j ? 1 : 0]
-                                .known_base = false;
+                        // a body's IDX gives every element its own index:
+                        // no single address is assumed, a list holds for each
+                        body_index[body_entry.which == IndexRegister::j ? 1
+                                                                        : 0] =
+                                IndexState{false, 0,
+                                           index_after(body_entry).may_hold};
                         row_index[body_entry.which == IndexRegister::j ? 1
                                                                        : 0] =
                                 row;
@@ -764,8 +797,8 @@ void ProgramBuilder::build(Built &built) const {
                 }
                 at_index[0] = body_index[0];
                 at_index[1] = body_index[1];
-                at_index[entry.which == IndexRegister::j ? 1 : 0].known_base =
-                        false;
+                at_index[entry.which == IndexRegister::j ? 1 : 0] =
+                        IndexState{};
                 next = end_cycle; // the loop costs nothing to leave
                 at   = entry.end;
                 continue;
