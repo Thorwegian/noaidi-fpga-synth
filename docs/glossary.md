@@ -228,8 +228,10 @@ control signal once a pass. The instruction set is
 - **acceptance** — the three checks that admit a bitstream, none implying
   another: the self-test, `csp verify`, and the **baseline take**, run as
   one command by `tools/lab/acceptance.py`.
-- **baseline take** — the Galaxy sequence recorded through the half-band
-  tap and compared with the benchmark in `tools/lab/benchmark` (envelope,
+- **baseline take** — the fixed sequence played on one of the lab's presets
+  (`Presets/Factory/Tests`: Galaxy, and PowerBass two octaves down), recorded
+  through the half-band
+  tap and compared with that preset's benchmark in `tools/lab/benchmark` (envelope,
   pitch classes, centroid, partials, **valley floor**: the silence between
   notes).
 - **seed** — nextpnr's placement seed, a diagnostic of the tool and never

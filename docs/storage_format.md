@@ -77,7 +77,8 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 │   │   │   └── Arctic Ice.toml
 │   │   ├── Percussion
 │   │   ├── Plucks
-│   │   └── Strings
+│   │   ├── Strings
+│   │   └── Tests
 │   └── User
 │       └── (the same category folders)
 └── Performances
@@ -85,9 +86,14 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 
 - **`Presets/Factory`** holds the presets shipped with the firmware.
   The synth never writes there.
+- **`Presets/Factory/Tests`** holds the lab's presets: copies of presets
+  from the categories, which the acceptance on the board plays against
+  recorded benchmarks (`tools/lab/baselines.py`). A preset in a category is
+  voiced and moves; its copy here does not, and a change to one re-records
+  its benchmark. `User` has no such folder.
 - **`Presets/User`** holds the user's presets. The synth saves only
   here.
-- **Category folders:** the twelve above. At mount, the firmware
+- **Category folders:** the twelve above `Tests`. At mount, the firmware
   creates any of them that are missing under `User`. Any other folder
   under `Factory` or `User` is a category too, so a user can add one
   from a computer.
@@ -448,6 +454,11 @@ programs = []
   nothing.
 - **Reading:** `banks.toml` is read when a Program Change needs it.
   A missing or unreadable file means there are no banks.
+- **The Tests bank** is bank 16383, the highest number there is (Bank
+  Select MSB 127, LSB 127): its programs are the presets of
+  `Presets/Factory/Tests`, and the lab's acceptance loads them by Bank
+  Select and Program Change. It is for the lab alone; no other bank lists
+  those files.
 
 ## Loading
 
@@ -506,7 +517,9 @@ The factory presets and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The sound the synth
 starts with is `Presets/Factory/Pads/Supersaw.toml`: `system.toml`
 names it as the startup preset, and `banks.toml` makes it program 0 of
-bank 0, "Factory", followed by the other factory presets. `make fw-test` checks that
+bank 0, "Factory", followed by the other factory presets; the presets of
+`Presets/Factory/Tests` are the programs of bank 16383, "Tests", and of no
+other. `make fw-test` checks that
 every factory preset and `banks.toml` read and are already in the
 writer's own form, so they read back exactly, and that every factory
 preset starts with the copyright notice.

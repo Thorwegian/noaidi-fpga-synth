@@ -1,0 +1,15 @@
+segment                      level      pitch       want  verdict
+lead-in                  -120.0 dB                     silence  ok    
+note 1 of the scale       -19.6 dB 47.95 (C3)               C3  ok    C3 88%  C4 11%
+note 2 of the scale       -17.2 dB 50.01 (D3)               D3  ok    D3 100%
+note 3 of the scale       -17.3 dB 51.94 (E3)               E3  ok    E3 100%
+note 4 of the scale       -19.7 dB 52.98 (F3)               F3  ok    F3 100%
+note 5 of the scale       -19.8 dB 54.96 (G3)               G3  ok    G3 100%
+note 6 of the scale       -18.9 dB 56.94 (A3)               A3  ok    A3 100%
+note 7 of the scale       -18.2 dB 58.97 (B3)               B3  ok    B3 100%
+C4 held, one bar          -28.9 dB 60.00 (C4)               C4  ok    C4 100%
+bar of silence           -120.0 dB                      < C4-6  ok    
+triad                     -23.8 dB 42.61 (G2)         C2 E2 G2  ok    C2 -5 dB  E2 -1 dB  G2 -5 dB
+release +2 s             -120.0 dB                     < triad  ok    
+release +6 s             -120.0 dB                  < triad-20  ok    
+0 failure(s)

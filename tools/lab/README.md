@@ -87,6 +87,39 @@ port. The synth's own preset saves are bare TOML without the copyright header
   the only true restore is a Program Change that reloads the preset
   (`midi_soak.py --program N`; `baseline_recording.py` uses program 1).
 
+## The baselines
+
+The acceptance plays the lab's baselines (`baselines.py`): PowerBass two
+octaves down, then Galaxy, each against its benchmark (`benchmark/`).
+
+- **The presets are the storage's `Presets/Factory/Tests`**, copies kept for
+  the lab, and the programs of bank 16383, "Tests" (`app/storage/banks.toml`,
+  `docs/storage_format.md`). The acceptance loads one as a controller would,
+  Bank Select 127/127 and a Program Change over the wire, and records only
+  when the console shows it loaded: the firmware's `bank 16383 program <p>:
+  <file>` line, and `preset` printing the file's every table and key as the
+  checkout's `app/storage` has them. A board whose file differs fails there.
+- **A board needs the folder and the bank in its storage.**
+  `make fw-storage-flash` writes them with everything else and erases the
+  user's presets. On a board whose presets are to stay, the console makes
+  them from the two presets they are copies of:
+
+  ```
+  mkdir /Presets/Factory/Tests
+  load /Presets/Factory/Pads/Galaxy.toml
+  save /Presets/Factory/Tests/Galaxy.toml
+  load /Presets/Factory/Basses/PowerBass.toml
+  save /Presets/Factory/Tests/PowerBass.toml
+  bank build 16383 /Presets/Factory/Tests
+  ```
+
+  `bank build` takes the files in path order, which is the order of the
+  programs: Galaxy 0, PowerBass 1. The bank it makes is named after the
+  folder.
+- **The acceptance leaves the channel's bank at 0.** A Program Change sent
+  without a Bank Select is of the bank the channel had last, and stays there
+  until the ESP32 restarts.
+
 ## The scripts
 
 Board, acceptance and measurement (`tools/lab/`):
@@ -94,13 +127,14 @@ Board, acceptance and measurement (`tools/lab/`):
 | script | what |
 |---|---|
 | `board.py` | console commands in, replies out (above) |
-| `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238); the limiter's reduction polled through the take and reported for the triad (#355) |
+| `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238): the boot's self-test, `csp verify`, and each baseline loaded by Bank Select and Program Change, checked on the console and recorded; the limiter's reduction polled through each take and reported for the triad (#355) |
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
-| `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, recorded over S/PDIF |
+| `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
+| `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |
 | `baseline_check.py` | that recording against what it should hold, with Essentia |
-| `benchmark_compare.py` | a baseline recording against the benchmark take |
+| `benchmark_compare.py` | a baseline recording against its baseline's benchmark take |
 | `release_tail.py` | the triad's release tail from a recording's envelope CSV: held level, levels after the release, slopes, time to 60 dB down — the shape that tells a dB release from a linear one (#176) |
 | `zipper_take.py` | the control-stepping stimulus (#268): fast attack and release, resonant sweep, five notes, recorded over S/PDIF |
 | `resonance_take.py` | the resonance limiter's take (#427): resonance at the top of the knob, the cutoff on the fundamental, the cascade then the single section, two notes and a triad, recorded over S/PDIF; what to listen for is in its docstring |

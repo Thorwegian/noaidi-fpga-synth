@@ -263,15 +263,18 @@ with whatever its registers hold. Then, before the first note:
    operand on any path shows here as a fraction of passes wrong;
 2. **`csp verify`**: every register the firmware wrote, read back through
    the probe; sent again while they differ, the count printed;
-3. the **baseline take** through `tools/lab`: the Galaxy sequence
-   recorded, checked with Essentia, compared with the benchmark's
+3. the **baseline takes** through `tools/lab`: the sequence played on each
+   of the lab's presets (PowerBass, then Galaxy), loaded by Bank Select and
+   Program Change,
+   recorded, checked with Essentia, compared with its benchmark's
    envelope, pitch classes, centroid, partials and valley floor.
 
 A bitstream is accepted when all three pass at 73.728 MHz; a seed sweep
 of a design change runs all three on every seed. `tools/lab/acceptance.py`
 runs the three on the board as one command (the bitstream loaded, the
-firmware reset, the preset loaded, the sequence recorded, checked and
-compared) and writes the recording, the tables, the plot, the MP3 and a
+firmware reset, each preset loaded and seen on the console to be loaded, its
+sequence recorded, checked and
+compared) and writes the recordings, the tables, the plots, the MP3s and a
 `verdict.json` to a directory; its exit status is the verdict.
 
 ## 7. What the first revision taught, by fault

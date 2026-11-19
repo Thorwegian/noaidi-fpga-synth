@@ -5,11 +5,14 @@
 the notes, their pitches, the bar of silence, the triad and the release — so
 that a wrong take is caught before anyone listens to it.
 
-usage: baseline_check.py <recording.wav> [--envelope CSV] [--json FILE]
+usage: baseline_check.py <recording.wav> [--transpose SEMITONES] [--envelope CSV]
+                         [--json FILE]
 
 The expected sequence is baseline_recording.py's: at 60 BPM, a beat of lead-in,
 C5 D5 E5 F5 G5 A5 B5 C6 as quarter notes with the C6 held a full bar, a bar of
-silence, C4 E4 G4 held four beats and released, then the tail. For each
+silence, C4 E4 G4 held four beats and released, then the tail; with
+--transpose every note is that many semitones away, as the recording played
+it (a bass baseline is two octaves down, baselines.py). For each
 segment of it (segments()) the checker takes the middle 60 % and measures:
 
   - the level (dBFS);
@@ -27,8 +30,8 @@ segment of it (segments()) the checker takes the middle 60 % and measures:
     harmonics: noise fills it, a clean tone leaves it deep (a gritty take
     shows as a valley floor tens of dB above the benchmark's).
 
-The verdicts are deliberately tolerant of the preset (a pad with a slow
-attack, a long release and free-running LFOs): a note passes when its pitch
+The verdicts are deliberately tolerant of the preset (Galaxy is a pad with a
+slow attack, a long release and free-running LFOs): a note passes when its pitch
 class, at any octave, holds at least a third of the confident frames; the
 silence bar passes when it is at least 6 dB below the held note before it
 (the bar's middle is 0.8–3.2 s into the held note's release, and Galaxy's
@@ -40,11 +43,17 @@ triad's. The exit status is 1 on any failure. The JSON carries every
 measurement, so that benchmark_compare.py can put another recording against
 this one without the WAV.
 
-WARNING: the reference is a recording of the Factory preset Galaxy, which is
-still being voiced on the bench, not a frozen test fixture (#305). A change to
-app/storage/Presets/Factory/Pads/Galaxy.toml moves what this test measures, so
-a failure after one may be the preset, not the synth. Re-record the benchmark
-(tools/lab/benchmark/README.md) in the commit that changes the preset.
+The spectrum's bins are 11.7 Hz apart (4096 samples at 48 kHz), and a peak is
+looked for within 3 % of its frequency: below about 200 Hz that window can
+fall between two bins and hold none, and the peak reads as absent (-240 dB).
+A note's peak is then found at the octave above, and the lowest partials of a
+bass note are not measured. A comparison of two takes reads the same blanks
+in both.
+
+The references are recordings of the presets in the storage's
+Presets/Factory/Tests folder (baselines.py), which are copies kept for the
+lab. A change to one of those files moves what its test measures: re-record
+its benchmark (tools/lab/benchmark/README.md) in the commit that changes it.
 """
 import argparse
 import json
@@ -81,18 +90,25 @@ def midi_to_hz(midi):
     return 440.0 * 2 ** ((midi - 69) / 12.0)
 
 
-def segments():
+def segments(transpose=0):
     """The sequence as (name, start, end, expected MIDI notes), in seconds."""
+    scale = [note + transpose for note in SCALE]
+    triad = [note + transpose for note in TRIAD]
     t = LEAD_IN
     out = [("lead-in", 0.0, LEAD_IN, [])]
-    for i, note in enumerate(SCALE[:-1]):
+    for i, note in enumerate(scale[:-1]):
         out.append(("note %d of the scale" % (i + 1), t + i * BEAT, t + (i + 1) * BEAT, [note]))
-    out.append(("C6 held, one bar", t + 7 * BEAT, t + 11 * BEAT, [SCALE[-1]]))
+    out.append((held_name(transpose), t + 7 * BEAT, t + 11 * BEAT, [scale[-1]]))
     out.append(("bar of silence", t + 11 * BEAT, t + 15 * BEAT, []))
-    out.append(("triad", t + 15 * BEAT, t + 19 * BEAT, TRIAD))
+    out.append(("triad", t + 15 * BEAT, t + 19 * BEAT, triad))
     out.append(("release +2 s", t + 19 * BEAT + 1.5, t + 19 * BEAT + 2.5, []))
     out.append(("release +6 s", t + 19 * BEAT + 5.5, t + 19 * BEAT + 6.5, []))
     return out
+
+
+def held_name(transpose=0):
+    """The name of the segment the scale's last note is held in."""
+    return "%s held, one bar" % note_name(SCALE[-1] + transpose)
 
 
 def level_db(samples):
@@ -180,24 +196,27 @@ def pitch_class_share(clusters, note):
     return sum(share for name, share in clusters.items() if name.rstrip("0123456789") == NAMES[note % 12])
 
 
-def analyse(audio):
+def analyse(audio, transpose=0):
     """Every segment measured, with its verdict; returns (results, failures)."""
     analyser = Analyser()
     results = []
-    for name, start, end, want in segments():
+    for name, start, end, want in segments(transpose):
         result = {"segment": name, "start": start, "end": end, "want": [note_name(n) for n in want]}
         result.update(analyser.segment(audio, start, end, want))
         results.append(result)
     by_name = {r["segment"]: r for r in results}
-    wanted = {name: want for name, _, _, want in segments()}
+    wanted = {name: want for name, _, _, want in segments(transpose)}
+    held = held_name(transpose)
     for result in results:
         name, want = result["segment"], wanted[result["segment"]]
         if name == "lead-in":
             result["ok"], result["rule"] = result["level_dbfs"] < -60, "silence"
         elif name == "bar of silence":
-            result["ok"], result["rule"] = result["level_dbfs"] < by_name["C6 held, one bar"]["level_dbfs"] - 6, "< C6-6"
+            result["ok"] = result["level_dbfs"] < by_name[held]["level_dbfs"] - 6
+            result["rule"] = "< %s-6" % note_name(wanted[held][0])
         elif name == "triad":
-            result["ok"], result["rule"] = all(rel > -24 for rel in result["peaks_db"].values()), "C4 E4 G4"
+            result["ok"] = all(rel > -24 for rel in result["peaks_db"].values())
+            result["rule"] = " ".join(note_name(n) for n in want)
         elif name == "release +2 s":
             result["ok"], result["rule"] = result["level_dbfs"] < by_name["triad"]["level_dbfs"], "< triad"
         elif name == "release +6 s":
@@ -221,12 +240,14 @@ def print_table(results):
 def main():
     parser = argparse.ArgumentParser(description="check a baseline recording with Essentia")
     parser.add_argument("wav")
+    parser.add_argument("--transpose", type=int, default=0,
+                        help="semitones every note of the sequence was played away from C5 … C6 and C4 E4 G4")
     parser.add_argument("--envelope", help="write the level envelope (time, dBFS every 50 ms) as CSV here")
     parser.add_argument("--json", help="write the per-segment results here")
     args = parser.parse_args()
 
     audio = load(args.wav)
-    results, failures = analyse(audio)
+    results, failures = analyse(audio, args.transpose)
     print_table(results)
     if args.envelope:
         with open(args.envelope, "w") as out:
