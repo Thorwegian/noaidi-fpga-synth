@@ -1,6 +1,6 @@
 # Noaidi — FPGA Polyphonic Synthesizer
 
-![A 3D render of the circuit board: sockets for the Tang Nano 20K and an ESP32-S3 module, two DIN MIDI inputs, an I2S DAC module, RCA and USB-C](docs/images/pcb-iso.jpg)
+![A 3D render of the board in a clear acrylic enclosure on a dark surface, lit from inside in magenta, amber and cyan](docs/images/enclosure-left-bottom-low.jpg)
 
 <a href="https://thj.no/synth/"><img src="docs/images/button-website-v5.png" width="177" height="48" alt="Official website"></a>
 
@@ -13,6 +13,8 @@ of their own. Playable today: 32-voice polyphony, 8 detuned
 unison partials per voice, per-voice ADSR amp envelopes in gateware,
 96 kHz synthesis, out on 96 kHz SPDIF and 96 kHz I2S (primary outputs),
 plus 48 kHz TOSLINK (for automated lab tests).
+
+![A 3D render of the circuit board: the ESP32-S3 module, the Tang Nano 20K and the I2S DAC module on their headers, two DIN MIDI inputs, the RCA socket and two USB-C sockets](docs/images/pcb-iso.jpg)
 
 ## Architecture
 
