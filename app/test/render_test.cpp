@@ -120,7 +120,7 @@ void test_setup() {
                                  == graph().address(
                                          synth().lfo(1, wiring::shape_saw)
                                                  .record),
-              "every channel listens to an LFO of each half");
+              "each LFO of every channel listens to the saw that runs for it");
         check(state.at(at(other.mod_amount)) == 0
                       && state.at(at(other.depth[0][wiring::moves_pitch])) == 0
                       && state.at(at(other.duty_base[0])) == 0
@@ -388,12 +388,12 @@ void test_controllers() {
 }
 
 void test_lfo() {
-    // Each half has an LFO of every shape. The firmware sets the one of the
-    // preset's shape and points the channel at its record, so the shape the
-    // preset asks for is the one the channel hears (issue #237). The gain
-    // scales the wave: the saw's phase runs ±8 so depth/8 reaches ±depth,
-    // the triangle's |phase| runs 0…8 so depth/4 does; the square and sine
-    // carry the depth itself, not a gain.
+    // An LFO of every shape runs for each of a channel's LFOs. The firmware
+    // sets the one of the preset's shape and points the channel at its
+    // record, so the shape the preset asks for is the one the channel hears
+    // (issue #237). The gain scales the wave: the saw's phase runs ±8 so
+    // depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
+    // does; the square and sine carry the depth itself, not a gain.
     struct Case {
         waveform_t wave;
         int shape;

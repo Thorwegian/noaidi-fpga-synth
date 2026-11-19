@@ -32,15 +32,14 @@ Taken on issue #231; the text below is written to them.
 
 ## 1. A program
 
-- **One pass every fourth sample, 24 kHz** (#268; it was every second,
-  48 kHz, with half the budget). A pass is 3072 cycles; instructions
-  issue in the first 3008, one per cycle at most, from the top of the
-  program every pass to its `END` row — the assembler's last row, where
-  the fetch parks until the next pass (#271): IMEM's 2048 rows hold the
-  program and whatever an earlier one left past it, and only the program
-  runs. There are no branches: conditional work is a
-  select (`SEL`), and every loop has a fixed count. Every pass runs the
-  same instructions in the same cycles.
+- **One pass every fourth sample, 24 kHz** (#268). A pass is 3072
+  cycles; instructions issue in the first 3008, one per cycle at most,
+  from the top of the program every pass to its `END` row — the
+  assembler's last row, where the fetch parks until the next pass
+  (#271): IMEM's 2048 rows hold the program and whatever an earlier one
+  left past it, and only the program runs. There are no branches:
+  conditional work is a select (`SEL`), and every loop has a fixed
+  count. Every pass runs the same instructions in the same cycles.
 - **The schedule is static.** Every operation has a fixed latency
   (section 8), and the assembler places each instruction so that its
   operands are ready when it issues: it inserts the waits, counts the
@@ -105,8 +104,7 @@ element's, and the other index may be the element's private one, set
 by an `IDX` in the body.
 
 An **immediate** in `x` or `y` is the row's `imm` field as an 18-bit
-Q4.14 value: constants no longer live in registers the firmware writes
-at boot.
+Q4.14 value: a constant takes no register.
 
 ## 4. Operations: the decode ROM
 

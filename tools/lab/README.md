@@ -66,16 +66,14 @@ port. The synth's own preset saves are bare TOML without the copyright header
   connected to the CH345 (`alsa_midi`, `port.connect_to(...)`, as
   `midi_tx_check.py` does); for an ad-hoc `aseqsend` session first
   `aconnect 14:0 16:0` (Midi Through → CH345) and `aconnect -d 14:0 16:0`
-  after. O.S.C.'s standing subscription used to hide this.
+  after.
   `aseqsend -p 16:0 "90 3C 64"` — the hex bytes are the
   **positional** argument; `-s` means "send this *file*". Several messages may
   go in one call as one byte stream. Send Active Sensing (`FE`) every quarter
   second during a session, as a keyboard does. Once the synth has seen `FE`
   on a port, 500 ms without a byte turns that port's notes off (the MIDI
   Active Sensing rule, #276) — so a script that sends `FE` must keep sending
-  it, or stop it only after its last note-off. Before #276 the silence reset
-  also flushed the UART and could drop the first message after a pause (a
-  note-off lost that way left a note stuck under a take); after any test
+  it, or stop it only after its last note-off. After any test
   that plays notes, read `csp voices`. `baseline_recording.py` is the model.
 - **BLE is Open Stage Control's.** The synth accepts one BLE connection; the
   BLE-era scripts in `tools/lab/ble/` (`ble_midi_fuzz.py`, `hil.py`, the

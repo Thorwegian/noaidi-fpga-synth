@@ -33,16 +33,17 @@
 
 namespace wiring {
 
-// An LFO's shapes, in the order of a half's LFOs.
+// An LFO's shapes, in the order they stand in Synth::lfos.
 enum { shape_saw, shape_square, shape_triangle, shape_sine, lfo_shape_count };
-// The LFOs are two halves, a channel's LFO 1 from the first and its LFO 2
-// from the second, each half one LFO of every shape.
-constexpr int lfo_half_count = 2;
-constexpr int lfo_count      = lfo_half_count * lfo_shape_count;
-constexpr int channel_count  = 16;
-constexpr int voice_count    = 32;
-constexpr int envelope_count = 2; // amp, mod
-constexpr int stage_count    = 3; // attack, decay, release
+// A channel has two LFOs, each a movable wire to one of the synth's. The
+// synth runs four for each of the two, one of every shape, and all the
+// channels share them.
+constexpr int channel_lfo_count = 2;
+constexpr int lfo_count         = channel_lfo_count * lfo_shape_count;
+constexpr int channel_count     = 16;
+constexpr int voice_count       = 32;
+constexpr int envelope_count    = 2; // amp, mod
+constexpr int stage_count       = 3; // attack, decay, release
 
 enum { envelope_amp, envelope_mod };
 enum { stage_attack, stage_decay, stage_release };
@@ -110,8 +111,8 @@ struct Segment {
 };
 
 struct Channel {
-    std::array<Wire, lfo_half_count> lfo; // movable: the address of an LFO
-    std::array<std::array<Wire, moved_count>, lfo_half_count> depth;
+    std::array<Wire, channel_lfo_count> lfo; // movable: the address of an LFO
+    std::array<std::array<Wire, moved_count>, channel_lfo_count> depth;
     Wire bend, cutoff_base, key_track, mod_amount;
     std::array<Wire, 2> duty_base; // each oscillator's pulse width
     Wire resonance_base;
@@ -132,15 +133,17 @@ struct Voice {
 
 struct Synth {
     csp::DspGraph graph;
-    std::array<Lfo, lfo_count> lfos; // a half's four shapes, then the other's
+    // The four shapes of a channel's LFO 1, then the four of its LFO 2.
+    std::array<Lfo, lfo_count> lfos;
     std::array<Channel, channel_count> channels;
     std::array<Voice, voice_count> voices;
 
-    Lfo &lfo(int half, int shape) {
-        return lfos[static_cast<size_t>(half * lfo_shape_count + shape)];
+    // The LFO of a shape that runs for a channel's LFO.
+    Lfo &lfo(int channel_lfo, int shape) {
+        return lfos[static_cast<size_t>(channel_lfo * lfo_shape_count + shape)];
     }
-    const Lfo &lfo(int half, int shape) const {
-        return lfos[static_cast<size_t>(half * lfo_shape_count + shape)];
+    const Lfo &lfo(int channel_lfo, int shape) const {
+        return lfos[static_cast<size_t>(channel_lfo * lfo_shape_count + shape)];
     }
 };
 
