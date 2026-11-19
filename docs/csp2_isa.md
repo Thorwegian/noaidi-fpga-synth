@@ -145,6 +145,7 @@ the operation is the same):
 | multiply-add | `MAC`, `MAC` in place, `MAC.d`, `MACW` (wrapping) | R = A + X × Y, A by the A-source bits |
 | add | `ADD3` | R = A + X + Y |
 | compare | `CMP` | R = X − Y, the flags set |
+| subtract | `SUB` | R = X − Y |
 | select | `SEL` | R = `cond` clear ? X : Y |
 | min, max, abs | `MIN`, `MAX`, `ABS` | as named |
 | logic | `ANDXOR` | R = (X & Y) ^ A |
@@ -202,9 +203,12 @@ loop still in flight lands where the first elements read it.
 
 ## 6. Conditionality
 
-`CMP` (and any row with *set the flags*) sets negative, zero and
-overflow. `SEL` chooses between its sources by the flag named in
-`cond`. There is no other conditional: a signal graph needs a value
+`CMP` sets negative, zero and overflow, and it is the only operation
+whose row has *set the flags*: every other operation leaves the flags as
+they are, `SUB` being `CMP`'s subtraction for its result alone. `SEL`
+chooses between its sources by the flag named in `cond`, the flags of the
+last `CMP` before it. Scalar code has one set of flags, so any rows but a
+`CMP` may stand between a `CMP` and its `SEL`. There is no other conditional: a signal graph needs a value
 chosen, not control flow, so there is no skip.
 
 ## 7. The register map

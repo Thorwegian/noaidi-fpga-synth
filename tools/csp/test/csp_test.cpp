@@ -205,6 +205,20 @@ void test_encoding() {
                   != 0,
           "END's control word is not NOP's: the fetch tells them apart");
     check(csp::mnemonic(csp::Op::end) == "END", "END has its mnemonic");
+    // CMP's row alone has "set the flags"; SUB is the same row without it
+    using csp::ConditionKind;
+    using csp::Op;
+    for (const Op op : {Op::mac, Op::macw, Op::add3, Op::sub, Op::abs, Op::min,
+                        Op::max, Op::andxor, Op::shift}) {
+        check(csp::control_of(op, false, csp::ASource::zero).cond
+                      == ConditionKind::none,
+              std::string(csp::mnemonic(op)) + " leaves the flags");
+    }
+    csp::Control compare = csp::control_of(Op::cmp, false, csp::ASource::zero);
+    check(compare.cond == ConditionKind::flags, "CMP sets the flags");
+    compare.cond = ConditionKind::none;
+    check(compare == csp::control_of(Op::sub, false, csp::ASource::zero),
+          "SUB is CMP's control word with the condition kind none");
 }
 
 // ---- arithmetic ---------------------------------------------------------------
@@ -230,7 +244,6 @@ void test_mac() {
     Machine sat(std::string(registers) + "MAC A_, 0, B_, C_\n");
     sat.set("B_", q(7.0)).set("C_", q(7.0)).start().run();
     check_equal(sat.get("A_"), csp::largest(18), "MAC saturates at the top");
-    check(sat.processor.flags().overflow, "MAC sets V when it saturates");
 
     Machine tiny(std::string(registers) + R"(
         MAC   A_, 0, B_, B_
@@ -251,7 +264,6 @@ void test_macw_and_wide() {
     m.set("A_", q(7.5)).set("B_", q(1.0));
     m.set_wide("W_", q_wide(7.75)).set_wide("V_", q_wide(0.5)).start().run();
     check_equal(m.get("A_"), q(-7.5), "MACW wraps 7.5 + 1.0 to −7.5");
-    check(!m.processor.flags().overflow, "MACW does not set V");
     check_equal(m.get_wide("W_"), q_wide(-7.75), "MACW.d wraps a dword phase");
     check_equal(m.get("W_"), q(-7.75), "a dword's upper word reads as Q4.14");
 }
@@ -274,6 +286,39 @@ void test_add3_sel_cmp_min_max() {
     Machine sat(std::string(registers) + "ADD3 A_, 0, B_, C_\n");
     sat.set("B_", q(6.0)).set("C_", q(6.0)).start().run();
     check_equal(sat.get("A_"), csp::largest(18), "ADD3 saturates");
+
+    // CMP alone sets the flags: rows of every other kind between it and its
+    // SEL, with results of the other sign, and one that saturates
+    Machine between(std::string(registers) + R"(
+        CMP   ZERO, B_, C_          ; 1 − 2: negative
+        MAC   A_, 0, C_, C_
+        ADD3  A_, 0, C_, C_
+        ABS   A_, C_
+        MAX   A_, B_, C_
+        MIN   A_, B_, C_
+        SUB   W_, C_, B_            ; 2 − 1, the flags left
+        SHIFT A_, A_, =#1
+        ANDXOR A_, 0, B_, C_
+        MACW  A_, A_, C_, C_
+        MAC   V_, 0, =7.0, =7.0     ; saturates
+        SEL   D_, B_, C_            ; by the CMP: negative, Y
+)");
+    between.set("B_", q(1.0)).set("C_", q(2.0)).start();
+    const csp::PassReport between_report = between.run();
+    check(between_report.errors.empty(),
+          "rows between a CMP and its SEL run without an early read");
+    check_equal(between.get("D_"), q(2.0),
+                "SEL chooses by the CMP, whatever rows stand between");
+    check_equal(between.get("W_"), q(1.0), "SUB: 2 − 1");
+    check(between.processor.flags().negative
+                  && !between.processor.flags().overflow,
+          "the flags are the CMP's still: no other row sets them");
+
+    Machine over(std::string(registers) + "CMP A_, B_, C_\n");
+    over.set("B_", q(7.0)).set("C_", q(-7.0)).start().run();
+    check_equal(over.get("A_"), csp::largest(18), "CMP saturates");
+    check(over.processor.flags().overflow,
+          "CMP sets V when the difference saturates");
 }
 
 void test_andxor_shift_abs_nop() {
@@ -321,8 +366,14 @@ void test_schedule() {
             "a read of a pair's lower word waits for the dword write");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nMAC C_, 0, B_, =1.0\n"), 2,
                 "another register does not wait");
-    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"),
-                csp::state_latency + 1, "SEL waits for the flags");
+    check_equal(cycles("CMP ZERO, A_, =1.0\nSEL B_, =1.0, C_\n"),
+                csp::state_latency + 1, "SEL waits for the flags of a CMP");
+    check_equal(
+            cycles("CMP ZERO, A_, =1.0\nMAC D_, 0, =1.0, =1.0\nSUB D_, A_, C_\nSEL B_, =1.0, C_\n"),
+            csp::state_latency + 1,
+            "other rows stand between a CMP and its SEL at no cost");
+    check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"), 2,
+                "SEL does not wait for a row that is not a CMP");
     check_equal(
             cycles("IDX i, =#0x100, 0\nMAC [i+1], 0, =1.0, =1.0\n"),
             csp::index_latency + 1,

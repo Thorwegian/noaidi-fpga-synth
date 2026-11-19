@@ -284,7 +284,7 @@ void voice_envelopes(ProgramBuilder &program) {
         // j → the envelope's row
         program.idx(j, from(i, cp::channel), from(i, envelope.stage));
         // D ← target − level, level ← level + D × rate
-        program.cmp(to(i, cp::d), from(j, cp::target), from(i, envelope.level));
+        program.sub(to(i, cp::d), from(j, cp::target), from(i, envelope.level));
         program.mac(to(i, envelope.level), in_place, from(i, cp::d),
                     from(j, cp::rate), true);
         program.mac(to(i, envelope.out), from_zero, from(i, envelope.level),

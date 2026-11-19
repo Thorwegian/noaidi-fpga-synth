@@ -480,12 +480,14 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
         } else {
             write_operand(word.r, static_cast<int32_t>(value.value), state);
         }
-        set_flags(value.value, value.overflow);
+        if (control.cond == ConditionKind::flags) {
+            set_flags(value.value, value.overflow);
+        }
     };
-    auto store_word = [&](int64_t raw, bool flags) {
+    auto store_word = [&](int64_t raw) {
         const auto value = static_cast<int32_t>(sign_extend(raw, word_bits));
         write_operand(word.r, value, state);
-        if (flags) {
+        if (control.cond == ConditionKind::flags) {
             set_flags(value, false);
         }
     };
@@ -511,17 +513,19 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
     case Op::sel: {
         const int64_t x = x_word();
         const int64_t y = y_word();
-        store_word(condition_holds(condition, flags_) ? y : x, false);
+        store_word(condition_holds(condition, flags_) ? y : x);
         break;
     }
     case Op::cmp:
+    case Op::
+            sub: // the same row but for its condition kind, which store() reads
         store(from_word(x_word()) - from_word(y_word()), false);
         break;
     case Op::min:
     case Op::max: {
         const int64_t x = x_word();
         const int64_t y = y_word();
-        store_word(op == Op::min ? std::min(x, y) : std::max(x, y), true);
+        store_word(op == Op::min ? std::min(x, y) : std::max(x, y));
         break;
     }
     case Op::andxor: {
@@ -532,7 +536,7 @@ void Processor::execute(const Decoded &decoded, PassState &state) {
                                   .value;
         const int64_t x = x_word();
         const int64_t y = y_word();
-        store_word((x & y) ^ a, true);
+        store_word((x & y) ^ a);
         break;
     }
     case Op::shift:

@@ -88,7 +88,10 @@ public:
 
 
     size_t sel(Operand r, Condition cond, Source x, Source y);
+    // R = X − Y, and the flags of the difference: what a SEL chooses by.
     size_t cmp(Operand r, Source x, Source y);
+    // R = X − Y, the flags left as they are.
+    size_t sub(Operand r, Source x, Source y);
     size_t min(Operand r, Source x, Source y);
     size_t max(Operand r, Source x, Source y);
     size_t abs(Operand r, Source x);
