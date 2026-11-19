@@ -300,16 +300,16 @@ ports.
   | drive | wrong at 10 MHz, of 4000 | wrong at 1 MHz, of 400 |
   |---|---|---|
   | 40 mA | 4000 | 400 |
-  | 20 mA, the chip's default | 3729 | 6 |
+  | 20 mA, the chip's default | 3838 | 7 |
   | 10 mA | 0 | 0 |
-  | 5 mA | 310 | 100 |
+  | 5 mA | 434 | 93 |
 
   The wrong dwords are shifted by a bit from some point on: the edges ring
   on the cable, and the slave, clocked by SCLK itself, takes the ringing
   for clock edges. `spi_link::init` therefore sets the three pads to
   10 mA. One step either way fails, so this cable has no margin to spare.
   At 10 mA a thousand rounds are also clean at 5 and at 20 MHz; at 40 MHz
-  270 of 4000 dwords are wrong with every ID nonet right, so the limit
+  48 of 4000 dwords are wrong with every ID nonet right, so the limit
   there is the read's timing, not ringing.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
