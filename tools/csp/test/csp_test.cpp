@@ -323,9 +323,18 @@ void test_schedule() {
                 "another register does not wait");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"),
                 csp::state_latency + 1, "SEL waits for the flags");
-    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"),
-                csp::index_latency + 1,
-                "the instruction after IDX comes index_latency cycles on");
+    check_equal(
+            cycles("IDX i, =#0x100, 0\nMAC [i+1], 0, =1.0, =1.0\n"),
+            csp::index_latency + 1,
+            "a row that uses the index comes index_latency cycles behind its IDX");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"), 2,
+                "a row that uses no index does not wait for an IDX");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC [j+1], 0, =1.0, =1.0\n"), 2,
+                "nor does a row that uses the other index register");
+    check_equal(
+            cycles("IDX i, =#0x100, 0\nLOOP.j end, =#2, =#1\nMAC B_, 0, =1.0, =1.0\nend:\n"),
+            csp::index_latency + 1 + 2 + csp::jump_penalty,
+            "a loop row waits for an IDX in flight");
     check_equal(
             cycles("MAC A_, 0, =1.0, =1.0\nNOP\nNOP\nNOP\nNOP\nNOP\nNOP\nMAC B_, 0, A_, =1.0\n"),
             csp::result_latency + 1,
@@ -356,6 +365,34 @@ void test_index() {
     check_equal(m.processor.index(csp::IndexRegister::j), 0x230,
                 "j holds the sum");
     check(report.errors.empty(), "without an early read");
+
+    // Rows in an IDX's wait: those that use the other index register, or none.
+    Machine filled(std::string(registers) + R"(
+        IDX   i, =#0x100, 0
+        IDX   j, =#0x200, 0             ; in i's wait
+        MAC   A_, 0, =0.5, =0.5         ; in both
+        MAC   [i+1], 0, =1.0, =1.0      ; i has landed
+        MAC   [j+1], 0, =2.0, =2.0      ; j has landed
+        IDX   i, =#0x180, 0
+        MAC   [j+2], 0, =1.5, =1.5      ; in i's wait, through j
+        MAC   [i+2], 0, =0.5, =0.5
+)");
+    filled.start();
+    const csp::PassReport filled_report = filled.run();
+    check(filled_report.errors.empty(),
+          "rows in an IDX's wait run without an early read");
+    // IDX i, IDX j, MAC, two waits, the two users, IDX i, a row through j,
+    // three waits, i's user, END
+    check_equal(filled.program.cycles, 2 * csp::index_latency + 4,
+                "only the rows that use an index wait for it");
+    check_equal(filled_report.cycles, filled.program.cycles,
+                "the model counts the cycles the assembler scheduled");
+    check_equal(filled.processor.read(0x060), q(0.25), "the row in both waits");
+    check_equal(filled.processor.read(0x101), q(1.0), "i's first user");
+    check_equal(filled.processor.read(0x201), q(4.0), "j's user");
+    check_equal(filled.processor.read(0x202), q(2.25),
+                "the row through j in i's second wait");
+    check_equal(filled.processor.read(0x182), q(0.25), "i's second user");
 
     // The chip ORs the offset into the index: an offset whose bits the
     // index already has is a different address from the sum, and reported.
@@ -540,21 +577,29 @@ outer_end:
     check(report.errors.empty(), "without errors");
 }
 
-// The chip has no stall, so what the front end used to wait for is rows: an
-// IDX is followed by four NOPs, and a loop of count 0 is not there at all.
+// The chip has no stall, so a wait is rows: a row that uses an index stands
+// index_latency rows behind its IDX, with NOPs between when nothing else can
+// issue; and a loop of count 0 is not there at all.
 void test_decisions() {
     const csp::Program idx =
             csp::assemble(std::string(registers)
-                          + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
+                          + "IDX i, =#0x100, 0\nMAC [i+1], 0, =1.0, =1.0\n");
     check(idx.ok, "IDX assembles");
     check_equal(
             idx.image.length, 1 + (csp::index_latency - 1) + 1 + 1,
-            "an IDX is followed by index_latency - 1 NOP rows (and the image by END)");
+            "an IDX and its user are index_latency - 1 NOP rows apart (and the image ends with END)");
     for (int row = 1; row < csp::index_latency; ++row) {
         check(csp::Word::decode(idx.image.rows[static_cast<size_t>(row)]).op
                       == 0,
-              "the row after an IDX is a NOP");
+              "the row between an IDX and its only user is a NOP");
     }
+    const csp::Program filled = csp::assemble(
+            std::string(registers)
+            + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\nMAC [i+1], 0, =1.0, =1.0\n");
+    check_equal(filled.image.length, 1 + (csp::index_latency - 1) + 1 + 1,
+                "a row that uses no index takes the place of a NOP");
+    check(csp::Word::decode(filled.image.rows[1]).op != 0,
+          "and it is the row behind the IDX");
 
     const csp::Program without =
             csp::assemble(std::string(registers) + "MAC A_, 0, =1.0, =1.0\n");
@@ -843,7 +888,9 @@ void test_builder_index_targets() {
     const csp::ProgramBuilder::Built built = with.build();
     const csp::ProgramBuilder::Built plain = without.build();
     check(built.ok && plain.ok, "the pointer programs build");
-    const int after_idx = csp::index_latency; // the first row behind the IDX
+    // the write to another word issues in the IDX's wait, so the first read
+    // through j stands in the row j lands in
+    const int after_idx = csp::index_latency - 1;
     check_equal(
             static_cast<int64_t>(built.position[rows.behind_another_word]),
             after_idx + 1,
@@ -863,7 +910,7 @@ void test_builder_index_targets() {
                 "and to no other word");
     check_equal(
             static_cast<int64_t>(plain.position[rows.behind_another_word]),
-            after_idx + csp::result_latency,
+            1 + csp::result_latency,
             "without a list, a read through an index waits for every earlier write");
     check(built.cycles < plain.cycles,
           "the list makes the pass shorter: " + std::to_string(built.cycles)
