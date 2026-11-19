@@ -45,28 +45,6 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 ```
 
-# Division of labour
-
-The top agent is Claude Fable, with DeepSeek V4 Flash as the fallback. Subagents run on DeepSeek V4 Flash. Work is split by what it can be trusted with.
-
-Suitable for DeepSeek V4 Flash:
-- Web and datasheet research.
-- Log and build-output digging.
-- Running make/test targets and reporting the numbers.
-- C firmware tasks with a test that decides done.
-- Doc edits whose content is already specified.
-- Reading document screenshots, datasheet figures and board photos.
-
-Not suitable:
-- Writing or debugging SystemVerilog.
-- Anything touching fixed-point arithmetic or timing.
-- Architecture decisions.
-- PR review verdicts.
-
-A subagent's output is delivered to the lead agent, never to a commit or a PR. The lead agent verifies before acting on it.
-
-If any DeepSeek agent finds itself editing RTL, it stops and reports instead.
-
 # Finding your feet
 
 - **The words:** `docs/glossary.md` defines every term the project uses in its own sense; a term that changes meaning changes there in the same PR.
