@@ -22,10 +22,12 @@
 #include <string>
 #include <vector>
 
+#include "../performance.hpp"
 #include "../processor.hpp"
 #include "csp/control_program.hpp"
 #include "csp/dsp_graph.hpp"
 #include "csp/generator.hpp"
+#include "graph_evaluator.hpp"
 #include "wiring.hpp"
 
 namespace {
@@ -804,6 +806,25 @@ struct Rig {
     }
 };
 
+// A setting on the interpreter: the number, the record or the inner record
+// the firmware's write carries.
+void set(csp::GraphEvaluator &evaluator, const performance::Setting &setting) {
+    switch (setting.kind) {
+    case performance::Setting::Kind::word:
+        evaluator.set_word(setting.wire, static_cast<int32_t>(setting.raw));
+        break;
+    case performance::Setting::Kind::dword:
+        evaluator.set_dword(setting.wire, setting.raw);
+        break;
+    case performance::Setting::Kind::pointer:
+        evaluator.set_pointer(setting.wire, setting.record);
+        break;
+    case performance::Setting::Kind::offset:
+        evaluator.set_offset(setting.wire, setting.record);
+        break;
+    }
+}
+
 void test_todays_synth() {
     csp::ProgramBuilder::Built today;
     csp::generate(csp::control_graph(), today);
@@ -899,10 +920,21 @@ void test_todays_synth() {
     }
     start(rig->today, today.image);
     start(rig->graphed, graphed.image);
-    int differences = 0, early = 0, stale = 0, cycles = 0, todays_errors = 0;
-    const int passes = 600;
+
+    // the interpreter, set by the performance the Rig plays
+    auto evaluator = std::make_unique<csp::GraphEvaluator>(graph);
+    for (const performance::Setting &setting :
+         performance::set_up(rig->synth)) {
+        set(*evaluator, setting);
+    }
+
+    int differences = 0, interpreted = 0, early = 0, stale = 0, cycles = 0,
+        todays_errors = 0;
+    const int passes  = 600;
     for (int at = 1; at <= passes; ++at) {
         // the performance: wires moved and notes played while it runs
+        const performance::Settings changes =
+                performance::before_pass(rig->synth, at);
         if (at == 120) {
             for (int v = 0; v < voice_count; v += 2) {
                 rig->voice_channel(v, (7 * v + 3) % channel_count);
@@ -935,7 +967,15 @@ void test_todays_synth() {
             }
         }
         stale += static_cast<int>(report.stale_sinks.size());
-        cycles       = std::max(cycles, report.cycles);
+        cycles = std::max(cycles, report.cycles);
+        evaluator->pass();
+        // the firmware's writes land in the model at the end of this pass:
+        // the interpreter takes them for the pass after, as the model does
+        if (report.writes_applied > 0) {
+            for (const performance::Setting &setting : changes) {
+                set(*evaluator, setting);
+            }
+        }
         auto compare = [&](int address, const char *what, int index, int k) {
             const int offset   = address - csp::sink_base;
             const int32_t want = rig->today.sink(offset);
@@ -959,10 +999,26 @@ void test_todays_synth() {
                         "channel", c, k);
             }
         }
+        // the interpreter's sinks, every one the graph has
+        for (const int address : evaluator->sink_addresses()) {
+            const int32_t from_program =
+                    rig->graphed.sink(address - csp::sink_base);
+            const int32_t from_graph = evaluator->sink(address);
+            if (from_program != from_graph && interpreted++ < 5) {
+                std::printf(
+                        "  pass %d, sink 0x%03x: the interpreter has %d, the "
+                        "graph's program %d\n",
+                        at, address, from_graph, from_program);
+            }
+        }
     }
     check_equal(differences, 0,
                 "sinks that differ from today's program over "
                         + std::to_string(passes) + " passes");
+    check_equal(interpreted, 0,
+                "sinks where the interpreter and the graph's program differ "
+                "over " + std::to_string(passes)
+                        + " passes");
     check_equal(todays_errors, 0,
                 "complaints of the model about today's program");
     check_equal(early, 0, "reads before ready reported by the model");

@@ -221,6 +221,9 @@ public:
     ~DspGraph();
 
 private:
+    // The host test's interpreter of a built graph (tools/csp/test).
+    friend class GraphEvaluator;
+
     struct Node;
     struct RecordLayout;
     struct Shape;    // a set of copies, node by node

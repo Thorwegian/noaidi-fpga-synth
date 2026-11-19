@@ -43,6 +43,7 @@
 // an offset through i.
 
 #include "dsp_graph.hpp"
+#include "dsp_graph_netlist.hpp"
 
 #include <algorithm>
 #include <array>
@@ -52,7 +53,6 @@ namespace csp {
 
 namespace {
 
-constexpr int32_t none      = -1;
 constexpr int direct_first  = io_base + io_count; // behind the inputs
 constexpr int high_base     = direct_reach; // DMEM's upper half, through i
 constexpr int sink_area_end = sink_base + sink_count;
@@ -70,63 +70,6 @@ int aligned(int at, int alignment) {
 }
 
 } // namespace
-
-struct DspGraph::Node {
-    enum class Kind : uint8_t {
-        source,
-        constant,
-        pointer, // value: its target set
-        offset,  // value: the inner record
-        sum,
-        multiply_add,
-        difference,
-        absolute,
-        maximum,
-        minimum,
-        shift,  // value: the places
-        select, // x − y compared; a if the condition is clear, b if set
-        delay,  // value: its input
-        through // a: the pointer, x: the offset, value: the field
-    };
-    Kind kind           = Kind::source;
-    Width width         = Width::word;
-    Overflow overflow   = Overflow::saturate;
-    Condition condition = Condition::always;
-    Wire a, x, y, b;
-    int32_t value  = none;
-    int32_t record = none; // the record this output is a field of
-
-    // what build() works out
-    int32_t shape    = none; // the set of copies its circuit is one of
-    int32_t copy     = none; // which of them
-    int32_t position = none; // its place in the circuit, the same in each copy
-    int32_t storage  = none; // the node whose word the output lives in
-    int32_t address  = none;
-    int32_t group    = none; // a read through a pointer: its pointer's group
-    int32_t sink     = none; // the sink word the operator writes directly
-    int readers      = 0;
-    bool delayed     = false; // a delay reads it
-    bool fetched     = false; // a read through a pointer, into its own word
-    bool in_place    = false; // the operator works on a's word
-    bool copies_a    = false; // a is copied into the output's word first
-
-    bool is_operator() const {
-        return kind == Kind::sum || kind == Kind::multiply_add
-               || kind == Kind::difference || kind == Kind::absolute
-               || kind == Kind::maximum || kind == Kind::minimum
-               || kind == Kind::shift || kind == Kind::select;
-    }
-};
-
-struct DspGraph::RecordLayout {
-    std::vector<Field> fields;
-    std::vector<int> field_offset;
-    int32_t parent  = none;
-    int size        = 0;
-    int alignment   = 1;
-    int offset      = 0; // in its parent
-    int32_t address = none;
-};
 
 // A set of copies: circuits of one shape.
 struct DspGraph::Shape {
