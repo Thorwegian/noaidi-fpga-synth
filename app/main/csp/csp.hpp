@@ -54,8 +54,10 @@ constexpr int rom_reserved          = 3; // row 0 (NOP) and the two
 // that what it reads has been written (docs/csp2_isa.md section 8). An
 // instruction issued at cycle c has its result in DMEM for an instruction
 // issued at c + result_latency; its flags are readable
-// at c + state_latency; an IDX's index is used at c + index_latency, which
-// the assembler lays after it as four wait rows (the chip has no stall); a loop's repeat
+// at c + state_latency; an IDX's index is in its register at c + index_latency,
+// so a row that uses that index register issues no earlier and other rows
+// issue meanwhile (the chip has no stall: where nothing can issue, the
+// assembler lays a NOP row); a loop's repeat
 // cost jump_penalty cycles over moving on to the next word. A vector loop
 // issues each body row once an element of the round, one cycle each, after
 // one bubble behind the first row's first element (the front end knows the

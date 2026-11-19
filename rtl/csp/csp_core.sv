@@ -40,7 +40,7 @@
 //              later reads it
 //
 // There is no interlock and no stall: the assembler places every row so that
-// what it reads has been written, and lays the IDX's four NOP rows itself.
+// what it reads has been written, a row that uses an index register five cycles behind its IDX.
 // The front end therefore has one rule of its own, the loop: a repeat is
 // decided in A and redirects the program counter, discarding the four rows in
 // flight behind the loop's last (csp_pkg::JUMP_PENALTY).
@@ -172,7 +172,7 @@ module csp_core (
     // written in E1b) and no longer straight from the adder: the adder's path now ends at a flop
     // the tool times, and only the trivial flop->DI net stays untimed (the pin audit, #238; the
     // board's clock sweep found the old adder->DI route the Fmax limiter). The register costs the
-    // IDX one cycle — index_latency 4->5 — which the assembler lays as a fourth wait row.
+    // IDX one cycle — index_latency 4->5 — which the assembler's schedule follows.
     logic [11:0]        other_copy [16];
     logic [3:0]         other_generation [16];
     logic [15:0]        other_valid;
@@ -745,7 +745,7 @@ module csp_core (
     // timed flop->adder->flop span and the element-copy LUT-RAM (RAM16SDP4) data pins and the index
     // registers are driven by a flop, not the raw adder — the untimed route nextpnr cannot see, the
     // Fmax limiter the board's clock sweep found (#238). The extra cycle is index_latency 4->5
-    // (csp.hpp, csp_pkg::INDEX_LATENCY); the assembler's wait rows and the model's scoreboard read
+    // (csp.hpp, csp_pkg::INDEX_LATENCY); the assembler's schedule and the model's scoreboard read
     // that constant, so they follow.
     wire [11:0] index_sum = e1_x[11:0] + e1_y[11:0];
     logic [11:0] index_sum_q;

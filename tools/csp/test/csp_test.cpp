@@ -374,9 +374,18 @@ void test_schedule() {
             "other rows stand between a CMP and its SEL at no cost");
     check_equal(cycles("MAC A_, 0, =1.0, =1.0\nSEL B_, =1.0, C_\n"), 2,
                 "SEL does not wait for a row that is not a CMP");
-    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"),
-                csp::index_latency + 1,
-                "the instruction after IDX comes index_latency cycles on");
+    check_equal(
+            cycles("IDX i, =#0x100, 0\nMAC [i+1], 0, =1.0, =1.0\n"),
+            csp::index_latency + 1,
+            "a row that uses the index comes index_latency cycles behind its IDX");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC B_, 0, =1.0, =1.0\n"), 2,
+                "a row that uses no index does not wait for an IDX");
+    check_equal(cycles("IDX i, =#0x100, 0\nMAC [j+1], 0, =1.0, =1.0\n"), 2,
+                "nor does a row that uses the other index register");
+    check_equal(
+            cycles("IDX i, =#0x100, 0\nLOOP.j end, =#2, =#1\nMAC B_, 0, =1.0, =1.0\nend:\n"),
+            csp::index_latency + 1 + 2 + csp::jump_penalty,
+            "a loop row waits for an IDX in flight");
     check_equal(
             cycles("MAC A_, 0, =1.0, =1.0\nNOP\nNOP\nNOP\nNOP\nNOP\nNOP\nMAC B_, 0, A_, =1.0\n"),
             csp::result_latency + 1,
@@ -407,6 +416,34 @@ void test_index() {
     check_equal(m.processor.index(csp::IndexRegister::j), 0x230,
                 "j holds the sum");
     check(report.errors.empty(), "without an early read");
+
+    // Rows in an IDX's wait: those that use the other index register, or none.
+    Machine filled(std::string(registers) + R"(
+        IDX   i, =#0x100, 0
+        IDX   j, =#0x200, 0             ; in i's wait
+        MAC   A_, 0, =0.5, =0.5         ; in both
+        MAC   [i+1], 0, =1.0, =1.0      ; i has landed
+        MAC   [j+1], 0, =2.0, =2.0      ; j has landed
+        IDX   i, =#0x180, 0
+        MAC   [j+2], 0, =1.5, =1.5      ; in i's wait, through j
+        MAC   [i+2], 0, =0.5, =0.5
+)");
+    filled.start();
+    const csp::PassReport filled_report = filled.run();
+    check(filled_report.errors.empty(),
+          "rows in an IDX's wait run without an early read");
+    // IDX i, IDX j, MAC, two waits, the two users, IDX i, a row through j,
+    // three waits, i's user, END
+    check_equal(filled.program.cycles, 2 * csp::index_latency + 4,
+                "only the rows that use an index wait for it");
+    check_equal(filled_report.cycles, filled.program.cycles,
+                "the model counts the cycles the assembler scheduled");
+    check_equal(filled.processor.read(0x060), q(0.25), "the row in both waits");
+    check_equal(filled.processor.read(0x101), q(1.0), "i's first user");
+    check_equal(filled.processor.read(0x201), q(4.0), "j's user");
+    check_equal(filled.processor.read(0x202), q(2.25),
+                "the row through j in i's second wait");
+    check_equal(filled.processor.read(0x182), q(0.25), "i's second user");
 
     // The chip ORs the offset into the index: an offset whose bits the
     // index already has is a different address from the sum, and reported.
@@ -591,21 +628,29 @@ outer_end:
     check(report.errors.empty(), "without errors");
 }
 
-// The chip has no stall, so what the front end used to wait for is rows: an
-// IDX is followed by four NOPs, and a loop of count 0 is not there at all.
+// The chip has no stall, so a wait is rows: a row that uses an index stands
+// index_latency rows behind its IDX, with NOPs between when nothing else can
+// issue; and a loop of count 0 is not there at all.
 void test_decisions() {
     const csp::Program idx =
             csp::assemble(std::string(registers)
-                          + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\n");
+                          + "IDX i, =#0x100, 0\nMAC [i+1], 0, =1.0, =1.0\n");
     check(idx.ok, "IDX assembles");
     check_equal(
             idx.image.length, 1 + (csp::index_latency - 1) + 1 + 1,
-            "an IDX is followed by index_latency - 1 NOP rows (and the image by END)");
+            "an IDX and its user are index_latency - 1 NOP rows apart (and the image ends with END)");
     for (int row = 1; row < csp::index_latency; ++row) {
         check(csp::Word::decode(idx.image.rows[static_cast<size_t>(row)]).op
                       == 0,
-              "the row after an IDX is a NOP");
+              "the row between an IDX and its only user is a NOP");
     }
+    const csp::Program filled = csp::assemble(
+            std::string(registers)
+            + "IDX i, =#0x100, 0\nMAC A_, 0, =1.0, =1.0\nMAC [i+1], 0, =1.0, =1.0\n");
+    check_equal(filled.image.length, 1 + (csp::index_latency - 1) + 1 + 1,
+                "a row that uses no index takes the place of a NOP");
+    check(csp::Word::decode(filled.image.rows[1]).op != 0,
+          "and it is the row behind the IDX");
 
     const csp::Program without =
             csp::assemble(std::string(registers) + "MAC A_, 0, =1.0, =1.0\n");
@@ -844,6 +889,127 @@ end:
     }
     check(reach && unclosed,
           "the builder reports reach, and a loop never closed");
+}
+
+// An IDX that says which addresses its index may hold: a pointer. Each
+// instruction's row is the cycle it issues in, the program being straight-line.
+void test_builder_index_targets() {
+    using csp::ASource;
+    using csp::IndexRegister;
+    using csp::Operand;
+    using csp::Source;
+    const Operand pointer = Operand::direct(0x060);
+    const Operand value   = Operand::direct(0x071);
+    const Source zero     = Source::reg(Operand::direct(0));
+    const std::array<int, 2> blocks{0x200, 0x210};
+    auto through = [](int offset) {
+        return Operand::indexed(IndexRegister::j, offset);
+    };
+    auto copy = [&](csp::ProgramBuilder &b, Operand to, Operand from) {
+        return b.add3(to, ASource::zero, Source::reg(from), zero);
+    };
+    // the program, with the list or without it
+    struct Rows {
+        size_t behind_another_word, behind_a_named_word, another_offset,
+                direct_behind_the_index, direct_elsewhere;
+    };
+    auto program = [&](csp::ProgramBuilder &b, bool with_targets) {
+        if (with_targets) {
+            b.idx(IndexRegister::j, Source::reg(pointer), zero,
+                  b.targets(blocks));
+        } else {
+            b.idx(IndexRegister::j, Source::reg(pointer), zero);
+        }
+        Rows rows{};
+        copy(b, Operand::direct(0x070), value);
+        rows.behind_another_word = copy(b, Operand::direct(0x072), through(1));
+        copy(b, Operand::direct(0x211), value);
+        rows.behind_a_named_word = copy(b, Operand::direct(0x073), through(1));
+        rows.another_offset      = copy(b, Operand::direct(0x074), through(2));
+        copy(b, through(3), value);
+        rows.direct_behind_the_index =
+                copy(b, Operand::direct(0x075), Operand::direct(0x213));
+        rows.direct_elsewhere =
+                copy(b, Operand::direct(0x076), Operand::direct(0x214));
+        return rows;
+    };
+    csp::ProgramBuilder with, without;
+    const Rows rows = program(with, true);
+    program(without, false);
+    const csp::ProgramBuilder::Built built = with.build();
+    const csp::ProgramBuilder::Built plain = without.build();
+    check(built.ok && plain.ok, "the pointer programs build");
+    const int after_idx = csp::index_latency; // the first row behind the IDX
+    check_equal(
+            static_cast<int64_t>(built.position[rows.behind_another_word]),
+            after_idx + 1,
+            "a read through a pointer does not wait for a write to a word outside its list");
+    check_equal(static_cast<int64_t>(built.position[rows.behind_a_named_word]),
+                after_idx + 2 + csp::result_latency,
+                "it waits for a write to a word of its list");
+    check_equal(static_cast<int64_t>(built.position[rows.another_offset]),
+                after_idx + 3 + csp::result_latency,
+                "another offset of the same blocks is another word");
+    check_equal(
+            static_cast<int64_t>(built.position[rows.direct_behind_the_index]),
+            after_idx + 4 + 2 * csp::result_latency,
+            "a write through a pointer is a write to every word it may name");
+    check_equal(static_cast<int64_t>(built.position[rows.direct_elsewhere]),
+                after_idx + 5 + 2 * csp::result_latency,
+                "and to no other word");
+    check_equal(
+            static_cast<int64_t>(plain.position[rows.behind_another_word]),
+            after_idx + csp::result_latency,
+            "without a list, a read through an index waits for every earlier write");
+    check(built.cycles < plain.cycles,
+          "the list makes the pass shorter: " + std::to_string(built.cycles)
+                  + " cycles against " + std::to_string(plain.cycles));
+
+    // on the model, the pointer at each block of its list
+    for (const int block : blocks) {
+        csp::Processor cpu;
+        cpu.write(0x060, block);
+        cpu.write(0x071, q(0.75));
+        cpu.write(block + 1, q(0.25));
+        cpu.write(block + 2, q(-0.5));
+        cpu.swap();
+        cpu.pass();
+        check(cpu.load(built.image), "the pointer program loads");
+        cpu.release();
+        const csp::PassReport report = cpu.pass();
+        for (const std::string &error : report.errors) {
+            std::printf("  model: %s\n", error.c_str());
+        }
+        const std::string where = ", the pointer at " + std::to_string(block);
+        check(report.errors.empty(), "the model reads nothing early" + where);
+        check_equal(report.cycles, built.cycles,
+                    "the model counts the builder's cycles" + where);
+        // only the second block's word 1 is overwritten before the second read
+        check_equal(cpu.read(0x072), q(0.25),
+                    "the first read is the word as it was" + where);
+        check_equal(cpu.read(0x073), block == 0x210 ? q(0.75) : q(0.25),
+                    "the second read is behind the write" + where);
+        check_equal(cpu.read(0x074), q(-0.5), "the third read" + where);
+        check_equal(cpu.read(block + 3), q(0.75),
+                    "the write through the pointer" + where);
+    }
+
+    // the list is a promise: a pointer outside it reads a word early, and the model says so
+    csp::ProgramBuilder broken;
+    broken.idx(IndexRegister::j, Source::reg(pointer), zero,
+               broken.targets(blocks));
+    copy(broken, Operand::direct(0x221), value);
+    copy(broken, Operand::direct(0x072), through(1));
+    const csp::ProgramBuilder::Built unkept = broken.build();
+    csp::Processor cpu;
+    cpu.write(0x060, 0x220);
+    cpu.swap();
+    cpu.pass();
+    check(unkept.ok && cpu.load(unkept.image),
+          "the program with the unkept promise builds and loads");
+    cpu.release();
+    check(!cpu.pass().errors.empty(),
+          "the model reports the early read of a pointer outside its list");
 }
 
 // ---- the programs ---------------------------------------------------------------
@@ -1483,6 +1649,7 @@ int main() {
     test_assembler();
     test_labels_and_count();
     test_builder();
+    test_builder_index_targets();
     test_envelope();
     test_lfo();
     test_envelope_rates();
