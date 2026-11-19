@@ -1,4 +1,4 @@
-// midi_in.c — MIDI input processes (UART1 = DIN, UART2 = panel)
+// midi_in.c — MIDI input processes (UART1 = din1, UART2 = din2)
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
@@ -9,9 +9,9 @@
 // and publishes complete messages to the event bus. Never prints in
 // the hot path and never blocks on a consumer.
 //
-// Port roles: UART1/GPIO18 is the DIN MIDI jack (keyboard);
-// UART2/GPIO1 is the second optocoupler input, the dev-host panel
-// port, fed through a USB-MIDI adapter.
+// The ports are the two optocoupler DIN inputs: din1 is UART1 on GPIO18,
+// din2 is UART2 on GPIO1. Either takes a keyboard or the dev host's
+// USB-MIDI adapter; the name says which socket, not what is plugged in.
 
 #include "midi_in.h"
 
@@ -58,10 +58,10 @@ typedef struct {
     bool sensing; // Active Sensing seen on this port: silence now means a broken link
 } midi_port_t;
 
-static midi_port_t s_din_port = {
-        .uart = UART_NUM_1, .name = "midi_in", .source = MIDI_SOURCE_DIN};
-static midi_port_t s_panel_port = {
-        .uart = UART_NUM_2, .name = "midi_pnl", .source = MIDI_SOURCE_PANEL};
+static midi_port_t s_din1_port = {
+        .uart = UART_NUM_1, .name = "midi_din1", .source = MIDI_SOURCE_DIN1};
+static midi_port_t s_din2_port = {
+        .uart = UART_NUM_2, .name = "midi_din2", .source = MIDI_SOURCE_DIN2};
 
 // ── Parser callback ────────────────────────────────────────────────
 // Runs in the context of the port's task. Fan-out to consumers
@@ -193,16 +193,16 @@ static void port_start(midi_port_t *p) {
 }
 
 void midi_in_start(void) {
-    port_start(&s_din_port);
-    port_start(&s_panel_port);
+    port_start(&s_din1_port);
+    port_start(&s_din2_port);
 }
 
-void midi_in_init(int rx_pin) {
-    port_init(&s_din_port, rx_pin);
+void midi_din1_init(int rx_pin) {
+    port_init(&s_din1_port, rx_pin);
 }
 
-void midi_panel_init(int rx_pin) {
-    // The panel port is UART2, which has no default pins: RX is routed
+void midi_din2_init(int rx_pin) {
+    // din2 is UART2, which has no default pins: RX is routed
     // to rx_pin, TX is left unrouted.
     //
     // Idle-polarity preflight: a standard MIDI-IN (opto, non-inverting)
@@ -223,17 +223,17 @@ void midi_panel_init(int rx_pin) {
     }
     bool idle_high = highs >= 24; // ≥75% high = healthy idle
 
-    port_init(&s_panel_port, rx_pin);
+    port_init(&s_din2_port, rx_pin);
 
     if (!idle_high) {
         ESP_ERROR_CHECK(
-                uart_set_line_inverse(s_panel_port.uart, UART_SIGNAL_RXD_INV));
-        ESP_LOGW(s_panel_port.name,
+                uart_set_line_inverse(s_din2_port.uart, UART_SIGNAL_RXD_INV));
+        ESP_LOGW(s_din2_port.name,
                  "line idles LOW (%d/32 high) - RX inverted; if no bytes"
                  " follow, check wiring/plug orientation",
                  highs);
     } else {
-        ESP_LOGI(s_panel_port.name, "line idles high (%d/32) - polarity OK",
+        ESP_LOGI(s_din2_port.name, "line idles high (%d/32) - polarity OK",
                  highs);
     }
 }

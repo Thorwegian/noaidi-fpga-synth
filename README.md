@@ -39,7 +39,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   the firmware writes. The program is `tools/csp/programs`.
   The instruction set is [docs/csp2_isa.md](docs/csp2_isa.md), the
   machine [docs/csp2_architecture.md](docs/csp2_architecture.md).
-- **Firmware** (ESP-IDF, `app/`): MIDI in on UART1, an event bus,
+- **Firmware** (ESP-IDF, `app/`): MIDI in on two DIN inputs and BLE, an event bus,
   a voice allocator (a voice = 8 detuned partials, keystroke-instance
   lifecycle), `render.cpp` (a preset as register and sink writes), and the
   engine link — sole owner of the SPI bus: it loads the control program and
@@ -291,8 +291,13 @@ default the edges ring on the prototype's cable, `docs/memory_map.md`,
 
 | Signal | GPIO | Description |
 |---|---|---|
-| MIDI in (DIN) | 18 | UART1 RX, 31250 baud, from a MIDI socket through a standard optocoupler input circuit — the physical keyboard |
-| Panel MIDI in | 1 | UART2 RX, 31250 baud, second optocoupler MIDI input fed from the dev host via a CH345 USB-MIDI adapter — for the test scripts (the panel talks over BLE; see "Control panel") |
+| MIDI in, `din1` | 18 | UART1 RX, 31250 baud, from the first DIN socket through a standard optocoupler input circuit |
+| MIDI in, `din2` | 1 | UART2 RX, 31250 baud, from the second DIN socket through an optocoupler of its own |
+
+The console's MIDI trace names each message's source: `din1`, `din2` or
+`ble`. On the lab bench the dev host's CH345 USB-MIDI adapter is in
+`din1`, for the test scripts, and the keyboard is in `din2` (the panel
+talks over BLE; see "Control panel").
 
 **Tang Nano 20K** (full list in `rtl/constraints.cst`):
 

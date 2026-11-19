@@ -5,7 +5,7 @@
     License: CERN-OHL-S v2
  
 Runs BEFORE the ear pass: drive the synth through the sanctioned test
-transport (BLE - the panel port is Open Stage Control's exclusively),
+transport (BLE),
 watch the ESP console for ingress and crashes, and MEASURE the pan
 implementation on the analog capture chain: stereo RMS at pan
 hard-left / center / hard-right.

@@ -8,14 +8,14 @@ one owner for SPI and the page-swap discipline; one output back to the
 surfaces.
 
 ```
-UART1 ──► midi_in ──event bus──► synth model ──cmd queue──► engine link ──SPI──► FPGA
+din1/2 ─► midi_in ──event bus──► synth model ──cmd queue──► engine link ──SPI──► FPGA
 BLE   ──► ble_midi               (musical state)            (transport + swap)
                      └──► midi_log, display, ... (other subscribers)
                                  └──► midi_out ──► BLE notifications (the surfaces)
 ```
 
-Every event on the bus carries its **source** (the DIN jack, the panel
-port, BLE, the firmware itself). The synth model sends a CC that edited
+Every event on the bus carries its **source** (`din1` or `din2`, the two
+DIN inputs; `ble`; or the firmware itself). The synth model sends a CC that edited
 the preset back out through `midi_out` to every surface but the one it
 came from, so a knob moved on one surface moves on the others and none
 hears itself (#284, the transport; #279, the whole preset on a Program

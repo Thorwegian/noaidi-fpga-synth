@@ -78,12 +78,11 @@ void app_main(void) {
 
     // The pins are the base board's (docs/pins.md in the KiCad repository).
 
-    // DIN MIDI, the keyboard: UART1 RX on GPIO18.
-    midi_in_init(18);
+    // din1, the first DIN input: UART1 RX on GPIO18.
+    midi_din1_init(18);
 
-    // The second MIDI input, from the dev host through a USB-MIDI
-    // adapter: UART2 RX on GPIO1.
-    midi_panel_init(1);
+    // din2, the second DIN input: UART2 RX on GPIO1.
+    midi_din2_init(1);
 
     // SPI2 on its own IO_MUX pins. 10 MHz: at 1 MHz a note-on's
     // 32 dwords (~130 us each) would blow the engine's 1 ms tick.

@@ -71,11 +71,12 @@ synth's state comes back as the same CCs (parameter feedback, so a
 Program Change moves the knobs; `midi_schema.md` "Parameter
 feedback"). BlueZ's MIDI plugin on the dev host exposes the connected
 Noaidi as one ALSA port, which `tools/osc_panel/run.sh` gives Open
-Stage Control as input and output. The second wired MIDI IN (UART2 on
-GPIO1; `midi_panel_init(1)`, a second parser instance on the same
-event bus) is fed by a CH345 USB-MIDI adapter and belongs to the test
-scripts, the keyboard being on the DIN jack, so panel traffic and test
-traffic never contend.
+Stage Control as input and output. The two wired MIDI inputs, `din1`
+(UART1 on GPIO18, `midi_din1_init(18)`) and `din2` (UART2 on GPIO1,
+`midi_din2_init(1)`), each have a parser instance of their own on the
+same event bus. On the lab bench a CH345 USB-MIDI adapter in `din1`
+belongs to the test scripts and the keyboard is in `din2`, so panel
+traffic and test traffic never contend.
 
 ### Default voice
 
@@ -97,7 +98,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
              voice allocation)            ──► SPDIF + I2S out
 ```
 
-- **ESP32-S3**: MIDI (UART1, 31250 baud), future display, and every
+- **ESP32-S3**: MIDI (two DIN inputs at 31250 baud, and BLE), future display, and every
   *musical* decision — voice allocation, unison grouping, CC mapping.
   Talks to the FPGA as SPI master (the link and its measurements:
   `memory_map.md`).

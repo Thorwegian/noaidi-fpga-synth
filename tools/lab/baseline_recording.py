@@ -58,7 +58,7 @@ def main():
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-keepalive", action="store_true",
-                        help="send no Active Sensing between the notes (the firmware's panel input resets its parser "
+                        help="send no Active Sensing between the notes (a DIN input of the firmware resets its parser "
                              "after half a second of silence and drops the next message; a keyboard keeps it alive)")
     args = parser.parse_args()
 
@@ -89,7 +89,7 @@ def walk_and_record(args, midi):
             stop.wait(0.25)
     if not args.no_keepalive:
         threading.Thread(target=keepalive, daemon=True).start()
-    # The first message after a silence can be lost (the panel input's
+    # The first message after a silence can be lost (a DIN input's
     # silence reset flushes the UART; tools/lab/README.md), and the keepalive
     # thread's first FE races the first message below: send one FE now and
     # let it land before anything that matters.
