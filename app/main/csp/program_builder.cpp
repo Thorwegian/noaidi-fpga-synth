@@ -35,25 +35,28 @@ bool reads_flags(Op op) {
     return op == Op::sel;
 }
 
+// CMP alone: every other row's control word leaves the flags.
 bool sets_flags(Op op) {
+    return op == Op::cmp;
+}
+
+bool writes_register(Op op) {
     switch (op) {
     case Op::mac:
     case Op::macw:
     case Op::add3:
     case Op::cmp:
+    case Op::sub:
     case Op::abs:
     case Op::min:
     case Op::max:
+    case Op::sel:
     case Op::andxor:
     case Op::shift:
         return true;
     default:
         return false;
     }
-}
-
-bool writes_register(Op op) {
-    return sets_flags(op) || op == Op::sel;
 }
 
 bool uses_x(Op op) {
@@ -179,6 +182,9 @@ size_t ProgramBuilder::sel(Operand r, Condition cond, Source x, Source y) {
 }
 size_t ProgramBuilder::cmp(Operand r, Source x, Source y) {
     return arithmetic(Op::cmp, r, ASource::zero, x, y, false);
+}
+size_t ProgramBuilder::sub(Operand r, Source x, Source y) {
+    return arithmetic(Op::sub, r, ASource::zero, x, y, false);
 }
 size_t ProgramBuilder::min(Operand r, Source x, Source y) {
     return arithmetic(Op::min, r, ASource::zero, x, y, false);

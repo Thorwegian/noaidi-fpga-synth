@@ -103,7 +103,8 @@ constexpr int64_t smallest(int bits) {
 // ---- the operations -------------------------------------------------------
 //
 // What a program writes; each becomes one or more decode ROM rows by its
-// variant (in place, dword).
+// variant (in place, dword). CMP alone sets the flags: every other row
+// leaves them, so any rows may stand between a CMP and the SEL that reads it.
 
 enum class Op : uint8_t {
     nop,
@@ -111,6 +112,7 @@ enum class Op : uint8_t {
     macw,   // R = A + X × Y, wrapping
     add3,   // R = A + X + Y
     cmp,    // R = X − Y, the flags set
+    sub,    // R = X − Y
     abs,    // R = |X|
     min,    // R = X < Y ? X : Y
     max,    // R = X > Y ? X : Y

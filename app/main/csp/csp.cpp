@@ -19,6 +19,8 @@ std::string_view mnemonic(Op op) {
         return "ADD3";
     case Op::cmp:
         return "CMP";
+    case Op::sub:
+        return "SUB";
     case Op::abs:
         return "ABS";
     case Op::min:
@@ -91,7 +93,7 @@ Control control_of(Op op, bool wide, ASource a_source) {
                 a_source,
                 true,
                 wide,
-                ConditionKind::flags,
+                ConditionKind::none,
                 true,
                 op == Op::macw,
                 static_cast<uint8_t>(MultiplyAddOp::mac)};
@@ -101,17 +103,19 @@ Control control_of(Op op, bool wide, ASource a_source) {
                 a_source,
                 true,
                 wide,
-                ConditionKind::flags,
+                ConditionKind::none,
                 true,
                 false,
                 static_cast<uint8_t>(MultiplyAddOp::add3)};
     case Op::cmp:
+    case Op::sub:
+        // one subtraction; CMP's row is the one that sets the flags
         return {Unit::multiply_add,
                 Writes::word,
                 ASource::zero,
                 true,
                 false,
-                ConditionKind::flags,
+                op == Op::cmp ? ConditionKind::flags : ConditionKind::none,
                 true,
                 false,
                 static_cast<uint8_t>(MultiplyAddOp::cmp)};
@@ -121,17 +125,17 @@ Control control_of(Op op, bool wide, ASource a_source) {
                 ASource::zero,
                 true,
                 false,
-                ConditionKind::flags,
+                ConditionKind::none,
                 false,
                 false,
                 static_cast<uint8_t>(MultiplyAddOp::abs)};
     case Op::min:
         return {Unit::logic, Writes::word, ASource::zero,
-                true,        false,        ConditionKind::flags,
+                true,        false,        ConditionKind::none,
                 true,        false,        static_cast<uint8_t>(LogicOp::min)};
     case Op::max:
         return {Unit::logic, Writes::word, ASource::zero,
-                true,        false,        ConditionKind::flags,
+                true,        false,        ConditionKind::none,
                 true,        false,        static_cast<uint8_t>(LogicOp::max)};
     case Op::sel:
         return {Unit::logic, Writes::word, ASource::zero,
@@ -143,14 +147,14 @@ Control control_of(Op op, bool wide, ASource a_source) {
                 a_source,
                 true,
                 false,
-                ConditionKind::flags,
+                ConditionKind::none,
                 true,
                 false,
                 static_cast<uint8_t>(LogicOp::andxor)};
     case Op::shift:
         // the count is Y; X is not read
-        return {Unit::shift,          result, a_source, false, false,
-                ConditionKind::flags, true,   false,    0};
+        return {Unit::shift,         result, a_source, false, false,
+                ConditionKind::none, true,   false,    0};
     case Op::loop:
     case Op::vloop:
         // the index register is the sub-operation's low bit, set by the caller; the

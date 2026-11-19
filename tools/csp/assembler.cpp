@@ -549,6 +549,7 @@ void Assembler::instruction(const std::string &full_name,
     using ThreeOperand = size_t (ProgramBuilder::*)(Operand, Source, Source);
     static const std::map<std::string, ThreeOperand> three_operand = {
             {"CMP", &ProgramBuilder::cmp},
+            {"SUB", &ProgramBuilder::sub},
             {"MIN", &ProgramBuilder::min},
             {"MAX", &ProgramBuilder::max}};
     static const std::map<std::string, Condition> conditions = {

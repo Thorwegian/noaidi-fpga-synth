@@ -48,12 +48,12 @@
         SEL     [i+STAGE_M], [i+U_M], [i+STAGE_M]
 
         IDX     j, [i+CHANNEL], [i+STAGE_A] ;   the amp envelope: j → its row
-        CMP     [i+D], [j+TARGET], [i+LEVEL_A]  ; D ← target − level
+        SUB     [i+D], [j+TARGET], [i+LEVEL_A]  ; D ← target − level
         MAC.d   [i+LEVEL_A], [i+D], [j+RATE]    ; level ← level + D × rate
         MAC     [i+OUT_A], 0, [i+LEVEL_A], [i+VELOCITY]
 
         IDX     j, [i+CHANNEL], [i+STAGE_M] ;   the mod envelope
-        CMP     [i+D], [j+TARGET], [i+LEVEL_M]
+        SUB     [i+D], [j+TARGET], [i+LEVEL_M]
         MAC.d   [i+LEVEL_M], [i+D], [j+RATE]
         MAC     [i+U_M], 0, [i+LEVEL_M], [i+VELOCITY_M]   ; the mod envelope's output
 done:

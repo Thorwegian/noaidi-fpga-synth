@@ -284,6 +284,7 @@ void run_directed(VerilatedContext &context) {
             {"vector_back_to_back",
                program_file("checks/vector_back_to_back.s"), 24},
             {"pair", program_file("checks/pair.s"), 24},
+            {"flags", program_file("checks/flags.s"), 24},
             {"arithmetic", std::string(registers) + R"(
             MAC     A_, 0, B_, C_
             MAC     D_, D_, A_, =0.5
@@ -539,6 +540,9 @@ private:
             break;
         case 1:
             b.macw(r, a_source(), x, y);
+            break;
+        case 2:
+            b.sub(r, x, y);
             break;
         case 3:
             b.add3(r, a_source(), x, y);
