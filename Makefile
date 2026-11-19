@@ -196,9 +196,9 @@ format-check:
 	    echo "FAIL not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
 	fi
 
-$(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/main.cpp
+$(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/main.cpp
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $@ $(CSP_SRC) $(CSP_DIR)/main.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $@ $(CSP_SRC) $(CSP_GRAPH) $(CSP_DIR)/main.cpp
 
 csp: $(CSP_TOOL)
 
