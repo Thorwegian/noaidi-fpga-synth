@@ -145,7 +145,7 @@ make fw-flash    # build + flash the firmware (port must be free)
 make fw-monitor  # attach the IDF serial monitor (boot log, crash decoding)
 make fw-console  # attach the console with screen (see Console above)
 make fw-test     # host tests of preset files and banks (about a minute)
-make csp-test    # host tests of the CSP reference model, the assembler (tools/csp), the DSP graph and its node-by-node evaluation
+make csp-test    # host tests of the CSP reference model, the assembler (tools/csp), the DSP graph and the Noaidi's wiring by its formulas
 make format      # reformat our C and C++ sources (.clang-format)
 make format-check  # fail on unformatted sources (fw, fw-test, csp-test run it)
 ```

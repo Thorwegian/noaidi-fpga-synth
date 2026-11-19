@@ -115,8 +115,9 @@ control signal once a pass. The instruction set is
   of enough copies runs as the elements of a vector loop, and the rest is
   **straight-line code**, an instruction for every operator. It picks the
   order the instructions issue in so that few waits are left. `make
-  csp-test` wires today's synth as a graph and holds its sinks equal to a
-  node-by-node evaluation of the graph, with no layout, schedule or loops.
+  csp-test` builds the Noaidi's wiring and holds its program's sinks equal
+  to a node-by-node evaluation of the graph, with no layout, schedule or
+  loops, and to the Noaidi's formulas in floating point.
 - **row** — one instruction, a qword in IMEM; "row" because the memories
   are rows and the chip knows nothing else. A **wait** is a NOP row the
   assembler lays so an operand is ready; the **END row** is the last,
