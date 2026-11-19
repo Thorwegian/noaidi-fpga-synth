@@ -311,7 +311,7 @@ ports.
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the
   traffic justifies it.
-- Traffic: a note-on is a handful of words; a re-render of the preset is the
+- Traffic: a note-on is a handful of words; a commit of the preset is the
   words that changed; envelopes, LFOs, pitch and cutoff cost no SPI traffic.
   The boot is the program (two dwords a row) and the decode ROM (one a row),
   the wiring (a word for each source, pointer and stage the firmware sets),

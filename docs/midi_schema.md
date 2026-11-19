@@ -31,10 +31,11 @@ the unconventional machinery stays under the hood.
 
 ## Channel policy
 
-The synth is omni; `voice_t.channel` is stored per voice. Nothing in
-this schema assumes omni: under multi-timbrality a channel is a timbre
-slot, the voice pool partitions, and CC state (`s_wheel`, `s_bend`,
-envelope rates) is per-channel.
+The synth is omni: every MIDI channel plays the sound engine's first
+channel. Nothing in this schema assumes omni: the sound engine has a
+preset, a bend and a wheel for each of its 16 channels, and a note on takes
+its channel ([firmware_architecture.md](firmware_architecture.md)); under
+multi-timbrality a MIDI channel is one of them.
 
 ## CC map
 
@@ -127,7 +128,7 @@ CC values share the top rung, 21 of them for the amp envelope's D and R.
 Not mapped: source→destination routing beyond the wheel and the
 env/LFO destinations above; glide/portamento (standard CC 5 / 65).
 
-Amp-envelope CCs re-render the channel's envelope rows (one page swap);
+Amp-envelope CCs are committed as the channel's envelope rows (one page swap);
 nothing in the firmware times a tail from them (#264).
 
 **Cutoff resolution.** CC 74 (coarse, high 7
