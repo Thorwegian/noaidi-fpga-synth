@@ -24,17 +24,15 @@
 #                   (app/build/host/csp asm|sim|image program.s; `image`
 #                   writes the rows and the ROM as hex for a bench, which
 #                   rtl/Makefile does for tb_top's boot self-test)
-#   make csp-test   host tests of the CSP reference model and assembler, that
-#                   selftest_program.hpp is current, and of the DSP graph
+#   make csp-test   host tests of the CSP reference model and assembler, of
+#                   the boot self-test's program (app/main/csp/selftest.cpp),
+#                   and of the DSP graph
 #                   (app/main/csp/dsp_graph.cpp): the Noaidi's wiring
 #                   (app/main/wiring.cpp) gives its formulas' sinks on the
 #                   model, and its program holds every sink to the
 #                   interpreter of the graph
 #                   (tools/csp/test/graph_evaluator.cpp), pass for pass;
 #                   prints the rows and cycles of the graph's program
-#   make csp-header regenerate app/main/csp/selftest_program.hpp from
-#                   tools/csp/programs/selftest.s (the boot self-test the
-#                   firmware loads, and its registers' names)
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  fail on any source that is not formatted; fw,
@@ -92,9 +90,9 @@ CC_MAP_TEST_CXX = app/test/cc_map_test.cpp app/main/cc_map.cpp app/main/preset.c
 HOST_FLAGS  = -O2 -Wall -Wextra -Iapp/main -Iapp/lib/tomlc17/src
 CSP_DIR     = tools/csp
 CSP_SHARED  = app/main/csp/csp.cpp app/main/csp/program_builder.cpp app/main/csp/envelope.cpp
-CSP_SRC     = $(CSP_SHARED) $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
-CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp/envelope.hpp $(CSP_DIR)/processor.hpp \
-              $(CSP_DIR)/assembler.hpp
+CSP_SRC     = $(CSP_SHARED) app/main/csp/selftest.cpp $(CSP_DIR)/processor.cpp $(CSP_DIR)/assembler.cpp
+CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp/envelope.hpp app/main/csp/selftest.hpp \
+              $(CSP_DIR)/processor.hpp $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test
 # The DSP graph, the Noaidi's wiring as one, and their test: the wiring's
@@ -200,21 +198,12 @@ $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/perf
 
 csp: $(CSP_TOOL)
 
-CSP_SELFTEST_FILES = $(CSP_DIR)/programs/selftest.s
-CSP_SELFTEST_HEADER = app/main/csp/selftest_program.hpp
-
-csp-header: $(CSP_TOOL) $(CSP_SELFTEST_FILES)
-	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) > $(CSP_SELFTEST_HEADER)
-
-csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) $(CSP_EVALUATOR_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL) $(CSP_SELFTEST_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) $(CSP_EVALUATOR_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_GRAPH_TEST) $(CSP_SRC) $(CSP_GRAPH) $(CSP_EVALUATOR) $(CSP_DIR)/test/dsp_graph_test.cpp
 	$(CSP_GRAPH_TEST)
-	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
-	    || { echo "FAIL $(CSP_SELFTEST_HEADER) is stale: make csp-header"; exit 1; }
-	@echo "$(CSP_SELFTEST_HEADER) is current"
 
 fw-storage-flash:
 	$(MAKE) fw-storage-write DIR=app/storage
@@ -230,4 +219,4 @@ fw-storage-read:
 clean:
 	$(MAKE) -C rtl clean
 
-.PHONY: all tools tools-check tools-upgrade sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-header csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean
+.PHONY: all tools tools-check tools-upgrade sim pack sram flash fw fw-flash fw-monitor fw-console fw-test csp csp-test format format-check fw-storage-flash fw-storage-write fw-storage-read clean

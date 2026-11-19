@@ -256,8 +256,9 @@ wires every channel and voice the program's loops run (their counts are
 the graph's, `app/main/wiring.hpp`), used or not: a loop runs every element
 with whatever its registers hold. Then, before the first note:
 
-1. the **self-test**: a program of its own in the same image, run from
-   the ROM, whose checks use operands that change every pass (`SHIFT`,
+1. the **self-test**: a program of its own, built at boot as the control
+   program is and run before it, whose checks use operands that change
+   every pass (`SHIFT`,
    `IDX`); the counts are printed and compared with the model's. A stale
    operand on any path shows here as a fraction of passes wrong;
 2. **`csp verify`**: every register the firmware wrote, read back through

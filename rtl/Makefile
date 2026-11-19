@@ -257,9 +257,10 @@ sim-memories: obj_dir/tb_csp_memories/sim
 # accumulator, the flags and the cycles after every pass, and DMEM's row rule at every edge.
 # `sim +rtltrace` prints the rows entering the address stage.
 CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
-                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp \
+                ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp ../app/main/csp/selftest.cpp \
                 ../app/main/csp/dsp_graph.cpp ../app/main/wiring.cpp
 CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp \
+                ../app/main/csp/selftest.hpp \
                 ../app/main/csp/dsp_graph.hpp ../app/main/csp/dsp_graph_netlist.hpp ../app/main/wiring.hpp \
                 ../tools/csp/performance.hpp
 obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
@@ -341,14 +342,14 @@ sim-i2s: obj_dir/tb_i2s_tx/sim
 obj_dir/tb_top/sim: $(PKG) $(MOD) tb/tb_top.sv $(LUTS) Makefile
 	$(VERILATE) $(PKG) $(MOD) tb/tb_top.sv
 
-# The boot self-test's image for tb_top (#378), assembled by the host tool as
-# the firmware's is: the rows and the decode ROM as hex for $readmemh (a count,
-# then the words), loaded over the bus the way the firmware loads them.
+# The boot self-test's image for tb_top (#378), built by the host tool as
+# the firmware builds it: the rows and the decode ROM as hex for $readmemh (a
+# count, then the words), loaded over the bus the way the firmware loads them.
 CSP_TOOL     = ../app/build/host/csp
-CSP_SELFTEST = ../tools/csp/programs/selftest.s
-obj_dir/tb_top/selftest.imem.hex: $(CSP_SELFTEST) ../tools/csp/main.cpp ../tools/csp/assembler.cpp ../app/main/csp/csp.hpp
+CSP_SELFTEST = ../app/main/csp/selftest.cpp ../app/main/csp/selftest.hpp
+obj_dir/tb_top/selftest.imem.hex: $(CSP_SELFTEST) ../tools/csp/main.cpp ../app/main/csp/program_builder.cpp ../app/main/csp/csp.hpp
 	$(MAKE) -C .. csp
-	mkdir -p $(@D) && $(CSP_TOOL) image $(CSP_SELFTEST) -o $(@D)/selftest
+	mkdir -p $(@D) && $(CSP_TOOL) image --selftest -o $(@D)/selftest
 
 sim-top: obj_dir/tb_top/sim obj_dir/tb_top/selftest.imem.hex
 	$(call run_sim,$<,tb/sim-top.out)

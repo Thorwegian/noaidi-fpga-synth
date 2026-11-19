@@ -8,7 +8,7 @@
 #include <array>
 #include <cstdio>
 
-#include "csp/selftest_program.hpp"
+#include "csp/selftest.hpp"
 #include "fpga_map.hpp"
 
 namespace {
@@ -24,7 +24,8 @@ int32_t signed_word(uint64_t raw18) {
 
 class Run {
 public:
-    explicit Run(SelfTestPort &port) : port_(port) {}
+    Run(SelfTestPort &port, const csp::Image &image)
+        : port_(port), image_(image) {}
 
     SelfTestResult run() {
         load();
@@ -49,15 +50,17 @@ private:
     // (#271). The program's constants are immediates in its rows.
     void load() {
         port_.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
-        for (size_t pc = 0; pc < st::rows.size(); ++pc) {
+        for (size_t pc = 0; pc < static_cast<size_t>(image_.length); ++pc) {
             port_.write_dword(fpga_map::program_base + 2 * pc,
-                              st::rows[pc].high);
+                              image_.rows[pc].high);
             port_.write_dword(fpga_map::program_base + 2 * pc + 1,
-                              st::rows[pc].low);
+                              image_.rows[pc].low);
         }
         for (size_t row = 0; row < fpga_map::rom_rows; ++row) {
             port_.write_dword(fpga_map::rom_base + row,
-                              row < st::rom.size() ? st::rom[row] : 0);
+                              row < static_cast<size_t>(image_.rom_used)
+                                      ? image_.rom[row]
+                                      : 0);
         }
         // The counters start at zero, whatever was there.
         for (const int counter_register :
@@ -140,13 +143,14 @@ private:
     }
 
     SelfTestPort &port_;
+    const csp::Image &image_;
     SelfTestResult result_;
 };
 
 } // namespace
 
-SelfTestResult run_selftest(SelfTestPort &port) {
-    SelfTestResult result = Run(port).run();
+SelfTestResult run_selftest(SelfTestPort &port, const csp::Image &image) {
+    SelfTestResult result = Run(port, image).run();
     port.write_dword(fpga_map::ctrl, fpga_map::ctrl_hold);
     return result;
 }

@@ -7,15 +7,13 @@
 // flags), the rules a program can see (the index registers, loops,
 // the write queue and swap, the hold, pass limits, sink pages), the
 // schedule the builder lays out (checked by the model's scoreboard), the
-// assembler's checks, and the boot self-test (tools/csp/programs/selftest.s).
+// assembler's checks, and the boot self-test (app/main/csp/selftest.cpp).
 //
 //   make csp-test
 
 #include <cmath>
 #include <cstdio>
-#include <fstream>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +23,7 @@
 #include "csp/envelope.hpp"
 #include "csp/lfo.hpp"
 #include "csp/program_builder.hpp"
+#include "csp/selftest.hpp"
 
 namespace {
 
@@ -1208,51 +1207,63 @@ void test_lfo_rate() {
 
 // ---- the boot self-test ------------------------------------------------------
 
-std::string read_program(const char *part) {
-    std::ifstream file(std::string("tools/csp/programs/") + part);
-    check(static_cast<bool>(file), std::string("reads ") + part);
-    std::stringstream text;
-    text << file.rdbuf();
-    return text.str() + "\n";
-}
-
-// The self-test program: what the firmware checks at boot, on the model.
+// The self-test's program (app/main/csp/selftest.cpp): what the firmware
+// checks at boot, on the model.
 void test_selftest_program() {
-    Machine m(read_program("selftest.s"));
-    m.start();
+    namespace st     = csp::selftest;
+    const auto built = std::make_unique<csp::ProgramBuilder::Built>();
+    st::build(*built);
+    check(built->ok && built->issues.empty(),
+          "the self-test builds without issues");
+    csp::Processor processor;
+    check(processor.load(built->image), "the self-test loads while held");
+    processor.release();
     // the pass counter's register holds 0 in the first pass after reset (nothing wrote it yet)
     // and the pass's number from the second on; the program sees that value
     int odd_passes = 0;
     for (int pass = 1; pass <= 4; ++pass) {
-        const csp::PassReport report = m.run();
+        const csp::PassReport report = processor.pass();
+        for (const std::string &error : report.errors) {
+            std::printf("  model: %s\n", error.c_str());
+        }
         check(report.errors.empty(), "the self-test runs without early reads");
         const int seen = pass == 1 ? 0 : pass;
         const int bit  = seen & 1;
         odd_passes += bit;
-        check_equal(m.get("RES_PASS_BIT"), bit,
-                    "RES_PASS_BIT follows the pass counter");
-        check_equal(m.get("RES_HALF"), bit * 8, "RES_HALF is the bit × 8");
-        check_equal(m.get("RES_CHAIN"), bit ? 0x808 : 0x4000,
-                    "RES_CHAIN reads the table through IDX");
-        check_equal(m.get("RES_ABS"), q(4.0), "ABS of −4.0");
-        check_equal(m.get("RES_MAC"), q(0.5), "MAC after it, 4.0 × 0.125");
-        check_equal(m.get("RES_ADD3"), q(-3.5), "ADD3 after that, 0.5 − 4.0");
-        check_equal(m.get("RES_SEL"), q(0.125), "SEL after a CMP");
-        check_equal(m.get("COUNT_TOTAL"), pass,
-                    "COUNT_TOTAL counts the passes");
-        check_equal(m.get("COUNT_PASSES"), pass,
-                    "COUNT_PASSES, which wraps, counts them too");
-        check_equal(m.get("PASS_VIA_LOGIC"), seen,
+        check_equal(processor.read(st::res_pass_bit), bit,
+                    "res_pass_bit follows the pass counter");
+        check_equal(processor.read(st::res_half), bit * 8,
+                    "res_half is the bit × 8");
+        check_equal(processor.read(st::res_chain), bit ? 0x808 : 0x4000,
+                    "res_chain reads the table through IDX");
+        check_equal(processor.read(st::res_abs), q(4.0), "ABS of −4.0");
+        check_equal(processor.read(st::res_mac), q(0.5),
+                    "MAC after it, 4.0 × 0.125");
+        check_equal(processor.read(st::res_add3), q(-3.5),
+                    "ADD3 after that, 0.5 − 4.0");
+        check_equal(processor.read(st::res_sel), q(0.125), "SEL after a CMP");
+        check_equal(processor.read(st::res_max), q(4.0), "MAX of 4.0 and −4.0");
+        check_equal(processor.read(st::res_min), q(-4.0),
+                    "MIN of 4.0 and −4.0");
+        check_equal(processor.read(st::count_total), pass,
+                    "count_total counts the passes");
+        check_equal(processor.read(st::count_passes), pass,
+                    "count_passes, which wraps, counts them too");
+        check_equal(processor.read(st::pass_via_logic), seen,
                     "the logic unit's copy of the pass counter");
-        check_equal(m.get("PASS_VIA_DSP"), seen, "the multiply-add's copy");
-        check_equal(m.get("PASS_VIA_LOGIC_A"), seen,
+        check_equal(processor.read(st::pass_via_dsp), seen,
+                    "the multiply-add's copy");
+        check_equal(processor.read(st::pass_via_logic_a), seen,
                     "the logic unit's second copy");
-        check_equal(m.get("PASS_VIA_LOGIC_B"), seen, "and its third");
+        check_equal(processor.read(st::pass_via_logic_b), seen,
+                    "and its third");
     }
-    check_equal(m.get("COUNT_ODD"), odd_passes,
-                "COUNT_ODD counts the odd passes");
-    check_equal(m.get("COUNT_HALF_ODD"), odd_passes, "COUNT_HALF_ODD agrees");
-    check_equal(m.get("COUNT_CHAIN_ODD"), odd_passes, "COUNT_CHAIN_ODD agrees");
+    check_equal(processor.read(st::count_odd), odd_passes,
+                "count_odd counts the odd passes");
+    check_equal(processor.read(st::count_half_odd), odd_passes,
+                "count_half_odd agrees");
+    check_equal(processor.read(st::count_chain_odd), odd_passes,
+                "count_chain_odd agrees");
 }
 
 } // namespace

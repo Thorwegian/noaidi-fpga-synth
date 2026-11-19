@@ -8,9 +8,9 @@
 // compares everything a program can leave behind: all 2048 registers, the
 // published sink page, i, j, the flags, the cycles the
 // pass took, and that DMEM's row rule held at every edge. Programs come from
-// three places: the boot self-test and some directed ones, assembled; the
-// program the firmware's graph builds for the Noaidi, played; and random
-// scalar programs built with csp::ProgramBuilder.
+// three places: the boot self-test, built as the firmware builds it, and some
+// directed ones, assembled; the program the firmware's graph builds for the
+// Noaidi, played; and random scalar programs built with csp::ProgramBuilder.
 //
 //   make sim-csp-cosim            (rtl/Makefile)
 //   obj_dir/csp_cosim/sim [seed] [programs]     (default: seed 1, 200 programs)
@@ -31,6 +31,7 @@
 #include "assembler.hpp"
 #include "csp/dsp_graph.hpp"
 #include "csp/program_builder.hpp"
+#include "csp/selftest.hpp"
 #include "processor.hpp"
 #include "svdpi.h"
 #include "performance.hpp"
@@ -277,15 +278,25 @@ int run_image(VerilatedContext &context, const char *name,
 
 void run_directed(VerilatedContext &context) {
     const std::vector<FirmwareWrite> setup = directed_setup();
-    const std::vector<Directed> programs   = {
-            {"selftest", program_file("selftest.s"), 24},
+    {
+        // the boot self-test (app/main/csp/selftest.cpp)
+        const auto built = std::make_unique<csp::ProgramBuilder::Built>();
+        csp::selftest::build(*built);
+        csp::Program selftest;
+        selftest.image  = built->image;
+        selftest.cycles = built->cycles;
+        selftest.ok     = built->ok;
+        failures += !built->ok
+                    || run_image(context, "selftest", selftest, 24, setup) != 0;
+    }
+    const std::vector<Directed> programs = {
             // the chip check's one-path programs (tools/csp/programs/checks, #235): the scalar loops'
             // repeat, one vector loop, the dword's write and read
             {"loop", program_file("checks/loop.s"), 24},
             {"vloop", program_file("checks/vloop.s"), 24},
             {"vector_flags", program_file("checks/vector_flags.s"), 24},
             {"vector_back_to_back",
-               program_file("checks/vector_back_to_back.s"), 24},
+             program_file("checks/vector_back_to_back.s"), 24},
             {"pair", program_file("checks/pair.s"), 24},
             {"flags", program_file("checks/flags.s"), 24},
             {"index_wait", program_file("checks/index_wait.s"), 24},
@@ -303,7 +314,7 @@ void run_directed(VerilatedContext &context) {
             SHIFT   S_, S_, C_
             SHIFT   T_, 0, =#-3
 )",
-               4},
+             4},
             {"dword", std::string(registers) + R"(
             MAC.d    W_, A_, V_
             MACW.d   V_, B_, W_
@@ -311,7 +322,7 @@ void run_directed(VerilatedContext &context) {
             SHIFT.d  W_, =#2
             MAC      A_, 0, W_, =0.25
 )",
-               4},
+             4},
             {"loops and index", std::string(registers) + R"(
             IDX    i, =#0x200, 0
             LOOP.i end_a, =#4, =#8
@@ -332,7 +343,7 @@ end_b:
 end_d:
             MAC    D_, 0, B_, =1.0
 )",
-               4},
+             4},
             {"select", std::string(registers) + R"(
             CMP    ZERO, A_, B_
             MAC    C_, 0, =1.0, A_
@@ -347,14 +358,14 @@ end_d:
             MAC    A_, A_, =0.0625, S_
 end:
 )",
-               4},
+             4},
             {"sinks", std::string(registers) + R"(
             IDX    j, =#0x800, 0
             MAC    [j+0], 0, A_, =1.0
             ADD3   [j+1], 0, B_, C_
             CMP    [j+2], A_, B_
 )",
-               4},
+             4},
     };
     for (const Directed &directed : programs) {
         const csp::Program program = csp::assemble(directed.source);

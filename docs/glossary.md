@@ -154,9 +154,10 @@ control signal once a pass. The instruction set is
   run by `csp sim`; the **cosim** runs the RTL against it on random and
   directed programs; the **chip check** (`chip_check.py`, `csp match`)
   runs the same programs on the board and diffs every register.
-- **self-test** — a program of its own in the boot image whose checks use
-  operands that change every pass; its counts are compared with the
-  model's at every boot.
+- **self-test** — a program of its own, which the firmware builds at boot
+  with the program builder (`app/main/csp/selftest.cpp`) and runs before the
+  control program. Its checks use operands that change every pass; its
+  counts are compared with the model's at every boot.
 - **hold / held** — the CSP stopped between passes so the memories take
   writes (program load, chip check). **release** — let it run.
 

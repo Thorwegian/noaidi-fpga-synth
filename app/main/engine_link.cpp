@@ -23,6 +23,7 @@
 #include "sdkconfig.h"
 
 #include "console.h"
+#include "csp/selftest.hpp"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
 #include "fpga_map.hpp"
@@ -64,7 +65,8 @@ EngineImage image;
 SpiPort port;
 
 // The Noaidi as a DSP graph, wired at boot (wiring.hpp), and the program
-// the graph builds. Every word the firmware writes is one it asks the
+// the graph builds, which the boot self-test's program is built in before
+// it. Every word the firmware writes is one it asks the
 // graph for, so the synth lives as long as the firmware plays. Static: an
 // image is larger than a task's stack, and so the linker sizes it with the
 // rest of the firmware's memory. The graph's own memory is the heap's.
@@ -514,10 +516,23 @@ void engine_link_init(void) {
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Does the chip do what the model says? Say so before the sound depends
-    // on it; the control program loads over the test either way.
+    // on it; the control program loads over the test either way. The test's
+    // program is built where the control program's is built after it.
     {
+        const int64_t started = esp_timer_get_time();
+        {
+            const ExternalHeap external;
+            csp::selftest::build(program);
+        }
+        ESP_LOGI(tag, "self-test: its program built in %lld us, %d rows",
+                 static_cast<long long>(esp_timer_get_time() - started),
+                 program.image.length);
+        for (const csp::BuildIssue &issue : program.issues) {
+            ESP_LOGE(tag, "self-test: %s", issue.message.c_str());
+        }
         SpiSelfTestPort self_test_port;
-        const SelfTestResult self_test = run_selftest(self_test_port);
+        const SelfTestResult self_test =
+                run_selftest(self_test_port, program.image);
         for (const std::string &line : self_test.lines) {
             ESP_LOGI(tag, "self-test: %s", line.c_str());
         }
