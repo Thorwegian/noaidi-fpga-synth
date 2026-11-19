@@ -3,8 +3,11 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// build() works in steps, each a part of Lowering below:
+// build() works in steps, the first Copies' and the rest each a part of
+// Lowering below:
 //
+//   copies        the circuits of one shape among the graph's nodes, found
+//                 from its structure;
 //   storage       which reads through a pointer are fetched into a word of
 //                 their own, and which operators work in place: one that
 //                 accumulates onto an operand nothing else reads takes that
@@ -28,6 +31,7 @@
 #include "dsp_graph.hpp"
 
 #include <algorithm>
+#include <array>
 #include <map>
 
 namespace csp {
@@ -79,15 +83,18 @@ struct DspGraph::Node {
     int32_t record = none; // the record this output is a field of
 
     // what build() works out
-    int32_t storage = none; // the node whose word the output lives in
-    int32_t address = none;
-    int32_t group   = none; // a read through a pointer: its pointer's group
-    int32_t sink    = none; // the sink word the operator writes directly
-    int readers     = 0;
-    bool delayed    = false; // a delay reads it
-    bool fetched    = false; // a read through a pointer, into its own word
-    bool in_place   = false; // the operator works on a's word
-    bool copies_a   = false; // a is copied into the output's word first
+    int32_t shape    = none; // the set of copies its circuit is one of
+    int32_t copy     = none; // which of them
+    int32_t position = none; // its place in the circuit, the same in each copy
+    int32_t storage  = none; // the node whose word the output lives in
+    int32_t address  = none;
+    int32_t group    = none; // a read through a pointer: its pointer's group
+    int32_t sink     = none; // the sink word the operator writes directly
+    int readers      = 0;
+    bool delayed     = false; // a delay reads it
+    bool fetched     = false; // a read through a pointer, into its own word
+    bool in_place    = false; // the operator works on a's word
+    bool copies_a    = false; // a is copied into the output's word first
 
     bool is_operator() const {
         return kind == Kind::sum || kind == Kind::multiply_add
@@ -105,6 +112,12 @@ struct DspGraph::RecordLayout {
     int alignment   = 1;
     int offset      = 0; // in its parent
     int32_t address = none;
+};
+
+// A set of copies: circuits of one shape.
+struct DspGraph::Shape {
+    // Each copy's nodes. The nodes at one position correspond.
+    std::vector<std::vector<int32_t>> copies;
 };
 
 // ---- building the graph --------------------------------------------------------
@@ -349,6 +362,502 @@ DspGraph::Writer DspGraph::writer(int address) const {
                    ? writers_[static_cast<size_t>(address)]
                    : Writer::nobody;
 }
+
+const std::vector<DspGraph::CopySet> &DspGraph::copy_sets() const {
+    return copy_sets_;
+}
+
+// ---- the copies ---------------------------------------------------------------------
+//
+// Circuits of one shape, found from the graph's structure alone: the top
+// says nothing of its loops. Every node gets a colour from what it is, and
+// the colours are refined round by round with the colours of what the node
+// reads and of what reads it, until no round tells two more nodes apart
+// (colour refinement, the first step of a graph isomorphism test). A node
+// whose colour no other node has is the only one of its kind, and belongs
+// to no copy. The others fall into circuits, each the nodes that wires,
+// delays and records connect among themselves. Circuits of the same colours
+// are then compared node by node, so that two shapes with one colour by
+// accident, or two circuits whose like nodes were made in another order,
+// are told apart here and stay straight-line code: a wrong colour costs a
+// loop, never a wrong program.
+
+struct DspGraph::Copies {
+    using Kind = Node::Kind;
+
+    DspGraph &graph;
+    std::vector<Node> &nodes;
+    std::vector<uint64_t> colour;
+    // who reads each node, and as which operand
+    std::vector<std::vector<std::pair<int32_t, int>>> readers;
+    std::vector<int> sinks_fed;
+    std::vector<int32_t> field_of; // a node's place among its record's fields
+    std::vector<int32_t> circuit;  // none: the only one of its kind
+    std::vector<std::vector<int32_t>> circuits;
+
+    static constexpr int operand_count = 4;
+    static constexpr int delay_input   = operand_count;
+
+    explicit Copies(DspGraph &graph) : graph(graph), nodes(graph.nodes_) {}
+
+    static constexpr uint64_t mixed(uint64_t hash, uint64_t value) {
+        hash ^= value + 0x9E3779B97F4A7C15ull + (hash << 12) + (hash >> 4);
+        hash *= 0xFF51AFD7ED558CCDull;
+        return hash ^ (hash >> 33);
+    }
+
+    static std::array<Wire, operand_count> operands(const Node &node) {
+        return {node.a, node.x, node.y, node.b};
+    }
+
+    const RecordLayout &record(int32_t index) const {
+        return graph.records_[static_cast<size_t>(index)];
+    }
+
+    int32_t outermost(int32_t index) const {
+        while (record(index).parent != none) {
+            index = record(index).parent;
+        }
+        return index;
+    }
+
+    bool is_immediate(int32_t at) const {
+        const Kind kind = nodes[static_cast<size_t>(at)].kind;
+        return kind == Kind::constant || kind == Kind::offset;
+    }
+
+    // ---- colours ---------------------------------------------------------------
+
+    void find_readers() {
+        readers.assign(nodes.size(), {});
+        sinks_fed.assign(nodes.size(), 0);
+        field_of.assign(nodes.size(), none);
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            const auto wires = operands(nodes[at]);
+            for (int slot = 0; slot < operand_count; ++slot) {
+                if (wires[static_cast<size_t>(slot)].node != none) {
+                    readers[static_cast<size_t>(
+                                    wires[static_cast<size_t>(slot)].node)]
+                            .push_back({static_cast<int32_t>(at), slot});
+                }
+            }
+            if (nodes[at].kind == Kind::delay && nodes[at].value != none) {
+                readers[static_cast<size_t>(nodes[at].value)].push_back(
+                        {static_cast<int32_t>(at), delay_input});
+            }
+        }
+        for (const auto &[address, value] : graph.sinks_) {
+            ++sinks_fed[static_cast<size_t>(value.node)];
+        }
+        for (const RecordLayout &layout : graph.records_) {
+            for (size_t field = 0; field < layout.fields.size(); ++field) {
+                if (layout.fields[field].wire.node != none) {
+                    field_of[static_cast<size_t>(
+                            layout.fields[field].wire.node)] =
+                            static_cast<int32_t>(field);
+                }
+            }
+        }
+    }
+
+    // Where a record lies in its outermost record: the fields on the way down.
+    uint64_t place_colour(int32_t index) const {
+        uint64_t hash = 0;
+        for (; record(index).parent != none; index = record(index).parent) {
+            const RecordLayout &parent = record(record(index).parent);
+            for (size_t field = 0; field < parent.fields.size(); ++field) {
+                if (parent.fields[field].record.index == index) {
+                    hash = mixed(hash, field + 1);
+                }
+            }
+        }
+        return hash;
+    }
+
+    // What a node is, before anything is known of its neighbours.
+    uint64_t own_colour(size_t at) const {
+        const Node &node = nodes[at];
+        uint64_t hash    = mixed(static_cast<uint64_t>(node.kind),
+                                 static_cast<uint64_t>(node.width));
+        hash             = mixed(hash, static_cast<uint64_t>(node.overflow));
+        hash             = mixed(hash, static_cast<uint64_t>(node.condition));
+        hash             = mixed(hash, static_cast<uint64_t>(sinks_fed[at]));
+        switch (node.kind) {
+        case Kind::constant:
+        case Kind::offset:
+        case Kind::shift:
+        case Kind::through:
+            hash = mixed(hash, static_cast<uint64_t>(node.value));
+            break;
+        case Kind::pointer:
+            for (const int32_t target :
+                 graph.target_sets_[static_cast<size_t>(node.value)]) {
+                hash = mixed(hash, static_cast<uint64_t>(target));
+            }
+            break;
+        default:
+            break;
+        }
+        if (node.record != none) {
+            hash = mixed(hash, place_colour(node.record));
+            hash = mixed(hash, static_cast<uint64_t>(field_of[at]) + 1);
+        }
+        return hash;
+    }
+
+    // The colour of a record with all that is in it.
+    uint64_t record_colour(int32_t index) const {
+        uint64_t hash = 0;
+        for (const Field &field : record(index).fields) {
+            hash = mixed(hash,
+                         field.record.index != none
+                                 ? record_colour(field.record.index)
+                         : field.wire.node != none
+                                 ? colour[static_cast<size_t>(field.wire.node)]
+                                 : 0);
+        }
+        return hash;
+    }
+
+    // One round: every colour with its neighbours' colours added.
+    void refine() {
+        std::vector<uint64_t> next(nodes.size());
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            uint64_t hash = colour[at];
+            for (const Wire wire : operands(nodes[at])) {
+                hash = mixed(hash,
+                             wire.node != none
+                                     ? colour[static_cast<size_t>(wire.node)]
+                                     : 0);
+            }
+            if (nodes[at].kind == Kind::delay && nodes[at].value != none) {
+                hash = mixed(hash,
+                             colour[static_cast<size_t>(nodes[at].value)]);
+            }
+            uint64_t read_by = 0; // a sum: in whatever order the readers come
+            for (const auto &[reader, slot] : readers[at]) {
+                read_by += mixed(colour[static_cast<size_t>(reader)],
+                                 static_cast<uint64_t>(slot));
+            }
+            next[at] = mixed(hash, read_by);
+        }
+        for (size_t index = 0; index < graph.records_.size(); ++index) {
+            if (graph.records_[index].parent != none) {
+                continue;
+            }
+            const uint64_t whole = record_colour(static_cast<int32_t>(index));
+            for_each_field(static_cast<int32_t>(index), [&](int32_t node) {
+                next[static_cast<size_t>(node)] =
+                        mixed(next[static_cast<size_t>(node)], whole);
+            });
+        }
+        colour = std::move(next);
+    }
+
+    template <typename Visit>
+    void for_each_field(int32_t index, Visit visit) {
+        for (const Field &field : record(index).fields) {
+            if (field.record.index != none) {
+                for_each_field(field.record.index, visit);
+            } else if (field.wire.node != none) {
+                visit(field.wire.node);
+            }
+        }
+    }
+
+    size_t colours_in_use() const {
+        std::vector<uint64_t> sorted = colour;
+        std::sort(sorted.begin(), sorted.end());
+        return static_cast<size_t>(std::unique(sorted.begin(), sorted.end())
+                                   - sorted.begin());
+    }
+
+    void find_colours() {
+        colour.resize(nodes.size());
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            colour[at] = own_colour(at);
+        }
+        // a round only ever splits colours: when none split, none will
+        for (size_t before = colours_in_use(), round = 0; round < nodes.size();
+             ++round) {
+            refine();
+            const size_t after = colours_in_use();
+            if (after == before) {
+                break;
+            }
+            before = after;
+        }
+    }
+
+    // ---- circuits --------------------------------------------------------------
+
+    void find_circuits() {
+        std::map<uint64_t, int> of_colour;
+        for (const uint64_t each : colour) {
+            ++of_colour[each];
+        }
+        std::vector<int32_t> joined(nodes.size());
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            joined[at] =
+                    of_colour[colour[at]] > 1 ? static_cast<int32_t>(at) : none;
+        }
+        auto root = [&](int32_t at) {
+            while (joined[static_cast<size_t>(at)] != at) {
+                at = joined[static_cast<size_t>(at)] =
+                        joined[static_cast<size_t>(
+                                joined[static_cast<size_t>(at)])];
+            }
+            return at;
+        };
+        auto join = [&](int32_t one, int32_t other) {
+            if (one != none && other != none
+                && joined[static_cast<size_t>(one)] != none
+                && joined[static_cast<size_t>(other)] != none) {
+                joined[static_cast<size_t>(root(one))] = root(other);
+            }
+        };
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            for (const Wire wire : operands(nodes[at])) {
+                join(static_cast<int32_t>(at), wire.node);
+            }
+            if (nodes[at].kind == Kind::delay) {
+                join(static_cast<int32_t>(at), nodes[at].value);
+            }
+        }
+        for (size_t index = 0; index < graph.records_.size(); ++index) {
+            if (graph.records_[index].parent == none) {
+                int32_t first = none;
+                for_each_field(static_cast<int32_t>(index), [&](int32_t node) {
+                    join(node, first);
+                    first = node;
+                });
+            }
+        }
+        circuit.assign(nodes.size(), none);
+        circuits.clear();
+        std::map<int32_t, int32_t> circuit_of_root;
+        for (size_t at = 0; at < nodes.size(); ++at) {
+            if (joined[at] == none) {
+                continue;
+            }
+            const auto [found, made] = circuit_of_root.try_emplace(
+                    root(static_cast<int32_t>(at)),
+                    static_cast<int32_t>(circuits.size()));
+            if (made) {
+                circuits.push_back({});
+            }
+            circuit[at] = found->second;
+            circuits[static_cast<size_t>(found->second)].push_back(
+                    static_cast<int32_t>(at));
+        }
+        // a circuit's nodes by colour, like nodes in the order they were made
+        for (std::vector<int32_t> &each : circuits) {
+            std::stable_sort(each.begin(), each.end(),
+                             [&](int32_t one, int32_t other) {
+                                 return colour[static_cast<size_t>(one)]
+                                        < colour[static_cast<size_t>(other)];
+                             });
+            for (size_t position = 0; position < each.size(); ++position) {
+                nodes[static_cast<size_t>(each[position])].position =
+                        static_cast<int32_t>(position);
+            }
+        }
+    }
+
+    // ---- the comparison ----------------------------------------------------------
+
+    // Whether two wires of two circuits lead to the same place: to the node
+    // at one position in each, to one node outside both, or to one number.
+    bool corresponds(int32_t ours, int32_t theirs, int32_t our_circuit,
+                     int32_t their_circuit) const {
+        if (ours == none || theirs == none) {
+            return ours == theirs;
+        }
+        const Node &one = nodes[static_cast<size_t>(ours)];
+        const Node &two = nodes[static_cast<size_t>(theirs)];
+        if (is_immediate(ours) || is_immediate(theirs)) {
+            return one.kind == two.kind && one.value == two.value;
+        }
+        const bool inside = circuit[static_cast<size_t>(ours)] == our_circuit;
+        if (inside != (circuit[static_cast<size_t>(theirs)] == their_circuit)) {
+            return false;
+        }
+        return inside ? one.position == two.position : ours == theirs;
+    }
+
+    bool records_correspond(int32_t ours, int32_t theirs, int32_t our_circuit,
+                            int32_t their_circuit) const {
+        const std::vector<Field> &one = record(ours).fields;
+        const std::vector<Field> &two = record(theirs).fields;
+        if (one.size() != two.size()) {
+            return false;
+        }
+        for (size_t field = 0; field < one.size(); ++field) {
+            const bool inner = one[field].record.index != none;
+            if (inner != (two[field].record.index != none)) {
+                return false;
+            }
+            if (inner ? !records_correspond(one[field].record.index,
+                                            two[field].record.index,
+                                            our_circuit, their_circuit)
+                      : !corresponds(one[field].wire.node, two[field].wire.node,
+                                     our_circuit, their_circuit)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Whether nothing outside a circuit reads into it: what a copy computes
+    // is its own until a pointer or a sink takes it.
+    bool is_closed(int32_t index) const {
+        for (const int32_t at : circuits[static_cast<size_t>(index)]) {
+            for (const auto &[reader, slot] :
+                 readers[static_cast<size_t>(at)]) {
+                if (circuit[static_cast<size_t>(reader)] != index
+                    && !is_immediate(at)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool same_shape(int32_t our_circuit, int32_t their_circuit) const {
+        const std::vector<int32_t> &ours =
+                circuits[static_cast<size_t>(our_circuit)];
+        const std::vector<int32_t> &theirs =
+                circuits[static_cast<size_t>(their_circuit)];
+        if (ours.size() != theirs.size()) {
+            return false;
+        }
+        for (size_t position = 0; position < ours.size(); ++position) {
+            const Node &one = nodes[static_cast<size_t>(ours[position])];
+            const Node &two = nodes[static_cast<size_t>(theirs[position])];
+            if (one.kind != two.kind || one.width != two.width
+                || one.overflow != two.overflow
+                || one.condition != two.condition
+                || sinks_fed[static_cast<size_t>(ours[position])]
+                           != sinks_fed[static_cast<size_t>(
+                                   theirs[position])]) {
+                return false;
+            }
+            switch (one.kind) {
+            case Kind::constant:
+            case Kind::offset:
+            case Kind::shift:
+            case Kind::through:
+                if (one.value != two.value) {
+                    return false;
+                }
+                break;
+            case Kind::pointer:
+                if (graph.target_sets_[static_cast<size_t>(one.value)]
+                    != graph.target_sets_[static_cast<size_t>(two.value)]) {
+                    return false;
+                }
+                break;
+            case Kind::delay:
+                if (!corresponds(one.value, two.value, our_circuit,
+                                 their_circuit)) {
+                    return false;
+                }
+                break;
+            default:
+                break;
+            }
+            const auto our_wires = operands(one), their_wires = operands(two);
+            for (size_t slot = 0; slot < our_wires.size(); ++slot) {
+                if (!corresponds(our_wires[slot].node, their_wires[slot].node,
+                                 our_circuit, their_circuit)) {
+                    return false;
+                }
+            }
+            if ((one.record == none) != (two.record == none)) {
+                return false;
+            }
+            if (one.record != none
+                && !records_correspond(outermost(one.record),
+                                       outermost(two.record), our_circuit,
+                                       their_circuit)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool has_operator(int32_t index) const {
+        const std::vector<int32_t> &members =
+                circuits[static_cast<size_t>(index)];
+        return std::any_of(members.begin(), members.end(), [&](int32_t at) {
+            return nodes[static_cast<size_t>(at)].is_operator();
+        });
+    }
+
+    void find_shapes() {
+        // the candidates: closed circuits with the same colours
+        std::map<std::vector<uint64_t>, std::vector<int32_t>> alike;
+        for (size_t index = 0; index < circuits.size(); ++index) {
+            if (!has_operator(static_cast<int32_t>(index))
+                || !is_closed(static_cast<int32_t>(index))) {
+                continue;
+            }
+            std::vector<uint64_t> colours;
+            for (const int32_t at : circuits[index]) {
+                colours.push_back(colour[static_cast<size_t>(at)]);
+            }
+            alike[std::move(colours)].push_back(static_cast<int32_t>(index));
+        }
+        for (auto &[colours, candidates] : alike) {
+            // the first candidate and all that are of its shape, then the
+            // first of those left over, until none is
+            while (candidates.size() > 1) {
+                std::vector<int32_t> others;
+                Shape shape;
+                for (const int32_t candidate : candidates) {
+                    if (candidate == candidates.front()
+                        || same_shape(candidates.front(), candidate)) {
+                        shape.copies.push_back(
+                                circuits[static_cast<size_t>(candidate)]);
+                    } else {
+                        others.push_back(candidate);
+                    }
+                }
+                if (shape.copies.size() > 1) {
+                    add(std::move(shape));
+                }
+                candidates = std::move(others);
+            }
+        }
+    }
+
+    void add(Shape shape) {
+        for (size_t copy = 0; copy < shape.copies.size(); ++copy) {
+            for (const int32_t at : shape.copies[copy]) {
+                nodes[static_cast<size_t>(at)].shape =
+                        static_cast<int32_t>(graph.shapes_.size());
+                nodes[static_cast<size_t>(at)].copy =
+                        static_cast<int32_t>(copy);
+            }
+        }
+        graph.copy_sets_.push_back(
+                {static_cast<int>(shape.copies.size()),
+                 static_cast<int>(shape.copies.front().size())});
+        graph.shapes_.push_back(std::move(shape));
+    }
+
+    void run() {
+        graph.shapes_.clear();
+        graph.copy_sets_.clear();
+        for (Node &each : nodes) {
+            each.shape = each.copy = each.position = none;
+        }
+        find_readers();
+        find_colours();
+        find_circuits();
+        find_shapes();
+    }
+};
 
 // ---- build() ------------------------------------------------------------------------
 
@@ -1377,6 +1886,7 @@ struct DspGraph::Lowering {
 };
 
 bool DspGraph::build(ProgramBuilder::Built &built) {
+    Copies(*this).run();
     Lowering lowering(*this);
     return lowering.run(built);
 }

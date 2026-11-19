@@ -693,6 +693,20 @@ void test_todays_synth() {
     check(graph.address(rig->synth.channels[3].record) % 32 == 0,
           "a channel's record is aligned to its size");
 
+    // the copies, which the wiring above never named: the voices, the
+    // channels, and the LFOs two of a shape
+    std::vector<int> copies;
+    std::string found;
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        copies.push_back(set.copies);
+        found += (found.empty() ? "" : ", ") + std::to_string(set.copies)
+                 + " of " + std::to_string(set.nodes) + " nodes";
+    }
+    std::printf("the graph's copies: %s\n", found.c_str());
+    std::sort(copies.begin(), copies.end());
+    check(copies == std::vector<int>{2, 2, 2, 2, channel_count, voice_count},
+          "the graph finds its voices, its channels and its pairs of LFOs");
+
     rig->set_up();
     start(rig->today, today.image);
     start(rig->graphed, graphed.image);

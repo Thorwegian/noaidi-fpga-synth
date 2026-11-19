@@ -185,13 +185,22 @@ public:
     enum class Writer : uint8_t { nobody, firmware, program };
     Writer writer(int address) const;
 
+    // Circuits of one shape that the build found among the graph's nodes.
+    struct CopySet {
+        int copies = 0; // how many circuits
+        int nodes  = 0; // the nodes of each
+    };
+    const std::vector<CopySet> &copy_sets() const;
+
     DspGraph();
     ~DspGraph();
 
 private:
     struct Node;
     struct RecordLayout;
-    struct Lowering; // build()'s work: analysis, layout, order, emission
+    struct Shape;    // a set of copies, node by node
+    struct Copies;   // build()'s first step: the copies found
+    struct Lowering; // the rest: analysis, layout, order, emission
 
     Wire add(Node node);
     void issue(std::string message);
@@ -201,6 +210,8 @@ private:
     std::vector<std::vector<int32_t>> target_sets_; // a pointer's records
     std::vector<std::pair<int32_t, Wire>> sinks_;   // address, value
     std::vector<Writer> writers_;                   // by DMEM address
+    std::vector<Shape> shapes_;
+    std::vector<CopySet> copy_sets_; // what copy_sets() reports of them
     std::vector<Issue> issues_;
 };
 
