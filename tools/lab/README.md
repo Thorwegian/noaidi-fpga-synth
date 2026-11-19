@@ -41,7 +41,7 @@ for diagnosis, with what their output does and does not mean:
 |---|---|---|
 | `csp diag` | passes, queue, limiter, `dropped`, stream frames | `passes ÷ 48000` is the FPGA's uptime in seconds since the bitstream loaded: it dates the last gateware load (the counter runs held or not, 32-bit, wraps at 24.9 h, survives ESP32 resets). `dropped` counts only writes refused at a full queue door. |
 | `csp voices` | the firmware's voice table | a stuck note showing **HELD** never got its note-off (firmware side); all **idle** while the chip still sounds is a chip-side loss. |
-| `csp verify` | registers whose chip value differs from the firmware's image | it compares **program-owned** words too (envelope levels and stages, LFO phases and outputs, channel scratch, `PARITY`), which legitimately move; after any note it reports dozens. It lists only the first **24** by address. Read it through `verify_filter.py`. |
+| `csp verify` | registers whose chip value differs from the firmware's image, each with whose it is, and how many are the firmware's own | it compares **program-owned** words too (a sounding voice's envelope levels and stages), which legitimately move; after any note it reports dozens. It lists only the first **24** by address; the count of the firmware's own covers all. Read it through `verify_filter.py`. |
 | `csp peek <reg> [count]` | register pairs, `0x000–0x7FF` | the sinks `0x800–0xBFF` **cannot be read back** at all; a peek there returns nothing. |
 
 `csp help` lists every op. The console carries only the ops a tool under
@@ -122,7 +122,7 @@ Hunting a silent write loss (#248):
 
 | script | what |
 |---|---|
-| `verify_filter.py` | `csp verify` classified by owner from `map.s`; only firmware-owned differences are real drift (exit 2). Re-read a hit after two seconds: a word caught mid-flight clears, a loss persists. |
+| `verify_filter.py` | `csp verify` read by owner, which the firmware prints from the graph's layout; only firmware-owned differences are real drift (exit 2). Re-read a hit after two seconds: a word caught mid-flight clears, a loss persists. |
 | `midi_soak.py` | random chords and knob walks with ~150-CC sweep bursts over USB→DIN, every delay jittered (a fixed-timing bench hides timing faults), seed printed to replay; `--program N` restores the preset |
 | `monitor.sh` | `verify_filter.py` on a loop while a soak plays, re-reading any real hit |
 

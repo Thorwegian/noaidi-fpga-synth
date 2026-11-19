@@ -63,6 +63,14 @@ public:
 EngineImage image;
 SpiPort port;
 
+// The Noaidi as a DSP graph, wired at boot (wiring.hpp), and the program
+// the graph builds. Every word the firmware writes is one it asks the
+// graph for, so the synth lives as long as the firmware plays. Static: an
+// image is larger than a task's stack, and so the linker sizes it with the
+// rest of the firmware's memory. The graph's own memory is the heap's.
+wiring::Synth synth;
+csp::ProgramBuilder::Built program;
+
 // The master limiter's gain reduction in codes of 0.375 dB (16 an octave),
 // from DIAG_LIMITER: the applied gain, linear, UQ0.18, unity 0x40000. The
 // log is taken once here, not in gateware: 16 * log2(unity / gain), to the
@@ -245,10 +253,20 @@ void meter_task(void *) {
     }
 }
 
-// Every register the image knows, read back through the probe and compared:
-// how many differ, the first `limit` of them filled in.
-int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
-    int differing = 0;
+// What a read-back of the image found: the registers that differ, and those
+// of them the program does not write. A word the program writes as well (a
+// voice's level and stage) moves by itself once the CSP is let go; any other
+// that differs is a write that did not land.
+struct Differing {
+    int all            = 0;
+    int firmware_owned = 0;
+};
+
+// Every register the image knows, read back through the probe and compared,
+// the first `limit` that differ filled in.
+Differing verify_image(int *registers, int32_t *wanted, int32_t *held,
+                       int limit) {
+    Differing differing;
     // The probe reads the register file (0x000–0x7FF) a pair at a time; the
     // sinks beyond it cannot be read back.
     for (int even = 0; even < 0x800; even += 2) {
@@ -263,12 +281,14 @@ int verify_image(int *registers, int32_t *wanted, int32_t *held, int limit) {
                                    static_cast<int32_t>(pair & 0x3FFFF)};
         for (int half = 0; half < 2; ++half) {
             if (known[half] && actual[half] != (expected[half] & 0x3FFFF)) {
-                if (differing < limit) {
-                    registers[differing] = even + half;
-                    wanted[differing]    = expected[half] & 0x3FFFF;
-                    held[differing]      = actual[half];
+                if (differing.all < limit) {
+                    registers[differing.all] = even + half;
+                    wanted[differing.all]    = expected[half] & 0x3FFFF;
+                    held[differing.all]      = actual[half];
                 }
-                ++differing;
+                ++differing.all;
+                differing.firmware_owned += synth.graph.writer(even + half)
+                                            != csp::DspGraph::Writer::program;
             }
         }
     }
@@ -288,7 +308,7 @@ void verify_boot_image() {
     for (int attempt = 1; attempt <= boot_image_attempts; ++attempt) {
         int registers[named];
         int32_t wanted[named], held[named];
-        const int lost = verify_image(registers, wanted, held, named);
+        const int lost = verify_image(registers, wanted, held, named).all;
         if (lost == 0) {
             ESP_LOGI(tag, "boot image: every register as sent%s",
                      attempt > 1 ? " (after a resend)" : "");
@@ -347,14 +367,6 @@ void engine_task(void *) {
         }
     }
 }
-
-// The Noaidi as a DSP graph, wired at boot (wiring.hpp), and the program
-// the graph builds. Every word the firmware writes is one it asks the
-// graph for, so the synth lives as long as the firmware plays. Static: an
-// image is larger than a task's stack, and so the linker sizes it with the
-// rest of the firmware's memory. The graph's own memory is the heap's.
-wiring::Synth synth;
-csp::ProgramBuilder::Built program;
 
 // While one of these lives, malloc() places every block in the PSRAM, the
 // small ones too: the graph and what its build needs, which the internal
@@ -645,11 +657,17 @@ bool engine_link_write(int address, int32_t raw) {
 }
 
 int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
-                       int limit) {
+                       int limit, int *firmware_owned) {
     if (!running) {
         return -1;
     }
-    return verify_image(registers, wanted, held, limit);
+    const Differing differing = verify_image(registers, wanted, held, limit);
+    *firmware_owned           = differing.firmware_owned;
+    return differing.all;
+}
+
+bool engine_link_program_writes(int address) {
+    return synth.graph.writer(address) == csp::DspGraph::Writer::program;
 }
 
 bool engine_link_write_all(const render::Writes &writes) {
