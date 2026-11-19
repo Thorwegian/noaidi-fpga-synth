@@ -11,12 +11,12 @@ unison_stereo = 100
 [[osc]]
 wave = "pulse"
 tune = -6
-pulse_width = 90.220684
+pulse_width = 90.22068
 
 [[osc]]
 wave = "pulse"
 tune = 6
-pulse_width = 65.832305
+pulse_width = 65.832306
 
 [filter]
 type = "lowpass"

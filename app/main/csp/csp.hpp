@@ -38,6 +38,8 @@ constexpr int cycles_per_pass =
         3072; // four 96 kHz samples: a 24 kHz pass (#268)
 constexpr int samples_per_pass =
         4; //   (the firmware's rate conversions count them)
+constexpr int sample_rate      = 96000;                          // Hz
+constexpr int pass_rate        = sample_rate / samples_per_pass; // Hz
 constexpr int pass_cycle_limit = 3008; // instructions issue before this
 constexpr int vector_round     = 16;   // elements in flight in a vector loop
 

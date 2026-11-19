@@ -12,8 +12,8 @@
 // area's layout is wiring.hpp's. It touches no hardware and no RTOS, so the
 // host tests run it.
 //
-// Words are Q4.14; pitch, cutoff and resonance are octaves, so the preset's
-// raw 1024 to the octave is 16 to a raw word.
+// Words are Q4.14; pitch, cutoff and resonance are octaves, so a semitone of
+// the preset's is a twelfth of a word's 1.0.
 
 #pragma once
 
@@ -43,15 +43,14 @@ constexpr int pointer_count      = 10; // a partial's sink pointers
 
 // The controllers the preset does not hold.
 struct Controllers {
-    uint8_t wheel = 0; // CC 1
-    int16_t bend =
-            0; // the pitch wheel, in raw octave steps (1024 to the octave)
+    float wheel = 0.0f; // CC 1: 0 at rest, 1 at the top
+    float bend  = 0.0f; // the pitch wheel, in semitones
 };
 
 // How the 8 partials of a voice sit on the two oscillators.
 struct Voicing {
     uint8_t oscillator = 0;
-    int16_t detune     = 0; // the unison spread, raw octave steps
+    float detune       = 0.0f; // the unison spread, in semitones
     bool left          = false;
     bool right         = false;
     bool active        = false;

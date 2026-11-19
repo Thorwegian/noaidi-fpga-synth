@@ -7,7 +7,8 @@
 // preset (preset_init), so a missing key takes the init preset's value, as
 // does an unknown name; unknown keys and tables are ignored, and an
 // out-of-range value clamps. A file that is not valid TOML, or whose format is newer than
-// PRESET_FILE_FORMAT, is not read. The conversions are preset_units.h's.
+// PRESET_FILE_FORMAT, is not read. The keys, their fields and their ranges
+// are preset_units.hpp's.
 //
 // C++ (preset_file.cpp) with a C interface; plain stdio and POSIX, so
 // the host test (app/test) uses it too. Saving goes through safe_file.hpp.
@@ -56,9 +57,8 @@ int preset_file_recover(const char *dir);
 // no trailing dot.
 bool preset_name_valid(const char *name);
 
-// Print every key where a and b differ as stored, as
-// "table.key: <a> -> <b>". Values that behave identically count as
-// equal. Returns the number of differences.
+// Print every key where a and b differ as the writer writes them, as
+// "table.key: <a> -> <b>". Returns the number of differences.
 int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b);
 
 #ifdef __cplusplus

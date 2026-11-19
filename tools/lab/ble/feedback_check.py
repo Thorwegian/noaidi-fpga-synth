@@ -41,7 +41,7 @@ DUMP = [7, 10, 101, 100, 6, 101, 100,
         113, 114, 76, 77, 115,
         111, 112, 109, 110, 116]
 
-# The storage format's names (app/main/preset_units.c) and the switch
+# The storage format's names (app/main/preset_units.hpp) and the switch
 # positions the panel shows for them (cc_map's four-way 0/32/64/96, three-way
 # 0/64/127).
 WAVES = {"saw": 0, "pulse": 32, "triangle": 64, "sine": 96}

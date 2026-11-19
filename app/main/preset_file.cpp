@@ -5,40 +5,127 @@
 
 #include "preset_file.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
-#include "preset_units.h"
+#include "preset_units.hpp"
 #include "safe_file.hpp"
 #include "toml.hpp"
 
 namespace {
 
-// The table that holds element i of field f: [table] for a single table,
-// the i-th [[table]] for an array of tables.
-std::optional<toml::Value> field_table(const toml::Value &top,
-                                       const preset_field_t &f, int i) {
-    auto t = top.get(f.table);
-    if (!t) {
-        return std::nullopt;
-    }
-    if (f.count == 1) {
-        return t->is_table() ? t : std::nullopt;
-    }
-    auto elems = t->elements();
-    if (i >= static_cast<int>(elems.size()) || !elems[i].is_table()) {
-        return std::nullopt;
-    }
-    return elems[i];
-}
+using preset_units::Range;
+using Names = std::span<const char *const>;
 
-std::string field_text(const preset_field_t &f, int i, const preset_t &p) {
-    char text[64];
-    preset_field_format(&f, i, &p, text, sizeof text);
-    return text;
-}
+// The loader, a visitor of the keys: a key the file has goes into its field;
+// one it lacks, or that holds something else than the key's kind (a string
+// for a number, a name the key does not have, a number that is not one),
+// leaves the field as it is.
+class Loader {
+public:
+    explicit Loader(const toml::Value &root) : root_(root) {}
+
+    void table(const char *name) {
+        table_ = root_.get(name);
+    }
+
+    void element(const char *name, int index) {
+        const auto array = root_.get(name);
+        const std::vector<toml::Value> elements =
+                array ? array->elements() : std::vector<toml::Value>{};
+        table_ = static_cast<size_t>(index) < elements.size()
+                         ? std::optional(elements[static_cast<size_t>(index)])
+                         : std::nullopt;
+    }
+
+    void number(const char *key, float &field, const Range &range) {
+        const auto value = table_ ? table_->get(key) : std::nullopt;
+        if (!value) {
+            return;
+        }
+        if (const auto whole = value->as_int()) {
+            field = preset_units::within(range, static_cast<double>(*whole));
+        } else if (const auto real = value->as_real();
+                   real && !std::isnan(*real)) {
+            field = preset_units::within(range, *real);
+        }
+    }
+
+    template <typename Name>
+    void name(const char *key, Name &field, Names names) {
+        const auto value = table_ ? table_->get(key) : std::nullopt;
+        const auto text  = value ? value->as_string() : std::nullopt;
+        if (!text) {
+            return;
+        }
+        const auto found = std::ranges::find(names, *text, [](const char *n) {
+            return std::string_view(n);
+        });
+        if (found != names.end()) {
+            field = static_cast<Name>(found - names.begin());
+        }
+    }
+
+private:
+    toml::Value root_;
+    std::optional<toml::Value> table_;
+};
+
+// A key as the writer writes it, and where it is.
+struct Entry {
+    std::string table;
+    int element; // of an array of tables, from 0; −1 in a table of its own
+    std::string key;
+    std::string text;
+
+    bool same_table(const Entry &other) const {
+        return table == other.table && element == other.element;
+    }
+};
+
+// The writer's side of the keys, a visitor too: every key's text, in order.
+class Entries {
+public:
+    void table(const char *name) {
+        table_   = name;
+        element_ = -1;
+    }
+
+    void element(const char *name, int index) {
+        table_   = name;
+        element_ = index;
+    }
+
+    void number(const char *key, const float &field, const Range &range) {
+        entries_.push_back(
+                {table_, element_, key, preset_units::text(range, field)});
+    }
+
+    template <typename Name>
+    void name(const char *key, const Name &field, Names names) {
+        entries_.push_back(
+                {table_, element_, key,
+                 preset_units::text(names, static_cast<int>(field))});
+    }
+
+    static std::vector<Entry> of(const preset_t &preset) {
+        Entries entries;
+        preset_units::visit(preset, entries);
+        return std::move(entries.entries_);
+    }
+
+private:
+    std::string table_;
+    int element_ = -1;
+    std::vector<Entry> entries_;
+};
 
 } // namespace
 
@@ -60,31 +147,10 @@ bool parse(std::string_view text, preset_t &p, std::string &error) {
         return false;
     }
 
-    preset_t q;
-    preset_init(&q);
-    size_t n;
-    const preset_field_t *fields = preset_fields(&n);
-    for (size_t k = 0; k < n; k++) { // table order: dependencies first
-        const preset_field_t &f = fields[k];
-        for (int i = 0; i < f.count; i++) {
-            auto table = field_table(doc.root(), f, i);
-            auto value = table ? table->get(f.key) : std::nullopt;
-            if (!value) {
-                continue; // the key keeps the init value
-            }
-            if (f.kind == PF_NAME) {
-                if (auto name = value->as_string()) {
-                    preset_field_set_name(&f, i, &q,
-                                          std::string(*name).c_str());
-                }
-            } else if (auto whole = value->as_int()) {
-                preset_field_set_number(&f, i, &q, static_cast<double>(*whole));
-            } else if (auto real = value->as_real()) {
-                preset_field_set_number(&f, i, &q, *real);
-            }
-        }
-    }
-    p = q;
+    preset_t loaded;
+    preset_init(&loaded);
+    preset_units::visit(loaded, Loader(doc.root()));
+    p = loaded;
     return true;
 }
 
@@ -111,27 +177,15 @@ bool read(const std::string &path, preset_t &p, std::string &error) {
 }
 
 std::string to_text(const preset_t &p) {
-    size_t n;
-    const preset_field_t *fields = preset_fields(&n);
     std::string text = "format = " + std::to_string(PRESET_FILE_FORMAT) + "\n";
-    // The fields of one table sit together in the table, so a table is
-    // written once per element: [voice], [[osc]] twice, [filter], ...
-    for (size_t k = 0; k < n;) {
-        size_t end = k;
-        while (end < n
-               && std::strcmp(fields[end].table, fields[k].table) == 0) {
-            end++;
+    const Entry *previous = nullptr;
+    for (const Entry &entry : Entries::of(p)) {
+        if (previous == nullptr || !entry.same_table(*previous)) {
+            text += entry.element < 0 ? "\n[" + entry.table + "]\n"
+                                      : "\n[[" + entry.table + "]]\n";
         }
-        for (int i = 0; i < fields[k].count; i++) {
-            text += fields[k].count == 1 ? "\n[" : "\n[[";
-            text += fields[k].table;
-            text += fields[k].count == 1 ? "]\n" : "]]\n";
-            for (size_t j = k; j < end; j++) {
-                text += std::string(fields[j].key) + " = "
-                        + field_text(fields[j], i, p) + "\n";
-            }
-        }
-        k = end;
+        text += entry.key + " = " + entry.text + "\n";
+        previous = &entry;
     }
     return text;
 }
@@ -207,26 +261,22 @@ bool preset_name_valid(const char *name) {
 }
 
 int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b) {
-    size_t n;
-    const preset_field_t *fields = preset_fields(&n);
-    int diffs                    = 0;
-    for (size_t k = 0; k < n; k++) {
-        const preset_field_t &f = fields[k];
-        for (int i = 0; i < f.count; i++) {
-            if (preset_field_canonical(&f, i, a, f.get(a, i))
-                == preset_field_canonical(&f, i, b, f.get(b, i))) {
-                continue;
-            }
-            const std::string where =
-                    f.count == 1
-                            ? std::string(f.table) + "." + f.key
-                            : std::string(f.table) + "[" + std::to_string(i + 1)
-                                      + "]." + f.key;
-            std::fprintf(out, "  %s: %s -> %s\n", where.c_str(),
-                         field_text(f, i, *a).c_str(),
-                         field_text(f, i, *b).c_str());
-            diffs++;
+    const std::vector<Entry> before = Entries::of(*a);
+    const std::vector<Entry> after  = Entries::of(*b);
+    int diffs                       = 0;
+    for (size_t k = 0; k < before.size(); k++) {
+        if (before[k].text == after[k].text) {
+            continue;
         }
+        const Entry &entry = before[k];
+        const std::string where =
+                entry.element < 0
+                        ? entry.table + "." + entry.key
+                        : entry.table + "[" + std::to_string(entry.element + 1)
+                                  + "]." + entry.key;
+        std::fprintf(out, "  %s: %s -> %s\n", where.c_str(),
+                     before[k].text.c_str(), after[k].text.c_str());
+        diffs++;
     }
     return diffs;
 }

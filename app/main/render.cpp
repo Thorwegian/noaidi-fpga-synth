@@ -19,20 +19,20 @@ namespace {
 using Graph = csp::DspGraph;
 using Wire  = Graph::Wire;
 
-constexpr int32_t word_one = csp::word_one;         // 1.0
-constexpr int32_t word_max = (1 << 17) - 1;         // the largest word
-constexpr int32_t word_min = -(1 << 17);            // and the smallest
-constexpr int raw_octave   = 1024;                  // the preset's octave
-constexpr int word_per_raw = word_one / raw_octave; // 16
-constexpr int32_t middle_c = 5 * raw_octave;        // MIDI note 60, UQ4.10
+constexpr int32_t word_one  = csp::word_one; // 1.0
+constexpr int32_t word_max  = (1 << 17) - 1; // the largest word
+constexpr int32_t word_min  = -(1 << 17);    // and the smallest
+constexpr int64_t dword_one = int64_t{1} << csp::wide_fraction_bits;
 
-// UQ4.4 volume codes: 0xFF is loudest, 16 steps an octave.
-constexpr int volume_mute = 0x00;
+constexpr float semitones_an_octave = 12.0f;
+constexpr float decibels_an_octave  = 6.0205999f; // of gain: 20 log10(2)
+constexpr int middle_c              = 60;         // the MIDI note
+constexpr float middle_c_hz         = 261.62557f;
 
-// An envelope's level is 22 bits in the preset's scale, 0x400000 full.
-constexpr int level_one = 0x400000;
-constexpr int attack_target =
-        0x533333; // 1.3 of full scale: the RC charge's aim
+// The pulse width, in percent of the cycle: the square, and from there to
+// the rail, which is 1.0 of the pulse width's word.
+constexpr float square         = 50.0f;
+constexpr float square_to_rail = 50.0f;
 
 // Unison offsets (symmetric, in steps of the preset's unison detune).
 constexpr std::array<int8_t, 7> unison_7 = {-3, -2, -1, 0, 1, 2, 3};
@@ -42,23 +42,26 @@ int32_t clamp_word(int64_t value) {
     return static_cast<int32_t>(std::clamp<int64_t>(value, word_min, word_max));
 }
 
-// A number of octaves, as the preset gives them (raw 1024 to the octave), in
-// a word.
-int32_t octaves(int64_t raw) {
-    return clamp_word(raw * word_per_raw);
+// A value as a word, to the nearest. It is clamped before it is rounded: an
+// infinity is a value here (a resonance that self-oscillates).
+int32_t word(float value) {
+    constexpr float reach = 8.0f; // a word is Q4.14
+    return clamp_word(std::lround(std::clamp(value, -reach, reach) * word_one));
 }
 
-int32_t fraction(double value) {
-    return clamp_word(std::lround(value * word_one));
+// A number of semitones as a word of octaves.
+int32_t octaves(float semitones) {
+    return word(semitones / semitones_an_octave);
 }
 
-// A linear gain from a UQ4.4 volume code: 6 dB every 16 steps, 0 for the
-// mute.
-int32_t gain_of_code(int code) {
-    if (code <= volume_mute) {
-        return 0;
-    }
-    return fraction(std::exp2((code - 255) / 16.0));
+// A value as a dword, to the nearest.
+int64_t dword(float value) {
+    return std::llround(static_cast<double>(value) * dword_one);
+}
+
+// A gain in dB as an amplitude: nothing at minus infinity.
+float amplitude(float decibels) {
+    return std::exp2(decibels / decibels_an_octave);
 }
 
 // A dword's two words, the upper first.
@@ -115,86 +118,72 @@ void enter(const wiring::Synth &synth, int voice, int stage, Writes &writes) {
     }
 }
 
-// Velocity scales an envelope's amount. c(vel) is linear; g falls from 1 at
-// the full velocity to 1 - amount/127 at the softest, so a velocity
-// sensitivity of 0 leaves every note at the preset's full amount.
-double velocity_curve(uint8_t velocity) {
-    return velocity / 127.0;
+// A soft note's amount. The velocity is linear, 1 at the hardest, and an
+// envelope's sensitivity says how far a softer note scales its amount: not
+// at all at 0 %, so that every note has the preset's full amount.
+float velocity_curve(uint8_t velocity) {
+    return static_cast<float>(velocity) / 127.0f;
 }
 
-double velocity_scale(uint8_t velocity, uint8_t amount) {
-    return 1.0 - (amount / 127.0) * (1.0 - velocity_curve(velocity));
-}
-
-// The loudness span the amp envelope's static amounts are laid out over: the
-// velocity's amount and the sustain are fractions of 60 dB (the old engine's
-// span; `param_conventions.md`), and since the pipeline's gain is linear
-// (#176) the exponential is taken here, once per note or per preset, not
-// in gateware. A fraction f is 2^(span × (f − 1)) of amplitude: 0 is −60 dB,
-// 1 is unity.
-constexpr double loudness_span_octaves = 10.0;
-
-double amplitude_of_fraction(double fraction) {
-    return std::exp2(loudness_span_octaves * (fraction - 1.0));
-}
+// The loudness a note at the softest loses at a sensitivity of 100 %: ten
+// octaves of gain, in proportion to the sensitivity and to how soft the
+// note is (`param_conventions.md`). The pipeline's gain is linear (#176), so
+// the exponential is taken here, once per note: a soft note rises to a
+// lower peak from the same floor.
+constexpr float velocity_span = 10.0f * decibels_an_octave; // dB
 
 // The amp envelope's amount for a note, as the amplitude the level is
-// multiplied by: a soft note rises to a lower peak from the same floor, as
-// it always did.
-double amp_amount(const preset_t &preset, uint8_t velocity) {
-    return amplitude_of_fraction(velocity_scale(velocity, preset.vel_amp_amt));
+// multiplied by.
+float amp_amount(const preset_t &preset, uint8_t velocity) {
+    return amplitude(-velocity_span * (preset.amp_env.velocity / 100.0f)
+                     * (1.0f - velocity_curve(velocity)));
 }
 
 // Velocity scales the mod envelope's amount more deeply than the amp's (#244):
-// at vel_mod_amt 0 the mod env is at full whatever the velocity, at the centre
-// (CC 64) the velocity scales it once, and at the top (CC 127) twice -- so a
-// hard note opens the filter further. With a = vel_mod_amt/127 and
-// v = velocity/127, the three points (0, 1), (0.5, v), (1, 2v) are met by
+// at a sensitivity of 0 % the mod env is at full whatever the velocity, at
+// 50 % the velocity scales it once, and at 100 % twice -- so a hard note
+// opens the filter further. With a the sensitivity as a fraction and
+// v the velocity, the three points (0, 1), (0.5, v), (1, 2v) are met by
 //   (1 - a)(1 - 2a) + 2 a v,
 // all products, no conditionals.
-double mod_velocity_scale(uint8_t velocity, uint8_t amount) {
-    const double a = amount / 127.0;
-    const double v = velocity_curve(velocity);
-    return (1.0 - a) * (1.0 - 2.0 * a) + 2.0 * a * v;
-}
-
-// The amount the mod envelope's depth is scaled by.
-double mod_amount(const preset_t &preset, uint8_t velocity) {
-    return mod_velocity_scale(velocity, preset.vel_mod_amt);
+float mod_amount(const preset_t &preset, uint8_t velocity) {
+    const float a = preset.mod_env.velocity / 100.0f;
+    const float v = velocity_curve(velocity);
+    return (1.0f - a) * (1.0f - 2.0f * a) + 2.0f * a * v;
 }
 
 // A MIDI note, in octaves from middle C.
 int32_t note_word(uint8_t note) {
-    const int raw = (note / 12) * raw_octave + (note % 12) * raw_octave / 12;
-    return octaves(raw - middle_c);
+    return octaves(static_cast<float>(note - middle_c));
 }
 
 // An envelope's segments: attack aims past full scale, decay at the sustain
-// level, release at zero; each with the preset's rate. The amp envelope's
+// level, release at zero; each with the preset's time, as the time constant
+// of its exponential (csp/envelope.hpp). The amp envelope's
 // level is the voice's linear gain (#176), so a decay or a release is an RC
 // fall in amplitude — a constant number of dB a second, the analog envelope —
 // and a released tail reaches the floor in the segment's time (60 dB down,
 // `storage_format.md`); the mod envelope's level is the cutoff in octaves.
-// `sustain` is the level the decay aims at, in the 22-bit scale of the level.
-void envelope(const wiring::Synth &synth, int which, const adsr_t &env,
-              int64_t sustain, Writes &writes) {
-    auto segment = [&](int stage, int64_t target22, uint8_t rate_code) {
+// `sustain` is the level the decay aims at, full scale being 1.
+void envelope(const wiring::Synth &synth, int which, float attack, float decay,
+              float release, float sustain, Writes &writes) {
+    auto segment = [&](int stage, float target, float time_constant) {
         const wiring::Segment &words =
                 channel_of(synth).segments[static_cast<size_t>(which)]
                                           [static_cast<size_t>(stage)];
-        const uint32_t k =
-                preset_adsr_rate_coeff(preset_adsr_rate_byte(rate_code));
-        wide(writes, word_of(synth, words.target), target22 << 10);
-        wide(writes, word_of(synth, words.rate), csp::envelope_rate(k));
+        wide(writes, word_of(synth, words.target), dword(target));
+        wide(writes, word_of(synth, words.rate),
+             csp::envelope_rate(time_constant));
     };
-    segment(wiring::stage_attack, attack_target, env.attack);
-    segment(wiring::stage_decay, sustain, env.decay);
-    segment(wiring::stage_release, 0, env.release);
+    segment(wiring::stage_attack, csp::attack_aim,
+            attack / csp::attack_time_constants);
+    segment(wiring::stage_decay, sustain, decay / csp::fall_time_constants);
+    segment(wiring::stage_release, 0.0f, release / csp::fall_time_constants);
 }
 
 // The wiring's shape for a preset's LFO waveform.
-int lfo_shape(uint8_t wave) {
-    switch (wave & 3) {
+int lfo_shape(waveform_t wave) {
+    switch (wave) {
     case WAVE_SAW:
         return wiring::shape_saw;
     case WAVE_PULSE:
@@ -206,77 +195,87 @@ int lfo_shape(uint8_t wave) {
     }
 }
 
-// The voicing's gains for one partial, as UQ4.4 codes: the volume anchor and
-// the make-up for the number of partials, the oscillator mix, the pan, the
-// stereo spread.
-struct Codes {
-    int left;
-    int right;
+// ---- the gains ---------------------------------------------------------------------------------
+//
+// A partial's gain on each side is the part's volume and what the voicing
+// takes off it, summed in dB and made an amplitude once.
+
+// The part's volume at 0 dB: an eighth of a partial's full scale, the
+// headroom the voices sum into.
+constexpr float unity = -3.0f * decibels_an_octave; // dB
+
+// What 100 % of the oscillator balance, the pan or the stereo spread takes
+// off the side or the oscillator it turns down, in proportion below that;
+// 100 % itself is a mute.
+constexpr float turned_down_span = 63.0f / 16.0f * decibels_an_octave; // dB
+
+float turned_down(float percent) {
+    return percent / 100.0f * turned_down_span;
+}
+
+// The lift of a structure with few partials, so that the structures are
+// about as loud: half an octave of gain for two, a quarter for four.
+float makeup(int sounding) {
+    return sounding <= 2   ? decibels_an_octave / 2.0f
+           : sounding <= 4 ? decibels_an_octave / 4.0f
+                           : 0.0f;
+}
+
+struct Gains {
+    float left;
+    float right;
 };
 
-Codes gain_codes(const preset_t &preset, const Voicing &partial, int sounding) {
-    const int makeup = sounding <= 2 ? 8 : sounding <= 4 ? 4 : 0;
-    const int mix    = preset.osc_mix; // + favours osc 2, − osc 1
-    // the preset's volume (a UQ4.4 code, 16 steps an octave) and the make-up:
-    // the voice's gain word is the envelope's alone
-    int volume = preset.volume + makeup;
-    if (partial.oscillator == 0 && mix > 0) {
-        volume -= mix;
+Gains gains(const preset_t &preset, const Voicing &partial, int sounding) {
+    // the balance: + favours osc 2, − osc 1
+    const float mix     = preset.voice.osc_mix;
+    const float against = partial.oscillator == 0 ? mix : -mix;
+    if (against >= 100.0f) {
+        return {0.0f, 0.0f};
     }
-    if (partial.oscillator == 1 && mix < 0) {
-        volume += mix;
-    }
-    // the balance's extremes are a mute, not 23.6 dB down
-    const bool balance_mute = (partial.oscillator == 0 && mix >= 63)
-                              || (partial.oscillator == 1 && mix <= -63);
-    const int pan = preset.pan;
-    int left      = std::clamp(volume - std::max(pan, 0), 0x01, 0xFF);
-    int right     = std::clamp(volume - std::max(-pan, 0), 0x01, 0xFF);
-
-    // The stereo spread: a leaning unison partial keeps its near side at full
-    // and loses spread/2 steps on the far side; 127 mutes the far side.
-    const int spread   = preset.unison_stereo & 0x7F;
-    const bool lean    = partial.left != partial.right;
-    const bool enabled = lean && spread < 127;
-    if (enabled) {
-        if (partial.left) {
-            right = std::max(right - (spread >> 1), 0x01);
-        } else {
-            left = std::max(left - (spread >> 1), 0x01);
+    const float level = unity + preset.part.volume + makeup(sounding)
+                        - turned_down(std::max(against, 0.0f));
+    // One side: `sits` is whether the partial sits on it (a centred partial
+    // sits on both, a leaning unison partial on one), `away` how far the
+    // pan turns from it. A leaning partial's far side loses the stereo
+    // spread.
+    const float spread = preset.voice.unison_stereo;
+    auto side          = [&](bool sits, float away) {
+        if (away >= 100.0f || (!sits && spread >= 100.0f)) {
+            return 0.0f;
         }
-    }
-    const bool left_on  = partial.left || enabled;
-    const bool right_on = partial.right || enabled;
-    return {(left_on && !balance_mute && pan < 63) ? left : volume_mute,
-            (right_on && !balance_mute && pan > -63) ? right : volume_mute};
+        const float lost = turned_down(away + (sits ? 0.0f : spread));
+        return amplitude(std::min(level - lost, 0.0f)); // full scale at most
+    };
+    const float pan = preset.part.pan;
+    return {side(partial.left, std::max(pan, 0.0f)),
+            side(partial.right, std::max(-pan, 0.0f))};
 }
 
 } // namespace
 
 int voicing(const preset_t &preset, VoicePlan &plan) {
-    plan             = VoicePlan{};
-    const int spread = preset.unison_detune; // raw octave steps a step
-    int sounding     = 0;
-    switch (preset.voice_struct) {
+    plan               = VoicePlan{};
+    const float spread = preset.voice.unison_detune; // semitones a step
+    int sounding       = 0;
+    switch (preset.voice.structure) {
     case VOICE_2_PLAIN:
-        plan[0]  = {0, 0, true, true, true};
-        plan[1]  = {1, 0, true, true, true};
+        plan[0]  = {0, 0.0f, true, true, true};
+        plan[1]  = {1, 0.0f, true, true, true};
         sounding = 2;
         break;
     case VOICE_7_PLUS_1:
         for (size_t i = 0; i < unison_7.size(); ++i) {
-            plan[i] = {0, static_cast<int16_t>(unison_7[i] * spread), !(i & 1),
-                       (i & 1) != 0, true};
+            plan[i] = {0, unison_7[i] * spread, !(i & 1), (i & 1) != 0, true};
         }
-        plan[7]  = {1, 0, true, true, true};
+        plan[7]  = {1, 0.0f, true, true, true};
         sounding = 8;
         break;
     case VOICE_4_PLUS_4:
         for (size_t i = 0; i < unison_4.size(); ++i) {
-            plan[i] = {0, static_cast<int16_t>(unison_4[i] * spread), !(i & 1),
-                       (i & 1) != 0, true};
-            plan[i + 4] = {1, static_cast<int16_t>(unison_4[i] * spread),
-                           !(i & 1), (i & 1) != 0, true};
+            plan[i] = {0, unison_4[i] * spread, !(i & 1), (i & 1) != 0, true};
+            plan[i + 4] = {1, unison_4[i] * spread, !(i & 1), (i & 1) != 0,
+                           true};
         }
         sounding = 8;
         break;
@@ -340,20 +339,19 @@ void setup(const wiring::Synth &synth, Writes &writes) {
 
 void amp_envelope(const wiring::Synth &synth, const preset_t &preset,
                   Writes &writes) {
-    // the sustain knob is a fraction of the 60 dB span, as it always was; the
-    // level it aims at is that loudness as an amplitude, the gain being linear
-    const double sustain =
-            std::min<uint16_t>(preset.env[0].sustain, 0x3FF) / double{0x3FF};
-    envelope(synth, wiring::envelope_amp, preset.env[0],
-             std::lround(amplitude_of_fraction(sustain) * double{level_one}),
-             writes);
+    // the sustain is a loudness below the peak; the level it aims at is
+    // that loudness as an amplitude, the gain being linear
+    const amp_env_t &env = preset.amp_env;
+    envelope(synth, wiring::envelope_amp, env.attack, env.decay, env.release,
+             amplitude(env.sustain), writes);
 }
 
 void mod_envelope(const wiring::Synth &synth, const preset_t &preset,
                   Writes &writes) {
-    // linear in octaves of cutoff: the sustain is a fraction of the depth
-    envelope(synth, wiring::envelope_mod, preset.env[1],
-             std::min<uint16_t>(preset.env[1].sustain, 0x3FF) << 12, writes);
+    // linear in octaves of cutoff: the sustain is a share of the depth
+    const mod_env_t &env = preset.mod_env;
+    envelope(synth, wiring::envelope_mod, env.attack, env.decay, env.release,
+             env.sustain / 100.0f, writes);
     // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
     // wiring takes the mod amount as a quarter of the depth and multiplies
     // by four after the envelope (wiring.cpp: a depth reaches 32 octaves, a
@@ -362,21 +360,20 @@ void mod_envelope(const wiring::Synth &synth, const preset_t &preset,
     // engine's (issue #222: the centroid 3960 Hz against the benchmark's
     // 1561 on a C5, 729 with the word zeroed).
     put(writes, word_of(synth, channel_of(synth).mod_amount),
-        octaves(preset.mod_env_depth / 4));
+        octaves(env.depth / 4.0f));
 }
 
 void cutoff(const wiring::Synth &synth, const preset_t &preset,
             const Controllers &controllers, Writes &writes) {
-    // The knob, the wheel (up to 5 octaves), and the half octave that puts a
-    // note's cutoff above its pitch when the tracking is 100 %.
-    constexpr int half_octave = raw_octave / 2;
-    constexpr int wheel_step  = 40; // raw octave steps a wheel step
+    // The preset's cutoff is the frequency for middle C, and the word is the
+    // octaves from middle C's own pitch: the note follows in the voices, at
+    // the tracking's ratio. The wheel at the top adds 4.96 octaves.
+    constexpr float wheel_octaves = 127.0f * 40.0f / 1024.0f;
     put(writes, word_of(synth, channel_of(synth).cutoff_base),
-        octaves(preset.filter.cutoff + half_octave
-                + controllers.wheel * wheel_step));
-    // 64 is 100 %
+        word(std::log2(preset.filter.cutoff / middle_c_hz)
+             + controllers.wheel * wheel_octaves));
     put(writes, word_of(synth, channel_of(synth).key_track),
-        clamp_word(int64_t{preset.filter.key_track} * word_one / 64));
+        word(preset.filter.key_track / 100.0f));
 }
 
 void pitch_bend(const wiring::Synth &synth, const Controllers &controllers,
@@ -394,8 +391,7 @@ void lfo(const wiring::Synth &synth, const preset_t &preset, int i,
     // pass; the channel listens to this one, below. Its output is ±depth,
     // which the channel scales by the destination's depth.
     const wiring::Lfo &wave = synth.lfo(i, shape);
-    wide(writes, word_of(synth, wave.step),
-         csp::lfo_rate(l.rate, 1)); // every pass (#268)
+    wide(writes, word_of(synth, wave.step), csp::lfo_rate(l.rate));
     put(writes, word_of(synth, wave.depth), word_one);
     put(writes, word_of(synth, wave.neg_depth), -word_one);
     put(writes, word_of(synth, wave.gain),
@@ -405,20 +401,21 @@ void lfo(const wiring::Synth &synth, const preset_t &preset, int i,
     put(writes, word_of(synth, channel.lfo[static_cast<size_t>(i)]),
         synth.graph.address(wave.record));
 
-    // The depth swings the destination by ±depth/2 of the preset's raw
-    // units (1024 to the octave, or to 1.0 of a pulse width): a word of
-    // depth × 8. Only the chosen destination carries it.
-    const int32_t amount = octaves(int64_t{l.depth} / 2);
-    auto depth           = [&](int moved, int destination) {
+    // The depth swings its destination by ±depth, in the destination's
+    // unit; `whole` is what makes 1.0 of the destination's word: an octave
+    // of pitch or of cutoff in semitones, an octave of Q, the pulse width's
+    // rail in percentage points from the square. Only the chosen
+    // destination carries the depth.
+    auto depth = [&](int moved, lfo_dest_t destination, float whole) {
         put(writes,
-                      word_of(synth, channel.depth[static_cast<size_t>(i)]
-                                                  [static_cast<size_t>(moved)]),
-            l.dest == destination ? amount : 0);
+            word_of(synth, channel.depth[static_cast<size_t>(i)]
+                                        [static_cast<size_t>(moved)]),
+            l.destination == destination ? word(l.depth / whole) : 0);
     };
-    depth(wiring::moves_pitch, LFO_DEST_PITCH);
-    depth(wiring::moves_cutoff, LFO_DEST_CUTOFF);
-    depth(wiring::moves_duty, LFO_DEST_DUTY);
-    depth(wiring::moves_resonance, LFO_DEST_RESONANCE);
+    depth(wiring::moves_pitch, LFO_DEST_PITCH, semitones_an_octave);
+    depth(wiring::moves_cutoff, LFO_DEST_CUTOFF, semitones_an_octave);
+    depth(wiring::moves_duty, LFO_DEST_DUTY, square_to_rail);
+    depth(wiring::moves_resonance, LFO_DEST_RESONANCE, 1.0f);
 }
 
 void channel_sound(const wiring::Synth &synth, const preset_t &preset,
@@ -429,44 +426,45 @@ void channel_sound(const wiring::Synth &synth, const preset_t &preset,
     const int channel  = cs::base;
     for (int slot = 0; slot < partials_per_voice; ++slot) {
         const Voicing &partial = plan[slot];
-        const int tune         = preset.osc[partial.oscillator].tune;
-        const int pitch        = partial.active ? tune + partial.detune : 0;
+        const float pitch = partial.active ? preset.osc[partial.oscillator].tune
+                                                     + partial.detune
+                                           : 0.0f;
         put(writes, channel + cs::detune + slot, octaves(pitch));
         // the cutoff follows the partial's own tune and spread at the
         // tracking's ratio; the note and the bend follow it in the voices
         put(writes, channel + cs::cutoff_offset + slot,
-            clamp_word(int64_t{pitch} * preset.filter.key_track * word_per_raw
-                       / 64));
-        const Codes codes = partial.active
-                                    ? gain_codes(preset, partial, sounding)
-                                    : Codes{volume_mute, volume_mute};
-        put(writes, channel + cs::gain_left + slot, gain_of_code(codes.left));
-        put(writes, channel + cs::gain_right + slot, gain_of_code(codes.right));
+            octaves(pitch * preset.filter.key_track / 100.0f));
+        const Gains gain = partial.active ? gains(preset, partial, sounding)
+                                          : Gains{0.0f, 0.0f};
+        put(writes, channel + cs::gain_left + slot, word(gain.left));
+        put(writes, channel + cs::gain_right + slot, word(gain.right));
     }
     // the oscillators: the mode word (waveform [2:0], cascade [3], filter
-    // type [5:4]) and the pulse width, 1.0 being the rail (the program adds
-    // the LFOs)
+    // type [5:4]) and the pulse width from the square, 1.0 being the rail
+    // (the program adds the LFOs)
+    const bool cascade = preset.filter.slope > 12.0f; // two sections: 24
     for (int oscillator = 0; oscillator < 2; ++oscillator) {
         const osc_t &osc = preset.osc[oscillator];
-        const int mode   = (osc.wave & 7) | ((preset.filter.cascade & 1) << 3)
-                         | ((preset.filter.type & 3) << 4);
+        const int mode = osc.wave | (cascade << 3) | (preset.filter.type << 4);
         put(writes, channel + (oscillator ? cs::mode_1 : cs::mode_0), mode);
         put(writes,
             word_of(synth, channel_of(synth)
                                    .duty_base[static_cast<size_t>(oscillator)]),
-            clamp_word(osc.duty >> 9));
+            word((osc.pulse_width - square) / square_to_rail));
     }
+    // the resonance, in octaves of Q above Butterworth
+    constexpr float butterworth = 0.70710678f;
     put(writes, word_of(synth, channel_of(synth).resonance_base),
-        octaves(preset.filter.resonance));
+        word(std::max(std::log2(preset.filter.resonance / butterworth), 0.0f)));
 }
 
 void velocity_amounts(const wiring::Synth &synth, const preset_t &preset,
                       int voice, uint8_t velocity, Writes &writes) {
     const wiring::Voice &words = voice_of(synth, voice);
     put(writes, word_of(synth, words.velocity[wiring::envelope_amp]),
-        fraction(amp_amount(preset, velocity)));
+        word(amp_amount(preset, velocity)));
     put(writes, word_of(synth, words.velocity[wiring::envelope_mod]),
-        fraction(mod_amount(preset, velocity)));
+        word(mod_amount(preset, velocity)));
 }
 
 void note_on(const wiring::Synth &synth, const preset_t &preset, int voice,

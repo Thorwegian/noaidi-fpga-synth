@@ -1,98 +1,69 @@
-// preset.c — the active-preset instance and the init preset.
+// preset.cpp — the active preset and the init preset
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// Foundation of the VA surface: g_preset is the single source of
-// truth for the active sound, and voice_alloc renders from it rather
-// than from constants of its own. preset_init() holds the init preset:
-// the sound when no stored preset loads, and the value of any key a
-// preset file leaves out. The boot timbre itself is a stored preset
-// (system.toml's startup_preset).
+// g_preset is the single source of truth for the active sound, and
+// voice_alloc renders from it. preset_init() holds the init preset: the
+// sound when no stored preset loads, and the value of any key a preset file
+// leaves out. The boot timbre itself is a stored preset (system.toml's
+// startup_preset).
 
 #include "preset.h"
-#include <cstring>
 
 preset_t g_preset;
 
-// RATE COMPENSATION: the envelope walk these bytes are calibrated
-// against runs at 48 kHz, half the sample rate, which alone would
-// double every attack/decay/release time. The rate decode is
-// (16+low4) << high4, so adding 1 to the exponent nibble (+0x10 on
-// the byte) doubles the increment and restores wall-clock times
-// exactly. Saturating: the 16 fastest codes flatten onto the ceiling
-// (already sub-millisecond). Sustain is a LEVEL — untouched.
-// The rate byte: mantissa in the low nibble, exponent in the high one.
-// The +0x10 cancels against the gateware's SHIFT_BIAS of 11; both
-// cancellations are folded into preset_adsr_rate_coeff() below.
-uint8_t preset_adsr_rate_byte(uint8_t preset_rate) {
-    return preset_rate > 0xEF ? 0xFF : (uint8_t) (preset_rate + 0x10);
-}
-
-// One rate byte -> the linear coefficient the CSP multiplies by.
-//
-//   k = round( (16 + low4) / 2^(26 - high4) * 2^ADSR_K_SHIFT )
-//
-// never zero.
-//
-// For shifts at or below ADSR_K_SHIFT this is an exact left shift, so
-// those codes come through bit-for-bit. Slower ones round, which costs
-// resolution above ~11 s and nothing below it.
-uint32_t preset_adsr_rate_coeff(uint8_t rate_byte) {
-    uint32_t mant  = 16u + (rate_byte & 0x0Fu);
-    uint32_t shift = 26u - ((uint32_t) rate_byte >> 4);
-    if (shift <= ADSR_K_SHIFT) {
-        return mant << (ADSR_K_SHIFT - shift);
-    }
-    uint32_t s = shift - ADSR_K_SHIFT;
-    uint32_t k = (mant + (1u << (s - 1))) >> s; // round to nearest
-    return k ? k : 1u; // a zero coefficient would freeze the envelope
-}
-
 void preset_init(preset_t *p) {
-    memset(p, 0, sizeof(*p));
+    *p = preset_t{};
 
-    // One saw: the "1+1" structure with the balance fully on osc 1
-    // (osc_mix −63 mutes osc 2), no unison.
-    p->voice_struct = VOICE_2_PLAIN;
-    p->osc[0].wave  = WAVE_SAW;
-    p->osc[1].wave  = WAVE_SAW;
-    p->osc_mix      = -63;
-
-    // Velocity off: every note at the full envelope amount.
-    p->vel_amp_amt = 0;
-    p->vel_mod_amt = 0;
-
-    // Open filter: 24 dB/oct lowpass with no key tracking, so every note's
-    // cutoff sits at the gateware's FC_MAX (0x2B20) — the base for C4,
-    // which 0 % tracking pins every note to, is 5 × 1024 + 512 — and no
-    // resonance (Butterworth).
-    p->filter.type      = 0; // LP
-    p->filter.cascade   = 1; // 24 dB/oct
-    p->filter.key_track = 0; // 0 %
-    p->filter.cutoff    = 0x2B20 - (5 * 1024 + 512);
-    p->filter.resonance = 0;
-
-    // Organ envelope: fastest attack, full sustain, a short release so
-    // note-off does not click. The MOD envelope has the same shape and
-    // no depth.
-    p->env[0].attack  = 0xFF; // ~1 ms
-    p->env[0].decay   = 0x80;
-    p->env[0].sustain = 0x3FF; // full
-    p->env[0].release = 0xE0;  // ~9 ms
-    p->env[1]         = p->env[0];
-    p->mod_env_dest   = 0; // cutoff
-    p->mod_env_depth  = 0;
-
-    // LFOs at 1 Hz, depth 0: LFO 1 on pitch, LFO 2 on pulse width.
-    for (int i = 0; i < PRESET_NUM_LFO; i++) {
-        p->lfo[i].shape = 2;   // triangle
-        p->lfo[i].rate  = 350; // ~1 Hz (350 × 96000 / 2^25)
-        p->lfo[i].depth = 0;
+    // One saw: the "1+1" structure with the balance fully on osc 1, which
+    // mutes osc 2, and no unison.
+    p->voice.structure     = VOICE_2_PLAIN;
+    p->voice.osc_mix       = -100.0f;
+    p->voice.unison_detune = 0.0f;
+    p->voice.unison_stereo = 0.0f;
+    for (osc_t &osc : p->osc) {
+        osc.wave        = WAVE_SAW;
+        osc.tune        = 0.0f;
+        osc.pulse_width = 50.0f;
     }
-    p->lfo[0].dest = LFO_DEST_PITCH;
-    p->lfo[1].dest = LFO_DEST_DUTY;
 
-    p->volume     = 0xCF; // = VOL_REF, the unity anchor (~-18 dB)
-    p->bend_range = 2;    // ±2 semitones
+    // Open filter: a 24 dB/octave lowpass at the top of its range with no
+    // key tracking, so every note's cutoff sits there, and no resonance
+    // (Butterworth).
+    p->filter.type      = FILTER_LOWPASS;
+    p->filter.slope     = 24.0f;
+    p->filter.cutoff    = 14388.0f;
+    p->filter.resonance = 0.707f;
+    p->filter.key_track = 0.0f;
+
+    // Organ envelope: the fastest attack, full sustain, a short release so
+    // a note-off does not click, and velocity off: every note at the full
+    // amount. The mod envelope has the same shape and no depth.
+    p->amp_env.attack   = 0.001f;
+    p->amp_env.sustain  = 0.0f;
+    p->amp_env.decay    = 0.59f;
+    p->amp_env.release  = 0.009f;
+    p->amp_env.velocity = 0.0f;
+
+    p->mod_env.attack      = p->amp_env.attack;
+    p->mod_env.sustain     = 100.0f;
+    p->mod_env.decay       = p->amp_env.decay;
+    p->mod_env.release     = p->amp_env.release;
+    p->mod_env.velocity    = 0.0f;
+    p->mod_env.destination = MOD_ENV_DEST_CUTOFF;
+    p->mod_env.depth       = 0.0f;
+
+    // LFOs at 1 Hz with no depth: LFO 1 on pitch, LFO 2 on pulse width.
+    for (lfo_t &lfo : p->lfo) {
+        lfo.shape = WAVE_TRI;
+        lfo.rate  = 1.0f;
+        lfo.depth = 0.0f;
+    }
+    p->lfo[0].destination = LFO_DEST_PITCH;
+    p->lfo[1].destination = LFO_DEST_DUTY;
+
+    p->part.volume     = 0.0f; // unity
+    p->part.pan        = 0.0f;
+    p->part.bend_range = 2.0f;
 }

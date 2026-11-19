@@ -260,9 +260,8 @@ ports.
   silent for it with every self-test passing). The console logs the count
   either way, and `csp verify` does the read-back by hand. The sinks
   (`0x800` on) cannot be read back.
-- ADSR rates are 8-bit log₂ in the preset (4-bit octave + 4-bit
-  1/16-octave fraction); firmware decodes them to the coefficient
-  (`preset_adsr_rate_coeff`) the envelope program's rate is made from
+- An envelope's times are seconds in the preset; firmware makes the
+  envelope program's rate of a segment's time constant
   (`csp::envelope_rate`).
 - Velocity scales the amp envelope's amount in dB (a soft note is as many dB
   down as the preset's sensitivity says: the old 60 dB span, taken as an

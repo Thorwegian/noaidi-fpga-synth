@@ -125,214 +125,207 @@ describes format 1.
 
 ## Values and precision
 
-Files hold musical units. The firmware holds raw values, and a value
-in a file is always one raw value written in a musical unit.
+Files hold musical units, and so does the firmware: the preset in memory
+(`preset_t`, `app/main/preset.h`) has the file's tables and keys, and
+every number in it is a `float` in the key's unit. Nothing is converted
+between a file and the preset in memory, and `app/main/render.cpp` makes
+the CSP's words straight from the units.
 
-- **Load:** a value converts to the raw value whose musical value is
-  nearest to it.
-  - Linear units (semitones, dB, percent) compare by difference.
-  - Ratio units (seconds, Hz, Q) compare by ratio.
-  - An exact tie goes to the raw value further from zero.
+- **Load:** a number becomes the nearest `float`.
   - A value outside a key's range is clamped to the range. The ranges
     are what the engine can practically do, not what a MIDI controller
-    reaches; the CCs cover only part of several of them.
-    `sustain = 0` therefore loads as the highest sustain the envelope
-    has.
-- **Save:** a raw value is written as the shortest decimal that loads
-  back to that same raw value. A hand-typed `cutoff = 1000` therefore
-  stays `1000` after a load and a save, instead of `1000.4174`.
-- **Exactness:** load → save → load returns the same raw values, so
-  no number of load/save cycles changes a preset.
-  - Where several raw values sound identical, a load picks one of them
-    (the lowest), so the first save may change the raw value without
-    changing the sound. After that the file never changes.
-  - A host test checks this for every raw value of every key.
-- **Arithmetic:** the firmware converts in `double`. `pulse_width`
-  needs 8 significant digits to reach every raw value, more than a
-  `float` holds.
+    reaches; the CCs cover only part of several of them. `attack = 0`
+    therefore loads as the fastest attack the envelope has.
+  - `inf` and `-inf` are values of their own for the keys that list
+    them, and are clamped like any other number for the rest. `nan` is
+    no number: the key takes the init preset's value.
+- **Save:** a field is written as the shortest decimal that loads back
+  to that same `float`. A hand-typed `cutoff = 1000` therefore stays
+  `1000` after a load and a save. A field outside its key's range (a
+  controller reaches past some of them) is written as what it would
+  load as.
+- **Exactness:** load → save → load returns the same preset, so no
+  number of load/save cycles changes one. A host test checks this with
+  presets drawn over every key's range.
+- **Precision:** a `float` holds seven significant digits. A value typed
+  with more is written back with the digits the `float` holds.
 - **Number types:** any numeric key accepts a TOML integer or a float;
   `24` and `24.0` mean the same.
-- **Integer keys:** `slope` and `bend_range` take whole numbers only.
+- **Integer keys:** `slope` and `bend_range` take whole numbers only: a
+  value between two loads as the nearer, an exact tie as the one further
+  from zero.
 - **Names:** keys that hold a name take a lowercase string from the
   list given for that key.
 
-Pitch and modulation amounts share one scale, the CSP's octaves: a raw
-value of 1024 is one octave. Hence 12 semitones = 1024 raw, and one
-raw step is 1200/1024 ≈ 1.17 cents. Hz values use A4 (MIDI note 69) =
-440 Hz.
+Pitch and modulation amounts are in semitones, 12 to the octave, with
+decimals for the cents. Hz values use A4 (MIDI note 69) = 440 Hz.
 
 ## Preset files
 
-A preset file holds the sound: every field of `preset_t` that the synth
-renders today. `mod` (the modulation matrix) and `arp` are not
-rendered yet and are not stored. A missing key takes the value of the
+A preset file holds the sound: every field of `preset_t`. A missing key
+takes the value of the
 **init preset** (`preset_init`): one saw, an open 24 dB/oct lowpass with
 no key tracking, an
-organ envelope (fastest attack, full sustain, ~9 ms release), velocity
+organ envelope (fastest attack, full sustain, 9 ms release), velocity
 off, no modulation. The init preset is also the sound when no stored
 preset loads.
 
 ### `[voice]`
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `structure` | name: `"1+1"`, `"7+1"`, `"4+4"` | | `voice_struct` 0, 1, 2 |
-| `osc_mix` | percent, −100 = osc 1 only, +100 = osc 2 only | −100 … +100 | `osc_mix` = round(value × 63 / 100) |
-| `unison_detune` | semitones per spread step | 0 … 1 | `unison_detune` = round(value × 1024 / 12) |
-| `unison_stereo` | percent | 0 … 100 | `unison_stereo` = round(value × 127 / 100) |
+| Key | Unit | Range |
+|---|---|---|
+| `structure` | name: `"1+1"`, `"7+1"`, `"4+4"` | |
+| `osc_mix` | percent, −100 = osc 1 only, +100 = osc 2 only | −100 … +100 |
+| `unison_detune` | semitones per spread step | 0 … 1 |
+| `unison_stereo` | percent | 0 … 100 |
 
-`osc_mix` raw values −64 and −63 both mute osc 2, and the synth stores
-−63.
+`osc_mix` turns the other oscillator down, by up to 23.7 dB just short
+of an end; at −100 and +100 it is muted. `unison_stereo` does the same
+to the far side of each partial of a unison group, which lean left and
+right in turn: 0 is every partial in the centre, 100 each on its own
+side alone.
 
 ### `[[osc]]` (twice: osc 1, then osc 2)
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"`, `"noise"` | | `wave` 0, 1, 2, 3, 4 |
-| `tune` | semitones, decimals for the fine part | −48 … +48 | one pitch offset, round(value × 1024 / 12) |
-| `pulse_width` | percent of the cycle the pulse is high | 0 … 100 | `duty` = round((value − 50) / 100 × 2²⁴) |
+| Key | Unit | Range |
+|---|---|---|
+| `wave` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"`, `"noise"` | |
+| `tune` | semitones, decimals for the fine part | −48 … +48 |
+| `pulse_width` | percent of the cycle the pulse is high | 0 … 100 |
 
 The pulse is DC-free at every width, so a width below 50 % sounds the
 same as its mirror above 50 %. Both are allowed, so a modulated width
 can sit on either side. 0 % and 100 % are silent.
 
 `tune` replaces the coarse/fine pair. Coarse and fine are two ways the
-CCs edit one pitch offset, so the file holds the sum. Two decimals
-reach every raw step: `-12.07` is an octave down and 7 cents flat.
+CCs edit one pitch offset, so the file holds the sum: `-12.07` is an
+octave down and 7 cents flat.
 
 ### `[filter]`
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `type` | name: `"lowpass"`, `"bandpass"`, `"highpass"` | | `type` 0, 1, 2 |
-| `slope` | dB/octave | 12 or 24 | `cascade` 0 or 1 |
-| `cutoff` | Hz, for MIDI note 60 (C4) | 8.18 … 14 388 | the cutoff pitch for C4, see below |
-| `resonance` | Q, or `inf` | 0.707 … 32, or `inf` | code = round(1024 × log₂(value × √2)); `inf` = code 0x3FFF |
-| `key_track` | percent | 0 … 200 | `key_track` = round(value × 64 / 100) |
+| Key | Unit | Range |
+|---|---|---|
+| `type` | name: `"lowpass"`, `"bandpass"`, `"highpass"` | |
+| `slope` | dB/octave | 12 or 24 |
+| `cutoff` | Hz, for MIDI note 60 (C4) | 8.18 … 14 388 |
+| `resonance` | Q, or `inf` | 0.707 … 32, or `inf` |
+| `key_track` | percent | 0 … 200 |
 
 **Cutoff.** The filter tracks the final pitch, not just the key. For a
-partial, the filter's pitch (raw) is
+partial, the filter's frequency is
 
-    note_pitch(60) + (partial_pitch − note_pitch(60)) × key_track / 64 + 512 + cutoff_offset
-      + pitch_modulation × key_track / 64
+    cutoff × 2^((partial_pitch − 60 + pitch_modulation) / 12 × key_track / 100)
 
-where `note_pitch(n) = n × 1024 / 12`, `partial_pitch` is the partial's
-own pitch (note_pitch(note) + the oscillator's `tune` + its unison
-detune), `pitch_modulation` is the pitch bend plus the pitch LFOs, and
-`cutoff_offset` is the CC 74/106 setting. So at 100 %, an octave of
-pitch from any source moves the filter an octave. `cutoff` is the
-filter's pitch for note 60 with `tune` 0 and no modulation, in Hz:
-
-    Hz = 440 × 2^((pitch × 12 / 1024 − 69) / 12)
+where `partial_pitch` is the partial's own pitch as a MIDI note number
+(the note + the oscillator's `tune` + its unison detune) and
+`pitch_modulation` is the pitch bend plus the pitch LFOs, in semitones.
+So at 100 %, an octave of pitch from any source moves the filter an
+octave. `cutoff` is the filter's frequency for note 60 with `tune` 0
+and no modulation.
 
 C4 is the reference that key tracking pivots on, so at 0 % key
 tracking `cutoff` is the frequency for every note, tuning and bend.
 
 The gateware clamps the cutoff at `FC_MAX` (14.4 kHz), its
-measured-clean limit, so `cutoff` stops there.
+measured-clean limit, so `cutoff` stops there. The range starts at MIDI
+note 0.
 
-**Resonance** is the effective resonance code: the preset's base value
-plus the CC 71 setting. Q 32 is the sharpest stable setting, the top
-CC 71 reaches. `inf` selects the top code, where the damping decodes
-to zero and the filter self-oscillates. The codes in between, where
-the filter is barely damped, are left out.
+**Resonance** is the filter's Q. 0.707 is Butterworth, no resonance,
+and 32 the sharpest stable setting, the top CC 71 reaches. `inf` is
+the filter with no damping at all: it self-oscillates. The Qs in
+between, where the filter is barely damped, are left out.
 
 ### `[amp_env]` and `[mod_env]`
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `attack` | seconds, zero to full scale | 0.001 … 32 | rate code, see below |
-| `decay` | seconds, for 60 dB of the way to the sustain | 0.0047 … 151 | rate code |
-| `sustain` (`amp_env`) | dB, relative to the peak | −60.2 … −0.06 | `sustain` = round(1024 × (1 + value / 60.206)) |
-| `sustain` (`mod_env`) | percent of the depth | 0 … 99.9 | `sustain` = round(value × 1024 / 100) |
-| `release` | seconds, for a fall of 60 dB | 0.0047 … 151 | rate code |
-| `velocity` | percent: how far a soft note scales the envelope's amount | 0 … 100 | `vel_amp_amt` / `vel_mod_amt` = round(value × 127 / 100) |
+| Key | Unit | Range |
+|---|---|---|
+| `attack` | seconds, zero to full scale | 0.001 … 32 |
+| `decay` | seconds, for 60 dB of the way to the sustain | 0.0047 … 151 |
+| `sustain` (`amp_env`) | dB, relative to the peak | −60.206 … 0 |
+| `sustain` (`mod_env`) | percent of the depth | 0 … 100 |
+| `release` | seconds, for a fall of 60 dB | 0.0047 … 151 |
+| `velocity` | percent: how far a soft note scales the envelope's amount | 0 … 100 |
 
 `[mod_env]` also has:
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `destination` | name: `"cutoff"` | | `mod_env_dest` 0 |
-| `depth` | semitones of cutoff | −129 … +129 | `mod_env_depth` = round(value × 1024 / 12) |
+| Key | Unit | Range |
+|---|---|---|
+| `destination` | name: `"cutoff"` | |
+| `depth` | semitones of cutoff | −129 … +129 |
 
 **Envelope times.** The CSP's envelope (`app/main/wiring.cpp`) is a one-pole RC
-with a wide level: once a pass, at 48 kHz, a segment moves its level
-toward the target by the fraction `RATE` of the distance left, and
-`RATE` is the per-sample coefficient's share of two samples
-(`csp::envelope_rate`: 1 − (1 − α)²), so the curve is the same
-exponential per 96 kHz sample. The step is `D × RATE` in 2⁻³² — there
+with a wide level: once a pass, at 24 kHz, a segment moves its level
+toward the target by the fraction `RATE` of the distance left. The step
+is `D × RATE` in 2⁻³² — there
 is no floor, no rounding worth a word: a segment is the exponential and
-nothing else. The rate code sets `k`; with
-`seconds = samples / 96000`:
+nothing else, and its speed is the exponential's time constant τ
+(`csp::envelope_rate`):
 
-    α = k / 2²⁴        g = −ln(1 − α)
+    RATE = 1 − e^(−1 / (24000 × τ))
+
+A time in a file is a number of time constants.
 
 **Decay and release** end when the remaining distance to the target
 is 60 dB below where it started (0.1 %), which for an exponential is
 the same time from any distance:
 
-    samples = ln(1000) / g
+    seconds = ln(1000) × τ
 
-so a `decay` no longer depends on the sustain it falls to, and a
+so a `decay` does not depend on the sustain it falls to, and a
 `release` means 60 dB down in that many seconds from wherever it
 starts. The amp envelope's level is the voice's linear gain, so a
-release is a straight line in dB: −60 dB over its time. (The old
-`adsr.sv` stepped at least one raw unit a sample and ended linearly;
-its law, kept into revision 2, made a "9.9 s" release a 21 s fall once
-the gain was linear — #176.)
+release is a straight line in dB: −60 dB over its time.
 
-**Attack** charges toward `T = 1.3 × F` and ends at full scale, with
-0.3 / 1.3 of the drive left:
+**Attack** charges toward 1.3 × full scale and ends at full scale, with
+0.3 / 1.3 of the way left:
 
-    samples = ln(1.3 / 0.3) / g
+    seconds = ln(1.3 / 0.3) × τ
 
-A time converts to the rate code whose time is nearest by ratio, and
-the lowest code wins a tie. The codes span 0.0047 … 151 s for a fall
-and 0.0010 … 32 s for an attack.
+**Amp envelope sustain.** The amp envelope's level is the voice's
+linear gain, and the sustain is the gain the decay ends at, in dB below
+the peak, at full velocity. The range ends ten octaves of gain down.
 
-Rate codes 0xF0–0xFF share one coefficient, and so do some slow codes.
-Of the 256 codes, 232 sound different.
-
-**Amp envelope sustain.** The amp envelope's level spans 60.206 dB of
-gain (10 octaves on the gain). Sustain in dB is
-−60.206 × (1 − level), at full velocity.
+**Velocity.** At 0 % every note has the envelope's full amount. The amp
+envelope's peak is 60.2 dB × `velocity` / 100 lower for the softest
+note than for the hardest, in proportion in between. The mod envelope's
+depth is scaled by the velocity once at 50 % and twice at 100 %, so a
+hard note opens the filter further.
 
 ### `[[lfo]]` (twice: LFO 1, then LFO 2)
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `shape` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | | `shape` 0, 1, 2, 3 |
-| `rate` | Hz | 0.0029 … 187 | `rate` = round(value × 2²⁵ / 96000) |
-| `destination` | name, see below | | `dest` |
-| `depth` | the destination's unit, peak | see below | `depth` |
+| Key | Unit | Range |
+|---|---|---|
+| `shape` | name: `"saw"`, `"pulse"`, `"triangle"`, `"sine"` | |
+| `rate` | Hz | 0.0029 … 187 |
+| `destination` | name, see below | |
+| `depth` | the destination's unit, peak | see below |
 
-| `destination` | `depth` unit | `depth` range | `depth` raw value |
-|---|---|---|---|
-| `"pulse_width"` | percentage points of pulse width | −50 … +50 | round(2 × value × 1024 / 50) |
-| `"resonance"` | octaves of Q | −5.5 … +5.5 | round(2 × value × 1024) |
-| `"pitch"` | semitones | −48 … +48 | round(2 × value × 1024 / 12) |
-| `"cutoff"` | semitones | −129 … +129 | round(2 × value × 1024 / 12) |
+| `destination` | `depth` unit | `depth` range |
+|---|---|---|
+| `"pulse_width"` | percentage points of pulse width | −50 … +50 |
+| `"resonance"` | octaves of Q | −5.5 … +5.5 |
+| `"pitch"` | semitones | −48 … +48 |
+| `"cutoff"` | semitones | −129 … +129 |
 
-`depth` is the instruction's COEF. The LFO's wave swings ±0.5 in the
-CSP's Q2.16 scale, so a raw `depth` of `d` moves the destination by
-±`d` / 2, hence the factor 2.
+`depth` is the peak: the LFO swings its destination by ±`depth` around
+where the preset has it.
 
-- **Destinations:** both LFOs take any of the four (`dest` 0
-  `pulse_width`, 1 `resonance`, 2 `pitch`, 3 `cutoff`).
-- **Reading order:** the loader reads `destination` before `depth`.
+- **Destinations:** both LFOs take any of the four.
+- **Reading order:** the loader reads `destination` before `depth`,
+  whose range is the destination's.
 
 ### `[part]`
 
 Preset-specific settings for the part that plays the preset.
 
-| Key | Unit | Range | Raw value |
-|---|---|---|---|
-| `volume` | dB, 0 = unity; `-inf` = off | −77.5 … +18 | `volume` = 207 + round(value / 0.37629); raw 0 = off |
-| `pan` | percent, −100 = left, +100 = right | −100 … +100 | `pan` = round(value × 63 / 100) |
-| `bend_range` | semitones, whole | 0 … 48 | `bend_range` |
+| Key | Unit | Range |
+|---|---|---|
+| `volume` | dB, 0 = unity; `-inf` = off | −77.5 … +18, or `-inf` |
+| `pan` | percent, −100 = left, +100 = right | −100 … +100 |
+| `bend_range` | semitones, whole | 0 … 48 |
 
-`pan` raw values −64 and −63 both mute the right side, and the synth
-stores −63.
+`pan` turns the far side down as `osc_mix` does an oscillator: by up to
+23.7 dB, and muted at −100 and +100.
 
 ### Example: the factory preset `Pads/Supersaw.toml`
 

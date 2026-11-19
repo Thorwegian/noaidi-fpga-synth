@@ -130,7 +130,7 @@ void point_partials() {
                               pointers.data());
         }
     }
-    s_pointed_struct = g_preset.voice_struct;
+    s_pointed_struct = g_preset.voice.structure;
 }
 
 
@@ -188,7 +188,7 @@ void update_voices() {
     render::cutoff(engine_link_synth(), g_preset, s_controllers,
                    writes); // the key tracking
     send(writes);
-    if (g_preset.voice_struct != s_pointed_struct) {
+    if (g_preset.voice.structure != s_pointed_struct) {
         point_partials();
     }
 }
@@ -285,16 +285,15 @@ void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
     send(writes);
 }
 
-// Pitch wheel: ±bend_range semitones (RPN 0; default ±2). The wheel's 14 bits
-// are ±8192; the raw octave steps are 1024 to the octave.
+// Pitch wheel: ± the preset's bend range (RPN 0; ±2 semitones in the init
+// preset). The wheel's 14 bits are ±8192 around the centre.
 void pitch_bend_update(uint16_t bend14) {
-    const int16_t raw =
-            static_cast<int16_t>((static_cast<int32_t>(bend14) - 8192)
-                                 * g_preset.bend_range * 1024 / 12 / 8192);
-    if (raw == s_controllers.bend) {
+    const float semitones = static_cast<float>(static_cast<int>(bend14) - 8192)
+                            / 8192.0f * g_preset.part.bend_range;
+    if (semitones == s_controllers.bend) {
         return;
     }
-    s_controllers.bend = raw;
+    s_controllers.bend = semitones;
     render::Writes writes;
     render::pitch_bend(engine_link_synth(), s_controllers, writes);
     send(writes);
@@ -353,9 +352,8 @@ void sustain_pedal_update(bool down) {
 // ---- CCs --------------------------------------------------------------------------------------------
 
 // The preset's CCs are cc_map's; what is handled here is performance (the
-// wheel, the pedal), the RPN mechanism, panic and the test tone. STORED but
-// not yet rendered: mod_env_dest (CC 108; cutoff is the only live MOD-env
-// destination). The arp has no CC yet.
+// wheel, the pedal), the RPN mechanism, panic and the test tone. The arp has
+// no CC yet.
 
 // RPN state: CC 101/100 select an RPN, CC 6 (data entry MSB) writes it. RPN
 // 0/0 = pitch-bend range, the standard mechanism. 127/127 is RPN null; an
@@ -366,12 +364,14 @@ uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
 bool handle_cc(uint8_t num, uint8_t val) {
     switch (num) {
     // ---- the wheel and the pedal ----
-    case 1:
-        if (val != s_controllers.wheel) {
-            s_controllers.wheel = val;
+    case 1: {
+        const float wheel = static_cast<float>(val) / 127.0f;
+        if (wheel != s_controllers.wheel) {
+            s_controllers.wheel = wheel;
             s_pending |= dirty_cutoff; // mod wheel → cutoff
         }
         return false;
+    }
     case 64:
         sustain_pedal_update(val >= 64);
         return false;
@@ -389,8 +389,9 @@ bool handle_cc(uint8_t num, uint8_t val) {
         return false;
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
-            g_preset.bend_range = std::clamp<uint8_t>(
-                    val, 1, 12); // takes effect on the next bend
+            // takes effect on the next bend
+            g_preset.part.bend_range =
+                    static_cast<float>(std::clamp<uint8_t>(val, 1, 12));
         }
         return false;
     case 38:
