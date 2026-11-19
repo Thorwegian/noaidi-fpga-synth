@@ -70,9 +70,9 @@ struct DspGraph::Node {
         delay,  // value: its input
         through // a: the pointer, x: the offset, value: the field
     };
-    Kind kind         = Kind::source;
-    Width width       = Width::word;
-    Overflow overflow = Overflow::saturate;
+    Kind kind           = Kind::source;
+    Width width         = Width::word;
+    Overflow overflow   = Overflow::saturate;
     Condition condition = Condition::always;
     Wire a, x, y, b;
     int32_t value  = none;
@@ -142,8 +142,8 @@ DspGraph::Wire DspGraph::sum(Wire a, Wire x, Wire y, Overflow overflow) {
     node.x        = x;
     node.y        = y;
     node.overflow = overflow;
-    node.width = a.node == none ? Width::word
-                                : nodes_[static_cast<size_t>(a.node)].width;
+    node.width    = a.node == none ? Width::word
+                                   : nodes_[static_cast<size_t>(a.node)].width;
     return add(node);
 }
 
@@ -159,8 +159,8 @@ DspGraph::Wire DspGraph::multiply_add(Wire a, Wire x, Wire y,
     node.x        = x;
     node.y        = y;
     node.overflow = overflow;
-    node.width = a.node == none ? Width::word
-                                : nodes_[static_cast<size_t>(a.node)].width;
+    node.width    = a.node == none ? Width::word
+                                   : nodes_[static_cast<size_t>(a.node)].width;
     return add(node);
 }
 
@@ -320,8 +320,7 @@ DspGraph::Wire DspGraph::offset_of(Record inner) {
 }
 
 void DspGraph::sink(int address, Wire value) {
-    if (address < sink_base || address >= sink_area_end
-        || value.node == none) {
+    if (address < sink_base || address >= sink_area_end || value.node == none) {
         issue("a sink is a word of the sink area with a value");
         return;
     }
@@ -379,11 +378,11 @@ struct DspGraph::Lowering {
         Condition cond = Condition::always;
         Operand r, x, y;
         IndexRegister which = IndexRegister::j; // an IDX's
-        int32_t group       = none;  // the index group it issues in
-        bool is_idx         = false; // the group's IDX
-        bool sets_flags     = false; // a CMP a SEL waits for
-        int32_t compare     = none;  // a SEL's CMP
-        int height          = 0;     // the longest way to the program's end
+        int32_t group       = none;             // the index group it issues in
+        bool is_idx         = false;            // the group's IDX
+        bool sets_flags     = false;            // a CMP a SEL waits for
+        int32_t compare     = none;             // a SEL's CMP
+        int height          = 0; // the longest way to the program's end
         std::vector<std::pair<int32_t, int>>
                 behind; // (instruction, cycles): what it issues behind
     };
@@ -480,6 +479,12 @@ struct DspGraph::Lowering {
                 node(wire).fetched = true;
             }
         };
+        // j is what the program has least of: every pointer's rows take
+        // their turn with it. A field with several readers is fetched once
+        // and costs one cycle of j, not one for each reader.
+        for (Node &each : nodes) {
+            each.fetched = each.kind == Kind::through && each.readers > 1;
+        }
         for (size_t at = 0; at < nodes.size(); ++at) {
             Node &reader = nodes[at];
             switch (reader.kind) {
@@ -554,7 +559,7 @@ struct DspGraph::Lowering {
     // operand a: a's output is read by nothing else, and neither is read by
     // a delay, which needs its word untouched until its own row.
     bool takes_word_of(const Node &taker, int32_t a) {
-        const Node &given = nodes[static_cast<size_t>(a)];
+        const Node &given   = nodes[static_cast<size_t>(a)];
         const bool has_word = given.is_operator()
                               || (given.kind == Kind::through && given.fetched);
         return has_word && given.readers == 1 && !given.delayed
@@ -568,11 +573,11 @@ struct DspGraph::Lowering {
             ++sinks_of[value.node];
         }
         for (size_t at = 0; at < nodes.size(); ++at) {
-            Node &each    = nodes[at];
-            each.storage  = static_cast<int32_t>(at);
-            each.in_place = false;
-            each.copies_a = false;
-            each.sink     = none;
+            Node &each             = nodes[at];
+            each.storage           = static_cast<int32_t>(at);
+            each.in_place          = false;
+            each.copies_a          = false;
+            each.sink              = none;
             const bool accumulates = each.kind == Kind::sum
                                      || each.kind == Kind::multiply_add
                                      || each.kind == Kind::shift;
@@ -586,8 +591,7 @@ struct DspGraph::Lowering {
                     each.storage  = each.a.node;
                 } else if (each.kind == Kind::sum
                            && each.overflow == Overflow::saturate
-                           && !connected(each.y)
-                           && each.width == Width::word) {
+                           && !connected(each.y) && each.width == Width::word) {
                     // a + x from zero: no word of a's is needed
                     each.y = each.x;
                     each.x = each.a;
@@ -619,17 +623,19 @@ struct DspGraph::Lowering {
         for (const auto &[address, value] : graph.sinks_) {
             Node &each           = node(value);
             const bool from_zero = !each.in_place && !each.copies_a;
-            bool pointed         = false;
+            // its row issues with the sinks, at the pass's end: too late for
+            // a delay's value, and with j taken
+            bool pointed = false;
             for (const Wire wire : {each.a, each.x, each.y, each.b}) {
                 pointed = pointed
                           || (connected(wire)
-                              && node(wire).kind == Kind::through
-                              && !node(wire).fetched);
+                              && (node(wire).kind == Kind::delay
+                                  || (node(wire).kind == Kind::through
+                                      && !node(wire).fetched)));
             }
             // (not a select: its SEL would wait for the sinks' turn with the flags held)
             if (each.is_operator() && each.kind != Kind::select && from_zero
-                && !pointed
-                && each.readers == 0 && !each.delayed
+                && !pointed && each.readers == 0 && !each.delayed
                 && sinks_of[value.node] == 1 && each.record == none
                 && each.width == Width::word
                 && storage_root(value.node) == value.node) {
@@ -725,18 +731,16 @@ struct DspGraph::Lowering {
             graph.issue("the graph's words do not fit DMEM: "
                         + std::to_string(high - register_count) + " too many");
         }
-        std::fill(graph.writers_.begin(), graph.writers_.end(),
-                  Writer::nobody);
+        std::fill(graph.writers_.begin(), graph.writers_.end(), Writer::nobody);
         for (size_t at = 0; at < nodes.size(); ++at) {
             Node &each = nodes[at];
             if (each.sink != none) {
                 each.address = each.sink;
                 continue;
             }
-            const Node &root =
-                    nodes[static_cast<size_t>(storage_root(
-                            static_cast<int32_t>(at)))];
-            each.address = root.address;
+            const Node &root = nodes[static_cast<size_t>(
+                    storage_root(static_cast<int32_t>(at)))];
+            each.address     = root.address;
             if (each.address == none || each.address >= register_count) {
                 continue;
             }
@@ -746,9 +750,9 @@ struct DspGraph::Lowering {
                             : Writer::program;
             const int size = each.width == Width::dword ? 2 : 1;
             for (int word = 0; word < size; ++word) {
-                Writer &slot =
-                        graph.writers_[static_cast<size_t>(each.address + word)];
-                slot = slot == Writer::program ? slot : writer;
+                Writer &slot = graph.writers_[static_cast<size_t>(each.address
+                                                                  + word)];
+                slot         = slot == Writer::program ? slot : writer;
             }
         }
     }
@@ -765,9 +769,9 @@ struct DspGraph::Lowering {
 
     // The offset of a read through a pointer in the record j points at.
     int field_offset(const Node &read) {
-        const RecordLayout *record =
-                &graph.records_[static_cast<size_t>(graph.target_sets_[
-                        static_cast<size_t>(node(read.a).value)].front())];
+        const RecordLayout *record = &graph.records_[static_cast<size_t>(
+                graph.target_sets_[static_cast<size_t>(node(read.a).value)]
+                        .front())];
         if (connected(read.x)) {
             for (const Field &inside : record->fields) {
                 if (inside.record.index != none) {
@@ -832,19 +836,19 @@ struct DspGraph::Lowering {
                 if (field.record.index != none) {
                     opened.may_hold.push_back(
                             graph.records_[static_cast<size_t>(
-                                                  field.record.index)]
+                                                   field.record.index)]
                                     .address);
                 }
             }
         }
         Instruction idx;
-        idx.op     = Op::idx;
-        idx.is_idx = true;
-        idx.group  = group;
+        idx.op           = Op::idx;
+        idx.is_idx       = true;
+        idx.group        = group;
         int32_t no_group = none;
-        idx.x      = operand(read.a, no_group);
-        idx.y      = operand(read.x, no_group);
-        opened.idx = emit(idx);
+        idx.x            = operand(read.a, no_group);
+        idx.y            = operand(read.x, no_group);
+        opened.idx       = emit(idx);
     }
 
     int32_t sinks_group() {
@@ -907,8 +911,8 @@ struct DspGraph::Lowering {
             const int offset = field_offset(each);
             copy(r, {Reach::pointed, offset}, each.group);
             if (wide) { // a dword is fetched as its two words
-                copy(at_address(each.address + 1),
-                     {Reach::pointed, offset + 1}, each.group);
+                copy(at_address(each.address + 1), {Reach::pointed, offset + 1},
+                     each.group);
             }
             return;
         }
@@ -970,9 +974,8 @@ struct DspGraph::Lowering {
             break;
         }
         case Kind::select: {
-            const int32_t compare =
-                    arithmetic(Op::cmp, {Reach::zero, 0}, ASource::zero, each.x,
-                               each.y);
+            const int32_t compare = arithmetic(Op::cmp, {Reach::zero, 0},
+                                               ASource::zero, each.x, each.y);
             code[static_cast<size_t>(compare)].sets_flags = true;
             const int32_t select =
                     arithmetic(Op::sel, r, ASource::zero, each.a, each.b);
@@ -1027,12 +1030,12 @@ struct DspGraph::Lowering {
                 continue;
             }
             Instruction row; // sink ← value × 1.0
-            row.op         = Op::mac;
-            row.r          = at_address(address);
-            int32_t group  = none;
-            row.x          = operand(value, group);
-            row.y          = {Reach::immediate, word_one};
-            row.group      = sink_group;
+            row.op        = Op::mac;
+            row.r         = at_address(address);
+            int32_t group = none;
+            row.x         = operand(value, group);
+            row.y         = {Reach::immediate, word_one};
+            row.group     = sink_group;
             emit(row);
         }
     }
@@ -1164,7 +1167,7 @@ struct DspGraph::Lowering {
         int32_t open_group = none, open_compare = none;
         size_t members_left = 0;
         int64_t cycle       = 0;
-        auto can_issue = [&](const Instruction &row, int64_t by,
+        auto can_issue      = [&](const Instruction &row, int64_t by,
                              int32_t except) {
             for (const auto &[other, cycles] : row.behind) {
                 if (other == except) {
@@ -1196,9 +1199,9 @@ struct DspGraph::Lowering {
                     for (const int32_t member : group.members) {
                         ready = ready
                                 && (group.sinks
-                                    || can_issue(code[static_cast<size_t>(
-                                                         member)],
-                                                 by++, at));
+                                    || can_issue(
+                                            code[static_cast<size_t>(member)],
+                                            by++, at));
                     }
                     if (!ready) {
                         continue;
@@ -1244,9 +1247,9 @@ struct DspGraph::Lowering {
             issued_at[static_cast<size_t>(best)] = cycle++;
             order.push_back(best);
             if (row.is_idx && row.group != none) {
-                open_group   = row.group;
-                members_left = groups[static_cast<size_t>(row.group)]
-                                       .members.size();
+                open_group = row.group;
+                members_left =
+                        groups[static_cast<size_t>(row.group)].members.size();
                 if (members_left == 0) {
                     open_group = none;
                 }

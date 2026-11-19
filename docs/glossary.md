@@ -109,6 +109,19 @@ control signal once a pass. The instruction set is
   (`app/main/csp/generator.cpp`) emits the program for a graph through the
   program builder; `make csp-test` holds its image equal to the assembled
   one.
+- **DSP graph** — the classic DSP flowchart as a flat netlist
+  (`app/main/csp/dsp_graph.hpp`): sources the firmware sets, constants,
+  operators (sum, multiply, multiply-add, difference, absolute value,
+  maximum, minimum, shift, select) and sinks, wired by ordinary loops. A
+  connection is **fixed** (an address in the instruction), **delayed**
+  (z⁻¹: last pass's value) or **movable** (read through a pointer the
+  firmware writes, to a field of a **record**). The graph lays out CSP
+  memory by reach, says where each value lives and who writes it, and
+  emits itself through the program builder as **straight-line code**, an
+  instruction for every operator, in an order it picks so that few waits
+  are left. `make csp-test` wires today's synth as a graph and holds its
+  sinks equal to the control program's on the reference model, pass for
+  pass. The firmware does not load the graph's program.
 - **row** — one instruction, a qword in IMEM; "row" because the memories
   are rows and the chip knows nothing else. A **wait** is a NOP row the
   assembler lays so an operand is ready; the **END row** is the last,

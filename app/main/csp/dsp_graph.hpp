@@ -105,7 +105,8 @@ public:
     // unconnected; a constant goes in x or y, one to an operator.
 
     // a + x + y
-    Wire sum(Wire a, Wire x, Wire y = {}, Overflow overflow = Overflow::saturate);
+    Wire sum(Wire a, Wire x, Wire y = {},
+             Overflow overflow = Overflow::saturate);
     // x × y
     Wire multiply(Wire x, Wire y);
     // a + x × y, the product at full precision. With a dword `a` the output

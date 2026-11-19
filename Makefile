@@ -27,8 +27,11 @@
 #   make csp-test   host tests of the CSP reference model and assembler, that
 #                   the firmware's generator (app/main/csp/generator.cpp),
 #                   whose image the firmware loads, gives the assembled
-#                   control program's image, and that control_program.hpp
-#                   is current
+#                   control program's image, that control_program.hpp
+#                   is current, and of the DSP graph
+#                   (app/main/csp/dsp_graph.cpp): today's synth wired as a
+#                   graph gives the control program's sinks on the model;
+#                   prints the rows and cycles of both
 #   make csp-header regenerate app/main/csp/control_program.hpp from
 #                   tools/csp/programs (the register map's names for the
 #                   firmware, and the assembled program the generator is
@@ -99,6 +102,11 @@ CSP_TEST    = $(HOST_DIR)/csp_test
 # the tool writes: the test builds with it, the tool does not.
 CSP_GENERATOR     = app/main/csp/generator.cpp
 CSP_GENERATOR_HDR = app/main/csp/generator.hpp app/main/csp/graph.hpp
+# The DSP graph and its test: today's wiring from the graph beside the
+# generator's program on the reference model.
+CSP_GRAPH      = app/main/csp/dsp_graph.cpp
+CSP_GRAPH_HDR  = app/main/csp/dsp_graph.hpp
+CSP_GRAPH_TEST = $(HOST_DIR)/dsp_graph_test
 
 all: pack fw
 
@@ -204,10 +212,12 @@ csp-header: $(CSP_TOOL) $(CSP_PROGRAM_FILES) $(CSP_SELFTEST_FILES)
 	$(CSP_TOOL) header $(CSP_PROGRAM_FILES) > $(CSP_CONTROL_HEADER)
 	$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest > $(CSP_SELFTEST_HEADER)
 
-csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GENERATOR) $(CSP_GENERATOR_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GENERATOR) $(CSP_GENERATOR_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL) $(CSP_PROGRAM_FILES)
 	mkdir -p $(HOST_DIR)
 	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_GENERATOR) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_GRAPH_TEST) $(CSP_SRC) $(CSP_GENERATOR) $(CSP_GRAPH) $(CSP_DIR)/test/dsp_graph_test.cpp
+	$(CSP_GRAPH_TEST)
 	@$(CSP_TOOL) header $(CSP_PROGRAM_FILES) | diff -u $(CSP_CONTROL_HEADER) - > /dev/null \
 	    || { echo "FAIL $(CSP_CONTROL_HEADER) is stale: make csp-header"; exit 1; }
 	@$(CSP_TOOL) header $(CSP_SELFTEST_FILES) -n selftest | diff -u $(CSP_SELFTEST_HEADER) - > /dev/null \
