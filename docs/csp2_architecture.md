@@ -108,8 +108,8 @@ are in their registers from cycle 9, which a `SEL`
 reads in its E1b (4): a reader issues **5** cycles after the writer, which
 the assembler takes (rev 1's `SKIP`, reading in R2, needed 7). An
 `IDX` writes its index at the end of its E1b; a row's A reads it **5**
-cycles after the `IDX` issues, the four rows between being NOPs the
-assembler lays itself. The sum is registered one stage into E1b so a flop,
+cycles after the `IDX` issues; the four rows between are rows that do not
+use that index register, or NOPs the assembler lays itself. The sum is registered one stage into E1b so a flop,
 not the raw adder, drives the element-copy LUT-RAM pins (#238). A loop's repeat is decided in A and redirects the
 program counter: the four rows behind the loop's last, in D3, D2, D1 and F,
 are discarded, so a repeat costs **4** cycles. A vector loop's row is known

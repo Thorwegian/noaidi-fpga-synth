@@ -249,8 +249,8 @@ int Processor::resolve(const Operand &operand) const {
 }
 
 // The address an operand names, checked: the index register is ready (an
-// IDX's index lands index_latency cycles after its issue, which the front
-// end waits for in scalar code and the schedule spaces in a vector body),
+// IDX's index lands index_latency cycles after its issue, which the
+// schedule leaves between the IDX and the rows that use its index),
 // and the offset's bits sit beside the index's, so that the OR the chip
 // does is the sum the program meant.
 int Processor::resolve_checked(const Operand &operand, PassState &state) const {
@@ -732,7 +732,7 @@ PassReport Processor::pass() {
         } else {
             execute(decoded, state);
             note_writes(decoded, state);
-            ++state.cycle; // an IDX is one cycle: the NOP rows after it carry the wait
+            ++state.cycle; // an IDX is one cycle: the rows after it carry the wait
         }
         end_loops(state);
     }

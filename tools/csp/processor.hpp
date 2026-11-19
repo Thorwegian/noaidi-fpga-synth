@@ -12,7 +12,7 @@
 //
 // The chip has no interlock, so the model does not wait either: it counts
 // the cycle every row issues in, exactly as the front end does (one a
-// cycle, the index barrier, the jump penalty, a vector loop's rounds),
+// cycle, the jump penalty, a vector loop's rounds),
 // keeps a scoreboard of when each value is written, and reports a row
 // that reads a value before it is ready — the proof that the assembler's
 // schedule is the chip's. Likewise an indexed access whose offset's bits
