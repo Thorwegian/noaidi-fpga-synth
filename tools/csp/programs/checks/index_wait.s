@@ -5,12 +5,15 @@
 ;
 ; An IDX's index is in its register five cycles after the IDX issues, and the
 ; assembler places only the rows that use that index register behind it: the
-; rows between use the other index register, or none. Here every kind of row
-; stands in a wait: a row with direct operands, the other register's IDX, a
-; row through the other index, and an IDX whose own operand is read through
-; the other index. The blocks the indexes point at change every pass, so a row
-; that used an index too early, or one that was held up, leaves its result in
-; another block than the model's.
+; rows between use the other index register, or none.
+;
+; The first part has bases the assembler knows, so nothing but the index is
+; waited for: the rows in the waits are a row with direct operands and the
+; other register's IDX, and each index is used in the first cycle it can be.
+; A row that used i too early would use the block i was left at by the pass
+; before. The second part points the indexes at blocks that change every
+; pass, by a register and by a pointer read through the other index, with a
+; row through the other index in the wait.
 ;
 ; The registers and the block every check shares, and the two rows at the top
 ; that count the passes run (RUN_COUNT wraps), so that `csp match` runs the
@@ -33,16 +36,24 @@
         .reg RUN_COUNT, 0x3FE
         ADD3   RUN_ONE, 0, =1.0, ZERO
         MACW   RUN_COUNT, RUN_COUNT, RUN_ONE, =#1
+            ADD3   S_, 0, A_, RUN_COUNT         ; the count is ready from here on
+            IDX    i, =#0x200, 0
+            ADD3   C_, 0, A_, B_                ; in i's wait: a row that uses no index
+            IDX    j, =#0x240, 0                ;   and the other register's IDX
+            MAC    D_, 0, A_, =0.5              ; in both waits
+            MAC    T_, 0, B_, =0.5
+            ADD3   [i+Y], 0, [i+X], RUN_COUNT   ; the first cycle i can be used
+            MAC    [i+Z], 0, [i+X], =0.5        ; j is in flight still
+            ADD3   [j+Y], 0, [j+X], RUN_COUNT   ; the first cycle j can be used
+
             ANDXOR T_, 0, RUN_COUNT, =#7
             SHIFT  T_, T_, =#3                  ; a block's offset, another every pass: 0, 8 … 56
-            IDX    i, =#0x200, T_               ; i lands five cycles on
-            ADD3   S_, 0, A_, B_                ; in its wait: a row that uses no index
-            IDX    j, =#0x280, T_               ;   and the other register's IDX
-            MAC    D_, 0, A_, =0.5              ; in both waits
-            ADD3   [i+Y], 0, [i+X], RUN_COUNT   ; i has landed, j is in flight
-            ADD3   [j+Y], 0, [j+X], S_          ; j has landed
-            ADD3   [j+Z], 0, =#0x2C0, T_        ; a pointer to a third block, written through j
+            IDX    i, =#0x280, T_
+            ADD3   S_, 0, A_, B_                ; in its wait
+            IDX    j, =#0x2C0, T_
+            ADD3   [i+Y], 0, [i+X], RUN_COUNT   ; behind an index set from a register, a row
+            ADD3   [j+Y], 0, [j+X], S_          ;   waits for every earlier write as well
+            ADD3   [j+Z], 0, =#0x300, T_        ; a pointer to a third block, written through j
             IDX    i, [j+Z], ZERO               ; i again: its operand read through j
             MAC    [j+SPARE], 0, [j+Y], =0.5    ; in i's wait: a row through the other index
-            ADD3   C_, 0, D_, S_                ;   and one through none
-            ADD3   [i+Y], 0, [i+X], [j+SPARE]   ; i has landed on the third block
+            ADD3   [i+Y], 0, [i+X], [j+SPARE]   ; i is at the third block
