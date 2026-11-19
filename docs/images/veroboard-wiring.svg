@@ -1695,10 +1695,10 @@
 <rect x="414" y="141" width="12" height="18" rx="2" fill="#7d7d7d" stroke="#555" />
 <path d="M230,265 L230.0,311.0 Q230,316 235.0,316.0 L481.0,316.0 Q486,316 486.0,321.0 L486.0,545.0 Q486,550 481.0,550.0 L470,550" stroke="#55601a" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M230,265 L230.0,311.0 Q230,316 235.0,316.0 L481.0,316.0 Q486,316 486.0,321.0 L486.0,545.0 Q486,550 481.0,550.0 L470,550" stroke="#8a9a2b" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M360,265 L360.0,325.0 Q360,330 365.0,330.0 L404,330" stroke="#000000" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M360,265 L360.0,325.0 Q360,330 365.0,330.0 L404,330" stroke="#2e2e2e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M100,265 L100.0,355.0 Q100,360 105.0,360.0 L375.0,360.0 Q380,360 380.0,365.0 L380,490" stroke="#9a1f1f" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M100,265 L100.0,355.0 Q100,360 105.0,360.0 L375.0,360.0 Q380,360 380.0,365.0 L380,490" stroke="#e23b3b" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M100,265 L100.0,340.0 Q100,345 105.0,345.0 L404,345" stroke="#000000" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M100,265 L100.0,340.0 Q100,345 105.0,345.0 L404,345" stroke="#2e2e2e" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M360,265 L360.0,285.0 Q360,290 365.0,290.0 L375.0,290.0 Q380,290 380.0,295.0 L380,490" stroke="#9a1f1f" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M360,265 L360.0,285.0 Q360,290 365.0,290.0 L375.0,290.0 Q380,290 380.0,295.0 L380,490" stroke="#e23b3b" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M404,330 L650,330" stroke="#000" stroke-width="7" stroke-linecap="round" fill="none"/>
 <path d="M404,330 L650,330" stroke="#2e2e2e" stroke-width="5" stroke-linecap="round" fill="none"/>
 <path d="M420,158 L420,330" stroke="#000000" stroke-width="4.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
@@ -2019,20 +2019,23 @@
 <text x="201" y="673" font-family="Helvetica, Arial, sans-serif" font-size="8" fill="#cfcfcf" text-anchor="start" font-weight="normal">4</text>
 <text x="239" y="673" font-family="Helvetica, Arial, sans-serif" font-size="8" fill="#cfcfcf" text-anchor="end" font-weight="normal">5</text>
 <text x="80" y="205" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#333" text-anchor="start" font-weight="normal">10 kΩ slide potentiometer, wiper on GPIO1 of the socket</text>
+<text x="80" y="220" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#555" text-anchor="start" font-weight="normal">min</text>
+<text x="380" y="220" font-family="Helvetica, Arial, sans-serif" font-size="9.5" fill="#555" text-anchor="end" font-weight="normal">max</text>
 <circle cx="100" cy="265" r="4.2" fill="#d9b44a" stroke="#7a6520" stroke-width="1"/>
 <circle cx="230" cy="265" r="4.2" fill="#d9b44a" stroke="#7a6520" stroke-width="1"/>
 <circle cx="360" cy="265" r="4.2" fill="#d9b44a" stroke="#7a6520" stroke-width="1"/>
-<rect x="355.0" y="286.0" width="10" height="24" rx="3" fill="#ead9ae" stroke="#8a7440" />
-<rect x="355.0" y="290.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
-<rect x="355.0" y="296.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
-<rect x="355.0" y="302.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
-<text x="350" y="302" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#333" text-anchor="end" font-weight="normal">680 Ω</text>
+<circle cx="404" cy="345" r="3.6" fill="#000000"/>
+<rect x="95.0" y="293.0" width="10" height="24" rx="3" fill="#ead9ae" stroke="#8a7440" />
+<rect x="95.0" y="297.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<rect x="95.0" y="303.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<rect x="95.0" y="309.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<text x="111" y="309" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#333" text-anchor="start" font-weight="normal">680 Ω</text>
 <circle cx="380" cy="490" r="3.6" fill="#9a1f1f"/>
-<rect x="228.0" y="355.0" width="24" height="10" rx="3" fill="#ead9ae" stroke="#8a7440" />
-<rect x="232.8" y="355.0" width="2.4" height="10" rx="0" fill="#8a5a2b" stroke="none" />
-<rect x="238.8" y="355.0" width="2.4" height="10" rx="0" fill="#8a5a2b" stroke="none" />
-<rect x="244.8" y="355.0" width="2.4" height="10" rx="0" fill="#8a5a2b" stroke="none" />
-<text x="240" y="350" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#333" text-anchor="middle" font-weight="normal">3.6 kΩ</text>
+<rect x="375.0" y="408.0" width="10" height="24" rx="3" fill="#ead9ae" stroke="#8a7440" />
+<rect x="375.0" y="412.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<rect x="375.0" y="418.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<rect x="375.0" y="424.8" width="10" height="2.4" rx="0" fill="#8a5a2b" stroke="none" />
+<text x="370" y="424" font-family="Helvetica, Arial, sans-serif" font-size="11" fill="#333" text-anchor="end" font-weight="normal">3.6 kΩ</text>
 <text x="60" y="128" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#333" text-anchor="start" font-weight="bold">S/PDIF 96 kHz, coaxial cable</text>
 <text x="452" y="348" font-family="Helvetica, Arial, sans-serif" font-size="10.5" fill="#222" text-anchor="middle" font-weight="bold">GND</text>
 <circle cx="404" cy="550" r="3.6" fill="#000000"/>
@@ -2106,6 +2109,6 @@
 <text x="802" y="1132" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#333" text-anchor="start" font-weight="normal">joint (wires that only cross are not joined)</text>
 <text x="60" y="1158" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">Tang Nano numbers are FPGA package pins. ESP32 numbers are GPIOs, as printed on the boards.</text>
 <text x="60" y="1178" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">Each MIDI input is the 6N138 circuit of docs/thirdparty/MIDI-circuit-6N138.png, built without its diode and fed from the ESP32&#x27;s 3.3 V.</text>
-<text x="60" y="1198" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">The potentiometer&#x27;s wiper ends at the socket: the jumper cable has no wire for it.</text>
+<text x="60" y="1198" font-family="Helvetica, Arial, sans-serif" font-size="11.5" fill="#555" text-anchor="start" font-weight="normal">The slide potentiometer was used during early testing and was later abandoned: the jumper cable has no wire for its wiper.</text>
 </g>
 </svg>

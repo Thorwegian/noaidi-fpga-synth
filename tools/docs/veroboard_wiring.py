@@ -23,7 +23,9 @@
 #     its diode and fed from 3.3 V;
 #   - the jumper cable (the wire colours, the socket pin and the module pin
 #     of each wire) and the slide potentiometer's three resistances are
-#     recorded here and nowhere else in the repository.
+#     recorded here and nowhere else in the repository. The potentiometer's
+#     left end is its minimum: the wiper's voltage rises with the travel,
+#     so that end has the 680 ohm to ground.
 import math
 import sys
 from html import escape
@@ -205,14 +207,17 @@ rect(parts, 80, 225, 300, 40, "#d0d3d8", "#888", 3)
 rect(parts, 100, 240, 260, 10, "#6b5b53", "none", 2)
 rect(parts, 130, 231, 22, 28, "#444", "#222", 2)
 text(top, 80, 205, "10 kΩ slide potentiometer, wiper on GPIO1 of the socket", 10.5, "#333")
+text(top, 80, 220, "min", 9.5, "#555")
+text(top, 380, 220, "max", 9.5, "#555", "end")
 for x in (100, 230, 360):
     pad(x, 265)
 board_wire([(230, 265), (230, 316), (486, 316), (486, 550), (XL, 550)], "olive")
-board_wire([(360, 265), (360, 330), (404, 330)], "black")
-resistor(360, 298, True, "680 Ω", (350, 302), "end")
-board_wire([(100, 265), (100, 360), (380, 360), (380, 490)], "red")
+board_wire([(100, 265), (100, 345), (404, 345)], "black")
+dot(404, 345, "black")
+resistor(100, 305, True, "680 Ω", (111, 309))
+board_wire([(360, 265), (360, 290), (380, 290), (380, 490)], "red")
 dot(380, 490, "red")
-resistor(240, 360, False, "3.6 kΩ", (240, 350), "middle")
+resistor(380, 420, True, "3.6 kΩ", (370, 424), "end")
 
 # Coaxial S/PDIF cable
 parts.append('<path d="M0,150 L455,150" stroke="#8f8f8f" stroke-width="16" stroke-linecap="butt" fill="none"/>')
@@ -308,7 +313,7 @@ top.append(f'<circle cx="790" cy="1128" r="3.6" fill="{COLOURS["blue"][1]}"/>')
 text(top, 802, 1132, "joint (wires that only cross are not joined)", 11.5, "#333")
 text(top, 60, 1158, "Tang Nano numbers are FPGA package pins. ESP32 numbers are GPIOs, as printed on the boards.", 11.5, "#555")
 text(top, 60, 1178, "Each MIDI input is the 6N138 circuit of docs/thirdparty/MIDI-circuit-6N138.png, built without its diode and fed from the ESP32's 3.3 V.", 11.5, "#555")
-text(top, 60, 1198, "The potentiometer's wiper ends at the socket: the jumper cable has no wire for it.", 11.5, "#555")
+text(top, 60, 1198, "The slide potentiometer was used during early testing and was later abandoned: the jumper cable has no wire for its wiper.", 11.5, "#555")
 
 # Title
 TITLE = "Noaidi Synth prototype: veroboard wiring"
