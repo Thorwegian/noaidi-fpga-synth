@@ -939,7 +939,9 @@ void test_builder_index_targets() {
     const csp::ProgramBuilder::Built built = with.build();
     const csp::ProgramBuilder::Built plain = without.build();
     check(built.ok && plain.ok, "the pointer programs build");
-    const int after_idx = csp::index_latency; // the first row behind the IDX
+    // the write to another word issues in the IDX's wait, so the first read
+    // through j stands in the row j lands in
+    const int after_idx = csp::index_latency - 1;
     check_equal(
             static_cast<int64_t>(built.position[rows.behind_another_word]),
             after_idx + 1,
@@ -959,7 +961,7 @@ void test_builder_index_targets() {
                 "and to no other word");
     check_equal(
             static_cast<int64_t>(plain.position[rows.behind_another_word]),
-            after_idx + csp::result_latency,
+            1 + csp::result_latency,
             "without a list, a read through an index waits for every earlier write");
     check(built.cycles < plain.cycles,
           "the list makes the pass shorter: " + std::to_string(built.cycles)
