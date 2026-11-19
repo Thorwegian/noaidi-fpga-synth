@@ -273,6 +273,10 @@ void GraphEvaluator::pass() {
     }
 }
 
+int64_t GraphEvaluator::probe(DspGraph::Wire wire) const {
+    return wire.node == none ? 0 : values_[static_cast<size_t>(wire.node)];
+}
+
 int32_t GraphEvaluator::sink(int address) const {
     int32_t value = 0;
     for (const auto &[at, wire] : graph_.sinks_) {

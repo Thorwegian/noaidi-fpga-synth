@@ -55,6 +55,10 @@ public:
     // The sink addresses the graph has, in the order it made them.
     std::vector<int> sink_addresses() const;
 
+    // A node's value after the last pass, in its own width: what a probe of
+    // the word the graph gave it would read (a dword whole).
+    int64_t probe(DspGraph::Wire wire) const;
+
 private:
     void store(DspGraph::Wire wire, int64_t raw, int bits);
     // A wire in a word operand's place: a dword gives its upper word.
