@@ -8,7 +8,7 @@ Galaxy's LFOs are free-running, so no two takes of it line up.
 usage: benchmark_compare.py <recording.wav> [--baseline NAME] [--benchmark DIR]
                             [--plot PNG] [--json FILE]
 
-The baselines are baselines.py's: galaxy (the default) and powerbass, each
+The baselines are baselines.py's: galaxy (the default) and sawbass, each
 with its preset, the transposition its sequence is played at and its
 benchmark's files. The recording is measured as baseline_check.py measures it (every segment's
 level, pitch clusters, centroid, peaks and partials, and the level envelope)
@@ -23,7 +23,10 @@ folder keeps as JSON and CSV so that the benchmark WAV is not needed:
   - the spectral centroid of each sounding segment: within half an octave;
   - the valley floor of each sounding segment (the level between the
     harmonics, baseline_check.py): not more than 6 dB fuller than the
-    benchmark's — the test for a gritty sound (Thor, #222);
+    benchmark's — the test for a gritty sound (Thor, #222). Both are read
+    no deeper than 80 dB below the strongest line: under that the row reads
+    a floor that moved by as much as 13 dB between takes of SawBass whose
+    levels agreed within a tenth of a dB;
   - the partials of each single note (multiples of half the fundamental,
     the octave-below oscillator's series): a mean difference of at most
     6 dB over the partials the benchmark has within 40 dB of its strongest;
@@ -59,6 +62,7 @@ CENTROID_TOLERANCE = 6.0                          # semitones
 PARTIAL_TOLERANCE = 6.0                           # dB, mean over the benchmark's partials within
 PARTIAL_WINDOW = 40.0                             # ... this many dB of its strongest
 VALLEY_TOLERANCE = 6.0                            # dB, the valley floor between the harmonics, fuller than the benchmark's
+VALLEY_FLOOR = -80.0                              # dB below the strongest line: a valley floor is read no deeper
 ENVELOPE_CORRELATION = 0.9
 
 
@@ -100,7 +104,7 @@ def compare_segment(reference, candidate):
     rows.append(("centroid", "%.0f Hz" % reference["centroid_hz"], "%.0f Hz" % candidate["centroid_hz"],
                  "%+.1f st" % semitones, "±%.0f st" % CENTROID_TOLERANCE, abs(semitones) <= CENTROID_TOLERANCE))
     if "valley_db" in reference and "valley_db" in candidate:
-        fuller = candidate["valley_db"] - reference["valley_db"]
+        fuller = max(VALLEY_FLOOR, candidate["valley_db"]) - max(VALLEY_FLOOR, reference["valley_db"])
         rows.append(("valley floor", "%.1f dB" % reference["valley_db"], "%.1f dB" % candidate["valley_db"],
                      "%+.1f dB" % fuller, "≤ +%.0f dB" % VALLEY_TOLERANCE, fuller <= VALLEY_TOLERANCE))
     if reference["partials_db"]:

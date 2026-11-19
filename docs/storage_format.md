@@ -86,10 +86,11 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 
 - **`Presets/Factory`** holds the presets shipped with the firmware.
   The synth never writes there.
-- **`Presets/Factory/Tests`** holds the lab's presets: copies of presets
-  from the categories, which the acceptance on the board plays against
-  recorded benchmarks (`tools/lab/baselines.py`). A preset in a category is
-  voiced and moves; its copy here does not, and a change to one re-records
+- **`Presets/Factory/Tests`** holds the lab's presets, which the acceptance
+  on the board plays against recorded benchmarks
+  (`tools/lab/baselines.py`): Galaxy, a copy of the pad, and SawBass, one saw
+  of the PowerBass. A preset in a category is
+  voiced and moves; these do not, and a change to one re-records
   its benchmark. `User` has no such folder.
 - **`Presets/User`** holds the user's presets. The synth saves only
   here.

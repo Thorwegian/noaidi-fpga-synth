@@ -229,7 +229,7 @@ control signal once a pass. The instruction set is
   another: the self-test, `csp verify`, and the **baseline take**, run as
   one command by `tools/lab/acceptance.py`.
 - **baseline take** — the fixed sequence played on one of the lab's presets
-  (`Presets/Factory/Tests`: Galaxy, and PowerBass two octaves down), recorded
+  (`Presets/Factory/Tests`: Galaxy, and SawBass two octaves down), recorded
   through the half-band
   tap and compared with that preset's benchmark in `tools/lab/benchmark` (envelope,
   pitch classes, centroid, partials, **valley floor**: the silence between

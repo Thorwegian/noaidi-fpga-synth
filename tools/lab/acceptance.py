@@ -6,7 +6,7 @@
   1. the boot's self-test: the chip does what the model says;
   2. `csp verify`: every register the firmware wrote, read back through the
      probe, none differing;
-  3. each baseline (baselines.py: powerbass, then galaxy): its preset loaded,
+  3. each baseline (baselines.py: sawbass, then galaxy): its preset loaded,
      its sequence recorded over S/PDIF, through baseline_check.py (Essentia)
      and benchmark_compare.py against its benchmark (tools/lab/benchmark):
      envelope, pitch classes, centroid, partials, valley floor.
@@ -194,7 +194,7 @@ def main():
     parser = argparse.ArgumentParser(description="the three acceptances on the board")
     parser.add_argument("--out", required=True, help="the directory for the recordings, the tables and the verdict")
     parser.add_argument("--label", default="take", help="the files' base name")
-    parser.add_argument("--baseline", default="powerbass,galaxy",
+    parser.add_argument("--baseline", default="sawbass,galaxy",
                         help="the baselines to play, comma-separated, in order (baselines.py)")
     parser.add_argument("--fs", help="load this bitstream first (SRAM)")
     parser.add_argument("--loader", default="openFPGALoader", help="--fs: the loader")

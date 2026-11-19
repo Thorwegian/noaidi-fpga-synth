@@ -3,8 +3,8 @@
 format = 1
 
 [voice]
-structure = "7+1"
-osc_mix = 0
+structure = "1+1"
+osc_mix = -100
 unison_detune = 0.046875
 unison_stereo = 0
 

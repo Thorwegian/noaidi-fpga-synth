@@ -89,10 +89,10 @@ port. The synth's own preset saves are bare TOML without the copyright header
 
 ## The baselines
 
-The acceptance plays the lab's baselines (`baselines.py`): PowerBass two
+The acceptance plays the lab's baselines (`baselines.py`): SawBass two
 octaves down, then Galaxy, each against its benchmark (`benchmark/`).
 
-- **The presets are the storage's `Presets/Factory/Tests`**, copies kept for
+- **The presets are the storage's `Presets/Factory/Tests`**, kept for
   the lab, and the programs of bank 16383, "Tests" (`app/storage/banks.toml`,
   `docs/storage_format.md`). The acceptance loads one as a controller would,
   Bank Select 127/127 and a Program Change over the wire, and records only
@@ -102,20 +102,30 @@ octaves down, then Galaxy, each against its benchmark (`benchmark/`).
 - **A board needs the folder and the bank in its storage.**
   `make fw-storage-flash` writes them with everything else and erases the
   user's presets. On a board whose presets are to stay, the console makes
-  them from the two presets they are copies of:
+  them from the two presets they come from. Galaxy is a copy; SawBass is the
+  PowerBass with the voice structure at `1+1` and the mix at oscillator 1,
+  which two CCs set (CC 26 = 0, CC 24 = 0; `aconnect 14:0 16:0` first, as
+  above):
 
   ```
   mkdir /Presets/Factory/Tests
   load /Presets/Factory/Pads/Galaxy.toml
   save /Presets/Factory/Tests/Galaxy.toml
   load /Presets/Factory/Basses/PowerBass.toml
-  save /Presets/Factory/Tests/PowerBass.toml
+  ```
+  ```
+  aseqsend -p 16:0 "B0 1A 00"
+  aseqsend -p 16:0 "B0 18 00"
+  ```
+  ```
+  save /Presets/Factory/Tests/SawBass.toml
   bank build 16383 /Presets/Factory/Tests
   ```
 
   `bank build` takes the files in path order, which is the order of the
-  programs: Galaxy 0, PowerBass 1. The bank it makes is named after the
-  folder.
+  programs: Galaxy 0, SawBass 1. The bank it makes is named after the
+  folder. The acceptance's own check then says whether the two files are
+  the checkout's.
 - **The acceptance leaves the channel's bank at 0.** A Program Change sent
   without a Bank Select is of the bank the channel had last, and stays there
   until the ESP32 restarts.

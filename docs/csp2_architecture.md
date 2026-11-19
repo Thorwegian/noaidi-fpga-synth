@@ -264,7 +264,7 @@ with whatever its registers hold. Then, before the first note:
 2. **`csp verify`**: every register the firmware wrote, read back through
    the probe; sent again while they differ, the count printed;
 3. the **baseline takes** through `tools/lab`: the sequence played on each
-   of the lab's presets (PowerBass, then Galaxy), loaded by Bank Select and
+   of the lab's presets (SawBass, then Galaxy), loaded by Bank Select and
    Program Change,
    recorded, checked with Essentia, compared with its benchmark's
    envelope, pitch classes, centroid, partials and valley floor.
