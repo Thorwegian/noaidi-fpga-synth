@@ -840,6 +840,127 @@ end:
           "the builder reports reach, and a loop never closed");
 }
 
+// An IDX that says which addresses its index may hold: a pointer. Each
+// instruction's row is the cycle it issues in, the program being straight-line.
+void test_builder_index_targets() {
+    using csp::ASource;
+    using csp::IndexRegister;
+    using csp::Operand;
+    using csp::Source;
+    const Operand pointer = Operand::direct(0x060);
+    const Operand value   = Operand::direct(0x071);
+    const Source zero     = Source::reg(Operand::direct(0));
+    const std::array<int, 2> blocks{0x200, 0x210};
+    auto through = [](int offset) {
+        return Operand::indexed(IndexRegister::j, offset);
+    };
+    auto copy = [&](csp::ProgramBuilder &b, Operand to, Operand from) {
+        return b.add3(to, ASource::zero, Source::reg(from), zero);
+    };
+    // the program, with the list or without it
+    struct Rows {
+        size_t behind_another_word, behind_a_named_word, another_offset,
+                direct_behind_the_index, direct_elsewhere;
+    };
+    auto program = [&](csp::ProgramBuilder &b, bool with_targets) {
+        if (with_targets) {
+            b.idx(IndexRegister::j, Source::reg(pointer), zero,
+                  b.targets(blocks));
+        } else {
+            b.idx(IndexRegister::j, Source::reg(pointer), zero);
+        }
+        Rows rows{};
+        copy(b, Operand::direct(0x070), value);
+        rows.behind_another_word = copy(b, Operand::direct(0x072), through(1));
+        copy(b, Operand::direct(0x211), value);
+        rows.behind_a_named_word = copy(b, Operand::direct(0x073), through(1));
+        rows.another_offset      = copy(b, Operand::direct(0x074), through(2));
+        copy(b, through(3), value);
+        rows.direct_behind_the_index =
+                copy(b, Operand::direct(0x075), Operand::direct(0x213));
+        rows.direct_elsewhere =
+                copy(b, Operand::direct(0x076), Operand::direct(0x214));
+        return rows;
+    };
+    csp::ProgramBuilder with, without;
+    const Rows rows = program(with, true);
+    program(without, false);
+    const csp::ProgramBuilder::Built built = with.build();
+    const csp::ProgramBuilder::Built plain = without.build();
+    check(built.ok && plain.ok, "the pointer programs build");
+    const int after_idx = csp::index_latency; // the first row behind the IDX
+    check_equal(
+            static_cast<int64_t>(built.position[rows.behind_another_word]),
+            after_idx + 1,
+            "a read through a pointer does not wait for a write to a word outside its list");
+    check_equal(static_cast<int64_t>(built.position[rows.behind_a_named_word]),
+                after_idx + 2 + csp::result_latency,
+                "it waits for a write to a word of its list");
+    check_equal(static_cast<int64_t>(built.position[rows.another_offset]),
+                after_idx + 3 + csp::result_latency,
+                "another offset of the same blocks is another word");
+    check_equal(
+            static_cast<int64_t>(built.position[rows.direct_behind_the_index]),
+            after_idx + 4 + 2 * csp::result_latency,
+            "a write through a pointer is a write to every word it may name");
+    check_equal(static_cast<int64_t>(built.position[rows.direct_elsewhere]),
+                after_idx + 5 + 2 * csp::result_latency,
+                "and to no other word");
+    check_equal(
+            static_cast<int64_t>(plain.position[rows.behind_another_word]),
+            after_idx + csp::result_latency,
+            "without a list, a read through an index waits for every earlier write");
+    check(built.cycles < plain.cycles,
+          "the list makes the pass shorter: " + std::to_string(built.cycles)
+                  + " cycles against " + std::to_string(plain.cycles));
+
+    // on the model, the pointer at each block of its list
+    for (const int block : blocks) {
+        csp::Processor cpu;
+        cpu.write(0x060, block);
+        cpu.write(0x071, q(0.75));
+        cpu.write(block + 1, q(0.25));
+        cpu.write(block + 2, q(-0.5));
+        cpu.swap();
+        cpu.pass();
+        check(cpu.load(built.image), "the pointer program loads");
+        cpu.release();
+        const csp::PassReport report = cpu.pass();
+        for (const std::string &error : report.errors) {
+            std::printf("  model: %s\n", error.c_str());
+        }
+        const std::string where = ", the pointer at " + std::to_string(block);
+        check(report.errors.empty(), "the model reads nothing early" + where);
+        check_equal(report.cycles, built.cycles,
+                    "the model counts the builder's cycles" + where);
+        // only the second block's word 1 is overwritten before the second read
+        check_equal(cpu.read(0x072), q(0.25),
+                    "the first read is the word as it was" + where);
+        check_equal(cpu.read(0x073), block == 0x210 ? q(0.75) : q(0.25),
+                    "the second read is behind the write" + where);
+        check_equal(cpu.read(0x074), q(-0.5), "the third read" + where);
+        check_equal(cpu.read(block + 3), q(0.75),
+                    "the write through the pointer" + where);
+    }
+
+    // the list is a promise: a pointer outside it reads a word early, and the model says so
+    csp::ProgramBuilder broken;
+    broken.idx(IndexRegister::j, Source::reg(pointer), zero,
+               broken.targets(blocks));
+    copy(broken, Operand::direct(0x221), value);
+    copy(broken, Operand::direct(0x072), through(1));
+    const csp::ProgramBuilder::Built unkept = broken.build();
+    csp::Processor cpu;
+    cpu.write(0x060, 0x220);
+    cpu.swap();
+    cpu.pass();
+    check(unkept.ok && cpu.load(unkept.image),
+          "the program with the unkept promise builds and loads");
+    cpu.release();
+    check(!cpu.pass().errors.empty(),
+          "the model reports the early read of a pointer outside its list");
+}
+
 // ---- the programs ---------------------------------------------------------------
 
 const char *envelope_program = R"(
@@ -1477,6 +1598,7 @@ int main() {
     test_assembler();
     test_labels_and_count();
     test_builder();
+    test_builder_index_targets();
     test_envelope();
     test_lfo();
     test_envelope_rates();
