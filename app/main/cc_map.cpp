@@ -394,10 +394,6 @@ bool apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     case 107:
         preset.mod_env.depth = mod_depth_of(value);
         return true;
-    case 108:
-        // the cutoff is the one destination there is
-        preset.mod_env.destination = MOD_ENV_DEST_CUTOFF;
-        return true;
     case 87:
         preset.mod_env.velocity = percent_of(value);
         return true;
@@ -509,7 +505,6 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
     emit(103, nearest(fall_of, preset.mod_env.decay), user);
     emit(104, nearest(mod_sustain_of, preset.mod_env.sustain), user);
     emit(105, nearest(fall_of, preset.mod_env.release), user);
-    emit(108, four_way(preset.mod_env.destination), user);
     emit(107, nearest(mod_depth_of, preset.mod_env.depth), user);
     emit(87, nearest(percent_of, preset.mod_env.velocity), user);
     // the LFOs
@@ -518,7 +513,7 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
 }
 
 int dump_length() {
-    return 2 + rpn_messages + 2 * 4 + 4 + 6 + 5 + 7 + 2 * 5;
+    return 2 + rpn_messages + 2 * 4 + 4 + 6 + 5 + 6 + 2 * 5;
 }
 
 } // namespace cc_map

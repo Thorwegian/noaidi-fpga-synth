@@ -43,13 +43,13 @@ void preset_init(preset_t *p) {
     p->amp_env.release  = 0.009f;
     p->amp_env.velocity = 0.0f;
 
-    p->mod_env.attack      = p->amp_env.attack;
-    p->mod_env.sustain     = 100.0f;
-    p->mod_env.decay       = p->amp_env.decay;
-    p->mod_env.release     = p->amp_env.release;
-    p->mod_env.velocity    = 0.0f;
-    p->mod_env.destination = MOD_ENV_DEST_CUTOFF;
-    p->mod_env.depth       = 0.0f;
+    p->mod_env.attack   = p->amp_env.attack;
+    p->mod_env.sustain  = 100.0f;
+    p->mod_env.decay    = p->amp_env.decay;
+    p->mod_env.release  = p->amp_env.release;
+    p->mod_env.velocity = 0.0f;
+    p->mod_env.depth    = 0.0f;
+    p->mod_env.pitch    = 0.0f;
 
     // LFOs at 1 Hz with no depth: LFO 1 on pitch, LFO 2 on pulse width.
     for (lfo_t &lfo : p->lfo) {

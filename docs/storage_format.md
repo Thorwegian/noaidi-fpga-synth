@@ -257,8 +257,8 @@ between, where the filter is barely damped, are left out.
 
 | Key | Unit | Range |
 |---|---|---|
-| `destination` | name: `"cutoff"` | |
 | `depth` | semitones of cutoff | −129 … +129 |
+| `pitch` | semitones of pitch | −48 … +48 |
 
 **Envelope times.** The CSP's envelope (`app/main/sound_engine.cpp`) is a one-pole RC
 with a wide level: once a pass, at 24 kHz, a segment moves its level

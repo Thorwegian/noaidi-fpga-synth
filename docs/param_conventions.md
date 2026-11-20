@@ -45,11 +45,11 @@ attack is the first 77 % of an RC charge toward 1.3 times full scale
 (convex in amplitude, F1 below fixed), and the decay and release are RC
 falls (exponential amplitude, as every classic). The preset's sustain is a
 loudness in dB below the peak (`sound_engine.cpp` makes the amplitude of it).
-The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain are loudnesses, in dB: the firmware takes the exponential once (`sound_engine.cpp`, `amplitude`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup preset's depth of 24 fits the register.
+The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain are loudnesses, in dB: the firmware takes the exponential once (`sound_engine.cpp`, `amplitude`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup preset's depth of 24 fits the register; its pitch amount takes no such shift, a pitch depth staying inside a word's eight octaves.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our
-MOD envelope does on the cutoff, in octaves. **The MOD envelope
+MOD envelope does on the cutoff and the pitch, in octaves and semitones. **The MOD envelope
 conforms natively; F1's deviation is the AMP envelope's attack
 only.**
 

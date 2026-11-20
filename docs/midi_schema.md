@@ -102,7 +102,6 @@ CC values share the top rung, 21 of them for the amp envelope's D and R.
 | 102 / 103 / 105 | MOD env A / D / R | the same ladder: A 1 ms … 32 s, D and R 4.7 ms … 151 s |
 | 104 | MOD env S | `cc/128` of the depth (a level, not inverted) |
 | 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper, d·\|d\|·3/64 semitones with d = `cc − 64`: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule) |
-| 108 | MOD env destination | the MOD env drives the cutoff, its one destination, whatever the value |
 
 **LFOs** (2)
 | CC | Target | Notes |

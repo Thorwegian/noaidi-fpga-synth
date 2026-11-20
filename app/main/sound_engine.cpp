@@ -62,7 +62,8 @@ enum { field_target, field_rate };
 enum {
     field_pitch = Wiring::envelope_count * Wiring::stage_count,
     field_cutoff,
-    field_mod_amount,
+    field_mod_cut_amount,
+    field_mod_pit_amount,
     field_key_track
 };
 
@@ -149,10 +150,11 @@ void wire_channel(Graph &graph, Wiring &wiring, int c) {
             }
         }
     }
-    channel.bend        = graph.source();
-    channel.cutoff_base = graph.source();
-    channel.key_track   = graph.source();
-    channel.mod_amount  = graph.source();
+    channel.bend           = graph.source();
+    channel.cutoff_base    = graph.source();
+    channel.key_track      = graph.source();
+    channel.mod_cut_amount = graph.source();
+    channel.mod_pit_amount = graph.source();
     // the bend and the pitch LFOs: added to every note
     channel.pitch =
             paths.moved(Wiring::moves_pitch)
@@ -199,7 +201,8 @@ void wire_channel(Graph &graph, Wiring &wiring, int c) {
     }
     fields.push_back(channel.pitch);
     fields.push_back(channel.cutoff);
-    fields.push_back(channel.mod_amount);
+    fields.push_back(channel.mod_cut_amount);
+    fields.push_back(channel.mod_pit_amount);
     fields.push_back(channel.key_track);
     channel.record = graph.record(fields);
 }
@@ -236,13 +239,17 @@ void wire_voice(Graph &graph, Wiring &wiring, int v) {
         voice.level[e] = before;
         envelope[e]    = graph.multiply(level, voice.velocity[e]);
     }
-    const Wire pitch =
-            graph.sum(voice.note, graph.through(voice.channel, field_pitch));
-    // the mod envelope's depth is a quarter of itself in its word: a depth
-    // reaches 32 octaves, a word holds 8
+    // The mod envelope's two amounts: the pitch's takes no shift, a pitch
+    // depth staying inside a word's eight octaves; the cutoff's is a quarter
+    // of itself in its word, a depth reaching 32 octaves where a word holds
+    // 8.
+    const Wire pitch = graph.multiply_add(
+            graph.sum(voice.note, graph.through(voice.channel, field_pitch)),
+            envelope[Wiring::envelope_mod],
+            graph.through(voice.channel, field_mod_pit_amount));
     Wire cutoff =
             graph.multiply(envelope[Wiring::envelope_mod],
-                           graph.through(voice.channel, field_mod_amount));
+                           graph.through(voice.channel, field_mod_cut_amount));
     cutoff = graph.shift(cutoff, 2);
     cutoff = graph.multiply_add(cutoff, voice.note,
                                 graph.through(voice.channel, field_key_track));
@@ -760,15 +767,20 @@ void SoundEngine::mod_envelope(int c, Writes &writes) const {
     const mod_env_t &env = committed_[static_cast<size_t>(c)].mod_env;
     envelope(c, Wiring::envelope_mod, env.attack, env.decay, env.release,
              env.sustain / 100.0f, writes);
-    // the depth: the envelope runs from 0 to 1, in octaves of cutoff. The
-    // wiring takes the mod amount as a quarter of the depth and multiplies
-    // by four after the envelope (a depth reaches 32 octaves, a word holds
-    // 8). Written whole, Galaxy's 2.85 octaves became eleven, the cutoff
-    // pinned at the top and the pad an octave brighter than the benchmark's
-    // (issue #222: the centroid 3960 Hz against 1561 on a C5, 729 with the
-    // word zeroed).
-    put(writes, address(wiring().channels[static_cast<size_t>(c)].mod_amount),
+    // The cut amount: the envelope runs from 0 to 1, in octaves of cutoff.
+    // The wiring takes it as a quarter of the depth and multiplies by four
+    // after the envelope (a depth reaches 32 octaves, a word holds 8).
+    // Written whole, Galaxy's 2.85 octaves became eleven, the cutoff pinned
+    // at the top and the pad an octave brighter than the benchmark's (issue
+    // #222: the centroid 3960 Hz against 1561 on a C5, 729 with the word
+    // zeroed). The pitch amount stays inside a word's eight octaves, so it
+    // is written whole and takes no shift.
+    put(writes,
+        address(wiring().channels[static_cast<size_t>(c)].mod_cut_amount),
         octaves(env.depth / 4.0f));
+    put(writes,
+        address(wiring().channels[static_cast<size_t>(c)].mod_pit_amount),
+        octaves(env.pitch));
 }
 
 // The cutoff and the wheel, and the key tracking.
