@@ -156,7 +156,7 @@ the way a hardware synth's panel does.
   state, and are never sent on (no THRU, and a surface never hears
   itself).
 - **Where.** Every MIDI output the synth has: MIDI over BLE today, the
-  wired MIDI OUT on UART0's TX pin when the board has it.
+  wired MIDI OUT on a free UART's TX pin when the board has it.
 - **What a value reads back as.** Each CC's law inverted: the knob value
   whose law lands nearest the field, the exact one where it exists (a
   7-bit knob into a 4-way switch reads back as the switch's position,

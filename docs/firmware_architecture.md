@@ -43,8 +43,8 @@ the synth model, above the console): what the model queues is framed as
 MIDI 1.0 over BLE, as many messages a packet as the negotiated MTU
 holds, and sent as a notification on the MIDI characteristic once a
 central has subscribed; without one the messages are consumed, not
-kept. A producer never blocks: a full queue drops and counts. UART0's
-free TX pin is the wired MIDI OUT when the board has the driver, a
+kept. A producer never blocks: a full queue drops and counts. A free
+UART's TX pin is the wired MIDI OUT when the board has the driver, a
 second output on the same queue.
 
 ## synth model
@@ -215,6 +215,16 @@ files, presets, banks, and system state. Commands run in the console
 task. The status bar's right end is a meter the engine link feeds
 (`engine_meter`, priority 1, one `DIAG_LIMITER` read every 50 ms, the log of the gain taken here): one
 column per 0.375 dB of the master limiter's gain reduction.
+
+**The UARTs.** UART0 is the console's and the flashing path's: the
+module's CH343 on GPIO43 and GPIO44, the socket marked `COM`, where the
+ROM prints its boot lines (#515). UART1 receives MIDI in 1 (`U1RXD`,
+GPIO18) and UART2 the panel port's input, both receive-only through an
+optocoupler. The carrier's J12 header carries `PANEL_UART_TX` and
+`PANEL_UART_RX` on GPIO15 and GPIO16 for the front panel board
+(noaidi-fpga-synth-kicad #147); a controller's receive half is one pin,
+so a two-way link there means the panel port's optocoupler no longer
+drives UART2's.
 
 ## Sequencers / arpeggiators
 
