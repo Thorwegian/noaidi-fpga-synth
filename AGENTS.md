@@ -1,9 +1,5 @@
 # Rules
 
-- A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else, and a voice's words are its own.
-
-- A channel is a little synthesiser of its own that just happens to draw on the shared voice pool, just happens to share the MIDI cable with the synths beside it, and just happens to be plugged into the same mixing desk: they meet at those three and nowhere else, and nothing beyond the channel sets what it sounds like.
-
 - Git policies:
   - Agents have GitHub accounts. `gh` access tokens and SSH keys are set up in their home directories.
   - Agents read GitHub through GraphQL queries in preference to REST calls.
@@ -102,3 +98,9 @@ License: CERN-OHL-S v2
   - It places against the lab box's `chipdb-GW2A-18C.bin`, copied over the one its own build generates.
   - The build places on the machine it runs on, so a placement is carried to the Mac by hand: `yosys.json` and `constraints.cst` over, nextpnr with the Makefile's options, `pnr.json` back.
 - Worktrees live under `~/wt` on the cloud box and the lab box: `git worktree add ~/wt/wt-<issue> -b <branch> main`. A worktree holds its own `rtl/obj_dir`, `yosys.json` and `pnr.log`.
+
+# Paradigms
+
+- A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else, and a voice's words are its own.
+
+- A channel is a little synthesiser of its own that just happens to draw on the shared voice pool, just happens to share the MIDI cable with the synths beside it, and just happens to be plugged into the same mixing desk: they meet at those three and nowhere else, and nothing beyond the channel sets what it sounds like.
