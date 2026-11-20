@@ -736,6 +736,162 @@ void test_copies_that_point_at_each_other() {
                 "sums that are wrong, of copies that point at each other");
 }
 
+// A select whose compare reads a word through a pointer and whose operand is
+// another select's result. The one compares the loop's own word, the other a
+// word the pointer holds: in the open group the pointer's compare ranks above
+// the one it does not, though the select it sets the flags for waits on the
+// other compare's. Sixteen copies are a loop and its body orders; two and
+// eight are straight-line code. Every sink has the value worked out here.
+void test_a_nested_select(int count, bool looped, int body_rows) {
+    const std::string what = std::to_string(count) + " nested selects";
+    auto a_of              = [](int c) {
+        return 0.125 * (1 + c % 4);
+    };
+    auto b_of = [](int c) {
+        return 0.125 * (2 + c % 5);
+    };
+    auto knob_of = [](int c) {
+        return 0.25 * (1 + c % 3);
+    };
+
+    Graph graph;
+    struct Knob {
+        Wire word;
+        Record record;
+    };
+    std::vector<Knob> knobs(static_cast<size_t>(count));
+    std::vector<Record> records;
+    for (Knob &knob : knobs) {
+        knob.word = graph.source();
+        const std::vector<Field> fields{knob.word};
+        knob.record = graph.record(fields);
+        records.push_back(knob.record);
+    }
+    struct Copy {
+        Wire a, b, pointer;
+    };
+    std::vector<Copy> copies(static_cast<size_t>(count));
+    for (int c = 0; c < count; ++c) {
+        Copy &copy         = copies[static_cast<size_t>(c)];
+        copy.a             = graph.source();
+        copy.b             = graph.source();
+        copy.pointer       = graph.pointer(records);
+        const Wire knob    = graph.through(copy.pointer, 0);
+        const Wire product = graph.multiply(copy.a, knob);
+        // the product is the loop's own word: this compare is outside the group
+        const Wire first = graph.select(
+                product, copy.b, csp::Condition::negative, product, copy.b);
+        // the knob is read through the pointer, and the first's result is an
+        // operand: this compare is in the group, that one is not
+        const Wire second = graph.select(knob, copy.b, csp::Condition::negative,
+                                         first, copy.a);
+        graph.sink(csp::sink_base + 2 * c + 0, second);
+        graph.sink(csp::sink_base + 2 * c + 1, first);
+    }
+
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, what)) {
+        return;
+    }
+    bool found = false;
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        if (set.copies != count) {
+            continue;
+        }
+        found = true;
+        check(set.looped == looped,
+              what
+                      + (looped ? " are a vector loop"
+                                : " are straight-line code"));
+        if (looped) {
+            check_equal(set.rows, body_rows,
+                        what + ": the instruction rows of the loop body");
+        }
+    }
+    check(found, what + " are found");
+
+    auto processor = std::make_unique<csp::Processor>();
+    csp::GraphEvaluator evaluator(graph);
+    auto word = [&](Wire wire, int32_t raw) {
+        processor->write(graph.address(wire), raw);
+        evaluator.set_word(wire, raw);
+    };
+    auto point_model = [&](int moved) {
+        for (int c = 0; c < count; ++c) {
+            evaluator.set_pointer(
+                    copies[static_cast<size_t>(c)].pointer,
+                    knobs[static_cast<size_t>((c + moved) % count)].record);
+        }
+    };
+    auto point_graph = [&](int moved) {
+        for (int c = 0; c < count; ++c) {
+            processor->write(
+                    graph.address(copies[static_cast<size_t>(c)].pointer),
+                    graph.address(
+                            knobs[static_cast<size_t>((c + moved) % count)]
+                                    .record));
+        }
+    };
+    for (int c = 0; c < count; ++c) {
+        word(knobs[static_cast<size_t>(c)].word, q(knob_of(c)));
+        word(copies[static_cast<size_t>(c)].a, q(a_of(c)));
+        word(copies[static_cast<size_t>(c)].b, q(b_of(c)));
+    }
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor->write(initial.address, initial.value);
+    }
+    point_model(0);
+    point_graph(0);
+    start(*processor, built.image);
+
+    auto expect = [&](int moved) {
+        int wrong = 0;
+        for (int c = 0; c < count; ++c) {
+            const double a = a_of(c), b = b_of(c);
+            const double knob    = knob_of((c + moved) % count);
+            const double product = a * knob;
+            const double first   = product - b < 0 ? b : product;
+            // if_set when x − y has the condition: the knob − b select takes
+            // a when it does, and the first's result otherwise
+            const double want[] = {knob - b < 0 ? a : first, first};
+            for (int k = 0; k < 2; ++k) {
+                const int32_t got = processor->sink(2 * c + k);
+                if (got != q(want[k]) && wrong++ < 3) {
+                    std::printf("  %s, copy %d sink %d: %d, want %d\n",
+                                what.c_str(), c, k, got, q(want[k]));
+                }
+            }
+        }
+        return wrong;
+    };
+    for (int warm = 0; warm < 2; ++warm) {
+        pass(*processor, what);
+        evaluator.pass();
+    }
+    check_equal(expect(0), 0, what + ": sinks that are wrong");
+    compare_sinks(evaluator, *processor, what);
+    point_model(1); // every pointer moved
+    processor->swap();
+    // the writes land a share a pass, the first at the end of this one: the
+    // interpreter takes them all at once, so the sinks are compared once the
+    // chip's pointers have all landed
+    pass(*processor, what);
+    evaluator.pass();
+    point_graph(1);
+    processor->swap(); // the firmware's swap: the writes are the program's now
+    while (processor->queued_writes() > 0) {
+        pass(*processor, what);
+        evaluator.pass();
+    }
+    for (int settled = 0; settled < 2; ++settled) {
+        pass(*processor, what);
+        evaluator.pass();
+    }
+    check_equal(expect(1), 0,
+                what + ": sinks that are wrong, the pointers moved");
+    compare_sinks(evaluator, *processor, what);
+}
+
 // ---- the interpreter's arithmetic --------------------------------------------------
 //
 // The corners the Noaidi's graph does not reach, on the model and on the
@@ -1598,6 +1754,9 @@ int main() {
     test_copies(20, false, 0); // a round of sixteen and one of four
     test_a_copy_made_otherwise();
     test_copies_that_point_at_each_other();
+    test_a_nested_select(2, false, 0); // straight-line code
+    test_a_nested_select(8, false, 0); // too few for a round
+    test_a_nested_select(16, true, 9); // a loop's body, of sixteen
     test_the_interpreter();
     test_todays_synth();
     test_fewer_paths();
