@@ -12,7 +12,7 @@
   - An issue's title says in plain words what is wrong and who notices.
   - An undecided item belongs to the issue that settles it: a measurement in the issue that measures, an implementation detail in a sub-issue, a deferred control in its own issue blocked by the parent. A parent's Undecided list ends empty.
   - An issue's body is trimmed of what belongs to its sub-issues: the child's problem is the child's.
-  - An undecided item is one of two kinds: the agent's to settle, or Thor's to answer. The agent settles its own; the list holds only his.
+  - An undecided item is the agent's to settle or Thor's to answer. A technical item is the agent's: the investigation settles it, and the list holds only what his answer alone can settle.
   - Issue relations live in GitHub's fields, never in prose.
   - A PR's relation to its issue is `Fixes #n` in the PR body.
   - When an agent pull request is approved, the agent must remove the branch it created for it.
