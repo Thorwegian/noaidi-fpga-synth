@@ -917,7 +917,8 @@ void set(csp::GraphEvaluator &evaluator, const performance::Setting &setting) {
 
 void test_todays_synth() {
     performance::Unplayed link;
-    auto synth   = std::make_unique<SoundEngine>(link);
+    auto synth = std::make_unique<SoundEngine>(link);
+    synth->wire(Wiring::Paths::every());
     Graph &graph = synth->graph();
     csp::ProgramBuilder::Built graphed;
     const auto began = std::chrono::steady_clock::now();
@@ -1111,6 +1112,7 @@ struct Played {
     performance::Settings settings;
 
     bool wire_and_build(const std::string &what) {
+        synth->wire(Wiring::Paths::every());
         if (!build(synth->graph(), *built, what)) {
             return false;
         }

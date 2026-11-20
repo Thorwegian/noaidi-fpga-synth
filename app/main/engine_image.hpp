@@ -47,6 +47,10 @@ public:
     // from the image: for a chip whose registers are in doubt.
     void resend_all();
 
+    // Nothing is known of what the FPGA holds, and nothing waits: for a
+    // chip whose words are about to be laid out anew.
+    void forget();
+
     // Send at most `limit` pending words and commit them with a swap, the
     // CTRL dword carrying `ctrl_bits` (hold, test tone). How many it sent.
     int send(EnginePort &port, int limit, fpga_map::dword_t ctrl_bits);

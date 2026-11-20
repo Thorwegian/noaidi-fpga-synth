@@ -43,13 +43,18 @@ void check(bool ok, const char *what) {
 }
 
 // A link that keeps what it is given: each swap's writes, what every word
-// holds after them, and where every partial points.
+// holds after them, where every partial points, and the programs loaded. A
+// load is a swap of its own, and nothing of what the chip held before is
+// left after it.
 class Recorder : public SoundEngine::Link {
 public:
     std::vector<std::vector<Write>> swaps;
     std::map<int, int32_t> state;
     std::map<int, SoundEngine::Pointers> pointers;
     int pointings = 0;
+    int loads     = 0;
+    int rows      = 0; // of the program loaded last
+    int cycles    = 0; // of its pass
 
     void write(std::span<const Write> writes) override {
         swaps.emplace_back(writes.begin(), writes.end());
@@ -60,6 +65,14 @@ public:
     void point(int partial, const SoundEngine::Pointers &to) override {
         pointers[partial] = to;
         ++pointings;
+    }
+    void load(const csp::ProgramBuilder::Built &program,
+              std::span<const Write> writes) override {
+        ++loads;
+        rows   = program.image.length;
+        cycles = program.cycles;
+        state.clear();
+        write(writes);
     }
 
     // The last swap's write of a word, if it has one.
@@ -74,16 +87,14 @@ public:
     }
 };
 
-// The Noaidi's engine, built and committed once: the program's first words
-// are in.
+// The Noaidi's engine, committed once: its program is loaded, with the
+// words it starts from.
 struct Played {
     Recorder link;
     SoundEngine engine{link};
 
     Played() {
-        const auto program = std::make_unique<csp::ProgramBuilder::Built>();
-        check(engine.build(*program), "the Noaidi's graph builds");
-        engine.commit();
+        check(engine.commit(), "the Noaidi's graph builds");
     }
 
     const Graph &graph() const {
@@ -143,7 +154,11 @@ double fraction_of(int64_t rate) {
 void test_set_up() {
     Played played;
     const Recorder &link = played.link;
-    check(link.swaps.size() == 1, "the first commit is one swap");
+    check(link.loads == 1 && link.swaps.size() == 1,
+          "the first commit loads the program, with its words in one swap");
+    check(link.rows == played.engine.program().image.length && link.rows > 1
+                  && link.cycles == played.engine.program().cycles,
+          "the program loaded is the graph's");
     // every word the engine owns is in the image, so the program reads
     // nothing the register file held before (issue #238)
     bool every_word = true;
@@ -237,7 +252,8 @@ void test_commit() {
     const int pointings = link.pointings;
 
     engine.commit();
-    check(link.swaps.size() == 1 && link.pointings == pointings,
+    check(link.swaps.size() == 1 && link.pointings == pointings
+                  && !engine.rewires(),
           "a commit of nothing sends nothing");
 
     // the latest value is all that counts, and only what changed goes out
@@ -309,6 +325,7 @@ void test_commit() {
     check(engine.channel[0].bend == 1.0f
                   && !link.written(played.at(played.wires().bend)),
           "a loaded preset leaves the bend where it is");
+    check(link.loads == 1, "commits of values load no program");
 }
 
 void test_envelope() {

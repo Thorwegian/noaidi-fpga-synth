@@ -296,6 +296,7 @@ bool build_noaidi(Noaidi &noaidi, bool counts_passes) {
     using Graph = csp::DspGraph;
     performance::Unplayed link;
     const auto synth = std::make_unique<SoundEngine>(link);
+    synth->wire(SoundEngine::Wiring::Paths::every());
     const auto built = std::make_unique<csp::ProgramBuilder::Built>();
     Graph &graph     = synth->graph();
     Graph::Wire step, count;

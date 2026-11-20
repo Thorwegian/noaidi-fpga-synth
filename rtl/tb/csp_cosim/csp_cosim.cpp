@@ -396,6 +396,7 @@ firmware_writes(const SoundEngine &synth,
 void run_noaidi(VerilatedContext &context) {
     performance::Unplayed link;
     const auto synth = std::make_unique<SoundEngine>(link);
+    synth->wire(SoundEngine::Wiring::Paths::every());
     const auto built = std::make_unique<csp::ProgramBuilder::Built>();
     if (!synth->graph().build(*built)) {
         for (const csp::DspGraph::Issue &issue : synth->graph().issues()) {

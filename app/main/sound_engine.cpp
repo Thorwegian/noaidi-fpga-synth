@@ -459,46 +459,94 @@ bool same(const Table &a, const Table &b) {
 
 // ---- the wiring ---------------------------------------------------------------------------------
 
-SoundEngine::SoundEngine(Link &link) : link_(link) {
+SoundEngine::SoundEngine(Link &link) : link_(link) {}
+
+// The paths the tree uses: all of them, whatever it holds.
+Wiring::Paths SoundEngine::paths() const {
+    return Wiring::Paths::every();
+}
+
+// The synth as a graph. Every LFO, channel and voice is wired, with every
+// path, whichever `paths` names.
+std::unique_ptr<SoundEngine::Wired>
+SoundEngine::wired_for(const Wiring::Paths &paths) {
+    auto wired     = std::make_unique<Wired>();
+    Graph &graph   = wired->graph;
+    Wiring &wiring = wired->wiring;
+    wiring.paths   = paths;
     for (int l = 0; l < Wiring::lfo_count; ++l) {
-        wire_lfo(graph_, wiring_.lfos[static_cast<size_t>(l)],
+        wire_lfo(graph, wiring.lfos[static_cast<size_t>(l)],
                  l % Wiring::lfo_shape_count);
     }
     for (int c = 0; c < channel_count; ++c) {
-        wire_channel(graph_, wiring_, c);
+        wire_channel(graph, wiring, c);
     }
     for (int v = 0; v < voice_count; ++v) {
-        wire_voice(graph_, wiring_, v);
+        wire_voice(graph, wiring, v);
     }
+    return wired;
 }
 
-bool SoundEngine::build(csp::ProgramBuilder::Built &program) {
-    fresh_ = true;
-    return graph_.build(program);
+void SoundEngine::wire(const Wiring::Paths &paths) {
+    wired_  = wired_for(paths);
+    loaded_ = false;
+}
+
+// A graph for `paths` and its program, in place of what runs. The engine
+// goes on with the graph it has until the new one has built. The new
+// program's memory is laid out anew, so the whole of the tree goes with it,
+// and no level or phase of the last program's is carried over: every voice
+// is silent and idle.
+bool SoundEngine::reload(const Wiring::Paths &paths) {
+    std::unique_ptr<Wired> next = wired_for(paths);
+    if (!next->graph.build(next->program)) {
+        issues_ = next->graph.issues();
+        return false;
+    }
+    issues_.clear();
+    wired_ = std::move(next);
+    for (Voice &voice : voices_) {
+        voice.state = Voice::State::idle;
+    }
+    Writes writes;
+    set_up(writes);
+    for (int c = 0; c < channel_count; ++c) {
+        commit_channel(c, true, writes);
+    }
+    link_.load(wired_->program, writes);
+    for (int v = 0; v < voice_count; ++v) {
+        point(v);
+    }
+    loaded_ = true;
+    return true;
 }
 
 int SoundEngine::address(Wiring::Wire wire) const {
-    return graph_.address(wire);
+    return graph().address(wire);
 }
 
 // What a voice's stage word holds in a stage of an envelope: the offset of
 // that segment in a channel's record, the same in every channel's.
 int SoundEngine::stage_offset(int envelope, int stage) const {
-    return graph_.offset(wiring_.channels[0]
-                                 .segments[static_cast<size_t>(envelope)]
-                                          [static_cast<size_t>(stage)]
-                                 .record);
+    return graph().offset(wiring().channels[0]
+                                  .segments[static_cast<size_t>(envelope)]
+                                           [static_cast<size_t>(stage)]
+                                  .record);
 }
 
 // ---- the commit ---------------------------------------------------------------------------------
 
-void SoundEngine::commit() {
-    Writes writes;
-    if (fresh_) {
-        set_up(writes);
+bool SoundEngine::rewires() const {
+    return !loaded_ || paths() != wiring().paths;
+}
+
+bool SoundEngine::commit() {
+    if (rewires()) {
+        return reload(paths());
     }
+    Writes writes;
     for (int c = 0; c < channel_count; ++c) {
-        commit_channel(c, writes);
+        commit_channel(c, false, writes);
     }
     if (!writes.empty()) {
         link_.write(writes);
@@ -506,7 +554,7 @@ void SoundEngine::commit() {
     for (int v = 0; v < voice_count; ++v) {
         point(v);
     }
-    fresh_ = false;
+    return true;
 }
 
 // Everything that is not a parameter: the words the graph has the engine set
@@ -514,52 +562,51 @@ void SoundEngine::commit() {
 // listening to the saw that runs for it, every voice on its channel, idle,
 // and the sink that stays zero. A pointer or a stage nobody has written
 // sends the program's reads anywhere, so the CSP is let go after these are
-// in.
+// in, which is the link's load. The boot's verify covers them.
 void SoundEngine::set_up(Writes &writes) {
     // Every word the engine owns, at zero: a source the program reads is in
     // the image whatever the register file held before, so a channel nobody
-    // plays on computes nothing the register file left it (issue #238), and
-    // the boot's verify covers it.
+    // plays on computes nothing the register file left it (issue #238).
     for (int at = 0; at < csp::register_count; ++at) {
-        if (graph_.writer(at) == Graph::Writer::firmware) {
+        if (graph().writer(at) == Graph::Writer::firmware) {
             put(writes, at, 0);
         }
     }
-    for (const Graph::InitialValue &initial : graph_.initial_values()) {
+    for (const Graph::InitialValue &initial : graph().initial_values()) {
         put(writes, initial.address, initial.value);
     }
-    for (const Wiring::Channel &wires : wiring_.channels) {
+    for (const Wiring::Channel &wires : wiring().channels) {
         for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
             put(writes, address(wires.lfo[static_cast<size_t>(l)]),
-                graph_.address(wiring_.lfo(l, Wiring::shape_saw).record));
+                graph().address(wiring().lfo(l, Wiring::shape_saw).record));
         }
     }
     // a voice with no note is in release, at zero
     for (int v = 0; v < voice_count; ++v) {
         const Voice &voice = voices_[static_cast<size_t>(v)];
-        put(writes, address(wiring_.voices[static_cast<size_t>(v)].channel),
-            graph_.address(wiring_.channels[voice.channel].record));
+        put(writes, address(wiring().voices[static_cast<size_t>(v)].channel),
+            graph().address(wiring().channels[voice.channel].record));
         silence(v, writes);
     }
     // the sink area's zero word: where a partial that points nowhere points
     put(writes, Wiring::zero_sink, 0);
 }
 
-void SoundEngine::commit_channel(int c, Writes &writes) {
+void SoundEngine::commit_channel(int c, bool whole, Writes &writes) {
     const Channel &now = channel[static_cast<size_t>(c)];
     Channel &was       = committed_[static_cast<size_t>(c)];
 
-    const bool amp_env_changed = fresh_ || !same(now.amp_env, was.amp_env);
-    const bool mod_env_changed = fresh_ || !same(now.mod_env, was.mod_env);
-    const bool cutoff_changed = fresh_ || now.filter.cutoff != was.filter.cutoff
+    const bool amp_env_changed = whole || !same(now.amp_env, was.amp_env);
+    const bool mod_env_changed = whole || !same(now.mod_env, was.mod_env);
+    const bool cutoff_changed  = whole || now.filter.cutoff != was.filter.cutoff
                                 || now.filter.key_track != was.filter.key_track
                                 || now.wheel != was.wheel;
-    const bool bend_changed = fresh_ || now.bend != was.bend;
+    const bool bend_changed = whole || now.bend != was.bend;
     std::array<bool, Wiring::channel_lfo_count> lfo_changed;
     for (size_t l = 0; l < lfo_changed.size(); ++l) {
-        lfo_changed[l] = fresh_ || !same(now.lfo[l], was.lfo[l]);
+        lfo_changed[l] = whole || !same(now.lfo[l], was.lfo[l]);
     }
-    const bool sound_changed = fresh_ || !same(now.voice, was.voice)
+    const bool sound_changed = whole || !same(now.voice, was.voice)
                                || !same(now.osc, was.osc)
                                || now.filter.type != was.filter.type
                                || now.filter.slope != was.filter.slope
@@ -616,7 +663,7 @@ void SoundEngine::envelope(int c, int which, float attack, float decay,
                            float release, float sustain, Writes &writes) const {
     auto segment = [&](int stage, float target, float time_constant) {
         const Wiring::Segment &words =
-                wiring_.channels[static_cast<size_t>(c)]
+                wiring().channels[static_cast<size_t>(c)]
                         .segments[static_cast<size_t>(which)]
                                  [static_cast<size_t>(stage)];
         wide(writes, address(words.target), dword(target));
@@ -648,14 +695,14 @@ void SoundEngine::mod_envelope(int c, Writes &writes) const {
     // pinned at the top and the pad an octave brighter than the benchmark's
     // (issue #222: the centroid 3960 Hz against 1561 on a C5, 729 with the
     // word zeroed).
-    put(writes, address(wiring_.channels[static_cast<size_t>(c)].mod_amount),
+    put(writes, address(wiring().channels[static_cast<size_t>(c)].mod_amount),
         octaves(env.depth / 4.0f));
 }
 
 // The cutoff and the wheel, and the key tracking.
 void SoundEngine::cutoff(int c, Writes &writes) const {
     const Channel &parameters    = committed_[static_cast<size_t>(c)];
-    const Wiring::Channel &wires = wiring_.channels[static_cast<size_t>(c)];
+    const Wiring::Channel &wires = wiring().channels[static_cast<size_t>(c)];
     // The preset's cutoff is the frequency for middle C, and the word is the
     // octaves from middle C's own pitch: the note follows in the voices, at
     // the tracking's ratio. The wheel at the top adds 4.96 octaves.
@@ -668,20 +715,20 @@ void SoundEngine::cutoff(int c, Writes &writes) const {
 }
 
 void SoundEngine::pitch_bend(int c, Writes &writes) const {
-    put(writes, address(wiring_.channels[static_cast<size_t>(c)].bend),
+    put(writes, address(wiring().channels[static_cast<size_t>(c)].bend),
         octaves(committed_[static_cast<size_t>(c)].bend));
 }
 
 // A channel's LFO: the shape, rate, destination and depth.
 void SoundEngine::lfo(int c, int which, Writes &writes) const {
     const lfo_t &l = committed_[static_cast<size_t>(c)].lfo[which];
-    const Wiring::Channel &wires = wiring_.channels[static_cast<size_t>(c)];
+    const Wiring::Channel &wires = wiring().channels[static_cast<size_t>(c)];
     if (l.depth != 0.0f) {
         // The LFO of the preset's shape among the four that run for this
         // one, which the channel listens to. Its output is ±1, which the
         // channel scales by the destination's depth.
         const int shape         = lfo_shape(l.shape);
-        const Wiring::Lfo &wave = wiring_.lfo(which, shape);
+        const Wiring::Lfo &wave = wiring().lfo(which, shape);
         wide(writes, address(wave.step), csp::lfo_rate(l.rate));
         put(writes, address(wave.depth), word_one);
         put(writes, address(wave.neg_depth), -word_one);
@@ -690,7 +737,7 @@ void SoundEngine::lfo(int c, int which, Writes &writes) const {
             : shape == Wiring::shape_triangle ? word_one / 4
                                               : 0);
         put(writes, address(wires.lfo[static_cast<size_t>(which)]),
-            graph_.address(wave.record));
+            graph().address(wave.record));
     }
     // The depth swings its destination by ±depth, in the destination's
     // unit; `whole` is what makes 1.0 of the destination's word: an octave
@@ -716,7 +763,7 @@ void SoundEngine::lfo(int c, int which, Writes &writes) const {
 void SoundEngine::sound(int c, Writes &writes) const {
     using ChannelSink            = Wiring::ChannelSink;
     const preset_t &preset       = committed_[static_cast<size_t>(c)];
-    const Wiring::Channel &wires = wiring_.channels[static_cast<size_t>(c)];
+    const Wiring::Channel &wires = wiring().channels[static_cast<size_t>(c)];
     VoicePlan plan;
     const int sounding =
             voicing(preset.voice.structure, preset.voice.unison_detune, plan);
@@ -760,7 +807,7 @@ void SoundEngine::sound(int c, Writes &writes) const {
 // The velocity's amounts, by the sensitivities of the voice's channel.
 void SoundEngine::velocity_amounts(int v, Writes &writes) const {
     const Voice &voice         = voices_[static_cast<size_t>(v)];
-    const Wiring::Voice &wires = wiring_.voices[static_cast<size_t>(v)];
+    const Wiring::Voice &wires = wiring().voices[static_cast<size_t>(v)];
     const preset_t &preset     = committed_[voice.channel];
     put(writes, address(wires.velocity[Wiring::envelope_amp]),
         word(amp_amount(preset, voice.velocity)));
@@ -775,7 +822,7 @@ void SoundEngine::velocity_amounts(int v, Writes &writes) const {
 void SoundEngine::enter(int v, int stage, Writes &writes) const {
     for (int envelope = 0; envelope < Wiring::envelope_count; ++envelope) {
         put(writes,
-            address(wiring_.voices[static_cast<size_t>(v)]
+            address(wiring().voices[static_cast<size_t>(v)]
                             .stage[static_cast<size_t>(envelope)]),
             stage_offset(envelope, stage), true);
     }
@@ -784,7 +831,7 @@ void SoundEngine::enter(int v, int stage, Writes &writes) const {
 // At once: both envelopes at zero, in release.
 void SoundEngine::silence(int v, Writes &writes) const {
     // the levels too are the CSP's: send them whatever was last written
-    for (const Wire level : wiring_.voices[static_cast<size_t>(v)].level) {
+    for (const Wire level : wiring().voices[static_cast<size_t>(v)].level) {
         wide(writes, address(level), 0, true);
     }
     enter(v, Wiring::stage_release, writes);
@@ -861,10 +908,10 @@ void SoundEngine::note_on(int c, int note, float velocity) {
     point(v);
     // The channel, the pitch and the velocity's amounts go in with the
     // attack, in one swap, so the attack's first pass already has them.
-    const Wiring::Voice &wires = wiring_.voices[static_cast<size_t>(v)];
+    const Wiring::Voice &wires = wiring().voices[static_cast<size_t>(v)];
     Writes writes;
     put(writes, address(wires.channel),
-        graph_.address(wiring_.channels[static_cast<size_t>(c)].record));
+        graph().address(wiring().channels[static_cast<size_t>(c)].record));
     put(writes, address(wires.note), note_word(note));
     velocity_amounts(v, writes);
     enter(v, Wiring::stage_attack, writes);

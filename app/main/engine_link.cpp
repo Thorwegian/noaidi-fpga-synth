@@ -11,6 +11,7 @@
 #include <bitset>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 
 #include "esp_heap_caps.h"
@@ -63,12 +64,14 @@ public:
 EngineImage image;
 SpiPort port;
 
-// The sound engine, whose graph says where every word lives and who writes
-// it, and the program that graph builds, which the boot self-test's program
-// is built in before it. Static: an image is larger than a task's stack, and
-// so the linker sizes it with the rest of the firmware's memory.
+// The sound engine, whose graph says who writes a word of the program a
+// load brings.
 SoundEngine *sound_engine = nullptr;
-csp::ProgramBuilder::Built program;
+
+// The registers the loaded program writes, by its graph's layout: the link's
+// own copy, so that a diagnostic on another task never asks a graph the
+// engine is replacing.
+std::bitset<csp::register_count> program_written;
 
 // The master limiter's gain reduction in codes of 0.375 dB (16 an octave),
 // from DIAG_LIMITER: the applied gain, linear, UQ0.18, unity 0x40000. The
@@ -92,10 +95,15 @@ bool data_stream       = false;
 int stream_source      = 0;
 bool running           = false;
 bool paused = false; // the tick sends nothing (the self-test has the chip)
+// The CSP is held, from the link's start until a program is in and whenever
+// a new one is going in: every CTRL write says so, and the tick sends
+// nothing.
+bool csp_held = false;
 
 // CTRL as the engine keeps it: the levels it owns, over the bits asked for.
 fpga_map::dword_t ctrl_word(fpga_map::dword_t bits) {
-    return bits | (test_tone ? fpga_map::ctrl_test_tone : 0)
+    return bits | (csp_held ? fpga_map::ctrl_hold : 0)
+           | (test_tone ? fpga_map::ctrl_test_tone : 0)
            | (data_stream ? fpga_map::ctrl_data_stream : 0)
            | (static_cast<fpga_map::dword_t>(stream_source
                                              & fpga_map::stream_source_mask)
@@ -107,15 +115,17 @@ int send(int limit, fpga_map::dword_t ctrl_bits) {
     return image.send(port, limit, ctrl_word(ctrl_bits));
 }
 
-// Every register to zero, while the CSP is held, after the self-test and
-// before the image: the register file outlives this chip's reset and keeps
-// whatever the last run left (the self-test's values, a chip check's fill and
-// pointers, a saturated scratch word), and a register the image never writes
-// — a scratch field, an unused channel's — would carry it into the program.
+// Every register to zero, while the CSP is held, before a program's words:
+// the register file outlives this chip's reset and a program's load, and
+// keeps whatever ran last left (the self-test's values, a chip check's fill
+// and pointers, a saturated scratch word, the last program's phases), and a
+// register the image never writes — a scratch field, a delay's word — would
+// carry it into the program.
 // Bursts of eight through the FIFO's door, every dword at the door's address
 // (spi_link::write auto-increments, and landed one dword in eight: issue
 // #238), committed a chunk at a time and applied by the held CSP's window,
-// as csp burst does (cli_csp.cpp).
+// as csp burst does (cli_csp.cpp). The lock is not held while a chunk is
+// applied.
 void clear_registers() {
     constexpr int burst_dwords = 8;
     constexpr int chunk_dwords = fpga_map::queue_depth / 2;
@@ -126,12 +136,17 @@ void clear_registers() {
         for (int k = 0; k < n; ++k) {
             dwords[k] = fpga_map::fifo_dword(at + k, 0);
         }
+        since_commit += n;
+        const bool commit =
+                since_commit >= chunk_dwords || at + n >= csp::register_count;
+        xSemaphoreTake(lock, portMAX_DELAY);
         spi_link::write_repeated(fpga_map::fifo_door, dwords,
                                  static_cast<size_t>(n));
-        since_commit += n;
-        if (since_commit >= chunk_dwords || at + n >= csp::register_count) {
-            spi_link::write_one(fpga_map::ctrl,
-                                fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+        if (commit) {
+            spi_link::write_one(fpga_map::ctrl, ctrl_word(fpga_map::ctrl_swap));
+        }
+        xSemaphoreGive(lock);
+        if (commit) {
             vTaskDelay(pdMS_TO_TICKS(2));
             since_commit = 0;
         }
@@ -286,9 +301,7 @@ Differing verify_image(int *registers, int32_t *wanted, int32_t *held,
                     held[differing.all]      = actual[half];
                 }
                 ++differing.all;
-                differing.firmware_owned +=
-                        sound_engine->graph().writer(even + half)
-                        != csp::DspGraph::Writer::program;
+                differing.firmware_owned += !program_written[even + half];
             }
         }
     }
@@ -301,6 +314,24 @@ Differing verify_image(int *registers, int32_t *wanted, int32_t *held,
 // holds is checked against the image and the image sent again until they
 // agree, a bounded number of times. The console shows the count either way.
 constexpr int boot_image_attempts = 3;
+
+// Send what waits in the image, while the CSP is held: it applies every
+// committed write in one pass and the queue holds 511, so a chunk at a
+// time, and a pass between.
+void send_held() {
+    for (;;) {
+        xSemaphoreTake(lock, portMAX_DELAY);
+        const bool pending = image.pending();
+        if (pending) {
+            send(fpga_map::queue_depth / 2, 0);
+        }
+        xSemaphoreGive(lock);
+        if (!pending) {
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
 
 void verify_boot_image() {
     constexpr int named =
@@ -326,12 +357,8 @@ void verify_boot_image() {
                 tag,
                 "boot image: %d register(s) not as sent (image/chip:%s), sending it again (%d of %d)",
                 lost, first, attempt, boot_image_attempts);
-        // the CSP is held: the window applies a committed chunk within a few passes
         image.resend_all();
-        while (image.pending()) {
-            send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
-            vTaskDelay(pdMS_TO_TICKS(2));
-        }
+        send_held();
     }
     ESP_LOGE(
             tag,
@@ -346,7 +373,7 @@ void engine_task(void *) {
         const int64_t woke = esp_timer_get_time();
 
         xSemaphoreTake(lock, portMAX_DELAY);
-        if (!paused) {
+        if (!paused && !csp_held) {
             send(writes_per_tick, 0);
         }
         xSemaphoreGive(lock);
@@ -366,53 +393,6 @@ void engine_task(void *) {
             vTaskDelay(1);
         }
     }
-}
-
-// The engine's program built from its graph, and what it cost: the time, the
-// PSRAM the build holds now and what it took beside that at its most (from
-// the least that has been free since boot), what the internal heap gave, and
-// the stack the calling task has never used. False if the graph's program
-// does not build, with the graph's reasons in the log.
-bool generate_program(SoundEngine &engine) {
-    const size_t external_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    const size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    const int64_t started        = esp_timer_get_time();
-    bool built                   = false;
-    {
-        const ExternalHeap external;
-        built = engine.build(program);
-    }
-    const int64_t finished      = esp_timer_get_time();
-    const size_t external_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    ESP_LOGI(
-            tag,
-            "the graph's program built in %lld us: %u bytes of PSRAM held, %u more at the build's most; %d bytes of internal heap held; stack %lu bytes never used",
-            static_cast<long long>(finished - started),
-            static_cast<unsigned>(external_before - external_after),
-            static_cast<unsigned>(
-                    external_after
-                    - heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
-            static_cast<int>(internal_before)
-                    - static_cast<int>(
-                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
-            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
-    for (const csp::DspGraph::Issue &issue : engine.graph().issues()) {
-        ESP_LOGE(tag, "control program: %s", issue.message.c_str());
-    }
-    return built;
-}
-
-// The dword at `index` of the program image as the firmware sends it: a row
-// is two dwords, bits 71:36 then 35:0.
-fpga_map::dword_t program_dword(size_t index) {
-    const csp::Row &row = program.image.rows[index / 2];
-    return index % 2 == 0 ? row.high : row.low;
-}
-
-// The dword at `index` of the decode ROM image: one control word a row,
-// NOP rows (0) past the program's.
-fpga_map::dword_t rom_dword(size_t index) {
-    return program.image.rom[index];
 }
 
 // Send `count` dwords from `base` in bursts, and read them back through the
@@ -439,18 +419,28 @@ int send_and_verify(uint32_t base, size_t count, Dword dword_at) {
     return differing;
 }
 
-// Load the control program while the CSP is held: the rows into IMEM and
+// Load a control program while the CSP is held: the rows into IMEM and
 // the control words into the decode ROM, then both read back and counted
 // against what was sent, so the program image is verified the way the
 // register image is.
-void load_program() {
-    // the program's rows only, END included: the chip's fetch parks on END, so
-    // what IMEM holds past them never runs (#271)
-    const size_t rows = static_cast<size_t>(program.image.length);
-    const int rows_differing =
-            send_and_verify(fpga_map::program_base, 2 * rows, program_dword);
-    const int rom_differing =
-            send_and_verify(fpga_map::rom_base, fpga_map::rom_rows, rom_dword);
+void load_program(const csp::Image &program) {
+    // A row is two dwords, bits 71:36 then 35:0. The program's rows only,
+    // END included: the chip's fetch parks on END, so what IMEM holds past
+    // them never runs (#271)
+    const size_t rows = static_cast<size_t>(program.length);
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const int rows_differing = send_and_verify(
+            fpga_map::program_base, 2 * rows, [&](size_t index) {
+                const csp::Row &row = program.rows[index / 2];
+                return index % 2 == 0 ? row.high : row.low;
+            });
+    // The decode ROM: one control word a row, NOP rows (0) past the
+    // program's.
+    const int rom_differing = send_and_verify(
+            fpga_map::rom_base, fpga_map::rom_rows, [&](size_t index) {
+                return program.rom[index];
+            });
+    xSemaphoreGive(lock);
     if (rows_differing == 0 && rom_differing == 0) {
         ESP_LOGI(tag,
                  "program image: every dword as sent (%u rows, %u decode rows)",
@@ -496,6 +486,55 @@ public:
                         dwords.data(), dwords.size());
         xSemaphoreGive(lock);
     }
+    // Hold the CSP; zero the registers, so nothing of the last program is
+    // under this one; write the rows and the decode ROM and read them back;
+    // send the words; let the CSP go. The first load, the boot's, reads
+    // every register back while the CSP is still held: once let go, the
+    // program rewrites the registers that hold its state, which the words
+    // set too.
+    void load(const csp::ProgramBuilder::Built &program,
+              std::span<const SoundEngine::Write> writes) override {
+        if (lock == nullptr) {
+            return;
+        }
+        const int64_t started = esp_timer_get_time();
+        xSemaphoreTake(lock, portMAX_DELAY);
+        csp_held = true;
+        spi_link::write_one(fpga_map::ctrl, ctrl_word(0));
+        image.forget();
+        for (int at = 0; at < csp::register_count; ++at) {
+            program_written[static_cast<size_t>(at)] =
+                    sound_engine->graph().writer(at)
+                    == csp::DspGraph::Writer::program;
+        }
+        xSemaphoreGive(lock);
+
+        clear_registers();
+        load_program(program.image);
+        write(writes);
+        send_held();
+        if (!running) {
+            verify_boot_image();
+        }
+
+        xSemaphoreTake(lock, portMAX_DELAY);
+        csp_held = false;
+        if (hold_after_boot && !running) {
+            paused = true;
+            ESP_LOGW(tag,
+                     "hold_after_boot: the CSP stays held, the tick is paused");
+        } else {
+            spi_link::write_one(fpga_map::ctrl, ctrl_word(0));
+        }
+        xSemaphoreGive(lock);
+        ESP_LOGI(
+                tag,
+                "control program loaded: %u rows, %u decode rows, %d cycles a pass; %u words with it, the CSP held for %lld us",
+                static_cast<unsigned>(program.image.length),
+                static_cast<unsigned>(program.image.rom_used), program.cycles,
+                static_cast<unsigned>(writes.size()),
+                static_cast<long long>(esp_timer_get_time() - started));
+    }
 };
 
 SoundEngineLink sound_engine_link;
@@ -514,9 +553,10 @@ void engine_link_init(SoundEngine &engine) {
         return;
     }
 
-    // The CSP starts held; make sure of it, whatever the last run left, then
-    // give it the program and the wiring.
-    spi_link::write_one(fpga_map::ctrl, fpga_map::ctrl_hold);
+    // The CSP starts held; make sure of it, whatever the last run left. It
+    // stays held until the engine's first commit has loaded a program.
+    csp_held = true;
+    spi_link::write_one(fpga_map::ctrl, ctrl_word(0));
 
     // The probe reads a register pair once a pass; after a reset it reads
     // pair 0, the row the constant ONE is in, and a read of a block RAM row
@@ -528,78 +568,48 @@ void engine_link_init(SoundEngine &engine) {
     // it (committed or not) would be applied during the self-test and the first
     // passes of the control program, over what they compute. Commit it and let
     // the held CSP apply it all now (up to 511 dwords, in one pass when held).
-    spi_link::write_one(fpga_map::ctrl,
-                        fpga_map::ctrl_hold | fpga_map::ctrl_swap);
+    spi_link::write_one(fpga_map::ctrl, ctrl_word(fpga_map::ctrl_swap));
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Does the chip do what the model says? Say so before the sound depends
     // on it; the control program loads over the test either way. The test's
-    // program is built where the control program's is built after it.
+    // program is larger than a task's stack, and is the PSRAM's for as long
+    // as the test runs.
+    const int64_t started = esp_timer_get_time();
+    std::unique_ptr<csp::ProgramBuilder::Built> test;
     {
-        const int64_t started = esp_timer_get_time();
-        {
-            const ExternalHeap external;
-            csp::selftest::build(program);
-        }
-        ESP_LOGI(tag, "self-test: its program built in %lld us, %d rows",
-                 static_cast<long long>(esp_timer_get_time() - started),
-                 program.image.length);
-        for (const csp::BuildIssue &issue : program.issues) {
-            ESP_LOGE(tag, "self-test: %s", issue.message.c_str());
-        }
-        SpiSelfTestPort self_test_port;
-        const SelfTestResult self_test =
-                run_selftest(self_test_port, program.image);
-        for (const std::string &line : self_test.lines) {
-            ESP_LOGI(tag, "self-test: %s", line.c_str());
-        }
-        if (self_test.passed) {
-            ESP_LOGI(tag, "self-test: the chip does what the model says");
-        } else {
-            ESP_LOGE(tag,
-                     "self-test: THE CHIP DOES NOT DO WHAT THE MODEL SAYS");
-        }
+        const ExternalHeap external;
+        test = std::make_unique<csp::ProgramBuilder::Built>();
+        csp::selftest::build(*test);
     }
+    ESP_LOGI(tag, "self-test: its program built in %lld us, %d rows",
+             static_cast<long long>(esp_timer_get_time() - started),
+             test->image.length);
+    for (const csp::BuildIssue &issue : test->issues) {
+        ESP_LOGE(tag, "self-test: %s", issue.message.c_str());
+    }
+    SpiSelfTestPort self_test_port;
+    const SelfTestResult self_test = run_selftest(self_test_port, test->image);
+    for (const std::string &line : self_test.lines) {
+        ESP_LOGI(tag, "self-test: %s", line.c_str());
+    }
+    if (self_test.passed) {
+        ESP_LOGI(tag, "self-test: the chip does what the model says");
+    } else {
+        ESP_LOGE(tag, "self-test: THE CHIP DOES NOT DO WHAT THE MODEL SAYS");
+    }
+}
 
-    // Nothing of the test, or of what ran before this chip was reset, under
-    // the image: every register zero, then the program and the image.
-    clear_registers();
-    const bool generated = generate_program(engine);
-    load_program();
-
-    // The program's constants are immediates in its rows; the register image
-    // starts from the engine's first commit, in the words the graph laid
-    // out, and the partials point where it says.
-    if (generated) {
-        engine.commit();
+void engine_link_start() {
+    if (lock == nullptr) {
+        return;
     }
-    // Held, the CSP applies every committed write in one pass; the queue holds
-    // 511, so a chunk at a time, and a pass between.
-    while (image.pending()) {
-        send(fpga_map::queue_depth / 2, fpga_map::ctrl_hold);
-        vTaskDelay(pdMS_TO_TICKS(2));
-    }
-    // read back while the CSP is still held: once released, the program rewrites
-    // the registers that hold its state, which the image set too
-    verify_boot_image();
-    if (!generated) {
-        // IMEM still holds the self-test: released, it would run on the image
-        paused = true;
+    if (csp_held) {
+        // IMEM still holds the self-test: let go, it would run on the image
         ESP_LOGE(
                 tag,
                 "no control program: the CSP stays held and the synth is silent");
-    } else if (hold_after_boot) {
-        paused = true;
-        ESP_LOGW(tag,
-                 "hold_after_boot: the CSP stays held, the tick is paused");
-    } else {
-        spi_link::write_one(fpga_map::ctrl, ctrl_word(0)); // release
     }
-    ESP_LOGI(
-            tag,
-            "control program loaded: %u rows, %u decode rows, %d cycles a pass",
-            static_cast<unsigned>(program.image.length),
-            static_cast<unsigned>(program.image.rom_used), program.cycles);
 
     if (xTaskCreate(engine_task, "engine_link", task_stack, nullptr,
                     task_priority, &task)
@@ -686,9 +696,13 @@ int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
 }
 
 bool engine_link_program_writes(int address) {
-    return sound_engine != nullptr
-           && sound_engine->graph().writer(address)
-                      == csp::DspGraph::Writer::program;
+    if (lock == nullptr || address < 0 || address >= csp::register_count) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    const bool written = program_written[static_cast<size_t>(address)];
+    xSemaphoreGive(lock);
+    return written;
 }
 
 void engine_link_test_tone(bool on) {

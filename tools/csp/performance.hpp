@@ -35,6 +35,8 @@ class Unplayed final : public SoundEngine::Link {
 public:
     void write(std::span<const SoundEngine::Write>) override {}
     void point(int, const SoundEngine::Pointers &) override {}
+    void load(const csp::ProgramBuilder::Built &,
+              std::span<const SoundEngine::Write>) override {}
 };
 
 // What the firmware sets a wire to.

@@ -22,13 +22,17 @@
 //   voices      The class picks the voice for a note and steals one when
 //               none is idle, finds the voice of a note off and releases it,
 //               gates its envelopes and points its partials.
-//   wiring      The constructor builds the Noaidi's graph
-//               (csp/dsp_graph.hpp) with ordinary loops, and this synth's
-//               sizes are decided here: 16 channels, and 32 voices of 8
-//               partials.
+//   wiring      The engine builds the Noaidi's graph (csp/dsp_graph.hpp)
+//               with ordinary loops, and this synth's sizes are decided
+//               here: 16 channels, and 32 voices of 8 partials. A graph is
+//               wired for a set of paths (Wiring::Paths), and its program
+//               computes those. A commit of a tree that uses other paths
+//               than the wired ones wires a new graph, generates its
+//               program and loads it in place of the one that runs; any
+//               other commit writes values.
 //
-// What the CSP computes for the partial pipeline, as the constructor wires
-// it from sources, operators and sinks:
+// What the CSP computes for the partial pipeline, as the engine wires it
+// from sources, operators and sinks:
 //
 //   an LFO      a phase and the wave of its shape at that phase
 //   a channel   two LFOs through movable wires, each onto the pitch, the
@@ -52,7 +56,9 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -92,6 +98,13 @@ public:
         virtual void write(std::span<const Write> writes) = 0;
         // A partial's sink pointers, which the chip takes whole.
         virtual void point(int partial, const Pointers &pointers) = 0;
+        // A program in place of the one that runs, and every word the
+        // engine owns with it: a program lays its memory out for itself, so
+        // no word is where the last program had it. The chip takes the two
+        // together: the CSP is held from the first row until the last word
+        // is in.
+        virtual void load(const csp::ProgramBuilder::Built &program,
+                          std::span<const Write> writes) = 0;
     };
 
     // ---- parameters --------------------------------------------------------
@@ -116,9 +129,16 @@ public:
     std::array<Channel, channel_count> channel;
 
     // Everything set on the tree since the last commit takes effect, in one
-    // swap. The first commit after build() sends the whole of it, with the
-    // words the program starts from.
-    void commit();
+    // swap. The first commit, and a commit of a tree that uses other paths
+    // than the wired ones, wires a graph for the tree's paths, generates its
+    // program and loads it with the whole of the tree and the words the
+    // program starts from; every voice is silent and idle after it. False
+    // when that graph does not build: the engine goes on with the program it
+    // has, and issues() say why.
+    bool commit();
+
+    // Whether the next commit loads a new program.
+    bool rewires() const;
 
     // ---- events ------------------------------------------------------------
 
@@ -265,6 +285,33 @@ public:
             std::array<Wire, envelope_count> stage, level;
         };
 
+        // The paths a program computes: the LFOs that run, and what a
+        // channel's LFOs move. A path costs its cycles every pass, whatever
+        // depth a preset gives it.
+        struct Paths {
+            // the shapes that run for each of a channel's LFOs
+            std::array<std::bitset<lfo_shape_count>, channel_lfo_count> shapes;
+            // what each of a channel's LFOs moves
+            std::array<std::bitset<moved_count>, channel_lfo_count> moves;
+
+            bool operator==(const Paths &) const = default;
+
+            // All of them: every shape runs, and moves everything.
+            static Paths every() {
+                Paths paths;
+                for (auto &shapes : paths.shapes) {
+                    shapes.set();
+                }
+                for (auto &moves : paths.moves) {
+                    moves.set();
+                }
+                return paths;
+            }
+        };
+
+        // The paths this wiring has.
+        Paths paths;
+
         // The four shapes of a channel's LFO 1, then the four of its LFO 2.
         std::array<Lfo, lfo_count> lfos;
         std::array<Channel, channel_count> channels;
@@ -281,26 +328,51 @@ public:
         }
     };
 
-    // Wires every LFO, channel and voice into the graph.
+    // Nothing is wired or loaded: the first commit wires the graph of the
+    // tree's paths and loads its program, and events come after it.
     explicit SoundEngine(Link &link);
 
-    // Lay the graph out and generate its program. False when it does not
-    // build; the graph's issues() say why. Parameters and events come after.
-    bool build(csp::ProgramBuilder::Built &program);
+    // Wire a graph for `paths`, whatever the tree uses, in place of any
+    // there is: for a tool that builds the graph's program and sets its
+    // wires itself (tools/csp/performance.hpp).
+    void wire(const Wiring::Paths &paths);
 
-    // The graph: where every word lives and who writes it, once built.
+    // The graph, once wired: where every word lives and who writes it, once
+    // built.
     csp::DspGraph &graph() {
-        return graph_;
+        return wired_->graph;
     }
     const csp::DspGraph &graph() const {
-        return graph_;
+        return wired_->graph;
     }
     const Wiring &wiring() const {
-        return wiring_;
+        return wired_->wiring;
+    }
+    // The graph's program, once a commit has loaded it: its rows, and the
+    // cycles of its pass.
+    const csp::ProgramBuilder::Built &program() const {
+        return wired_->program;
+    }
+    // Why the last commit's graph did not build.
+    const std::vector<csp::DspGraph::Issue> &issues() const {
+        return issues_;
     }
 
 private:
     using Writes = std::vector<Write>;
+
+    // The synth wired: the graph, where the engine's wires are in it, and
+    // the program the graph builds.
+    struct Wired {
+        csp::DspGraph graph;
+        Wiring wiring;
+        csp::ProgramBuilder::Built program;
+    };
+
+    // The paths the tree uses.
+    Wiring::Paths paths() const;
+    static std::unique_ptr<Wired> wired_for(const Wiring::Paths &paths);
+    bool reload(const Wiring::Paths &paths);
 
     // What a voice's partials point at: its channel's sinks, each partial on
     // the oscillator the channel's voice structure gives it.
@@ -315,8 +387,9 @@ private:
 
     // The words the program starts from.
     void set_up(Writes &writes);
-    // What changed in a channel since its last commit.
-    void commit_channel(int c, Writes &writes);
+    // What changed in a channel since its last commit, or the `whole` of
+    // it.
+    void commit_channel(int c, bool whole, Writes &writes);
 
     // A channel's committed parameters as words.
     void envelope(int c, int which, float attack, float decay, float release,
@@ -337,12 +410,12 @@ private:
     int pick_voice() const;
 
     Link &link_;
-    csp::DspGraph graph_;
-    Wiring wiring_;
+    std::unique_ptr<Wired> wired_;
+    bool loaded_ = false; // the chip runs wired_'s program
+    std::vector<csp::DspGraph::Issue> issues_;
 
-    // The tree as the chip has it. Nothing of it has been sent while `fresh_`.
+    // The tree as the chip has it, once a program is loaded.
     std::array<Channel, channel_count> committed_;
-    bool fresh_ = true;
 
     std::array<Voice, voice_count> voices_;
     std::array<std::optional<Pointing>, voice_count> pointed_;
