@@ -6,7 +6,7 @@
   - On the issues and pull requests they are working on, agents watch for new comments and notifications and *always* liveblog their progress in the comments.
   - Issues form a tree, read as a Makefile: a sub-issue is a prerequisite of its parent, and the issue to work on has no open sub-issues.
   - Sub-issues of one parent are independent of each other.
-  - `blocked_by` is only for a prerequisite that several issues share.
+  - `blocked_by` is for a prerequisite that several issues share, or for one that belongs under another `meta`: the sub-issue edge would file it in the wrong place.
   - GitHub allows one parent and eight levels.
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
   - An issue's title says in plain words what is wrong and who notices.
