@@ -8,7 +8,9 @@
 #   make pack       synthesize + place/route -> rtl/pack.fs
 #   make sram       load pack.fs into FPGA SRAM (volatile, fast)
 #   make flash      write pack.fs to FPGA flash (persistent)
-#   make fw         build the ESP32 firmware
+#   make fw         build the ESP32 firmware, then warn of every function of
+#                   app/main that neither the firmware nor the csp tool
+#                   links, oldest first (tools/firmware/unused_functions.py)
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
@@ -138,8 +140,9 @@ tools-upgrade:
 tools-upgrade-pack:
 	scripts/tools.sh upgrade pack
 
-fw: format-check
+fw: format-check $(CSP_TOOL)
 	cd app && $(IDF) build
+	python3 tools/firmware/unused_functions.py --firmware app/build --host-tool $(CSP_TOOL)
 
 fw-flash:
 	cd app && $(IDF) flash
@@ -195,9 +198,15 @@ format-check:
 	    echo "FAIL not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
 	fi
 
+# The csp tool's link is one of the two that say whether a function of
+# app/main is used (tools/firmware/unused_functions.py): the linker drops
+# what the tool does not reference, and the debug information names each
+# remaining function's source line.
+HOST_LINK_JUDGES = -g -ffunction-sections -Wl,--gc-sections
+
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/main.cpp
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $@ $(CSP_SRC) $(CSP_GRAPH) $(CSP_DIR)/main.cpp
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra $(HOST_LINK_JUDGES) -Iapp/main -o $@ $(CSP_SRC) $(CSP_GRAPH) $(CSP_DIR)/main.cpp
 
 csp: $(CSP_TOOL)
 
