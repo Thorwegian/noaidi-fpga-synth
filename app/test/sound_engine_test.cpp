@@ -181,17 +181,18 @@ void test_set_up() {
         const Wiring::Channel &wires = played.wires(c);
         check(played.word(wires.lfo[0])
                               == played.graph().address(
-                                      played.engine.wiring()
-                                              .lfo(0, Wiring::shape_saw)
-                                              .record)
+                                      played.engine.wiring().lfo(c, 0).record)
                       && played.word(wires.lfo[1])
                                  == played.graph().address(
                                          played.engine.wiring()
-                                                 .lfo(1, Wiring::shape_saw)
+                                                 .lfo(c, 1)
                                                  .record),
-              "an LFO with no depth listens to the saw that runs for it");
+              "a channel's LFOs are its own two records");
         check(played.word(wires.mod_amount) == 0
-                      && played.word(wires.depth[0][Wiring::moves_pitch]) == 0
+                      && played.word(played.engine.wiring()
+                                             .lfo(c, 0)
+                                             .depth[Wiring::moves_pitch])
+                                 == 0
                       && played.word(wires.duty_base[0]) == 0
                       && played.word(wires.resonance_base) == 0
                       && played.word(wires.bend) == 0,
@@ -556,23 +557,19 @@ void test_lfo() {
     Played played;
     Recorder &link      = played.link;
     SoundEngine &engine = played.engine;
-    // An LFO of every shape runs for each of a channel's LFOs. The engine
-    // sets the one of the preset's shape and points the channel at its
-    // record, so the shape the preset asks for is the one the channel hears
-    // (issue #237). The gain scales the wave: the saw's phase runs ±8 so
-    // depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
-    // does; the square and sine carry the depth itself, not a gain.
+    // A channel's LFO is a record of its own: the shape is a word of it, so
+    // the wave the preset asks for is the one the program reads from the
+    // record (issue #237), and the rate is its own step.
     struct Case {
         waveform_t wave;
         int shape;
-        int32_t gain;
         const char *name;
     };
     const Case cases[] = {
-            {WAVE_SAW, Wiring::shape_saw, 2048, "saw"},
-            {WAVE_PULSE, Wiring::shape_square, 0, "square"},
-            {WAVE_TRI, Wiring::shape_triangle, 4096, "triangle"},
-            {WAVE_SINE, Wiring::shape_sine, 0, "sine"},
+            {WAVE_SAW, Wiring::shape_saw, "saw"},
+            {WAVE_PULSE, Wiring::shape_square, "square"},
+            {WAVE_TRI, Wiring::shape_triangle, "triangle"},
+            {WAVE_SINE, Wiring::shape_sine, "sine"},
     };
     for (int i = 0; i < 2; ++i) {
         for (const Case &shape : cases) {
@@ -582,15 +579,14 @@ void test_lfo() {
             lfo.depth       = 0.25f;
             lfo.destination = LFO_DEST_RESONANCE;
             engine.commit();
-            const Wiring::Lfo &wave =
-                    played.engine.wiring().lfo(i, shape.shape);
+            const Wiring::Lfo &wave = played.engine.wiring().lfo(0, i);
+            const std::string named =
+                    std::string("the record's shape is the preset's: ")
+                    + shape.name;
+            check(played.word(wave.shape) == shape.shape, named.c_str());
             check(played.word(played.wires().lfo[i])
                           == played.graph().address(wave.record),
-                  "the channel listens to the LFO of the preset's shape");
-            check(played.word(wave.gain) == shape.gain, shape.name);
-            check(played.word(wave.depth) == 16384
-                          && played.word(wave.neg_depth) == -16384,
-                  "the wave is ±1 before the channel's depth");
+                  "and the channel's wire holds its own record's address");
             // the phase's 36 bits are a cycle, and it steps once a pass, at
             // 24 kHz: the rate is a cycle every 65536 passes
             check(played.dword(wave.step) == int64_t{1} << 20,
@@ -622,7 +618,7 @@ void test_lfo() {
         lfo.depth       = reach.depth;
         lfo.destination = reach.destination;
         engine.commit();
-        const auto &depth = played.wires().depth[1];
+        const auto &depth = played.engine.wiring().lfo(0, 1).depth;
         for (int moved = 0; moved < Wiring::moved_count; ++moved) {
             const double want = moved == reach.moved ? reach.word : 0.0;
             check(std::fabs(played.octaves(depth[moved]) - want) < 1e-4,
@@ -630,24 +626,25 @@ void test_lfo() {
         }
     }
 
-    // an LFO with no depth takes none of the synth's
-    const Wiring::Lfo &sine = played.engine.wiring().lfo(1, Wiring::shape_sine);
+    // an LFO with no depth is the channel's own: it runs at its rate, and
+    // moves nothing
+    const Wiring::Lfo &sine = played.engine.wiring().lfo(0, 1);
     lfo_t &lfo              = engine.channel[0].lfo[1];
     lfo.shape               = WAVE_SINE;
     lfo.rate                = 5.0f;
     lfo.depth               = 0.0f;
+    lfo.destination         = LFO_DEST_RESONANCE;
     engine.commit();
-    check(!link.written(played.at(sine.step))
-                  && !link.written(played.at(played.wires().lfo[1])),
-          "an LFO with no depth sets no rate and moves no wire");
-    check(played.word(played.wires().depth[1][Wiring::moves_duty]) == 0,
-          "and its depth is zero");
+    check(played.dword(sine.step) == csp::lfo_rate(5.0f),
+          "an LFO with no depth still runs at its rate");
+    for (int moved = 0; moved < Wiring::moved_count; ++moved) {
+        check(played.word(sine.depth[moved]) == 0, "and moves nothing");
+    }
     lfo.depth = 1.0f;
     engine.commit();
     check(played.dword(sine.step) == csp::lfo_rate(5.0f)
-                  && played.word(played.wires().lfo[1])
-                             == played.graph().address(sine.record),
-          "given a depth, it runs at its rate and the channel listens");
+                  && played.word(sine.depth[Wiring::moves_resonance]) == 16384,
+          "given a depth, it moves what it is pointed at");
 
     lfo.rate  = 2.0f;
     lfo.depth = 0.5f;
@@ -679,27 +676,32 @@ void test_knobs() {
     lfo.destination = LFO_DEST_DUTY;
     lfo.depth       = 10.0f;
     check(is_a_value()
-                  && played.word(played.wires().depth[0][Wiring::moves_duty])
+                  && played.word(engine.wiring()
+                                         .lfo(0, 0)
+                                         .depth[Wiring::moves_duty])
                              != 0,
           "an LFO's depth turned up from zero is a value");
     lfo.destination = LFO_DEST_CUTOFF;
     check(is_a_value()
-                  && played.word(played.wires().depth[0][Wiring::moves_duty])
+                  && played.word(engine.wiring()
+                                         .lfo(0, 0)
+                                         .depth[Wiring::moves_duty])
                              == 0
-                  && played.word(played.wires().depth[0][Wiring::moves_cutoff])
+                  && played.word(engine.wiring()
+                                         .lfo(0, 0)
+                                         .depth[Wiring::moves_cutoff])
                              != 0,
           "an LFO's destination is a value: the depth moves to it");
     lfo.shape = WAVE_PULSE;
     check(is_a_value()
-                  && played.word(played.wires().lfo[0])
-                             == played.graph().address(
-                                     engine.wiring()
-                                             .lfo(0, Wiring::shape_square)
-                                             .record),
-          "an LFO's shape is a value: the channel's wire moves to it");
+                  && played.word(engine.wiring().lfo(0, 0).shape)
+                             == Wiring::shape_square,
+          "an LFO's shape is a value: the record's word names it");
     lfo.depth = 0.0f;
     check(is_a_value()
-                  && played.word(played.wires().depth[0][Wiring::moves_cutoff])
+                  && played.word(engine.wiring()
+                                         .lfo(0, 0)
+                                         .depth[Wiring::moves_cutoff])
                              == 0,
           "an LFO's depth turned down to zero is a value");
 
@@ -724,11 +726,12 @@ void test_knobs() {
     preset.lfo[1].depth       = 0.5f;
     engine.channel[0]         = preset;
     check(is_a_value()
-                  && played.word(played.wires().lfo[1])
-                             == played.graph().address(
-                                     engine.wiring()
-                                             .lfo(1, Wiring::shape_triangle)
-                                             .record),
+                  && played.word(engine.wiring().lfo(0, 1).shape)
+                             == Wiring::shape_triangle
+                  && played.word(engine.wiring()
+                                         .lfo(0, 1)
+                                         .depth[Wiring::moves_pitch])
+                             != 0,
           "a preset with LFOs of other shapes onto other things loads no program");
     preset_init(&preset);
     engine.channel[0] = preset;

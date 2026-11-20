@@ -118,24 +118,19 @@ inline void voice_to_channel(const SoundEngine &engine, int voice, int channel,
                         wiring.channels[static_cast<size_t>(channel)].record});
 }
 
-// A channel's LFO to one of the LFOs that run: the `choice`-th, counted
+// A channel's LFO to one of the LFOs' records: the `choice`-th, counted
 // round.
 inline void channel_to_lfo(const SoundEngine &engine, int channel, int which,
                            int choice, Settings &settings) {
     const Wiring &wiring = engine.wiring();
     const Wire wire      = wiring.channels[static_cast<size_t>(channel)]
                               .lfo[static_cast<size_t>(which)];
-    std::vector<Record> running;
-    for (const Wiring::Lfo &lfo : wiring.lfos) {
-        if (wired(lfo.out)) {
-            running.push_back(lfo.record);
-        }
-    }
-    if (!wired(wire) || running.empty()) {
+    if (!wired(wire)) {
         return;
     }
-    settings.push_back({Setting::Kind::pointer, wire, 0,
-                        running[static_cast<size_t>(choice) % running.size()]});
+    const size_t at = static_cast<size_t>(choice) % wiring.lfos.size();
+    settings.push_back(
+            {Setting::Kind::pointer, wire, 0, wiring.lfos[at].record});
 }
 
 // Both envelopes of a voice into a stage: a note on is the attack, a note
@@ -171,24 +166,17 @@ inline Settings set_up(const SoundEngine &engine) {
             settings.push_back({Setting::Kind::dword, wire, q_wide(value), {}});
         }
     };
-    for (int l = 0; l < lfo_count; ++l) {
-        const double depth     = 0.3 + 0.05 * l;
-        const Wiring::Lfo &lfo = wiring.lfos[static_cast<size_t>(l)];
-        dword(lfo.step, 0.0031 * (l + 1) * 16.0);
-        word(lfo.depth, depth);
-        word(lfo.neg_depth, -depth);
-        word(lfo.gain, l % Wiring::lfo_shape_count == Wiring::shape_triangle
-                               ? depth / 4
-                               : depth / 8);
-    }
+    word(wiring.one, 1.0);
     for (int c = 0; c < channel_count; ++c) {
         const Wiring::Channel &channel =
                 wiring.channels[static_cast<size_t>(c)];
         word(channel.bend, 0.02 * (c - 8));
         for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
+            const Wiring::Lfo &lfo = wiring.lfo(c, l);
+            dword(lfo.step, 0.0031 * (2 * c + l + 1) * 16.0);
+            word(lfo.shape, (c + 3 * l) % Wiring::lfo_shape_count);
             for (int k = 0; k < Wiring::moved_count; ++k) {
-                word(channel.depth[static_cast<size_t>(l)]
-                                  [static_cast<size_t>(k)],
+                word(lfo.depth[static_cast<size_t>(k)],
                      0.05 * ((c + 3 * l + k) % 7) - 0.1);
             }
             channel_to_lfo(engine, c, l, (3 * c + 5 * l + 1) % lfo_count,

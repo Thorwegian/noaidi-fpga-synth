@@ -434,22 +434,13 @@ void run_noaidi(VerilatedContext &context) {
     using Paths = SoundEngine::Wiring::Paths;
     run_noaidi(context, "the Noaidi", Paths::every());
     run_noaidi(context, "the Noaidi with no LFO", Paths{});
-    Paths some;
-    some.shapes[0] = 0b1000; // a sine
-    some.moves[0]  = 0b1000; // onto the resonance
-    some.shapes[1] = 0b0100; // a triangle
-    some.moves[1]  = 0b0100; // onto the pulse width
-    run_noaidi(
-            context,
-            "the Noaidi with a sine onto the resonance and a triangle onto the pulse width",
-            some);
+    Paths resonance;
+    resonance.moves[0] = 0b1000; // onto the resonance
+    run_noaidi(context, "the Noaidi with an LFO onto the resonance", resonance);
     Paths pitch;
-    pitch.shapes[0] = 0b0011; // a saw and a square
-    pitch.moves[0]  = 0b0011; // onto the pitch and the cutoff
-    run_noaidi(
-            context,
-            "the Noaidi with a saw and a square onto the pitch and the cutoff",
-            pitch);
+    pitch.moves[0] = 0b0011; // the pitch and the cutoff
+    run_noaidi(context, "the Noaidi with an LFO onto the pitch and the cutoff",
+               pitch);
 }
 
 // ---- random programs ----------------------------------------------------------------------------

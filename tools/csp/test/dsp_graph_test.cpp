@@ -1411,8 +1411,8 @@ void test_todays_synth() {
           "a channel's record is aligned to its size");
 
     // the copies, which the wiring above never named: the voices and the
-    // channels, each a vector loop, and the LFOs two of a shape, too few
-    // for a loop
+    // channels, each a vector loop, and the LFOs' records, which are words
+    // of their own a channel reads through a pointer
     std::vector<std::pair<int, bool>> copies;
     std::string found;
     for (const Graph::CopySet &set : graph.copy_sets()) {
@@ -1426,16 +1426,15 @@ void test_todays_synth() {
     std::printf("the graph's copies: %s\n", found.c_str());
     std::sort(copies.begin(), copies.end());
     check(copies
-                  == std::vector<std::pair<int, bool>>{{2, false},
-                                                       {2, false},
-                                                       {2, false},
-                                                       {2, false},
-                                                       {channel_count, true},
+                  == std::vector<std::pair<int, bool>>{{channel_count, true},
                                                        {voice_count, true}},
-          "the graph finds its voices and its channels, and loops over them, and its pairs of LFOs");
+          "the graph finds its voices and its channels, and loops over them");
     for (const Graph::CopySet &set : graph.copy_sets()) {
         if (set.looped) {
-            check_equal(set.rows, set.copies == voice_count ? 23 : 17,
+            // a voice's body: its two envelopes, its pitch, cutoff and
+            // gain; a channel's: its two LFOs' phases and waves, and what
+            // they move
+            check_equal(set.rows, set.copies == voice_count ? 23 : 59,
                         "the instruction rows in the loop body of "
                                 + std::to_string(set.copies) + " copies");
         }
@@ -1496,35 +1495,29 @@ void test_todays_synth() {
 // so each is played on the model against the interpreter of its graph, as
 // the whole one is above.
 void test_fewer_paths() {
-    // a bit for each shape (saw, square, triangle, sine) that runs for a
-    // channel's LFO, and for each of what it moves (pitch, cutoff, pulse
-    // width, resonance)
+    // a bit for each of what a channel's LFO moves (pitch, cutoff, pulse
+    // width, resonance), a set for each of its two
     struct Case {
         const char *name;
-        unsigned shapes_1, moves_1, shapes_2, moves_2;
+        unsigned moves_1, moves_2;
     };
     const Case cases[] = {
-            {"no LFO", 0b0000, 0b0000, 0b0000, 0b0000},
-            {"a saw onto the pitch", 0b0001, 0b0001, 0b0000, 0b0000},
-            {"a sine onto the cutoff", 0b1000, 0b0010, 0b0000, 0b0000},
-            {"a square onto the pulse width", 0b0010, 0b0100, 0b0000, 0b0000},
-            {"a triangle onto the resonance", 0b0100, 0b1000, 0b0000, 0b0000},
-            {"LFO 2 alone, a sine onto the pitch", 0b0000, 0b0000, 0b1000,
-             0b0001},
-            {"both onto the pitch", 0b0001, 0b0001, 0b0100, 0b0001},
-            {"a sine onto the resonance, a triangle onto the pulse width",
-             0b1000, 0b1000, 0b0100, 0b0100},
-            {"every shape of LFO 1 onto the cutoff", 0b1111, 0b0010, 0b0000,
-             0b0000},
-            {"two shapes each, onto two each", 0b0011, 0b0011, 0b1100, 0b1100},
-            {"every path but the sines'", 0b0111, 0b1111, 0b0111, 0b1111},
+            {"no LFO", 0b0000, 0b0000},
+            {"LFO 1 onto the pitch", 0b0001, 0b0000},
+            {"LFO 1 onto the cutoff", 0b0010, 0b0000},
+            {"LFO 1 onto the pulse width", 0b0100, 0b0000},
+            {"LFO 1 onto the resonance", 0b1000, 0b0000},
+            {"LFO 2 alone, onto the pitch", 0b0000, 0b0001},
+            {"both onto the pitch", 0b0001, 0b0001},
+            {"onto the resonance and the pulse width", 0b1000, 0b0100},
+            {"LFO 1 everywhere", 0b1111, 0b0000},
+            {"two each", 0b0011, 0b0011},
+            {"every path but the resonances'", 0b0111, 0b0111},
     };
     for (const Case &wiring : cases) {
         Wiring::Paths paths;
-        paths.shapes[0] = wiring.shapes_1;
-        paths.moves[0]  = wiring.moves_1;
-        paths.shapes[1] = wiring.shapes_2;
-        paths.moves[1]  = wiring.moves_2;
+        paths.moves[0] = wiring.moves_1;
+        paths.moves[1] = wiring.moves_2;
         performance::Unplayed link;
         auto synth = std::make_unique<SoundEngine>(link);
         synth->wire(paths);
@@ -1601,21 +1594,20 @@ struct Played {
     }
 };
 
-// An LFO's wave at a phase, −8 … +8 a cycle.
-double lfo_wave(int shape, double phase, double depth, double neg_depth,
-                double gain) {
+// A wave at a phase, −8 … +8 a cycle, in floating point.
+double lfo_wave(int shape, double phase) {
     switch (shape) {
     case Wiring::shape_saw:
-        return phase * gain;
+        return phase / 8;
     case Wiring::shape_square:
-        return phase < 0 ? depth : neg_depth;
+        return phase < 0 ? -1.0 : 1.0;
     case Wiring::shape_triangle:
-        return std::fabs(phase) * gain + neg_depth;
+        return std::fabs(phase) / 4 - 1.0;
     default: {
+        // a parabola and a correction by its own square
         const double p        = phase / 8;
         const double parabola = 4 * p * (1 - std::fabs(p));
-        return (0.775 * parabola + 0.225 * parabola * std::fabs(parabola))
-               * depth;
+        return 0.775 * parabola + 0.225 * parabola * std::fabs(parabola);
     }
     }
 }
@@ -1630,72 +1622,56 @@ void test_the_noaidis_formulas() {
     }
     const SoundEngine &synth = *played.synth;
 
-    // the LFOs step for five passes and then stand: one of them wraps
-    constexpr int stepping_passes                        = 5;
-    constexpr std::array<double, Wiring::lfo_count> step = {
-            1.8, -1.02, -0.64, -0.26, 0.12, 0.5, 0.88, 1.26};
+    // the LFOs step for five passes and then stand, each by a step and a
+    // shape of its own: its phase wraps where the steps carry it past a cycle
+    constexpr int stepping_passes = 5;
+    auto step_of                  = [](int c, int l) {
+        return -1.4 + 0.19 * (2 * c + l);
+    };
+    auto shape_of = [](int c, int l) {
+        return l;
+    };
     std::array<double, Wiring::lfo_count> lfo_out;
-    for (int k = 0; k < Wiring::lfo_count; ++k) {
-        const Wiring::Lfo &lfo = synth.wiring().lfos[static_cast<size_t>(k)];
-        const double depth     = 0.5 + 0.05 * k;
-        const double neg_depth = -0.4 + 0.03 * k;
-        const double gain      = 0.1 + 0.01 * k;
-        played.dword(lfo.step, step[static_cast<size_t>(k)]);
-        played.word(lfo.depth, depth);
-        played.word(lfo.neg_depth, neg_depth);
-        played.word(lfo.gain, gain);
-        const double phase = std::remainder(
-                stepping_passes * step[static_cast<size_t>(k)], 16.0);
-        lfo_out[static_cast<size_t>(k)] = lfo_wave(
-                k % Wiring::lfo_shape_count, phase, depth, neg_depth, gain);
+    for (int c = 0; c < SoundEngine::channel_count; ++c) {
+        const Wiring::Channel &wired =
+                synth.wiring().channels[static_cast<size_t>(c)];
+        for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
+            const Wiring::Lfo &lfo = synth.wiring().lfo(c, l);
+            const double step      = step_of(c, l);
+            played.dword(lfo.step, step);
+            played.word(lfo.shape, shape_of(c, l));
+            played.pointer(wired.lfo[static_cast<size_t>(l)], lfo.record);
+        }
     }
+    // the square's high level, 1.0, for every LFO
+    played.word(synth.wiring().one, 1.0);
 
     struct Channel {
         double bend, p1, c1, p2, c2, base, track, amount;
-        int lfo1, lfo2;
         double d1, d2, r1, r2, duty0, duty1, resonance;
     };
     std::vector<Channel> channel(SoundEngine::channel_count);
     for (int c = 0; c < SoundEngine::channel_count; ++c) {
         Channel &a = channel[static_cast<size_t>(c)];
-        a          = {0.02 * (c - 8),
-                      0.1 + 0.01 * c,
-                      -0.2 + 0.03 * c,
-                      0.05 * (c % 4),
-                      0.4 - 0.02 * c,
-                      0.5 + 0.1 * (c % 5),
-                      0.25 * (c % 5),
-                      0.3 + 0.05 * c,
-                      (3 * c) % Wiring::lfo_count,
-                      (7 * c + 5) % Wiring::lfo_count,
-                      0.03 * (c % 5),
-                      -0.02 * (c % 3),
-                      0.1 * (c % 4),
-                      0.05 * (c % 6),
-                      0.1 + 0.02 * c,
-                      -0.3 + 0.03 * c,
-                      0.5 + 0.1 * (c % 7)};
-        // the first channels' resonance sinks are an LFO each, bare
-        if (c < Wiring::lfo_count) {
-            a.lfo1      = c;
-            a.r1        = 1.0;
-            a.r2        = 0;
-            a.resonance = 0;
-        }
+        a          = {0.02 * (c - 8),  0.1 + 0.01 * c,  -0.2 + 0.03 * c,
+                      0.05 * (c % 4),  0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
+                      0.25 * (c % 5),  0.3 + 0.05 * c,  0.03 * (c % 5),
+                      -0.02 * (c % 3), 0.1 * (c % 4),   0.05 * (c % 6),
+                      0.1 + 0.02 * c,  -0.3 + 0.03 * c, 0.5 + 0.1 * (c % 7)};
         const Wiring::Channel &wired =
                 synth.wiring().channels[static_cast<size_t>(c)];
-        played.pointer(wired.lfo[0],
-                       synth.wiring().lfos[static_cast<size_t>(a.lfo1)].record);
-        played.pointer(wired.lfo[1],
-                       synth.wiring().lfos[static_cast<size_t>(a.lfo2)].record);
-        played.word(wired.depth[0][Wiring::moves_pitch], a.p1);
-        played.word(wired.depth[1][Wiring::moves_pitch], a.p2);
-        played.word(wired.depth[0][Wiring::moves_cutoff], a.c1);
-        played.word(wired.depth[1][Wiring::moves_cutoff], a.c2);
-        played.word(wired.depth[0][Wiring::moves_duty], a.d1);
-        played.word(wired.depth[1][Wiring::moves_duty], a.d2);
-        played.word(wired.depth[0][Wiring::moves_resonance], a.r1);
-        played.word(wired.depth[1][Wiring::moves_resonance], a.r2);
+        const Wiring::Lfo &first  = synth.wiring().lfo(c, 0);
+        const Wiring::Lfo &second = synth.wiring().lfo(c, 1);
+        played.word(first.depth[Wiring::moves_pitch], a.p1);
+        played.word(second.depth[Wiring::moves_pitch], a.p2);
+        played.word(first.depth[Wiring::moves_cutoff], a.c1);
+        played.word(second.depth[Wiring::moves_cutoff], a.c2);
+        // each LFO's wave bare: LFO 1 on the resonance and LFO 2 on the
+        // pulse width, so that a channel's sinks say what its two are
+        played.word(first.depth[Wiring::moves_duty], 0.0);
+        played.word(second.depth[Wiring::moves_duty], 1.0);
+        played.word(first.depth[Wiring::moves_resonance], 1.0);
+        played.word(second.depth[Wiring::moves_resonance], 0.0);
         played.word(wired.bend, a.bend);
         played.word(wired.cutoff_base, a.base);
         played.word(wired.key_track, a.track);
@@ -1738,43 +1714,61 @@ void test_the_noaidis_formulas() {
     csp::Processor &processor = *played.processor;
     start(processor, played.built->image);
 
-    // the write that stops the LFOs is in the registers after the pass it
-    // was sent before, which is a step too
-    for (int n = 1; n < stepping_passes; ++n) {
+    // The phases take a step a pass, and a write that stops the LFOs reaches
+    // the registers after the pass it was sent before: that pass steps too,
+    // and so does every pass the writes take to land.
+    // The steps run for a few passes, and the writes that stop them take a
+    // pass each until they land; a channel's phase is where its steps took it
+    for (int n = 0; n < stepping_passes; ++n) {
         pass(processor, "the Noaidi's formulas, stepping");
     }
     for (const Wiring::Lfo &lfo : synth.wiring().lfos) {
         played.dword(lfo.step, 0);
     }
     played.send();
-    pass(processor, "the Noaidi's formulas, the last step");
-    check_equal(processor.queued_writes(), 0, "the LFOs' steps are written");
+    while (processor.queued_writes() > 0) {
+        pass(processor, "the Noaidi's formulas, the last step");
+    }
     for (int n = 0; n < 3; ++n) {
         pass(processor, "the Noaidi's formulas, standing");
     }
-
-    double worst_lfo = 0;
-    for (int k = 0; k < Wiring::lfo_count; ++k) {
-        const int sinks =
-                Wiring::ChannelSink::base + Wiring::ChannelSink::block * k;
-        worst_lfo = std::max(
-                worst_lfo,
-                std::fabs(played.sink(sinks + Wiring::ChannelSink::resonance)
-                          - lfo_out[static_cast<size_t>(k)]));
+    // the phases the program holds, and the waves they are: a wave is the
+    // shape's formula at the phase the same pass read
+    std::array<double, Wiring::lfo_count> phase;
+    for (int c = 0; c < SoundEngine::channel_count; ++c) {
+        const Wiring::Channel &wired =
+                synth.wiring().channels[static_cast<size_t>(c)];
+        for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
+            const int at = c * Wiring::channel_lfo_count + l;
+            phase[static_cast<size_t>(at)] =
+                    static_cast<double>(processor.read_wide(played.address(
+                            wired.phase[static_cast<size_t>(l)])))
+                    / static_cast<double>(int64_t{1}
+                                          << csp::wide_fraction_bits);
+            lfo_out[static_cast<size_t>(at)] =
+                    lfo_wave(shape_of(c, l), phase[static_cast<size_t>(at)]);
+        }
     }
-    // a few raw units of the words' rounding, through the sine's eight products
-    check(worst_lfo <= 4.0 / csp::word_one,
-          "every LFO's wave is its shape's formula at its phase: largest difference "
-                  + std::to_string(worst_lfo));
+    // the phases are inside their cycle, and the steps carried them off zero
+    double largest = 0;
+    int stepped    = 0;
+    for (const double each : phase) {
+        largest = std::max(largest, std::fabs(each));
+        stepped += std::fabs(each) > 0.1 ? 1 : 0;
+    }
+    check(largest <= 8.0, "every phase is inside its cycle: the largest is "
+                                  + std::to_string(largest));
+    check(stepped >= Wiring::lfo_count / 2,
+          "the steps carried the phases off zero: " + std::to_string(stepped)
+                  + " of " + std::to_string(Wiring::lfo_count));
 
     double worst_channel = 0;
     for (int c = 0; c < SoundEngine::channel_count; ++c) {
         const Channel &a     = channel[static_cast<size_t>(c)];
-        const double lfo1    = lfo_out[static_cast<size_t>(a.lfo1)];
-        const double lfo2    = lfo_out[static_cast<size_t>(a.lfo2)];
-        const double duty    = lfo1 * a.d1 + lfo2 * a.d2;
-        const double want[3] = {a.duty0 + duty, a.duty1 + duty,
-                                a.resonance + lfo1 * a.r1 + lfo2 * a.r2};
+        const double lfo1    = lfo_out[static_cast<size_t>(2 * c)];
+        const double lfo2    = lfo_out[static_cast<size_t>(2 * c + 1)];
+        const double want[3] = {a.duty0 + lfo2, a.duty1 + lfo2,
+                                a.resonance + lfo1};
         const int fields[3]  = {Wiring::ChannelSink::duty_0,
                                 Wiring::ChannelSink::duty_1,
                                 Wiring::ChannelSink::resonance};
@@ -1792,10 +1786,10 @@ void test_the_noaidis_formulas() {
 
     double worst_voice = 0;
     for (int v = 0; v < SoundEngine::voice_count; ++v) {
-        const Voice &a             = voice[static_cast<size_t>(v)];
-        const Channel &c           = channel[static_cast<size_t>(a.channel)];
-        const double lfo1          = lfo_out[static_cast<size_t>(c.lfo1)];
-        const double lfo2          = lfo_out[static_cast<size_t>(c.lfo2)];
+        const Voice &a    = voice[static_cast<size_t>(v)];
+        const Channel &c  = channel[static_cast<size_t>(a.channel)];
+        const double lfo1 = lfo_out[static_cast<size_t>(2 * a.channel)];
+        const double lfo2 = lfo_out[static_cast<size_t>(2 * a.channel + 1)];
         const double channel_pitch = c.bend + lfo1 * c.p1 + lfo2 * c.p2;
         // the cutoff tracks the bend and the note, not the pitch LFOs: an
         // LFO on the pitch does not sweep the filter too

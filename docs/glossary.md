@@ -105,9 +105,9 @@ control signal once a pass. The instruction set is
   wired ones; where each value's word lives is the graph's, and differs
   from one program to the next.
 - **path** — a part of the synth a control program may leave out, and then
-  does not compute: an LFO of a shape, what an LFO moves
-  (`SoundEngine::Wiring::Paths`). What a knob reaches is in every program
-  the firmware loads, so a knob loads none; today that is every path.
+  does not compute: what a channel's LFO moves (`SoundEngine::Wiring::Paths`).
+  What a knob reaches is in every program the firmware loads, so a knob
+  loads none; today that is every path.
   **rewire** — wire a graph for the committed tree's paths; **reload** —
   load its program, with every word the firmware owns, while the CSP is
   held.
