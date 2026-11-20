@@ -115,7 +115,7 @@ def main():
                     if name not in in_firmware and (source, line) not in in_host_tool)
     for changed, source, line, readable in unused:
         days = (today - changed).days
-        print(f"WARN {source.relative_to(REPOSITORY)}:{line}: {readable} is in neither the firmware"
+        print(f"WARN {source.relative_to(REPOSITORY)}:{line}: {readable} is neither used in the firmware"
               f" nor the host tool (unchanged since {changed}, {days} day{'s' if days != 1 else ''})")
     if unused:
         print(f"WARN {len(unused)} unused function(s), oldest first: remove each, or give it internal"
