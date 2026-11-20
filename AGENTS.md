@@ -8,6 +8,7 @@
   - Issues form a tree, read as a Makefile: a sub-issue is a prerequisite of its parent, and the issue to work on has no open sub-issues.
   - Sub-issues of one parent are independent of each other.
   - A new sub-issue is ranked among its siblings by how critical it is, the most critical first.
+  - Issues that affect playability or audio come first.
   - `blocked_by` is only for a prerequisite that several issues share.
   - GitHub allows one parent and eight levels.
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
