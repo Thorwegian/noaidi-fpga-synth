@@ -13,6 +13,7 @@
   - GitHub allows one parent and eight levels.
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
   - An issue's title says in plain words what is wrong and who notices.
+  - An undecided item belongs to the issue that settles it: a measurement in the issue that measures, an implementation detail in a sub-issue, a deferred control in its own issue blocked by the parent. A parent's Undecided list ends empty.
   - Issue relations live in GitHub's fields, never in prose.
   - A PR's relation to its issue is `Fixes #n` in the PR body.
   - When an agent pull request is approved, the agent must remove the branch it created for it.
@@ -97,3 +98,9 @@ License: CERN-OHL-S v2
   - It places against the lab box's `chipdb-GW2A-18C.bin`, copied over the one its own build generates.
   - The build places on the machine it runs on, so a placement is carried to the Mac by hand: `yosys.json` and `constraints.cst` over, nextpnr with the Makefile's options, `pnr.json` back.
 - Worktrees live under `~/wt` on the cloud box and the lab box: `git worktree add ~/wt/wt-<issue> -b <branch> main`. A worktree holds its own `rtl/obj_dir`, `yosys.json` and `pnr.log`.
+
+# Paradigms
+
+- A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
+
+- A channel is a little synthesiser of its own that just happens to draw on the shared voice pool, just happens to share the MIDI cable with the synths beside it, and just happens to be plugged into the same mixing desk: they meet at those three and nowhere else, and nothing beyond the channel sets what it sounds like.
