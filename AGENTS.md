@@ -11,6 +11,8 @@
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
   - An issue's title says in plain words what is wrong and who notices.
   - An undecided item belongs to the issue that settles it: a measurement in the issue that measures, an implementation detail in a sub-issue, a deferred control in its own issue blocked by the parent. A parent's Undecided list ends empty.
+  - An issue's body is trimmed of what belongs to its sub-issues: the child's problem is the child's.
+  - The deeper an issue sits, the more of its Undecided the agent settles itself: a low-level decision is the agent's, not left undecided for Thor.
   - Issue relations live in GitHub's fields, never in prose.
   - A PR's relation to its issue is `Fixes #n` in the PR body.
   - When an agent pull request is approved, the agent must remove the branch it created for it.
