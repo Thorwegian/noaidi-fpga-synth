@@ -892,6 +892,217 @@ void test_a_nested_select(int count, bool looped, int body_rows) {
     compare_sinks(evaluator, *processor, what);
 }
 
+// ---- every select's own compare -----------------------------------------------------
+//
+// A wiring may hold as many selects as it needs, each comparing a word with
+// an operand of its own — a word the firmware writes, or an immediate in the
+// row — and each answers the compare it was built with, whatever order the
+// rows issue in and whichever way the others answer. A select answering
+// another's compare would show here as one arm of one compare, twice.
+//
+// The shape a copy picks with is a word the compare reads through a pointer:
+// with a word operand the compare and the select share the pointer's index
+// register, and with an immediate the compare reads no register but the
+// pointed word, so the two are not in a group together.
+//
+// The number in a row is a raw Q4.14 word: graph.constant(q(1.0)) is the word
+// 16384, and graph.constant(1) is the word 1 — 2^-14, a little above zero,
+// not 1.0.
+
+void test_selects_against_their_own_compares(int compares, bool words,
+                                             int copies) {
+    const std::string what = std::to_string(compares) + " compares against "
+                             + (words ? "words" : "immediates") + ", "
+                             + std::to_string(copies)
+                             + (copies == 1 ? " copy" : " copies");
+    const double limit[] = {1.0, 2.0, 3.0};
+    auto if_clear_of     = [](int k) {
+        return -0.25 * (k + 1);
+    };
+    auto if_set_of = [](int k) {
+        return 0.25 * (k + 1);
+    };
+
+    Graph graph;
+    std::vector<Wire> limits; // the thresholds, when they are words
+    for (int k = 0; k < compares; ++k) {
+        limits.push_back(graph.source());
+    }
+    struct Copy {
+        Wire shape;
+        Wire pointer;
+        Record record;
+        Wire if_clear[3], if_set[3];
+    };
+    std::vector<Copy> pickers(static_cast<size_t>(copies));
+    std::vector<Record> records;
+    for (Copy &copy : pickers) {
+        copy.shape = graph.source();
+        for (int k = 0; k < compares; ++k) {
+            copy.if_clear[k] = graph.source();
+            copy.if_set[k]   = graph.source();
+        }
+        const std::vector<Field> fields{copy.shape};
+        copy.record = graph.record(fields);
+        records.push_back(copy.record);
+    }
+    for (int c = 0; c < copies; ++c) {
+        Copy &copy         = pickers[static_cast<size_t>(c)];
+        copy.pointer       = graph.pointer(records);
+        const Wire through = graph.through(copy.pointer, 0);
+        for (int k = 0; k < compares; ++k) {
+            const Wire operand = words ? limits[static_cast<size_t>(k)]
+                                       : graph.constant(q(limit[k]));
+            const Wire picked =
+                    graph.select(through, operand, csp::Condition::negative,
+                                 copy.if_clear[k], copy.if_set[k]);
+            graph.sink(csp::sink_base + 4 * c + k, picked);
+        }
+    }
+
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, what)) {
+        return;
+    }
+    for (const Graph::CopySet &set : graph.copy_sets()) {
+        if (set.copies == copies) {
+            check(set.looped == (copies >= csp::result_latency),
+                  what
+                          + (copies >= csp::result_latency
+                                     ? " are a vector loop"
+                                     : " are straight-line code"));
+        }
+    }
+
+    // The rows the compares came out as: every immediate is the word the
+    // graph was given with it, and no compare against a word reads one.
+    std::vector<int32_t> immediates;
+    int compares_in_the_image = 0;
+    for (int row = 0; row < built.image.length; ++row) {
+        const csp::Word word = csp::Word::decode(built.image.rows[row]);
+        const csp::Control control =
+                csp::Control::decode(built.image.rom[word.op]);
+        if (!(control
+              == csp::control_of(csp::Op::cmp, false, csp::ASource::zero))) {
+            continue;
+        }
+        ++compares_in_the_image;
+        if (words) {
+            check(word.x.mode != csp::Operand::Mode::immediate
+                          && word.y.mode != csp::Operand::Mode::immediate,
+                  what + ": a compare against words carries no immediate");
+        } else {
+            immediates.push_back(static_cast<int32_t>(word.imm));
+        }
+    }
+    check(compares_in_the_image >= compares,
+          what + ": every compare has a row");
+    if (!words) {
+        for (int k = 0; k < compares; ++k) {
+            check(std::find(immediates.begin(), immediates.end(), q(limit[k]))
+                          != immediates.end(),
+                  what + ": the row's immediate is the word given, "
+                          + std::to_string(q(limit[k])));
+        }
+    }
+
+    auto processor = std::make_unique<csp::Processor>();
+    csp::GraphEvaluator evaluator(graph);
+    auto word = [&](Wire wire, int32_t raw) {
+        processor->write(graph.address(wire), raw);
+        evaluator.set_word(wire, raw);
+    };
+    for (int c = 0; c < copies; ++c) {
+        Copy &copy = pickers[static_cast<size_t>(c)];
+        processor->write(graph.address(copy.pointer),
+                         graph.address(copy.record));
+        evaluator.set_pointer(copy.pointer, copy.record);
+        for (int k = 0; k < compares; ++k) {
+            word(copy.if_clear[k], q(if_clear_of(k)));
+            word(copy.if_set[k], q(if_set_of(k)));
+        }
+    }
+    for (int k = 0; k < compares; ++k) {
+        word(limits[static_cast<size_t>(k)], q(limit[k]));
+    }
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor->write(initial.address, initial.value);
+    }
+    start(*processor, built.image);
+
+    // the shape swept through every threshold and past the last
+    int wrong = 0;
+    for (int step = -2; step <= 16; ++step) {
+        const double shape = 0.25 * step;
+        for (int c = 0; c < copies; ++c) {
+            word(pickers[static_cast<size_t>(c)].shape, q(shape));
+        }
+        processor->swap();
+        pass(*processor, what); // the writes land at the end of this pass
+        evaluator.pass();
+        pass(*processor, what);
+        evaluator.pass();
+        for (int c = 0; c < copies; ++c) {
+            for (int k = 0; k < compares; ++k) {
+                const double want =
+                        shape < limit[k] ? if_set_of(k) : if_clear_of(k);
+                const int32_t got = processor->sink(4 * c + k);
+                if (got != q(want) && wrong++ < 3) {
+                    std::printf("  %s, copy %d compare %d at %+.2f: %d, want "
+                                "%d\n",
+                                what.c_str(), c, k, shape, got, q(want));
+                }
+            }
+        }
+        compare_sinks(evaluator, *processor, what);
+    }
+    check_equal(wrong, 0, what + ": selects that answered another compare");
+}
+
+// A constant is the raw word the graph is given and nothing else: the word 1
+// is 2^-14, so a wiring that compares against 1.0 says q(1.0) — 16384, and one
+// that says graph.constant(1) compares against a little above zero. Two
+// selects, one of each, over a shape of 0.5: the raw word's compare is not
+// negative, the scaled one's is.
+void test_a_constant_is_the_word_it_says() {
+    const std::string what = "a constant is the word it says";
+    Graph graph;
+    const Wire shape  = graph.source();
+    const Wire above  = graph.source(); // +1.0, the if_set arm
+    const Wire below  = graph.source(); // −1.0, the if_clear arm
+    const Wire raw    = graph.select(shape, graph.constant(1),
+                                     csp::Condition::negative, below, above);
+    const Wire scaled = graph.select(shape, graph.constant(q(1.0)),
+                                     csp::Condition::negative, below, above);
+    graph.sink(csp::sink_base + 0, raw);
+    graph.sink(csp::sink_base + 1, scaled);
+
+    csp::ProgramBuilder::Built built;
+    if (!build(graph, built, what)) {
+        return;
+    }
+    auto processor = std::make_unique<csp::Processor>();
+    csp::GraphEvaluator evaluator(graph);
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor->write(initial.address, initial.value);
+    }
+    processor->write(graph.address(shape), q(0.5));
+    processor->write(graph.address(above), q(1.0));
+    processor->write(graph.address(below), q(-1.0));
+    evaluator.set_word(shape, q(0.5));
+    evaluator.set_word(above, q(1.0));
+    evaluator.set_word(below, q(-1.0));
+    start(*processor, built.image);
+    pass(*processor, what);
+    evaluator.pass();
+
+    check_equal(processor->sink(0), q(-1.0),
+                what + ": the word 1 is 2^-14, below a shape of 0.5");
+    check_equal(processor->sink(1), q(1.0),
+                what + ": the word 16384 is 1.0, above a shape of 0.5");
+    compare_sinks(evaluator, *processor, what);
+}
+
 // ---- the interpreter's arithmetic --------------------------------------------------
 //
 // The corners the Noaidi's graph does not reach, on the model and on the
@@ -1757,6 +1968,14 @@ int main() {
     test_a_nested_select(2, false, 0); // straight-line code
     test_a_nested_select(8, false, 0); // too few for a round
     test_a_nested_select(16, true, 9); // a loop's body, of sixteen
+    test_selects_against_their_own_compares(1, false, 1);
+    test_selects_against_their_own_compares(2, false, 1);
+    test_selects_against_their_own_compares(2, true, 1);
+    test_selects_against_their_own_compares(3, false, 1);
+    test_selects_against_their_own_compares(3, true, 1);
+    test_selects_against_their_own_compares(3, false, 16); // a loop's body
+    test_selects_against_their_own_compares(3, true, 16);
+    test_a_constant_is_the_word_it_says();
     test_the_interpreter();
     test_todays_synth();
     test_fewer_paths();
