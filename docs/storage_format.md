@@ -77,7 +77,8 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 │   │   │   └── Arctic Ice.toml
 │   │   ├── Percussion
 │   │   ├── Plucks
-│   │   └── Strings
+│   │   ├── Strings
+│   │   └── Tests
 │   └── User
 │       └── (the same category folders)
 └── Performances
@@ -85,9 +86,15 @@ rewritten, so a power loss mid-write loses no neighbouring data.
 
 - **`Presets/Factory`** holds the presets shipped with the firmware.
   The synth never writes there.
+- **`Presets/Factory/Tests`** holds the lab's presets, which the acceptance
+  on the board plays against recorded benchmarks
+  (`tools/lab/baselines.py`): Galaxy, a copy of the pad, and SawBass, one saw
+  of the PowerBass. A preset in a category is
+  voiced and moves; these do not, and a change to one re-records
+  its benchmark. `User` has no such folder.
 - **`Presets/User`** holds the user's presets. The synth saves only
   here.
-- **Category folders:** the twelve above. At mount, the firmware
+- **Category folders:** the twelve above `Tests`. At mount, the firmware
   creates any of them that are missing under `User`. Any other folder
   under `Factory` or `User` is a category too, so a user can add one
   from a computer.
@@ -128,8 +135,8 @@ describes format 1.
 Files hold musical units, and so does the firmware: the preset in memory
 (`preset_t`, `app/main/preset.h`) has the file's tables and keys, and
 every number in it is a `float` in the key's unit. Nothing is converted
-between a file and the preset in memory, and `app/main/render.cpp` makes
-the CSP's words straight from the units.
+between a file and the preset in memory, and the sound engine
+(`app/main/sound_engine.cpp`) makes the CSP's words straight from the units.
 
 - **Load:** a number becomes the nearest `float`.
   - A value outside a key's range is clamped to the range. The ranges
@@ -253,7 +260,7 @@ between, where the filter is barely damped, are left out.
 | `destination` | name: `"cutoff"` | |
 | `depth` | semitones of cutoff | −129 … +129 |
 
-**Envelope times.** The CSP's envelope (`app/main/wiring.cpp`) is a one-pole RC
+**Envelope times.** The CSP's envelope (`app/main/sound_engine.cpp`) is a one-pole RC
 with a wide level: once a pass, at 24 kHz, a segment moves its level
 toward the target by the fraction `RATE` of the distance left. The step
 is `D × RATE` in 2⁻³² — there
@@ -448,6 +455,11 @@ programs = []
   nothing.
 - **Reading:** `banks.toml` is read when a Program Change needs it.
   A missing or unreadable file means there are no banks.
+- **The Tests bank** is bank 16383, the highest number there is (Bank
+  Select MSB 127, LSB 127): its programs are the presets of
+  `Presets/Factory/Tests`, and the lab's acceptance loads them by Bank
+  Select and Program Change. It is for the lab alone; no other bank lists
+  those files.
 
 ## Loading
 
@@ -506,7 +518,9 @@ The factory presets and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The sound the synth
 starts with is `Presets/Factory/Pads/Supersaw.toml`: `system.toml`
 names it as the startup preset, and `banks.toml` makes it program 0 of
-bank 0, "Factory", followed by the other factory presets. `make fw-test` checks that
+bank 0, "Factory", followed by the other factory presets; the presets of
+`Presets/Factory/Tests` are the programs of bank 16383, "Tests", and of no
+other. `make fw-test` checks that
 every factory preset and `banks.toml` read and are already in the
 writer's own form, so they read back exactly, and that every factory
 preset starts with the copyright notice.

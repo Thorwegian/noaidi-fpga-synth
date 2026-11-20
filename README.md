@@ -38,14 +38,16 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   that runs a fixed program every fourth sample, a pass of 3072 cycles at
   24 kHz ([docs/csp2_architecture.md](docs/csp2_architecture.md) section 5),
   and computes envelopes, LFOs, pitch, cutoff and gain from the registers
-  the firmware writes. The program is a DSP graph the firmware wires at
-  boot (`app/main/wiring.cpp`); the graph lays it out and builds the rows
-  (`app/main/csp/dsp_graph.hpp`).
+  the firmware writes. The program is a DSP graph the firmware's sound
+  engine wires at boot (`app/main/sound_engine.cpp`); the graph lays it out
+  and builds the rows (`app/main/csp/dsp_graph.hpp`).
   The instruction set is [docs/csp2_isa.md](docs/csp2_isa.md), the
   machine [docs/csp2_architecture.md](docs/csp2_architecture.md).
 - **Firmware** (ESP-IDF, `app/`): MIDI in on two DIN inputs and BLE, an event bus,
-  a voice allocator (a voice = 8 detuned partials, keystroke-instance
-  lifecycle), `render.cpp` (a preset as register and sink writes), and the
+  the synth model (presets, banks, the CCs' laws), the sound engine
+  (`SoundEngine`: a tree of parameters in musical units that take effect on
+  a commit, note events, and the voices, a voice = 8 detuned partials with a
+  keystroke-instance lifecycle), and the
   engine link — sole owner of the SPI bus: it loads the control program and
   sends what changed, committed by one swap. See
   [docs/firmware_architecture.md](docs/firmware_architecture.md).

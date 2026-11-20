@@ -1,28 +1,32 @@
 #!/usr/bin/env python3
 # Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 # License: CERN-OHL-S v2
-"""Put a recording of the baseline sequence against the benchmark
-(tools/lab/benchmark/: main@d03e915, the CSP's second revision with its RC
-envelopes and the half-band 48 kHz path, playing the Galaxy preset), by shape and spectrum rather than sample by sample — the
-preset's LFOs are free-running, so no two takes line up.
+"""Put a recording of the baseline sequence against a baseline's benchmark
+(tools/lab/benchmark/), by shape and spectrum rather than sample by sample:
+Galaxy's LFOs are free-running, so no two takes of it line up.
 
-usage: benchmark_compare.py <recording.wav> [--benchmark DIR] [--plot PNG]
-                            [--json FILE]
+usage: benchmark_compare.py <recording.wav> [--baseline NAME] [--benchmark DIR]
+                            [--plot PNG] [--json FILE]
 
-The recording is measured as baseline_check.py measures it (every segment's
+The baselines are baselines.py's: galaxy (the default) and sawbass, each
+with its preset, the transposition its sequence is played at and its
+benchmark's files. The recording is measured as baseline_check.py measures it (every segment's
 level, pitch clusters, centroid, peaks and partials, and the level envelope)
 and each measurement is put against the benchmark's, which the benchmark
 folder keeps as JSON and CSV so that the benchmark WAV is not needed:
 
-  - the level of each segment: within 3 dB for a note, the held C6 and the
-    triad (the tremolo's phase alone moves a beat's level by a dB or two),
+  - the level of each segment: within 3 dB for a note, the held note and the
+    triad (Galaxy's tremolo phase alone moves a beat's level by a dB or two),
     within 6 dB for the lead-in, the bar of silence and the release, with
     digital silence floored at -80 dBFS;
   - each note's pitch class: a third of the confident frames, as the check;
   - the spectral centroid of each sounding segment: within half an octave;
   - the valley floor of each sounding segment (the level between the
     harmonics, baseline_check.py): not more than 6 dB fuller than the
-    benchmark's — the test for a gritty sound (Thor, #222);
+    benchmark's — the test for a gritty sound (Thor, #222). Both are read
+    no deeper than 80 dB below the strongest line: under that the row reads
+    a floor that moved by as much as 13 dB between takes of SawBass whose
+    levels agreed within a tenth of a dB;
   - the partials of each single note (multiples of half the fundamental,
     the octave-below oscillator's series): a mean difference of at most
     6 dB over the partials the benchmark has within 40 dB of its strongest;
@@ -30,13 +34,12 @@ folder keeps as JSON and CSV so that the benchmark WAV is not needed:
     take at least 0.9, and the median absolute difference printed.
 
 The exit status is 1 when any comparison fails; with --plot the two
-envelopes and the held C6's partials are drawn with Matplotlib.
+envelopes and the held note's partials are drawn with Matplotlib.
 
-WARNING: the reference is a recording of the Factory preset Galaxy, which is
-still being voiced on the bench, not a frozen test fixture (#305). A change to
-app/storage/Presets/Factory/Pads/Galaxy.toml moves what this test measures, so
-a failure after one may be the preset, not the synth. Re-record the benchmark
-(tools/lab/benchmark/README.md) in the commit that changes the preset.
+The references are recordings of the presets in the storage's
+Presets/Factory/Tests folder (baselines.py), which are copies kept for the
+lab. A change to one of those files moves what its test measures: re-record
+its benchmark (tools/lab/benchmark/README.md) in the commit that changes it.
 """
 import argparse
 import csv
@@ -49,23 +52,24 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import baseline_check as check                    # noqa: E402
+from baselines import BASELINES                   # noqa: E402
 
 BENCHMARK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark")
-BENCHMARK = "baseline_galaxy_d03e915"
 ENVELOPE_FLOOR = -80.0
-LEVEL_TOLERANCE_SOUNDING = 3.0                    # dB, a note, the held C6, the triad
+LEVEL_TOLERANCE_SOUNDING = 3.0                    # dB, a note, the held note, the triad
 LEVEL_TOLERANCE_QUIET = 6.0                       # dB, the lead-in, the silence bar, the release
 CENTROID_TOLERANCE = 6.0                          # semitones
 PARTIAL_TOLERANCE = 6.0                           # dB, mean over the benchmark's partials within
 PARTIAL_WINDOW = 40.0                             # ... this many dB of its strongest
 VALLEY_TOLERANCE = 6.0                            # dB, the valley floor between the harmonics, fuller than the benchmark's
+VALLEY_FLOOR = -80.0                              # dB below the strongest line: a valley floor is read no deeper
 ENVELOPE_CORRELATION = 0.9
 
 
-def load_benchmark(folder):
-    with open(os.path.join(folder, BENCHMARK + ".essentia.json")) as f:
+def load_benchmark(folder, name):
+    with open(os.path.join(folder, name + ".essentia.json")) as f:
         reference = json.load(f)
-    with open(os.path.join(folder, BENCHMARK + ".envelope.csv")) as f:
+    with open(os.path.join(folder, name + ".envelope.csv")) as f:
         rows = list(csv.DictReader(f))
     reference["envelope"] = [(float(r["time_s"]), float(r["level_dbfs"])) for r in rows]
     return reference
@@ -100,7 +104,7 @@ def compare_segment(reference, candidate):
     rows.append(("centroid", "%.0f Hz" % reference["centroid_hz"], "%.0f Hz" % candidate["centroid_hz"],
                  "%+.1f st" % semitones, "±%.0f st" % CENTROID_TOLERANCE, abs(semitones) <= CENTROID_TOLERANCE))
     if "valley_db" in reference and "valley_db" in candidate:
-        fuller = candidate["valley_db"] - reference["valley_db"]
+        fuller = max(VALLEY_FLOOR, candidate["valley_db"]) - max(VALLEY_FLOOR, reference["valley_db"])
         rows.append(("valley floor", "%.1f dB" % reference["valley_db"], "%.1f dB" % candidate["valley_db"],
                      "%+.1f dB" % fuller, "≤ +%.0f dB" % VALLEY_TOLERANCE, fuller <= VALLEY_TOLERANCE))
     if reference["partials_db"]:
@@ -120,40 +124,44 @@ def compare_envelope(reference, candidate):
     return correlation, float(np.median(np.abs(a - b)))
 
 
-def plot(path, reference, candidate, candidate_name):
+def plot(path, reference, candidate, candidate_name, baseline):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    held_segment = check.held_name(baseline.transpose)
+    held_note = check.note_name(check.SCALE[-1] + baseline.transpose)
     figure, (top, bottom) = plt.subplots(2, 1, figsize=(11, 7))
-    for envelope, label in ((reference["envelope"], "benchmark " + BENCHMARK), (candidate["envelope"], candidate_name)):
+    for envelope, label in ((reference["envelope"], "benchmark " + baseline.benchmark), (candidate["envelope"], candidate_name)):
         top.plot([t for t, _ in envelope], [floored(level) for _, level in envelope], label=label, linewidth=0.9)
-    for name, start, end, want in check.segments():
+    for name, start, end, want in check.segments(baseline.transpose):
         if want:
             top.axvspan(start, end, color="0.92", zorder=0)
     top.set_ylabel("level (dBFS, 50 ms)"); top.set_xlabel("time (s)"); top.set_ylim(ENVELOPE_FLOOR, 0)
     top.legend(loc="upper right"); top.set_title("the baseline sequence: level envelope")
-    held = [r for r in reference["segments"] if r["segment"] == "C6 held, one bar"][0]
-    held_candidate = [r for r in candidate["segments"] if r["segment"] == "C6 held, one bar"][0]
+    held = [r for r in reference["segments"] if r["segment"] == held_segment][0]
+    held_candidate = [r for r in candidate["segments"] if r["segment"] == held_segment][0]
     k = np.arange(1, len(held["partials_db"]) + 1)
     floor = -PARTIAL_WINDOW - 20                  # the bars rise from the panel's floor, so that 0 dB is a full bar
-    bottom.bar(k - 0.2, [v - floor for v in held["partials_db"]], 0.4, bottom=floor, label="benchmark")
-    bottom.bar(k + 0.2, [v - floor for v in held_candidate["partials_db"]], 0.4, bottom=floor, label=candidate_name)
-    bottom.set_xlabel("partial (multiples of C5, half the held C6)"); bottom.set_ylabel("level (dB re strongest)")
-    bottom.set_ylim(floor, 5); bottom.legend(loc="upper right"); bottom.set_title("the held C6: partials")
+    bottom.bar(k - 0.2, [max(v, floor) - floor for v in held["partials_db"]], 0.4, bottom=floor, label="benchmark")
+    bottom.bar(k + 0.2, [max(v, floor) - floor for v in held_candidate["partials_db"]], 0.4, bottom=floor, label=candidate_name)
+    bottom.set_xlabel("partial (multiples of half the held %s)" % held_note); bottom.set_ylabel("level (dB re strongest)")
+    bottom.set_ylim(floor, 5); bottom.legend(loc="upper right"); bottom.set_title("the held %s: partials" % held_note)
     figure.tight_layout(); figure.savefig(path, dpi=110)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="compare a recording with the benchmark")
+    parser = argparse.ArgumentParser(description="compare a recording with a baseline's benchmark")
     parser.add_argument("wav")
+    parser.add_argument("--baseline", default="galaxy", choices=sorted(BASELINES), help="the baseline the recording is a take of")
     parser.add_argument("--benchmark", default=BENCHMARK_DIR, help="the benchmark folder")
-    parser.add_argument("--plot", help="draw the envelopes and the held C6's partials to this PNG")
+    parser.add_argument("--plot", help="draw the envelopes and the held note's partials to this PNG")
     parser.add_argument("--json", help="write the comparison here")
     args = parser.parse_args()
 
-    reference = load_benchmark(args.benchmark)
+    baseline = BASELINES[args.baseline]
+    reference = load_benchmark(args.benchmark, baseline.benchmark)
     audio = check.load(args.wav)
-    results, check_failures = check.analyse(audio)
+    results, check_failures = check.analyse(audio, baseline.transpose)
     candidate = {"file": args.wav, "segments": results, "envelope": check.envelope(audio)}
 
     failures = 0
@@ -174,10 +182,10 @@ def main():
                                                   "median |Δ| %.1f dB" % median, "≥ %.1f" % ENVELOPE_CORRELATION, "ok" if ok else "FAIL"))
     print("%d comparison failure(s); the recording's own check: %d failure(s)" % (failures, check_failures))
     if args.plot:
-        plot(args.plot, reference, candidate, os.path.basename(args.wav))
+        plot(args.plot, reference, candidate, os.path.basename(args.wav), baseline)
     if args.json:
         with open(args.json, "w") as out:
-            json.dump({"file": args.wav, "benchmark": BENCHMARK, "failures": failures, "check_failures": check_failures,
+            json.dump({"file": args.wav, "benchmark": baseline.benchmark, "failures": failures, "check_failures": check_failures,
                        "comparison": comparison, "segments": results}, out, indent=1)
     return 1 if failures or check_failures else 0
 

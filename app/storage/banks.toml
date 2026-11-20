@@ -14,4 +14,11 @@ programs = [
 [bank.1]
 name = "User"
 programs = []
+
+[bank.16383]
+name = "Tests"
+programs = [
+    "Presets/Factory/Tests/Galaxy.toml",  # 0
+    "Presets/Factory/Tests/SawBass.toml", # 1
+]
 # end

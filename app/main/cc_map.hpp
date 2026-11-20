@@ -28,18 +28,6 @@
 
 namespace cc_map {
 
-// What a CC changed: the part of the sound the voice task pushes again.
-enum class Part : uint8_t {
-    none, // not a preset CC: the wheel, the pedal, RPN, panic are the caller's
-    voices,
-    amp_env,
-    mod_env,
-    cutoff,
-    lfo1,
-    lfo2,
-    volume,
-};
-
 // An LFO's depth knobs. Unknown until one is moved or the preset is read back.
 struct DepthKnobs {
     uint8_t coarse = 0;
@@ -54,8 +42,9 @@ struct Knobs {
     DepthKnobs lfo_depth[PRESET_NUM_LFO];
 };
 
-// A CC into the preset and the knobs.
-Part apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value);
+// A CC into the preset and the knobs. False when it is not a preset CC: the
+// wheel, the pedal, RPN and panic are the caller's.
+bool apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value);
 
 // The knobs a preset implies: the cutoff pair from its cutoff, each LFO's
 // depth knobs from its depth and destination.

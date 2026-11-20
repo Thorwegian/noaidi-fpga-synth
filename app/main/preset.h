@@ -1,10 +1,11 @@
-// preset.h — the active sound, in RAM
+// preset.h — a preset, in RAM
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The single source of truth for the active sound: the CC handlers set its
-// fields (cc_map.cpp), and render.cpp makes the CSP's words of them. A stored
+// The sound of a channel: the CC handlers set its fields (cc_map.cpp) on
+// the sound engine's tree, whose channels hold one each (sound_engine.hpp),
+// and the engine makes the CSP's words of them. A stored
 // preset is a file in the format of docs/storage_format.md, and this struct
 // is that file in memory: the same tables, the same keys, and every number a
 // float in the file's unit (seconds, Hz, semitones, percent, dB, Q). A key
@@ -125,8 +126,6 @@ typedef struct preset_s {
     preset_part_t part;
 } preset_t;
 
-// ── The active preset ───────────────────────────────────────────────
-extern preset_t g_preset;
 // The init preset: one saw, open filter, organ envelope, no modulation.
 void preset_init(preset_t *p);
 

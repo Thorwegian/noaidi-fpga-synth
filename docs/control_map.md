@@ -70,15 +70,19 @@ Prophet-capable engine:
    Unison spread = per-oscillator detune + stereo spread. Nothing on
    the FPGA changes (partial detune/pan are already per-partial).
 3. **Step sequencer** — part of the surface.
-5. **MIDI channels — channel awareness.** The engine is omni;
-   `voice_t.channel` is stored per voice. A channel-aware synth model
+5. **MIDI channels — channel awareness.** The synth model is omni: every
+   MIDI channel plays the sound engine's first channel. The engine has 16,
+   each with a preset of its own, and a note on takes its channel. A
+   channel-aware synth model
    gives multi-timbral layering and key splits — each channel is a
    "part" that holds its own preset.
-6. **Active-preset data structure**: the in-RAM `preset_t` `g_preset`
-   (`app/main/preset.h`/`preset.cpp`) holds the whole currently-active
-   sound, in the preset file's tables and units — the single source of
-   truth the CC handlers MUTATE and
-   voice_alloc/render.cpp/engine_link RENDER to the CSP's registers and sink words.
+6. **Active-preset data structure**: the in-RAM `preset_t`
+   (`app/main/preset.h`) holds a whole
+   sound, in the preset file's tables and units. The active one is the
+   first channel of the sound engine's parameter tree
+   (`app/main/sound_engine.hpp`): the CC handlers set its fields there and
+   the engine's commit makes the CSP's registers and sink words of what
+   changed.
    Stored presets are TOML files in the format of
    [storage_format.md](storage_format.md); Bank Select and
    Program Change load them through `banks.toml` into `preset_t`; multi-timbral layering

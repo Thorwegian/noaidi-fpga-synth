@@ -26,10 +26,9 @@
 #include "csp/selftest.hpp"
 #include "engine_image.hpp"
 #include "engine_selftest.hpp"
+#include "external_heap.hpp"
 #include "fpga_map.hpp"
-#include "render.hpp"
 #include "spi_link.hpp"
-#include "wiring.hpp"
 
 namespace {
 
@@ -64,13 +63,11 @@ public:
 EngineImage image;
 SpiPort port;
 
-// The Noaidi as a DSP graph, wired at boot (wiring.hpp), and the program
-// the graph builds, which the boot self-test's program is built in before
-// it. Every word the firmware writes is one it asks the
-// graph for, so the synth lives as long as the firmware plays. Static: an
-// image is larger than a task's stack, and so the linker sizes it with the
-// rest of the firmware's memory. The graph's own memory is the heap's.
-wiring::Synth synth;
+// The sound engine, whose graph says where every word lives and who writes
+// it, and the program that graph builds, which the boot self-test's program
+// is built in before it. Static: an image is larger than a task's stack, and
+// so the linker sizes it with the rest of the firmware's memory.
+SoundEngine *sound_engine = nullptr;
 csp::ProgramBuilder::Built program;
 
 // The master limiter's gain reduction in codes of 0.375 dB (16 an octave),
@@ -289,8 +286,9 @@ Differing verify_image(int *registers, int32_t *wanted, int32_t *held,
                     held[differing.all]      = actual[half];
                 }
                 ++differing.all;
-                differing.firmware_owned += synth.graph.writer(even + half)
-                                            != csp::DspGraph::Writer::program;
+                differing.firmware_owned +=
+                        sound_engine->graph().writer(even + half)
+                        != csp::DspGraph::Writer::program;
             }
         }
     }
@@ -370,48 +368,26 @@ void engine_task(void *) {
     }
 }
 
-// While one of these lives, malloc() places every block in the PSRAM, the
-// small ones too: the graph and what its build needs, which the internal
-// RAM has no room for beside the firmware's own
-// (docs.espressif.com, "Support for External RAM": the size limit under
-// which a block goes to internal memory first).
-class ExternalHeap {
-public:
-    ExternalHeap() {
-        heap_caps_malloc_extmem_enable(0);
-    }
-    ~ExternalHeap() {
-        heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
-    }
-    ExternalHeap(const ExternalHeap &)            = delete;
-    ExternalHeap &operator=(const ExternalHeap &) = delete;
-};
-
-// Every LFO, channel and voice wired into the graph and the graph's program
-// built, and what it cost: the time of each, the PSRAM the graph holds now
-// and what the build took beside it at its most (from the least that has
-// been free since boot), what the internal heap gave, and the stack the
-// calling task has never used. False if the graph's program does not
-// build, with the graph's reasons in the log.
-bool generate_program() {
+// The engine's program built from its graph, and what it cost: the time, the
+// PSRAM the build holds now and what it took beside that at its most (from
+// the least that has been free since boot), what the internal heap gave, and
+// the stack the calling task has never used. False if the graph's program
+// does not build, with the graph's reasons in the log.
+bool generate_program(SoundEngine &engine) {
     const size_t external_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const int64_t started        = esp_timer_get_time();
-    int64_t wired                = 0;
     bool built                   = false;
     {
         const ExternalHeap external;
-        wiring::wire(synth);
-        wired = esp_timer_get_time();
-        built = synth.graph.build(program);
+        built = engine.build(program);
     }
     const int64_t finished      = esp_timer_get_time();
     const size_t external_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(
             tag,
-            "graph wired in %lld us, its program built in %lld us: %u bytes of PSRAM held, %u more at the build's most; %d bytes of internal heap held; stack %lu bytes never used",
-            static_cast<long long>(wired - started),
-            static_cast<long long>(finished - wired),
+            "the graph's program built in %lld us: %u bytes of PSRAM held, %u more at the build's most; %d bytes of internal heap held; stack %lu bytes never used",
+            static_cast<long long>(finished - started),
             static_cast<unsigned>(external_before - external_after),
             static_cast<unsigned>(
                     external_after
@@ -420,7 +396,7 @@ bool generate_program() {
                     - static_cast<int>(
                             heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
             static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
-    for (const csp::DspGraph::Issue &issue : synth.graph.issues()) {
+    for (const csp::DspGraph::Issue &issue : engine.graph().issues()) {
         ESP_LOGE(tag, "control program: %s", issue.message.c_str());
     }
     return built;
@@ -488,10 +464,51 @@ void load_program() {
     }
 }
 
+// The link as the sound engine sends through it (engine_link.h). Without the
+// lock the link never started, and what is sent is lost.
+class SoundEngineLink final : public SoundEngine::Link {
+public:
+    void write(std::span<const SoundEngine::Write> writes) override {
+        if (lock == nullptr) {
+            return;
+        }
+        xSemaphoreTake(lock, portMAX_DELAY);
+        for (const SoundEngine::Write &write : writes) {
+            image.set(write.address, write.raw, write.force);
+        }
+        xSemaphoreGive(lock);
+    }
+    void point(int partial, const SoundEngine::Pointers &pointers) override {
+        if (lock == nullptr) {
+            return;
+        }
+        // Three pointers of ten bits to a dword, the fourth dword commits.
+        std::array<fpga_map::dword_t, fpga_map::pointer_words> dwords{};
+        for (size_t k = 0; k < pointers.size(); ++k) {
+            dwords[k / 3] |=
+                    (static_cast<fpga_map::dword_t>(pointers[k]) & 0x3FF)
+                    << (10 * (k % 3));
+        }
+        xSemaphoreTake(lock, portMAX_DELAY);
+        spi_link::write(fpga_map::partial_base
+                                + static_cast<uint32_t>(partial)
+                                          * fpga_map::partial_stride,
+                        dwords.data(), dwords.size());
+        xSemaphoreGive(lock);
+    }
+};
+
+SoundEngineLink sound_engine_link;
+
 } // namespace
 
-void engine_link_init(void) {
-    lock = xSemaphoreCreateMutex();
+SoundEngine::Link &engine_link() {
+    return sound_engine_link;
+}
+
+void engine_link_init(SoundEngine &engine) {
+    sound_engine = &engine;
+    lock         = xSemaphoreCreateMutex();
     if (lock == nullptr) {
         ESP_LOGE(tag, "no mutex");
         return;
@@ -547,17 +564,14 @@ void engine_link_init(void) {
     // Nothing of the test, or of what ran before this chip was reset, under
     // the image: every register zero, then the program and the image.
     clear_registers();
-    const bool generated = generate_program();
+    const bool generated = generate_program(engine);
     load_program();
 
     // The program's constants are immediates in its rows; the register image
-    // starts from what the renderer sets up, in the words the graph laid out.
-    render::Writes writes;
+    // starts from the engine's first commit, in the words the graph laid
+    // out, and the partials point where it says.
     if (generated) {
-        render::setup(synth, writes);
-    }
-    for (const render::Write &write : writes) {
-        image.set(write.address, write.raw);
+        engine.commit();
     }
     // Held, the CSP applies every committed write in one pass; the queue holds
     // 511, so a chunk at a time, and a pass between.
@@ -661,16 +675,6 @@ bool engine_link_peek(int address, uint64_t *pair) {
     return true;
 }
 
-bool engine_link_write(int address, int32_t raw) {
-    if (!running) {
-        return false;
-    }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    const bool ok = image.set(address, raw);
-    xSemaphoreGive(lock);
-    return ok;
-}
-
 int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
                        int limit, int *firmware_owned) {
     if (!running) {
@@ -682,43 +686,9 @@ int engine_link_verify(int *registers, int32_t *wanted, int32_t *held,
 }
 
 bool engine_link_program_writes(int address) {
-    return synth.graph.writer(address) == csp::DspGraph::Writer::program;
-}
-
-bool engine_link_write_all(const render::Writes &writes) {
-    if (!running) {
-        return false;
-    }
-    bool ok = true;
-    xSemaphoreTake(lock, portMAX_DELAY);
-    for (const render::Write &write : writes) {
-        ok &= image.set(write.address, write.raw, write.force);
-    }
-    xSemaphoreGive(lock);
-    return ok;
-}
-
-const wiring::Synth &engine_link_synth() {
-    return synth;
-}
-
-bool engine_link_point(int partial, const int *pointers) {
-    if (!running || partial < 0 || partial >= fpga_map::partial_count) {
-        return false;
-    }
-    // Three pointers of ten bits to a dword, the fourth dword commits.
-    std::array<fpga_map::dword_t, fpga_map::pointer_words> dwords{};
-    for (int k = 0; k < render::pointer_count; ++k) {
-        dwords[k / 3] |= (static_cast<fpga_map::dword_t>(pointers[k]) & 0x3FF)
-                         << (10 * (k % 3));
-    }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    spi_link::write(fpga_map::partial_base
-                            + static_cast<uint32_t>(partial)
-                                      * fpga_map::partial_stride,
-                    dwords.data(), dwords.size());
-    xSemaphoreGive(lock);
-    return true;
+    return sound_engine != nullptr
+           && sound_engine->graph().writer(address)
+                      == csp::DspGraph::Writer::program;
 }
 
 void engine_link_test_tone(bool on) {

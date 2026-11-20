@@ -18,8 +18,10 @@
 #   make fw-test    host test: every preset-file value loads back exactly,
 #                   banks.toml reads and writes back, the factory presets
 #                   and banks read back exactly and are in the writer's own
-#                   form (comment lines aside), and the writes a
-#                   preset renders to the CSP are the arithmetic they should be
+#                   form (comment lines aside), and the sound engine
+#                   (app/main/sound_engine.cpp) sends what its parameters,
+#                   commits, notes and voices should, each word the
+#                   arithmetic it should be
 #   make csp        build tools/csp: the CSP assembler and simulator
 #                   (app/build/host/csp asm|sim|image program.s; `image`
 #                   writes the rows and the ROM as hex for a bench, which
@@ -27,9 +29,9 @@
 #   make csp-test   host tests of the CSP reference model and assembler, of
 #                   the boot self-test's program (app/main/csp/selftest.cpp),
 #                   and of the DSP graph
-#                   (app/main/csp/dsp_graph.cpp): the Noaidi's wiring
-#                   (app/main/wiring.cpp) gives its formulas' sinks on the
-#                   model, and its program holds every sink to the
+#                   (app/main/csp/dsp_graph.cpp): the sound engine's wiring
+#                   (app/main/sound_engine.cpp) gives its formulas' sinks on
+#                   the model, and its program holds every sink to the
 #                   interpreter of the graph
 #                   (tools/csp/test/graph_evaluator.cpp), pass for pass;
 #                   prints the rows and cycles of the graph's program
@@ -79,8 +81,8 @@ HOST_DIR  = app/build/host
 FW_TEST   = $(HOST_DIR)/preset_units_test
 FW_TEST_C   = app/lib/tomlc17/src/tomlc17.c
 FW_TEST_CXX = app/test/preset_units_test.cpp app/main/preset.cpp app/main/preset_units.cpp app/main/preset_file.cpp app/main/safe_file.cpp
-RENDER_TEST = $(HOST_DIR)/render_test
-RENDER_TEST_CXX = app/test/render_test.cpp app/main/render.cpp app/main/engine_image.cpp app/main/preset.cpp $(CSP_SHARED) $(CSP_GRAPH)
+SOUND_ENGINE_TEST = $(HOST_DIR)/sound_engine_test
+SOUND_ENGINE_TEST_CXX = app/test/sound_engine_test.cpp $(CSP_SHARED) $(CSP_GRAPH)
 BANKS_TEST  = $(HOST_DIR)/banks_test
 BANKS_TEST_CXX = app/test/banks_test.cpp app/main/banks.cpp app/main/safe_file.cpp
 PARSER_TEST = $(HOST_DIR)/midi_parser_test
@@ -95,11 +97,12 @@ CSP_HDR     = app/main/csp/csp.hpp app/main/csp/program_builder.hpp app/main/csp
               $(CSP_DIR)/processor.hpp $(CSP_DIR)/assembler.hpp
 CSP_TOOL    = $(HOST_DIR)/csp
 CSP_TEST    = $(HOST_DIR)/csp_test
-# The DSP graph, the Noaidi's wiring as one, and their test: the wiring's
-# program from the graph, its every sink held to the graph's interpreter.
-CSP_GRAPH      = app/main/csp/dsp_graph.cpp app/main/wiring.cpp
+# The DSP graph, the sound engine that wires the Noaidi as one, and their
+# test: the engine's program from the graph, its every sink held to the
+# graph's interpreter.
+CSP_GRAPH      = app/main/csp/dsp_graph.cpp app/main/sound_engine.cpp app/main/preset.cpp
 CSP_GRAPH_HDR  = app/main/csp/dsp_graph.hpp app/main/csp/dsp_graph_netlist.hpp \
-                 app/main/wiring.hpp
+                 app/main/sound_engine.hpp app/main/preset.h app/main/csp/lfo.hpp
 CSP_GRAPH_TEST = $(HOST_DIR)/dsp_graph_test
 # The interpreter of a built graph: the netlist's arithmetic, for the host.
 CSP_EVALUATOR     = $(CSP_DIR)/test/graph_evaluator.cpp
@@ -161,8 +164,8 @@ fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
 	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(RENDER_TEST) $(RENDER_TEST_CXX)
-	$(RENDER_TEST)
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(SOUND_ENGINE_TEST) $(SOUND_ENGINE_TEST_CXX)
+	$(SOUND_ENGINE_TEST)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(CC_MAP_TEST) $(CC_MAP_TEST_CXX) \
 	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(CC_MAP_TEST) $(shell find app/storage/Presets -name '*.toml')

@@ -30,7 +30,7 @@ are small mapping choices, not architecture.
 | Knob direction | up = longer | up = longer (rates invert in the CC handler) | ✓ |
 | **Attack CURVE** | **linear/convex in AMPLITUDE** (SF2 spec: attack "a linear increase in amplitude" / convex; analog RC charges toward an overshoot target — perceptually immediate) | an RC charge toward 1.3 × full scale, in amplitude (the gain is linear since #222) | ✓ **F1 fixed** (it was linear in dB, the likely main "feels wrong") |
 | Decay/release curve | exponential amplitude = linear dB (SF2 centibel ramps; analog RC discharge) | linear in dB | ✓ exactly conventional |
-| Sustain | a level, linear-ish dB | dB below the peak in the preset, down to −60.2 (0.47 dB per CC step), made a linear amplitude target by the firmware (`render.cpp`) | ✓ |
+| Sustain | a level, linear-ish dB | dB below the peak in the preset, down to −60.2 (0.47 dB per CC step), made a linear amplitude target by the firmware (`sound_engine.cpp`) | ✓ |
 
 **F1 explained** (fixed by the linear gain, #222): a linear-dB attack spends most of its wall-clock
 time below audibility and then arrives all at once — short attacks
@@ -44,8 +44,8 @@ voice's word times its channel's), so the level now moves the amplitude: the
 attack is the first 77 % of an RC charge toward 1.3 times full scale
 (convex in amplitude, F1 below fixed), and the decay and release are RC
 falls (exponential amplitude, as every classic). The preset's sustain is a
-loudness in dB below the peak (`render.cpp` makes the amplitude of it).
-The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain are loudnesses, in dB: the firmware takes the exponential once (`render.cpp`, `amplitude`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup preset's depth of 24 fits the register.
+loudness in dB below the peak (`sound_engine.cpp` makes the amplitude of it).
+The amp envelope's level is the voice's gain word, and the gain is linear (#176): a fall is an RC in amplitude — a constant number of dB a second, so a release reaches the floor in its segment's time and stops — and the pipeline multiplies, clamped at unity, silent at zero and below. The velocity's amount and the sustain are loudnesses, in dB: the firmware takes the exponential once (`sound_engine.cpp`, `amplitude`), so the knobs feel as they did while the curve is the analog one. The MOD envelope's depth is written as octaves/4 and the voice program multiplies it back by four, so the startup preset's depth of 24 fits the register.
 
 SF2's *modulation* envelope stages are linear in the MODULATION
 domain (output applied linearly in cents) — which is exactly what our

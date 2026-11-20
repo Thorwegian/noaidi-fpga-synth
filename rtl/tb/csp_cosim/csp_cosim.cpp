@@ -36,7 +36,7 @@
 #include "svdpi.h"
 #include "performance.hpp"
 #include "verilated.h"
-#include "wiring.hpp"
+#include "sound_engine.hpp"
 
 #include "csp_rtl.hpp"
 
@@ -377,13 +377,13 @@ end:
 
 // ---- the Noaidi's program ------------------------------------------------------------------------
 //
-// The synth the firmware wires (app/main/wiring.cpp) and the program its graph builds, vector
+// The synth the sound engine wires (app/main/sound_engine.cpp) and the program its graph builds, vector
 // loops and movable wires and all, through a performance (tools/csp/performance.hpp):
 // set up while held, as the firmware's boot does, then played, with voices moved between
 // channels, channels between LFOs and notes struck and let go.
 
 std::vector<FirmwareWrite>
-firmware_writes(const wiring::Synth &synth,
+firmware_writes(const SoundEngine &synth,
                 const performance::Settings &settings) {
     std::vector<FirmwareWrite> writes;
     for (const performance::Write &write :
@@ -394,11 +394,11 @@ firmware_writes(const wiring::Synth &synth,
 }
 
 void run_noaidi(VerilatedContext &context) {
-    const auto synth = std::make_unique<wiring::Synth>();
+    performance::Unplayed link;
+    const auto synth = std::make_unique<SoundEngine>(link);
     const auto built = std::make_unique<csp::ProgramBuilder::Built>();
-    wiring::wire(*synth);
-    if (!synth->graph.build(*built)) {
-        for (const csp::DspGraph::Issue &issue : synth->graph.issues()) {
+    if (!synth->graph().build(*built)) {
+        for (const csp::DspGraph::Issue &issue : synth->graph().issues()) {
             std::printf("the Noaidi: %s\n", issue.message.c_str());
         }
         ++failures;
@@ -407,7 +407,7 @@ void run_noaidi(VerilatedContext &context) {
     std::vector<FirmwareWrite> setup =
             firmware_writes(*synth, performance::set_up(*synth));
     for (const csp::DspGraph::InitialValue &initial :
-         synth->graph.initial_values()) {
+         synth->graph().initial_values()) {
         setup.push_back({initial.address, initial.value});
     }
     CoSim cosim(context);

@@ -1,17 +1,14 @@
-// preset.cpp — the active preset and the init preset
+// preset.cpp — the init preset
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// g_preset is the single source of truth for the active sound, and
-// voice_alloc renders from it. preset_init() holds the init preset: the
+// preset_init() holds the init preset: the
 // sound when no stored preset loads, and the value of any key a preset file
 // leaves out. The boot timbre itself is a stored preset (system.toml's
 // startup_preset).
 
 #include "preset.h"
-
-preset_t g_preset;
 
 void preset_init(preset_t *p) {
     *p = preset_t{};

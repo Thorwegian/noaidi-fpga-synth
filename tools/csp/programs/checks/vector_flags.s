@@ -3,12 +3,12 @@
 ; Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 ; License: CERN-OHL-S v2
 ;
-; A voice's envelope (app/main/wiring.cpp) compares a level, selects a stage
-; by the flags, reads the stage's segment through j and accumulates a dword
-; level from what j reads: the per-element flags and the per-element other
-; index, which vloop.s and the four micro-programs never touch. The same
-; shapes over four items whose fill puts two elements below the threshold
-; and two above.
+; A voice's envelope (app/main/sound_engine.cpp) compares a level, selects a
+; stage by the flags, reads the stage's segment through j and accumulates a
+; dword level from what j reads: the per-element flags and the per-element
+; other index, which vloop.s and the four micro-programs never touch. The
+; same shapes over four items whose fill puts two elements below the
+; threshold and two above.
 ;
 ; The registers every check shares, and the two rows at the top that count
 ; the passes run (RUN_COUNT wraps), so that `csp match` runs the model for

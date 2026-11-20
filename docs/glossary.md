@@ -209,8 +209,11 @@ control signal once a pass. The instruction set is
 - **engine link** — the firmware module that is the sole owner of the SPI
   bus: loads the image, sends what changed, commits with one swap
   ([firmware_architecture.md](firmware_architecture.md)).
-- **render** — `render.cpp`: a preset expressed as register and sink
-  writes.
+- **sound engine** — `SoundEngine` (`sound_engine.cpp`): the class the
+  synth model plays. Its parameters are a tree of floats in musical units,
+  a preset for each channel, which take effect on a commit; its events are
+  the notes; it keeps the voices, wires the DSP graph and makes the
+  register and sink writes.
 - **event bus** — `midi_in` to the synth model's path for MIDI events.
 - **console** — the firmware's serial command line
   ([README.md](../README.md), Console).
@@ -225,8 +228,10 @@ control signal once a pass. The instruction set is
 - **acceptance** — the three checks that admit a bitstream, none implying
   another: the self-test, `csp verify`, and the **baseline take**, run as
   one command by `tools/lab/acceptance.py`.
-- **baseline take** — the Galaxy sequence recorded through the half-band
-  tap and compared with the benchmark in `tools/lab/benchmark` (envelope,
+- **baseline take** — the fixed sequence played on one of the lab's presets
+  (`Presets/Factory/Tests`: Galaxy, and SawBass two octaves down), recorded
+  through the half-band
+  tap and compared with that preset's benchmark in `tools/lab/benchmark` (envelope,
   pitch classes, centroid, partials, **valley floor**: the silence between
   notes).
 - **seed** — nextpnr's placement seed, a diagnostic of the tool and never

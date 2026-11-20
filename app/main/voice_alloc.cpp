@@ -1,14 +1,14 @@
-// voice_alloc.cpp — MIDI events → voices → the CSP's registers and sinks
+// voice_alloc.cpp — the synth model: MIDI events → the sound engine
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// The allocator keeps the voices (32, of 8 partials each), turns MIDI into
-// the active preset's changes (preset.h) and into notes, and hands both to
-// render.cpp, which says what the CSP's registers and sinks must hold; the
-// engine link sends it. The sound's arithmetic (the envelopes, the LFOs, the
-// pitch and cutoff of every voice) is the CSP's, running the program of the
-// graph that wiring.cpp wires.
+// The synth model keeps the sound engine (sound_engine.hpp) and plays it:
+// it turns MIDI into changes of the active preset (cc_map.hpp), which it
+// sets on the engine's tree and commits, and into the engine's note events.
+// The preset loader, the banks, the sustain pedal and the surfaces' feedback
+// are here; the voices, the conversions to the CSP's words and the graph are
+// the engine's.
 
 #include "voice_alloc.h"
 
@@ -17,7 +17,10 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <numeric>
+#include <optional>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -28,10 +31,11 @@
 #include "cc_map.hpp"
 #include "engine_link.h"
 #include "event_bus.h"
+#include "external_heap.hpp"
 #include "midi_out.h"
 #include "preset.h"
 #include "preset_file.h"
-#include "render.hpp"
+#include "sound_engine.hpp"
 #include "storage.h"
 
 namespace {
@@ -54,55 +58,31 @@ constexpr int loader_stack = 6144; // a preset_t and the TOML parse live on it
 constexpr int loader_priority      = 3;
 constexpr int program_queue_length = 4;
 
-constexpr int voice_count        = render::voice_count;
-constexpr int partials_per_voice = render::partials_per_voice;
+// The sound engine. The voice task alone sets its parameters, commits and
+// sends its events: every other task hands its preset over through the
+// task's queue (preset_request), so a commit never sends another task's
+// half-set values. Made at init, when the PSRAM its graph lives in is there.
+std::optional<SoundEngine> s_engine;
 
-// Voice lifecycle. A voice is an instance of a KEYSTROKE: every
-// note-on allocates a
-// fresh voice; the previous strike of the same key keeps ringing its
-// release tail underneath. Three states, because "key held" and
-// "voice in use" are different facts:
-//   V_HELD      key is down (or held by the sustain pedal), envelope
-//               gated on
-//   V_RELEASING key is up; the tail is the chip's business, the voice is
-//               available again, the longest released first
-//   V_IDLE      never struck, or silenced (CC 120) — free for allocation
-// A V_HELD voice whose key came up while the sustain pedal is down is
-// marked `sustained`: its envelopes are not released until the pedal comes up.
-// The firmware never guesses when a tail has gone quiet (#264): the gain
-// is linear and the chip is silent when the level is, so a released voice
-// simply ranks by how long ago its key came up — a fact, not an estimate.
-enum VoiceState { V_IDLE = 0, V_HELD, V_RELEASING };
+// Omni: every MIDI channel plays the engine's first, and that channel's part
+// of the engine's tree is the active preset.
+constexpr int omni_channel = 0;
 
-struct Voice {
-    VoiceState state    = V_IDLE;
-    uint8_t note        = 0;
-    uint8_t vel         = 0;     // stored so a live CC edit can re-render
-    uint8_t channel     = 0;     // stored for later multi-timbrality; omni
-    uint32_t alloc_seq  = 0;     // allocation order, for oldest-steal
-    int64_t released_at = 0;     // esp_timer µs of the key-up, while RELEASING
-    bool sustained      = false; // key up, held by the sustain pedal
-};
+SoundEngine::Channel &active() {
+    return s_engine->channel[omni_channel];
+}
 
-std::array<Voice, voice_count> s_voices;
-uint32_t s_alloc_seq;
-bool s_sustain_pedal;              // CC 64 down, omni for now
-render::Controllers s_controllers; // the wheel and the bend
-voice_struct_t
-        s_pointed_struct; // the voice structure the pointers were set for
+// The sustain pedal (CC 64), omni: while it is down a note off is held back,
+// counted by its note, and the engine's voice stays held, its envelopes
+// where they are. A note has at most a voice's worth of them to release.
+bool s_sustain_pedal;
+std::array<uint8_t, 128> s_held_back;
 
-// Live CC edits COALESCE: a CC just marks what changed; flush_pending_edits()
-// does the heavy work at a bounded rate, so a controller sweep does not flood
-// the engine link and starve the CPU (task watchdog).
-constexpr uint32_t dirty_voices =
-        1u; // the partials: voicing, gains, modes, tracking
-constexpr uint32_t dirty_amp_env = 2u;  // push the amp envelope
-constexpr uint32_t dirty_cutoff  = 4u;  // the cutoff knob and the wheel
-constexpr uint32_t dirty_lfo1    = 8u;  // push LFO 1
-constexpr uint32_t dirty_volume  = 16u; // master volume
-constexpr uint32_t dirty_mod_env = 32u; // push the mod envelope
-constexpr uint32_t dirty_lfo2    = 64u; // push LFO 2
-uint32_t s_pending;
+// Live CC edits COALESCE: a CC sets its value on the engine's tree, and the
+// commit, where the engine does the heavy work, runs at a bounded rate, so a
+// controller sweep does not flood the engine link and starve the CPU (task
+// watchdog).
+bool s_edited;
 int64_t s_last_flush;
 constexpr int64_t flush_min_us =
         15000; // ≤66 Hz apply rate, whatever the CC rate
@@ -110,116 +90,12 @@ constexpr int64_t flush_min_us =
 QueueHandle_t s_queue;
 int s_sub_id = -1;
 
-// Send a list of writes to the engine link.
-void send(const render::Writes &writes) {
-    if (!engine_link_write_all(writes)) {
-        ESP_LOGW(tag, "engine link not running, %u writes lost",
-                 static_cast<unsigned>(writes.size()));
-    }
-}
-
-// Point every partial at its sinks, for the active voice structure: which
-// oscillator's pulse width and mode a partial reads depends on it.
-void point_partials() {
-    render::VoicePlan plan;
-    render::voicing(g_preset, plan);
-    for (int voice = 0; voice < voice_count; ++voice) {
-        for (int slot = 0; slot < partials_per_voice; ++slot) {
-            const auto pointers = render::pointers_of(voice, slot, plan[slot]);
-            engine_link_point(voice * partials_per_voice + slot,
-                              pointers.data());
-        }
-    }
-    s_pointed_struct = g_preset.voice.structure;
-}
-
-
-// The velocity-dependent amounts of the voices that sound, after the preset's
-// sensitivities changed (a held note keeps the velocity it was struck with).
-void refresh_velocities() {
-    render::Writes writes;
-    for (int v = 0; v < voice_count; ++v) {
-        if (s_voices[v].state == V_HELD) {
-            render::velocity_amounts(engine_link_synth(), g_preset, v,
-                                     s_voices[v].vel, writes);
-        }
-    }
-    send(writes);
-}
-
-void update_amp_env() {
-    render::Writes writes;
-    render::amp_envelope(engine_link_synth(), g_preset, writes);
-    send(writes);
-    refresh_velocities();
-}
-
-void update_mod_env() {
-    render::Writes writes;
-    render::mod_envelope(engine_link_synth(), g_preset, writes);
-    send(writes);
-    refresh_velocities();
-}
-
-void update_cutoff() {
-    render::Writes writes;
-    render::cutoff(engine_link_synth(), g_preset, s_controllers, writes);
-    send(writes);
-}
-
-// The preset's volume is in the channel's left and right gains, with the
-// voicing's own terms.
-void update_volume() {
-    render::Writes writes;
-    render::channel_sound(engine_link_synth(), g_preset, writes);
-    send(writes);
-}
-
-void update_lfo(int i) {
-    render::Writes writes;
-    render::lfo(engine_link_synth(), g_preset, i, writes);
-    send(writes);
-}
-
-// The partials follow the preset's voicing, tuning, panning and modes.
-void update_voices() {
-    render::Writes writes;
-    render::channel_sound(engine_link_synth(), g_preset, writes);
-    render::cutoff(engine_link_synth(), g_preset, s_controllers,
-                   writes); // the key tracking
-    send(writes);
-    if (g_preset.voice.structure != s_pointed_struct) {
-        point_partials();
-    }
-}
-
 // ---- knobs ⇄ preset values -----------------------------------------------------------
 //
 // The CC laws, both ways, are cc_map's (cc_map.hpp). The knob positions that
 // are not preset fields (the cutoff's coarse and fine, each LFO's depth
 // knobs) live here beside the preset, and a loaded preset implies them.
 cc_map::Knobs s_knobs;
-
-uint32_t dirty_of(cc_map::Part part) {
-    switch (part) {
-    case cc_map::Part::voices:
-        return dirty_voices;
-    case cc_map::Part::amp_env:
-        return dirty_amp_env;
-    case cc_map::Part::mod_env:
-        return dirty_mod_env;
-    case cc_map::Part::cutoff:
-        return dirty_cutoff;
-    case cc_map::Part::lfo1:
-        return dirty_lfo1;
-    case cc_map::Part::lfo2:
-        return dirty_lfo2;
-    case cc_map::Part::volume:
-        return dirty_volume;
-    default:
-        return 0;
-    }
-}
 
 // Parameter feedback (#279): the preset as the CCs a surface shows, to every
 // output but the one `except` came through.
@@ -229,124 +105,52 @@ void emit_cc(uint8_t cc, uint8_t value, void *user) {
     midi_out_send(&message, *static_cast<uint8_t *>(user));
 }
 void sync_surfaces(uint8_t except) {
-    cc_map::dump(g_preset, s_knobs, emit_cc, &except);
+    cc_map::dump(active(), s_knobs, emit_cc, &except);
 }
 
 // ---- notes --------------------------------------------------------------------------------------
 
-// Every note-on gets a FRESH voice — allocation never matches on the note.
-// Preference: least-recently-used IDLE voice; else the most-decayed RELEASING
-// voice (earliest tail end — the least audible casualty); else steal the
-// oldest HELD voice. A stolen voice starts its new attack from the level its
-// tail is at (#267); stealing only happens when all 32 voices are genuinely
-// in use.
-void note_on(uint8_t channel, uint8_t note, uint8_t vel) {
-    int pick = -1;
-
-    uint32_t best = UINT32_MAX;
-    for (int v = 0; v < voice_count; ++v) {
-        if (s_voices[v].state == V_IDLE && s_voices[v].alloc_seq < best) {
-            best = s_voices[v].alloc_seq;
-            pick = v;
-        }
-    }
-    if (pick < 0) {
-        int64_t earliest = INT64_MAX;
-        for (int v = 0; v < voice_count; ++v) {
-            if (s_voices[v].state == V_RELEASING
-                && s_voices[v].released_at < earliest) {
-                earliest = s_voices[v].released_at;
-                pick     = v;
-            }
-        }
-    }
-    if (pick < 0) {
-        uint32_t oldest = UINT32_MAX;
-        for (int v = 0; v < voice_count; ++v) {
-            if (s_voices[v].alloc_seq < oldest) {
-                oldest = s_voices[v].alloc_seq;
-                pick   = v;
-            }
-        }
-    }
-
-    Voice &voice    = s_voices[pick];
-    voice           = Voice{};
-    voice.state     = V_HELD;
-    voice.note      = note;
-    voice.vel       = vel;
-    voice.channel   = channel;
-    voice.alloc_seq = ++s_alloc_seq;
-
-    // The pitch and the velocity's amounts go in with the attack, in one
-    // swap, so the attack's first pass already has them.
-    render::Writes writes;
-    render::note_on(engine_link_synth(), g_preset, pick, note, vel, writes);
-    send(writes);
+// The velocity's 7 bits as the engine takes it: 1 at the hardest.
+void note_on(uint8_t note, uint8_t velocity) {
+    s_engine->note_on(omni_channel, note,
+                      static_cast<float>(velocity) / 127.0f);
 }
 
-// Pitch wheel: ± the preset's bend range (RPN 0; ±2 semitones in the init
-// preset). The wheel's 14 bits are ±8192 around the centre.
-void pitch_bend_update(uint16_t bend14) {
-    const float semitones = static_cast<float>(static_cast<int>(bend14) - 8192)
-                            / 8192.0f * g_preset.part.bend_range;
-    if (semitones == s_controllers.bend) {
-        return;
-    }
-    s_controllers.bend = semitones;
-    render::Writes writes;
-    render::pitch_bend(engine_link_synth(), s_controllers, writes);
-    send(writes);
-}
-
-// Release one voice: both its envelopes go to their release segment.
-void release_voice(int v) {
-    s_voices[v].state       = V_RELEASING;
-    s_voices[v].sustained   = false;
-    s_voices[v].released_at = esp_timer_get_time();
-    render::Writes writes;
-    render::release(engine_link_synth(), v, writes);
-    send(writes);
-}
-
-// Note-off releases the OLDEST HELD voice carrying that note — FIFO pairing
-// with note-ons, since MIDI guarantees one off per on. Voices already held
-// only by the sustain pedal are skipped, so a key struck again while sustained
-// pairs with its new voice. With the pedal down the voice is marked sustained
-// instead of released. A voice whose key was stolen carries a different note
-// by now and is correctly skipped.
+// With the pedal down the note off waits for it to come up.
 void note_off(uint8_t note) {
-    int pick        = -1;
-    uint32_t oldest = UINT32_MAX;
-    for (int v = 0; v < voice_count; ++v) {
-        if (s_voices[v].state == V_HELD && !s_voices[v].sustained
-            && s_voices[v].note == note && s_voices[v].alloc_seq < oldest) {
-            oldest = s_voices[v].alloc_seq;
-            pick   = v;
-        }
-    }
-    if (pick < 0) {
-        return; // off without a matching held on (steal ate it)
-    }
-    if (s_sustain_pedal) {
-        s_voices[pick].sustained = true;
-    } else {
-        release_voice(pick);
+    if (!s_sustain_pedal) {
+        s_engine->note_off(omni_channel, note);
+    } else if (s_held_back[note] < SoundEngine::voice_count) {
+        ++s_held_back[note];
     }
 }
 
-// Sustain (damper) pedal, CC 64: values >= 64 are down. Pedal up releases
-// every voice the pedal was holding.
+// Sustain (damper) pedal, CC 64: values >= 64 are down. Pedal up sends every
+// note off it held back.
 void sustain_pedal_update(bool down) {
     s_sustain_pedal = down;
     if (down) {
         return;
     }
-    for (int v = 0; v < voice_count; ++v) {
-        if (s_voices[v].state == V_HELD && s_voices[v].sustained) {
-            release_voice(v);
+    for (size_t note = 0; note < s_held_back.size(); ++note) {
+        for (; s_held_back[note] > 0; --s_held_back[note]) {
+            s_engine->note_off(omni_channel, static_cast<int>(note));
         }
     }
+}
+
+// Pitch wheel: ± the preset's bend range (RPN 0; ±2 semitones in the init
+// preset). The wheel's 14 bits are ±8192 around the centre. Committed at
+// once: a bend is heard as it moves, and the CC edits that wait go with it.
+void pitch_bend_update(uint16_t bend14) {
+    const float semitones = static_cast<float>(static_cast<int>(bend14) - 8192)
+                            / 8192.0f * active().part.bend_range;
+    if (semitones == active().bend) {
+        return;
+    }
+    active().bend = semitones;
+    s_engine->commit();
+    s_edited = false;
 }
 
 // ---- CCs --------------------------------------------------------------------------------------------
@@ -366,9 +170,9 @@ bool handle_cc(uint8_t num, uint8_t val) {
     // ---- the wheel and the pedal ----
     case 1: {
         const float wheel = static_cast<float>(val) / 127.0f;
-        if (wheel != s_controllers.wheel) {
-            s_controllers.wheel = wheel;
-            s_pending |= dirty_cutoff; // mod wheel → cutoff
+        if (wheel != active().wheel) {
+            active().wheel = wheel; // mod wheel → cutoff
+            s_edited       = true;
         }
         return false;
     }
@@ -390,7 +194,7 @@ bool handle_cc(uint8_t num, uint8_t val) {
     case 6:
         if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
             // takes effect on the next bend
-            g_preset.part.bend_range =
+            active().part.bend_range =
                     static_cast<float>(std::clamp<uint8_t>(val, 1, 12));
         }
         return false;
@@ -407,34 +211,22 @@ bool handle_cc(uint8_t num, uint8_t val) {
     // ---- panic (found via the BLE fuzzer's stuck notes: its final CC 123 was
     // a no-op, so note-offs dropped under flood backpressure left voices
     // ringing forever) ----
-    case 123:                    // all notes off: release held voices,
-        s_sustain_pedal = false; // sustained ones included
-        for (int v = 0; v < voice_count; ++v) {
-            if (s_voices[v].state == V_HELD) {
-                release_voice(v);
-            }
-        }
-        return false;
-    case 120: { // all sound off: immediate silence
+    case 123: // all notes off: the notes the pedal holds included
         s_sustain_pedal = false;
-        render::Writes writes;
-        for (int v = 0; v < voice_count; ++v) {
-            if (s_voices[v].state != V_IDLE) {
-                s_voices[v].state     = V_IDLE;
-                s_voices[v].sustained = false;
-                render::silence(engine_link_synth(), v, writes);
-            }
-        }
-        send(writes);
+        s_held_back.fill(0);
+        s_engine->all_notes_off(omni_channel);
         return false;
-    }
+    case 120: // all sound off: immediate silence
+        s_sustain_pedal = false;
+        s_held_back.fill(0);
+        s_engine->all_sound_off(omni_channel);
+        return false;
 
-    // ---- the preset: cc_map's laws; a live edit of a velocity amount
-    // re-pushes the held voices' (the envelope's dirty bit) ----
+    // ---- the preset: cc_map's laws, onto the engine's tree ----
     default: {
-        const cc_map::Part part = cc_map::apply(g_preset, s_knobs, num, val);
-        s_pending |= dirty_of(part);
-        return part != cc_map::Part::none;
+        const bool edited = cc_map::apply(active(), s_knobs, num, val);
+        s_edited          = s_edited || edited;
+        return edited;
     }
     }
 }
@@ -451,7 +243,7 @@ void handle_midi(const midi_message_t *m, uint8_t source) {
 
     switch (type) {
     case 0x90: // parser normalises vel 0 → note off
-        note_on(ch, m->data[0], m->data[1]);
+        note_on(m->data[0], m->data[1]);
         break;
     case 0x80:
         note_off(m->data[0]);
@@ -477,49 +269,28 @@ void handle_midi(const midi_message_t *m, uint8_t source) {
     }
 }
 
-// Apply coalesced CC edits at a bounded rate. A CC burst sets dirty bits
-// cheaply; here the heavy work runs at most every flush_min_us, so no
+// Commit coalesced CC edits at a bounded rate. A CC burst sets values
+// cheaply; here the engine's work runs at most every flush_min_us, so no
 // controller sweep can flood the engine link or starve the CPU.
 void flush_pending_edits(int64_t now) {
-    if (!s_pending || now - s_last_flush < flush_min_us) {
+    if (!s_edited || now - s_last_flush < flush_min_us) {
         return;
     }
-    if (s_pending & dirty_amp_env) {
-        update_amp_env();
-    }
-    if (s_pending & dirty_mod_env) {
-        update_mod_env();
-    }
-    if (s_pending & dirty_cutoff) {
-        update_cutoff();
-    }
-    if (s_pending & dirty_lfo1) {
-        update_lfo(0);
-    }
-    if (s_pending & dirty_lfo2) {
-        update_lfo(1);
-    }
-    if (s_pending & dirty_volume) {
-        update_volume();
-    }
-    if (s_pending & dirty_voices) {
-        update_voices();
-    }
-    s_pending    = 0;
+    s_engine->commit();
+    s_edited     = false;
     s_last_flush = now;
 }
 
-// Make p the active preset: everything dirty, flushed at once, so the new
+// Make p the active preset: assigned and committed at once, so the new
 // preset is in place before the next event. Held voices follow it too: their
 // pitch is theirs, but the sound around it is the channel's.
 void apply_preset(const preset_t *p, int64_t now) {
-    g_preset = *p;
+    active() = *p;
     s_knobs  = cc_map::knobs_of(
-            g_preset); // the preset's values stand; the knobs follow them
-    s_pending |= dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
-                 | dirty_lfo2 | dirty_volume | dirty_voices;
-    s_last_flush = 0;
-    flush_pending_edits(now);
+            active()); // the preset's values stand; the knobs follow them
+    s_engine->commit();
+    s_edited     = false;
+    s_last_flush = now;
     sync_surfaces(MIDI_SOURCE_INTERNAL); // every surface follows the change
 }
 
@@ -527,7 +298,7 @@ void handle_preset_request(const preset_request_t *r, int64_t now) {
     if (r->set) {
         apply_preset(r->preset, now);
     } else {
-        *r->preset = g_preset;
+        *r->preset = active();
     }
     xSemaphoreGive(r->done);
 }
@@ -637,18 +408,16 @@ bool preset_request(bool set, preset_t *p) {
     return ok;
 }
 
-// Poll period for the idle sweep: a released voice must reach IDLE within this
-// of its tail ending, even if no further notes arrive. 20 ms is well below
-// noticeable and negligible load. It also bounds how long a pending coalesced
-// CC edit waits.
+// Poll period: it bounds how long a pending coalesced CC edit waits. 20 ms
+// is well below noticeable and negligible load.
 constexpr int poll_ms = 20;
 
 void voice_alloc_task(void *) {
     evt_t evt;
     int64_t busy_since = esp_timer_get_time();
     while (true) {
-        // Timed receive so the idle sweep runs during quiet passages, not only
-        // when the next note_on happens to scan.
+        // Timed receive so a pending edit is committed during quiet passages,
+        // not only when the next event happens to arrive.
         if (xQueueReceive(s_queue, &evt, pdMS_TO_TICKS(poll_ms)) == pdTRUE) {
             if (evt.kind == EVT_MIDI) {
                 handle_midi(&evt.midi, evt.source);
@@ -693,16 +462,39 @@ void voice_alloc_set_preset_listener(void (*listener)(const char *name)) {
     s_preset_listener = listener;
 }
 
-// A snapshot of the voice table for the console (#238). Best-effort across the
-// allocator task — no lock; a diagnostic read tolerates a rare torn field.
+// A snapshot of the engine's voices for the console (#238). Best-effort
+// across the voice task — no lock; a diagnostic read tolerates a rare torn
+// field. A note off the pedal holds back will release the oldest held voice
+// of its note, so those voices are the ones shown as sustained.
 int voice_alloc_diag(voice_diag_t *out, int max) {
-    const int n = max < voice_count ? max : voice_count;
+    if (!s_engine) {
+        return 0;
+    }
+    const auto &voices = s_engine->voices();
+    std::array<int, SoundEngine::voice_count> oldest_first;
+    std::iota(oldest_first.begin(), oldest_first.end(), 0);
+    std::sort(oldest_first.begin(), oldest_first.end(), [&](int a, int b) {
+        return voices[static_cast<size_t>(a)].struck
+               < voices[static_cast<size_t>(b)].struck;
+    });
+    std::array<uint8_t, 128> held_back = s_held_back;
+    std::array<bool, SoundEngine::voice_count> sustained{};
+    for (const int v : oldest_first) {
+        const SoundEngine::Voice &voice = voices[static_cast<size_t>(v)];
+        if (voice.state == SoundEngine::Voice::State::held
+            && held_back[voice.note] > 0) {
+            --held_back[voice.note];
+            sustained[static_cast<size_t>(v)] = true;
+        }
+    }
+    const int n = std::min(max, SoundEngine::voice_count);
     for (int v = 0; v < n; ++v) {
-        out[v].state     = static_cast<uint8_t>(s_voices[v].state);
-        out[v].note      = s_voices[v].note;
-        out[v].vel       = s_voices[v].vel;
-        out[v].sustained = s_voices[v].sustained ? 1 : 0;
-        out[v].alloc_seq = s_voices[v].alloc_seq;
+        const SoundEngine::Voice &voice = voices[static_cast<size_t>(v)];
+        out[v].state                    = static_cast<uint8_t>(voice.state);
+        out[v].note                     = voice.note;
+        out[v].vel = static_cast<uint8_t>(std::lround(voice.velocity * 127.0f));
+        out[v].sustained = sustained[static_cast<size_t>(v)] ? 1 : 0;
+        out[v].alloc_seq = voice.struck;
     }
     return n;
 }
@@ -717,16 +509,27 @@ void voice_alloc_init(void) {
         ESP_LOGE(tag, "failed to create event queue");
         return;
     }
-    preset_init(&g_preset);          // the active sound, in one struct
-    storage_load_startup(&g_preset); // system.toml's startup preset, if any
-    s_knobs = cc_map::knobs_of(g_preset);
 
-    // The sound: every part of the preset to the CSP, once, and the pointers.
-    point_partials();
-    s_pending = dirty_amp_env | dirty_mod_env | dirty_cutoff | dirty_lfo1
-                | dirty_lfo2 | dirty_volume | dirty_voices;
-    s_last_flush = 0;
-    flush_pending_edits(esp_timer_get_time());
+    // The engine: its graph wired, in the PSRAM.
+    const size_t external_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const int64_t started        = esp_timer_get_time();
+    {
+        const ExternalHeap external;
+        s_engine.emplace(engine_link());
+    }
+    ESP_LOGI(tag,
+             "sound engine: graph wired in %lld us, %u bytes of PSRAM held",
+             static_cast<long long>(esp_timer_get_time() - started),
+             static_cast<unsigned>(
+                     external_before
+                     - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+
+    // The active sound: system.toml's startup preset, if any, in place of
+    // the init preset the channel holds. The link's start commits it, so the
+    // CSP is let go with the whole sound in.
+    storage_load_startup(&active());
+    s_knobs = cc_map::knobs_of(active());
+    engine_link_init(*s_engine);
 
     s_program_queue =
             xQueueCreate(program_queue_length, sizeof(ProgramRequest));
@@ -748,6 +551,7 @@ void voice_alloc_init(void) {
         ESP_LOGE(tag, "failed to create task");
         return;
     }
-    ESP_LOGI(tag, "%d voices x %d partials ready (sub id %d)", voice_count,
-             partials_per_voice, s_sub_id);
+    ESP_LOGI(tag, "%d voices x %d partials ready (sub id %d)",
+             SoundEngine::voice_count, SoundEngine::partials_per_voice,
+             s_sub_id);
 }

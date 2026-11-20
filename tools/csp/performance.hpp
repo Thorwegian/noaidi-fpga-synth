@@ -3,8 +3,9 @@
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// A set-up and a short performance for the wired synth (app/main/wiring.hpp),
-// in the graph's own terms: a value for a source, a record for a pointer, an
+// A set-up and a short performance for the graph the sound engine wires
+// (app/main/sound_engine.hpp), in the graph's own terms, past the engine's
+// parameters and events: a value for a source, a record for a pointer, an
 // inner record for a stage. Every LFO runs, every channel listens to two of
 // them at depths of its own, the voices are spread over the channels, and
 // while it plays voices move to other channels, channels to other LFOs, and
@@ -20,12 +21,21 @@
 #include <cstdint>
 #include <vector>
 
-#include "wiring.hpp"
+#include "sound_engine.hpp"
 
 namespace performance {
 
+using Wiring = SoundEngine::Wiring;
 using Wire   = csp::DspGraph::Wire;
 using Record = csp::DspGraph::Record;
+
+// The link of an engine that is built for its graph and its wires and never
+// played: it goes nowhere.
+class Unplayed final : public SoundEngine::Link {
+public:
+    void write(std::span<const SoundEngine::Write>) override {}
+    void point(int, const SoundEngine::Pointers &) override {}
+};
 
 // What the firmware sets a wire to.
 struct Setting {
@@ -61,9 +71,9 @@ inline int64_t q_wide(double value) {
 }
 
 // The settings as the firmware's writes: a dword is two, the upper word first.
-inline std::vector<Write> writes(const wiring::Synth &synth,
+inline std::vector<Write> writes(const SoundEngine &engine,
                                  const Settings &settings) {
-    const csp::DspGraph &graph = synth.graph;
+    const csp::DspGraph &graph = engine.graph();
     std::vector<Write> out;
     for (const Setting &setting : settings) {
         const int address = graph.address(setting.wire);
@@ -91,30 +101,33 @@ inline std::vector<Write> writes(const wiring::Synth &synth,
 
 // ---- the moves ------------------------------------------------------------------
 
-inline void voice_to_channel(const wiring::Synth &synth, int voice, int channel,
+inline void voice_to_channel(const SoundEngine &engine, int voice, int channel,
                              Settings &settings) {
+    const Wiring &wiring = engine.wiring();
     settings.push_back({Setting::Kind::pointer,
-                        synth.voices[static_cast<size_t>(voice)].channel, 0,
-                        synth.channels[static_cast<size_t>(channel)].record});
+                        wiring.voices[static_cast<size_t>(voice)].channel, 0,
+                        wiring.channels[static_cast<size_t>(channel)].record});
 }
 
-inline void channel_to_lfo(const wiring::Synth &synth, int channel, int which,
+inline void channel_to_lfo(const SoundEngine &engine, int channel, int which,
                            int lfo, Settings &settings) {
+    const Wiring &wiring = engine.wiring();
     settings.push_back({Setting::Kind::pointer,
-                        synth.channels[static_cast<size_t>(channel)]
+                        wiring.channels[static_cast<size_t>(channel)]
                                 .lfo[static_cast<size_t>(which)],
-                        0, synth.lfos[static_cast<size_t>(lfo)].record});
+                        0, wiring.lfos[static_cast<size_t>(lfo)].record});
 }
 
 // Both envelopes of a voice into a stage: a note on is the attack, a note
 // off the release.
-inline void voice_to_stage(const wiring::Synth &synth, int voice, int stage,
+inline void voice_to_stage(const SoundEngine &engine, int voice, int stage,
                            Settings &settings) {
-    for (size_t e = 0; e < wiring::envelope_count; ++e) {
+    const Wiring &wiring = engine.wiring();
+    for (size_t e = 0; e < Wiring::envelope_count; ++e) {
         settings.push_back({Setting::Kind::offset,
-                            synth.voices[static_cast<size_t>(voice)].stage[e],
+                            wiring.voices[static_cast<size_t>(voice)].stage[e],
                             0,
-                            synth.channels[0]
+                            wiring.channels[0]
                                     .segments[e][static_cast<size_t>(stage)]
                                     .record});
     }
@@ -122,10 +135,11 @@ inline void voice_to_stage(const wiring::Synth &synth, int voice, int stage,
 
 // ---- the set-up: before the CSP is let go ------------------------------------------
 
-inline Settings set_up(const wiring::Synth &synth) {
-    using wiring::channel_count;
-    using wiring::lfo_count;
-    using wiring::voice_count;
+inline Settings set_up(const SoundEngine &engine) {
+    constexpr int channel_count = SoundEngine::channel_count;
+    constexpr int voice_count   = SoundEngine::voice_count;
+    constexpr int lfo_count     = Wiring::lfo_count;
+    const Wiring &wiring        = engine.wiring();
     Settings settings;
     auto word = [&](Wire wire, double value) {
         settings.push_back({Setting::Kind::word, wire, q(value), {}});
@@ -135,24 +149,25 @@ inline Settings set_up(const wiring::Synth &synth) {
     };
     for (int l = 0; l < lfo_count; ++l) {
         const double depth     = 0.3 + 0.05 * l;
-        const wiring::Lfo &lfo = synth.lfos[static_cast<size_t>(l)];
+        const Wiring::Lfo &lfo = wiring.lfos[static_cast<size_t>(l)];
         dword(lfo.step, 0.0031 * (l + 1) * 16.0);
         word(lfo.depth, depth);
         word(lfo.neg_depth, -depth);
-        word(lfo.gain, l % wiring::lfo_shape_count == wiring::shape_triangle
+        word(lfo.gain, l % Wiring::lfo_shape_count == Wiring::shape_triangle
                                ? depth / 4
                                : depth / 8);
     }
     for (int c = 0; c < channel_count; ++c) {
-        const wiring::Channel &channel = synth.channels[static_cast<size_t>(c)];
+        const Wiring::Channel &channel =
+                wiring.channels[static_cast<size_t>(c)];
         word(channel.bend, 0.02 * (c - 8));
-        for (int l = 0; l < wiring::channel_lfo_count; ++l) {
-            for (int k = 0; k < wiring::moved_count; ++k) {
+        for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
+            for (int k = 0; k < Wiring::moved_count; ++k) {
                 word(channel.depth[static_cast<size_t>(l)]
                                   [static_cast<size_t>(k)],
                      0.05 * ((c + 3 * l + k) % 7) - 0.1);
             }
-            channel_to_lfo(synth, c, l, (3 * c + 5 * l + 1) % lfo_count,
+            channel_to_lfo(engine, c, l, (3 * c + 5 * l + 1) % lfo_count,
                            settings);
         }
         word(channel.cutoff_base, 0.5 + 0.1 * (c % 5));
@@ -161,28 +176,28 @@ inline Settings set_up(const wiring::Synth &synth) {
         word(channel.duty_base[0], 0.1 + 0.02 * c);
         word(channel.duty_base[1], -0.3 + 0.03 * c);
         word(channel.resonance_base, 0.5 + 0.1 * (c % 7));
-        const double targets[wiring::envelope_count][wiring::stage_count] = {
+        const double targets[Wiring::envelope_count][Wiring::stage_count] = {
                 {1.25, 0.4 + 0.02 * c, 0.0}, {1.25, 0.2 + 0.03 * c, 0.0}};
-        const double rates[wiring::envelope_count][wiring::stage_count] = {
+        const double rates[Wiring::envelope_count][Wiring::stage_count] = {
                 {0.02 + 0.004 * c, 0.004, 0.008},
                 {0.05, 0.002 + 0.001 * c, 0.02}};
-        for (size_t e = 0; e < wiring::envelope_count; ++e) {
-            for (size_t s = 0; s < wiring::stage_count; ++s) {
+        for (size_t e = 0; e < Wiring::envelope_count; ++e) {
+            for (size_t s = 0; s < Wiring::stage_count; ++s) {
                 dword(channel.segments[e][s].target, targets[e][s]);
                 dword(channel.segments[e][s].rate, rates[e][s]);
             }
         }
     }
     for (int v = 0; v < voice_count; ++v) {
-        const wiring::Voice &voice = synth.voices[static_cast<size_t>(v)];
+        const Wiring::Voice &voice = wiring.voices[static_cast<size_t>(v)];
         word(voice.note, -1.0 + 0.1 * v);
-        word(voice.velocity[wiring::envelope_amp], 0.3 + 0.02 * v);
-        word(voice.velocity[wiring::envelope_mod], 1.0 - 0.01 * v);
-        voice_to_channel(synth, v, (5 * v + 1) % channel_count, settings);
+        word(voice.velocity[Wiring::envelope_amp], 0.3 + 0.02 * v);
+        word(voice.velocity[Wiring::envelope_mod], 1.0 - 0.01 * v);
+        voice_to_channel(engine, v, (5 * v + 1) % channel_count, settings);
         // idle, or in its attack
-        voice_to_stage(synth, v,
-                       v % 3 == 0 ? wiring::stage_release
-                                  : wiring::stage_attack,
+        voice_to_stage(engine, v,
+                       v % 3 == 0 ? Wiring::stage_release
+                                  : Wiring::stage_attack,
                        settings);
     }
     return settings;
@@ -190,30 +205,30 @@ inline Settings set_up(const wiring::Synth &synth) {
 
 // ---- the performance: what the firmware sets before a pass, from 1 ------------------
 
-inline Settings before_pass(const wiring::Synth &synth, int pass) {
-    using wiring::channel_count;
-    using wiring::voice_count;
+inline Settings before_pass(const SoundEngine &engine, int pass) {
+    constexpr int channel_count = SoundEngine::channel_count;
+    constexpr int voice_count   = SoundEngine::voice_count;
     Settings settings;
     switch (pass) {
     case 120: // every other voice to another channel
         for (int v = 0; v < voice_count; v += 2) {
-            voice_to_channel(synth, v, (7 * v + 3) % channel_count, settings);
+            voice_to_channel(engine, v, (7 * v + 3) % channel_count, settings);
         }
         break;
     case 200: // notes off
         for (int v = 1; v < voice_count; v += 2) {
-            voice_to_stage(synth, v, wiring::stage_release, settings);
+            voice_to_stage(engine, v, Wiring::stage_release, settings);
         }
         break;
     case 300: // every channel to another LFO
         for (int c = 0; c < channel_count; ++c) {
-            channel_to_lfo(synth, c, c % 2, (c + 2) % wiring::lfo_count,
+            channel_to_lfo(engine, c, c % 2, (c + 2) % Wiring::lfo_count,
                            settings);
         }
         break;
     case 380: // notes on
         for (int v = 0; v < voice_count; v += 3) {
-            voice_to_stage(synth, v, wiring::stage_attack, settings);
+            voice_to_stage(engine, v, Wiring::stage_attack, settings);
         }
         break;
     default:

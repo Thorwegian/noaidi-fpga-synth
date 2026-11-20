@@ -252,17 +252,18 @@ sim-memories: obj_dir/tb_csp_memories/sim
 
 # The co-simulation: the RTL, Verilated to C++, against tools/csp's reference model in one executable
 # (tb/csp_cosim/csp_cosim.cpp). It runs the boot self-test and some directed programs, the program the
-# firmware's graph builds for the Noaidi (app/main/wiring.cpp) through a performance, and random scalar
+# firmware's sound engine builds for the Noaidi (app/main/sound_engine.cpp) through a performance, and random scalar
 # ones built with csp::ProgramBuilder, comparing every register, the published sinks, i, j, the
 # accumulator, the flags and the cycles after every pass, and DMEM's row rule at every edge.
 # `sim +rtltrace` prints the rows entering the address stage.
 CSP_COSIM_CPP = tb/csp_cosim/csp_cosim.cpp ../tools/csp/processor.cpp ../tools/csp/assembler.cpp \
                 ../app/main/csp/csp.cpp ../app/main/csp/program_builder.cpp ../app/main/csp/selftest.cpp \
-                ../app/main/csp/dsp_graph.cpp ../app/main/wiring.cpp
+                ../app/main/csp/envelope.cpp ../app/main/csp/dsp_graph.cpp ../app/main/sound_engine.cpp \
+                ../app/main/preset.cpp
 CSP_COSIM_HPP = ../tools/csp/processor.hpp ../tools/csp/assembler.hpp ../app/main/csp/csp.hpp ../app/main/csp/program_builder.hpp \
-                ../app/main/csp/selftest.hpp \
-                ../app/main/csp/dsp_graph.hpp ../app/main/csp/dsp_graph_netlist.hpp ../app/main/wiring.hpp \
-                ../tools/csp/performance.hpp
+                ../app/main/csp/selftest.hpp ../app/main/csp/envelope.hpp ../app/main/csp/lfo.hpp \
+                ../app/main/csp/dsp_graph.hpp ../app/main/csp/dsp_graph_netlist.hpp ../app/main/sound_engine.hpp \
+                ../app/main/preset.h ../tools/csp/performance.hpp
 obj_dir/csp_cosim/sim: $(CSP) tb/csp_cosim/tb_csp_cosim.sv tb/csp_cosim/csp_rtl.hpp $(CSP_COSIM_CPP) $(CSP_COSIM_HPP) \
                        Makefile
 	mkdir -p $(@D) && verilator --cc --exe --build -j 8 -O3 --x-assign unique --x-initial unique -I. \

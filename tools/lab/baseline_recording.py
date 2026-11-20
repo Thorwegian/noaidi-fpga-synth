@@ -12,13 +12,17 @@ The sequence (Thor, issue #222, 2026-10-17), at 60 BPM:
   - a C major triad an octave below, C4 E4 G4, held four beats and released;
   - the recording runs on while the envelope fades.
 
-usage: baseline_recording.py <out.wav> [--program N[,N...]] [--port CLIENT:PORT]
+usage: baseline_recording.py <out.wav> [--bank N] [--program N[,N...]]
+                             [--transpose SEMITONES] [--port CLIENT:PORT]
                              [--device hw:1,0] [--tail SECONDS]
 
-The preset is chosen by a MIDI Program Change (the Factory bank: 0 Supersaw,
-1 Galaxy — app/storage/banks.toml); several programs, comma-separated, play
+The preset is chosen as a player's controller would choose it, by Bank Select
+and a Program Change (app/storage/banks.toml: bank 0 is Factory, 0 Supersaw,
+1 Galaxy; the lab's baselines are the Tests bank's programs, baselines.py);
+several programs, comma-separated, play
 the sequence once each in one recording, a Program Change before each walk
-(a listening test of the preset change itself); the MIDI goes out through `aseqsend` to
+(a listening test of the preset change itself); --transpose moves every note
+of the sequence (a bass is played two octaves down, -24); the MIDI goes out through `aseqsend` to
 the ALSA sequencer port the synth's USB MIDI interface has (held open by a
 subscription for the run: the kernel opens a USB MIDI port's device only
 while some client is subscribed to it, and drops a direct event to an
@@ -27,10 +31,6 @@ nothing else happens to be connected), the audio comes in through `arecord`
 from the ALSA capture device the S/PDIF receiver has.
 The file is 48 kHz, 16-bit, stereo; the summary printed at the end gives the
 level of each note so that a recording can be checked without listening.
-
-WARNING: the acceptance plays Galaxy (program 1), a Factory preset still being
-voiced on the bench (#305); its benchmark is only valid for the Galaxy.toml it
-was recorded with (tools/lab/benchmark/README.md).
 """
 import argparse
 import subprocess
@@ -40,6 +40,8 @@ import time
 import wave
 
 import numpy as np
+
+from baselines import bank_select
 
 BPM = 60.0
 BEAT = 60.0 / BPM
@@ -51,9 +53,12 @@ VELOCITY = 0x64
 def main():
     parser = argparse.ArgumentParser(description="the baseline recording")
     parser.add_argument("out", help="the WAV file to write")
+    parser.add_argument("--bank", type=int, default=0,
+                        help="the bank the programs are of (Bank Select goes out before every Program Change): 0 is Factory")
     parser.add_argument("--program", default="1",
                         help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
-                             "negative sends no Program Change (the preset loaded already, e.g. by the console's `load`)")
+                             "negative sends no Program Change (the preset loaded already)")
+    parser.add_argument("--transpose", type=int, default=0, help="semitones added to every note of the sequence")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
@@ -100,27 +105,30 @@ def walk_and_record(args, midi):
     # silence, 4 beats of triad, the tail; plus a beat of lead-in. Several
     # programs walk in turn, each after its Program Change and a settle.
     programs = [int(p) for p in args.program.split(",")]
+    scale    = [note + args.transpose for note in SCALE]
+    triad    = [note + args.transpose for note in TRIAD]
     walk     = BEAT * (1 + 8 + 3 + 4 + 4) + args.tail
     settle   = 2.0                                # a Program Change reloads the preset; let it settle
     length   = len(programs) * walk + (len(programs) - 1) * settle
     if programs[0] >= 0:
-        midi("C0 %02X" % programs[0])
+        midi(*bank_select(args.bank), "C0 %02X" % programs[0])
         time.sleep(settle)
     recorder = subprocess.Popen(["arecord", "-q", "-D", args.device, "-f", "S16_LE", "-r", "48000", "-c", "2",
                                  "-d", str(int(round(length)) + 1), args.out])
     t0 = time.monotonic()
 
     events = []                                   # (beat, [notes on], [notes off])
-    for i, note in enumerate(SCALE[:-1]):
-        events.append((i, [note], [SCALE[i - 1]] if i else []))
-    events.append((7, [SCALE[-1]], [SCALE[-2]]))   # the C6, held a full bar
-    events.append((11, [], [SCALE[-1]]))           # released at the end of its bar; a bar of silence follows
-    events.append((15, TRIAD, []))                 # the triad, four beats
-    events.append((19, [], TRIAD))                 # released; the envelope fades
+    for i, note in enumerate(scale[:-1]):
+        events.append((i, [note], [scale[i - 1]] if i else []))
+    events.append((7, [scale[-1]], [scale[-2]]))   # the last note, held a full bar
+    events.append((11, [], [scale[-1]]))           # released at the end of its bar; a bar of silence follows
+    events.append((15, triad, []))                 # the triad, four beats
+    events.append((19, [], triad))                 # released; the envelope fades
     for n, program in enumerate(programs):
         base = t0 + n * (walk + settle)
         if n and program >= 0:
-            midi("C0 %02X" % program)           # the change itself is in the take, in the tail before
+            # the change itself is in the take, in the tail before
+            midi(*bank_select(args.bank), "C0 %02X" % program)
         for beat, on, off in events:
             delay = base + BEAT * (1 + beat) - time.monotonic()
             if delay > 0:
@@ -135,9 +143,9 @@ def walk_and_record(args, midi):
     second = lambda s: x[int(s * 48000):int((s + 0.8) * 48000), 0]
     print("baseline %s: program(s) %s, %.1f s" % (args.out, args.program, len(x) / 48000.0))
     print("  lead-in        %6.1f dBFS" % level(second(0.1)))
-    for i, note in enumerate(SCALE):
+    for i, note in enumerate(scale):
         print("  note %3d       %6.1f dBFS" % (note, level(second(1 + BEAT * i + 0.1))))
-    print("  C6 held, 4th s %6.1f dBFS" % level(second(1 + BEAT * 10 + 0.1)))
+    print("  held, 4th s    %6.1f dBFS" % level(second(1 + BEAT * 10 + 0.1)))
     print("  silence        %6.1f dBFS" % level(second(1 + BEAT * 13 + 0.1)))
     print("  triad          %6.1f dBFS" % level(second(1 + BEAT * 16 + 0.1)))
     print("  release + 2 s  %6.1f dBFS" % level(second(1 + BEAT * 19 + 2.0)))

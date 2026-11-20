@@ -1,0 +1,393 @@
+{
+ "file": "/home/thor/.local/tmp/hermes/benchmark/baseline_sawbass_b158923.wav",
+ "failures": 0,
+ "segments": [
+  {
+   "segment": "lead-in",
+   "start": 0.0,
+   "end": 1.0,
+   "want": [],
+   "level_dbfs": -120.0,
+   "median_midi": null,
+   "clusters": {},
+   "centroid_hz": 0.0,
+   "valley_db": -240.0,
+   "peaks_db": {},
+   "partials_db": [],
+   "ok": true,
+   "rule": "silence"
+  },
+  {
+   "segment": "note 1 of the scale",
+   "start": 1.0,
+   "end": 2.0,
+   "want": [
+    "C3"
+   ],
+   "level_dbfs": -24.16,
+   "median_midi": 47.98,
+   "clusters": {
+    "C3": 100
+   },
+   "centroid_hz": 309.0,
+   "valley_db": -99.4,
+   "peaks_db": {
+    "C3": 0.0
+   },
+   "partials_db": [
+    -240.0,
+    0.0,
+    -50.8,
+    -1.7,
+    -54.2,
+    -8.0,
+    -58.6,
+    -15.8,
+    -65.0,
+    -23.6,
+    -71.6,
+    -31.2,
+    -77.8,
+    -39.1,
+    -80.5,
+    -46.4
+   ],
+   "ok": true,
+   "rule": "C3"
+  },
+  {
+   "segment": "note 2 of the scale",
+   "start": 2.0,
+   "end": 3.0,
+   "want": [
+    "D3"
+   ],
+   "level_dbfs": -24.14,
+   "median_midi": 49.97,
+   "clusters": {
+    "D3": 100
+   },
+   "centroid_hz": 339.8,
+   "valley_db": -98.6,
+   "peaks_db": {
+    "D3": -0.1
+   },
+   "partials_db": [
+    -240.0,
+    -240.0,
+    -50.9,
+    -0.1,
+    -55.6,
+    -7.2,
+    -58.8,
+    -13.7,
+    -64.9,
+    -22.0,
+    -70.7,
+    -29.7,
+    -75.8,
+    -39.1,
+    -79.8,
+    -45.1
+   ],
+   "ok": true,
+   "rule": "D3"
+  },
+  {
+   "segment": "note 3 of the scale",
+   "start": 3.0,
+   "end": 4.0,
+   "want": [
+    "E3"
+   ],
+   "level_dbfs": -24.16,
+   "median_midi": 51.97,
+   "clusters": {
+    "E3": 100
+   },
+   "centroid_hz": 395.4,
+   "valley_db": -95.7,
+   "peaks_db": {
+    "E3": 0.0
+   },
+   "partials_db": [
+    -59.5,
+    0.0,
+    -55.3,
+    -1.4,
+    -52.9,
+    -7.5,
+    -57.2,
+    -15.0,
+    -60.9,
+    -22.8,
+    -66.8,
+    -31.3,
+    -71.8,
+    -39.8,
+    -76.3,
+    -47.5
+   ],
+   "ok": true,
+   "rule": "E3"
+  },
+  {
+   "segment": "note 4 of the scale",
+   "start": 4.0,
+   "end": 5.0,
+   "want": [
+    "F3"
+   ],
+   "level_dbfs": -24.18,
+   "median_midi": 52.97,
+   "clusters": {
+    "F3": 100
+   },
+   "centroid_hz": 408.9,
+   "valley_db": -97.0,
+   "peaks_db": {
+    "F3": 0.0
+   },
+   "partials_db": [
+    -240.0,
+    0.0,
+    -56.0,
+    -1.8,
+    -58.5,
+    -8.6,
+    -64.6,
+    -15.7,
+    -71.0,
+    -23.0,
+    -74.3,
+    -31.4,
+    -76.6,
+    -39.5,
+    -81.2,
+    -46.7
+   ],
+   "ok": true,
+   "rule": "F3"
+  },
+  {
+   "segment": "note 5 of the scale",
+   "start": 5.0,
+   "end": 6.0,
+   "want": [
+    "G3"
+   ],
+   "level_dbfs": -24.21,
+   "median_midi": 54.97,
+   "clusters": {
+    "G3": 100
+   },
+   "centroid_hz": 459.0,
+   "valley_db": -94.5,
+   "peaks_db": {
+    "G3": 0.0
+   },
+   "partials_db": [
+    -240.0,
+    0.0,
+    -55.8,
+    -1.8,
+    -56.2,
+    -7.1,
+    -63.2,
+    -15.3,
+    -66.6,
+    -23.2,
+    -71.4,
+    -31.2,
+    -75.5,
+    -39.4,
+    -78.1,
+    -47.3
+   ],
+   "ok": true,
+   "rule": "G3"
+  },
+  {
+   "segment": "note 6 of the scale",
+   "start": 6.0,
+   "end": 7.0,
+   "want": [
+    "A3"
+   ],
+   "level_dbfs": -24.26,
+   "median_midi": 56.97,
+   "clusters": {
+    "A3": 100
+   },
+   "centroid_hz": 506.8,
+   "valley_db": -94.9,
+   "peaks_db": {
+    "A3": 0.0
+   },
+   "partials_db": [
+    -240.0,
+    0.0,
+    -55.7,
+    -2.5,
+    -54.9,
+    -7.6,
+    -56.0,
+    -15.1,
+    -57.4,
+    -23.7,
+    -64.1,
+    -32.6,
+    -70.4,
+    -40.3,
+    -75.0,
+    -47.3
+   ],
+   "ok": true,
+   "rule": "A3"
+  },
+  {
+   "segment": "note 7 of the scale",
+   "start": 7.0,
+   "end": 8.0,
+   "want": [
+    "B3"
+   ],
+   "level_dbfs": -24.3,
+   "median_midi": 58.97,
+   "clusters": {
+    "B3": 100
+   },
+   "centroid_hz": 550.2,
+   "valley_db": -98.4,
+   "peaks_db": {
+    "B3": 0.0
+   },
+   "partials_db": [
+    -240.0,
+    0.0,
+    -60.3,
+    -1.5,
+    -59.1,
+    -7.8,
+    -63.9,
+    -15.4,
+    -69.0,
+    -23.4,
+    -75.4,
+    -32.2,
+    -79.5,
+    -40.8,
+    -83.0,
+    -48.7
+   ],
+   "ok": true,
+   "rule": "B3"
+  },
+  {
+   "segment": "C4 held, one bar",
+   "start": 8.0,
+   "end": 12.0,
+   "want": [
+    "C4"
+   ],
+   "level_dbfs": -35.36,
+   "median_midi": 60.0,
+   "clusters": {
+    "C4": 100
+   },
+   "centroid_hz": 542.2,
+   "valley_db": -90.5,
+   "peaks_db": {
+    "C4": 0.0
+   },
+   "partials_db": [
+    -65.8,
+    0.0,
+    -60.7,
+    -2.1,
+    -65.9,
+    -20.4,
+    -77.5,
+    -36.5,
+    -80.7,
+    -48.2,
+    -82.8,
+    -56.6,
+    -83.4,
+    -64.6,
+    -84.6,
+    -71.4
+   ],
+   "ok": true,
+   "rule": "C4"
+  },
+  {
+   "segment": "bar of silence",
+   "start": 12.0,
+   "end": 16.0,
+   "want": [],
+   "level_dbfs": -120.0,
+   "median_midi": null,
+   "clusters": {},
+   "centroid_hz": 0.0,
+   "valley_db": -240.0,
+   "peaks_db": {},
+   "partials_db": [],
+   "ok": true,
+   "rule": "< C4-6"
+  },
+  {
+   "segment": "triad",
+   "start": 16.0,
+   "end": 20.0,
+   "want": [
+    "C2",
+    "E2",
+    "G2"
+   ],
+   "level_dbfs": -30.4,
+   "median_midi": null,
+   "clusters": {},
+   "centroid_hz": 200.3,
+   "valley_db": -87.5,
+   "peaks_db": {
+    "C2": -2.1,
+    "E2": 0.0,
+    "G2": -2.9
+   },
+   "partials_db": [],
+   "ok": true,
+   "rule": "C2 E2 G2"
+  },
+  {
+   "segment": "release +2 s",
+   "start": 21.5,
+   "end": 22.5,
+   "want": [],
+   "level_dbfs": -120.0,
+   "median_midi": null,
+   "clusters": {},
+   "centroid_hz": 0.0,
+   "valley_db": -240.0,
+   "peaks_db": {},
+   "partials_db": [],
+   "ok": true,
+   "rule": "< triad"
+  },
+  {
+   "segment": "release +6 s",
+   "start": 25.5,
+   "end": 26.5,
+   "want": [],
+   "level_dbfs": -120.0,
+   "median_midi": null,
+   "clusters": {},
+   "centroid_hz": 0.0,
+   "valley_db": -240.0,
+   "peaks_db": {},
+   "partials_db": [],
+   "ok": true,
+   "rule": "< triad-20"
+  }
+ ]
+}
