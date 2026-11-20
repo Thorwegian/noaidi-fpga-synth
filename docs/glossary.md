@@ -101,14 +101,16 @@ control signal once a pass. The instruction set is
   counter and the probe.
 - **control program** — the program the CSP runs every pass: the wiring
   between sources and sinks. The firmware generates it from the DSP graph
-  and loads it, at boot and whenever a commit uses other paths than the
+  and loads it, at boot and whenever a commit has other paths than the
   wired ones; where each value's word lives is the graph's, and differs
   from one program to the next.
-- **path** — a part of the synth a preset may leave unused, which the
-  control program then does not compute: an LFO of a shape, what an LFO
-  moves (`SoundEngine::Wiring::Paths`). **rewire** — wire a graph for the
-  paths the committed presets use; **reload** — load its program, with
-  every word the firmware owns, while the CSP is held.
+- **path** — a part of the synth a control program may leave out, and then
+  does not compute: an LFO of a shape, what an LFO moves
+  (`SoundEngine::Wiring::Paths`). What a knob reaches is in every program
+  the firmware loads, so a knob loads none; today that is every path.
+  **rewire** — wire a graph for the committed tree's paths; **reload** —
+  load its program, with every word the firmware owns, while the CSP is
+  held.
 - **DSP graph** — the classic DSP flowchart as a flat netlist
   (`app/main/csp/dsp_graph.hpp`): sources the firmware sets, constants,
   operators (sum, multiply, multiply-add, difference, absolute value,

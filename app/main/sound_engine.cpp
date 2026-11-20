@@ -496,22 +496,11 @@ bool same(const Table &a, const Table &b) {
 
 SoundEngine::SoundEngine(Link &link) : link_(link) {}
 
-// The paths the tree uses: those of every channel together, so that the
-// channels are wired alike and the voices alike, and the graph finds its
-// copies in them. An LFO with no depth uses none.
+// The paths the tree's program has: every one, whatever the tree holds. A
+// knob loads no program, so what a knob reaches is wired once a program is
+// loaded, and an LFO's depth, shape and destination are knobs.
 Wiring::Paths SoundEngine::paths() const {
-    Wiring::Paths paths;
-    for (const Channel &parameters : channel) {
-        for (size_t l = 0; l < Wiring::channel_lfo_count; ++l) {
-            const lfo_t &lfo = parameters.lfo[l];
-            if (lfo.depth != 0.0f) {
-                paths.shapes[l].set(static_cast<size_t>(lfo_shape(lfo.shape)));
-                paths.moves[l].set(
-                        static_cast<size_t>(moved_by(lfo.destination)));
-            }
-        }
-    }
-    return paths;
+    return Wiring::Paths::every();
 }
 
 // The synth as a graph, with the paths named: an LFO that does not run is
