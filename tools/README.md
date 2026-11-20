@@ -23,6 +23,11 @@ One rule decides the folder: what the thing needs.
   `tools/esp_idf.sh idf.py build` runs any `idf.py` command with ESP-IDF
   activated, `--where` says which ESP-IDF it found. The Makefile's `fw*`
   targets go through it; nobody sources `export.sh` by hand.
+- **`tools/firmware/`** — gates of the firmware's build.
+  `unused_functions.py` runs after every link (`app/CMakeLists.txt`) and
+  fails the build on a function of `app/main` that the firmware does not
+  link: one that nothing calls, or that only a host test or a host tool
+  calls.
 - **`tools/csp/`** — the CSP's assembler, reference model and host tests.
   **`tools/storage/`** — the storage partition image, for the Makefile.
   **`tools/docs/`** — `mermaid_check.mjs`, which parses every Mermaid graph in

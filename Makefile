@@ -8,7 +8,9 @@
 #   make pack       synthesize + place/route -> rtl/pack.fs
 #   make sram       load pack.fs into FPGA SRAM (volatile, fast)
 #   make flash      write pack.fs to FPGA flash (persistent)
-#   make fw         build the ESP32 firmware
+#   make fw         build the ESP32 firmware; an unused function of
+#                   app/main fails it (tools/firmware/unused_functions.py
+#                   after the link, -Werror=unused-function for a static one)
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)

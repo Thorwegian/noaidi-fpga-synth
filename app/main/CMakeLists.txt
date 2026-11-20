@@ -15,6 +15,10 @@ idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NOAIDI_BUILD="${NOAIDI_BUILD}")
 
+# ESP-IDF takes the unused static function out of -Werror
+# (-Wno-error=unused-function); here it is an error.
+target_compile_options(${COMPONENT_LIB} PRIVATE "-Werror=unused-function")
+
 # tomlc17 prints a uint32_t with %x, which is a format mismatch on this
 # target (uint32_t is unsigned long); it only affects an error message.
 set_source_files_properties("../lib/tomlc17/src/tomlc17.c" PROPERTIES COMPILE_OPTIONS "-Wno-format")
