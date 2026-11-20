@@ -51,8 +51,9 @@ typedef enum {
 // straight to voice_alloc's queue, so it stays in order with MIDI; the
 // sender waits on done.
 typedef struct {
-    bool set; // true: *preset becomes the active preset;
-              // false: the active preset is copied to *preset
+    bool set;        // true: *preset becomes the part's preset;
+                     // false: the part's preset is copied to *preset
+    uint8_t channel; // the part, the MIDI channel's engine channel
     struct preset_s *preset;
     SemaphoreHandle_t done;
 } preset_request_t;
