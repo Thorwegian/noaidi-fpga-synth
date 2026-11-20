@@ -22,9 +22,9 @@ a MIDI-to-CV converter). Consequences:
 - **Envelopes, LFOs, pitch and cutoff arithmetic run in the FPGA**, as the
   control program the CSP executes once per pass (four samples, 24 kHz — #268):
   the firmware generates it from the DSP graph
-  (`app/main/csp/dsp_graph.hpp`, wired in `app/main/sound_engine.cpp` for
-  the paths the presets in use need) and the engine link loads it, at boot
-  and again whenever a preset needs other paths. A program lays the
+  (`app/main/csp/dsp_graph.hpp`, wired in `app/main/sound_engine.cpp` with
+  everything a knob reaches) and the engine link loads it at boot; no knob
+  and no preset change loads another. A program lays the
   registers out for itself: where a value's word lives is that program's
   graph's to say, and a load brings every word the firmware owns with it.
   The instruction set is

@@ -25,10 +25,12 @@
 //   wiring      The engine builds the Noaidi's graph (csp/dsp_graph.hpp)
 //               with ordinary loops, and this synth's sizes are decided
 //               here: 16 channels, and 32 voices of 8 partials. A graph is
-//               wired for a set of paths (Wiring::Paths), the ones the
-//               committed tree uses, and its program computes those and
-//               spends no cycle on another. A commit of a tree that uses
-//               other paths wires a new graph, generates its program and
+//               wired for a set of paths (Wiring::Paths), and its program
+//               computes those and spends no cycle on another. A knob
+//               loads no program: what a knob reaches is wired whatever
+//               the tree holds, and only a path no knob reaches follows
+//               the tree. A commit of a tree with other paths than the
+//               wired ones wires a new graph, generates its program and
 //               loads it in place of the one that runs; any other commit
 //               writes values.
 //
@@ -45,15 +47,17 @@
 //   a voice     two envelopes, amp and mod, and through a movable wire to
 //               its channel, its pitch, cutoff and gain sinks
 //
-// The paths are those of all the channels together: every channel is wired
-// alike and every voice alike, whatever its preset, so the graph finds them
-// to be copies and loops over them. An LFO that a channel gives a depth
-// uses two paths: the LFO of its shape runs, for that one of a channel's
-// two, and a channel's LFO moves its destination. The channels share the
-// LFOs that run: an LFO of one shape has one rate, that of the channel
-// committed last among those it moves something in. An LFO with no depth
-// uses no path. What no LFO moves is not the program's: a pulse width or a
-// resonance is then a sink word the engine writes.
+// Every channel is wired alike and every voice alike, whatever its preset,
+// so the graph finds them to be copies and loops over them. The paths are
+// the LFOs': the LFO of a shape that runs, for one of a channel's two, and
+// what a channel's LFO moves. An LFO's depth, shape and destination are
+// knobs, so the tree's program has every path: an LFO of every shape runs
+// for each of a channel's two, and each moves all four destinations by a
+// depth of its own. The channels share the LFOs: an LFO of one shape has
+// one rate, that of the channel committed last among those it moves
+// something in. An LFO with no depth moves nothing and sets no rate. In a
+// graph wired for fewer paths, what no LFO moves is not the program's: a
+// pulse width or a resonance is then a sink word the engine writes.
 //
 // The conversions from a unit to a word are the class's own. The words go
 // out through a Link: the engine link on the board, a recorder in a host
@@ -136,8 +140,8 @@ public:
     std::array<Channel, channel_count> channel;
 
     // Everything set on the tree since the last commit takes effect, in one
-    // swap. The first commit, and a commit of a tree that uses other paths
-    // than the wired ones, wires a graph for the tree's paths, generates its
+    // swap. The first commit, and a commit of a tree with other paths than
+    // the wired ones, wires a graph for the tree's paths, generates its
     // program and loads it with the whole of the tree and the words the
     // program starts from; every voice is silent and idle after it. False
     // when that graph does not build: the engine goes on with the program it
@@ -294,8 +298,7 @@ public:
 
         // The paths a program computes: the LFOs that run, and what a
         // channel's LFOs move. A path costs its cycles every pass, whatever
-        // depth a preset gives it, so a graph is wired for the paths the
-        // tree uses.
+        // depth a preset gives it.
         struct Paths {
             // the shapes that run for each of a channel's LFOs
             std::array<std::bitset<lfo_shape_count>, channel_lfo_count> shapes;
@@ -352,7 +355,7 @@ public:
     // tree's paths and loads its program, and events come after it.
     explicit SoundEngine(Link &link);
 
-    // Wire a graph for `paths`, whatever the tree uses, in place of any
+    // Wire a graph for `paths`, whatever the tree's are, in place of any
     // there is: for a tool that builds the graph's program and sets its
     // wires itself (tools/csp/performance.hpp).
     void wire(const Wiring::Paths &paths);
@@ -389,7 +392,7 @@ private:
         csp::ProgramBuilder::Built program;
     };
 
-    // The paths the tree uses.
+    // The paths the tree's program has.
     Wiring::Paths paths() const;
     static std::unique_ptr<Wired> wired_for(const Wiring::Paths &paths);
     bool reload(const Wiring::Paths &paths);
