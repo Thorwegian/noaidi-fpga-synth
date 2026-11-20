@@ -8,10 +8,11 @@
   - Issues form a tree, read as a Makefile: a sub-issue is a prerequisite of its parent, and the issue to work on has no open sub-issues.
   - Sub-issues of one parent are independent of each other.
   - A new sub-issue is ranked among its siblings by how critical it is, the most critical first.
-  - An issue ranks by how much it annoys a keyboard player; a bug that can cause systemic faults ranks above a mild annoyance.
+  - An issue ranks by how much, and how often, it annoys a keyboard player. A bug that can cause systemic faults ranks above a mild annoyance; what the player's other gear already does ranks low.
   - `blocked_by` is only for a prerequisite that several issues share.
   - GitHub allows one parent and eight levels.
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
+  - An issue's title says in plain words what is wrong and who notices.
   - Issue relations live in GitHub's fields, never in prose.
   - A PR's relation to its issue is `Fixes #n` in the PR body.
   - When an agent pull request is approved, the agent must remove the branch it created for it.
