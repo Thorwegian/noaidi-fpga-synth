@@ -13,9 +13,10 @@ usage: parts_stack_take.py <out.wav> [--channels 1,2,3,4] [--notes 48,60,72,84]
                            [--solo-seconds 2] [--stack-seconds 5]
                            [--port CLIENT:PORT] [--device hw:1,0]
 
-The presets are loaded beforehand through the console
-(`python3 tools/lab/board.py "part 1" "load /Presets/Factory/Basses/PowerBass.toml"`,
-one per part), or by Bank Select and Program Change on each channel.
+With --bank 16383 --programs 2,3,4,5 the take loads the Tests bank's five
+programs as a controller does, a Bank Select and a Program Change per channel,
+so nothing is set through the console; without them the parts play the presets
+they hold.
 
 The MIDI goes out through `aseqsend` to the synth's USB MIDI port, held open by
 a subscription for the run (tools/lab/README.md); the audio comes in through
@@ -41,6 +42,12 @@ def main():
                         help="the MIDI channels, one per part, 1-based")
     parser.add_argument("--notes", default="48,60,72,84",
                         help="each channel's note: C3, C4, C5, C6")
+    parser.add_argument("--bank", type=int, default=-1,
+                        help="if given, each channel takes its program from this bank: "
+                             "Bank Select 127/127 for 16383, the Tests bank, before every Program Change")
+    parser.add_argument("--programs", default="",
+                        help="the programs to load on the channels, comma-separated: "
+                             "the take then loads them as a controller does")
     parser.add_argument("--solo-seconds", type=float, default=2.0)
     parser.add_argument("--stack-seconds", type=float, default=5.0)
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
@@ -51,6 +58,10 @@ def main():
     notes    = [int(n) for n in args.notes.split(",")]
     if len(channels) != len(notes):
         print("one note for each channel")
+        return 2
+    programs = [int(p) for p in args.programs.split(",")] if args.programs else []
+    if programs and len(programs) != len(channels):
+        print("one program for each channel")
         return 2
 
     def midi(*messages):
@@ -65,7 +76,8 @@ def main():
 
 
 def play_and_record(args, channels, notes, midi):
-    stop = threading.Event()
+    programs = [int(p) for p in args.programs.split(",")] if args.programs else []
+    stop     = threading.Event()
 
     def keepalive():
         while not stop.is_set():
@@ -74,6 +86,18 @@ def play_and_record(args, channels, notes, midi):
 
     threading.Thread(target=keepalive, daemon=True).start()
     midi("FE")
+
+    # the programs first, as a controller picks them: Bank Select 127/127 is
+    # bank 16383, the Tests bank, and each change settles before the next
+    if programs:
+        bank_msb = (args.bank >> 7) & 0x7F if args.bank >= 0 else 0
+        bank_lsb = args.bank & 0x7F if args.bank >= 0 else 0
+        for channel, program in zip(channels, programs):
+            midi("B%X 00 %02X" % (channel, bank_msb),
+                 "B%X 20 %02X" % (channel, bank_lsb),
+                 "C%X %02X" % (channel, program))
+            time.sleep(1.2)                      # the loader reads flash
+        midi("FE")
 
     lead  = 1.0
     solo  = args.solo_seconds
