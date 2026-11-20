@@ -5,6 +5,7 @@
 
 #include "cli.h"
 #include "cli_shell.hpp"
+#include "sound_engine.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -24,8 +25,10 @@ namespace cli {
 
 namespace {
 
-std::string g_cwd     = "/Presets";    // from the storage root
-std::string g_current = "init preset"; // the active preset, for the status bar
+std::string g_cwd = "/Presets"; // from the storage root
+std::string g_current =
+        "init preset"; // the console's part's preset, for the status bar
+int g_part; // the part the console's preset commands act on: MIDI channel + 1
 
 void show_status() {
     console_set_status("noaidi %s | %s", NOAIDI_BUILD, g_current.c_str());
@@ -141,7 +144,7 @@ int cmd_load(int argc, char **argv) {
         std::printf("load: %s\n", error.c_str());
         return 1;
     }
-    if (!voice_alloc_set_preset(&p)) {
+    if (!voice_alloc_set_preset(g_part, &p)) {
         std::printf("load: the synth did not answer\n");
         return 1;
     }
@@ -153,7 +156,7 @@ int cmd_load(int argc, char **argv) {
 int cmd_init(int, char **) {
     preset_t p;
     preset_init(&p);
-    if (!voice_alloc_set_preset(&p)) {
+    if (!voice_alloc_set_preset(g_part, &p)) {
         std::printf("init: the synth did not answer\n");
         return 1;
     }
@@ -169,7 +172,7 @@ int cmd_save(int argc, char **argv) {
     }
     std::string abs = resolve(argv[1]), error;
     preset_t p;
-    if (!voice_alloc_get_preset(&p)) {
+    if (!voice_alloc_get_preset(g_part, &p)) {
         std::printf("save: the synth did not answer\n");
         return 1;
     }
@@ -225,7 +228,7 @@ int cmd_rmdir(int argc, char **argv) {
 
 int cmd_preset(int, char **) {
     preset_t p;
-    if (!voice_alloc_get_preset(&p)) {
+    if (!voice_alloc_get_preset(g_part, &p)) {
         std::printf("preset: the synth did not answer\n");
         return 1;
     }
@@ -241,7 +244,24 @@ int cmd_ble(int, char **) {
 
 int cmd_sync(int, char **) {
     voice_alloc_sync();
-    std::printf("the preset goes out as CCs to every surface\n");
+    std::printf("every part's preset goes out as CCs to every surface\n");
+    return 0;
+}
+
+// The part the preset commands act on, and MIDI channel that plays it.
+int cmd_part(int argc, char **argv) {
+    if (argc == 1) {
+        std::printf("part %d, on MIDI channel %d\n", g_part + 1, g_part + 1);
+        return 0;
+    }
+    const int n = std::atoi(argv[1]);
+    if (n < 1 || n > SoundEngine::channel_count) {
+        std::printf("part: 1 to %d\n", SoundEngine::channel_count);
+        return 1;
+    }
+    g_part = n - 1;
+    set_current("init preset"); // the part's own preset names itself below
+    std::printf("part %d, on MIDI channel %d\n", g_part + 1, g_part + 1);
     return 0;
 }
 
@@ -263,7 +283,9 @@ const console_cmd_t commands[] = {
          nullptr},
         {"ble", "", "BLE MIDI status; re-advertise if needed", cmd_ble,
          nullptr},
-        {"sync", "", "send the preset as CCs to the surfaces", cmd_sync,
+        {"sync", "", "send every part's preset as CCs to the surfaces",
+         cmd_sync, nullptr},
+        {"part", "[n]", "the part the preset commands act on", cmd_part,
          nullptr},
 };
 

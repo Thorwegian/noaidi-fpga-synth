@@ -4,11 +4,12 @@
 // License: CERN-OHL-S v2
 //
 // The synth model keeps the sound engine (sound_engine.hpp) and plays it:
-// it turns MIDI into changes of the active preset (cc_map.hpp), which it
-// sets on the engine's tree and commits, and into the engine's note events.
-// The preset loader, the banks, the sustain pedal and the surfaces' feedback
-// are here; the voices, the conversions to the CSP's words and the graph are
-// the engine's.
+// it turns MIDI into changes of a part's preset (cc_map.hpp), which it sets
+// on the engine's tree and commits, and into the engine's note events. A
+// part is the engine's channel of the same number as the MIDI channel that
+// plays it. The preset loader, the banks, the sustain pedal and the
+// surfaces' feedback are here; the voices, the conversions to the CSP's
+// words and the graph are the engine's.
 
 #include "voice_alloc.h"
 
@@ -64,12 +65,12 @@ constexpr int program_queue_length = 4;
 // half-set values.
 std::optional<SoundEngine> s_engine;
 
-// Omni: every MIDI channel plays the engine's first, and that channel's part
-// of the engine's tree is the active preset.
-constexpr int omni_channel = 0;
+// A part is the engine's channel of the MIDI channel's own number: its
+// preset, its performance state (the bend, the wheel) and its knob positions.
+constexpr int part_count = SoundEngine::channel_count;
 
-SoundEngine::Channel &active() {
-    return s_engine->channel[omni_channel];
+SoundEngine::Channel &part(uint8_t channel) {
+    return s_engine->channel[channel];
 }
 
 // Commit the engine's tree. A commit that loads a new program wires a graph
@@ -114,11 +115,12 @@ void commit() {
     }
 }
 
-// The sustain pedal (CC 64), omni: while it is down a note off is held back,
-// counted by its note, and the engine's voice stays held, its envelopes
-// where they are. A note has at most a voice's worth of them to release.
-bool s_sustain_pedal;
-std::array<uint8_t, 128> s_held_back;
+// The sustain pedal (CC 64) of each part: while it is down a note off is
+// held back, counted by its note, and the engine's voice stays held, its
+// envelopes where they are. A note has at most a voice's worth of them to
+// release.
+std::array<bool, part_count> s_sustain_pedal{};
+std::array<std::array<uint8_t, 128>, part_count> s_held_back{};
 
 // Live CC edits COALESCE: a CC sets its value on the engine's tree, and the
 // commit, where the engine does the heavy work, runs at a bounded rate, so a
@@ -137,46 +139,59 @@ int s_sub_id = -1;
 // The CC laws, both ways, are cc_map's (cc_map.hpp). The knob positions that
 // are not preset fields (the cutoff's coarse and fine, each LFO's depth
 // knobs) live here beside the preset, and a loaded preset implies them.
-cc_map::Knobs s_knobs;
+std::array<cc_map::Knobs, part_count> s_knobs{};
 
 // Parameter feedback (#279): the preset as the CCs a surface shows, to every
 // output but the one `except` came through.
+struct SyncTarget {
+    uint8_t except;
+    uint8_t channel;
+};
 void emit_cc(uint8_t cc, uint8_t value, void *user) {
+    const auto &target           = *static_cast<SyncTarget *>(user);
     const midi_message_t message = {
-            .status = 0xB0, .len = 2, .data = {cc, value}};
-    midi_out_send(&message, *static_cast<uint8_t *>(user));
+            .status = static_cast<uint8_t>(0xB0 | target.channel),
+            .len    = 2,
+            .data   = {cc, value}};
+    midi_out_send(&message, target.except);
+}
+// A part's preset to the surfaces, its CCs on its own channel.
+void sync_part(uint8_t channel, uint8_t except) {
+    SyncTarget target{except, channel};
+    cc_map::dump(part(channel), s_knobs[channel], emit_cc, &target);
 }
 void sync_surfaces(uint8_t except) {
-    cc_map::dump(active(), s_knobs, emit_cc, &except);
+    for (uint8_t channel = 0; channel < part_count; ++channel) {
+        sync_part(channel, except);
+    }
 }
 
 // ---- notes --------------------------------------------------------------------------------------
 
 // The velocity's 7 bits as the engine takes it: 1 at the hardest.
-void note_on(uint8_t note, uint8_t velocity) {
-    s_engine->note_on(omni_channel, note,
-                      static_cast<float>(velocity) / 127.0f);
+void note_on(uint8_t channel, uint8_t note, uint8_t velocity) {
+    s_engine->note_on(channel, note, static_cast<float>(velocity) / 127.0f);
 }
 
-// With the pedal down the note off waits for it to come up.
-void note_off(uint8_t note) {
-    if (!s_sustain_pedal) {
-        s_engine->note_off(omni_channel, note);
-    } else if (s_held_back[note] < SoundEngine::voice_count) {
-        ++s_held_back[note];
+// With the part's pedal down the note off waits for it to come up.
+void note_off(uint8_t channel, uint8_t note) {
+    if (!s_sustain_pedal[channel]) {
+        s_engine->note_off(channel, note);
+    } else if (s_held_back[channel][note] < SoundEngine::voice_count) {
+        ++s_held_back[channel][note];
     }
 }
 
-// Sustain (damper) pedal, CC 64: values >= 64 are down. Pedal up sends every
-// note off it held back.
-void sustain_pedal_update(bool down) {
-    s_sustain_pedal = down;
+// Sustain (damper) pedal of a part, CC 64: values >= 64 are down. Pedal up
+// sends every note off it held back.
+void sustain_pedal_update(uint8_t channel, bool down) {
+    s_sustain_pedal[channel] = down;
     if (down) {
         return;
     }
-    for (size_t note = 0; note < s_held_back.size(); ++note) {
-        for (; s_held_back[note] > 0; --s_held_back[note]) {
-            s_engine->note_off(omni_channel, static_cast<int>(note));
+    for (size_t note = 0; note < s_held_back[channel].size(); ++note) {
+        for (; s_held_back[channel][note] > 0; --s_held_back[channel][note]) {
+            s_engine->note_off(channel, static_cast<int>(note));
         }
     }
 }
@@ -184,13 +199,13 @@ void sustain_pedal_update(bool down) {
 // Pitch wheel: ± the preset's bend range (RPN 0; ±2 semitones in the init
 // preset). The wheel's 14 bits are ±8192 around the centre. Committed at
 // once: a bend is heard as it moves, and the CC edits that wait go with it.
-void pitch_bend_update(uint16_t bend14) {
+void pitch_bend_update(uint8_t channel, uint16_t bend14) {
     const float semitones = static_cast<float>(static_cast<int>(bend14) - 8192)
-                            / 8192.0f * active().part.bend_range;
-    if (semitones == active().bend) {
+                            / 8192.0f * part(channel).part.bend_range;
+    if (semitones == part(channel).bend) {
         return;
     }
-    active().bend = semitones;
+    part(channel).bend = semitones;
     commit();
     s_edited = false;
 }
@@ -204,39 +219,43 @@ void pitch_bend_update(uint16_t bend14) {
 // RPN state: CC 101/100 select an RPN, CC 6 (data entry MSB) writes it. RPN
 // 0/0 = pitch-bend range, the standard mechanism. 127/127 is RPN null; an
 // NRPN select (99/98) also deselects.
-uint8_t s_rpn_msb = 127, s_rpn_lsb = 127;
+struct Rpn {
+    uint8_t msb = 127, lsb = 127;
+};
+std::array<Rpn, part_count> s_rpn{};
 
 // True when the CC edited the preset: the surfaces are told (handle_midi).
-bool handle_cc(uint8_t num, uint8_t val) {
+bool handle_cc(uint8_t channel, uint8_t num, uint8_t val) {
+    Rpn &rpn = s_rpn[channel];
     switch (num) {
     // ---- the wheel and the pedal ----
     case 1: {
         const float wheel = static_cast<float>(val) / 127.0f;
-        if (wheel != active().wheel) {
-            active().wheel = wheel; // mod wheel → cutoff
-            s_edited       = true;
+        if (wheel != part(channel).wheel) {
+            part(channel).wheel = wheel; // mod wheel → cutoff
+            s_edited            = true;
         }
         return false;
     }
     case 64:
-        sustain_pedal_update(val >= 64);
+        sustain_pedal_update(channel, val >= 64);
         return false;
 
     // ---- RPN 0: pitch-bend range ----
     case 101:
-        s_rpn_msb = val;
+        rpn.msb = val;
         return false;
     case 100:
-        s_rpn_lsb = val;
+        rpn.lsb = val;
         return false;
     case 99:
     case 98:
-        s_rpn_msb = s_rpn_lsb = 127; // NRPN deselects
+        rpn.msb = rpn.lsb = 127; // NRPN deselects
         return false;
     case 6:
-        if (s_rpn_msb == 0 && s_rpn_lsb == 0) {
+        if (rpn.msb == 0 && rpn.lsb == 0) {
             // takes effect on the next bend
-            active().part.bend_range =
+            part(channel).part.bend_range =
                     static_cast<float>(std::clamp<uint8_t>(val, 1, 12));
         }
         return false;
@@ -254,20 +273,21 @@ bool handle_cc(uint8_t num, uint8_t val) {
     // a no-op, so note-offs dropped under flood backpressure left voices
     // ringing forever) ----
     case 123: // all notes off: the notes the pedal holds included
-        s_sustain_pedal = false;
-        s_held_back.fill(0);
-        s_engine->all_notes_off(omni_channel);
+        s_sustain_pedal[channel] = false;
+        s_held_back[channel].fill(0);
+        s_engine->all_notes_off(channel);
         return false;
     case 120: // all sound off: immediate silence
-        s_sustain_pedal = false;
-        s_held_back.fill(0);
-        s_engine->all_sound_off(omni_channel);
+        s_sustain_pedal[channel] = false;
+        s_held_back[channel].fill(0);
+        s_engine->all_sound_off(channel);
         return false;
 
-    // ---- the preset: cc_map's laws, onto the engine's tree ----
+    // ---- the preset: cc_map's laws, onto the part's tree ----
     default: {
-        const bool edited = cc_map::apply(active(), s_knobs, num, val);
-        s_edited          = s_edited || edited;
+        const bool edited =
+                cc_map::apply(part(channel), s_knobs[channel], num, val);
+        s_edited = s_edited || edited;
         return edited;
     }
     }
@@ -285,17 +305,17 @@ void handle_midi(const midi_message_t *m, uint8_t source) {
 
     switch (type) {
     case 0x90: // parser normalises vel 0 → note off
-        note_on(m->data[0], m->data[1]);
+        note_on(ch, m->data[0], m->data[1]);
         break;
     case 0x80:
-        note_off(m->data[0]);
+        note_off(ch, m->data[0]);
         break;
     case 0xB0:
         if (m->data[0] == 0) { // Bank Select MSB
             s_bank_msb[ch] = m->data[1];
         } else if (m->data[0] == 32) { // Bank Select LSB
             s_bank_lsb[ch] = m->data[1];
-        } else if (handle_cc(m->data[0], m->data[1])) {
+        } else if (handle_cc(ch, m->data[0], m->data[1])) {
             midi_out_send(m, source);
         }
         break;
@@ -303,8 +323,9 @@ void handle_midi(const midi_message_t *m, uint8_t source) {
         program_change(ch, m->data[0]);
         break;
     case 0xE0: // pitch wheel, 14-bit
-        pitch_bend_update(static_cast<uint16_t>(
-                (static_cast<uint16_t>(m->data[1]) << 7) | m->data[0]));
+        pitch_bend_update(ch, static_cast<uint16_t>(
+                                      (static_cast<uint16_t>(m->data[1]) << 7)
+                                      | m->data[0]));
         break;
     default:
         break;
@@ -323,24 +344,24 @@ void flush_pending_edits(int64_t now) {
     s_last_flush = now;
 }
 
-// Make p the active preset: assigned and committed at once, so the new
-// preset is in place before the next event. Held voices follow it too: their
-// pitch is theirs, but the sound around it is the channel's.
-void apply_preset(const preset_t *p, int64_t now) {
-    active() = *p;
-    s_knobs  = cc_map::knobs_of(
-            active()); // the preset's values stand; the knobs follow them
+// Make p the part's preset: assigned and committed at once, so the new
+// preset is in place before the next event. Held voices of the part follow it
+// too: their pitch is theirs, but the sound around it is the part's.
+void apply_preset(uint8_t channel, const preset_t *p, int64_t now) {
+    part(channel)    = *p;
+    s_knobs[channel] = cc_map::knobs_of(
+            part(channel)); // the preset's values stand; the knobs follow them
     commit();
     s_edited     = false;
     s_last_flush = now;
-    sync_surfaces(MIDI_SOURCE_INTERNAL); // every surface follows the change
+    sync_part(channel, MIDI_SOURCE_INTERNAL); // the surfaces follow the change
 }
 
 void handle_preset_request(const preset_request_t *r, int64_t now) {
     if (r->set) {
-        apply_preset(r->preset, now);
+        apply_preset(r->channel, r->preset, now);
     } else {
-        *r->preset = active();
+        *r->preset = part(r->channel);
     }
     xSemaphoreGive(r->done);
 }
@@ -348,11 +369,10 @@ void handle_preset_request(const preset_request_t *r, int64_t now) {
 // ── Banks: Bank Select and Program Change (storage_format.md "Banks") ──
 // Each channel's current bank (s_bank_msb/_lsb, declared above handle_midi):
 // CC 0 sets its MSB and CC 32 its LSB, and the bank applies at the channel's
-// next Program Change. Omni today: every channel plays the one active preset,
-// but the bank is kept per channel so parts can follow.
+// next Program Change, which loads the preset into that channel's part.
 void (*s_preset_listener)(const char *name);
 
-bool preset_request(bool set,
+bool preset_request(bool set, uint8_t channel,
                     preset_t *p); // below: the hand-off to the voice task
 
 // A Program Change as the loader task receives it: the channel's bank at the
@@ -360,6 +380,7 @@ bool preset_request(bool set,
 struct ProgramRequest {
     int bank;
     uint8_t program;
+    uint8_t channel;
 };
 QueueHandle_t s_program_queue;
 
@@ -389,15 +410,15 @@ void preset_loader_task(void *) {
                      request.program, err);
             continue;
         }
-        if (!preset_request(true, &p)) {
+        if (!preset_request(true, request.channel, &p)) {
             ESP_LOGW(
                     tag,
                     "bank %d program %d: the voice task did not take the preset",
                     request.bank, request.program);
             continue;
         }
-        ESP_LOGI(tag, "bank %d program %d: %s", request.bank, request.program,
-                 rel);
+        ESP_LOGI(tag, "channel %d, bank %d program %d: %s", request.channel + 1,
+                 request.bank, request.program, rel);
         if (s_preset_listener) {
             s_preset_listener(rel);
         }
@@ -407,7 +428,7 @@ void preset_loader_task(void *) {
 // On the voice task: post the change and go on to the next event.
 void program_change(uint8_t channel, uint8_t program) {
     const ProgramRequest request{
-            s_bank_msb[channel] * 128 + s_bank_lsb[channel], program};
+            s_bank_msb[channel] * 128 + s_bank_lsb[channel], program, channel};
     if (s_program_queue == nullptr
         || xQueueSend(s_program_queue, &request, 0) != pdTRUE) {
         ESP_LOGW(tag, "program %d: the loader's queue is full, change dropped",
@@ -429,7 +450,7 @@ void voice_alloc_sync(void) {
 
 namespace {
 
-bool preset_request(bool set, preset_t *p) {
+bool preset_request(bool set, uint8_t channel, preset_t *p) {
     if (s_queue == nullptr) {
         return false;
     }
@@ -439,7 +460,7 @@ bool preset_request(bool set, preset_t *p) {
     }
     evt_t evt{};
     evt.kind   = EVT_PRESET;
-    evt.preset = {set, reinterpret_cast<struct preset_s *>(p), done};
+    evt.preset = {set, channel, reinterpret_cast<struct preset_s *>(p), done};
     // Once queued, the request holds pointers into this frame and to done, so
     // wait for it however long it takes.
     const bool ok = xQueueSend(s_queue, &evt, pdMS_TO_TICKS(500)) == pdTRUE;
@@ -491,13 +512,19 @@ void voice_alloc_task(void *) {
 
 } // namespace
 
-bool voice_alloc_set_preset(const preset_t *p) {
+bool voice_alloc_set_preset(int channel, const preset_t *p) {
+    if (channel < 0 || channel >= part_count) {
+        return false;
+    }
     preset_t copy = *p; // the caller's copy may go out of scope
-    return preset_request(true, &copy);
+    return preset_request(true, static_cast<uint8_t>(channel), &copy);
 }
 
-bool voice_alloc_get_preset(preset_t *p) {
-    return preset_request(false, p);
+bool voice_alloc_get_preset(int channel, preset_t *p) {
+    if (channel < 0 || channel >= part_count) {
+        return false;
+    }
+    return preset_request(false, static_cast<uint8_t>(channel), p);
 }
 
 void voice_alloc_set_preset_listener(void (*listener)(const char *name)) {
@@ -519,13 +546,13 @@ int voice_alloc_diag(voice_diag_t *out, int max) {
         return voices[static_cast<size_t>(a)].struck
                < voices[static_cast<size_t>(b)].struck;
     });
-    std::array<uint8_t, 128> held_back = s_held_back;
+    std::array<std::array<uint8_t, 128>, part_count> held_back = s_held_back;
     std::array<bool, SoundEngine::voice_count> sustained{};
     for (const int v : oldest_first) {
         const SoundEngine::Voice &voice = voices[static_cast<size_t>(v)];
         if (voice.state == SoundEngine::Voice::State::held
-            && held_back[voice.note] > 0) {
-            --held_back[voice.note];
+            && held_back[voice.channel][voice.note] > 0) {
+            --held_back[voice.channel][voice.note];
             sustained[static_cast<size_t>(v)] = true;
         }
     }
@@ -542,7 +569,9 @@ int voice_alloc_diag(voice_diag_t *out, int max) {
 }
 
 bool voice_alloc_sustain_pedal(void) {
-    return s_sustain_pedal;
+    return std::ranges::any_of(s_sustain_pedal, [](bool down) {
+        return down;
+    });
 }
 
 void voice_alloc_init(void) {
@@ -558,8 +587,8 @@ void voice_alloc_init(void) {
     // the init preset the channel holds. The link holds the CSP and tests
     // the chip; the first commit loads the startup preset's program, so the
     // CSP is let go with the whole sound in.
-    storage_load_startup(&active());
-    s_knobs = cc_map::knobs_of(active());
+    storage_load_startup(&part(0));
+    s_knobs[0] = cc_map::knobs_of(part(0));
     engine_link_init(*s_engine);
     commit();
     engine_link_start();

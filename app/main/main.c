@@ -96,7 +96,7 @@ void app_main(void) {
     // which takes sole ownership of the SPI link from here on (it loads the
     // CSP's control program); then it turns MIDI into the engine's
     // parameters and notes.
-    printf("=== voice concept: 32 voices x 8 partials, MIDI omni ===\n");
+    printf("=== voice concept: 32 voices x 8 partials, 16 parts ===\n");
     voice_alloc_init();
     midi_in_start(); // subscribers are registered: start publishing
     // NVS holds the BLE bonds. A full or version-mismatched partition is

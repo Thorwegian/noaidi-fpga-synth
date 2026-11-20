@@ -18,7 +18,11 @@ programs = []
 [bank.16383]
 name = "Tests"
 programs = [
-    "Presets/Factory/Tests/Galaxy.toml",  # 0
-    "Presets/Factory/Tests/SawBass.toml", # 1
+    "Presets/Factory/Tests/Galaxy.toml",     # 0
+    "Presets/Factory/Tests/SawBass.toml",    # 1
+    "Presets/Factory/Tests/Stack1Bass.toml", # 2
+    "Presets/Factory/Tests/Stack2Pad.toml",  # 3
+    "Presets/Factory/Tests/Stack3Lead.toml", # 4
+    "Presets/Factory/Tests/Stack4Bell.toml", # 5
 ]
 # end

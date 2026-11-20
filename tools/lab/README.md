@@ -143,6 +143,8 @@ Board, acceptance and measurement (`tools/lab/`):
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
 | `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |
+| `parts_take.py` | a melody whose notes jump MIDI channels, each channel on its own part's preset, recorded over S/PDIF; the per-note levels and the shapes they fall on say whether the routing holds |
+| `parts_stack_take.py` | the parts in octaves: one note on each channel, an octave apart and on very different presets, alone in turn and then all together, recorded over S/PDIF |
 | `baseline_check.py` | that recording against what it should hold, with Essentia |
 | `benchmark_compare.py` | a baseline recording against its baseline's benchmark take |
 | `release_tail.py` | the triad's release tail from a recording's envelope CSV: held level, levels after the release, slopes, time to 60 dB down — the shape that tells a dB release from a linear one (#176) |
