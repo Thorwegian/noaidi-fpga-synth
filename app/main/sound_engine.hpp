@@ -25,28 +25,35 @@
 //   wiring      The engine builds the Noaidi's graph (csp/dsp_graph.hpp)
 //               with ordinary loops, and this synth's sizes are decided
 //               here: 16 channels, and 32 voices of 8 partials. A graph is
-//               wired for a set of paths (Wiring::Paths), and its program
-//               computes those. A commit of a tree that uses other paths
-//               than the wired ones wires a new graph, generates its
-//               program and loads it in place of the one that runs; any
-//               other commit writes values.
+//               wired for a set of paths (Wiring::Paths), the ones the
+//               committed tree uses, and its program computes those and
+//               spends no cycle on another. A commit of a tree that uses
+//               other paths wires a new graph, generates its program and
+//               loads it in place of the one that runs; any other commit
+//               writes values.
 //
 // What the CSP computes for the partial pipeline, as the engine wires it
 // from sources, operators and sinks:
 //
 //   an LFO      a phase and the wave of its shape at that phase
-//   a channel   two LFOs through movable wires, each onto the pitch, the
-//               cutoff, the pulse width and the resonance by a depth of its
-//               own; with the bend, the cutoff and the key tracking, the
-//               channel's pitch and cutoff for its voices, and its pulse
-//               width and resonance sinks
+//   a channel   two LFOs through movable wires, each onto what it moves of
+//               the pitch, the cutoff, the pulse width and the resonance,
+//               by a depth of its own; with the bend, the cutoff and the
+//               key tracking, the channel's pitch and cutoff for its
+//               voices; and the pulse width and resonance sinks an LFO
+//               moves
 //   a voice     two envelopes, amp and mod, and through a movable wire to
 //               its channel, its pitch, cutoff and gain sinks
 //
-// The synth runs an LFO of every shape for each of a channel's two, and the
-// channels share them: an LFO of one shape has one rate, that of the channel
+// The paths are those of all the channels together: every channel is wired
+// alike and every voice alike, whatever its preset, so the graph finds them
+// to be copies and loops over them. An LFO that a channel gives a depth
+// uses two paths: the LFO of its shape runs, for that one of a channel's
+// two, and a channel's LFO moves its destination. The channels share the
+// LFOs that run: an LFO of one shape has one rate, that of the channel
 // committed last among those it moves something in. An LFO with no depth
-// moves nothing and takes none of them.
+// uses no path. What no LFO moves is not the program's: a pulse width or a
+// resonance is then a sink word the engine writes.
 //
 // The conversions from a unit to a word are the class's own. The words go
 // out through a Link: the engine link on the board, a recorder in a host
@@ -215,11 +222,11 @@ public:
             static constexpr int pitch = 0, cutoff = 1, gain = 2;
         };
 
-        // A channel's block. The pulse widths and the resonance are the
-        // program's, since LFOs move them, and come first: the program
-        // reaches them at offsets 0–2 from a block whose address is a
-        // multiple of 16. The rest are the engine's, what only a parameter
-        // moves: a word for each of the eight oscillator and unison
+        // A channel's block. The pulse widths and the resonance come first:
+        // they are the program's where an LFO moves them, and it reaches
+        // them at offsets 0–2 from a block whose address is a multiple of
+        // 16; where no LFO does they are the engine's. The rest are the
+        // engine's always, what only a parameter moves: a word for each of the eight oscillator and unison
         // positions for the detune, the cutoff's offset and the gain on each
         // side, and one for each oscillator's mode.
         struct ChannelSink {
@@ -287,7 +294,8 @@ public:
 
         // The paths a program computes: the LFOs that run, and what a
         // channel's LFOs move. A path costs its cycles every pass, whatever
-        // depth a preset gives it.
+        // depth a preset gives it, so a graph is wired for the paths the
+        // tree uses.
         struct Paths {
             // the shapes that run for each of a channel's LFOs
             std::array<std::bitset<lfo_shape_count>, channel_lfo_count> shapes;
@@ -295,6 +303,16 @@ public:
             std::array<std::bitset<moved_count>, channel_lfo_count> moves;
 
             bool operator==(const Paths &) const = default;
+
+            // Whether either of a channel's LFOs moves it.
+            bool moved(int what) const {
+                for (const auto &by : moves) {
+                    if (by[static_cast<size_t>(what)]) {
+                        return true;
+                    }
+                }
+                return false;
+            }
 
             // All of them: every shape runs, and moves everything.
             static Paths every() {
@@ -309,7 +327,9 @@ public:
             }
         };
 
-        // The paths this wiring has.
+        // The paths this wiring has. A wire of a path it leaves out is not
+        // connected: an LFO that does not run, a depth onto what an LFO
+        // does not move, the base of what no LFO moves.
         Paths paths;
 
         // The four shapes of a channel's LFO 1, then the four of its LFO 2.

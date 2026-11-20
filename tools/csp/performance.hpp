@@ -6,10 +6,11 @@
 // A set-up and a short performance for the graph the sound engine wires
 // (app/main/sound_engine.hpp), in the graph's own terms, past the engine's
 // parameters and events: a value for a source, a record for a pointer, an
-// inner record for a stage. Every LFO runs, every channel listens to two of
-// them at depths of its own, the voices are spread over the channels, and
-// while it plays voices move to other channels, channels to other LFOs, and
-// notes are struck and let go. writes() turns the settings into the
+// inner record for a stage. Every LFO the wiring has runs, every channel
+// listens to two of them at depths of its own, the voices are spread over
+// the channels, and while it plays voices move to other channels, channels
+// to other LFOs, and notes are struck and let go. A wire of a path the
+// wiring leaves out is not set. writes() turns the settings into the
 // firmware's writes, at the addresses the built graph gives.
 //
 // The co-simulation plays it on the RTL beside the reference model, and
@@ -101,6 +102,12 @@ inline std::vector<Write> writes(const SoundEngine &engine,
     return out;
 }
 
+// Whether the wiring has the wire: that of a path it leaves out is not
+// connected.
+inline bool wired(Wire wire) {
+    return wire.node >= 0;
+}
+
 // ---- the moves ------------------------------------------------------------------
 
 inline void voice_to_channel(const SoundEngine &engine, int voice, int channel,
@@ -111,13 +118,24 @@ inline void voice_to_channel(const SoundEngine &engine, int voice, int channel,
                         wiring.channels[static_cast<size_t>(channel)].record});
 }
 
+// A channel's LFO to one of the LFOs that run: the `choice`-th, counted
+// round.
 inline void channel_to_lfo(const SoundEngine &engine, int channel, int which,
-                           int lfo, Settings &settings) {
+                           int choice, Settings &settings) {
     const Wiring &wiring = engine.wiring();
-    settings.push_back({Setting::Kind::pointer,
-                        wiring.channels[static_cast<size_t>(channel)]
-                                .lfo[static_cast<size_t>(which)],
-                        0, wiring.lfos[static_cast<size_t>(lfo)].record});
+    const Wire wire      = wiring.channels[static_cast<size_t>(channel)]
+                              .lfo[static_cast<size_t>(which)];
+    std::vector<Record> running;
+    for (const Wiring::Lfo &lfo : wiring.lfos) {
+        if (wired(lfo.out)) {
+            running.push_back(lfo.record);
+        }
+    }
+    if (!wired(wire) || running.empty()) {
+        return;
+    }
+    settings.push_back({Setting::Kind::pointer, wire, 0,
+                        running[static_cast<size_t>(choice) % running.size()]});
 }
 
 // Both envelopes of a voice into a stage: a note on is the attack, a note
@@ -144,10 +162,14 @@ inline Settings set_up(const SoundEngine &engine) {
     const Wiring &wiring        = engine.wiring();
     Settings settings;
     auto word = [&](Wire wire, double value) {
-        settings.push_back({Setting::Kind::word, wire, q(value), {}});
+        if (wired(wire)) {
+            settings.push_back({Setting::Kind::word, wire, q(value), {}});
+        }
     };
     auto dword = [&](Wire wire, double value) {
-        settings.push_back({Setting::Kind::dword, wire, q_wide(value), {}});
+        if (wired(wire)) {
+            settings.push_back({Setting::Kind::dword, wire, q_wide(value), {}});
+        }
     };
     for (int l = 0; l < lfo_count; ++l) {
         const double depth     = 0.3 + 0.05 * l;

@@ -98,19 +98,30 @@ void wire_lfo(Graph &graph, Wiring::Lfo &lfo, int shape) {
 }
 
 void wire_channel(Graph &graph, Wiring &wiring, int c) {
-    Wiring::Channel &channel = wiring.channels[static_cast<size_t>(c)];
+    Wiring::Channel &channel   = wiring.channels[static_cast<size_t>(c)];
+    const Wiring::Paths &paths = wiring.paths;
+    // the LFOs that run: where a channel's LFO wire can be plugged in
     std::vector<Record> lfo_records;
-    for (const Wiring::Lfo &lfo : wiring.lfos) {
-        lfo_records.push_back(lfo.record);
+    for (size_t l = 0; l < wiring.lfos.size(); ++l) {
+        if (paths.shapes[l / Wiring::lfo_shape_count]
+                        [l % Wiring::lfo_shape_count]) {
+            lfo_records.push_back(wiring.lfos[l].record);
+        }
     }
     // each LFO onto each of what it moves, by a depth of its own
     std::array<Wire, Wiring::moved_count> moved;
     for (size_t l = 0; l < channel.lfo.size(); ++l) {
+        if (paths.moves[l].none() || lfo_records.empty()) {
+            continue;
+        }
         channel.lfo[l] = graph.pointer(lfo_records);
         const Wire lfo = graph.through(channel.lfo[l], 0);
         for (size_t k = 0; k < moved.size(); ++k) {
-            channel.depth[l][k] = graph.source();
-            moved[k] = graph.multiply_add(moved[k], lfo, channel.depth[l][k]);
+            if (paths.moves[l][k]) {
+                channel.depth[l][k] = graph.source();
+                moved[k] =
+                        graph.multiply_add(moved[k], lfo, channel.depth[l][k]);
+            }
         }
     }
     channel.bend        = graph.source();
@@ -118,27 +129,37 @@ void wire_channel(Graph &graph, Wiring &wiring, int c) {
     channel.key_track   = graph.source();
     channel.mod_amount  = graph.source();
     // the bend and the pitch LFOs: added to every note
-    channel.pitch = graph.sum({}, moved[Wiring::moves_pitch], channel.bend);
+    channel.pitch =
+            paths.moved(Wiring::moves_pitch)
+                    ? graph.sum({}, moved[Wiring::moves_pitch], channel.bend)
+                    : channel.bend;
     // the cutoff, the LFOs and the tracking of the bend
     channel.cutoff =
             graph.sum(graph.multiply_add(moved[Wiring::moves_cutoff],
                                          channel.bend, channel.key_track),
                       channel.cutoff_base);
+    // The pulse widths and the resonance are the program's sums where an LFO
+    // moves them, and the engine's own sink words where none does.
     const int sinks =
             Wiring::ChannelSink::base + Wiring::ChannelSink::block * c;
-    for (size_t oscillator = 0; oscillator < channel.duty_base.size();
-         ++oscillator) {
-        channel.duty_base[oscillator] = graph.source();
-        graph.sink(sinks
-                           + (oscillator == 0 ? Wiring::ChannelSink::duty_0
-                                              : Wiring::ChannelSink::duty_1),
-                   graph.sum({}, moved[Wiring::moves_duty],
-                             channel.duty_base[oscillator]));
+    if (paths.moved(Wiring::moves_duty)) {
+        for (size_t oscillator = 0; oscillator < channel.duty_base.size();
+             ++oscillator) {
+            channel.duty_base[oscillator] = graph.source();
+            graph.sink(sinks
+                               + (oscillator == 0
+                                          ? Wiring::ChannelSink::duty_0
+                                          : Wiring::ChannelSink::duty_1),
+                       graph.sum({}, moved[Wiring::moves_duty],
+                                 channel.duty_base[oscillator]));
+        }
     }
-    channel.resonance_base = graph.source();
-    graph.sink(sinks + Wiring::ChannelSink::resonance,
-               graph.sum({}, moved[Wiring::moves_resonance],
-                         channel.resonance_base));
+    if (paths.moved(Wiring::moves_resonance)) {
+        channel.resonance_base = graph.source();
+        graph.sink(sinks + Wiring::ChannelSink::resonance,
+                   graph.sum({}, moved[Wiring::moves_resonance],
+                             channel.resonance_base));
+    }
 
     // the record a voice reaches: the envelopes' segments, then the fields
     std::vector<Field> fields;
@@ -313,6 +334,20 @@ int lfo_shape(waveform_t wave) {
     }
 }
 
+// What an LFO's destination moves, in the wiring.
+int moved_by(lfo_dest_t destination) {
+    switch (destination) {
+    case LFO_DEST_PITCH:
+        return Wiring::moves_pitch;
+    case LFO_DEST_CUTOFF:
+        return Wiring::moves_cutoff;
+    case LFO_DEST_DUTY:
+        return Wiring::moves_duty;
+    default:
+        return Wiring::moves_resonance;
+    }
+}
+
 // ---- the voicing --------------------------------------------------------------------------------
 
 // Unison offsets (symmetric, in steps of the preset's unison detune).
@@ -461,13 +496,26 @@ bool same(const Table &a, const Table &b) {
 
 SoundEngine::SoundEngine(Link &link) : link_(link) {}
 
-// The paths the tree uses: all of them, whatever it holds.
+// The paths the tree uses: those of every channel together, so that the
+// channels are wired alike and the voices alike, and the graph finds its
+// copies in them. An LFO with no depth uses none.
 Wiring::Paths SoundEngine::paths() const {
-    return Wiring::Paths::every();
+    Wiring::Paths paths;
+    for (const Channel &parameters : channel) {
+        for (size_t l = 0; l < Wiring::channel_lfo_count; ++l) {
+            const lfo_t &lfo = parameters.lfo[l];
+            if (lfo.depth != 0.0f) {
+                paths.shapes[l].set(static_cast<size_t>(lfo_shape(lfo.shape)));
+                paths.moves[l].set(
+                        static_cast<size_t>(moved_by(lfo.destination)));
+            }
+        }
+    }
+    return paths;
 }
 
-// The synth as a graph. Every LFO, channel and voice is wired, with every
-// path, whichever `paths` names.
+// The synth as a graph, with the paths named: an LFO that does not run is
+// not wired, nor a depth onto what an LFO does not move.
 std::unique_ptr<SoundEngine::Wired>
 SoundEngine::wired_for(const Wiring::Paths &paths) {
     auto wired     = std::make_unique<Wired>();
@@ -475,8 +523,11 @@ SoundEngine::wired_for(const Wiring::Paths &paths) {
     Wiring &wiring = wired->wiring;
     wiring.paths   = paths;
     for (int l = 0; l < Wiring::lfo_count; ++l) {
-        wire_lfo(graph, wiring.lfos[static_cast<size_t>(l)],
-                 l % Wiring::lfo_shape_count);
+        const int shape = l % Wiring::lfo_shape_count;
+        if (paths.shapes[static_cast<size_t>(l / Wiring::lfo_shape_count)]
+                        [static_cast<size_t>(shape)]) {
+            wire_lfo(graph, wiring.lfos[static_cast<size_t>(l)], shape);
+        }
     }
     for (int c = 0; c < channel_count; ++c) {
         wire_channel(graph, wiring, c);
@@ -559,7 +610,7 @@ bool SoundEngine::commit() {
 
 // Everything that is not a parameter: the words the graph has the engine set
 // at load, every word the engine owns at zero, each LFO of every channel
-// listening to the saw that runs for it, every voice on its channel, idle,
+// listening to one that runs for it, every voice on its channel, idle,
 // and the sink that stays zero. A pointer or a stage nobody has written
 // sends the program's reads anywhere, so the CSP is let go after these are
 // in, which is the link's load. The boot's verify covers them.
@@ -575,10 +626,21 @@ void SoundEngine::set_up(Writes &writes) {
     for (const Graph::InitialValue &initial : graph().initial_values()) {
         put(writes, initial.address, initial.value);
     }
+    // a channel's LFO listens to the first that runs for it, until its
+    // preset says which
+    const Wiring::Paths &paths = wiring().paths;
     for (const Wiring::Channel &wires : wiring().channels) {
-        for (int l = 0; l < Wiring::channel_lfo_count; ++l) {
-            put(writes, address(wires.lfo[static_cast<size_t>(l)]),
-                graph().address(wiring().lfo(l, Wiring::shape_saw).record));
+        for (size_t l = 0; l < Wiring::channel_lfo_count; ++l) {
+            if (paths.moves[l].none()) {
+                continue;
+            }
+            int shape = 0;
+            while (!paths.shapes[l][static_cast<size_t>(shape)]) {
+                ++shape;
+            }
+            put(writes, address(wires.lfo[l]),
+                graph().address(
+                        wiring().lfo(static_cast<int>(l), shape).record));
         }
     }
     // a voice with no note is in release, at zero
@@ -743,17 +805,23 @@ void SoundEngine::lfo(int c, int which, Writes &writes) const {
     // unit; `whole` is what makes 1.0 of the destination's word: an octave
     // of pitch or of cutoff in semitones, an octave of Q, the pulse width's
     // rail in percentage points from the square. Only the chosen
-    // destination carries the depth.
-    auto depth = [&](int moved, lfo_dest_t destination, float whole) {
-        put(writes,
-            address(wires.depth[static_cast<size_t>(which)]
-                               [static_cast<size_t>(moved)]),
-            l.destination == destination ? word(l.depth / whole) : 0);
+    // destination carries the depth, and only what the wiring has this LFO
+    // move has a word for it.
+    constexpr std::array<float, Wiring::moved_count> whole = {
+            semitones_an_octave, // moves_pitch
+            semitones_an_octave, // moves_cutoff
+            square_to_rail,      // moves_duty
+            1.0f,                // moves_resonance
     };
-    depth(Wiring::moves_pitch, LFO_DEST_PITCH, semitones_an_octave);
-    depth(Wiring::moves_cutoff, LFO_DEST_CUTOFF, semitones_an_octave);
-    depth(Wiring::moves_duty, LFO_DEST_DUTY, square_to_rail);
-    depth(Wiring::moves_resonance, LFO_DEST_RESONANCE, 1.0f);
+    const auto &moves = wiring().paths.moves[static_cast<size_t>(which)];
+    for (size_t moved = 0; moved < whole.size(); ++moved) {
+        if (moves[moved]) {
+            put(writes, address(wires.depth[static_cast<size_t>(which)][moved]),
+                static_cast<size_t>(moved_by(l.destination)) == moved
+                        ? word(l.depth / whole[moved])
+                        : 0);
+        }
+    }
 }
 
 // The preset's sound in the channel's sinks and registers that depend on the
@@ -784,8 +852,10 @@ void SoundEngine::sound(int c, Writes &writes) const {
         put(writes, sinks + ChannelSink::gain_right + slot, word(gain.right));
     }
     // the oscillators: the mode word (waveform [2:0], cascade [3], filter
-    // type [5:4]) and the pulse width from the square, 1.0 being the rail
-    // (the program adds the LFOs)
+    // type [5:4]) and the pulse width from the square, 1.0 being the rail.
+    // Where an LFO moves the pulse width, the word is the program's base
+    // and the program adds the LFOs; where none does, it is the sink.
+    const Wiring::Paths &paths = wiring().paths;
     const bool cascade = preset.filter.slope > 12.0f; // two sections: 24
     for (int oscillator = 0; oscillator < PRESET_NUM_OSC; ++oscillator) {
         const osc_t &osc = preset.osc[oscillator];
@@ -793,12 +863,20 @@ void SoundEngine::sound(int c, Writes &writes) const {
         put(writes,
             sinks + (oscillator ? ChannelSink::mode_1 : ChannelSink::mode_0),
             mode);
-        put(writes, address(wires.duty_base[static_cast<size_t>(oscillator)]),
+        put(writes,
+            paths.moved(Wiring::moves_duty)
+                    ? address(wires.duty_base[static_cast<size_t>(oscillator)])
+                    : sinks
+                              + (oscillator ? ChannelSink::duty_1
+                                            : ChannelSink::duty_0),
             word((osc.pulse_width - square) / square_to_rail));
     }
-    // the resonance, in octaves of Q above Butterworth
+    // the resonance, in octaves of Q above Butterworth: the program's base
+    // or the sink, as the pulse width
     constexpr float butterworth = 0.70710678f;
-    put(writes, address(wires.resonance_base),
+    put(writes,
+        paths.moved(Wiring::moves_resonance) ? address(wires.resonance_base)
+                                             : sinks + ChannelSink::resonance,
         word(std::max(std::log2(preset.filter.resonance / butterworth), 0.0f)));
 }
 

@@ -915,6 +915,93 @@ void set(csp::GraphEvaluator &evaluator, const performance::Setting &setting) {
     }
 }
 
+// The performance on the model, which runs the graph's program, and on the
+// interpreter, which reads the graph itself: every sink the graph has,
+// compared pass for pass.
+struct Performed {
+    std::unique_ptr<csp::GraphEvaluator> evaluator;
+    int differences = 0; // sinks where the two differ
+    int early       = 0; // reads before ready, as the model reports them
+    int stale       = 0; // sinks the program left unwritten
+    int cycles      = 0; // of the longest pass
+};
+
+Performed perform(const SoundEngine &synth,
+                  const csp::ProgramBuilder::Built &graphed) {
+    const Graph &graph = synth.graph();
+    Performed performed;
+    // the set-up: the same performance on the model and on the interpreter
+    csp::Processor processor;
+    for (const performance::Write &write :
+         performance::writes(synth, performance::set_up(synth))) {
+        processor.write(write.address, write.raw);
+    }
+    for (const Graph::InitialValue &initial : graph.initial_values()) {
+        processor.write(initial.address, initial.value);
+    }
+    performed.evaluator = std::make_unique<csp::GraphEvaluator>(graph);
+    csp::GraphEvaluator &evaluator = *performed.evaluator;
+    for (const performance::Setting &setting : performance::set_up(synth)) {
+        set(evaluator, setting);
+    }
+    start(processor, graphed.image);
+
+    for (int at = 1; at <= performance::passes; ++at) {
+        // the performance: wires moved and notes played while it runs
+        const performance::Settings changes =
+                performance::before_pass(synth, at);
+        for (const performance::Write &write :
+             performance::writes(synth, changes)) {
+            processor.write(write.address, write.raw);
+        }
+        processor.swap();
+        const csp::PassReport report = processor.pass();
+        for (const std::string &error : report.errors) {
+            if (performed.early++ < 3) {
+                std::printf("  pass %d: %s\n", at, error.c_str());
+            }
+        }
+        performed.stale += static_cast<int>(report.stale_sinks.size());
+        performed.cycles = std::max(performed.cycles, report.cycles);
+        evaluator.pass();
+        // the writes land in the model at the end of this pass, so the
+        // interpreter takes them for the pass after
+        if (report.writes_applied > 0) {
+            for (const performance::Setting &setting : changes) {
+                set(evaluator, setting);
+            }
+        }
+        for (const int address : evaluator.sink_addresses()) {
+            const int32_t from_program =
+                    processor.sink(address - csp::sink_base);
+            const int32_t from_graph = evaluator.sink(address);
+            if (from_program != from_graph && performed.differences++ < 5) {
+                std::printf(
+                        "  pass %d, sink 0x%03x: the interpreter has %d, the "
+                        "program %d\n",
+                        at, address, from_graph, from_program);
+            }
+        }
+    }
+    return performed;
+}
+
+void check_performed(const Performed &performed,
+                     const csp::ProgramBuilder::Built &graphed,
+                     const std::string &what) {
+    check_equal(performed.differences, 0,
+                what
+                        + ": sinks where the interpreter and the graph's "
+                          "program differ over "
+                        + std::to_string(performance::passes) + " passes");
+    check_equal(performed.early, 0,
+                what + ": reads before ready reported by the model");
+    check_equal(performed.stale, 0,
+                what + ": sinks the graph's program left unwritten");
+    check_equal(performed.cycles, graphed.cycles,
+                what + ": the model runs the cycles the builder counted");
+}
+
 void test_todays_synth() {
     performance::Unplayed link;
     auto synth = std::make_unique<SoundEngine>(link);
@@ -994,69 +1081,9 @@ void test_todays_synth() {
                   == Graph::Writer::firmware,
           "such a word is the firmware's");
 
-    // the set-up: the same performance on the model and on the interpreter
-    csp::Processor processor;
-    for (const performance::Write &write :
-         performance::writes(*synth, performance::set_up(*synth))) {
-        processor.write(write.address, write.raw);
-    }
-    for (const Graph::InitialValue &initial : graph.initial_values()) {
-        processor.write(initial.address, initial.value);
-    }
-    auto evaluator = std::make_unique<csp::GraphEvaluator>(graph);
-    for (const performance::Setting &setting : performance::set_up(*synth)) {
-        set(*evaluator, setting);
-    }
-    start(processor, graphed.image);
-
-    int differences = 0, early = 0, stale = 0, cycles = 0;
-    const int passes = performance::passes;
-    for (int at = 1; at <= passes; ++at) {
-        // the performance: wires moved and notes played while it runs
-        const performance::Settings changes =
-                performance::before_pass(*synth, at);
-        for (const performance::Write &write :
-             performance::writes(*synth, changes)) {
-            processor.write(write.address, write.raw);
-        }
-        processor.swap();
-        const csp::PassReport report = processor.pass();
-        for (const std::string &error : report.errors) {
-            if (early++ < 3) {
-                std::printf("  pass %d: %s\n", at, error.c_str());
-            }
-        }
-        stale += static_cast<int>(report.stale_sinks.size());
-        cycles = std::max(cycles, report.cycles);
-        evaluator->pass();
-        // the writes land in the model at the end of this pass, so the
-        // interpreter takes them for the pass after
-        if (report.writes_applied > 0) {
-            for (const performance::Setting &setting : changes) {
-                set(*evaluator, setting);
-            }
-        }
-        for (const int address : evaluator->sink_addresses()) {
-            const int32_t from_program =
-                    processor.sink(address - csp::sink_base);
-            const int32_t from_graph = evaluator->sink(address);
-            if (from_program != from_graph && differences++ < 5) {
-                std::printf(
-                        "  pass %d, sink 0x%03x: the interpreter has %d, the "
-                        "program %d\n",
-                        at, address, from_graph, from_program);
-            }
-        }
-    }
-    check_equal(differences, 0,
-                "sinks where the interpreter and the graph's program differ "
-                "over " + std::to_string(passes)
-                        + " passes");
-    check_equal(early, 0, "reads before ready reported by the model");
-    check_equal(stale, 0, "sinks the graph's program left unwritten");
-    check_equal(cycles, graphed.cycles,
-                "the model runs the cycles the builder counted");
-
+    const Performed performed = perform(*synth, graphed);
+    check_performed(performed, graphed, "every path");
+    const csp::GraphEvaluator *evaluator = performed.evaluator.get();
     // the sinks are the layout's, and the comparison above was of all of
     // them: three for each voice, three for each channel
     const std::vector<int> sinks = evaluator->sink_addresses();
@@ -1095,6 +1122,56 @@ void test_todays_synth() {
                                            + Wiring::VoiceSink::gain);
     check(gain_1 != 0 && gain_2 != 0 && gain_1 != gain_2,
           "the voices' gains are alive at the end");
+}
+
+// The synth wired for some of its paths. A wiring with fewer paths is
+// another graph and another program, with its own copies, layout and order,
+// so each is played on the model against the interpreter of its graph, as
+// the whole one is above.
+void test_fewer_paths() {
+    // a bit for each shape (saw, square, triangle, sine) that runs for a
+    // channel's LFO, and for each of what it moves (pitch, cutoff, pulse
+    // width, resonance)
+    struct Case {
+        const char *name;
+        unsigned shapes_1, moves_1, shapes_2, moves_2;
+    };
+    const Case cases[] = {
+            {"no LFO", 0b0000, 0b0000, 0b0000, 0b0000},
+            {"a saw onto the pitch", 0b0001, 0b0001, 0b0000, 0b0000},
+            {"a sine onto the cutoff", 0b1000, 0b0010, 0b0000, 0b0000},
+            {"a square onto the pulse width", 0b0010, 0b0100, 0b0000, 0b0000},
+            {"a triangle onto the resonance", 0b0100, 0b1000, 0b0000, 0b0000},
+            {"LFO 2 alone, a sine onto the pitch", 0b0000, 0b0000, 0b1000,
+             0b0001},
+            {"both onto the pitch", 0b0001, 0b0001, 0b0100, 0b0001},
+            {"a sine onto the resonance, a triangle onto the pulse width",
+             0b1000, 0b1000, 0b0100, 0b0100},
+            {"every shape of LFO 1 onto the cutoff", 0b1111, 0b0010, 0b0000,
+             0b0000},
+            {"two shapes each, onto two each", 0b0011, 0b0011, 0b1100, 0b1100},
+            {"every path but the sines'", 0b0111, 0b1111, 0b0111, 0b1111},
+    };
+    for (const Case &wiring : cases) {
+        Wiring::Paths paths;
+        paths.shapes[0] = wiring.shapes_1;
+        paths.moves[0]  = wiring.moves_1;
+        paths.shapes[1] = wiring.shapes_2;
+        paths.moves[1]  = wiring.moves_2;
+        performance::Unplayed link;
+        auto synth = std::make_unique<SoundEngine>(link);
+        synth->wire(paths);
+        const auto graphed = std::make_unique<csp::ProgramBuilder::Built>();
+        if (!build(synth->graph(), *graphed, wiring.name)) {
+            continue;
+        }
+        std::printf("%s: %d rows, %d decode rows, %d cycles a pass\n",
+                    wiring.name, graphed->image.length, graphed->image.rom_used,
+                    graphed->cycles);
+        check(graphed->cycles <= csp::pass_cycle_limit,
+              std::string(wiring.name) + ": the program fits the pass");
+        check_performed(perform(*synth, *graphed), *graphed, wiring.name);
+    }
 }
 
 // ---- the Noaidi by its formulas -------------------------------------------------
@@ -1523,6 +1600,7 @@ int main() {
     test_copies_that_point_at_each_other();
     test_the_interpreter();
     test_todays_synth();
+    test_fewer_paths();
     test_the_noaidis_formulas();
     test_the_noaidis_envelope();
     std::printf("dsp graph: %s (%d checks, %d failures)\n",

@@ -175,24 +175,15 @@ void test_set_up() {
         check(link.state.at(initial.address) == initial.value,
               "a word the graph has the engine set at load holds its value");
     }
+    check(played.engine.wiring().paths == Wiring::Paths{},
+          "the init preset uses none of the LFOs' paths");
     for (int c = 0; c < SoundEngine::channel_count; ++c) {
         const Wiring::Channel &wires = played.wires(c);
-        check(played.word(wires.lfo[0])
-                              == played.graph().address(
-                                      played.engine.wiring()
-                                              .lfo(0, Wiring::shape_saw)
-                                              .record)
-                      && played.word(wires.lfo[1])
-                                 == played.graph().address(
-                                         played.engine.wiring()
-                                                 .lfo(1, Wiring::shape_saw)
-                                                 .record),
-              "an LFO with no depth listens to the saw that runs for it");
-        check(played.word(wires.mod_amount) == 0
-                      && played.word(wires.depth[0][Wiring::moves_pitch]) == 0
-                      && played.word(wires.duty_base[0]) == 0
-                      && played.word(wires.resonance_base) == 0
-                      && played.word(wires.bend) == 0,
+        const int sinks = ChannelSink::base + c * ChannelSink::block;
+        check(played.word(wires.mod_amount) == 0 && played.word(wires.bend) == 0
+                      && link.state.at(sinks + ChannelSink::duty_0) == 0
+                      && link.state.at(sinks + ChannelSink::duty_1) == 0
+                      && link.state.at(sinks + ChannelSink::resonance) == 0,
               "the init preset moves nothing");
     }
     for (int v = 0; v < SoundEngine::voice_count; ++v) {
@@ -296,7 +287,7 @@ void test_commit() {
     check(link.swaps.size() == 3 && link.written(played.at(played.wires().bend))
                   && link.written(played.at(played.wires().key_track))
                   && link.written(played.at(played.wires().mod_amount))
-                  && link.written(played.at(played.wires().duty_base[1])),
+                  && link.written(ChannelSink::base + ChannelSink::duty_1),
           "what is committed together goes in one swap");
 
     // a channel's parameters are its own
@@ -554,12 +545,12 @@ void test_lfo() {
     Played played;
     Recorder &link      = played.link;
     SoundEngine &engine = played.engine;
-    // An LFO of every shape runs for each of a channel's LFOs. The engine
-    // sets the one of the preset's shape and points the channel at its
-    // record, so the shape the preset asks for is the one the channel hears
-    // (issue #237). The gain scales the wave: the saw's phase runs ±8 so
-    // depth/8 reaches ±depth, the triangle's |phase| runs 0…8 so depth/4
-    // does; the square and sine carry the depth itself, not a gain.
+    // The LFO of a preset's shape runs for a channel's LFO, and no other.
+    // The engine sets it and points the channel at its record, so the shape
+    // the preset asks for is the one the channel hears (issue #237). The
+    // gain scales the wave: the saw's phase runs ±8 so depth/8 reaches
+    // ±depth, the triangle's |phase| runs 0…8 so depth/4 does; the square
+    // and sine carry the depth itself, not a gain.
     struct Case {
         waveform_t wave;
         int shape;
@@ -580,8 +571,13 @@ void test_lfo() {
             lfo.depth       = 0.25f;
             lfo.destination = LFO_DEST_RESONANCE;
             engine.commit();
-            const Wiring::Lfo &wave =
-                    played.engine.wiring().lfo(i, shape.shape);
+            const Wiring &wiring = played.engine.wiring();
+            check(wiring.paths.shapes[i].count() == 1
+                          && wiring.paths.shapes[i][shape.shape]
+                          && wiring.paths.moves[i].count() == 1
+                          && wiring.paths.moves[i][Wiring::moves_resonance],
+                  "the LFO of the preset's shape runs, onto what it moves");
+            const Wiring::Lfo &wave = wiring.lfo(i, shape.shape);
             check(played.word(played.wires().lfo[i])
                           == played.graph().address(wave.record),
                   "the channel listens to the LFO of the preset's shape");
@@ -596,7 +592,7 @@ void test_lfo() {
         }
     }
 
-    // the depth reaches its one destination and nothing else
+    // the depth reaches its one destination, the only one wired
     struct Reach {
         lfo_dest_t destination;
         int moved;
@@ -620,32 +616,132 @@ void test_lfo() {
         lfo.depth       = reach.depth;
         lfo.destination = reach.destination;
         engine.commit();
-        const auto &depth = played.wires().depth[1];
-        for (int moved = 0; moved < Wiring::moved_count; ++moved) {
-            const double want = moved == reach.moved ? reach.word : 0.0;
-            check(std::fabs(played.octaves(depth[moved]) - want) < 1e-4,
-                  reach.name);
-        }
+        const auto &moves = played.engine.wiring().paths.moves[1];
+        check(moves.count() == 1 && moves[reach.moved]
+                      && std::fabs(played.octaves(
+                                           played.wires().depth[1][reach.moved])
+                                   - reach.word)
+                                 < 1e-4,
+              reach.name);
     }
 
     // an LFO with no depth takes none of the synth's
-    const Wiring::Lfo &sine = played.engine.wiring().lfo(1, Wiring::shape_sine);
-    lfo_t &lfo              = engine.channel[0].lfo[1];
-    lfo.shape               = WAVE_SINE;
-    lfo.rate                = 5.0f;
-    lfo.depth               = 0.0f;
+    lfo_t &lfo = engine.channel[0].lfo[1];
+    lfo.shape  = WAVE_SINE;
+    lfo.rate   = 5.0f;
+    lfo.depth  = 0.0f;
     engine.commit();
-    check(!link.written(played.at(sine.step))
-                  && !link.written(played.at(played.wires().lfo[1])),
-          "an LFO with no depth sets no rate and moves no wire");
-    check(played.word(played.wires().depth[1][Wiring::moves_duty]) == 0,
-          "and its depth is zero");
+    check(played.engine.wiring().paths.shapes[1].none()
+                  && played.engine.wiring().paths.moves[1].none()
+                  && played.engine.wiring().paths.shapes[0].count() == 1,
+          "an LFO with no depth runs no LFO and moves nothing");
     lfo.depth = 1.0f;
     engine.commit();
+    const Wiring::Lfo &sine = played.engine.wiring().lfo(1, Wiring::shape_sine);
     check(played.dword(sine.step) == csp::lfo_rate(5.0f)
                   && played.word(played.wires().lfo[1])
                              == played.graph().address(sine.record),
           "given a depth, it runs at its rate and the channel listens");
+
+    // a rate or a depth is a value: no program is loaded for it
+    const int loads = link.loads;
+    lfo.rate        = 2.0f;
+    lfo.depth       = 0.5f;
+    engine.commit();
+    check(link.loads == loads && played.dword(sine.step) == csp::lfo_rate(2.0f),
+          "a new rate and depth are written, with the program that runs");
+}
+
+// A commit that changes the wiring loads a new program, and the engine's
+// words go with it to where that program's graph laid them out.
+void test_rewire() {
+    Played played;
+    Recorder &link      = played.link;
+    SoundEngine &engine = played.engine;
+    const int cycles    = link.cycles;
+    auto every_word     = [&] {
+        for (int address = 0; address < csp::register_count; ++address) {
+            if (played.graph().writer(address) == Graph::Writer::firmware
+                && link.state.count(address) == 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    engine.note_on(0, 60, 1.0f);
+    const int held = played.struck_last();
+    check(engine.voices()[held].state == Voice::State::held,
+          "a note is held before the wiring changes");
+
+    lfo_t &lfo      = engine.channel[0].lfo[0];
+    lfo.shape       = WAVE_SAW;
+    lfo.rate        = 5.0f;
+    lfo.destination = LFO_DEST_DUTY;
+    lfo.depth       = 10.0f;
+    check(engine.rewires(),
+          "an LFO given a depth uses a path that is not wired");
+    const size_t swaps = link.swaps.size();
+    check(engine.commit() && link.loads == 2 && link.swaps.size() == swaps + 1,
+          "the commit loads a new program, with its words in one swap");
+    check(link.cycles > cycles, "a path costs cycles");
+    check(every_word(), "every word the engine owns goes with the program");
+    const int sinks = ChannelSink::base;
+    check(link.state.count(sinks + ChannelSink::duty_0) == 0
+                  && link.state.count(played.at(played.wires().duty_base[0]))
+                             == 1
+                  && link.state.count(sinks + ChannelSink::resonance) == 1,
+          "a pulse width an LFO moves is the program's, the resonance the engine's");
+    bool idle = true;
+    for (const Voice &voice : engine.voices()) {
+        idle = idle && voice.state == Voice::State::idle;
+    }
+    check(idle, "every voice is idle after a load");
+    check(played.dword(played.voice_wires(held).level[Wiring::envelope_amp])
+                          == 0
+                  && played.word(played.voice_wires(held)
+                                         .stage[Wiring::envelope_amp])
+                             == played.stage_offset(Wiring::envelope_amp,
+                                                    Wiring::stage_release),
+          "and silent");
+    engine.note_off(0, 60);
+    check(link.swaps.size() == swaps + 1,
+          "the note off of a key struck before the load finds nothing");
+    engine.note_on(0, 62, 1.0f);
+    const Wiring::Voice &struck = played.voice_wires(played.struck_last());
+    check(played.word(struck.stage[Wiring::envelope_amp])
+                  == played.stage_offset(Wiring::envelope_amp,
+                                         Wiring::stage_attack),
+          "a note struck after it starts its attack");
+
+    // A channel's LFO wire is a pointer: between two LFOs that run it moves
+    // with one write. Two more channels have the saw and the square run for
+    // LFO 1, the square being a path and a load; then the first channel's
+    // change of shape leaves both in use, and is a write.
+    engine.channel[5].lfo[0]       = lfo;
+    engine.channel[3].lfo[0]       = lfo;
+    engine.channel[3].lfo[0].shape = WAVE_PULSE;
+    check(engine.commit() && link.loads == 3,
+          "a shape no channel had runs after a load");
+    lfo.shape = WAVE_PULSE;
+    check(!engine.rewires() && engine.commit() && link.loads == 3,
+          "a change between shapes that stay in use loads nothing");
+    check(played.word(played.wires().lfo[0])
+                  == played.graph().address(
+                          engine.wiring().lfo(0, Wiring::shape_square).record),
+          "the channel's wire is moved to it");
+    engine.channel[5].lfo[0].shape = WAVE_PULSE;
+    check(engine.commit() && link.loads == 4
+                  && engine.wiring().paths.shapes[0].count() == 1,
+          "a shape the last channel leaves is not wired");
+
+    // with the paths gone the program is the one it was
+    lfo.depth                      = 0.0f;
+    engine.channel[3].lfo[0].depth = 0.0f;
+    engine.channel[5].lfo[0].depth = 0.0f;
+    check(engine.commit() && link.loads == 5 && link.cycles == cycles
+                  && engine.wiring().paths == Wiring::Paths{},
+          "paths no channel uses are not wired");
 }
 
 void test_sound() {
@@ -688,9 +784,9 @@ void test_sound() {
     check(state.at(sinks + ChannelSink::mode_0)
                   == (preset.osc[0].wave | (1 << 3)),
           "the mode word: waveform and cascade");
-    check(played.word(played.wires().duty_base[0]) == 0
-                  && played.word(played.wires().resonance_base) == 0,
-          "a square and Butterworth are zero, before the LFOs");
+    check(state.at(sinks + ChannelSink::duty_0) == 0
+                  && state.at(sinks + ChannelSink::resonance) == 0,
+          "a square and Butterworth are zero");
 
     // half the spread: the far side is there, 11.9 dB under the near one
     preset.voice.unison_stereo = 50.0f;
@@ -714,18 +810,34 @@ void test_sound() {
     preset.filter.slope       = 12.0f;
     preset.filter.type        = FILTER_HIGHPASS;
     engine.commit();
-    check(played.word(played.wires().duty_base[0]) == 8192
-                  && played.word(played.wires().duty_base[1]) == -8192,
+    check(state.at(sinks + ChannelSink::duty_0) == 8192
+                  && state.at(sinks + ChannelSink::duty_1) == -8192,
           "a pulse width is its distance from the square, the rail being 1.0");
-    check(std::abs(played.word(played.wires().resonance_base) - 2 * 16384) <= 1,
+    check(std::abs(state.at(sinks + ChannelSink::resonance) - 2 * 16384) <= 1,
           "a Q four times Butterworth's is two octaves");
     check(state.at(sinks + ChannelSink::mode_0)
                   == (WAVE_PULSE | (FILTER_HIGHPASS << 4)),
           "the mode word: one section, highpass");
     preset.filter.resonance = std::numeric_limits<float>::infinity();
     engine.commit();
-    check(played.word(played.wires().resonance_base) == (1 << 17) - 1,
+    check(state.at(sinks + ChannelSink::resonance) == (1 << 17) - 1,
           "a Q of infinity is the largest word");
+
+    // with an LFO onto them, the same words are the program's bases
+    engine.channel[0].lfo[0].depth       = 5.0f;
+    engine.channel[0].lfo[0].destination = LFO_DEST_DUTY;
+    engine.channel[0].lfo[1].depth       = 1.0f;
+    engine.channel[0].lfo[1].destination = LFO_DEST_RESONANCE;
+    engine.commit();
+    check(played.word(played.wires().duty_base[0]) == 8192
+                  && played.word(played.wires().duty_base[1]) == -8192
+                  && played.word(played.wires().resonance_base) == (1 << 17) - 1
+                  && state.count(sinks + ChannelSink::duty_0) == 0
+                  && state.count(sinks + ChannelSink::resonance) == 0,
+          "what an LFO moves has its base in a register, and the program writes the sink");
+    engine.channel[0].lfo[0].depth = 0.0f;
+    engine.channel[0].lfo[1].depth = 0.0f;
+    engine.commit();
 
     // two plain partials; the make-up lifts them by half an octave of gain
     // over the volume's eighth of full scale
@@ -914,6 +1026,7 @@ int main() {
     test_notes();
     test_controllers();
     test_lfo();
+    test_rewire();
     test_sound();
     test_pointers();
     test_voices();
