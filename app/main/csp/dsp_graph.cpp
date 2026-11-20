@@ -1713,6 +1713,25 @@ struct DspGraph::Lowering {
         }
     }
 
+    // Whether the SEL of the CMP at `at` can issue while that compare has
+    // not: every operand the select waits for, save the compare's flags, has
+    // been written. A compare that sets the flags for a select which cannot
+    // follow holds them against the compare that select does wait for, so a
+    // scheduler lets it in only when the select can follow at once. True
+    // when the compare sets the flags for no select: nothing waits.
+    template <typename MayIssue>
+    static bool select_can_follow(const std::vector<Instruction> &code,
+                                  int32_t at, MayIssue may_issue) {
+        for (auto select = at + 1; select < static_cast<int32_t>(code.size());
+             ++select) {
+            const Instruction &sel = code[static_cast<size_t>(select)];
+            if (sel.compare == at) {
+                return may_issue(sel, at);
+            }
+        }
+        return true;
+    }
+
     // ---- a loop's body -------------------------------------------------------------
 
     // The words of the loop's own copy that an operand names, each as twice
@@ -1739,20 +1758,25 @@ struct DspGraph::Lowering {
     // of what is behind what, and of whose turn it is with j and with the
     // flags. Every row that may issue is a candidate: first the SEL the
     // flags wait for, then the rows that read through the pointer j holds,
-    // then the others by their height. When none may, j goes to the pointer
-    // whose rows can go on: its IDX issues, again if j was another's in
-    // between.
+    // then the others by their height. A CMP is a candidate only when the
+    // SEL it sets the flags for can follow at once, as in the straight-line
+    // code: the compare's operand and its select's operands are two sets,
+    // and a compare opened for a select that is not yet ready holds the
+    // flags against the compare that select does wait for. When none may, j
+    // goes to the pointer whose rows can go on: its IDX issues, again if j
+    // was another's in between.
     void order_body(Loop &loop) {
         static_assert(fewest_looped >= result_latency,
                       "a body is ordered with every latency hidden");
         const std::vector<Instruction> &code = loop.code;
         const auto count = static_cast<int32_t>(code.size());
         std::vector<bool> issued(static_cast<size_t>(count), false);
-        auto may_issue = [&](const Instruction &row) {
+        auto may_issue = [&](const Instruction &row, int32_t except = none) {
             return std::all_of(
                     row.behind.begin(), row.behind.end(),
                     [&](const auto &earlier) {
-                        return issued[static_cast<size_t>(earlier.first)];
+                        return earlier.first == except
+                               || issued[static_cast<size_t>(earlier.first)];
                     });
         };
         auto rows_left     = std::count_if(code.begin(), code.end(),
@@ -1766,9 +1790,14 @@ struct DspGraph::Lowering {
             for (int32_t at = 0; at < count; ++at) {
                 const Instruction &row = code[static_cast<size_t>(at)];
                 if (row.is_idx || issued[static_cast<size_t>(at)]
-                    || !may_issue(row)
-                    || (row.sets_flags && open_compare != none)) {
+                    || !may_issue(row)) {
                     continue;
+                }
+                if (row.sets_flags) {
+                    if (open_compare != none
+                        || !select_can_follow(code, at, may_issue)) {
+                        continue;
+                    }
                 }
                 if (row.group != none && row.group != open_group) {
                     const Instruction &idx = code[static_cast<size_t>(
@@ -2365,15 +2394,12 @@ struct DspGraph::Lowering {
                     if (open_compare != none) {
                         continue;
                     }
-                    bool ready = true; // its SEL can follow at once
-                    for (int32_t select = at + 1; select < count; ++select) {
-                        if (code[static_cast<size_t>(select)].compare == at) {
-                            ready = can_issue(code[static_cast<size_t>(select)],
-                                              cycle + state_latency, at);
-                            break;
-                        }
-                    }
-                    if (!ready) {
+                    if (!select_can_follow(
+                                code, at,
+                                [&](const Instruction &sel, int32_t except) {
+                                    return can_issue(sel, cycle + state_latency,
+                                                     except);
+                                })) {
                         continue;
                     }
                     rank = std::min(rank, 3);
