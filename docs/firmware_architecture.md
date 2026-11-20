@@ -93,16 +93,17 @@ CSP's memory or holds a voice number.
   that channel's sinks.
 - **Wiring.** The engine builds the DSP graph (`csp/dsp_graph.hpp`) with
   loops, and the synth's sizes are its: 16 channels, 32 voices of 8
-  partials. A graph is wired for a set of paths (`Wiring::Paths`: the LFO of
-  a shape that runs, what a channel's LFO moves), and its program spends no
-  cycle on another. A knob loads no program: what a knob reaches is wired
-  whatever the tree holds, and only a path no knob reaches follows the
-  tree. An LFO's depth, shape and destination are knobs, so the tree's
-  program has every path: an LFO of every shape runs for each of a
-  channel's two, and each moves all four destinations. Every channel is
-  wired alike and every voice alike, and the graph loops over them. The
-  channels share the LFOs: an LFO of one shape has one rate, and an LFO
-  with no depth sets none.
+  partials. A graph is wired for a set of paths (`Wiring::Paths`: what a
+  channel's LFOs move), and its program spends no cycle on another. A knob
+  loads no program: what a knob reaches is wired whatever the tree holds,
+  and only a path no knob reaches follows the tree. An LFO's depth, shape
+  and destination are knobs, so the tree's program has every path: each of
+  a channel's two LFOs is a record of its own, moving all four
+  destinations, and its four waves are all computed at its phase with the
+  shape's word choosing among them. Every channel is wired alike and every
+  voice alike, and the graph loops over them. A channel's LFO is its own in
+  everything: its rate, its depths, its shape, and a phase that runs free
+  and is zero when the program loads, nothing writing it again.
 - **Rewire and reload.** The first commit, and a commit of a tree with
   other paths than the wired ones, wires a graph for the tree's paths, has
   it build its program and loads it with every word the engine owns: a
@@ -110,8 +111,8 @@ CSP's memory or holds a voice number.
   program had it. Every voice is silent and idle after it. The engine goes
   on with the graph it has until the new one has built. With every path on
   a knob the first commit's program is the only one: no knob and no preset
-  change loads another. A change of an LFO's shape moves the channel's LFO
-  wire to the LFO of that shape.
+  change loads another. A change of an LFO's shape writes the shape word of
+  the channel's own record.
 - **The link.** The words and the program go out through
   `SoundEngine::Link`, which the engine link implements and a host test
   records (`make fw-test`).

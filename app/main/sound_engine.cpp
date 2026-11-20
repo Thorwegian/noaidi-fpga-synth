@@ -43,8 +43,14 @@ constexpr int32_t raw_word(double value) {
 constexpr int32_t full =
         raw_word(1.0); // an envelope's level at the attack's end
 
-// The sine's constants: the parabola's, and the correction's.
-constexpr int32_t eighth               = raw_word(0.125);
+// The waves' scales, and the sine's constants: the parabola's, and the
+// correction's.
+constexpr int32_t eighth  = raw_word(0.125);
+constexpr int32_t quarter = raw_word(0.25);
+// The shape word's thresholds: the shape is a value, and a compare takes its
+// constant as a word.
+constexpr int32_t two                  = 2 * full;
+constexpr int32_t three                = 3 * full;
 constexpr int32_t four                 = raw_word(4.0);
 constexpr int32_t minus_four           = raw_word(-4.0);
 constexpr int32_t correction           = raw_word(0.225);
@@ -60,67 +66,86 @@ enum {
     field_key_track
 };
 
-void wire_lfo(Graph &graph, Wiring::Lfo &lfo, int shape) {
-    lfo.step          = graph.source(Width::dword);
-    lfo.depth         = graph.source();
-    lfo.neg_depth     = graph.source();
-    lfo.gain          = graph.source();
-    const Wire before = graph.delay(Width::dword);
-    // −8 … +8, wrapping: one cycle
-    const Wire phase = graph.sum(before, lfo.step, {}, Overflow::wrap);
-    graph.connect(before, phase);
-    switch (shape) {
-    case Wiring::shape_saw:
-        lfo.out = graph.multiply(phase, lfo.gain);
-        break;
-    case Wiring::shape_square:
-        lfo.out = graph.select(phase, {}, csp::Condition::negative,
-                               lfo.neg_depth, lfo.depth);
-        break;
-    case Wiring::shape_triangle:
-        lfo.out = graph.sum(graph.multiply(graph.absolute(phase), lfo.gain),
-                            lfo.neg_depth);
-        break;
-    default: { // the sine: a parabola, and a correction by its own square
-        const Wire p = graph.multiply(phase, graph.constant(eighth));
-        Wire t       = graph.multiply(graph.absolute(p), p);
-        t            = graph.multiply(t, graph.constant(minus_four));
-        t            = graph.multiply_add(t, p, graph.constant(four));
-        const Wire z = graph.multiply(t, graph.absolute(t));
-        Wire wave    = graph.multiply(t, graph.constant(one_minus_correction));
-        wave         = graph.multiply_add(wave, z, graph.constant(correction));
-        lfo.out      = graph.multiply(wave, lfo.depth);
-        break;
+// An LFO record's fields: its step, a depth onto each of what it moves, and
+// its shape.
+constexpr int lfo_field_step  = 0;
+constexpr int lfo_field_depth = 1;
+constexpr int lfo_field_shape = lfo_field_depth + Wiring::moved_count;
+
+// The record of a channel's LFO: what its knobs set.
+void wire_lfo(Graph &graph, Wiring::Lfo &lfo) {
+    lfo.step  = graph.source(Width::dword);
+    lfo.shape = graph.source();
+    for (Wire &depth : lfo.depth) {
+        depth = graph.source();
     }
+    std::vector<Field> fields{lfo.step};
+    for (const Wire depth : lfo.depth) {
+        fields.emplace_back(depth);
     }
-    const std::vector<Field> fields{lfo.out};
+    fields.emplace_back(lfo.shape);
     lfo.record = graph.record(fields);
+}
+
+// The four waves at a phase, each at full scale, and the shape word's pick
+// among them: the saw and the triangle scale the phase, the square is its
+// sign from 1.0 to the negative constant, and the sine is a parabola and a
+// correction by its own square. The square's 1.0 is a word, a row holding one
+// constant already.
+Wire wave_at(Graph &graph, const Wiring &wiring, Wire phase, Wire shape) {
+    const Wire saw      = graph.multiply(phase, graph.constant(eighth));
+    const Wire square   = graph.select(phase, {}, csp::Condition::negative,
+                                       wiring.one, graph.constant(-full));
+    const Wire triangle = graph.sum(
+            graph.multiply(graph.absolute(phase), graph.constant(quarter)),
+            graph.constant(-full));
+    Wire t       = graph.multiply(graph.absolute(saw), saw);
+    t            = graph.multiply(t, graph.constant(minus_four));
+    t            = graph.multiply_add(t, saw, graph.constant(four));
+    const Wire z = graph.multiply(t, graph.absolute(t));
+    Wire sine    = graph.multiply(t, graph.constant(one_minus_correction));
+    sine         = graph.multiply_add(sine, z, graph.constant(correction));
+    // three compares deep, so that one of the four is the wave
+    const Wire low  = graph.select(shape, graph.constant(full),
+                                   csp::Condition::negative, square, saw);
+    const Wire high = graph.select(shape, graph.constant(three),
+                                   csp::Condition::negative, sine, triangle);
+    return graph.select(shape, graph.constant(two), csp::Condition::negative,
+                        high, low);
 }
 
 void wire_channel(Graph &graph, Wiring &wiring, int c) {
     Wiring::Channel &channel   = wiring.channels[static_cast<size_t>(c)];
     const Wiring::Paths &paths = wiring.paths;
-    // the LFOs that run: where a channel's LFO wire can be plugged in
+    // every LFO is a record: where a channel's LFO wire can be plugged in
     std::vector<Record> lfo_records;
-    for (size_t l = 0; l < wiring.lfos.size(); ++l) {
-        if (paths.shapes[l / Wiring::lfo_shape_count]
-                        [l % Wiring::lfo_shape_count]) {
-            lfo_records.push_back(wiring.lfos[l].record);
-        }
+    for (const Wiring::Lfo &lfo : wiring.lfos) {
+        lfo_records.push_back(lfo.record);
     }
-    // each LFO onto each of what it moves, by a depth of its own
+    // each LFO onto each of what it moves, by the depth its record holds
     std::array<Wire, Wiring::moved_count> moved;
     for (size_t l = 0; l < channel.lfo.size(); ++l) {
-        if (paths.moves[l].none() || lfo_records.empty()) {
+        if (paths.moves[l].none()) {
             continue;
         }
         channel.lfo[l] = graph.pointer(lfo_records);
-        const Wire lfo = graph.through(channel.lfo[l], 0);
+        // The phase is the channel's, and free-running: zero when the
+        // program loads, and nothing writes it again.
+        const Wire before = graph.delay(Width::dword);
+        channel.phase[l]  = before;
+        // −8 … +8, wrapping: one cycle
+        const Wire phase =
+                graph.sum(before, graph.through(channel.lfo[l], lfo_field_step),
+                          {}, Overflow::wrap);
+        graph.connect(before, phase);
+        const Wire wave =
+                wave_at(graph, wiring, phase,
+                        graph.through(channel.lfo[l], lfo_field_shape));
         for (size_t k = 0; k < moved.size(); ++k) {
             if (paths.moves[l][k]) {
-                channel.depth[l][k] = graph.source();
-                moved[k] =
-                        graph.multiply_add(moved[k], lfo, channel.depth[l][k]);
+                const Wire depth = graph.through(
+                        channel.lfo[l], lfo_field_depth + static_cast<int>(k));
+                moved[k] = graph.multiply_add(moved[k], wave, depth);
             }
         }
     }
@@ -503,20 +528,17 @@ Wiring::Paths SoundEngine::paths() const {
     return Wiring::Paths::every();
 }
 
-// The synth as a graph, with the paths named: an LFO that does not run is
-// not wired, nor a depth onto what an LFO does not move.
+// The synth as a graph, with the paths named: a depth onto what an LFO does
+// not move is not wired.
 std::unique_ptr<SoundEngine::Wired>
 SoundEngine::wired_for(const Wiring::Paths &paths) {
     auto wired     = std::make_unique<Wired>();
     Graph &graph   = wired->graph;
     Wiring &wiring = wired->wiring;
     wiring.paths   = paths;
-    for (int l = 0; l < Wiring::lfo_count; ++l) {
-        const int shape = l % Wiring::lfo_shape_count;
-        if (paths.shapes[static_cast<size_t>(l / Wiring::lfo_shape_count)]
-                        [static_cast<size_t>(shape)]) {
-            wire_lfo(graph, wiring.lfos[static_cast<size_t>(l)], shape);
-        }
+    wiring.one     = graph.source();
+    for (Wiring::Lfo &lfo : wiring.lfos) {
+        wire_lfo(graph, lfo);
     }
     for (int c = 0; c < channel_count; ++c) {
         wire_channel(graph, wiring, c);
@@ -615,21 +637,20 @@ void SoundEngine::set_up(Writes &writes) {
     for (const Graph::InitialValue &initial : graph().initial_values()) {
         put(writes, initial.address, initial.value);
     }
-    // a channel's LFO listens to the first that runs for it, until its
-    // preset says which
+    // the square's high level, 1.0, for every LFO
+    put(writes, address(wiring().one), word_one);
+    // a channel's LFOs are its own: each of its wires points at the record
+    // of one of its two
     const Wiring::Paths &paths = wiring().paths;
-    for (const Wiring::Channel &wires : wiring().channels) {
+    for (int c = 0; c < channel_count; ++c) {
+        const Wiring::Channel &wires =
+                wiring().channels[static_cast<size_t>(c)];
         for (size_t l = 0; l < Wiring::channel_lfo_count; ++l) {
             if (paths.moves[l].none()) {
                 continue;
             }
-            int shape = 0;
-            while (!paths.shapes[l][static_cast<size_t>(shape)]) {
-                ++shape;
-            }
             put(writes, address(wires.lfo[l]),
-                graph().address(
-                        wiring().lfo(static_cast<int>(l), shape).record));
+                graph().address(wiring().lfo(c, static_cast<int>(l)).record));
         }
     }
     // a voice with no note is in release, at zero
@@ -770,26 +791,16 @@ void SoundEngine::pitch_bend(int c, Writes &writes) const {
         octaves(committed_[static_cast<size_t>(c)].bend));
 }
 
-// A channel's LFO: the shape, rate, destination and depth.
+// A channel's LFO: the shape, rate, destination and depth. Its record is
+// the channel's own, so every word of it is the channel's.
 void SoundEngine::lfo(int c, int which, Writes &writes) const {
-    const lfo_t &l = committed_[static_cast<size_t>(c)].lfo[which];
-    const Wiring::Channel &wires = wiring().channels[static_cast<size_t>(c)];
-    if (l.depth != 0.0f) {
-        // The LFO of the preset's shape among the four that run for this
-        // one, which the channel listens to. Its output is ±1, which the
-        // channel scales by the destination's depth.
-        const int shape         = lfo_shape(l.shape);
-        const Wiring::Lfo &wave = wiring().lfo(which, shape);
-        wide(writes, address(wave.step), csp::lfo_rate(l.rate));
-        put(writes, address(wave.depth), word_one);
-        put(writes, address(wave.neg_depth), -word_one);
-        put(writes, address(wave.gain),
-            shape == Wiring::shape_saw        ? word_one / 8
-            : shape == Wiring::shape_triangle ? word_one / 4
-                                              : 0);
-        put(writes, address(wires.lfo[static_cast<size_t>(which)]),
-            graph().address(wave.record));
-    }
+    const lfo_t &l          = committed_[static_cast<size_t>(c)].lfo[which];
+    const Wiring::Lfo &wave = wiring().lfo(c, which);
+    // The wave the record's shape word names: the four run at the phase, and
+    // the word chooses among them. Its output is ±1, which the channel
+    // scales by the destination's depth.
+    wide(writes, address(wave.step), csp::lfo_rate(l.rate));
+    put(writes, address(wave.shape), lfo_shape(l.shape));
     // The depth swings its destination by ±depth, in the destination's
     // unit; `whole` is what makes 1.0 of the destination's word: an octave
     // of pitch or of cutoff in semitones, an octave of Q, the pulse width's
@@ -805,7 +816,7 @@ void SoundEngine::lfo(int c, int which, Writes &writes) const {
     const auto &moves = wiring().paths.moves[static_cast<size_t>(which)];
     for (size_t moved = 0; moved < whole.size(); ++moved) {
         if (moves[moved]) {
-            put(writes, address(wires.depth[static_cast<size_t>(which)][moved]),
+            put(writes, address(wave.depth[moved]),
                 static_cast<size_t>(moved_by(l.destination)) == moved
                         ? word(l.depth / whole[moved])
                         : 0);

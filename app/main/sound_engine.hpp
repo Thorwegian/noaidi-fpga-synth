@@ -48,16 +48,16 @@
 //               its channel, its pitch, cutoff and gain sinks
 //
 // Every channel is wired alike and every voice alike, whatever its preset,
-// so the graph finds them to be copies and loops over them. The paths are
-// the LFOs': the LFO of a shape that runs, for one of a channel's two, and
-// what a channel's LFO moves. An LFO's depth, shape and destination are
-// knobs, so the tree's program has every path: an LFO of every shape runs
-// for each of a channel's two, and each moves all four destinations by a
-// depth of its own. The channels share the LFOs: an LFO of one shape has
-// one rate, that of the channel committed last among those it moves
-// something in. An LFO with no depth moves nothing and sets no rate. In a
-// graph wired for fewer paths, what no LFO moves is not the program's: a
-// pulse width or a resonance is then a sink word the engine writes.
+// so the graph finds them to be copies and loops over them. Each of a
+// channel's two LFOs is a record of its own, a free-running oscillator: its
+// step, a depth onto each of what it moves, and its shape, with its phase
+// zero when the program loads and nothing writing it again. The four shapes
+// are all computed at the phase, and one is chosen by compares, so the
+// shape knob writes a word and no path follows it. What a channel's LFO
+// moves is a path; a knob moves it, so the tree's program has every one,
+// each LFO moving all four destinations by its own depth. In a graph wired
+// for fewer paths, what no LFO moves is not the program's: a pulse width or
+// a resonance is then a sink word the engine writes.
 //
 // The conversions from a unit to a word are the class's own. The words go
 // out through a Link: the engine link on the board, a recorder in a host
@@ -193,7 +193,7 @@ public:
     // through a pointer the engine sets, so no gateware knows which sink is
     // which.
     struct Wiring {
-        // An LFO's shapes, in the order they stand in `lfos`.
+        // An LFO's shapes, in the order the shape word names them.
         enum {
             shape_saw,
             shape_square,
@@ -201,9 +201,9 @@ public:
             shape_sine,
             lfo_shape_count
         };
-        // A channel has two LFOs, each a movable wire to one of the synth's.
+        // A channel has two LFOs, a record of its own each.
         static constexpr int channel_lfo_count = PRESET_NUM_LFO;
-        static constexpr int lfo_count = channel_lfo_count * lfo_shape_count;
+        static constexpr int lfo_count      = channel_lfo_count * channel_count;
         static constexpr int envelope_count = 2; // amp, mod
         static constexpr int stage_count    = 3; // attack, decay, release
 
@@ -259,11 +259,14 @@ public:
         using Record = csp::DspGraph::Record;
 
         struct Lfo {
-            Wire step;             // a dword: added to the phase every pass
-            Wire depth, neg_depth; // the square's two levels, the sine's scale
-            Wire gain;             // the saw's and the triangle's scale
-            Wire out;              // the wave
-            Record record;         // what a channel's LFO pointer holds
+            // The record a channel's LFO pointer holds: everything a knob
+            // sets of it. The step is a dword, added to the phase every
+            // pass; the four depths are onto each of what an LFO moves; and
+            // the shape says which of the four waves the phase is read as.
+            Wire step;
+            std::array<Wire, moved_count> depth;
+            Wire shape;
+            Record record;
         };
 
         // An envelope's segment: where the level heads, and how fast. Dwords.
@@ -274,9 +277,11 @@ public:
         };
 
         struct Channel {
-            // movable: the address of an LFO
+            // movable: the address of one of the LFOs, its own
             std::array<Wire, channel_lfo_count> lfo;
-            std::array<std::array<Wire, moved_count>, channel_lfo_count> depth;
+            // each LFO's phase, a dword the program keeps: zero when it
+            // loads, and nothing writes it again
+            std::array<Wire, channel_lfo_count> phase;
             Wire bend, cutoff_base, key_track, mod_amount;
             std::array<Wire, PRESET_NUM_OSC> duty_base; // the pulse widths
             Wire resonance_base;
@@ -296,12 +301,9 @@ public:
             std::array<Wire, envelope_count> stage, level;
         };
 
-        // The paths a program computes: the LFOs that run, and what a
-        // channel's LFOs move. A path costs its cycles every pass, whatever
-        // depth a preset gives it.
+        // The paths a program computes: what a channel's LFOs move. A path
+        // costs its cycles every pass, whatever depth a preset gives it.
         struct Paths {
-            // the shapes that run for each of a channel's LFOs
-            std::array<std::bitset<lfo_shape_count>, channel_lfo_count> shapes;
             // what each of a channel's LFOs moves
             std::array<std::bitset<moved_count>, channel_lfo_count> moves;
 
@@ -317,12 +319,9 @@ public:
                 return false;
             }
 
-            // All of them: every shape runs, and moves everything.
+            // All of them: every LFO moves everything.
             static Paths every() {
                 Paths paths;
-                for (auto &shapes : paths.shapes) {
-                    shapes.set();
-                }
                 for (auto &moves : paths.moves) {
                     moves.set();
                 }
@@ -331,23 +330,27 @@ public:
         };
 
         // The paths this wiring has. A wire of a path it leaves out is not
-        // connected: an LFO that does not run, a depth onto what an LFO
-        // does not move, the base of what no LFO moves.
+        // connected: a depth onto what an LFO does not move, the base of
+        // what no LFO moves.
         Paths paths;
 
-        // The four shapes of a channel's LFO 1, then the four of its LFO 2.
+        // 1.0, the square's high level: its row spends its one constant on
+        // −1.0, so the other of the two levels is a word.
+        Wire one;
+
+        // A channel's two LFOs, channel after channel.
         std::array<Lfo, lfo_count> lfos;
         std::array<Channel, channel_count> channels;
         std::array<Voice, voice_count> voices;
 
-        // The LFO of a shape that runs for a channel's LFO.
-        Lfo &lfo(int channel_lfo, int shape) {
-            return lfos[static_cast<size_t>(channel_lfo * lfo_shape_count
-                                            + shape)];
+        // One of a channel's LFOs.
+        Lfo &lfo(int channel, int which) {
+            return lfos[static_cast<size_t>(channel * channel_lfo_count
+                                            + which)];
         }
-        const Lfo &lfo(int channel_lfo, int shape) const {
-            return lfos[static_cast<size_t>(channel_lfo * lfo_shape_count
-                                            + shape)];
+        const Lfo &lfo(int channel, int which) const {
+            return lfos[static_cast<size_t>(channel * channel_lfo_count
+                                            + which)];
         }
     };
 

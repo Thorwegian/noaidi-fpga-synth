@@ -101,7 +101,9 @@ The list fits the engine as built:
   allocator).
 - Instructions: entries 0–1 are the LFOs, 32–63 the amp ADSRs and
   64–127 the MOD-env / fan-out MAC pairs — 98 of the 256-entry
-  instruction table. 2 LFOs × 16 channels would need 30 more.
+  instruction table. The channel LFOs are the control program's own rows
+  and not the table's: the thirty-two cost 480 cycles a pass for their four
+  shapes and 192 for the pick among them (#519).
 - Arp/sequencer, bend range, key tracking, pedals, aftertouch: pure
   firmware (event bus → synth model → register writes), as the
   architecture intends.
