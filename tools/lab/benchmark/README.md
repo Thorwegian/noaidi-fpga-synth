@@ -5,7 +5,9 @@ License: CERN-OHL-S v2
 
 One benchmark for each of the lab's baselines (`tools/lab/baselines.py`):
 a recording of the baseline's preset playing the fixed sequence, kept here
-as its measurements, `baseline_<preset>_<commit>.*`. The presets are the
+as the WAV and its measurements, `baseline_<preset>_<commit>.*`, the commit
+being the firmware's that played it. Each section says when its recording
+was approved as the benchmark. The presets are the
 files of `app/storage/Presets/Factory/Tests`, kept for the lab, and a
 benchmark is valid for its file as it is there: after a change to one of
 those files, re-record its benchmark in the same commit.
@@ -37,9 +39,10 @@ tail no longer matched the instrument anyway.
 
 **What the reference is.** The reference is the JSON and the CSV below:
 `benchmark_compare.py` reads those two files and nothing else. The WAV they
-were made from is take 4 of the 2026-10-28 session (`take4.wav`, md5
-`2b4d7e2044b11b66090ee45a45354615`; the JSON's `file` field names it), kept
-on the lab box out of the tree, with no copies elsewhere. A file is the
+were made from is `baseline_galaxy_d03e915.wav` in this folder (md5
+`2b4d7e2044b11b66090ee45a45354615`; the JSON's `file` field names it): take
+4 of the 2026-10-28 session, approved as the benchmark when Thor merged
+PR #323 (merge `2409560`, 2026-10-28 22:44 +01:00). A file is the
 benchmark if `baseline_check.py` on it reproduces this folder's JSON and CSV
 exactly. After a change to the checker, remake the derived files from it
 with the Essentia interpreter (`~/.noaidi-blenv/bin/python` on the lab box)
@@ -47,7 +50,7 @@ and commit them with the checker:
 
 ```
 cd tools/lab/benchmark
-~/.noaidi-blenv/bin/python ../baseline_check.py <path to take4.wav> \
+~/.noaidi-blenv/bin/python ../baseline_check.py baseline_galaxy_d03e915.wav \
     --json baseline_galaxy_d03e915.essentia.json \
     --envelope baseline_galaxy_d03e915.envelope.csv \
     > baseline_galaxy_d03e915.essentia.txt
@@ -109,14 +112,16 @@ Its file is `app/storage/Presets/Factory/Tests/SawBass.toml`, git blob
 
 The reference is `baseline_sawbass_b158923.essentia.json` and
 `baseline_sawbass_b158923.envelope.csv`, with the checker's table as
-`baseline_sawbass_b158923.essentia.txt`. The WAV they were made from
-(md5 `3f255bfe3217086ae5422abb430ca974`; the JSON's `file` field names it)
-is on the lab box out of the tree, with no copies elsewhere. The files are
+`baseline_sawbass_b158923.essentia.txt`. The WAV they were made from is
+`baseline_sawbass_b158923.wav` in this folder (md5
+`3f255bfe3217086ae5422abb430ca974`; the JSON's `file` field names it),
+recorded on 2026-11-20 and approved as the benchmark when Thor merged
+PR #516 (merge `07803b9`, 2026-11-20 01:13 +01:00). The files are
 remade from it with the transposition the take was played at:
 
 ```
 cd tools/lab/benchmark
-~/.noaidi-blenv/bin/python ../baseline_check.py <path to the WAV> --transpose -24 \
+~/.noaidi-blenv/bin/python ../baseline_check.py baseline_sawbass_b158923.wav --transpose -24 \
     --json baseline_sawbass_b158923.essentia.json \
     --envelope baseline_sawbass_b158923.envelope.csv \
     > baseline_sawbass_b158923.essentia.txt
