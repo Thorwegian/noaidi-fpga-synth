@@ -379,8 +379,8 @@ end:
 //
 // The synth the sound engine wires (app/main/sound_engine.cpp) and the program its graph builds, vector
 // loops and movable wires and all, through a performance (tools/csp/performance.hpp):
-// set up while held, as the firmware's boot does, then played, with voices moved between
-// channels, channels between LFOs and notes struck and let go.
+// set up while held, as the firmware's load does, then played, with voices moved between
+// channels, channels between LFOs and notes struck and let go. A wiring is named by its paths.
 
 std::vector<FirmwareWrite>
 firmware_writes(const SoundEngine &synth,
@@ -393,13 +393,15 @@ firmware_writes(const SoundEngine &synth,
     return writes;
 }
 
-void run_noaidi(VerilatedContext &context) {
+void run_noaidi(VerilatedContext &context, const char *name,
+                const SoundEngine::Wiring::Paths &paths) {
     performance::Unplayed link;
     const auto synth = std::make_unique<SoundEngine>(link);
+    synth->wire(paths);
     const auto built = std::make_unique<csp::ProgramBuilder::Built>();
     if (!synth->graph().build(*built)) {
         for (const csp::DspGraph::Issue &issue : synth->graph().issues()) {
-            std::printf("the Noaidi: %s\n", issue.message.c_str());
+            std::printf("%s: %s\n", name, issue.message.c_str());
         }
         ++failures;
         return;
@@ -418,12 +420,36 @@ void run_noaidi(VerilatedContext &context) {
         ++pass;
         differences += cosim.run_pass(
                 firmware_writes(*synth, performance::before_pass(*synth, pass)),
-                "the Noaidi pass " + std::to_string(pass));
+                std::string(name) + " pass " + std::to_string(pass));
     }
-    std::printf("the Noaidi: %s (%d rows, %d cycles a pass, %d passes)\n",
+    std::printf("%s: %s (%d rows, %d cycles a pass, %d passes)\n", name,
                 differences == 0 ? "ok" : "DIFFERS", built->image.length,
                 built->cycles, pass);
     failures += differences != 0;
+}
+
+// The Noaidi with every path, and wired for fewer: each wiring is a program
+// of its own, with its own loops, layout and order.
+void run_noaidi(VerilatedContext &context) {
+    using Paths = SoundEngine::Wiring::Paths;
+    run_noaidi(context, "the Noaidi", Paths::every());
+    run_noaidi(context, "the Noaidi with no LFO", Paths{});
+    Paths some;
+    some.shapes[0] = 0b1000; // a sine
+    some.moves[0]  = 0b1000; // onto the resonance
+    some.shapes[1] = 0b0100; // a triangle
+    some.moves[1]  = 0b0100; // onto the pulse width
+    run_noaidi(
+            context,
+            "the Noaidi with a sine onto the resonance and a triangle onto the pulse width",
+            some);
+    Paths pitch;
+    pitch.shapes[0] = 0b0011; // a saw and a square
+    pitch.moves[0]  = 0b0011; // onto the pitch and the cutoff
+    run_noaidi(
+            context,
+            "the Noaidi with a saw and a square onto the pitch and the cutoff",
+            pitch);
 }
 
 // ---- random programs ----------------------------------------------------------------------------

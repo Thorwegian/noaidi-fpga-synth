@@ -35,11 +35,13 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   oscillator (saw/pulse/tri/sine), two TPT/ZDF SVFs, stereo panning. A
   partial is ten pointers into the **sink area**, which the **CSP** (the
   Control Signal Processor, `rtl/csp`) publishes: a pipelined processor
-  that runs a fixed program every fourth sample, a pass of 3072 cycles at
+  that runs its program every fourth sample, a pass of 3072 cycles at
   24 kHz ([docs/csp2_architecture.md](docs/csp2_architecture.md) section 5),
   and computes envelopes, LFOs, pitch, cutoff and gain from the registers
   the firmware writes. The program is a DSP graph the firmware's sound
-  engine wires at boot (`app/main/sound_engine.cpp`); the graph lays it out
+  engine wires for what the presets in use need
+  (`app/main/sound_engine.cpp`), and wires anew when a preset needs
+  something else; the graph lays it out
   and builds the rows (`app/main/csp/dsp_graph.hpp`).
   The instruction set is [docs/csp2_isa.md](docs/csp2_isa.md), the
   machine [docs/csp2_architecture.md](docs/csp2_architecture.md).

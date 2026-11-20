@@ -33,10 +33,10 @@
 #                   and of the DSP graph
 #                   (app/main/csp/dsp_graph.cpp): the sound engine's wiring
 #                   (app/main/sound_engine.cpp) gives its formulas' sinks on
-#                   the model, and its program holds every sink to the
-#                   interpreter of the graph
-#                   (tools/csp/test/graph_evaluator.cpp), pass for pass;
-#                   prints the rows and cycles of the graph's program
+#                   the model, and its program, wired for every path and
+#                   for fewer, holds every sink to the interpreter of the
+#                   graph (tools/csp/test/graph_evaluator.cpp), pass for
+#                   pass; prints the rows and cycles of each program
 #   make format     reformat our C and C++ sources (.clang-format: the
 #                   Java Code Conventions); app/lib is left alone
 #   make format-check  fail on any source that is not formatted; fw,

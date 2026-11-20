@@ -61,7 +61,7 @@ constexpr int program_queue_length = 4;
 // The sound engine. The voice task alone sets its parameters, commits and
 // sends its events: every other task hands its preset over through the
 // task's queue (preset_request), so a commit never sends another task's
-// half-set values. Made at init, when the PSRAM its graph lives in is there.
+// half-set values.
 std::optional<SoundEngine> s_engine;
 
 // Omni: every MIDI channel plays the engine's first, and that channel's part
@@ -70,6 +70,48 @@ constexpr int omni_channel = 0;
 
 SoundEngine::Channel &active() {
     return s_engine->channel[omni_channel];
+}
+
+// Commit the engine's tree. A commit that loads a new program wires a graph
+// and builds it on this task, in the PSRAM, while the program before it
+// plays; the log has what it took: the time, the wiring, the build and the
+// link's load together; each heap's free bytes, the change and the least
+// there has been since boot; and the stack this task has never used.
+void commit() {
+    if (!s_engine->rewires()) {
+        s_engine->commit();
+        return;
+    }
+    const auto external_before =
+            static_cast<int>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    const auto internal_before =
+            static_cast<int>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    const int64_t started = esp_timer_get_time();
+    bool loaded           = false;
+    {
+        const ExternalHeap external;
+        loaded = s_engine->commit();
+    }
+    const auto external =
+            static_cast<int>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    const auto internal =
+            static_cast<int>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    ESP_LOGI(
+            tag,
+            "sound engine: a new program in %lld us; PSRAM free %d bytes (%+d), least %u; internal free %d bytes (%+d), least %u; stack %lu bytes never used",
+            static_cast<long long>(esp_timer_get_time() - started), external,
+            external - external_before,
+            static_cast<unsigned>(
+                    heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)),
+            internal, internal - internal_before,
+            static_cast<unsigned>(
+                    heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
+            static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
+    if (!loaded) {
+        for (const csp::DspGraph::Issue &issue : s_engine->issues()) {
+            ESP_LOGE(tag, "sound engine: %s", issue.message.c_str());
+        }
+    }
 }
 
 // The sustain pedal (CC 64), omni: while it is down a note off is held back,
@@ -149,7 +191,7 @@ void pitch_bend_update(uint16_t bend14) {
         return;
     }
     active().bend = semitones;
-    s_engine->commit();
+    commit();
     s_edited = false;
 }
 
@@ -276,7 +318,7 @@ void flush_pending_edits(int64_t now) {
     if (!s_edited || now - s_last_flush < flush_min_us) {
         return;
     }
-    s_engine->commit();
+    commit();
     s_edited     = false;
     s_last_flush = now;
 }
@@ -288,7 +330,7 @@ void apply_preset(const preset_t *p, int64_t now) {
     active() = *p;
     s_knobs  = cc_map::knobs_of(
             active()); // the preset's values stand; the knobs follow them
-    s_engine->commit();
+    commit();
     s_edited     = false;
     s_last_flush = now;
     sync_surfaces(MIDI_SOURCE_INTERNAL); // every surface follows the change
@@ -510,26 +552,17 @@ void voice_alloc_init(void) {
         return;
     }
 
-    // The engine: its graph wired, in the PSRAM.
-    const size_t external_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    const int64_t started        = esp_timer_get_time();
-    {
-        const ExternalHeap external;
-        s_engine.emplace(engine_link());
-    }
-    ESP_LOGI(tag,
-             "sound engine: graph wired in %lld us, %u bytes of PSRAM held",
-             static_cast<long long>(esp_timer_get_time() - started),
-             static_cast<unsigned>(
-                     external_before
-                     - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+    s_engine.emplace(engine_link());
 
     // The active sound: system.toml's startup preset, if any, in place of
-    // the init preset the channel holds. The link's start commits it, so the
+    // the init preset the channel holds. The link holds the CSP and tests
+    // the chip; the first commit loads the startup preset's program, so the
     // CSP is let go with the whole sound in.
     storage_load_startup(&active());
     s_knobs = cc_map::knobs_of(active());
     engine_link_init(*s_engine);
+    commit();
+    engine_link_start();
 
     s_program_queue =
             xQueueCreate(program_queue_length, sizeof(ProgramRequest));

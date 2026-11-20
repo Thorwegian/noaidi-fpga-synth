@@ -251,8 +251,9 @@ sim-memories: obj_dir/tb_csp_memories/sim
 	$(call run_sim,$<,tb/sim-memories.out)
 
 # The co-simulation: the RTL, Verilated to C++, against tools/csp's reference model in one executable
-# (tb/csp_cosim/csp_cosim.cpp). It runs the boot self-test and some directed programs, the program the
-# firmware's sound engine builds for the Noaidi (app/main/sound_engine.cpp) through a performance, and random scalar
+# (tb/csp_cosim/csp_cosim.cpp). It runs the boot self-test and some directed programs, the programs the
+# firmware's sound engine builds for the Noaidi (app/main/sound_engine.cpp), wired for every path and for
+# fewer, each through a performance, and random scalar
 # ones built with csp::ProgramBuilder, comparing every register, the published sinks, i, j, the
 # accumulator, the flags and the cycles after every pass, and DMEM's row rule at every edge.
 # `sim +rtltrace` prints the rows entering the address stage.

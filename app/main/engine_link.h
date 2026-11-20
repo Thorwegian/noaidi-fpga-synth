@@ -66,13 +66,19 @@ void engine_link_data_stream(bool on, int source);
 // the image at once, so a tick sends all of it with one swap (a batch larger
 // than a tick's share takes the next tick too); a write of the value already
 // there is dropped. A partial's pointers go straight to the FPGA, which
-// takes the whole entry atomically.
+// takes the whole entry atomically. A program is loaded with its words while
+// the CSP is held, and the caller waits for it: the registers are cleared,
+// the rows and the decode ROM written and read back, the words sent, and the
+// CSP let go. The boot's load reads every register back as well.
 SoundEngine::Link &engine_link();
 
-// Hold the CSP and run the boot self-test; build the engine's program and
-// load it with its decode ROM; send the engine's first commit, the words the
-// program starts from and the parameters set so far, and read it back;
-// release the CSP and start the 1 kHz tick task. Call after spi_link_init().
-// The link asks the engine's graph who writes a word for as long as it runs.
+// Hold the CSP and run the boot self-test. Call after spi_link_init(). The
+// CSP stays held until the engine's first commit loads its program, through
+// the link. The link asks the engine's graph who writes a word at each load.
 void engine_link_init(SoundEngine &engine);
+
+// Start the 1 kHz tick task and the meter. Call after the engine's first
+// commit; with no program loaded the CSP stays held and the tick sends
+// nothing.
+void engine_link_start();
 #endif

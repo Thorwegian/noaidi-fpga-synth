@@ -91,13 +91,27 @@ CSP's memory or holds a voice number.
   the voice for a note, pairs a note off with its note on, gates the
   envelopes, moves the voice's wire to its channel and points its partials at
   that channel's sinks.
-- **Wiring.** Its constructor builds the DSP graph (`csp/dsp_graph.hpp`)
-  with loops, and the synth's sizes are its: 16 channels, 32 voices of 8
-  partials. The channels share the synth's LFOs, an LFO of every shape for
-  each of a channel's two: an LFO of one shape has one rate, and an LFO with
-  no depth takes none of them.
-- **The link.** The words go out through `SoundEngine::Link`, which the
-  engine link implements and a host test records (`make fw-test`).
+- **Wiring.** The engine builds the DSP graph (`csp/dsp_graph.hpp`) with
+  loops, and the synth's sizes are its: 16 channels, 32 voices of 8
+  partials. A graph is wired for the paths the committed tree uses
+  (`Wiring::Paths`), and its program spends no cycle on another: an LFO a
+  channel gives a depth has the LFO of its shape run and a channel's LFO
+  move its destination, and an LFO with no depth uses no path. The paths
+  are those of all the channels together, so every channel is wired alike
+  and every voice alike, and the graph loops over them. A pulse width or a
+  resonance that no LFO moves is a sink word the engine writes. The channels
+  share the LFOs that run: an LFO of one shape has one rate.
+- **Rewire and reload.** The first commit, and a commit of a tree that uses
+  other paths than the wired ones (an LFO given a depth or losing it, its
+  destination, a shape no channel had), wires a graph for the tree's paths,
+  has it build its program and loads it with every word the engine owns: a
+  graph lays its memory out for itself, so no word is where the last
+  program had it. Every voice is silent and idle after it. The engine goes
+  on with the graph it has until the new one has built. A change between
+  two shapes that both stay in use is one write of the channel's LFO wire.
+- **The link.** The words and the program go out through
+  `SoundEngine::Link`, which the engine link implements and a host test
+  records (`make fw-test`).
 
 ## engine link
 
@@ -106,12 +120,14 @@ Nothing else in the firmware may call `fpga_word_write`/`fpga_swap`
 once `engine_link_init()` has run (`main.c`'s boot SPI self-test
 writes directly before that).
 
-- Has the sound engine build its graph's control program at boot
-  (`csp/dsp_graph.cpp` through `csp::ProgramBuilder`)
-  into a static image, loads it with the decode ROM while the CSP is held,
-  takes the engine's first commit, the words the program starts from and
-  the startup preset, and reads it back. The boot log has the wiring's
-  time, the build's time, the PSRAM they hold and the stack left.
+- Holds the CSP at boot and runs the self-test. The CSP stays held until the
+  sound engine's first commit hands the link a program.
+- Loads a program the sound engine hands it, with the words that go with
+  it, while the CSP is held: the registers are cleared, the rows and the
+  decode ROM written and read back, the words sent, and the CSP let go. The
+  boot's load reads every register back before that. The synth model's log
+  has what the commit took (the time, each heap's free bytes, the stack
+  left), the link's what it loaded and how long the CSP was held.
 - Keeps a full RAM image of the parameter space. The engine's writes change
   the image; the link writes dirty words to the shadow page and swaps.
 - The mirror-both-pages rule ("after a swap the new shadow page is
@@ -212,3 +228,7 @@ engine, through the synth model's queue. Producers own their timing
   image is only as good as the last write.
 - A partial's ten sink pointers (`SoundEngine::Pointers`), which go
   straight to the FPGA: it takes the whole entry atomically.
+- A program (`csp::ProgramBuilder::Built`, the graph's through
+  `csp::ProgramBuilder`) and the batch of writes that goes with it: the
+  words the program starts from and the whole of the tree, at the addresses
+  that program's graph laid out.

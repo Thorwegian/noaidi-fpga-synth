@@ -43,6 +43,11 @@ void EngineImage::resend_all() {
     }
 }
 
+void EngineImage::forget() {
+    known_.reset();
+    pending_.reset();
+}
+
 int EngineImage::send(EnginePort &port, int limit,
                       fpga_map::dword_t ctrl_bits) {
     // Every dword carries its own address, so a burst takes the pending

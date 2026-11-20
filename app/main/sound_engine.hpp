@@ -22,27 +22,38 @@
 //   voices      The class picks the voice for a note and steals one when
 //               none is idle, finds the voice of a note off and releases it,
 //               gates its envelopes and points its partials.
-//   wiring      The constructor builds the Noaidi's graph
-//               (csp/dsp_graph.hpp) with ordinary loops, and this synth's
-//               sizes are decided here: 16 channels, and 32 voices of 8
-//               partials.
+//   wiring      The engine builds the Noaidi's graph (csp/dsp_graph.hpp)
+//               with ordinary loops, and this synth's sizes are decided
+//               here: 16 channels, and 32 voices of 8 partials. A graph is
+//               wired for a set of paths (Wiring::Paths), the ones the
+//               committed tree uses, and its program computes those and
+//               spends no cycle on another. A commit of a tree that uses
+//               other paths wires a new graph, generates its program and
+//               loads it in place of the one that runs; any other commit
+//               writes values.
 //
-// What the CSP computes for the partial pipeline, as the constructor wires
-// it from sources, operators and sinks:
+// What the CSP computes for the partial pipeline, as the engine wires it
+// from sources, operators and sinks:
 //
 //   an LFO      a phase and the wave of its shape at that phase
-//   a channel   two LFOs through movable wires, each onto the pitch, the
-//               cutoff, the pulse width and the resonance by a depth of its
-//               own; with the bend, the cutoff and the key tracking, the
-//               channel's pitch and cutoff for its voices, and its pulse
-//               width and resonance sinks
+//   a channel   two LFOs through movable wires, each onto what it moves of
+//               the pitch, the cutoff, the pulse width and the resonance,
+//               by a depth of its own; with the bend, the cutoff and the
+//               key tracking, the channel's pitch and cutoff for its
+//               voices; and the pulse width and resonance sinks an LFO
+//               moves
 //   a voice     two envelopes, amp and mod, and through a movable wire to
 //               its channel, its pitch, cutoff and gain sinks
 //
-// The synth runs an LFO of every shape for each of a channel's two, and the
-// channels share them: an LFO of one shape has one rate, that of the channel
+// The paths are those of all the channels together: every channel is wired
+// alike and every voice alike, whatever its preset, so the graph finds them
+// to be copies and loops over them. An LFO that a channel gives a depth
+// uses two paths: the LFO of its shape runs, for that one of a channel's
+// two, and a channel's LFO moves its destination. The channels share the
+// LFOs that run: an LFO of one shape has one rate, that of the channel
 // committed last among those it moves something in. An LFO with no depth
-// moves nothing and takes none of them.
+// uses no path. What no LFO moves is not the program's: a pulse width or a
+// resonance is then a sink word the engine writes.
 //
 // The conversions from a unit to a word are the class's own. The words go
 // out through a Link: the engine link on the board, a recorder in a host
@@ -52,7 +63,9 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -92,6 +105,13 @@ public:
         virtual void write(std::span<const Write> writes) = 0;
         // A partial's sink pointers, which the chip takes whole.
         virtual void point(int partial, const Pointers &pointers) = 0;
+        // A program in place of the one that runs, and every word the
+        // engine owns with it: a program lays its memory out for itself, so
+        // no word is where the last program had it. The chip takes the two
+        // together: the CSP is held from the first row until the last word
+        // is in.
+        virtual void load(const csp::ProgramBuilder::Built &program,
+                          std::span<const Write> writes) = 0;
     };
 
     // ---- parameters --------------------------------------------------------
@@ -116,9 +136,16 @@ public:
     std::array<Channel, channel_count> channel;
 
     // Everything set on the tree since the last commit takes effect, in one
-    // swap. The first commit after build() sends the whole of it, with the
-    // words the program starts from.
-    void commit();
+    // swap. The first commit, and a commit of a tree that uses other paths
+    // than the wired ones, wires a graph for the tree's paths, generates its
+    // program and loads it with the whole of the tree and the words the
+    // program starts from; every voice is silent and idle after it. False
+    // when that graph does not build: the engine goes on with the program it
+    // has, and issues() say why.
+    bool commit();
+
+    // Whether the next commit loads a new program.
+    bool rewires() const;
 
     // ---- events ------------------------------------------------------------
 
@@ -195,11 +222,11 @@ public:
             static constexpr int pitch = 0, cutoff = 1, gain = 2;
         };
 
-        // A channel's block. The pulse widths and the resonance are the
-        // program's, since LFOs move them, and come first: the program
-        // reaches them at offsets 0–2 from a block whose address is a
-        // multiple of 16. The rest are the engine's, what only a parameter
-        // moves: a word for each of the eight oscillator and unison
+        // A channel's block. The pulse widths and the resonance come first:
+        // they are the program's where an LFO moves them, and it reaches
+        // them at offsets 0–2 from a block whose address is a multiple of
+        // 16; where no LFO does they are the engine's. The rest are the
+        // engine's always, what only a parameter moves: a word for each of the eight oscillator and unison
         // positions for the detune, the cutoff's offset and the gain on each
         // side, and one for each oscillator's mode.
         struct ChannelSink {
@@ -265,6 +292,46 @@ public:
             std::array<Wire, envelope_count> stage, level;
         };
 
+        // The paths a program computes: the LFOs that run, and what a
+        // channel's LFOs move. A path costs its cycles every pass, whatever
+        // depth a preset gives it, so a graph is wired for the paths the
+        // tree uses.
+        struct Paths {
+            // the shapes that run for each of a channel's LFOs
+            std::array<std::bitset<lfo_shape_count>, channel_lfo_count> shapes;
+            // what each of a channel's LFOs moves
+            std::array<std::bitset<moved_count>, channel_lfo_count> moves;
+
+            bool operator==(const Paths &) const = default;
+
+            // Whether either of a channel's LFOs moves it.
+            bool moved(int what) const {
+                for (const auto &by : moves) {
+                    if (by[static_cast<size_t>(what)]) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // All of them: every shape runs, and moves everything.
+            static Paths every() {
+                Paths paths;
+                for (auto &shapes : paths.shapes) {
+                    shapes.set();
+                }
+                for (auto &moves : paths.moves) {
+                    moves.set();
+                }
+                return paths;
+            }
+        };
+
+        // The paths this wiring has. A wire of a path it leaves out is not
+        // connected: an LFO that does not run, a depth onto what an LFO
+        // does not move, the base of what no LFO moves.
+        Paths paths;
+
         // The four shapes of a channel's LFO 1, then the four of its LFO 2.
         std::array<Lfo, lfo_count> lfos;
         std::array<Channel, channel_count> channels;
@@ -281,26 +348,51 @@ public:
         }
     };
 
-    // Wires every LFO, channel and voice into the graph.
+    // Nothing is wired or loaded: the first commit wires the graph of the
+    // tree's paths and loads its program, and events come after it.
     explicit SoundEngine(Link &link);
 
-    // Lay the graph out and generate its program. False when it does not
-    // build; the graph's issues() say why. Parameters and events come after.
-    bool build(csp::ProgramBuilder::Built &program);
+    // Wire a graph for `paths`, whatever the tree uses, in place of any
+    // there is: for a tool that builds the graph's program and sets its
+    // wires itself (tools/csp/performance.hpp).
+    void wire(const Wiring::Paths &paths);
 
-    // The graph: where every word lives and who writes it, once built.
+    // The graph, once wired: where every word lives and who writes it, once
+    // built.
     csp::DspGraph &graph() {
-        return graph_;
+        return wired_->graph;
     }
     const csp::DspGraph &graph() const {
-        return graph_;
+        return wired_->graph;
     }
     const Wiring &wiring() const {
-        return wiring_;
+        return wired_->wiring;
+    }
+    // The graph's program, once a commit has loaded it: its rows, and the
+    // cycles of its pass.
+    const csp::ProgramBuilder::Built &program() const {
+        return wired_->program;
+    }
+    // Why the last commit's graph did not build.
+    const std::vector<csp::DspGraph::Issue> &issues() const {
+        return issues_;
     }
 
 private:
     using Writes = std::vector<Write>;
+
+    // The synth wired: the graph, where the engine's wires are in it, and
+    // the program the graph builds.
+    struct Wired {
+        csp::DspGraph graph;
+        Wiring wiring;
+        csp::ProgramBuilder::Built program;
+    };
+
+    // The paths the tree uses.
+    Wiring::Paths paths() const;
+    static std::unique_ptr<Wired> wired_for(const Wiring::Paths &paths);
+    bool reload(const Wiring::Paths &paths);
 
     // What a voice's partials point at: its channel's sinks, each partial on
     // the oscillator the channel's voice structure gives it.
@@ -315,8 +407,9 @@ private:
 
     // The words the program starts from.
     void set_up(Writes &writes);
-    // What changed in a channel since its last commit.
-    void commit_channel(int c, Writes &writes);
+    // What changed in a channel since its last commit, or the `whole` of
+    // it.
+    void commit_channel(int c, bool whole, Writes &writes);
 
     // A channel's committed parameters as words.
     void envelope(int c, int which, float attack, float decay, float release,
@@ -337,12 +430,12 @@ private:
     int pick_voice() const;
 
     Link &link_;
-    csp::DspGraph graph_;
-    Wiring wiring_;
+    std::unique_ptr<Wired> wired_;
+    bool loaded_ = false; // the chip runs wired_'s program
+    std::vector<csp::DspGraph::Issue> issues_;
 
-    // The tree as the chip has it. Nothing of it has been sent while `fresh_`.
+    // The tree as the chip has it, once a program is loaded.
     std::array<Channel, channel_count> committed_;
-    bool fresh_ = true;
 
     std::array<Voice, voice_count> voices_;
     std::array<std::optional<Pointing>, voice_count> pointed_;
