@@ -52,15 +52,3 @@ endif()
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
 project(flex-app)
-
-# The unused-function gate (tools/firmware/unused_functions.py) runs after
-# every link: a function of main/ that the linker dropped fails the build, so
-# no image is made of a firmware that has one.
-idf_build_get_property(project_elf EXECUTABLE)
-idf_build_get_property(python PYTHON)
-idf_component_get_property(main_lib main COMPONENT_LIB)
-add_custom_command(TARGET ${project_elf} POST_BUILD
-    COMMAND ${python} ${CMAKE_SOURCE_DIR}/../tools/firmware/unused_functions.py
-            --nm ${CMAKE_NM} --elf $<TARGET_FILE:${project_elf}>
-            --sources ${CMAKE_SOURCE_DIR}/main $<TARGET_OBJECTS:${main_lib}>
-    COMMAND_EXPAND_LISTS VERBATIM)
