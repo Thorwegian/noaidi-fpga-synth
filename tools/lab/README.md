@@ -165,6 +165,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238): the boot's self-test, `csp verify`, and each baseline loaded by Bank Select and Program Change, checked on the console and recorded; the limiter's reduction polled through each take and reported for the triad (#355) |
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
+| `usb_midi_pass.py` | the whole pass over the USB cable: every message a player sends, the wedge cases, and the round trip |
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
 | `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |
