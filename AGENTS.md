@@ -40,6 +40,10 @@
 
 - Agents use Numpy, Scipy and Essentia for audio analysis. Essentia is the agent's ear, not the human's: an agent hears nothing, so a description of the recording is all it has to judge a sound by. Reach for the perceptual descriptions first (log attack time, sensory dissonance, inharmonicity, tristimulus, EBU R128 loudness), which say what the sound is like, and the signal's own (pitch per frame, centroid, envelope) after them, which say only that the output is as expected.
 
+- Suspect the measurement before the design: a silent take or a wrong value is the capture path, the flashed build or the MIDI parser until each is ruled out.
+
+- Every take carries a control that must not move and a known value that must be right.
+
 - Agents write canonical C++ with the STL, *never* janky C hacks (C-style buffer juggling, sentinel values). C++ where it protects (RAII, std::string/std::string_view, std::optional, strong types, no raw buffers); a libc or POSIX call where it is the precise tool for the job (strcasestr, fsync, rename): chip (newlib) and host (glibc) are both POSIX. C code that does not conform goes on the agent's task list: agents *will* port C modules to C++ at every chance (dependencies excepted).
 
 - Code in C-like languages is formatted in the style of the Oracle Java API Documentation.
