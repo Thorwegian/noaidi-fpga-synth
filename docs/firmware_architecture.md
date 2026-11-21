@@ -202,8 +202,9 @@ active preset out the same way.
 
 ## Console
 
-`console` owns the USB serial port (USB-Serial/JTAG). On a VT100
-terminal it splits the screen like an IRC client: a scroll region for
+`console` owns the firmware's console channel: UART0 at 115200, the module's
+CH343 bridge in the socket marked `COM`. On a VT100 terminal it splits the
+screen like an IRC client: a scroll region for
 everything printed, a status bar, and an input line with a line
 editor, history and Tab completion. Until a terminal has answered its
 size query it draws no layout, and a script reading the port gets plain
@@ -226,6 +227,17 @@ optocoupler. The carrier's J12 header carries `PANEL_UART_TX` and
 (noaidi-fpga-synth-kicad #147); a controller's receive half is one pin,
 so a two-way link there means the panel port's optocoupler no longer
 drives UART2's.
+
+**The USB device.** `usb_midi` puts the synth on the socket marked `USB` as a
+MIDI 1.0 device (`usb_midi.cpp`): one interface, one bulk endpoint each way at
+64 bytes, TinyUSB under esp_tinyusb. The host's bytes go through a parser
+instance of their own — running status belongs to a stream, and the DIN
+inputs' silence rules do not apply here, since a USB stream has no Active
+Sensing to send and no half message crosses a packet boundary — and are
+published as `MIDI_SOURCE_USB`. Its output is the same queue the BLE surface
+reads (`midi_out`), which is what makes a preset read-back observable on the
+cable that asked for it. The device is installed before the engine link is
+built, so a host sees it in the first second whatever state the gateware is in.
 
 ## Sequencers / arpeggiators
 

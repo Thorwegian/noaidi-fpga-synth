@@ -68,8 +68,9 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 
 ![The firmware console's help screen: file, preset, bank and system commands, then the CSP lab commands](docs/images/firmware-console.png)
 
-`make fw-console` attaches `screen` to the ESP32's USB serial port
-(`ESPPORT` overrides the port it finds). **Press Return** to bring up
+`make fw-console` attaches `screen` to the console's port, the module's
+CH343 USB-to-UART bridge in the socket marked `COM` (`ESPPORT` overrides
+the port it finds). **Press Return** to bring up
 the layout: output scrolls above a status bar and an input line. The
 layout is drawn only once a terminal has answered the console's size
 query; a script or a logger reading the port gets plain lines.
@@ -165,12 +166,21 @@ target builds, or an output port no bench reads fails the run with the
 name of the gap, so a module or a port cannot fall out of the suite
 unnoticed.
 
+## USB
+
+The socket marked `USB` is the chip's USB-OTG controller, its PHY assigned to
+it by eFuse (`docs/esp32s3_hw678.md`), and the firmware presents the synth
+there as a MIDI 1.0 device: a computer sees **Model 1**, sends notes and
+controllers to it, and reads its parameter feedback and preset dump back on
+the same cable. The console and the flashing path are on the socket marked
+`COM` and do not move.
+
 ## Preset storage
 
 The synth keeps its presets and settings as TOML files on a FAT
 partition in the ESP32's flash
 ([docs/storage_format.md](docs/storage_format.md)). A computer reaches
-them over the USB serial port:
+them over the console's port, the socket marked `COM`:
 
 ```bash
 make fw-storage-read DIR=~/noaidi     # synth → folder

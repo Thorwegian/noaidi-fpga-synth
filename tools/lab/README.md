@@ -12,9 +12,9 @@ each carry their own docstring; this is the index and the facts around them.
 ```mermaid
 flowchart LR
     cloud[cloud build box<br/>no board: builds, host tests, cosim] -. ssh -p 23000 .-> lab[lab computer<br/>the repo checkout, the board]
-    lab -- /dev/ttyACM0 115200<br/>console, firmware flash --> esp[ESP32-S3<br/>firmware]
+    lab -- CH343 (by-id) 115200<br/>console, firmware flash --> esp[ESP32-S3<br/>firmware]
     lab -- /dev/ttyUSB0 and 1<br/>FTDI: openFPGALoader, BL616 CLI --> fpga[Tang Nano 20K<br/>GW2AR-18C gateware]
-    lab -- ALSA 16:0 CH345<br/>USB-MIDI into din1 --> esp
+    lab -- ALSA "Model 1"<br/>USB MIDI, both ways --> esp
     osc[Open Stage Control] -- BLE MIDI<br/>the synth's single connection --> esp
     fpga -- S/PDIF --> cap[USB sound card hw:1,0<br/>the capture]
 ```
@@ -22,10 +22,20 @@ flowchart LR
 - The board lives on the lab computer (`ssh -p 23000 thor@home.thj.no`, repo at
   `~/Documents/Code/noaidi-fpga-synth`). Flashing and chip tests run there;
   the cloud box has no board.
-- **Two USB devices, two jobs.** `/dev/ttyACM0` is the ESP32's console and
-  firmware port. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads
-  (`make sram` volatile, `make flash` persistent) and the BL616 clock CLI
-  (`board_clock.py`). Loading gateware does not touch the console port.
+- **Three USB roles, and the console's name moves.** The ESP32's console and
+  firmware port is the CH343 in the module's socket marked `COM`, UART0: it is
+  `/dev/serial/by-id/usb-1a86_USB_Single_Serial_*-if00`, which `console_port.py`
+  resolves for the tools; by name it is `ttyACM0` only while the socket marked
+  `USB` is empty, and `ttyACM1` when the synth's own USB device is cabled too.
+  The second role is that device: the synth as a MIDI port on the socket marked
+  `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
+  volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
+  Loading gateware does not touch the console port.
+- **Check the checkout before blaming the gateware.** A link that answers
+  `no ID nonet` after a fresh build usually means the tree is behind the
+  firmware: `git status -sb` on the lab computer's checkout first, then rebuild.
+  Silence after a power cycle is just an empty FPGA, and a stale tree only
+  looks like a design fault.
 - **The capture card must be told which input to use.** The saved ALSA state
   is applied only to a card that is up at boot, so a card that dies and
   re-enumerates on its own keeps the driver's defaults: the capture switches
@@ -63,7 +73,15 @@ port. The synth's own preset saves are bare TOML without the copyright header
 
 ## MIDI into the synth
 
-- **USB → `din1` (use this).** The CH345 adapter is ALSA `16:0`,
+- **The synth's own USB port (use this).** The socket marked `USB` presents the
+  synth to the lab computer as a MIDI device, ALSA client `Model 1`, one
+  cable in both directions: notes and controllers in, the synth's parameter
+  feedback and preset dump back out on the same wire. The CH345 adapter it
+  replaces is retired from the bench.
+- **A preset read-back needs no second path.** A Program Change over that cable
+  returns the whole preset as CCs on the same cable, which is why the old
+  "observe it over BLE" detour is gone.
+- **The CH345 adapter, while it is still around.** It is ALSA `16:0`,
   cabled into the first DIN input (UART1; the trace names its source `din1`);
   the keyboard is in the second, `din2`. **The adapter drops what a one-shot sender
   queues:** the kernel bridge opens the USB device only while a client is
@@ -147,6 +165,13 @@ Board, acceptance and measurement (`tools/lab/`):
 | `acceptance.py` | the three acceptances of a bitstream on the board, as one run (#238): the boot's self-test, `csp verify`, and each baseline loaded by Bank Select and Program Change, checked on the console and recorded; the limiter's reduction polled through each take and reported for the triad (#355) |
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
+| `usb_midi_pass.py` | the whole pass over the USB cable: every message a player sends, the wedge cases, and the round trip |
+
+The analysis stages of `acceptance.py` import Essentia, which the lab
+computer keeps in its own venv, not in `/usr/bin/python3`: run the acceptance
+with `~/.noaidi-blenv/bin/python`, or the two `baseline_check` and
+`benchmark_compare` stages fail on the import and the verdict reads as audio
+failure when nothing was analysed.
 | `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
 | `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |

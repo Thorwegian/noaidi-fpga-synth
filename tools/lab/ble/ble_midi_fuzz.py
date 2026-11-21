@@ -28,6 +28,10 @@ import argparse
 import subprocess
 import threading
 import time
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_port import find_console  # noqa: E402
 
 NOAIDI_MAC = "44:BD:8D:6C:87:5E"
 
@@ -136,8 +140,10 @@ def main():
     ap.add_argument("seconds", nargs="?", type=float, default=40.0)
     ap.add_argument("--rate", type=int, default=1000,
                     help="target MIDI messages/sec")
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--port", default=None)
     args = ap.parse_args()
+    if args.port is None:
+        args.port = find_console()
 
     cap = SerialCapture(args.port); cap.start()
     time.sleep(3.0)   # let the reset-boot settle

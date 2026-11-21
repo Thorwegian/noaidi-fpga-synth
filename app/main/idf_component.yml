@@ -1,0 +1,5 @@
+## The USB device stack on the chip's USB-OTG controller: TinyUSB, wrapped by
+## Espressif for ESP-IDF (esp_tinyusb). The MIDI class comes from TinyUSB
+## itself; esp_tinyusb supplies the driver install, the task and the PHY.
+dependencies:
+  esp_tinyusb: "~3.0.0"

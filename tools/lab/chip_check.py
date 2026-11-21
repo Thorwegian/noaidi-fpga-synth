@@ -24,8 +24,9 @@ import serial
 
 import board_clock
 import spdif_capture
+from console_port import find_console
 
-PORT = "/dev/ttyACM0"
+PORT = find_console()
 REGISTERS = 0x800              # DMEM: the registers csp peek reads, 16 a line
 PEEK_WORDS = 16
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b[78]")

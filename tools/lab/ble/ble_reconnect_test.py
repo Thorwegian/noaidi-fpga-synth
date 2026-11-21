@@ -12,7 +12,7 @@ where the connection formed but MIDI never made it through -- the
 exact reported symptom -- plus disconnect reasons from the firmware
 log.
 
-    python3 ble_reconnect_test.py [cycles] [--port /dev/ttyACM0]
+    python3 ble_reconnect_test.py [cycles] [--port PORT]
 
 Run on the dev host. Always disconnects and untrusts at the end.
 """
@@ -20,6 +20,10 @@ import argparse
 import subprocess
 import threading
 import time
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_port import find_console  # noqa: E402
 
 NOAIDI_MAC = "44:BD:8D:6C:87:5E"
 
@@ -116,10 +120,12 @@ def send_note(on, note=60):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cycles", nargs="?", type=int, default=15)
-    ap.add_argument("--port", default="/dev/ttyACM0")
+    ap.add_argument("--port", default=None)
     ap.add_argument("--gap", type=float, default=1.0,
                     help="seconds between disconnect and next connect")
     args = ap.parse_args()
+    if args.port is None:
+        args.port = find_console()
 
     cap = SerialCapture(args.port); cap.start()
     time.sleep(3)

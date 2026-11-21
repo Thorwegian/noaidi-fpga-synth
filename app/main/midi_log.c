@@ -37,6 +37,8 @@ static const char *source_name(uint8_t source) {
         return "din1";
     case MIDI_SOURCE_DIN2:
         return "din2";
+    case MIDI_SOURCE_USB:
+        return "usb";
     case MIDI_SOURCE_BLE:
         return "ble";
     default:
