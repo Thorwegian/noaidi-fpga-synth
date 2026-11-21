@@ -11,9 +11,9 @@ while looking like it worked.
 
 import re
 
-# The ALSA client is named after the USB product string, S-1; the older
-# Noaidi prefix is kept so a differently-named prototype is still found.
-SYNTH_CLIENTS = ("S-1", "Noaidi")
+# The ALSA client is named after the USB product string, Model 1; the Noaidi
+# prefix is kept so a prototype named otherwise is still found.
+SYNTH_CLIENTS = ("Model 1", "Noaidi")
 
 
 def find_synth_port():
