@@ -10,12 +10,12 @@ unison_stereo = 0
 
 [[osc]]
 wave = "saw"
-tune = 0
+tune = -0.04
 pulse_width = 50
 
 [[osc]]
 wave = "saw"
-tune = 0
+tune = 0.04
 pulse_width = 50
 
 [filter]
