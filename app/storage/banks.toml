@@ -3,7 +3,7 @@ format = 1
 [bank.0]
 name = "GM"
 # General MIDI's program numbers, in order: 0 … 59 answer with the init
-# sound until each is made, and 60 is GM's 61, the French Horn.
+# sound until each is made; program 60 is GM's 61, the French Horn.
 programs = [
     "Presets/Factory/GM/Init.toml",       # 0
     "Presets/Factory/GM/Init.toml",       # 1

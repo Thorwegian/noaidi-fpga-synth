@@ -463,7 +463,9 @@ programs = []
   A missing or unreadable file means there are no banks.
 - **Bank 0 is General MIDI's.** Its programs are in GM's order as the
   specification numbers them, one preset a program, so a GM file's Bank
-  Select 0 and Program Change reach the sound it means. A GM program not
+  Select 0 and Program Change reach the sound it means. The numbers are a
+  program number minus one: GM's French Horn is its 61 and Program Change
+  value 60. A GM program not
   yet made answers with the init sound, `Presets/Factory/GM/Init.toml`,
   and the bank grows in program order.
 - **The Tests bank** is bank 16383, the highest number there is (Bank
