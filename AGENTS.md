@@ -118,6 +118,12 @@ License: CERN-OHL-S v2
 - A metric says what changed; only he says whether it sounds right.
 - Any conclusion about how it sounds ends with a take in the thread, not a picture.
 
+## Remember output
+
+- The artefact is the deliverable; a raytracer that traces no rays has failed, however green its tests. We deal in pixels.
+- A check that passes while the sound is wrong does not pass: the check is what stands between the work and the player, not a substitute for hearing it.
+- Judge a picture by looking at it, a sound by hearing it, a board by using it.
+
 # Paradigms
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
