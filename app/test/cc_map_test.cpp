@@ -170,7 +170,6 @@ void test_dump_shape() {
         case 111:
         case 114:
         case 112:
-        case 108:
             check(m.value % 32 == 0,
                   "a four-way switch sits at 0, 32, 64 or 96: CC "
                           + std::to_string(m.cc));

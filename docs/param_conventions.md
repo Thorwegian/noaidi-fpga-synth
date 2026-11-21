@@ -80,4 +80,5 @@ only.**
 | LFO→cutoff / resonance depth | LFO sweeps the filter's full range (JP-8000: ±63 ≈ the whole cutoff travel); resonance LFO rarer, same span | the same Coarse/Fine law in octaves: Coarse = span in whole octaves (of cutoff, of Q), sixteen knob steps each, Fine = 1/128 octave between; the top is an eight-octave span, ±4 octaves of swing — the cutoff knob's own reach (#256) | ✓ |
 | Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | fixed route → cutoff | ~ |
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct, square-law taper (fine near centre) | ✓ |
+| Env→pitch depth | an attack blip of a few semitones, wider for percussion | bipolar ±48 st, square-law taper with the cutoff's authority rule; the envelope's own attack and decay shape it, so a lip blip and a tom's fall are the same amount | ✓ |
 | LFO fade-in | JP-8000 has per-LFO fade-in time (0–127) — a loved feature | none | ✗ |
