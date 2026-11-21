@@ -112,8 +112,8 @@ std::string differences(const preset_t &a, const preset_t &b) {
     field("mod_env.decay", a.mod_env.decay, b.mod_env.decay);
     field("mod_env.release", a.mod_env.release, b.mod_env.release);
     field("mod_env.velocity", a.mod_env.velocity, b.mod_env.velocity);
-    field("mod_env.destination", a.mod_env.destination, b.mod_env.destination);
     field("mod_env.depth", a.mod_env.depth, b.mod_env.depth);
+    field("mod_env.pitch", a.mod_env.pitch, b.mod_env.pitch);
     for (int i = 0; i < 2; ++i) {
         const std::string l = "lfo" + std::to_string(i + 1) + ".";
         field(l + "shape", a.lfo[i].shape, b.lfo[i].shape);

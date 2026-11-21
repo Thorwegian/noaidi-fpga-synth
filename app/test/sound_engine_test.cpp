@@ -188,7 +188,8 @@ void test_set_up() {
                                                  .lfo(c, 1)
                                                  .record),
               "a channel's LFOs are its own two records");
-        check(played.word(wires.mod_amount) == 0
+        check(played.word(wires.mod_cut_amount) == 0
+                      && played.word(wires.mod_pit_amount) == 0
                       && played.word(played.engine.wiring()
                                              .lfo(c, 0)
                                              .depth[Wiring::moves_pitch])
@@ -298,7 +299,7 @@ void test_commit() {
     engine.commit();
     check(link.swaps.size() == 3 && link.written(played.at(played.wires().bend))
                   && link.written(played.at(played.wires().key_track))
-                  && link.written(played.at(played.wires().mod_amount))
+                  && link.written(played.at(played.wires().mod_cut_amount))
                   && link.written(played.at(played.wires().duty_base[1])),
           "what is committed together goes in one swap");
 
@@ -322,7 +323,8 @@ void test_commit() {
     engine.channel[0]       = preset;
     engine.commit();
     check(played.word(played.wires().key_track) == 16384
-                  && std::fabs(played.octaves(played.wires().mod_amount) - 0.5)
+                  && std::fabs(played.octaves(played.wires().mod_cut_amount)
+                               - 0.5)
                              < 1e-9,
           "a preset assigned to a channel is committed");
     check(engine.channel[0].bend == 1.0f
@@ -386,8 +388,13 @@ void test_envelope() {
     // The mod amount is a quarter of the depth: the wiring multiplies by
     // four after the envelope, so that a depth of up to 32 octaves fits a
     // word that holds 8.
-    check(std::fabs(played.octaves(played.wires().mod_amount) - 0.5) < 1e-9,
+    check(std::fabs(played.octaves(played.wires().mod_cut_amount) - 0.5) < 1e-9,
           "the mod depth is in octaves, a quarter of it in the word");
+
+    engine.channel[0].mod_env.pitch = 12.0f; // an octave
+    engine.commit();
+    check(std::fabs(played.octaves(played.wires().mod_pit_amount) - 1.0) < 1e-9,
+          "the mod envelope's pitch amount is in octaves, written whole");
 }
 
 void test_notes() {

@@ -1434,7 +1434,7 @@ void test_todays_synth() {
             // a voice's body: its two envelopes, its pitch, cutoff and
             // gain; a channel's: its two LFOs' phases and waves, and what
             // they move
-            check_equal(set.rows, set.copies == voice_count ? 23 : 59,
+            check_equal(set.rows, set.copies == voice_count ? 24 : 59,
                         "the instruction rows in the loop body of "
                                 + std::to_string(set.copies) + " copies");
         }
@@ -1647,17 +1647,18 @@ void test_the_noaidis_formulas() {
     played.word(synth.wiring().one, 1.0);
 
     struct Channel {
-        double bend, p1, c1, p2, c2, base, track, amount;
+        double bend, p1, c1, p2, c2, base, track, cut, pit;
         double d1, d2, r1, r2, duty0, duty1, resonance;
     };
     std::vector<Channel> channel(SoundEngine::channel_count);
     for (int c = 0; c < SoundEngine::channel_count; ++c) {
         Channel &a = channel[static_cast<size_t>(c)];
-        a          = {0.02 * (c - 8),  0.1 + 0.01 * c,  -0.2 + 0.03 * c,
-                      0.05 * (c % 4),  0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
-                      0.25 * (c % 5),  0.3 + 0.05 * c,  0.03 * (c % 5),
-                      -0.02 * (c % 3), 0.1 * (c % 4),   0.05 * (c % 6),
-                      0.1 + 0.02 * c,  -0.3 + 0.03 * c, 0.5 + 0.1 * (c % 7)};
+        a          = {0.02 * (c - 8),     0.1 + 0.01 * c,  -0.2 + 0.03 * c,
+                      0.05 * (c % 4),     0.4 - 0.02 * c,  0.5 + 0.1 * (c % 5),
+                      0.25 * (c % 5),     0.3 + 0.05 * c,  0.04 * (c % 4) - 0.06,
+                      0.03 * (c % 5),     -0.02 * (c % 3), 0.1 * (c % 4),
+                      0.05 * (c % 6),     0.1 + 0.02 * c,  -0.3 + 0.03 * c,
+                      0.5 + 0.1 * (c % 7)};
         const Wiring::Channel &wired =
                 synth.wiring().channels[static_cast<size_t>(c)];
         const Wiring::Lfo &first  = synth.wiring().lfo(c, 0);
@@ -1675,7 +1676,8 @@ void test_the_noaidis_formulas() {
         played.word(wired.bend, a.bend);
         played.word(wired.cutoff_base, a.base);
         played.word(wired.key_track, a.track);
-        played.word(wired.mod_amount, a.amount);
+        played.word(wired.mod_cut_amount, a.cut);
+        played.word(wired.mod_pit_amount, a.pit);
         played.word(wired.duty_base[0], a.duty0);
         played.word(wired.duty_base[1], a.duty1);
         played.word(wired.resonance_base, a.resonance);
@@ -1795,8 +1797,8 @@ void test_the_noaidis_formulas() {
         // LFO on the pitch does not sweep the filter too
         const double channel_cutoff =
                 c.base + lfo1 * c.c1 + lfo2 * c.c2 + c.track * c.bend;
-        const double want[3] = {a.note + channel_pitch,
-                                4 * a.level_mod * c.amount + a.note * c.track
+        const double want[3] = {a.note + channel_pitch + a.level_mod * c.pit,
+                                4 * a.level_mod * c.cut + a.note * c.track
                                         + channel_cutoff,
                                 a.level_amp * a.velocity};
         const int fields[3]  = {Wiring::VoiceSink::pitch,
@@ -1810,7 +1812,7 @@ void test_the_noaidis_formulas() {
                     std::fabs(played.sink(sinks + fields[k]) - want[k]));
         }
     }
-    // the mod envelope's term is multiplied by 4
+    // the cutoff's mod-envelope term is multiplied by 4
     check(worst_voice <= 16.0 / csp::word_one,
           "the voices' pitch, cutoff and gain sinks match their formulas: largest difference "
                   + std::to_string(worst_voice));

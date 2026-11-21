@@ -38,8 +38,8 @@ sustain = 0
 decay = 7.5451
 release = 6.2876
 velocity = 66.142
-destination = "cutoff"
 depth = 51.047
+pitch = 0
 
 [[lfo]]
 shape = "triangle"

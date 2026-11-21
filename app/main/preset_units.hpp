@@ -61,7 +61,6 @@ inline constexpr const char *lfo_shapes[]       = {"saw", "pulse", "triangle",
                                                    "sine"};
 inline constexpr const char *filter_types[]     = {"lowpass", "bandpass",
                                                    "highpass"};
-inline constexpr const char *mod_env_destinations[] = {"cutoff"};
 inline constexpr const char *lfo_destinations[] = {"pulse_width", "resonance",
                                                    "pitch", "cutoff"};
 
@@ -84,6 +83,8 @@ inline constexpr Range fall{0.0047f, 151.0f};
 // The floor is ten octaves of gain down.
 inline constexpr Range amp_sustain{-60.206f, 0.0f};
 inline constexpr Range mod_depth{-129.0f, 129.0f};
+// The mod envelope's pitch amount, inside a word's eight octaves.
+inline constexpr Range mod_pitch_depth{-48.0f, 48.0f};
 inline constexpr Range lfo_rate{0.0029f, 187.0f};
 inline constexpr Range volume{-77.5f, 18.0f, 0.0f, -infinity};
 inline constexpr Range bend_range{0.0f, 48.0f, 1.0f};
@@ -148,9 +149,8 @@ void visit(Preset &preset, Visitor &&visitor) {
     visitor.number("decay", preset.mod_env.decay, fall);
     visitor.number("release", preset.mod_env.release, fall);
     visitor.number("velocity", preset.mod_env.velocity, percent);
-    visitor.name("destination", preset.mod_env.destination,
-                 mod_env_destinations);
     visitor.number("depth", preset.mod_env.depth, mod_depth);
+    visitor.number("pitch", preset.mod_env.pitch, mod_pitch_depth);
 
     for (int i = 0; i < PRESET_NUM_LFO; ++i) {
         auto &lfo = preset.lfo[i];

@@ -282,7 +282,7 @@ public:
             // each LFO's phase, a dword the program keeps: zero when it
             // loads, and nothing writes it again
             std::array<Wire, channel_lfo_count> phase;
-            Wire bend, cutoff_base, key_track, mod_amount;
+            Wire bend, cutoff_base, key_track, mod_cut_amount, mod_pit_amount;
             std::array<Wire, PRESET_NUM_OSC> duty_base; // the pulse widths
             Wire resonance_base;
             std::array<std::array<Segment, stage_count>, envelope_count>

@@ -77,17 +77,14 @@ typedef struct {
     float velocity; // percent: how far a soft note scales the amount
 } amp_env_t;
 
-// What the mod envelope moves.
-typedef enum { MOD_ENV_DEST_CUTOFF = 0 } mod_env_dest_t;
-
 typedef struct {
     float attack;   // seconds, as the amp envelope's
     float sustain;  // percent of the depth
     float decay;    // seconds
     float release;  // seconds
     float velocity; // percent
-    mod_env_dest_t destination;
-    float depth; // semitones of cutoff, signed
+    float depth;    // semitones of cutoff, signed
+    float pitch;    // semitones of pitch, signed
 } mod_env_t;
 
 // ── [[lfo]] ─────────────────────────────────────────────────────────

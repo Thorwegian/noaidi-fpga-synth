@@ -184,7 +184,8 @@ inline Settings set_up(const SoundEngine &engine) {
         }
         word(channel.cutoff_base, 0.5 + 0.1 * (c % 5));
         word(channel.key_track, 0.25 * (c % 5));
-        word(channel.mod_amount, 0.1 + 0.03 * c);
+        word(channel.mod_cut_amount, 0.1 + 0.03 * c);
+        word(channel.mod_pit_amount, 0.05 * ((c + 2) % 5) - 0.1);
         word(channel.duty_base[0], 0.1 + 0.02 * c);
         word(channel.duty_base[1], -0.3 + 0.03 * c);
         word(channel.resonance_base, 0.5 + 0.1 * (c % 7));
