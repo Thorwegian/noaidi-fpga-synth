@@ -14,7 +14,7 @@
   - An issue's body is trimmed of what belongs to its sub-issues: the child's problem is the child's.
   - An undecided item is the agent's to settle or Thor's to answer. A technical item is the agent's: the investigation settles it, and the list holds only what his answer alone can settle.
   - Issue relations live in GitHub's fields, never in prose.
-  - A PR's relation to its issue is `Fixes #n` in the PR body.
+  - A PR's relation to its issue is `Fixes #n` in the PR body, and *n* is the issue whose work the PR lands: never a `meta`, whose closing is Thor's to make.
   - When an agent pull request is approved, the agent must remove the branch it created for it.
 
 - Triaging:
