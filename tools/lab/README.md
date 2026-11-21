@@ -31,12 +31,6 @@ flowchart LR
   `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
   volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
   Loading gateware does not touch the console port.
-- **Bring-up checks, in this order, before any theory.** A silent link is
-  read from the hardware outwards: `openFPGALoader --detect` (the FPGA is
-  powered and alive), the load's `DONE` (it is configured), and the firmware's
-  own MISO pad probe, which pulls the line up and down and reports whether
-  anything drives it. Driven but no ID means design or clock; floating means
-  trace, pin or an unconfigured FPGA.
 - **Check the checkout before blaming the gateware.** A link that answers
   `no ID nonet` after a fresh build usually means the tree is behind the
   firmware: `git status -sb` on the lab computer's checkout first, then rebuild.

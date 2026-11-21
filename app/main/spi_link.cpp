@@ -11,42 +11,12 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
-#include "esp_rom_sys.h"
 
 namespace spi_link {
 
 namespace {
 
 constexpr const char *tag = "spi_link";
-
-// The MISO pad, kept for the wire check below.
-int s_miso_pin = -1;
-
-// A wire check that needs no instrument. MISO is the slave's to drive, so a
-// level that follows the master's own pull means nothing on the far side is
-// driving it — an unconfigured FPGA, a broken trace, or the wrong pin — while
-// a level that ignores the pull means something is and the fault lies
-// elsewhere. Run when the ID nonet does not come back, which is the first
-// frame that would tell the two apart (docs/memory_map.md, "Bring-up").
-void probe_miso_pad() {
-    if (s_miso_pin < 0) {
-        return;
-    }
-    const auto pin = static_cast<gpio_num_t>(s_miso_pin);
-    gpio_set_direction(pin, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(pin, GPIO_PULLUP_ONLY);
-    esp_rom_delay_us(100);
-    const int pulled_up = gpio_get_level(pin);
-    gpio_set_pull_mode(pin, GPIO_PULLDOWN_ONLY);
-    esp_rom_delay_us(100);
-    const int pulled_down = gpio_get_level(pin);
-    gpio_set_pull_mode(pin, GPIO_FLOATING);
-    ESP_LOGW(tag, "MISO pad %d: pull-up reads %d, pull-down reads %d: %s",
-             s_miso_pin, pulled_up, pulled_down,
-             pulled_up != pulled_down
-                     ? "nothing drives the line"
-                     : "something drives the line");
-}
 
 // The drive of the pads that carry the master's edges: about 10 mA, one step
 // under the chip's default of about 20 mA (ESP32-S3 datasheet, the pin
@@ -153,7 +123,6 @@ void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
     spi_bus_config_t bus = {};
     bus.mosi_io_num      = mosi_pin;
     bus.miso_io_num      = miso_pin;
-    s_miso_pin           = miso_pin;
     bus.sclk_io_num      = sclk_pin;
     bus.quadwp_io_num    = -1;
     bus.quadhd_io_num    = -1;
@@ -271,9 +240,6 @@ extern "C" int spi_link_boot_check(void) {
     const bool id_ok = spi_link::read(scratch, back.data(), back.size());
     check("2. a burst of three dwords, auto-increment", back == burst);
     check("   the ID nonet on the read frame", id_ok);
-    if (!id_ok) {
-        spi_link::probe_miso_pad();
-    }
 
     spi_link::write_one(0x00008, spi_link::dword_mask);
     check("3. a status dword ignores a write",
