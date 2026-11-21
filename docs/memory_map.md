@@ -318,6 +318,24 @@ ports.
   cable is unchanged, so this is the margin that the table above says it does
   not have: the ceiling has moved down to somewhere between 8 and 10 MHz, and
   the firmware asks for 8 MHz until the lead and its contacts are reworked.
+  Swept from the console with `csp rate <hz>` (the link re-clocked in place and
+  every check run at each rate), the same board, one boot:
+
+  | rate | fails of the link's checks |
+  |---|---|
+  | 20.0 MHz | 4 |
+  | 16.0 MHz | 3 |
+  | 13.3 MHz | 4 |
+  | 11.4 MHz | 4 |
+  | 10.0 MHz | 4 |
+  | 8.9 MHz | 4 |
+  | 8.0 MHz | 0 |
+  | 7.3 MHz | 0 |
+  | 6.7 MHz | 0 |
+  | 5.0 MHz | 0 |
+
+  The ceiling is sharp between 8.9 and 8.0 MHz, which is what a cable-limited
+  link looks like; there is nothing gradual in it.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the
