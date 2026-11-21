@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 
 #include "ble_midi.h"
+#include "usb_midi.h"
 #include "event_bus.h"
 
 namespace {
@@ -112,6 +113,18 @@ bool notify(const BlePacket &packet) {
 
 // ---- the task -----------------------------------------------------------------------------------------
 
+// A wired surface takes each message as it is: a USB MIDI event packet needs
+// no timestamp framing, and the one source to skip is its own.
+void send_usb(const Outgoing &outgoing) {
+    if (outgoing.except == MIDI_SOURCE_USB || !usb_midi_connected()) {
+        return;
+    }
+    const uint8_t bytes[3] = {outgoing.message.status,
+                              outgoing.message.data[0],
+                              outgoing.message.data[1]};
+    usb_midi_send(bytes, 1u + outgoing.message.len);
+}
+
 void midi_out_task(void *) {
     Outgoing item{};
     BlePacket packet;
@@ -119,6 +132,7 @@ void midi_out_task(void *) {
         if (xQueueReceive(s_queue, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        send_usb(item);
         // Everything queued goes into as few packets as fit. Without a
         // subscribed central the messages are consumed and nothing is sent:
         // nobody is listening, which is not a loss.
@@ -135,6 +149,9 @@ void midi_out_task(void *) {
                 packet.add(item.message);
             }
             more = xQueueReceive(s_queue, &item, 0) == pdTRUE;
+            if (more) {
+                send_usb(item);
+            }
         }
         if (packet.holds_messages() && !notify(packet)) {
             ++s_dropped;

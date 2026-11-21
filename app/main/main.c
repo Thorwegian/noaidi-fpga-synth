@@ -23,9 +23,10 @@
 #include "ble_midi.h"
 #include "stress_test.h"
 #include "storage.h"
+#include "usb_midi.h"
 
 void app_main(void) {
-    // The serial console first: from here on stdout and ESP_LOG print
+    // The serial console next: from here on stdout and ESP_LOG print
     // through it (console.h).
     console_init();
 
@@ -75,6 +76,12 @@ void app_main(void) {
     midi_out_init();
     midi_log_init();
 
+    // The synth as a USB MIDI device on the socket marked USB (usb_midi.h).
+    // Its own channel, the chip's USB-OTG controller, so it needs neither the
+    // FPGA nor the engine and comes up before both: a host sees the device in
+    // the first second, whatever state the gateware is in.
+    usb_midi_init();
+
     // The pins are the base board's (docs/pins.md in the KiCad repository).
 
     // din1, the first DIN input: UART1 RX on GPIO18.
@@ -98,6 +105,7 @@ void app_main(void) {
     // parameters and notes.
     printf("=== voice concept: 32 voices x 8 partials, 16 parts ===\n");
     voice_alloc_init();
+
     midi_in_start(); // subscribers are registered: start publishing
     // NVS holds the BLE bonds. A full or version-mismatched partition is
     // erased and reinitialized: it only ever holds settings.

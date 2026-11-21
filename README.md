@@ -166,6 +166,15 @@ target builds, or an output port no bench reads fails the run with the
 name of the gap, so a module or a port cannot fall out of the suite
 unnoticed.
 
+## USB
+
+The socket marked `USB` is the chip's USB-OTG controller, its PHY assigned to
+it by eFuse (`docs/esp32s3_hw678.md`), and the firmware presents the synth
+there as a MIDI 1.0 device: a computer sees **Noaidi MIDI**, sends notes and
+controllers to it, and reads its parameter feedback and preset dump back on
+the same cable. The console and the flashing path are on the socket marked
+`COM` and do not move.
+
 ## Preset storage
 
 The synth keeps its presets and settings as TOML files on a FAT

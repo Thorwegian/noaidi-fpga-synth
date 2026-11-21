@@ -22,10 +22,15 @@ flowchart LR
 - The board lives on the lab computer (`ssh -p 23000 thor@home.thj.no`, repo at
   `~/Documents/Code/noaidi-fpga-synth`). Flashing and chip tests run there;
   the cloud box has no board.
-- **Two USB devices, two jobs.** `/dev/ttyACM0` is the ESP32's console and
-  firmware port: the CH343 in the module's socket marked `COM`, UART0. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads
-  (`make sram` volatile, `make flash` persistent) and the BL616 clock CLI
-  (`board_clock.py`). Loading gateware does not touch the console port.
+- **Three USB roles, and the console's name moves.** The ESP32's console and
+  firmware port is the CH343 in the module's socket marked `COM`, UART0: it is
+  `/dev/serial/by-id/usb-1a86_USB_Single_Serial_*-if00`, which `console_port.py`
+  resolves for the tools; by name it is `ttyACM0` only while the socket marked
+  `USB` is empty, and `ttyACM1` when the synth's own USB device is cabled too.
+  The second role is that device: the synth as a MIDI port on the socket marked
+  `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
+  volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
+  Loading gateware does not touch the console port.
 - **The capture card must be told which input to use.** The saved ALSA state
   is applied only to a card that is up at boot, so a card that dies and
   re-enumerates on its own keeps the driver's defaults: the capture switches
@@ -63,7 +68,15 @@ port. The synth's own preset saves are bare TOML without the copyright header
 
 ## MIDI into the synth
 
-- **USB → `din1` (use this).** The CH345 adapter is ALSA `16:0`,
+- **The synth's own USB port (use this).** The socket marked `USB` presents the
+  synth to the lab computer as a MIDI device, ALSA client `Noaidi MIDI`, one
+  cable in both directions: notes and controllers in, the synth's parameter
+  feedback and preset dump back out on the same wire. The CH345 adapter it
+  replaces is retired from the bench.
+- **A preset read-back needs no second path.** A Program Change over that cable
+  returns the whole preset as CCs on the same cable, which is why the old
+  "observe it over BLE" detour is gone.
+- **The CH345 adapter, while it is still around.** It is ALSA `16:0`,
   cabled into the first DIN input (UART1; the trace names its source `din1`);
   the keyboard is in the second, `din2`. **The adapter drops what a one-shot sender
   queues:** the kernel bridge opens the USB device only while a client is

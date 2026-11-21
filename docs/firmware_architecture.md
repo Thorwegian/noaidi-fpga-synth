@@ -228,6 +228,17 @@ optocoupler. The carrier's J12 header carries `PANEL_UART_TX` and
 so a two-way link there means the panel port's optocoupler no longer
 drives UART2's.
 
+**The USB device.** `usb_midi` puts the synth on the socket marked `USB` as a
+MIDI 1.0 device (`usb_midi.cpp`): one interface, one bulk endpoint each way at
+64 bytes, TinyUSB under esp_tinyusb. The host's bytes go through a parser
+instance of their own — running status belongs to a stream, and the DIN
+inputs' silence rules do not apply here, since a USB stream has no Active
+Sensing to send and no half message crosses a packet boundary — and are
+published as `MIDI_SOURCE_USB`. Its output is the same queue the BLE surface
+reads (`midi_out`), which is what makes a preset read-back observable on the
+cable that asked for it. The device is installed before the engine link is
+built, so a host sees it in the first second whatever state the gateware is in.
+
 ## Sequencers / arpeggiators
 
 A sequencer or arpeggiator is just another source of notes for the sound

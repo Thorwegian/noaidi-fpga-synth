@@ -12,5 +12,6 @@ __pycache__/
 sdkconfig.old
 !tools/lab/benchmark/*.json
 .tools/
+app/managed_components/
 .tools.*/
 node_modules/

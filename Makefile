@@ -75,9 +75,10 @@
 # Override with IDF=<command that runs idf.py>.
 IDF ?= $(CURDIR)/tools/esp_idf.sh idf.py
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
-# The console port, the CH343 in the module's socket marked COM: Linux names
-# it ttyACM, macOS cu.usbmodem.
-ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))
+# The console port, the CH343 in the module's socket marked COM. Its name is
+# not stable (the USB device adds an ACM port of its own), so the by-id name
+# comes first; the ACM/usbmodem globs are the fallback.
+ESPPORT ?= $(firstword $(wildcard /dev/serial/by-id/usb-1a86_USB_Single_Serial_*-if00 /dev/ttyACM* /dev/cu.usbmodem*))
 HOST_CC  ?= cc
 HOST_CXX ?= c++
 HOST_DIR  = app/build/host
