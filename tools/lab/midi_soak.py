@@ -163,7 +163,7 @@ def main():
     ap.add_argument("--seed", type=int, default=None, help="RNG seed (printed; reuse to replay)")
     ap.add_argument("--rate", type=float, default=120.0,
                     help="mean messages/sec between bursts (bursts add ~1 kHz sweeps)")
-    ap.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
+    ap.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi client)")
     ap.add_argument("--program", type=int, default=None,
                     help="Program Change sent before and after the soak, reloading the preset "
                          "so no walked controller is left behind (baseline_recording.py uses 1)")
@@ -171,7 +171,7 @@ def main():
     if args.port is None:
         args.port = find_synth_port()
         if args.port is None:
-            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi")
         print("synth port: %s" % args.port)
 
     seed = args.seed if args.seed is not None else random.randrange(1 << 31)

@@ -39,14 +39,14 @@ def main():
     parser = argparse.ArgumentParser(description="the noise waveform's take")
     parser.add_argument("out", help="the WAV file to write")
     parser.add_argument("--program", type=int, default=0, help="MIDI program in the Factory bank, bank 1: 0 Supersaw, 1 Galaxy")
-    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=3.0, help="seconds recorded after the last release")
     args = parser.parse_args()
     if args.port is None:
         args.port = find_synth_port()
         if args.port is None:
-            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi")
         print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 

@@ -61,7 +61,7 @@ def main():
                         help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
                              "negative sends no Program Change (the preset loaded already)")
     parser.add_argument("--transpose", type=int, default=0, help="semitones added to every note of the sequence")
-    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-keepalive", action="store_true",
@@ -71,7 +71,7 @@ def main():
     if args.port is None:
         args.port = find_synth_port()
         if args.port is None:
-            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi")
         print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 
