@@ -112,6 +112,12 @@ License: CERN-OHL-S v2
 - How these instruments are played and programmed, in other people's words: Gordon Reid's *Synth Secrets* (Sound On Sound, 63 parts, <https://www.soundonsound.com/series/synth-secrets-sound-sound>); the Nord Lead 2 manual's "About Subtractive Synthesis" (<https://www.nordkeyboards.com/wt/documents/217/Nord%20Lead%202%20English%20User%20Manual%20v1.0.pdf>); the ARP 2600 owner's manual (<https://cdn.korg.com/us/support/download/files/cb766ad31ea603642fe01f107abe7d86.pdf>); the JP-8000 Basic Synthesis notes `param_conventions.md` cites (<https://cdn.roland.com/assets/media/pdf/JP8000_Basic_Synthesis.pdf>).
 - Guidance, not rules. They describe other instruments, and no two models overlap: read them for what a sound needs and why, then translate to our controls ([param_conventions.md](docs/param_conventions.md) says what ours do). Do not stop at a field a guide names that we do not have.
 
+## You are deaf
+
+- Judge a sound by the take, never by a plot: send Thor the audio and let him hear it.
+- A metric says what changed; only he says whether it sounds right.
+- Any conclusion about how it sounds ends with a take in the thread, not a picture.
+
 # Paradigms
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
