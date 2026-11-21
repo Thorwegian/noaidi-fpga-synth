@@ -61,6 +61,7 @@ sys.path.insert(0, HERE)
 from console_port import find_console  # noqa: E402
 from baselines import BASELINES, TESTS_BANK, bank_select  # noqa: E402
 from chip_check import ANSI, command  # noqa: E402
+from synth_port import find_synth_port
 
 SELF_TEST_PASS = "self-test: the chip does what the model says"
 SELF_TEST_FAIL = "THE CHIP DOES NOT DO WHAT THE MODEL SAYS"
@@ -201,12 +202,17 @@ def main():
     parser.add_argument("--loader", default="openFPGALoader", help="--fs: the loader")
     parser.add_argument("--console", default=None,
                         help="the firmware's serial console (default: the CH343 in the socket marked COM)")
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--boot-seconds", type=float, default=16.0, help="how long the boot log is read")
     parser.add_argument("--tail", type=float, default=24.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-mp3", action="store_true", help="no MP3 for review")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+        print("synth port: %s" % args.port)
     if args.console is None:
         args.console = find_console()
     print("console: %s" % args.console)

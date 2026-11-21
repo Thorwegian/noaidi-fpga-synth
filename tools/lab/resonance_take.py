@@ -26,6 +26,7 @@ import time
 
 import capture_card
 from baselines import bank_select
+from synth_port import find_synth_port
 
 CONTROLS = [(71, 127), (74, 60), (106, 69), (31, 64), (30, 127), (73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
 EVENTS = [([48], 127), ([55], 127), ([60, 64, 67], 127), ([48], 0)]   # the notes, and CC 30's value before them
@@ -35,10 +36,15 @@ def main():
     parser = argparse.ArgumentParser(description="the resonance limiter's take")
     parser.add_argument("out", help="the WAV file to write")
     parser.add_argument("--program", type=int, default=0, help="MIDI program in the Factory bank, bank 1: 0 Supersaw, 1 Galaxy")
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=3.0, help="seconds recorded after the last release")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+        print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 
     def midi(*messages):

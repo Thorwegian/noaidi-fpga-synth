@@ -33,6 +33,7 @@ import capture_card
 import wave
 
 import numpy as np
+from synth_port import find_synth_port
 
 VELOCITY = 0x64
 
@@ -52,9 +53,14 @@ def main():
                              "the take then loads them as a controller does")
     parser.add_argument("--solo-seconds", type=float, default=2.0)
     parser.add_argument("--stack-seconds", type=float, default=5.0)
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+        print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 
     channels = [int(c) - 1 for c in args.channels.split(",")]

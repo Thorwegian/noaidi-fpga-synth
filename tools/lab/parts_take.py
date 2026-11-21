@@ -34,6 +34,7 @@ import capture_card
 import wave
 
 import numpy as np
+from synth_port import find_synth_port
 
 # Für Elise's opening, right hand: E5 D#5 E5 D#5 E5 B4 D5 C5 A4.
 MELODY   = [76, 75, 76, 75, 76, 71, 74, 72, 69]
@@ -49,10 +50,15 @@ def main():
                         help="from one note to the next")
     parser.add_argument("--rounds", type=int, default=4,
                         help="how many times the melody plays, each from the next channel")
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=6.0, help="seconds recorded after the last note")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+        print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 
     channels = [int(c) - 1 for c in args.channels.split(",")]

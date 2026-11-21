@@ -43,6 +43,7 @@ import numpy as np
 
 import capture_card
 from baselines import bank_select
+from synth_port import find_synth_port
 
 BPM = 60.0
 BEAT = 60.0 / BPM
@@ -60,13 +61,18 @@ def main():
                         help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
                              "negative sends no Program Change (the preset loaded already)")
     parser.add_argument("--transpose", type=int, default=0, help="semitones added to every note of the sequence")
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi MIDI client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=8.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-keepalive", action="store_true",
                         help="send no Active Sensing between the notes (a DIN input of the firmware resets its parser "
                              "after half a second of silence and drops the next message; a keyboard keeps it alive)")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi MIDI")
+        print("synth port: %s" % args.port)
     capture_card.prepare(args.device)
 
     def midi(*messages):
