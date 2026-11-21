@@ -44,6 +44,8 @@ import os
 import subprocess
 import sys
 import time
+
+import capture_card
 import wave
 
 import numpy as np
@@ -117,6 +119,7 @@ def capture(seconds, device, port, keep):
     path = keep or os.path.join(os.environ.get("TMPDIR", "/tmp"), "spdif_capture.wav")
     midi("B0 %02X 7F" % TONE_CC)
     time.sleep(0.5)
+    capture_card.prepare(device)
     # arecord's -d is whole seconds, and 0 records for ever: at least one
     subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
                     "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)
@@ -398,6 +401,7 @@ def write_dump(registers, path, before=""):
 
 def capture_stream(seconds, device, keep):
     path = keep or os.path.join(os.environ.get("TMPDIR", "/tmp"), "spdif_capture.wav")
+    capture_card.prepare(device)
     # arecord's -d is whole seconds, and 0 records for ever: at least one
     subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
                     "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)

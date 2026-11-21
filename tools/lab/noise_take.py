@@ -24,6 +24,7 @@ import subprocess
 import threading
 import time
 
+import capture_card
 from baselines import bank_select
 
 SHUT = [(73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
@@ -41,6 +42,7 @@ def main():
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=3.0, help="seconds recorded after the last release")
     args = parser.parse_args()
+    capture_card.prepare(args.device)
 
     def midi(*messages):
         for message in messages:

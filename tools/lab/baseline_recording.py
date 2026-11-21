@@ -41,6 +41,7 @@ import wave
 
 import numpy as np
 
+import capture_card
 from baselines import bank_select
 
 BPM = 60.0
@@ -66,6 +67,7 @@ def main():
                         help="send no Active Sensing between the notes (a DIN input of the firmware resets its parser "
                              "after half a second of silence and drops the next message; a keyboard keeps it alive)")
     args = parser.parse_args()
+    capture_card.prepare(args.device)
 
     def midi(*messages):
         for message in messages:

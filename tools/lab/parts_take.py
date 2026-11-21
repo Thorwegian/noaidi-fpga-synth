@@ -29,6 +29,8 @@ import subprocess
 import sys
 import threading
 import time
+
+import capture_card
 import wave
 
 import numpy as np
@@ -51,6 +53,7 @@ def main():
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=6.0, help="seconds recorded after the last note")
     args = parser.parse_args()
+    capture_card.prepare(args.device)
 
     channels = [int(c) - 1 for c in args.channels.split(",")]
     if not channels or any(c < 0 or c > 15 for c in channels):
