@@ -75,7 +75,8 @@
 # Override with IDF=<command that runs idf.py>.
 IDF ?= $(CURDIR)/tools/esp_idf.sh idf.py
 STORAGE_IMAGE = python3 tools/storage/storage_image.py
-# The ESP32's USB serial port: Linux names it ttyACM, macOS cu.usbmodem.
+# The console port, the CH343 in the module's socket marked COM: Linux names
+# it ttyACM, macOS cu.usbmodem.
 ESPPORT ?= $(firstword $(wildcard /dev/ttyACM* /dev/cu.usbmodem*))
 HOST_CC  ?= cc
 HOST_CXX ?= c++

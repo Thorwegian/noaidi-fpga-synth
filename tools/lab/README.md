@@ -23,7 +23,7 @@ flowchart LR
   `~/Documents/Code/noaidi-fpga-synth`). Flashing and chip tests run there;
   the cloud box has no board.
 - **Two USB devices, two jobs.** `/dev/ttyACM0` is the ESP32's console and
-  firmware port. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads
+  firmware port: the CH343 in the module's socket marked `COM`, UART0. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads
   (`make sram` volatile, `make flash` persistent) and the BL616 clock CLI
   (`board_clock.py`). Loading gateware does not touch the console port.
 - **The capture card must be told which input to use.** The saved ALSA state
