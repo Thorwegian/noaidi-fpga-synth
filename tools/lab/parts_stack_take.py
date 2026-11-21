@@ -28,6 +28,8 @@ import subprocess
 import sys
 import threading
 import time
+
+import capture_card
 import wave
 
 import numpy as np
@@ -53,6 +55,7 @@ def main():
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     args = parser.parse_args()
+    capture_card.prepare(args.device)
 
     channels = [int(c) - 1 for c in args.channels.split(",")]
     notes    = [int(n) for n in args.notes.split(",")]
