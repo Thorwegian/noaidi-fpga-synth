@@ -1,11 +1,11 @@
-// console.h — the serial console: a line editor on the USB serial port
+// console.h — the serial console: a line editor on the serial port
 //
 // Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 // License: CERN-OHL-S v2
 //
-// One task owns the USB-Serial/JTAG port. On a VT100 terminal (screen,
-// tio, picocom; "make fw-console") the screen is split like an IRC
-// client's:
+// One task owns the console's UART, the module's CH343 bridge, the socket
+// marked COM. On a VT100 terminal (screen, tio, picocom; "make fw-console")
+// the screen is split like an IRC client's:
 //
 //   rows 1 … N−2   output, a scroll region (DECSTBM)
 //   row  N−1       status bar
@@ -53,7 +53,7 @@ typedef struct {
                      void (*add)(const char *candidate));
 } console_cmd_t;
 
-// Take over the USB serial port and stdout/stderr, and start the
+// Take over the console's UART and stdout/stderr, and start the
 // console task. Call early in app_main, before other tasks print.
 void console_init(void);
 

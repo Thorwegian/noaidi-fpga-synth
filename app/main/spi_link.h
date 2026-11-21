@@ -21,6 +21,11 @@ void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
 // print each. Returns the number of checks that failed.
 int spi_link_boot_check(void);
 
+// Bring the link back up at another clock and check it where it stands: the
+// ceiling on a prototype's leads is a property of the leads, and finding it
+// by reflashing once per rate measures the build as much as the wire.
+void spi_link_set_rate(uint32_t frequency_hz);
+
 #ifdef __cplusplus
 }
 #endif

@@ -8,14 +8,20 @@
 #
 # --reset restarts the ESP32 (RTS) first and prints its boot log for SECONDS.
 # The commands are those of the firmware's console (app/main/cli*.cpp), for
-# instance "csp diag" or "csp peek 0x40 2". Port: /dev/ttyACM0.
+# instance "csp diag" or "csp peek 0x40 2". Port: the CH343's by-id
+# port (console_port.py), which is ttyACM0 or ttyACM1 depending on what else
+# is cabled.
+import os
 import re
 import sys
 import time
 
 import serial
 
-PORT = "/dev/ttyACM0"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from console_port import find_console  # noqa: E402
+
+PORT = find_console()
 
 
 def clean(raw):

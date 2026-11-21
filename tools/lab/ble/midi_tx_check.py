@@ -28,7 +28,7 @@ connects with bluetoothctl, and always disconnects and untrusts at the end:
 the Noaidi takes one BLE connection, and a trusted device is auto-reconnected
 by BlueZ.
 
-    ~/.noaidi-blenv/bin/python3 tools/lab/ble/midi_tx_check.py [--port /dev/ttyACM0] [--no-reset]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/midi_tx_check.py [--port PORT] [--no-reset]
 """
 import argparse
 import os
@@ -39,6 +39,10 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ble_midi_fuzz import NOAIDI_MAC, bt  # noqa: E402
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_port import find_console  # noqa: E402
 
 CONNECT_SECONDS = 6.0  # BlueZ: connect, encrypt, discover, accept the profile, subscribe
 
@@ -130,9 +134,11 @@ def describe(ev):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
+    ap.add_argument("--port", default=None, help="the ESP32 console")
     ap.add_argument("--no-reset", action="store_true", help="leave the ESP32 running; capture only")
     args = ap.parse_args()
+    if args.port is None:
+        args.port = find_console()
 
     from alsa_midi import ControlChangeEvent, NoteOffEvent, NoteOnEvent
 

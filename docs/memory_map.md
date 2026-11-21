@@ -311,6 +311,37 @@ ports.
   At 10 mA a thousand rounds are also clean at 5 and at 20 MHz; at 40 MHz
   48 of 4000 dwords are wrong with every ID nonet right, so the limit
   there is the read's timing, not ringing.
+- **2026-11-21, the same board after a power cycle and a cable reseat: 10 MHz
+  no longer answers, 8 MHz does.** `csp diag` passes every check at 8 MHz and
+  at 5 MHz; at 10 MHz the ID nonet never comes back and the reads are zeros,
+  with the pads at 10 mA as above and at the chip's 20 mA default alike. The
+  cable is unchanged, so this is the margin that the table above says it does
+  not have: the ceiling has moved down to somewhere between 8 and 10 MHz, and
+  the firmware asks for 8 MHz until the lead and its contacts are reworked.
+  Swept from the console with `csp rate <hz>` (the link re-clocked in place and
+  every check run at each rate), the same board, one boot:
+
+  | rate | fails of the link's checks |
+  |---|---|
+  | 20.0 MHz | 4 |
+  | 16.0 MHz | 3 |
+  | 13.3 MHz | 4 |
+  | 11.4 MHz | 4 |
+  | 10.0 MHz | 4 |
+  | 8.9 MHz | 4 |
+  | 8.0 MHz | 0 |
+  | 7.3 MHz | 0 |
+  | 6.7 MHz | 0 |
+  | 5.0 MHz | 0 |
+
+  The ceiling is sharp between 8.9 and 8.0 MHz, which is what a cable-limited
+  link looks like; there is nothing gradual in it.
+- **8 MHz is a stopgap for this prototype's leads, not a rate the link needs.**
+  The master is not the constraint (nextpnr closes the domain at 230–269 MHz)
+  and the design has run clean at 10, 20 and 40 MHz on better wiring; the
+  ceiling here is the hanging jumper leads and their contacts. The board being
+  ordered in place of this one gets its ceiling measured with `csp rate <hz>`,
+  and the firmware's default set from that measurement.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the

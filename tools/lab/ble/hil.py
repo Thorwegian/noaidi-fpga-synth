@@ -51,7 +51,7 @@ import numpy as np
 
 RATE = 48000
 AUDIO_DEV = "hw:1,0"
-ESP_PORT = "/dev/ttyACM0"
+ESP_PORT = find_console()
 RTL_DIR = "rtl"
 
 # Reference signature, measured on captures confirmed by ear:

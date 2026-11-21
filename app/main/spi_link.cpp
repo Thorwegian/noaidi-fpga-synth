@@ -26,6 +26,13 @@ constexpr const char *tag = "spi_link";
 // docs/memory_map.md, "SPI speed budget".
 constexpr gpio_drive_cap_t pad_drive = GPIO_DRIVE_CAP_1;
 
+// The pads the link is on, kept so the bus can be brought up again at another
+// rate without the caller having to remember them.
+int pins_mosi = -1;
+int pins_miso = -1;
+int pins_sclk = -1;
+int pins_cs   = -1;
+
 constexpr int command_nonets    = 1;
 constexpr int address_nonets    = address_bits / nonet_bits;
 constexpr int turnaround_nonets = nonets_per_dword;
@@ -97,6 +104,14 @@ private:
     int position_ = 0;
 };
 
+// The device's clock, not the bus's: the bus, its pins and their drive stay
+// as they were, and the engine keeps running through the change.
+void set_rate(uint32_t frequency_hz) {
+    ESP_ERROR_CHECK(spi_bus_remove_device(device));
+    device = nullptr;
+    add_device(pins_cs, frequency_hz);
+}
+
 // One CS-framed transaction of `length_bits` bits, polling: the engine link
 // is the sole SPI owner and these are tiny, frequent frames, for which the
 // interrupt driver's per-transaction cost dominated.
@@ -127,6 +142,11 @@ void init(int mosi_pin, int miso_pin, int sclk_pin, int cs_pin,
     bus.quadwp_io_num    = -1;
     bus.quadhd_io_num    = -1;
     bus.max_transfer_sz  = static_cast<int>(frame_max_bytes);
+
+    pins_mosi = mosi_pin;
+    pins_miso = miso_pin;
+    pins_sclk = sclk_pin;
+    pins_cs   = cs_pin;
 
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_DISABLED));
     add_device(cs_pin, frequency_hz);
@@ -215,6 +235,10 @@ dword_t read_one(uint32_t address) {
 extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin,
                               int cs_pin, uint32_t frequency_hz) {
     spi_link::init(mosi_pin, miso_pin, sclk_pin, cs_pin, frequency_hz);
+}
+
+extern "C" void spi_link_set_rate(uint32_t frequency_hz) {
+    spi_link::set_rate(frequency_hz);
 }
 
 extern "C" int spi_link_boot_check(void) {

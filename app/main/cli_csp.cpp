@@ -345,6 +345,26 @@ int op_freeze(int, char **) {
     return 0;
 }
 
+// The link at another rate, checked on the spot: the ceiling of a prototype's
+// leads is a property of the leads, so it is measured, not assumed.
+int op_rate(int argc, char **argv) {
+    if (argc < 2) {
+        std::printf("usage: csp rate <hz>\n");
+        return 1;
+    }
+    const auto hz = static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 0));
+    if (hz < 100000 || hz > 40000000) {
+        std::printf("rate %lu out of range: 100 kHz to 40 MHz\n",
+                    static_cast<unsigned long>(hz));
+        return 1;
+    }
+    spi_link_set_rate(hz);
+    std::printf("=== the link at %lu Hz ===\n", static_cast<unsigned long>(hz));
+    const int fails = spi_link_boot_check();
+    std::printf("rate %lu: %d fail(s)\n", static_cast<unsigned long>(hz), fails);
+    return fails ? 1 : 0;
+}
+
 struct Op {
     const char *name;
     const char *usage;
@@ -353,6 +373,8 @@ struct Op {
 };
 
 const Op ops[] = {
+        {"rate", "<hz>", "bring the link up at another clock and check it",
+         op_rate},
         {"diag", "", "the gateware's diagnostic words", op_diag},
         {"verify", "",
          "read every register the image knows back and count the differences",

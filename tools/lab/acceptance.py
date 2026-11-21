@@ -32,7 +32,7 @@ has its explanation in the same output.
 
 usage: acceptance.py --out DIR [--label NAME] [--baseline NAME[,NAME...]]
                      [--fs BITSTREAM] [--loader PATH]
-                     [--console /dev/ttyACM0] [--port 16:0] [--device hw:1,0]
+                     [--console PORT] [--port PORT] [--device hw:1,0]
                      [--boot-seconds 16] [--tail 24] [--no-mp3]
 
 With --fs the bitstream is loaded first (openFPGALoader, SRAM). The ESP32 is
@@ -58,8 +58,10 @@ import serial
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+from console_port import find_console  # noqa: E402
 from baselines import BASELINES, TESTS_BANK, bank_select  # noqa: E402
 from chip_check import ANSI, command  # noqa: E402
+from synth_port import find_synth_port
 
 SELF_TEST_PASS = "self-test: the chip does what the model says"
 SELF_TEST_FAIL = "THE CHIP DOES NOT DO WHAT THE MODEL SAYS"
@@ -198,13 +200,22 @@ def main():
                         help="the baselines to play, comma-separated, in order (baselines.py)")
     parser.add_argument("--fs", help="load this bitstream first (SRAM)")
     parser.add_argument("--loader", default="openFPGALoader", help="--fs: the loader")
-    parser.add_argument("--console", default="/dev/ttyACM0", help="the firmware's serial console")
-    parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
+    parser.add_argument("--console", default=None,
+                        help="the firmware's serial console (default: the CH343 in the socket marked COM)")
+    parser.add_argument("--port", default=None, help="the ALSA sequencer port of the synth (default: the Noaidi client)")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--boot-seconds", type=float, default=16.0, help="how long the boot log is read")
     parser.add_argument("--tail", type=float, default=24.0, help="seconds recorded after the triad's release")
     parser.add_argument("--no-mp3", action="store_true", help="no MP3 for review")
     args = parser.parse_args()
+    if args.port is None:
+        args.port = find_synth_port()
+        if args.port is None:
+            raise SystemExit("no %s client on the sequencer; pass --port" % "Noaidi")
+        print("synth port: %s" % args.port)
+    if args.console is None:
+        args.console = find_console()
+    print("console: %s" % args.console)
     names = args.baseline.split(",")
     unknown = [name for name in names if name not in BASELINES]
     if unknown:

@@ -31,6 +31,10 @@ import tomllib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ble_midi_fuzz import NOAIDI_MAC, bt  # noqa: E402
 from midi_tx_check import CONNECT_SECONDS, Console, describe, open_ports, received  # noqa: E402
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_port import find_console  # noqa: E402
 
 # cc_map::dump()'s messages, in order (the RPN select bytes appear twice).
 DUMP = [7, 10, 101, 100, 6, 101, 100,
@@ -73,11 +77,13 @@ def expected_from_toml(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
+    ap.add_argument("--port", default=None, help="the ESP32 console")
     ap.add_argument("--program", type=int, default=1, help="the Program Change to send, on the channel's current bank (0 is General MIDI's, 1 Factory)")
     ap.add_argument("--toml", default=None, help="the program's preset file, for the value check")
     ap.add_argument("--no-reset", action="store_true")
     args = ap.parse_args()
+    if args.port is None:
+        args.port = find_console()
 
     from alsa_midi import ControlChangeEvent, ProgramChangeEvent
 

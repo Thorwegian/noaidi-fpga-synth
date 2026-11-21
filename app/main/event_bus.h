@@ -45,6 +45,7 @@ typedef enum {
     MIDI_SOURCE_DIN1,         // UART1, the first DIN input
     MIDI_SOURCE_DIN2,         // UART2, the second DIN input
     MIDI_SOURCE_BLE,          // MIDI over Bluetooth LE
+    MIDI_SOURCE_USB,          // the chip's USB-OTG socket, as a USB MIDI device
 } midi_source_t;
 
 // A preset request: replace the active preset, or copy it out. Sent
