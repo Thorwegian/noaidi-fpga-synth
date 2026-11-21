@@ -336,6 +336,12 @@ ports.
 
   The ceiling is sharp between 8.9 and 8.0 MHz, which is what a cable-limited
   link looks like; there is nothing gradual in it.
+- **8 MHz is a stopgap for this prototype's leads, not a rate the link needs.**
+  The master is not the constraint (nextpnr closes the domain at 230–269 MHz)
+  and the design has run clean at 10, 20 and 40 MHz on better wiring; the
+  ceiling here is the hanging jumper leads and their contacts. The board being
+  ordered in place of this one gets its ceiling measured with `csp rate <hz>`,
+  and the firmware's default set from that measurement.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the
