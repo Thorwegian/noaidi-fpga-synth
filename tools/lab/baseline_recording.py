@@ -17,7 +17,7 @@ usage: baseline_recording.py <out.wav> [--bank N] [--program N[,N...]]
                              [--device hw:1,0] [--tail SECONDS]
 
 The preset is chosen as a player's controller would choose it, by Bank Select
-and a Program Change (app/storage/banks.toml: bank 0 is Factory, 0 Supersaw,
+and a Program Change (app/storage/banks.toml: bank 1 is Factory, 0 Supersaw,
 1 Galaxy; the lab's baselines are the Tests bank's programs, baselines.py);
 several programs, comma-separated, play
 the sequence once each in one recording, a Program Change before each walk
@@ -53,8 +53,8 @@ VELOCITY = 0x64
 def main():
     parser = argparse.ArgumentParser(description="the baseline recording")
     parser.add_argument("out", help="the WAV file to write")
-    parser.add_argument("--bank", type=int, default=0,
-                        help="the bank the programs are of (Bank Select goes out before every Program Change): 0 is Factory")
+    parser.add_argument("--bank", type=int, default=1,
+                        help="the bank the programs are of (Bank Select goes out before every Program Change): 1 is Factory, 0 is General MIDI's")
     parser.add_argument("--program", default="1",
                         help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy), or several comma-separated, the sequence once each; "
                              "negative sends no Program Change (the preset loaded already)")

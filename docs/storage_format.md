@@ -422,13 +422,19 @@ is its program number, so a bank has no gaps.
 format = 1
 
 [bank.0]
-name = "Factory"
+name = "GM"
 programs = [
-    "Presets/Factory/Pads/Supersaw.toml",       # program 0
-    "Presets/Factory/Leads/RnB Whistle.toml",   # program 1
+    "Presets/Factory/GM/Init.toml",             # program 0: not yet made
+    "Presets/Factory/GM/FrenchHorn.toml",       # program 1
 ]
 
 [bank.1]
+name = "Factory"
+programs = [
+    "Presets/Factory/Pads/Supersaw.toml",       # program 0
+]
+
+[bank.2]
 name = "User"
 programs = []
 ```
@@ -455,6 +461,11 @@ programs = []
   nothing.
 - **Reading:** `banks.toml` is read when a Program Change needs it.
   A missing or unreadable file means there are no banks.
+- **Bank 0 is General MIDI's.** Its programs are in GM's order as the
+  specification numbers them, one preset a program, so a GM file's Bank
+  Select 0 and Program Change reach the sound it means. A GM program not
+  yet made answers with the init sound, `Presets/Factory/GM/Init.toml`,
+  and the bank grows in program order.
 - **The Tests bank** is bank 16383, the highest number there is (Bank
   Select MSB 127, LSB 127): its programs are the presets of
   `Presets/Factory/Tests`, and the lab's acceptance loads them by Bank
@@ -518,7 +529,8 @@ The factory presets and the default `system.toml` live in the repo
 under `app/storage/`, mirroring the root above. The sound the synth
 starts with is `Presets/Factory/Pads/Supersaw.toml`: `system.toml`
 names it as the startup preset, and `banks.toml` makes it program 0 of
-bank 0, "Factory", followed by the other factory presets; the presets of
+bank 1, "Factory", followed by the other factory presets; bank 0 is
+General MIDI's, its sounds under `Presets/Factory/GM`; the presets of
 `Presets/Factory/Tests` are the programs of bank 16383, "Tests", and of no
 other. `make fw-test` checks that
 every factory preset and `banks.toml` read and are already in the

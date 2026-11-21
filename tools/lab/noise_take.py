@@ -24,6 +24,8 @@ import subprocess
 import threading
 import time
 
+from baselines import bank_select
+
 SHUT = [(73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
 SWEEP = [(26, 0), (24, 0), (20, 127), (29, 0), (30, 127), (71, 96), (31, 0), (74, 16)]
 SEVEN_PLUS_ONE = [(26, 64), (24, 64), (20, 0), (21, 127), (71, 0), (74, 127)]
@@ -34,7 +36,7 @@ SWEEP_SECONDS = 4.0
 def main():
     parser = argparse.ArgumentParser(description="the noise waveform's take")
     parser.add_argument("out", help="the WAV file to write")
-    parser.add_argument("--program", type=int, default=0, help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy)")
+    parser.add_argument("--program", type=int, default=0, help="MIDI program in the Factory bank, bank 1: 0 Supersaw, 1 Galaxy")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=3.0, help="seconds recorded after the last release")
@@ -70,7 +72,7 @@ def controls(midi, pairs):
 def take(args, midi):
     midi("FE")
     time.sleep(0.3)
-    midi("C0 %02X" % args.program)
+    midi(*bank_select(1), "C0 %02X" % args.program)
     time.sleep(1.0)
     controls(midi, SHUT + SWEEP)
     time.sleep(0.5)

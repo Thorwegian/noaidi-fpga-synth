@@ -318,7 +318,7 @@ def main():
                             take + ".mp3"])
     port.close()
     # A Program Change without a Bank Select, a soak's or a player's, is of
-    # the Factory bank again.
+    # the Factory bank (bank 1) again.
     send(args.port, *bank_select(0))
 
     def word(ok):
