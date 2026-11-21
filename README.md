@@ -26,7 +26,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
                                          a processor that computes
                                          every control signal
                                          ("gateware")
-                                         ──► SPDIF/TOSLINK @ 97/48 kHz + I2S @ 96 kHz
+                                         ──► SPDIF/TOSLINK @ 96/48 kHz + I2S @ 96 kHz
 ```
 
 - **Gateware** (SystemVerilog, `rtl/`): a time-division-multiplexed
