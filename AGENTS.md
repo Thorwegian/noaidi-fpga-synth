@@ -38,7 +38,7 @@
 
 - Agents use Mermaid.js for diagrams and Matplotlib for graphs.
 
-- Agents use Numpy, Scipy and Essentia for audio analysis.
+- Agents use Numpy, Scipy and Essentia for audio analysis. Essentia is the agent's ear, not the human's: an agent hears nothing, so a description of the recording is all it has to judge a sound by. Reach for the perceptual descriptions first (log attack time, sensory dissonance, inharmonicity, tristimulus, EBU R128 loudness), which say what the sound is like, and the signal's own (pitch per frame, centroid, envelope) after them, which say only that the output is as expected.
 
 - Agents write canonical C++ with the STL, *never* janky C hacks (C-style buffer juggling, sentinel values). C++ where it protects (RAII, std::string/std::string_view, std::optional, strong types, no raw buffers); a libc or POSIX call where it is the precise tool for the job (strcasestr, fsync, rename): chip (newlib) and host (glibc) are both POSIX. C code that does not conform goes on the agent's task list: agents *will* port C modules to C++ at every chance (dependencies excepted).
 
