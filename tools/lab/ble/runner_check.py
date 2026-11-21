@@ -17,7 +17,7 @@ Starts tools/osc_panel/runner.py, plays Open Stage Control's part on its port
 
 Always stops the runner, disconnects and untrusts at the end.
 
-    ~/.noaidi-blenv/bin/python3 tools/lab/ble/runner_check.py [--port /dev/ttyACM0]
+    ~/.noaidi-blenv/bin/python3 tools/lab/ble/runner_check.py [--port PORT]
 """
 import argparse
 import os
@@ -30,6 +30,10 @@ sys.path.insert(0, HERE)
 from ble_midi_fuzz import NOAIDI_MAC  # noqa: E402
 from feedback_check import DUMP  # noqa: E402
 from midi_tx_check import Console, find_port, received  # noqa: E402
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from console_port import find_console  # noqa: E402
 
 RUNNER = os.path.join(HERE, "..", "..", "osc_panel", "runner.py")
 RESET_BUDGET = 40.0  # seconds from the reset to the state's return (reconnect, link delay, dump)
@@ -52,8 +56,10 @@ def wait_for_dump(client, budget):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
+    ap.add_argument("--port", default=None, help="the ESP32 console")
     args = ap.parse_args()
+    if args.port is None:
+        args.port = find_console()
 
     from alsa_midi import PortCaps, ProgramChangeEvent, SequencerClient
 

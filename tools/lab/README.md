@@ -12,9 +12,9 @@ each carry their own docstring; this is the index and the facts around them.
 ```mermaid
 flowchart LR
     cloud[cloud build box<br/>no board: builds, host tests, cosim] -. ssh -p 23000 .-> lab[lab computer<br/>the repo checkout, the board]
-    lab -- /dev/ttyACM0 115200<br/>console, firmware flash --> esp[ESP32-S3<br/>firmware]
+    lab -- CH343 (by-id) 115200<br/>console, firmware flash --> esp[ESP32-S3<br/>firmware]
     lab -- /dev/ttyUSB0 and 1<br/>FTDI: openFPGALoader, BL616 CLI --> fpga[Tang Nano 20K<br/>GW2AR-18C gateware]
-    lab -- ALSA 16:0 CH345<br/>USB-MIDI into din1 --> esp
+    lab -- ALSA "Model 1"<br/>USB MIDI, both ways --> esp
     osc[Open Stage Control] -- BLE MIDI<br/>the synth's single connection --> esp
     fpga -- S/PDIF --> cap[USB sound card hw:1,0<br/>the capture]
 ```

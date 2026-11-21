@@ -32,7 +32,7 @@ has its explanation in the same output.
 
 usage: acceptance.py --out DIR [--label NAME] [--baseline NAME[,NAME...]]
                      [--fs BITSTREAM] [--loader PATH]
-                     [--console /dev/ttyACM0] [--port 16:0] [--device hw:1,0]
+                     [--console PORT] [--port PORT] [--device hw:1,0]
                      [--boot-seconds 16] [--tail 24] [--no-mp3]
 
 With --fs the bitstream is loaded first (openFPGALoader, SRAM). The ESP32 is
