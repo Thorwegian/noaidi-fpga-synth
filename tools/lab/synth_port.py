@@ -11,9 +11,9 @@ while looking like it worked.
 
 import re
 
-# The ALSA client is named after the USB product string, which is the
-# manufacturer's and the model's; the prefix survives a rename of the model.
-SYNTH_CLIENT = "Noaidi"
+# The ALSA client is named after the USB product string, S-1; the older
+# Noaidi prefix is kept so a differently-named prototype is still found.
+SYNTH_CLIENTS = ("S-1", "Noaidi")
 
 
 def find_synth_port():
@@ -28,7 +28,8 @@ def find_synth_port():
                     client = (int(found.group(1)), found.group(2))
                     continue
                 port = re.match(r"\s*Port\s+(\d+)\s*:", line)
-                if port and client and client[1].startswith(SYNTH_CLIENT):
+                if port and client and any(client[1].startswith(name)
+                                           for name in SYNTH_CLIENTS):
                     return "%d:%s" % (client[0], port.group(1))
     except OSError:
         pass

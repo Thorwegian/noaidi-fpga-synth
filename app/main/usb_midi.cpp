@@ -75,7 +75,7 @@ const tusb_desc_device_t kDevice = {
 // Index 0 is the language ID; the serial index is left NULL, and esp_tinyusb
 // fills it with the chip's MAC, so the port keeps its identity across flashes.
 const char *kStrings[] = {
-        "\x09\x04", "Noaidi", "Noaidi Model 1", nullptr,
+        "\x09\x04", "NOAIDI Research", "S-1", nullptr,
 };
 
 // ── The incoming stream ────────────────────────────────────────────

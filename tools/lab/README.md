@@ -69,7 +69,7 @@ port. The synth's own preset saves are bare TOML without the copyright header
 ## MIDI into the synth
 
 - **The synth's own USB port (use this).** The socket marked `USB` presents the
-  synth to the lab computer as a MIDI device, ALSA client `Noaidi Model 1`, one
+  synth to the lab computer as a MIDI device, ALSA client `S-1`, one
   cable in both directions: notes and controllers in, the synth's parameter
   feedback and preset dump back out on the same wire. The CH345 adapter it
   replaces is retired from the bench.
