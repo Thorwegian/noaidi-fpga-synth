@@ -101,7 +101,8 @@ CC values share the top rung, 21 of them for the amp envelope's D and R.
 | 79 | amp env S | −60.2 dB × (1 − `cc/128`), 0.47 dB a step — sustain is a LEVEL (higher = louder), NOT inverted; knob up = louder |
 | 102 / 103 / 105 | MOD env A / D / R | the same ladder: A 1 ms … 32 s, D and R 4.7 ms … 151 s |
 | 104 | MOD env S | `cc/128` of the depth (a level, not inverted) |
-| 107 | MOD env depth | BIPOLAR: centre 64 = off, SQUARE-LAW taper, d·\|d\|·3/64 semitones with d = `cc − 64`: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule) |
+| 107 | MOD CUT AMT | BIPOLAR: centre 64 = off, SQUARE-LAW taper, d·\|d\|·3/64 semitones of cutoff with d = `cc − 64`: ~±1 oct at quarter turn, ±4 at half, ±16 at the rails (the authority rule) |
+| 108 | MOD PIT AMT | the same taper over the pitch amount's ±48 semitones: d·\|d\|/84, so ±47 at the rails, ±12 at half travel, ±3 at a quarter turn. One envelope and one velocity amount (CC 87) drive both amounts |
 
 **LFOs** (2)
 | CC | Target | Notes |

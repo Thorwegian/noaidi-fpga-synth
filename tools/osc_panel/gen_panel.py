@@ -254,9 +254,8 @@ root_widgets = [
         knob(105, "Release", 107),
         knob(107, "Env>Cutoff", 87, bipolar=True),  # 64 = off; square-law
                                                     #: 87 ~ boot +2 oct
-        # CC 108 (env dest) deliberately absent: stored-only in firmware,
-        # cutoff is the sole implemented destination - a knob that
-        # does nothing erodes trust in the panel.
+        knob(108, "Env>Pitch", 64, bipolar=True),    # 64 = off; the same
+                                                    # square law over ±48 st
     ]),
     section("LFOs", [
         knob(76, "LFO1 Rate", 64),

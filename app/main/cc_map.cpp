@@ -201,6 +201,14 @@ float mod_depth_of(int value) {
     return d * std::fabs(d) * (3.0f / 64.0f);
 }
 
+// The mod envelope's pitch amount: the same bipolar square-law taper over the
+// field's ±48 semitones, so the rails reach the range and a quarter turn is a
+// few semitones. In semitones, d · |d| / 84.
+float mod_pitch_of(int value) {
+    const float d = static_cast<float>(value - 64);
+    return d * std::fabs(d) * (1.0f / 84.0f);
+}
+
 // LFO rate: exponential 0.03 Hz … 30 Hz, one equal frequency ratio a step.
 float lfo_rate_of(int value) {
     return 0.03f * std::pow(1000.0f, static_cast<float>(value) / 127.0f);
@@ -394,6 +402,9 @@ bool apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
     case 107:
         preset.mod_env.depth = mod_depth_of(value);
         return true;
+    case 108:
+        preset.mod_env.pitch = mod_pitch_of(value);
+        return true;
     case 87:
         preset.mod_env.velocity = percent_of(value);
         return true;
@@ -506,6 +517,7 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
     emit(104, nearest(mod_sustain_of, preset.mod_env.sustain), user);
     emit(105, nearest(fall_of, preset.mod_env.release), user);
     emit(107, nearest(mod_depth_of, preset.mod_env.depth), user);
+    emit(108, nearest(mod_pitch_of, preset.mod_env.pitch), user);
     emit(87, nearest(percent_of, preset.mod_env.velocity), user);
     // the LFOs
     dump_lfo(preset, knobs, 0, emit, user);
@@ -513,7 +525,7 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
 }
 
 int dump_length() {
-    return 2 + rpn_messages + 2 * 4 + 4 + 6 + 5 + 6 + 2 * 5;
+    return 2 + rpn_messages + 2 * 4 + 4 + 6 + 5 + 7 + 2 * 5;
 }
 
 } // namespace cc_map
