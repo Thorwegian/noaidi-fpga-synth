@@ -21,8 +21,18 @@ CONFIG_SPIRAM_USE_MALLOC=y
 # two of them running at once has not been examined.
 CONFIG_FREERTOS_UNICORE=y
 
-# The console is on the chip's USB-Serial/JTAG controller (console.c).
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# The console is on the module's CH343 USB-to-UART bridge, the socket marked
+# COM: UART0 on GPIO43 and GPIO44 at 115200, the rate the ROM prints its boot
+# lines at, so one setting reads the whole boot log (console.c).
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# The socket marked USB is USB-OTG's alone. The chip's USB-Serial/JTAG
+# controller shares its PHY with OTG and is on after every power-on, so it is
+# turned off here: with no console on it, esp_system disables its clock and
+# its pad at startup (port/soc/esp32s3/clk.c). The bootloader keeps it for
+# download mode; the secondary console, which ESP-IDF would put back on it,
+# is off with it.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=n
 
 # BLE MIDI: NimBLE peripheral hosting the standard
 # MIDI 1.0 over BLE service (03B80E5A-EDE8-4B33-A751-6CE34EC4C700).

@@ -8,7 +8,7 @@ idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
                        "csp/csp.cpp" "csp/program_builder.cpp" "csp/envelope.cpp" "csp/dsp_graph.cpp" "csp/selftest.cpp"
                        "../lib/tomlc17/src/tomlc17.c"
                        PRIV_REQUIRES spi_flash esp_app_format esp_driver_spi esp_driver_gpio esp_driver_uart esp_timer
-                                     nvs_flash esp_driver_usb_serial_jtag bt esp_ringbuf esp_psram
+                                     nvs_flash bt esp_ringbuf esp_psram
                                      fatfs wear_levelling vfs
                        INCLUDE_DIRS ""
                        PRIV_INCLUDE_DIRS "../lib/tomlc17/src")

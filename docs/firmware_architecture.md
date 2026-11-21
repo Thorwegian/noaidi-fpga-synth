@@ -202,8 +202,9 @@ active preset out the same way.
 
 ## Console
 
-`console` owns the USB serial port (USB-Serial/JTAG). On a VT100
-terminal it splits the screen like an IRC client: a scroll region for
+`console` owns the firmware's console channel: UART0 at 115200, the module's
+CH343 bridge in the socket marked `COM`. On a VT100 terminal it splits the
+screen like an IRC client: a scroll region for
 everything printed, a status bar, and an input line with a line
 editor, history and Tab completion. Until a terminal has answered its
 size query it draws no layout, and a script reading the port gets plain

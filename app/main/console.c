@@ -11,11 +11,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "driver/usb_serial_jtag.h"
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
+#include "sdkconfig.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+
+// The console's channel: UART0 on the CH343 bridge, the socket marked COM
+// (docs/esp32s3_hw678.md), at the baud sdkconfig sets. The chip's
+// USB-Serial/JTAG controller shares its PHY with USB-OTG, so nothing here and
+// nothing in sdkconfig may keep it on: the socket marked USB belongs to OTG,
+// whose first line of code would otherwise take the console away.
+#define CONSOLE_UART     UART_NUM_0
+#define CONSOLE_TX_GPIO  43
+#define CONSOLE_RX_GPIO  44
 
 #define LINE_MAX_BYTES   160 // the input line
 #define OUT_LINE_BYTES   256 // one printed line; longer ones split
@@ -36,20 +47,15 @@ static char s_status[128];
 static int s_meter; // columns of the status bar in normal video
 static char s_prompt[96] = "$ ";
 
-// Raw output to the USB serial port. Dropped when no host is attached,
-// and without waiting once a write has timed out (a host is attached but
-// nothing reads the port, e.g. during boot), so a printing task never
-// stalls on an absent terminal. The first write that fits again ends
-// that.
-static bool s_stalled;
-
+// Raw output to the console's UART. A UART has no signal for an attached
+// host, so every line leaves the pin whether or not anything listens, and a
+// write waits when the driver's transmit buffer is full: 1024 bytes drain in
+// 89 ms at 115200.
 static void term_write(const char *buf, size_t len) {
-    if (!len || !usb_serial_jtag_is_connected()) {
+    if (!len) {
         return;
     }
-    size_t n = (size_t) usb_serial_jtag_write_bytes(
-            buf, len, s_stalled ? 0 : pdMS_TO_TICKS(20));
-    s_stalled = n < len;
+    uart_write_bytes(CONSOLE_UART, buf, len);
 }
 
 static void term_puts(const char *s) {
@@ -643,7 +649,8 @@ static void console_task(void *arg) {
 
     while (1) {
         uint8_t c;
-        int got = usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(100));
+        int got = (int) uart_read_bytes(CONSOLE_UART, &c, 1,
+                                        pdMS_TO_TICKS(100));
         xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
         if (s_query_sent
             && esp_timer_get_time() - s_query_sent > SIZE_QUERY_US) {
@@ -735,12 +742,20 @@ static void console_task(void *arg) {
 
 void console_init(void) {
     s_lock = xSemaphoreCreateRecursiveMutex();
-    // The driver insists on buffers strictly larger than 64 bytes.
-    usb_serial_jtag_driver_config_t cfg = {
-            .rx_buffer_size = 256,
-            .tx_buffer_size = 1024,
+    const uart_config_t cfg = {
+            .baud_rate    = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+            .data_bits    = UART_DATA_8_BITS,
+            .parity       = UART_PARITY_DISABLE,
+            .stop_bits    = UART_STOP_BITS_1,
+            .flow_ctrl    = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk   = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&cfg));
+    ESP_ERROR_CHECK(uart_param_config(CONSOLE_UART, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(CONSOLE_UART, CONSOLE_TX_GPIO,
+                                 CONSOLE_RX_GPIO, UART_PIN_NO_CHANGE,
+                                 UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(CONSOLE_UART, 256, 1024, 0, NULL, 0));
+    uart_vfs_dev_use_driver(CONSOLE_UART);
 #ifdef FDEV_SETUP_STREAM
     fflush(stdout);
     stdout = &s_stream;
