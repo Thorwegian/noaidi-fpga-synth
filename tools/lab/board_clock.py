@@ -53,7 +53,10 @@ def set_clock(khz, port=PORT):
     """Sets the system clock to `khz` and returns the CLI's reply."""
     cli = open_cli(port)
     try:
-        return command(cli, "pll_clk O0=%dK" % khz)
+        # -s stores it, so the BL616 re-applies it at the next power-up; the
+        # bare command leaves the FPGA unclocked after a cycle, which reads as
+        # a dead design rather than an unset clock.
+        return command(cli, "pll_clk O0=%dK -s" % khz)
     finally:
         cli.close()
 
