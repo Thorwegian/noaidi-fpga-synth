@@ -74,7 +74,7 @@ def expected_from_toml(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="/dev/ttyACM0", help="the ESP32 console")
-    ap.add_argument("--program", type=int, default=1, help="the Program Change to send (bank 0)")
+    ap.add_argument("--program", type=int, default=1, help="the Program Change to send, on the channel's current bank (0 is General MIDI's, 1 Factory)")
     ap.add_argument("--toml", default=None, help="the program's preset file, for the value check")
     ap.add_argument("--no-reset", action="store_true")
     args = ap.parse_args()

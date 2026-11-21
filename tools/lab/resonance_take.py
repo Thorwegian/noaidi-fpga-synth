@@ -24,6 +24,8 @@ import subprocess
 import threading
 import time
 
+from baselines import bank_select
+
 CONTROLS = [(71, 127), (74, 60), (106, 69), (31, 64), (30, 127), (73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
 EVENTS = [([48], 127), ([55], 127), ([60, 64, 67], 127), ([48], 0)]   # the notes, and CC 30's value before them
 
@@ -31,7 +33,7 @@ EVENTS = [([48], 127), ([55], 127), ([60, 64, 67], 127), ([48], 0)]   # the note
 def main():
     parser = argparse.ArgumentParser(description="the resonance limiter's take")
     parser.add_argument("out", help="the WAV file to write")
-    parser.add_argument("--program", type=int, default=0, help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy)")
+    parser.add_argument("--program", type=int, default=0, help="MIDI program in the Factory bank, bank 1: 0 Supersaw, 1 Galaxy")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=3.0, help="seconds recorded after the last release")
@@ -63,7 +65,7 @@ def main():
 def take(args, midi):
     midi("FE")
     time.sleep(0.3)
-    midi("C0 %02X" % args.program)
+    midi(*bank_select(1), "C0 %02X" % args.program)
     time.sleep(1.0)
     midi(*("B0 %02X %02X" % (cc, value) for cc, value in CONTROLS))
     time.sleep(0.5)

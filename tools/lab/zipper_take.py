@@ -24,6 +24,8 @@ import subprocess
 import threading
 import time
 
+from baselines import bank_select
+
 NOTES = [60, 61, 62, 63, 64]
 VELOCITY = 0x64
 CONTROLS = [(73, 127), (75, 64), (79, 127), (72, 100), (102, 127), (103, 100), (107, 110), (71, 105)]
@@ -32,7 +34,7 @@ CONTROLS = [(73, 127), (75, 64), (79, 127), (72, 100), (102, 127), (103, 100), (
 def main():
     parser = argparse.ArgumentParser(description="the control-stepping take")
     parser.add_argument("out", help="the WAV file to write")
-    parser.add_argument("--program", type=int, default=1, help="MIDI program (Factory bank: 0 Supersaw, 1 Galaxy)")
+    parser.add_argument("--program", type=int, default=1, help="MIDI program in the Factory bank, bank 1: 0 Supersaw, 1 Galaxy")
     parser.add_argument("--port", default="16:0", help="the ALSA sequencer port of the synth")
     parser.add_argument("--device", default="hw:1,0", help="the ALSA capture device of the S/PDIF input")
     parser.add_argument("--tail", type=float, default=4.0, help="seconds recorded after the last release")
@@ -58,7 +60,7 @@ def main():
     midi("FE")
     time.sleep(0.3)
 
-    midi("C0 %02X" % args.program)
+    midi(*bank_select(1), "C0 %02X" % args.program)
     time.sleep(1.0)
     midi(*("B0 %02X %02X" % (cc, value) for cc, value in CONTROLS))
     time.sleep(0.5)

@@ -1,6 +1,74 @@
 format = 1
 
 [bank.0]
+name = "GM"
+# General MIDI's program numbers, in order: 0 … 59 answer with the init
+# sound until each is made; program 60 is GM's 61, the French Horn.
+programs = [
+    "Presets/Factory/GM/Init.toml",       # 0
+    "Presets/Factory/GM/Init.toml",       # 1
+    "Presets/Factory/GM/Init.toml",       # 2
+    "Presets/Factory/GM/Init.toml",       # 3
+    "Presets/Factory/GM/Init.toml",       # 4
+    "Presets/Factory/GM/Init.toml",       # 5
+    "Presets/Factory/GM/Init.toml",       # 6
+    "Presets/Factory/GM/Init.toml",       # 7
+    "Presets/Factory/GM/Init.toml",       # 8
+    "Presets/Factory/GM/Init.toml",       # 9
+    "Presets/Factory/GM/Init.toml",       # 10
+    "Presets/Factory/GM/Init.toml",       # 11
+    "Presets/Factory/GM/Init.toml",       # 12
+    "Presets/Factory/GM/Init.toml",       # 13
+    "Presets/Factory/GM/Init.toml",       # 14
+    "Presets/Factory/GM/Init.toml",       # 15
+    "Presets/Factory/GM/Init.toml",       # 16
+    "Presets/Factory/GM/Init.toml",       # 17
+    "Presets/Factory/GM/Init.toml",       # 18
+    "Presets/Factory/GM/Init.toml",       # 19
+    "Presets/Factory/GM/Init.toml",       # 20
+    "Presets/Factory/GM/Init.toml",       # 21
+    "Presets/Factory/GM/Init.toml",       # 22
+    "Presets/Factory/GM/Init.toml",       # 23
+    "Presets/Factory/GM/Init.toml",       # 24
+    "Presets/Factory/GM/Init.toml",       # 25
+    "Presets/Factory/GM/Init.toml",       # 26
+    "Presets/Factory/GM/Init.toml",       # 27
+    "Presets/Factory/GM/Init.toml",       # 28
+    "Presets/Factory/GM/Init.toml",       # 29
+    "Presets/Factory/GM/Init.toml",       # 30
+    "Presets/Factory/GM/Init.toml",       # 31
+    "Presets/Factory/GM/Init.toml",       # 32
+    "Presets/Factory/GM/Init.toml",       # 33
+    "Presets/Factory/GM/Init.toml",       # 34
+    "Presets/Factory/GM/Init.toml",       # 35
+    "Presets/Factory/GM/Init.toml",       # 36
+    "Presets/Factory/GM/Init.toml",       # 37
+    "Presets/Factory/GM/Init.toml",       # 38
+    "Presets/Factory/GM/Init.toml",       # 39
+    "Presets/Factory/GM/Init.toml",       # 40
+    "Presets/Factory/GM/Init.toml",       # 41
+    "Presets/Factory/GM/Init.toml",       # 42
+    "Presets/Factory/GM/Init.toml",       # 43
+    "Presets/Factory/GM/Init.toml",       # 44
+    "Presets/Factory/GM/Init.toml",       # 45
+    "Presets/Factory/GM/Init.toml",       # 46
+    "Presets/Factory/GM/Init.toml",       # 47
+    "Presets/Factory/GM/Init.toml",       # 48
+    "Presets/Factory/GM/Init.toml",       # 49
+    "Presets/Factory/GM/Init.toml",       # 50
+    "Presets/Factory/GM/Init.toml",       # 51
+    "Presets/Factory/GM/Init.toml",       # 52
+    "Presets/Factory/GM/Init.toml",       # 53
+    "Presets/Factory/GM/Init.toml",       # 54
+    "Presets/Factory/GM/Init.toml",       # 55
+    "Presets/Factory/GM/Init.toml",       # 56
+    "Presets/Factory/GM/Init.toml",       # 57
+    "Presets/Factory/GM/Init.toml",       # 58
+    "Presets/Factory/GM/Init.toml",       # 59
+    "Presets/Factory/GM/FrenchHorn.toml", # 60
+]
+
+[bank.1]
 name = "Factory"
 programs = [
     "Presets/Factory/Pads/Supersaw.toml",        # 0
@@ -11,7 +79,7 @@ programs = [
     "Presets/Factory/Bells/Future.toml",         # 5
 ]
 
-[bank.1]
+[bank.2]
 name = "User"
 programs = []
 
@@ -24,5 +92,6 @@ programs = [
     "Presets/Factory/Tests/Stack2Pad.toml",  # 3
     "Presets/Factory/Tests/Stack3Lead.toml", # 4
     "Presets/Factory/Tests/Stack4Bell.toml", # 5
+    "Presets/Factory/Tests/ModPitch.toml",   # 6
 ]
 # end
