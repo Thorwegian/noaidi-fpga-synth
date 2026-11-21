@@ -31,6 +31,11 @@ flowchart LR
   `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
   volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
   Loading gateware does not touch the console port.
+- **Check the checkout before blaming the gateware.** A link that answers
+  `no ID nonet` after a fresh build usually means the tree is behind the
+  firmware: `git status -sb` on the lab computer's checkout first, then rebuild.
+  Silence after a power cycle is just an empty FPGA, and a stale tree only
+  looks like a design fault.
 - **The capture card must be told which input to use.** The saved ALSA state
   is applied only to a card that is up at boot, so a card that dies and
   re-enumerates on its own keeps the driver's defaults: the capture switches
