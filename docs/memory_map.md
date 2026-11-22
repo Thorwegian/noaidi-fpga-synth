@@ -331,9 +331,10 @@ ports.
   | 8.0 MHz | 0 |
 
   Clean everywhere the link is asked to run, and marginal only at the master's
-  40 MHz, which matches the ceiling recorded above. The firmware's default of
-  10 MHz therefore has margin on this prototype, and `csp rate <hz>` measures
-  it again on any harness that changes.
+  40 MHz, which matches the ceiling recorded above. The firmware asks for
+  20 MHz: one whole step under the first rate that fails, and 2.5 times the
+  boot image's speed. `csp rate <hz>` measures the ceiling again on any
+  harness that changes.
 - nextpnr reports the `u_spi.sclk` domain closing at 230–269 MHz, so the
   slave has enormous margin; the master is the constraint at every rate.
 - Raising the firmware default is therefore a free change whenever the
