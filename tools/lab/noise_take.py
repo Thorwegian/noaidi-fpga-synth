@@ -9,11 +9,12 @@ at osc 1 (CC 24 = 0, osc 2 muted), osc 1 on noise (CC 20 = 127), the
 low-pass (CC 29 = 0) as the cascade (CC 30 = 127), resonance three
 quarters up (CC 71 = 96), key tracking off (CC 31 = 0) so the cutoff is
 the knob alone, the amp envelope fast and every other route to the
-cutoff shut; C3 held while CC 74 climbs from 16 to 112 over four seconds,
-then back. Second, 7+1 (CC 26 = 64) with osc 1 on the saw (CC 20 = 0),
-osc 2 on noise (CC 21 = 127), the balance at the centre (CC 24 = 64), the
-resonance at Butterworth and the cutoff open: C3 for three seconds, the
-noise partial beside seven detuned saws. What to listen for: in the
+cutoff shut; C3 held while CC 74 climbs from note 0 to note 127 (8 Hz to
+12.5 kHz, the pair's rails) over four seconds, then back. Second, 7+1
+(CC 26 = 64) with osc 1 on the saw (CC 20 = 0), osc 2 on noise
+(CC 21 = 127), the balance at the centre (CC 24 = 64), the resonance at
+Butterworth and the cutoff at the top of its knob: C3 for three seconds,
+the noise partial beside seven detuned saws. What to listen for: in the
 first part a hiss with no pitch of its own and the filter's resonance
 sweeping through it, no tone under the hiss, no change of character
 with the note; in the second the supersaw with a breath of noise on it,
@@ -91,10 +92,10 @@ def take(args, midi):
     # part one: noise alone, the cutoff up and down under the note
     midi("90 30 64")
     for step in range(SWEEP_STEPS + 1):
-        midi("B0 4A %02X" % (16 + 96 * step // SWEEP_STEPS))
+        midi("B0 4A %02X" % (127 * step // SWEEP_STEPS))
         time.sleep(SWEEP_SECONDS / SWEEP_STEPS)
     for step in range(SWEEP_STEPS, -1, -1):
-        midi("B0 4A %02X" % (16 + 96 * step // SWEEP_STEPS))
+        midi("B0 4A %02X" % (127 * step // SWEEP_STEPS))
         time.sleep(SWEEP_SECONDS / SWEEP_STEPS)
     midi("80 30 40")
     time.sleep(1.5)

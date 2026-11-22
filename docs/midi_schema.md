@@ -81,8 +81,8 @@ units are [storage_format.md](storage_format.md)'s).
 **Filter**
 | CC | Target | Notes |
 |---|---|---|
-| 74 | cutoff — COARSE | 7-bit MSB; span ±8 octaves around the key-tracked base (the authority rule — full deflection reaches the closed rail) |
-| 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing); optional |
+| 74 | cutoff — COARSE | the note the filter sits on: 128 units a semitone from note 0 (8.18 Hz), so one coarse step is a semitone and the pair's top is note 128, 13.27 kHz. Key tracking (CC 31) moves the cutoff from this base with the key; the mod wheel and the MOD envelope's cut amount reach past the top |
+| 106 | cutoff — FINE | fine 7 bits (74+32, the MIDI coarse/fine pairing): the 128ths of a semitone above the coarse note, 0.78 cents each, of which the filter's word resolves 1.172; optional |
 | 71 | resonance | Q = 2^(5.5 × `val/127`) / √2: 0 = Butterworth, 127 = 5.5 octaves of Q above it (Q 32, sharp but stable), equal Q ratio per step; drives the channel's resonance register |
 | 29 | filter type | discrete: 3 types only — LP/BP/HP (RTL S6/S9 case; any 4th code falls into the LP default). CC maps `(val*3)>>7` → 0..2 |
 | 30 | filter 12/24 dB | discrete: single section (12 dB/oct) / cascade (two 2-pole sections, 24 dB/oct) |

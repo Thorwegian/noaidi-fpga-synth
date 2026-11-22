@@ -13,6 +13,7 @@
 //   cc_map_test [preset.toml ...]
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -189,6 +190,28 @@ void test_dump_shape() {
     }
 }
 
+void test_cutoff_grid() {
+    // CC 74 is a note: a coarse step is a semitone and the fine is the
+    // 128ths of the one above it, so the pair's position is readable.
+    preset_t preset;
+    preset_init(&preset);
+    cc_map::Knobs knobs;
+    check(cc_map::apply(preset, knobs, 74, 60), "CC 74 is a preset CC");
+    const float on_middle_c = preset.filter.cutoff;
+    check(std::fabs(on_middle_c - 261.6256f) < 0.05f,
+          "CC 74 = 60 puts the cutoff on middle C");
+    check(cc_map::apply(preset, knobs, 74, 61), "CC 74 = 61 applies");
+    check(std::fabs(preset.filter.cutoff / on_middle_c
+                    - std::exp2(1.0f / 12.0f))
+                  < 1e-4f,
+          "a coarse step is a semitone");
+    check(cc_map::apply(preset, knobs, 106, 64), "CC 106 applies");
+    check(std::fabs(preset.filter.cutoff / on_middle_c
+                    - std::exp2((1.0f + 64.0f / 128.0f) / 12.0f))
+                  < 1e-4f,
+          "the fine is the 128ths of a semitone");
+}
+
 void test_round_trip() {
     // The baseline is the init preset within the knobs' reach: preset_init()
     // holds a few values no knob lands on (a decay of 0.59 s where the knob's
@@ -248,6 +271,7 @@ void test_factory_preset(const char *path) {
 
 int main(int argc, char **argv) {
     test_dump_shape();
+    test_cutoff_grid();
     test_round_trip();
     for (int i = 1; i < argc; ++i) {
         test_factory_preset(argv[i]);

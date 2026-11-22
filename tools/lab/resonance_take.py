@@ -5,8 +5,8 @@
 usage: resonance_take.py <out.wav> [--program N] [--port CLIENT:PORT] [--device hw:1,0]
 The case the attenuation table could not handle and the limiter is for:
 resonance at the top (CC 71 = 127, Q 32), the cutoff on the fundamental
-(CC 74 = 60 and fine 106 = 69: 0.46 octave under the centre, where the
-base sits 5.5 semitones above the note; 100 % key tracking, CC 31 = 64),
+(CC 74 = 60 and fine 106 = 104: middle C and 0.8 semitone above it, where
+the ring sits just over the note; 100 % key tracking, CC 31 = 64),
 the cascade (CC 30 = 127), the amp attack at its fastest (CC 73 = 0, knob
 up is longer) so the onset is the filter's and not the envelope's, and
 every other route to the cutoff shut: the mod envelope's depth at the
@@ -28,7 +28,7 @@ import capture_card
 from baselines import bank_select
 from synth_port import find_synth_port
 
-CONTROLS = [(71, 127), (74, 60), (106, 69), (31, 64), (30, 127), (73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
+CONTROLS = [(71, 127), (74, 60), (106, 104), (31, 64), (30, 127), (73, 0), (107, 64), (1, 0), (77, 0), (115, 0), (110, 0), (116, 0)]
 EVENTS = [([48], 127), ([55], 127), ([60, 64, 67], 127), ([48], 0)]   # the notes, and CC 30's value before them
 
 

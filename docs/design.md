@@ -86,9 +86,10 @@ The power-on timbre is the factory preset `Pads/Supersaw.toml`
 sub**: osc1 is the 7-voice supersaw, osc2 a pure sine one octave below
 (fattens the saws without muddying the mid), through a **24 dB/oct**
 lowpass. The **filter sweep is widened and mod-wheel-driven**: CC 74/106
-spans ±8 octaves and the mod wheel opens ~+5 octaves — the wheel is
-the primary sweep control. With the wheel down the cutoff sits half an
-octave above the note, so the sweep starts fairly bright.
+addresses the cutoff as a note, a semitone a coarse step to note 128 at
+the top, and the mod wheel opens ~+5 octaves — the wheel is the primary
+sweep control. The startup preset's cutoff sits on middle C, so at 100 %
+key tracking the filter follows the note it plays.
 
 ## System topology
 
