@@ -48,7 +48,13 @@ ALL = (("saw", "Saw"), ("pulse", "Pulse"), ("triangle", "Tri"), ("sine", "Sine")
 
 
 def load_preset(path):
-    subprocess.run([sys.executable, BOARD, "load %s" % path], capture_output=True)
+    # The console resolves a preset relative to /storage/Presets, so a path
+    # from the checkout does not load: it answers with the error and leaves
+    # whatever was loaded in place, which reads as a shape that never changes.
+    result = subprocess.run([sys.executable, BOARD, "load %s" % path],
+                            capture_output=True, text=True)
+    if "loaded" not in result.stdout:
+        sys.exit("the preset did not load: %s\n%s" % (path, result.stdout))
 
 
 def track(samples, rate, low=200.0, high=8000.0):
