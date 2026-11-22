@@ -42,7 +42,7 @@ depth = 0
 pitch = 0
 
 [[lfo]]
-shape = "pulse"
+shape = "saw"
 rate = 7.2927
 destination = "pitch"
 depth = 6

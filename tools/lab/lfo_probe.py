@@ -7,22 +7,25 @@ An LFO is judged by its shape, and a shape is measured, not guessed: a square
 puts the pitch at two levels, a saw puts it at every level between them, and a
 triangle spends most of its time in the middle. This plays one note on a preset
 whose oscillator is a single sine with the filter out of the way, tracks the
-fundamental four to five hundred times a second, and says which of the three it
-saw, with the swing in semitones and the centre against the note's own octave.
+fundamental two hundred times a second, and names the shape it saw, with the
+swing in semitones and the centre against the note's own frequency.
 
-    lfo_probe.py [--preset PATH] [--note N] [--seconds S] [--plot FILE]
+    lfo_probe.py [--preset PATH --shape NAME] [--all] [--note N] [--plot FILE]
 
-The note defaults to 96, about a kilohertz in this engine's numbering, because a
-low note cannot be tracked fast enough to see a 7 Hz shape. `--plot` writes the
-trajectory and its histogram, which is how the sawtooth that started this
-(#591) was found: 1500 to 2900 Hz, flat across the band, an octave above where
-the note sits.
+--all runs every SineLfo<Shape> preset in the Tests folder and prints one table,
+marking each waveform that does not come out as its preset asked: the mapping
+from a preset's name to the wave the program runs is what it tests, and that is
+where #591's fault lived -- a pulse arriving as a ramp, and a saw as a square.
+
+The note defaults to 96, about two kilohertz in this engine's numbering, because
+a note at 64 Hz cannot be tracked fast enough to see a 7 Hz shape. `--plot`
+writes each trajectory with its histogram.
 """
 import argparse
 import os
 import subprocess
 import sys
-import tempfile
+import time
 import wave
 
 import numpy as np
@@ -32,26 +35,20 @@ from synth_port import find_synth_rawmidi  # noqa: E402
 
 BOARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board.py")
 CAPTURE = "hw:1,0"
+MIDDLE_C = 261.62557  # the engine's reference: note 60 at this rate
+FOLDER = "/Presets/Factory/Tests"
+
+# What each preset asks for, and what the probe must then see. A triangle and a
+# sine get one verdict between them: the program's sine is a parabolic
+# approximation (sound_engine.cpp's wave_at), so the two are the same shape to a
+# histogram, and telling them apart is not this test's job.
+WANTED = {"saw": {"sawtooth"}, "pulse": {"square"},
+          "triangle": {"triangle or sine"}, "sine": {"triangle or sine"}}
+ALL = (("saw", "Saw"), ("pulse", "Pulse"), ("triangle", "Tri"), ("sine", "Sine"))
 
 
 def load_preset(path):
     subprocess.run([sys.executable, BOARD, "load %s" % path], capture_output=True)
-
-
-def record(seconds):
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
-        name = handle.name
-    subprocess.run(["arecord", "-D", CAPTURE, "-f", "S16_LE", "-r", "48000",
-                    "-c", "2", "-d", str(int(seconds) + 1), name],
-                   capture_output=True)
-    with wave.open(name) as w:
-        rate = w.getframerate()
-        frames = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    os.unlink(name)
-    samples = frames.astype(float)
-    if len(samples) and samples.size % 2 == 0:
-        samples = samples.reshape(-1, 2).mean(axis=1)
-    return samples, rate
 
 
 def track(samples, rate, low=200.0, high=8000.0):
@@ -81,88 +78,120 @@ def track(samples, rate, low=200.0, high=8000.0):
 def shape_of(pitches):
     """Two levels is a square, a flat spread is a saw, a hump is a triangle."""
     if len(pitches) < 20:
-        return "too few frames", 0.0
+        return "too few frames"
     lo, hi = pitches.min(), pitches.max()
     if hi <= lo:
-        return "steady", 0.0
+        return "steady"
     histogram, _ = np.histogram(pitches, bins=12, range=(lo, hi))
     share = histogram / histogram.sum()
     middle = share[4:8].sum()
     ends = share[:2].sum() + share[-2:].sum()
     if ends > 0.6:
-        return "square", ends
+        return "square"
     if middle > 0.45:
-        return "triangle or sine", middle
-    return "sawtooth", 1.0 - ends - middle
+        return "triangle or sine"
+    return "sawtooth"
+
+
+def measure(port, preset, note, seconds):
+    """Load a preset, play one note, and return what the pitch did."""
+    load_preset(preset)
+    reader = subprocess.Popen(
+            ["arecord", "-D", CAPTURE, "-f", "S16_LE", "-r", "48000", "-c", "2",
+             "-d", str(int(seconds) + 1), "/tmp/.lfo_probe.wav"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(0.4)
+    subprocess.run(["amidi", "-p", port, "-S", "90 %02x 64" % note],
+                   check=True, capture_output=True)
+    time.sleep(seconds)
+    subprocess.run(["amidi", "-p", port, "-S", "80 %02x 00" % note],
+                   check=True, capture_output=True)
+    reader.wait()
+    with wave.open("/tmp/.lfo_probe.wav") as w:
+        rate = w.getframerate()
+        frames = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    samples = frames.astype(float).reshape(-1, 2).mean(axis=1)
+    pitches = track(samples, rate)
+    expected = MIDDLE_C * 2 ** ((note - 60) / 12.0)
+    return {
+        "pitches": pitches,
+        "verdict": shape_of(pitches),
+        "centre": float(np.median(pitches)) if len(pitches) else 0.0,
+        "low": float(pitches.min()) if len(pitches) else 0.0,
+        "high": float(pitches.max()) if len(pitches) else 0.0,
+        "span": float(12 * np.log2(max(pitches.max(), 1e-9)
+                                   / max(pitches.min(), 1e-9))) if len(pitches) else 0.0,
+        "expected": expected,
+    }
+
+
+def plot(result, preset, shape, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    figure, (top, bottom) = plt.subplots(2, 1, figsize=(11, 7), height_ratios=[2, 1])
+    times = np.arange(len(result["pitches"])) * 0.005
+    top.plot(times, result["pitches"], lw=1.0)
+    for k in (-1, 0, 1):
+        top.axhline(result["expected"] * 2 ** k, color="#888", ls="--", lw=0.8)
+    top.set_xlabel("time (s)")
+    top.set_ylabel("pitch (Hz)")
+    top.set_title("%s: asked %s, measured %s"
+                  % (preset.split("/")[-1], shape or "?", result["verdict"]))
+    top.grid(alpha=0.3)
+    bottom.hist(result["pitches"], bins=40)
+    bottom.set_xlabel("pitch (Hz)")
+    bottom.set_ylabel("frames")
+    bottom.grid(alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(path, dpi=110)
+    print("  plot: %s" % path)
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--preset", default="/Presets/Factory/Tests/SineLfo.toml")
+    parser.add_argument("--preset", default="%s/SineLfoPulse.toml" % FOLDER)
+    parser.add_argument("--shape", help="what that preset asks for, for the verdict")
+    parser.add_argument("--all", action="store_true",
+                        help="every SineLfo<Shape> preset, as one table")
     parser.add_argument("--note", type=int, default=96)
     parser.add_argument("--seconds", type=float, default=2.0)
-    parser.add_argument("--plot")
+    parser.add_argument("--plot", help="a PNG per preset, suffixed with its shape")
     args = parser.parse_args()
 
     port = find_synth_rawmidi()
     if port is None:
         raise SystemExit("no synth on the sequencer; is the USB socket cabled?")
 
-    load_preset(args.preset)
-    reader = subprocess.Popen(["arecord", "-D", CAPTURE, "-f", "S16_LE",
-                              "-r", "48000", "-c", "2", "-d", str(int(args.seconds) + 1),
-                               "/tmp/.lfo_probe.wav"], stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
-    import time
-    time.sleep(0.4)
-    subprocess.run(["amidi", "-p", port, "-S", "90 %02x 64" % args.note], check=True,
-                   capture_output=True)
-    time.sleep(args.seconds)
-    subprocess.run(["amidi", "-p", port, "-S", "80 %02x 00" % args.note], check=True,
-                   capture_output=True)
-    reader.wait()
+    jobs = ([("%s/SineLfo%s.toml" % (FOLDER, name), shape) for shape, name in ALL]
+            if args.all else [(args.preset, args.shape)])
 
-    with wave.open("/tmp/.lfo_probe.wav") as w:
-        rate = w.getframerate()
-        frames = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    samples = frames.astype(float).reshape(-1, 2).mean(axis=1)
+    failures = 0
+    print("note %d, %s" % (args.note, "every waveform" if args.all else jobs[0][0]))
+    print("  %-16s %-9s %-16s %9s %8s %8s %8s" %
+          ("preset", "asked", "measured", "centre st", "low Hz", "high Hz", "span st"))
+    for preset, shape in jobs:
+        result = measure(port, preset, args.note, args.seconds)
+        if len(result["pitches"]) < 20:  # a dropped or late note: take it again
+            result = measure(port, preset, args.note, args.seconds)
+        if len(result["pitches"]) < 20:
+            print("  %-16s too few frames to judge" % preset.split("/")[-1])
+            failures += 1 if shape else 0
+            continue
+        ok = result["verdict"] in WANTED.get(shape, set()) if shape else True
+        failures += 0 if ok else 1
+        offset = 12 * np.log2(max(result["centre"], 1e-9) / result["expected"])
+        print("  %-16s %-9s %-16s %+9.1f %8.0f %8.0f %8.1f  %s"
+              % (preset.split("/")[-1], shape or "-", result["verdict"], offset,
+                 result["low"], result["high"], result["span"],
+                 "" if shape is None else ("ok" if ok else "WRONG SHAPE")))
+        if args.plot:
+            out = args.plot.replace(".png", "_%s.png" % (shape or "one"))
+            plot(result, preset, shape, out)
 
-    pitches = track(samples, rate)
-    verdict, score = shape_of(pitches)
-    if len(pitches) < 20:
-        raise SystemExit("too few frames: is the note sounding and the capture set up?")
-
-    centre = float(np.median(pitches))
-    span = float(12 * np.log2(pitches.max() / max(pitches.min(), 1e-9)))
-    middle_c = 261.62557  # the engine's reference: note 60 at this rate
-    expected = middle_c * 2 ** ((args.note - 60) / 12.0)
-    print("note %d, expected %.0f Hz (the engine's own numbering)" % (args.note, expected))
-    print("pitch: centre %.0f Hz, from %.0f to %.0f Hz" % (centre, pitches.min(), pitches.max()))
-    print("swing: %.1f semitones; centre is %+.1f semitones from the note"
-          % (span, 12 * np.log2(centre / expected)))
-    print("shape: %s" % verdict)
-
-    if args.plot:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        figure, (top, bottom) = plt.subplots(2, 1, figsize=(11, 7), height_ratios=[2, 1])
-        times = np.arange(len(pitches)) * 0.005
-        top.plot(times, pitches, lw=1.0)
-        for k in (-1, 0, 1):
-            top.axhline(expected * 2 ** k, color="#888", ls="--", lw=0.8)
-        top.set_xlabel("time (s)")
-        top.set_ylabel("pitch (Hz)")
-        top.set_title("note %d, %s" % (args.note, args.preset.split("/")[-1]))
-        top.grid(alpha=0.3)
-        bottom.hist(pitches, bins=40)
-        bottom.set_xlabel("pitch (Hz)")
-        bottom.set_ylabel("frames")
-        bottom.set_title(verdict)
-        bottom.grid(alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(args.plot, dpi=110)
-        print("plot: %s" % args.plot)
+    if args.all:
+        print("\n%d of %d waveform(s) wrong" % (failures, len(jobs)))
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
