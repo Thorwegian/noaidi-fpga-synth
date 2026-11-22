@@ -15,6 +15,17 @@ idf_component_register(SRCS "main.c" "event_bus.c" "midi_in.c" "midi_log.c"
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NOAIDI_BUILD="${NOAIDI_BUILD}")
 
+# The format check runs ahead of this component's compilation, so every path
+# that builds the firmware runs it: `make fw`'s prerequisite is one door in,
+# and tools/esp_idf.sh idf.py build — the lab box's path — is another, with no
+# Makefile in it (#613).
+add_custom_target(format_check ALL
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../../tools/format_check.sh
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../..
+    COMMENT "Checking that the sources are formatted"
+    VERBATIM)
+add_dependencies(${COMPONENT_LIB} format_check)
+
 # tomlc17 prints a uint32_t with %x, which is a format mismatch on this
 # target (uint32_t is unsigned long); it only affects an error message.
 set_source_files_properties("../lib/tomlc17/src/tomlc17.c" PROPERTIES COMPILE_OPTIONS "-Wno-format")

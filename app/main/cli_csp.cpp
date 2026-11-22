@@ -361,7 +361,8 @@ int op_rate(int argc, char **argv) {
     spi_link_set_rate(hz);
     std::printf("=== the link at %lu Hz ===\n", static_cast<unsigned long>(hz));
     const int fails = spi_link_boot_check();
-    std::printf("rate %lu: %d fail(s)\n", static_cast<unsigned long>(hz), fails);
+    std::printf("rate %lu: %d fail(s)\n", static_cast<unsigned long>(hz),
+                fails);
     return fails ? 1 : 0;
 }
 
