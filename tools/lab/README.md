@@ -47,12 +47,14 @@ flowchart LR
   `COM` and the console goes silent while the board is still running, which
   looks like a dead bench and is only a lost console. A true power cycle means
   **both** leads out.
-- **A power cycle empties the FPGA, and that is what the boot log's complaint
-  means.** The bitstream is loaded into SRAM (`make sram`) and is lost with the
-  power. After a cycle the firmware resends its boot image — about 7 s in
-  `engine_link`, with `THE CHIP DOES NOT DO WHAT THE MODEL SAYS` in the log —
-  and only then does the synth's USB device install. Reload the gateware before
-  reading anything into that line.
+- **The gateware lives in the FPGA's own configuration flash, which it reads at
+  power-up, so a power cycle does not empty it.** `make flash` writes that flash
+  and is what the bench runs; `make sram` loads a build into SRAM for the inner
+  dev loop, and that copy is lost with the power. An FPGA loaded only by `make
+  sram` comes back empty, and `THE CHIP DOES NOT DO WHAT THE MODEL SAYS` in the
+  log is the firmware resending its boot image to a gateware that is not there.
+  Flashed, the cycle costs the firmware's boot image alone — about 7 s in
+  `engine_link` — and then the synth's USB device installs.
 - **Wait for the device's own line, not a fixed sleep.** The synth's USB device
   installs about 902 ms after a reset, and `usb_midi` logs `host attached the
   bus` when the host enumerates it. That line is what a script should wait for:
