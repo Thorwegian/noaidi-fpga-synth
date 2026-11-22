@@ -31,6 +31,16 @@ flowchart LR
   `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
   volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
   Loading gateware does not touch the console port.
+- **The board, the module and the carrier are three different things.** The
+  *veroboard* is the carrier: it holds the Tang Nano 20K, the socket made for an
+  ESP32-C3 Super Mini, the two DIN inputs and the S/PDIF output. The *module* is
+  the ESP32-S3 (HW-678) seated on the ten-wire jumper cable plugged into that
+  socket. "The board" in these notes means the whole assembly on the bench, and
+  nothing narrower. The pins on both sides of the jumper and **the colour of
+  each of its wires** are in
+  [`docs/images/veroboard-wiring.svg`](../../docs/images/veroboard-wiring.svg),
+  drawn by `tools/docs/veroboard_wiring.py`; that picture is the reference, not
+  a table here that can drift from it.
 - **Power comes down the USB cables, and the `COM` lead is the supply.** The
   bench has no separate supply: unplugging `COM` powers the board down and
   takes the console with it, so a power cycle and a lost console are one event
