@@ -41,10 +41,12 @@ flowchart LR
   [`docs/images/veroboard-wiring.svg`](../../docs/images/veroboard-wiring.svg),
   drawn by `tools/docs/veroboard_wiring.py`; that picture is the reference, not
   a table here that can drift from it.
-- **Power comes down the USB cables, and the `COM` lead is the supply.** The
-  bench has no separate supply: unplugging `COM` powers the board down and
-  takes the console with it, so a power cycle and a lost console are one event
-  rather than two faults to chase.
+- **Both USB leads are power leads.** `COM` (the CH343) and `USB` (the OTG
+  socket) each carry 5 V into the board, so unplugging one does not necessarily
+  power it down: the other keeps it alive. That is the shape of the trap — pull
+  `COM` and the console goes silent while the board is still running, which
+  looks like a dead bench and is only a lost console. A true power cycle means
+  **both** leads out.
 - **A power cycle empties the FPGA, and that is what the boot log's complaint
   means.** The bitstream is loaded into SRAM (`make sram`) and is lost with the
   power. After a cycle the firmware resends its boot image — about 7 s in
