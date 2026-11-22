@@ -1968,10 +1968,13 @@ void test_the_shapes() {
     constexpr int passes_a_cycle = 3289; // 7.2927 Hz at 24 kHz
 
     const Wiring::Channel &channel = synth.wiring().channels[0];
-    const int address              = synth.graph().address(channel.pitch);
+    const int pitch_at             = synth.graph().address(channel.pitch);
+    const int phase_at             = synth.graph().address(channel.phase[0]);
 
-    // one trace a shape, in semitones of the pitch the LFO moves
-    std::array<std::vector<double>, 4> trace;
+    // the trace of each shape, with the phase it was taken at, both in words:
+    // the phase runs +-8 to the cycle, 14 bits below them
+    std::array<std::vector<double>, 4> pitch;
+    std::array<std::vector<double>, 4> phase;
     for (int shape = 0; shape < 4; ++shape) {
         for (int c = 0; c < SoundEngine::channel_count; ++c) {
             const Wiring::Lfo &lfo = synth.wiring().lfo(c, 0);
@@ -1997,50 +2000,72 @@ void test_the_shapes() {
         if (shape == 0) {
             start(*played.processor, played.built->image);
         }
-        std::vector<double> &shape_trace = trace[static_cast<size_t>(shape)];
+        std::vector<double> &shape_pitch = pitch[static_cast<size_t>(shape)];
+        std::vector<double> &shape_phase = phase[static_cast<size_t>(shape)];
         for (int p = 0; p < 2 * passes_a_cycle; ++p) {
             pass(*played.processor, "the four LFO shapes");
-            shape_trace.push_back(played.processor->read(address) / 12.0 * 12.0
+            shape_pitch.push_back(played.processor->read(pitch_at)
                                   / static_cast<double>(csp::word_one));
+            // the phase runs +-8 units to the cycle: turn it into 0..1
+            const double units = played.processor->read(phase_at)
+                                 / static_cast<double>(csp::word_one);
+            shape_phase.push_back(std::fmod(units / 16.0 + 0.5 + 1.0, 1.0));
         }
     }
 
-    // the ideal shapes at a phase, in the same units (+-half an octave)
-    auto ideal = [](int shape, double phase) {
+    // the ideal shapes at a phase, in the same units as the pitch it moves
+    auto ideal = [](int shape, double cycle) {
         switch (shape) {
         case 0:
-            return 2.0 * phase - 1.0; // saw
+            return 2.0 * cycle - 1.0; // saw
         case 1:
-            return phase < 0.5 ? 1.0 : -1.0; // square
+            return cycle < 0.5 ? 1.0 : -1.0; // square
         case 2:
-            return 1.0 - 4.0 * std::fabs(phase - 0.5); // triangle
-        default:
-            return std::sin(2.0 * M_PI * phase); // sine
+            return 1.0 - 4.0 * std::fabs(cycle - 0.5); // triangle
+        default: {
+            // the program's sine is a parabola: t = 4s - 4s|s|, and that is what
+            // the wave asks of the phase, so the ideal is the shape it draws
+            const double s = 2.0 * cycle - 1.0;
+            return -(s * (4.0 - 4.0 * std::fabs(s)) - 0.0);
         }
-    };
-    auto correlation = [](const std::vector<double> &a,
-                          const std::vector<double> &b, size_t from,
-                          size_t count) {
-        double mean_a = 0, mean_b = 0;
-        for (size_t i = 0; i < count; ++i) {
-            mean_a += a[from + i];
-            mean_b += b[i];
         }
-        mean_a /= static_cast<double>(count);
-        mean_b /= static_cast<double>(count);
-        double cov = 0, var_a = 0, var_b = 0;
-        for (size_t i = 0; i < count; ++i) {
-            const double da = a[from + i] - mean_a;
-            const double db = b[i] - mean_b;
-            cov += da * db;
-            var_a += da * da;
-            var_b += db * db;
-        }
-        return std::fabs(cov) / std::sqrt(var_a * var_b + 1e-12);
     };
 
-    // each shape against each ideal, the phase unknown: the best lag wins
-    std::printf("shape against ideal: rows asked, columns measured\n");
+    // how far the trace is from an ideal once its scale and offset are fitted:
+    // the residual as a fraction of the swing the ideal has
+    auto residual = [&](const std::vector<double> &trace,
+                        const std::vector<double> &cycles, int shape) {
+        std::vector<double> wave(cycles.size());
+        for (size_t i = 0; i < cycles.size(); ++i) {
+            wave[i] = ideal(shape, cycles[i]);
+        }
+        double mean_wave = 0, mean_trace = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            mean_wave += wave[i];
+            mean_trace += trace[i];
+        }
+        mean_wave /= static_cast<double>(wave.size());
+        mean_trace /= static_cast<double>(trace.size());
+        double covariance = 0, variance = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            covariance += (wave[i] - mean_wave) * (trace[i] - mean_trace);
+            variance += (wave[i] - mean_wave) * (wave[i] - mean_wave);
+        }
+        const double scale  = variance > 1e-12 ? covariance / variance : 0.0;
+        const double offset = mean_trace - scale * mean_wave;
+        double error = 0, swing = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            const double want = scale * wave[i] + offset;
+            error += (trace[i] - want) * (trace[i] - want);
+            swing += (want - mean_trace) * (want - mean_trace);
+        }
+        const double residual =
+                std::sqrt(error / static_cast<double>(wave.size()))
+                / std::sqrt(swing / static_cast<double>(wave.size()) + 1e-12);
+        return std::min(residual, 99.0); // an ideal with no swing fits nothing
+    };
+
+    std::printf("shape against ideal, residual as a fraction of the swing\n");
     std::printf("        ");
     for (const char *name : {"saw", "square", "triangle", "sine"}) {
         std::printf("%9s", name);
@@ -2048,33 +2073,30 @@ void test_the_shapes() {
     std::printf("\n");
     int wrong = 0;
     for (int asked = 0; asked < 4; ++asked) {
-        std::vector<double> best(4, 0.0);
+        std::array<double, 4> error{};
         for (int measured = 0; measured < 4; ++measured) {
-            std::vector<double> wave(passes_a_cycle);
-            for (int p = 0; p < passes_a_cycle; ++p) {
-                wave[static_cast<size_t>(p)] = ideal(
-                        measured, static_cast<double>(p) / passes_a_cycle);
-            }
-            for (int lag = 0; lag < passes_a_cycle; lag += 7) {
-                const double r =
-                        correlation(trace[static_cast<size_t>(asked)], wave,
-                                    static_cast<size_t>(lag), wave.size());
-                best[static_cast<size_t>(measured)] =
-                        std::max(best[static_cast<size_t>(measured)], r);
-            }
+            error[static_cast<size_t>(measured)] =
+                    residual(pitch[static_cast<size_t>(asked)],
+                             phase[static_cast<size_t>(asked)], measured);
         }
-        const auto top = static_cast<size_t>(
-                std::max_element(best.begin(), best.end()) - best.begin());
-        if (static_cast<int>(top) != asked) {
+        const auto best = static_cast<size_t>(
+                std::min_element(error.begin(), error.end()) - error.begin());
+        std::array<double, 4> sorted = error;
+        std::sort(sorted.begin(), sorted.end());
+        const bool clear =
+                sorted[1] - sorted[0] > 0.01; // a tenth of a percent of swing
+        if (static_cast<int>(best) != asked || !clear) {
             ++wrong;
         }
         std::printf("  %-6d", asked);
-        for (size_t i = 0; i < best.size(); ++i) {
-            std::printf("%9.3f", best[i]);
+        for (const double value : error) {
+            std::printf("%9.4f", value);
         }
-        std::printf("  %s\n", static_cast<int>(top) == asked ? "ok" : "WRONG");
+        std::printf("  %s\n",
+                    static_cast<int>(best) == asked && clear ? "ok" : "WRONG");
     }
-    check_equal(wrong, 0, "each LFO shape correlates best with its own ideal");
+    check_equal(wrong, 0,
+                "each LFO shape is nearest its own ideal, and clearly");
 }
 
 int main() {
