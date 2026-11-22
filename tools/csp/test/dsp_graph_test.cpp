@@ -32,6 +32,7 @@
 #include "csp/dsp_graph.hpp"
 #include "graph_evaluator.hpp"
 #include "sound_engine.hpp"
+#include "csp/lfo.hpp"
 
 namespace {
 
@@ -1949,8 +1950,136 @@ void test_the_noaidis_envelope() {
 
 } // namespace
 
+// The four shapes, each selected and then scored against its own ideal in the
+// log domain: the pitch the LFO moves, in semitones, against a saw, a square, a
+// triangle and a sine. A shape selected wrongly correlates better with another
+// shape's ideal than with its own, which is what this catches. The cosim never
+// wrote a shape word, so nothing exercised the selects at all.
+void test_the_shapes() {
+    Played played;
+    if (!played.wire_and_build("the four LFO shapes")) {
+        return;
+    }
+    const SoundEngine &synth = *played.synth;
+    constexpr float rate     = 7.2927f;
+    const double step =
+            static_cast<double>(csp::lfo_rate(rate))
+            / static_cast<double>(int64_t{1} << csp::wide_fraction_bits);
+    constexpr int passes_a_cycle = 3289; // 7.2927 Hz at 24 kHz
+
+    const Wiring::Channel &channel = synth.wiring().channels[0];
+    const int address              = synth.graph().address(channel.pitch);
+
+    // one trace a shape, in semitones of the pitch the LFO moves
+    std::array<std::vector<double>, 4> trace;
+    for (int shape = 0; shape < 4; ++shape) {
+        for (int c = 0; c < SoundEngine::channel_count; ++c) {
+            const Wiring::Lfo &lfo = synth.wiring().lfo(c, 0);
+            played.dword(lfo.step, step);
+            played.word(lfo.shape, shape);
+            played.word(lfo.depth[Wiring::moves_pitch], 0.5);
+            played.pointer(
+                    synth.wiring().channels[static_cast<size_t>(c)].lfo[0],
+                    lfo.record);
+        }
+        for (const Wiring::Voice &voice : synth.wiring().voices) {
+            played.pointer(voice.channel, channel.record);
+            for (int e = 0; e < Wiring::envelope_count; ++e) {
+                played.word(voice.velocity[static_cast<size_t>(e)], 1.0);
+                played.stage(
+                        voice.stage[static_cast<size_t>(e)],
+                        channel.segments[static_cast<size_t>(
+                                e)][static_cast<size_t>(Wiring::stage_release)]
+                                .record);
+            }
+        }
+        played.send();
+        if (shape == 0) {
+            start(*played.processor, played.built->image);
+        }
+        std::vector<double> &shape_trace = trace[static_cast<size_t>(shape)];
+        for (int p = 0; p < 2 * passes_a_cycle; ++p) {
+            pass(*played.processor, "the four LFO shapes");
+            shape_trace.push_back(played.processor->read(address) / 12.0 * 12.0
+                                  / static_cast<double>(csp::word_one));
+        }
+    }
+
+    // the ideal shapes at a phase, in the same units (+-half an octave)
+    auto ideal = [](int shape, double phase) {
+        switch (shape) {
+        case 0:
+            return 2.0 * phase - 1.0; // saw
+        case 1:
+            return phase < 0.5 ? 1.0 : -1.0; // square
+        case 2:
+            return 1.0 - 4.0 * std::fabs(phase - 0.5); // triangle
+        default:
+            return std::sin(2.0 * M_PI * phase); // sine
+        }
+    };
+    auto correlation = [](const std::vector<double> &a,
+                          const std::vector<double> &b, size_t from,
+                          size_t count) {
+        double mean_a = 0, mean_b = 0;
+        for (size_t i = 0; i < count; ++i) {
+            mean_a += a[from + i];
+            mean_b += b[i];
+        }
+        mean_a /= static_cast<double>(count);
+        mean_b /= static_cast<double>(count);
+        double cov = 0, var_a = 0, var_b = 0;
+        for (size_t i = 0; i < count; ++i) {
+            const double da = a[from + i] - mean_a;
+            const double db = b[i] - mean_b;
+            cov += da * db;
+            var_a += da * da;
+            var_b += db * db;
+        }
+        return std::fabs(cov) / std::sqrt(var_a * var_b + 1e-12);
+    };
+
+    // each shape against each ideal, the phase unknown: the best lag wins
+    std::printf("shape against ideal: rows asked, columns measured\n");
+    std::printf("        ");
+    for (const char *name : {"saw", "square", "triangle", "sine"}) {
+        std::printf("%9s", name);
+    }
+    std::printf("\n");
+    int wrong = 0;
+    for (int asked = 0; asked < 4; ++asked) {
+        std::vector<double> best(4, 0.0);
+        for (int measured = 0; measured < 4; ++measured) {
+            std::vector<double> wave(passes_a_cycle);
+            for (int p = 0; p < passes_a_cycle; ++p) {
+                wave[static_cast<size_t>(p)] = ideal(
+                        measured, static_cast<double>(p) / passes_a_cycle);
+            }
+            for (int lag = 0; lag < passes_a_cycle; lag += 7) {
+                const double r =
+                        correlation(trace[static_cast<size_t>(asked)], wave,
+                                    static_cast<size_t>(lag), wave.size());
+                best[static_cast<size_t>(measured)] =
+                        std::max(best[static_cast<size_t>(measured)], r);
+            }
+        }
+        const auto top = static_cast<size_t>(
+                std::max_element(best.begin(), best.end()) - best.begin());
+        if (static_cast<int>(top) != asked) {
+            ++wrong;
+        }
+        std::printf("  %-6d", asked);
+        for (size_t i = 0; i < best.size(); ++i) {
+            std::printf("%9.3f", best[i]);
+        }
+        std::printf("  %s\n", static_cast<int>(top) == asked ? "ok" : "WRONG");
+    }
+    check_equal(wrong, 0, "each LFO shape correlates best with its own ideal");
+}
+
 int main() {
     test_operators();
+    test_the_shapes();
     test_refusals();
     test_a_field_summed_onto();
     constexpr int body_rows = 20; // of test_copies' circuit as a loop
