@@ -4,7 +4,7 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 What a new agent (or a new pair of hands) needs to know before touching the
-board, so none of it has to be rediscovered by grepping. The scripts below
+prototype, so none of it has to be rediscovered by grepping. The scripts below
 each carry their own docstring; this is the index and the facts around them.
 
 ## Where things are
