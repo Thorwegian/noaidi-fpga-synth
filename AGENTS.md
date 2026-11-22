@@ -120,7 +120,7 @@ License: CERN-OHL-S v2
 
 # Paradigms
 
-- A synthesiser is a 3D renderer for music.
+A synthesiser is a 3D renderer for music.
 
 - A raytracer that traces no rays has failed, however green its tests: a sample is to a sound what a pixel is to a picture.
 
