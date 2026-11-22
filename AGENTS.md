@@ -126,7 +126,7 @@ License: CERN-OHL-S v2
 
 # Paradigms
 
-- A sample is to a sound what a pixel is to a picture: the smallest piece of the artefact, and the unit the work is done in. "We deal in audio pixels" is "we deal in samples" — what is judged is the recording, never a metric describing it.
+- "We deal in audio pixels" is "we deal in samples": a sample is to a sound what a pixel is to a picture.
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
 
