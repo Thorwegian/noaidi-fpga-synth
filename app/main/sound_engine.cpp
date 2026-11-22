@@ -812,7 +812,10 @@ void SoundEngine::lfo(int c, int which, Writes &writes) const {
     // the word chooses among them. Its output is ±1, which the channel
     // scales by the destination's depth.
     wide(writes, address(wave.step), csp::lfo_rate(l.rate));
-    put(writes, address(wave.shape), lfo_shape(l.shape));
+    // the shape word is compared against Q14 constants in wave_at, so it is a
+    // scaled word: written raw, 0..3 is always below 1.0 and every compare says
+    // "less", which is the saw and only the saw, whatever the preset asked for.
+    put(writes, address(wave.shape), lfo_shape(l.shape) * csp::word_one);
     // The depth swings its destination by ±depth, in the destination's
     // unit; `whole` is what makes 1.0 of the destination's word: an octave
     // of pitch or of cutoff in semitones, an octave of Q, the pulse width's
