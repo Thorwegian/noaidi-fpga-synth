@@ -74,8 +74,10 @@ flowchart LR
   capture should too.
 - **The console port must be free.** `make fw-console` (screen) and
   `make fw-monitor` hold it; `board.py`, `make fw-flash` and the storage
-  targets need it. `lsof /dev/ttyACM0` says who has it. Detach a screen with
-  Ctrl-A D; never `fuser -k` (it kills your own session).
+  targets need it. `lsof /dev/ttyACM0` says who has it. Kill the screen that
+  holds it — `screen -ls`, then `screen -S <pid> -X quit` — since detaching
+  leaves the screen holding the device; never `fuser -k` (it kills your own
+  session).
 
 ## Talking to the console
 
