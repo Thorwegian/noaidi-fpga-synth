@@ -53,8 +53,9 @@ def load_preset(path):
     # whatever was loaded in place, which reads as a shape that never changes.
     result = subprocess.run([sys.executable, BOARD, "load %s" % path],
                             capture_output=True, text=True)
-    if "loaded" not in result.stdout:
-        sys.exit("the preset did not load: %s\n%s" % (path, result.stdout))
+    said = result.stdout + result.stderr  # board.py echoes the console to stderr
+    if "loaded" not in said:
+        sys.exit("the preset did not load: %s\n%s" % (path, said))
 
 
 def track(samples, rate, low=200.0, high=8000.0):
