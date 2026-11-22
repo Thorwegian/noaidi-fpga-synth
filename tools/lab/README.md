@@ -166,6 +166,7 @@ Board, acceptance and measurement (`tools/lab/`):
 | `chip_check.py` | the chip check's board half: the co-simulation's method on silicon (#235) |
 | `board_clock.py` | the board's system clock from the BL616 CLI on `/dev/ttyUSB1`, no rebuild |
 | `usb_midi_pass.py` | the whole pass over the USB cable: every message a player sends, the wedge cases, and the round trip |
+| `lfo_probe.py` | what an LFO does to the pitch: a sine, one note near a kilohertz, the shape named and the swing in semitones; `--plot` draws it |
 
 The analysis stages of `acceptance.py` import Essentia, which the lab
 computer keeps in its own venv, not in `/usr/bin/python3`: run the acceptance
