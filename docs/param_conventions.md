@@ -65,7 +65,7 @@ only.**
 
 | Aspect | Convention | Ours | Verdict |
 |---|---|---|---|
-| Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂, CC 74 ±8 oct around key-tracked base, KT amount CC 31 (0–200%, centre 64 = 100%) | ✓ |
+| Cutoff knob | log-frequency travel over the full audio range, plus key-track amount | UQ4.10 log₂; CC 74 the cutoff's note (a semitone a step from note 0, to note 128) and CC 106 its 128ths, KT amount CC 31 (0–200%, centre 64 = 100%) | ✓ |
 | Osc pitch/fine | semitone steps ±12 / fine ±0.5 semi, center detents | same | ✓ |
 | Resonance taper | knob ~linear in damping, self-oscillation onset ≈ 80–85% of travel | log₂ octaves-of-Q, `val·5632/127` spans 0–5.5 oct of Q, equal Q ratio per step | **F5** — a stable top by design: CC 71 tops out at r = 5.5 oct (Q≈32), sharp but stable, rather than running into self-oscillation |
 | Resonance level | the peak's loudness grows with the knob (Minimoog: the passband drops as resonance rises, so the peak stays put) | a limiter per partial around the filter holds the peak at most 6 dB over the oscillator's level, whatever the knob and wherever the harmonics fall (`partial_pipeline.sv`, section L; a constant, not a CC) | ✓ the knob sets the timbre, the volume knob stops being a resonance compensator |
@@ -77,7 +77,7 @@ only.**
 |---|---|---|---|
 | LFO rate law | exponential, ~0.03–30 Hz (JP class; Nord Lead reaches audio-rate) | exponential 0.03–30 Hz | ✓ |
 | Vibrato depth | performance vibrato ≤ ±50 cents; FX pitch-LFO up to ±1 oct | Coarse/Fine, linear: Coarse (CC 77/110) = span in whole semitones, four knob steps each (96 = two octaves), Fine (CC 115/116) = 1/128 semitone steps in between | ✓ — vibrato on Fine, intervals and FX on Coarse |
-| LFO→cutoff / resonance depth | LFO sweeps the filter's full range (JP-8000: ±63 ≈ the whole cutoff travel); resonance LFO rarer, same span | the same Coarse/Fine law in octaves: Coarse = span in whole octaves (of cutoff, of Q), sixteen knob steps each, Fine = 1/128 octave between; the top is an eight-octave span, ±4 octaves of swing — the cutoff knob's own reach (#256) | ✓ |
+| LFO→cutoff / resonance depth | LFO sweeps the filter's full range (JP-8000: ±63 ≈ the whole cutoff travel); resonance LFO rarer, same span | the same Coarse/Fine law in octaves: Coarse = span in whole octaves (of cutoff, of Q), sixteen knob steps each, Fine = 1/128 octave between; the top is an eight-octave span, ±4 octaves of swing (#256) | ✓ |
 | Wheel | dedicated vibrato LFO (JP-8000 LFO2) or matrix source | fixed route → cutoff | ~ |
 | Env→cutoff depth | bipolar, full filter range | bipolar ±16 oct, square-law taper (fine near centre) | ✓ |
 | Env→pitch depth | an attack blip of a few semitones, wider for percussion | bipolar ±48 st, square-law taper with the cutoff's authority rule; the envelope's own attack and decay shape it, so a lip blip and a tom's fall are the same amount | ✓ |

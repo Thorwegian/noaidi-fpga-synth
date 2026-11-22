@@ -37,8 +37,8 @@ struct DepthKnobs {
 
 // The knob positions that are not preset fields.
 struct Knobs {
-    uint8_t cutoff_msb = 64; // CC 74: centre is the key-tracked base
-    uint8_t cutoff_lsb = 0;  // CC 106
+    uint8_t cutoff_msb = 60; // CC 74: the note the filter sits on
+    uint8_t cutoff_lsb = 0;  // CC 106: the 128ths of a semitone above it
     DepthKnobs lfo_depth[PRESET_NUM_LFO];
 };
 

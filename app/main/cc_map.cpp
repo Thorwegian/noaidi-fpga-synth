@@ -127,18 +127,17 @@ float pulse_width_of(int value) {
 }
 
 // The cutoff pair: 14 bits, coarse CC 74 the high seven and fine CC 106 the
-// low, 1024 to the octave, centred at coarse 64 on the half octave above
-// middle C that puts a note's cutoff above its pitch when the tracking is
-// 100 %: ±8 octaves — the authority rule, full deflection reaches the rails.
-constexpr float middle_c_hz       = 261.62557f;
-constexpr int cutoff_centre       = 8192;
-constexpr float cutoff_per_octave = 1024.0f;
+// low, 128 to the semitone from note 0, so a coarse step is exactly a
+// semitone and CC 74 reads as the note the filter sits on. 1536 to the
+// octave, and the pair's top is note 128, 13.27 kHz. The filter's word is
+// wider than the pair (UQ4.10, 16 octaves), so the stepping is the pair's to
+// choose; a semitone is the one a filter tuned to a pitch is played by, and
+// the wheel and the MOD envelope reach past the top.
+constexpr float note0_hz          = 8.17579892f;
+constexpr float cutoff_per_octave = 1536.0f;
 float cutoff_of(const Knobs &knobs) {
     const int v14 = (knobs.cutoff_msb << 7) | knobs.cutoff_lsb;
-    return middle_c_hz
-           * std::exp2(static_cast<float>(v14 - cutoff_centre)
-                               / cutoff_per_octave
-                       + 0.5f);
+    return note0_hz * std::exp2(static_cast<float>(v14) / cutoff_per_octave);
 }
 
 // Resonance: 0 is Butterworth, 127 is 5.5 octaves of Q above it (Q 32), each
@@ -440,9 +439,8 @@ bool apply(preset_t &preset, Knobs &knobs, uint8_t cc, uint8_t value) {
 Knobs knobs_of(const preset_t &preset) {
     Knobs knobs;
     const long v14 = std::clamp<long>(
-            std::lround((std::log2(preset.filter.cutoff / middle_c_hz) - 0.5f)
-                        * cutoff_per_octave)
-                    + cutoff_centre,
+            std::lround(std::log2(preset.filter.cutoff / note0_hz)
+                        * cutoff_per_octave),
             0, 16383);
     knobs.cutoff_msb = static_cast<uint8_t>(v14 >> 7);
     knobs.cutoff_lsb = static_cast<uint8_t>(v14 & 0x7F);
