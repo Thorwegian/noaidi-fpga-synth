@@ -120,6 +120,8 @@ License: CERN-OHL-S v2
 
 # Paradigms
 
+- A synthesiser is a 3D renderer for music.
+
 - A raytracer that traces no rays has failed, however green its tests: a sample is to a sound what a pixel is to a picture.
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
