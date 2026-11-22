@@ -73,6 +73,15 @@ port. The synth's own preset saves are bare TOML without the copyright header
 
 ## MIDI into the synth
 
+- **A velocity is the player's effort, not the wire's range.** The scripts play at
+  100, meaning as hard as a keyboard is played in normal playing; above that is
+  extraordinarily hard, and 127 is the cable's ceiling rather than a level
+  anyone reaches. Controllers differ — one tops out near 90, another near 117 —
+  so a take is read for what it does, not for the number it was played at. The
+  bench keyboard is a Yamaha PSR-1500, whose manual (with the MIDI
+  implementation chart) is
+  [thirdparty/Yamaha_PSR-3000_1500_Owners_Manual.pdf](../thirdparty/Yamaha_PSR-3000_1500_Owners_Manual.pdf).
+
 - **The synth's own USB port (use this).** The socket marked `USB` presents the
   synth to the lab computer as a MIDI device, ALSA client `Model 1`, one
   cable in both directions: notes and controllers in, the synth's parameter
