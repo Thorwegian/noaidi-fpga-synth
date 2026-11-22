@@ -120,11 +120,13 @@ License: CERN-OHL-S v2
 
 ## Remember output
 
-- The artefact is the deliverable; a raytracer that traces no rays has failed, however green its tests. We deal in pixels.
+- The artefact is the deliverable; a raytracer that traces no rays has failed, however green its tests.
 - A check that passes while the sound is wrong does not pass: the check is what stands between the work and the player, not a substitute for hearing it.
 - Judge a picture by looking at it, a sound by hearing it, a board by using it.
 
 # Paradigms
+
+- A take is to a sound what a pixel is to a picture: the smallest thing that exists to be judged, and the unit the work is done in. "We deal in audio pixels" — so a metric describes a take, and never stands in for one.
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
 
