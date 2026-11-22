@@ -92,7 +92,7 @@ void app_main(void) {
 
     // SPI2 on its own IO_MUX pins. 10 MHz: at 1 MHz a note-on's
     // 32 dwords (~130 us each) would blow the engine's 1 ms tick.
-    spi_link_init(11, 13, 12, 10, 8000000); // MOSI, MISO, SCLK, CS
+    spi_link_init(11, 13, 12, 10, 10000000); // MOSI, MISO, SCLK, CS
 
     // The link in nines, checked as tb_spi_bus.sv checks the slave, so that
     // firmware and RTL agree on the same evidence.
