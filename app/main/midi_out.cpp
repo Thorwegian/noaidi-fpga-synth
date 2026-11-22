@@ -119,8 +119,7 @@ void send_usb(const Outgoing &outgoing) {
     if (outgoing.except == MIDI_SOURCE_USB || !usb_midi_connected()) {
         return;
     }
-    const uint8_t bytes[3] = {outgoing.message.status,
-                              outgoing.message.data[0],
+    const uint8_t bytes[3] = {outgoing.message.status, outgoing.message.data[0],
                               outgoing.message.data[1]};
     usb_midi_send(bytes, 1u + outgoing.message.len);
 }

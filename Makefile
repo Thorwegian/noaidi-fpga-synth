@@ -178,27 +178,14 @@ fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(PARSER_TEST) $(PARSER_TEST_CXX) $(HOST_DIR)/midi_parser.o
 	$(PARSER_TEST)
 
-# Our own C and C++ sources; the libraries in app/lib keep their style.
-# .clang-format is written for clang-format 18, the clang-format-18 system
-# package (README.md, External dependencies); other major versions format
-# some constructs differently, so the check names the version it ran.
-CLANG_FORMAT ?= clang-format-18
-CLANG_FORMAT_VERSION = 18
-FORMAT_SOURCES = $(shell git ls-files '*.c' '*.h' '*.cpp' '*.hpp' | grep -v '^app/lib/')
-
+# The format check: one script, which the ESP-IDF build runs too
+# (app/main/CMakeLists.txt), so a build outside make cannot skip it (#613).
+# CLANG_FORMAT names the binary; .clang-format is written for version 18.
 format:
-	$(CLANG_FORMAT) -i $(FORMAT_SOURCES)
+	@tools/format_check.sh --write
 
 format-check:
-	@command -v $(CLANG_FORMAT) >/dev/null \
-	    || { echo "FAIL $(CLANG_FORMAT) not found: apt install clang-format-$(CLANG_FORMAT_VERSION)"; exit 1; }
-	@$(CLANG_FORMAT) --version | grep -q ' version $(CLANG_FORMAT_VERSION)\.' \
-	    || { echo "FAIL $(CLANG_FORMAT) is not clang-format $(CLANG_FORMAT_VERSION)"; exit 1; }
-	@unformatted=$$(for f in $(FORMAT_SOURCES); do \
-	    $(CLANG_FORMAT) --dry-run --Werror "$$f" 2>/dev/null || echo "$$f"; done); \
-	if [ -n "$$unformatted" ]; then \
-	    echo "FAIL not formatted (make format):"; echo "$$unformatted" | sed 's/^/  /'; exit 1; \
-	fi
+	@tools/format_check.sh
 
 # The csp tool's link is one of the two that say whether a function of
 # app/main is used (tools/firmware/unused_functions.py): the linker drops

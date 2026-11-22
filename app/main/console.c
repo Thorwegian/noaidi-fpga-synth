@@ -24,9 +24,9 @@
 // USB-Serial/JTAG controller shares its PHY with USB-OTG, so nothing here and
 // nothing in sdkconfig may keep it on: the socket marked USB belongs to OTG,
 // whose first line of code would otherwise take the console away.
-#define CONSOLE_UART     UART_NUM_0
-#define CONSOLE_TX_GPIO  43
-#define CONSOLE_RX_GPIO  44
+#define CONSOLE_UART    UART_NUM_0
+#define CONSOLE_TX_GPIO 43
+#define CONSOLE_RX_GPIO 44
 
 #define LINE_MAX_BYTES   160 // the input line
 #define OUT_LINE_BYTES   256 // one printed line; longer ones split
@@ -649,8 +649,8 @@ static void console_task(void *arg) {
 
     while (1) {
         uint8_t c;
-        int got = (int) uart_read_bytes(CONSOLE_UART, &c, 1,
-                                        pdMS_TO_TICKS(100));
+        int got =
+                (int) uart_read_bytes(CONSOLE_UART, &c, 1, pdMS_TO_TICKS(100));
         xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
         if (s_query_sent
             && esp_timer_get_time() - s_query_sent > SIZE_QUERY_US) {
@@ -741,19 +741,18 @@ static void console_task(void *arg) {
 }
 
 void console_init(void) {
-    s_lock = xSemaphoreCreateRecursiveMutex();
+    s_lock                  = xSemaphoreCreateRecursiveMutex();
     const uart_config_t cfg = {
-            .baud_rate    = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
-            .data_bits    = UART_DATA_8_BITS,
-            .parity       = UART_PARITY_DISABLE,
-            .stop_bits    = UART_STOP_BITS_1,
-            .flow_ctrl    = UART_HW_FLOWCTRL_DISABLE,
-            .source_clk   = UART_SCLK_DEFAULT,
+            .baud_rate  = CONFIG_ESP_CONSOLE_UART_BAUDRATE,
+            .data_bits  = UART_DATA_8_BITS,
+            .parity     = UART_PARITY_DISABLE,
+            .stop_bits  = UART_STOP_BITS_1,
+            .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+            .source_clk = UART_SCLK_DEFAULT,
     };
     ESP_ERROR_CHECK(uart_param_config(CONSOLE_UART, &cfg));
-    ESP_ERROR_CHECK(uart_set_pin(CONSOLE_UART, CONSOLE_TX_GPIO,
-                                 CONSOLE_RX_GPIO, UART_PIN_NO_CHANGE,
-                                 UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_set_pin(CONSOLE_UART, CONSOLE_TX_GPIO, CONSOLE_RX_GPIO,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
     ESP_ERROR_CHECK(uart_driver_install(CONSOLE_UART, 256, 1024, 0, NULL, 0));
     uart_vfs_dev_use_driver(CONSOLE_UART);
 #ifdef FDEV_SETUP_STREAM

@@ -56,14 +56,15 @@ const uint8_t kConfiguration[] = {
 };
 
 const tusb_desc_device_t kDevice = {
-        .bLength            = sizeof(tusb_desc_device_t),
-        .bDescriptorType    = TUSB_DESC_DEVICE,
-        .bcdUSB             = 0x0200,
-        .bDeviceClass       = 0x00,
-        .bDeviceSubClass    = 0x00,
-        .bDeviceProtocol    = 0x00,
-        .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
-        .idVendor           = 0xCafe, // prototype: TinyUSB's example vendor, not a registration
+        .bLength         = sizeof(tusb_desc_device_t),
+        .bDescriptorType = TUSB_DESC_DEVICE,
+        .bcdUSB          = 0x0200,
+        .bDeviceClass    = 0x00,
+        .bDeviceSubClass = 0x00,
+        .bDeviceProtocol = 0x00,
+        .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
+        .idVendor =
+                0xCafe, // prototype: TinyUSB's example vendor, not a registration
         .idProduct          = 0x4015,
         .bcdDevice          = 0x0100,
         .iManufacturer      = 0x01,
@@ -75,7 +76,10 @@ const tusb_desc_device_t kDevice = {
 // Index 0 is the language ID; the serial index is left NULL, and esp_tinyusb
 // fills it with the chip's MAC, so the port keeps its identity across flashes.
 const char *kStrings[] = {
-        "\x09\x04", "NOAIDI Research", "Model 1", nullptr,
+        "\x09\x04",
+        "NOAIDI Research",
+        "Model 1",
+        nullptr,
 };
 
 // ── The incoming stream ────────────────────────────────────────────
@@ -83,7 +87,7 @@ midi_parser_t s_parser;
 
 void publish_message(const midi_message_t *message, void *user) {
     (void) user;
-    evt_t evt = {};
+    evt_t evt  = {};
     evt.kind   = EVT_MIDI;
     evt.source = MIDI_SOURCE_USB;
     evt.midi   = *message;
@@ -133,17 +137,17 @@ void usb_midi_init(void) {
     midi_parser_init(&s_parser, publish_message, nullptr);
     midi_parser_on_sysex(&s_parser, publish_sysex);
 
-    tinyusb_config_t config = {};
-    config.port                  = TINYUSB_PORT_FULL_SPEED_0;
-    config.task.size             = 4096;
-    config.task.priority         = 5;
-    config.task.xCoreID          = 0; // the one core the firmware uses
-    config.descriptor.device     = &kDevice;
-    config.descriptor.string     = kStrings;
+    tinyusb_config_t config  = {};
+    config.port              = TINYUSB_PORT_FULL_SPEED_0;
+    config.task.size         = 4096;
+    config.task.priority     = 5;
+    config.task.xCoreID      = 0; // the one core the firmware uses
+    config.descriptor.device = &kDevice;
+    config.descriptor.string = kStrings;
     config.descriptor.string_count =
             static_cast<int>(sizeof kStrings / sizeof kStrings[0]);
     config.descriptor.full_speed_config = kConfiguration;
-    config.event_cb              = on_device_event;
+    config.event_cb                     = on_device_event;
 
     const esp_err_t err = tinyusb_driver_install(&config);
     if (err != ESP_OK) {
