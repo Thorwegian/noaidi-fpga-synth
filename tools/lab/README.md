@@ -4,7 +4,7 @@ Copyright © 2026 Thor H. Linløkken <thj@thj.no>
 License: CERN-OHL-S v2
 
 What a new agent (or a new pair of hands) needs to know before touching the
-board, so none of it has to be rediscovered by grepping. The scripts below
+prototype, so none of it has to be rediscovered by grepping. The scripts below
 each carry their own docstring; this is the index and the facts around them.
 
 ## Where things are
@@ -31,6 +31,33 @@ flowchart LR
   `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
   volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
   Loading gateware does not touch the console port.
+- **The board, the module and the carrier are three different things.** The
+  *veroboard* is the carrier: it holds the Tang Nano 20K, the socket made for an
+  ESP32-C3 Super Mini, the two DIN inputs and the S/PDIF output. The *module* is
+  the ESP32-S3 (HW-678) seated on the ten-wire jumper cable plugged into that
+  socket. "The board" in these notes means the whole assembly on the bench, and
+  nothing narrower. The pins on both sides of the jumper and **the colour of
+  each of its wires** are in
+  [`docs/images/veroboard-wiring.svg`](../../docs/images/veroboard-wiring.svg),
+  drawn by `tools/docs/veroboard_wiring.py`; that picture is the reference, not
+  a table here that can drift from it.
+- **Both USB leads are power leads.** `COM` (the CH343) and `USB` (the OTG
+  socket) each carry 5 V into the board, so unplugging one does not necessarily
+  power it down: the other keeps it alive. That is the shape of the trap — pull
+  `COM` and the console goes silent while the board is still running, which
+  looks like a dead bench and is only a lost console. A true power cycle means
+  **both** leads out.
+- **A power cycle empties the FPGA, and that is what the boot log's complaint
+  means.** The bitstream is loaded into SRAM (`make sram`) and is lost with the
+  power. After a cycle the firmware resends its boot image — about 7 s in
+  `engine_link`, with `THE CHIP DOES NOT DO WHAT THE MODEL SAYS` in the log —
+  and only then does the synth's USB device install. Reload the gateware before
+  reading anything into that line.
+- **Wait for the device's own line, not a fixed sleep.** The synth's USB device
+  installs about 902 ms after a reset, and `usb_midi` logs `host attached the
+  bus` when the host enumerates it. That line is what a script should wait for:
+  a presence check that sleeps and then looks can pass on a device that has not
+  arrived yet, and it did while the engine link was retried ahead of the device.
 - **Check the checkout before blaming the gateware.** A link that answers
   `no ID nonet` after a fresh build usually means the tree is behind the
   firmware: `git status -sb` on the lab computer's checkout first, then rebuild.
