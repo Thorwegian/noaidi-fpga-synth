@@ -32,6 +32,7 @@
 #include "csp/dsp_graph.hpp"
 #include "graph_evaluator.hpp"
 #include "sound_engine.hpp"
+#include "csp/lfo.hpp"
 
 namespace {
 
@@ -1949,8 +1950,213 @@ void test_the_noaidis_envelope() {
 
 } // namespace
 
+// The four shapes, each selected and then scored against its own ideal in the
+// log domain: the pitch the LFO moves, in semitones, against a saw, a square, a
+// triangle and a sine. A shape selected wrongly correlates better with another
+// shape's ideal than with its own, which is what this catches. The cosim never
+// wrote a shape word, so nothing exercised the selects at all.
+void test_the_shapes() {
+    Played played;
+    if (!played.wire_and_build("the four LFO shapes")) {
+        return;
+    }
+    const SoundEngine &synth = *played.synth;
+    constexpr float rate     = 7.2927f;
+    const double step =
+            static_cast<double>(csp::lfo_rate(rate))
+            / static_cast<double>(int64_t{1} << csp::wide_fraction_bits);
+    constexpr int passes_a_cycle = 3289; // 7.2927 Hz at 24 kHz
+
+    const Wiring::Channel &channel = synth.wiring().channels[0];
+    const int pitch_at             = synth.graph().address(channel.pitch);
+    const int phase_at             = synth.graph().address(channel.phase[0]);
+
+    // the trace of each shape, with the phase it was taken at, both in words:
+    // the phase runs +-8 to the cycle, 14 bits below them
+    std::array<std::vector<double>, 4> pitch;
+    std::array<std::vector<double>, 4> phase;
+    for (int shape = 0; shape < 4; ++shape) {
+        for (int c = 0; c < SoundEngine::channel_count; ++c) {
+            const Wiring::Lfo &lfo = synth.wiring().lfo(c, 0);
+            played.dword(lfo.step, step);
+            played.word(lfo.shape, shape);
+            played.word(lfo.depth[Wiring::moves_pitch], 0.5);
+            played.pointer(
+                    synth.wiring().channels[static_cast<size_t>(c)].lfo[0],
+                    lfo.record);
+        }
+        for (const Wiring::Voice &voice : synth.wiring().voices) {
+            played.pointer(voice.channel, channel.record);
+            for (int e = 0; e < Wiring::envelope_count; ++e) {
+                played.word(voice.velocity[static_cast<size_t>(e)], 1.0);
+                played.stage(
+                        voice.stage[static_cast<size_t>(e)],
+                        channel.segments[static_cast<size_t>(
+                                e)][static_cast<size_t>(Wiring::stage_release)]
+                                .record);
+            }
+        }
+        played.send();
+        if (shape == 0) {
+            start(*played.processor, played.built->image);
+        }
+        std::vector<double> &shape_pitch = pitch[static_cast<size_t>(shape)];
+        std::vector<double> &shape_phase = phase[static_cast<size_t>(shape)];
+        for (int p = 0; p < 2 * passes_a_cycle; ++p) {
+            pass(*played.processor, "the four LFO shapes");
+            shape_pitch.push_back(played.processor->read(pitch_at)
+                                  / static_cast<double>(csp::word_one));
+            // the phase runs +-8 units to the cycle: turn it into 0..1
+            const double units = played.processor->read(phase_at)
+                                 / static_cast<double>(csp::word_one);
+            shape_phase.push_back(std::fmod(units / 16.0 + 0.5 + 1.0, 1.0));
+        }
+    }
+
+    // the ideal shapes at a phase, in the same units as the pitch it moves
+    auto ideal = [](int shape, double cycle) {
+        switch (shape) {
+        case 0:
+            return 2.0 * cycle - 1.0; // saw
+        case 1:
+            return cycle < 0.5 ? 1.0 : -1.0; // square
+        case 2:
+            return 1.0 - 4.0 * std::fabs(cycle - 0.5); // triangle
+        default: {
+            // the program's sine is a parabola: t = 4s - 4s|s|, and that is what
+            // the wave asks of the phase, so the ideal is the shape it draws
+            const double s = 2.0 * cycle - 1.0;
+            return -(s * (4.0 - 4.0 * std::fabs(s)) - 0.0);
+        }
+        }
+    };
+
+    // how far the trace is from an ideal once its scale and offset are fitted:
+    // the residual as a fraction of the swing the ideal has
+    auto residual = [&](const std::vector<double> &trace,
+                        const std::vector<double> &cycles, int shape) {
+        std::vector<double> wave(cycles.size());
+        for (size_t i = 0; i < cycles.size(); ++i) {
+            wave[i] = ideal(shape, cycles[i]);
+        }
+        double mean_wave = 0, mean_trace = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            mean_wave += wave[i];
+            mean_trace += trace[i];
+        }
+        mean_wave /= static_cast<double>(wave.size());
+        mean_trace /= static_cast<double>(trace.size());
+        double covariance = 0, variance = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            covariance += (wave[i] - mean_wave) * (trace[i] - mean_trace);
+            variance += (wave[i] - mean_wave) * (wave[i] - mean_wave);
+        }
+        const double scale  = variance > 1e-12 ? covariance / variance : 0.0;
+        const double offset = mean_trace - scale * mean_wave;
+        double error = 0, swing = 0;
+        for (size_t i = 0; i < wave.size(); ++i) {
+            const double want = scale * wave[i] + offset;
+            error += (trace[i] - want) * (trace[i] - want);
+            swing += (want - mean_trace) * (want - mean_trace);
+        }
+        const double residual =
+                std::sqrt(error / static_cast<double>(wave.size()))
+                / std::sqrt(swing / static_cast<double>(wave.size()) + 1e-12);
+        return std::min(residual, 99.0); // an ideal with no swing fits nothing
+    };
+
+    std::printf("shape against ideal, residual as a fraction of the swing\n");
+    std::printf("        ");
+    for (const char *name : {"saw", "square", "triangle", "sine"}) {
+        std::printf("%9s", name);
+    }
+    std::printf("\n");
+    int wrong = 0;
+    for (int asked = 0; asked < 4; ++asked) {
+        std::array<double, 4> error{};
+        for (int measured = 0; measured < 4; ++measured) {
+            error[static_cast<size_t>(measured)] =
+                    residual(pitch[static_cast<size_t>(asked)],
+                             phase[static_cast<size_t>(asked)], measured);
+        }
+        const auto best = static_cast<size_t>(
+                std::min_element(error.begin(), error.end()) - error.begin());
+        std::array<double, 4> sorted = error;
+        std::sort(sorted.begin(), sorted.end());
+        const bool clear =
+                sorted[1] - sorted[0] > 0.01; // a tenth of a percent of swing
+        if (static_cast<int>(best) != asked || !clear) {
+            ++wrong;
+        }
+        std::printf("  %-6d", asked);
+        for (const double value : error) {
+            std::printf("%9.4f", value);
+        }
+        std::printf("  %s\n",
+                    static_cast<int>(best) == asked && clear ? "ok" : "WRONG");
+    }
+    check_equal(wrong, 0,
+                "each LFO shape is nearest its own ideal, and clearly");
+}
+
+// A link that keeps every word the engine sends, so a test can read the
+// engine's own writes — the ones the firmware puts on the wire — rather than a
+// helper's copy of them.
+class RecordedWrites final : public SoundEngine::Link {
+public:
+    std::vector<SoundEngine::Write> all;
+    void write(std::span<const SoundEngine::Write> writes) override {
+        all.insert(all.end(), writes.begin(), writes.end());
+    }
+    void point(int, const SoundEngine::Pointers &) override {}
+    void load(const csp::ProgramBuilder::Built &,
+              std::span<const SoundEngine::Write> writes) override {
+        all.insert(all.end(), writes.begin(), writes.end());
+    }
+};
+
+// The engine's own write of the LFO record, watched: a preset's shape must
+// reach the record in the units wave_at compares it against. Written as a raw
+// index (0..3) against Q14 constants, every compare says "less" and the wave is
+// the saw whatever the preset asked for — which is what happened in #594, and
+// what no simulation saw, because both of them supply the word already scaled.
+void test_the_lfo_write() {
+    RecordedWrites link;
+    auto synth = std::make_unique<SoundEngine>(link);
+    synth->wire(SoundEngine::Wiring::Paths::every());
+
+    preset_t preset{};
+    preset_init(&preset);
+    preset.lfo[0].shape       = WAVE_PULSE;
+    preset.lfo[0].rate        = 7.2927f;
+    preset.lfo[0].destination = LFO_DEST_PITCH;
+    preset.lfo[0].depth       = 6.0f;
+    synth->channel[0]         = preset;
+    if (!synth->commit()) {
+        check(false,
+              "the engine commits a preset whose LFO asks for the square");
+        return;
+    }
+
+    const int at = synth->graph().address(synth->wiring().lfo(0, 0).shape);
+    bool seen    = false;
+    int64_t word = 0;
+    for (const SoundEngine::Write &write : link.all) {
+        if (write.address == at) {
+            word = write.raw;
+            seen = true;
+        }
+    }
+    check(seen, "the LFO's shape word is among the engine's own writes");
+    check_equal(word,
+                static_cast<int64_t>(Wiring::shape_square) * csp::word_one,
+                "the shape word is scaled, as the compares in wave_at expect");
+}
+
 int main() {
     test_operators();
+    test_the_shapes();
+    test_the_lfo_write();
     test_refusals();
     test_a_field_summed_onto();
     constexpr int body_rows = 20; // of test_copies' circuit as a loop
