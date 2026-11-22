@@ -31,6 +31,21 @@ flowchart LR
   `USB`. `/dev/ttyUSB0`/`1` are the FPGA's FTDI: gateware loads (`make sram`
   volatile, `make flash` persistent) and the BL616 clock CLI (`board_clock.py`).
   Loading gateware does not touch the console port.
+- **Power comes down the USB cables, and the `COM` lead is the supply.** The
+  bench has no separate supply: unplugging `COM` powers the board down and
+  takes the console with it, so a power cycle and a lost console are one event
+  rather than two faults to chase.
+- **A power cycle empties the FPGA, and that is what the boot log's complaint
+  means.** The bitstream is loaded into SRAM (`make sram`) and is lost with the
+  power. After a cycle the firmware resends its boot image — about 7 s in
+  `engine_link`, with `THE CHIP DOES NOT DO WHAT THE MODEL SAYS` in the log —
+  and only then does the synth's USB device install. Reload the gateware before
+  reading anything into that line.
+- **Wait for the device's own line, not a fixed sleep.** The synth's USB device
+  installs about 902 ms after a reset, and `usb_midi` logs `host attached the
+  bus` when the host enumerates it. That line is what a script should wait for:
+  a presence check that sleeps and then looks can pass on a device that has not
+  arrived yet, and it did while the engine link was retried ahead of the device.
 - **Check the checkout before blaming the gateware.** A link that answers
   `no ID nonet` after a fresh build usually means the tree is behind the
   firmware: `git status -sb` on the lab computer's checkout first, then rebuild.
