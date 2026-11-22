@@ -108,6 +108,12 @@ port. The synth's own preset saves are bare TOML without the copyright header
   bench keyboard is a Yamaha PSR-1500, whose manual (with the MIDI
   implementation chart) is
   [thirdparty/Yamaha_PSR-3000_1500_Owners_Manual.pdf](../thirdparty/Yamaha_PSR-3000_1500_Owners_Manual.pdf).
+  It runs the **Master KBD** MIDI template and splits itself at **note 48**:
+  below that it transmits on **channel 2**, from 48 up on **channel 1**, so one
+  keyboard arrives as two parts. The manual lists that template and the rest
+  (`All Parts`, `KBD & STYLE`, `Song`, …) on page 202 without saying which
+  channel any of them assigns; the split point and the two channels are the
+  instrument's own, measured on the bench.
 
 - **The synth's own USB port (use this).** The socket marked `USB` presents the
   synth to the lab computer as a MIDI device, ALSA client `Model 1`, one
