@@ -999,6 +999,11 @@ void SoundEngine::note_on(int c, int note, float velocity) {
     voice.struck   = ++order_;
 
     point(v);
+    // A voice taken from its last note is not the note: the stroke clears
+    // its filter and limiter state, at whatever the partials now point at
+    // (#623). It goes with the pointers, before the attack's words, so the
+    // first pass of the attack is already on a fresh filter.
+    link_.stroke(v);
     // The channel, the pitch and the velocity's amounts go in with the
     // attack, in one swap, so the attack's first pass already has them.
     const Wiring::Voice &wires = wiring().voices[static_cast<size_t>(v)];

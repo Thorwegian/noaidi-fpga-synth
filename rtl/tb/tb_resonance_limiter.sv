@@ -82,6 +82,7 @@ module tb_resonance_limiter #(
         .pointer_write_enable(pointer_write_enable),
         .pointer_write_index(pointer_write_index),
         .pointer_write_data(pointer_write_data),
+        .note_stroke('0),                  // no note-on stroke: the whole run is one note
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
         .probe_address(synth_pkg::POINTER_ZERO), .probe_word(),

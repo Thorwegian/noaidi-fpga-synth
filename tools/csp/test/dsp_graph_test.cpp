@@ -2109,6 +2109,7 @@ public:
         all.insert(all.end(), writes.begin(), writes.end());
     }
     void point(int, const SoundEngine::Pointers &) override {}
+    void stroke(int) override {}
     void load(const csp::ProgramBuilder::Built &,
               std::span<const SoundEngine::Write> writes) override {
         all.insert(all.end(), writes.begin(), writes.end());

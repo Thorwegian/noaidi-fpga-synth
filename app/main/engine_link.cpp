@@ -468,6 +468,20 @@ public:
         }
         xSemaphoreGive(lock);
     }
+    // The note-on stroke is a system register, not a word of the CSP's, so
+    // it goes over the link at once rather than waiting in the image for
+    // the tick's swap. The toggle alternates, so that a note on a voice the
+    // last note also used is a different word and the pipeline takes it.
+    void stroke(int voice) override {
+        if (lock == nullptr) {
+            return;
+        }
+        xSemaphoreTake(lock, portMAX_DELAY);
+        spi_link::write_one(fpga_map::note_stroke,
+                            fpga_map::stroke_word(voice, stroke_toggle));
+        stroke_toggle = !stroke_toggle;
+        xSemaphoreGive(lock);
+    }
     void point(int partial, const SoundEngine::Pointers &pointers) override {
         if (lock == nullptr) {
             return;
@@ -535,6 +549,10 @@ public:
                 static_cast<unsigned>(writes.size()),
                 static_cast<long long>(esp_timer_get_time() - started));
     }
+
+private:
+    // The note-on stroke's toggle: a new word for every note.
+    bool stroke_toggle = false;
 };
 
 SoundEngineLink sound_engine_link;

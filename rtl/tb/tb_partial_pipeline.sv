@@ -29,6 +29,11 @@
 //  11. the probe: the data stream's sink word, read in the last port's
 //      idle clocks between the partials, follows the probe's address and
 //      the page it names
+//  12. the note-on stroke (#624): a stroke names a voice, and at the next
+//      visit of each of that voice's slots its filter states are zero and
+//      its limiter is at unity, and no other voice's are touched; a
+//      repeated value does nothing; the toggle makes a re-strike of the
+//      same voice a new event
 //
 // Run from rtl/ via `make sim-partial` ($readmemh paths are relative to rtl/).
 //--------------------------------------------------------------------
@@ -85,6 +90,7 @@ module tb_partial_pipeline;
     logic                                  pointer_write_enable = 1'b0;
     logic [7:0]                            pointer_write_index  = '0;
     logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data   = '0;
+    logic [synth_pkg::STROKE_W-1:0]        note_stroke          = '0;   // the SPI clock's level, as the firmware leaves it
 
     partial_pipeline #(.NUM_PARTIALS(PARTIALS)) u_pipe (
         .clk(clk), .rst_n(rst_n),
@@ -93,6 +99,7 @@ module tb_partial_pipeline;
         .pointer_write_enable(pointer_write_enable),
         .pointer_write_index(pointer_write_index),
         .pointer_write_data(pointer_write_data),
+        .note_stroke(note_stroke),
         .sink_read_address(sink_read_address),
         .sink_read_data(sink_read_data),
         .probe_address(probe_address), .probe_word(probe_word),
@@ -255,6 +262,91 @@ module tb_partial_pipeline;
 
     // the gain multiply's operands, one register back
     integer prev_s9_sample = 0, prev_s9_gain_l = 0, prev_s9_gain_r = 0;
+
+    //----------------------------------------------------------------
+    // 12. The note-on stroke's state: the voice it strikes, the reference
+    // one sample before the first stroke, and the counts the run reports.
+    //----------------------------------------------------------------
+    localparam int     STRUCK      = 5;
+    localparam longint LIMIT_UNITY = 33'h1_0000_0000;   // the limiter's gain state at unity
+
+    integer ref_filter  [0:PARTIALS-1];     // the section-1 states, at period 5's end
+    integer ref_filter2 [0:PARTIALS-1];
+    integer ref_phase   [0:PARTIALS-1];
+    integer n_cleared = 0, n_kept = 0;
+
+    // The four state words of a partial at zero: what a stroke writes.
+    function automatic logic state_cleared(input integer p);
+        state_cleared = $signed(u_pipe.ic1eq1_ram[p]) == 0
+                     && $signed(u_pipe.ic2eq1_ram[p]) == 0
+                     && $signed(u_pipe.ic1eq2_ram[p]) == 0
+                     && $signed(u_pipe.ic2eq2_ram[p]) == 0;
+    endfunction
+
+    // The struck voice's eight slots at a sample's end, when every
+    // writeback has landed: cleared, the limiter at unity and the phase
+    // carried on (the stroke is not #518's), or not cleared at all.
+    task automatic check_struck(input bit expect_clear, input integer samples_on, input string what);
+        integer p;
+        for (int slot_in_voice = 0; slot_in_voice < synth_pkg::UNISON; slot_in_voice++) begin
+            p = STRUCK * synth_pkg::UNISON + slot_in_voice;
+            if (expect_clear) begin
+                n_cleared = n_cleared + 1;
+                if (!state_cleared(p)) begin
+                    $display("FAIL %0s: partial %0d keeps its filter state %h %h %h %h", what, p,
+                             $signed(u_pipe.ic1eq1_ram[p]), $signed(u_pipe.ic2eq1_ram[p]),
+                             $signed(u_pipe.ic1eq2_ram[p]), $signed(u_pipe.ic2eq2_ram[p]));
+                    errors = errors + 1;
+                end
+                if (u_pipe.limiter_ram[p] !== LIMIT_UNITY) begin
+                    $display("FAIL %0s: partial %0d limiter %h is not unity", what, p,
+                             u_pipe.limiter_ram[p]);
+                    errors = errors + 1;
+                end
+                if (((u_pipe.phase_ram[p] - ref_phase[p]) & 32'hFFFFFF)
+                        !== ((samples_on * exp_delta(p)) & 32'hFFFFFF)) begin
+                    $display("FAIL %0s: partial %0d phase %h is not %0d steps on", what, p,
+                             u_pipe.phase_ram[p], samples_on);
+                    errors = errors + 1;
+                end
+            end else begin
+                if (ref_filter[p] == 0 && ref_filter2[p] == 0) continue;   // nothing to keep
+                n_kept = n_kept + 1;
+                if (state_cleared(p)) begin
+                    $display("FAIL %0s: partial %0d was cleared", what, p);
+                    errors = errors + 1;
+                end
+            end
+        end
+    endtask
+
+    // Every other voice's slots keep their state: a cleared pair is both of
+    // its section's states at zero, which a filter driven by an oscillator
+    // is not, and the count shows the case had something to keep.
+    task automatic check_others(input string what);
+        integer p, kept;
+        kept = 0;
+        for (p = 0; p < PARTIALS; p++) begin
+            if (p / synth_pkg::UNISON == STRUCK) continue;
+            if (ref_filter[p] == 0 && ref_filter2[p] == 0) continue;
+            kept = kept + 1;
+            if (state_cleared(p)) begin
+                $display("FAIL %0s: partial %0d of another voice was cleared", what, p);
+                errors = errors + 1;
+            end
+        end
+        if (kept < PARTIALS / 2) begin
+            $display("FAIL %0s: only %0d partials of other voices had state to keep", what, kept);
+            errors = errors + 1;
+        end
+    endtask
+
+    // A stroke: the word the firmware writes, {toggle, voice}, held in the
+    // SPI clock.
+    task automatic stroke(input bit toggle, input integer voice);
+        @(posedge clk);
+        note_stroke <= {toggle, voice[synth_pkg::STROKE_VOICE_W-1:0]};
+    endtask
 
     //----------------------------------------------------------------
     // Main monitor
@@ -439,6 +531,28 @@ module tb_partial_pipeline;
                 errors = errors + 1;
             end
         end
+
+        // 12. the note-on stroke: the reference the strokes are judged
+        // against, then the three checks at the samples' ends. The struck
+        // voice's limiter words are put where a peak of the last note
+        // would have left them: a bench this short never rings a partial
+        // into the limiter, and the stroke must bring them back to unity.
+        if (slot == 700 && period == 5) begin
+            for (int p = 0; p < PARTIALS; p++) begin
+                ref_filter[p]  = $signed(u_pipe.ic1eq1_ram[p]);
+                ref_filter2[p] = $signed(u_pipe.ic2eq1_ram[p]);
+                ref_phase[p]   = $signed(u_pipe.phase_ram[p]);
+            end
+            for (int slot_in_voice = 0; slot_in_voice < synth_pkg::UNISON; slot_in_voice++) begin
+                u_pipe.limiter_ram[STRUCK * synth_pkg::UNISON + slot_in_voice] = 33'h0_1000_0000;
+            end
+        end
+        if (slot == 700 && period == 7) begin
+            check_struck(1'b1, 2, "the stroke");
+            check_others("the stroke");
+        end
+        if (slot == 700 && period == 9)  check_struck(1'b0, 4, "the repeated value");
+        if (slot == 700 && period == 11) check_struck(1'b1, 6, "the toggled re-strike");
     end
 
     //----------------------------------------------------------------
@@ -465,14 +579,31 @@ module tb_partial_pipeline;
     end
 
     //----------------------------------------------------------------
+    // 12. The strokes, each at slot 200: after the voice's slots have
+    // written back for the sample and before the next, so the check at the
+    // sample's end sees one window's worth of visits. The second write is
+    // the same word (nothing); the third flips the toggle on the same
+    // voice (a new stroke).
+    //----------------------------------------------------------------
+    initial begin
+        wait (period == 6 && slot == 200);
+        stroke(1'b1, STRUCK);
+        wait (period == 8 && slot == 200);
+        stroke(1'b1, STRUCK);
+        wait (period == 10 && slot == 200);
+        stroke(1'b0, STRUCK);
+    end
+
+    //----------------------------------------------------------------
     // Run control
     //----------------------------------------------------------------
     always @(posedge clk) begin
         if (period >= LAST_PERIOD && slot == 400) begin
             $display("checked: %0d front end, %0d parameters, %0d gains, %0d mix periods, %0d phases, %0d after the flip, %0d probe reads",
                      n_front, n_param, n_gain, n_mix, n_phase, n_paged, n_probe);
-            if (errors == 0 && (n_paged == 0 || n_probe == 0))
-                $display("FAIL: the paging case or the probe never ran");
+            $display("checked: %0d struck slots cleared, %0d slots kept their state", n_cleared, n_kept);
+            if (errors == 0 && (n_paged == 0 || n_probe == 0 || n_cleared == 0 || n_kept == 0))
+                $display("FAIL: the paging case, the probe or the stroke cases never ran");
             else if (errors == 0)
                 $display("PASS: all partial pipeline checks passed");
             else

@@ -23,11 +23,16 @@ package synth_pkg;
     //--- Partials and issue slots (design doc terminology) ----------
     // The FPGA generates PARTIALS (256 of them), one per issue slot
     // through the time-division-multiplexed partial pipeline. The
-    // ESP32 groups partials into voices; the FPGA never sees that.
+    // ESP32 groups partials into voices; the FPGA never sees that
+    // grouping except in the note-on stroke, which names a voice.
     parameter int NUM_PARTIALS = 256;
     parameter int PARTIAL_W       = 8;      // $clog2(NUM_PARTIALS)
-    parameter int UNISON       = 8;      // firmware convention only
-    parameter int POLYPHONY    = 32;     // firmware convention only
+    // A voice is a run of consecutive partials and the firmware lays them
+    // out by index: partial p is of voice p[7:3]. The note-on stroke's
+    // voice field is read against those bits.
+    parameter int UNISON       = 8;      // a voice's partials
+    parameter int POLYPHONY    = 32;     // voices
+    parameter int VOICE_W      = $clog2(POLYPHONY);
 
     //--- The wire (docs/memory_map.md, conventions) ------------------
     // Every block RAM on the chip is 9, 18 or 36 bits wide, so the SPI
@@ -50,6 +55,13 @@ package synth_pkg;
     parameter int CTRL_DATA_STREAM = 3;
     parameter int CTRL_SOURCE_LOW  = 4;
     parameter int CTRL_SOURCE_HIGH = 6;
+    // The note-on stroke: {toggle, voice}, which the firmware writes at a
+    // note-on. The pipeline takes it as an event, a change against the
+    // value it last consumed, so the toggle makes a second note-on on the
+    // same voice a different value, and a repeated value is nothing.
+    parameter logic [SPI_ADDRESS_W-1:0] MAP_STROKE = 18'h00001;
+    parameter int STROKE_VOICE_W = VOICE_W;             // the voice, at the bottom
+    parameter int STROKE_W       = STROKE_VOICE_W + 1;  // the toggle above it
     parameter int MAP_SYSTEM_DWORDS = 16;
     parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back (0x7 reads the trap's capture); 0x8–0xF are status
     parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset

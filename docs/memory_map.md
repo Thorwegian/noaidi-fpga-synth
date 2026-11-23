@@ -38,7 +38,8 @@ a MIDI-to-CV converter). Consequences:
 - Note-on/off is a handful of writes to a voice's registers (its note, the
   amounts its velocity sets, its envelopes' stages: attack at note-on,
   release at note-off); the CSP steps the envelopes and ends an attack at
-  full scale.
+  full scale. The note-on also strokes the pipeline (`STROKE`, `0x001`), so
+  a re-struck voice begins with no filter or limiter state of the last note.
 
 ## Block diagram
 
@@ -119,7 +120,7 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 | Offset | Register | Contents |
 |---|---|---|
 | `0x000` | `ID` | reserved (the ID byte rides MISO byte 0 of every frame) |
-| `0x001` | `STATUS` | reserved |
+| `0x001` | `STROKE` | written: `{toggle, voice[4:0]}`, the note-on stroke. A change of the word is one note-on to the partial pipeline and a repeated value is nothing; the toggle alternates with every note-on, so a second note on the same voice is a new word. Reads back what was last written |
 | `0x002` | `CTRL` | `[0]` commit the write queue (an event: write 1 to commit), `[1]` hold the CSP in reset, `[2]` replace the output with the test tone, `[3]` the data stream on the 48 kHz output, `[6:4]` its source |
 | `0x003–0x006` | scratch | read back what was written |
 | `0x007` | `TRAP` | written: `[10:0]` the CSP register, or with `[11]` set the sink word by index, that the write trap watches (0: none); read: what it caught — `[35:30]` the hits (mod 64), `[29]` the last was the pass's (the window's or the sink area's), `[28:18]` its cycle in the pass, `[17:0]` its word. The lab's instrument for a write nobody asked for (#238) |
@@ -133,6 +134,18 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 | `0x00F` | `DIAG_STREAM` | read-only. `[15:0]` the data stream's frames sent since reset |
 
 The diagnostic words cross from the system clock through two flip-flops and are not coherent across bits; read twice.
+
+`STROKE` is the partial pipeline's event input (#624), and it is not a word
+of the CSP's address space: the firmware writes it outside the write queue,
+at the note-on it belongs to, because the pipeline acts on it at once where
+a queued word waits for a swap and a pass. On a change of the word the
+pipeline clears the struck voice's per-partial state at the next visit of
+each of its slots and no other voice's: both sections of its filter to zero
+and its resonance limiter's gain to unity (#623). The stroke is positioned
+by voice, not by slot, so a note-on that re-points a voice's partials
+reaches them whatever their layout. The toggle makes a re-strike of the same
+voice a new word, since a value the pipeline has already consumed is not an
+event.
 
 `CTRL[1]` is 1 at power-up: the CSP runs no program until the firmware has
 loaded one and written `CTRL = 0`. A held CSP applies every committed write in
