@@ -153,7 +153,7 @@ the pass it is committed in. `CTRL` reads back its last value without the
 commit bit. Every `CTRL` write sets all three bits: pass the hold and the test
 tone along with a swap.
 
-## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x090FF`
+## Program — IMEM `0x08000–0x08FFF`, the decode ROM `0x09000–0x090FF`
 
 An instruction is a qword ([csp2_isa.md](csp2_isa.md) section 2), held as
 eight nonet slices of one row in eight blocks of 2048 × 9. A row is two
