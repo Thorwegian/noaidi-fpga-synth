@@ -124,6 +124,6 @@ License: CERN-OHL-S v2
 
 - A voice is a little monophonic synthesiser of its own that just happens to be controlled by the same channel as the others: they meet at the channel and nowhere else.
 
-- A channel is a little synthesiser of its own that just happens to draw on the shared voice pool, just happens to share the MIDI cable with the synths beside it, and just happens to be plugged into the same mixing desk: they meet at those three and nowhere else, and nothing beyond the channel sets what it sounds like.
+- A channel is a little polyphonic synthesiser of its own that just happens to draw on the shared voice pool, just happens to share the MIDI cable with the synths beside it, and just happens to be plugged into the same mixing desk: they meet at those three and nowhere else, and nothing beyond the channel sets what it sounds like.
 
 - The player hears no mechanism: the keybed, the pedal and the switch are the trigger for the synthesis engine, and the sound is the engine, the cabinet and the room.
