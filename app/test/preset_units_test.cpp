@@ -456,6 +456,50 @@ static void check_saving(void) {
     printf("saving, recovery, names: %s\n", s_failures ? "see above" : "ok");
 }
 
+// The name a save refuses (storage_format.md "Names", #523).
+static void check_name_refusals(void) {
+    const int before = s_failures;
+    char dir[]       = "/tmp/noaidi_names_XXXXXX";
+    if (!mkdtemp(dir)) {
+        fail("mkdtemp");
+        return;
+    }
+    char taken[320], clash[320], spare[320], bad[320], err[200];
+    snprintf(taken, sizeof taken, "%s/Snare.toml", dir);
+    snprintf(clash, sizeof clash, "%s/snare.toml", dir);
+    snprintf(spare, sizeof spare, "%s/Space Tom.toml", dir);
+    snprintf(bad, sizeof bad, "%s/what?.toml", dir);
+    preset_t init;
+    preset_init(&init);
+    if (!preset_file_save(taken, &init, err, sizeof err)) {
+        fail(err);
+        return;
+    }
+    struct Case {
+        const char *path;
+        bool refused;
+        const char *say; // the words the refusal must hold, or the failure
+    };
+    const Case cases[] = {
+            {taken, false, "a file already on the storage keeps its name"},
+            {clash, true, "letter case"},
+            {spare, false, "a free name is allowed"},
+            {bad, true, "none of"},
+    };
+    for (const Case &c : cases) {
+        const char *why = preset_file_name_refusal(c.path);
+        if (c.refused != (why != nullptr)) {
+            fail(c.say);
+        } else if (why && strstr(why, c.say) == nullptr) {
+            fail(c.say);
+        }
+    }
+    remove(taken);
+    rmdir(dir);
+    printf("names a save refuses: %s\n",
+           s_failures == before ? "ok" : "see above");
+}
+
 int main(int argc, char **argv) {
     check_round_trips();
     check_loading();
@@ -522,6 +566,8 @@ int main(int argc, char **argv) {
     }
 
     check_saving();
+
+    check_name_refusals();
 
     printf("\n%s (%d failures)\n", s_failures ? "FAIL" : "ALL PASS",
            s_failures);

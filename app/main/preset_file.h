@@ -57,6 +57,12 @@ int preset_file_recover(const char *dir);
 // no trailing dot.
 bool preset_name_valid(const char *name);
 
+// Why storage_format.md's name rule refuses a new preset at path, in the
+// console's words; NULL when the save may go ahead. A file already at path
+// is not judged, and a name a letter case apart from another in the same
+// folder is refused, since FAT compares names case-insensitively.
+const char *preset_file_name_refusal(const char *path);
+
 // Print every key where a and b differ as the writer writes them, as
 // "table.key: <a> -> <b>". Returns the number of differences.
 int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b);

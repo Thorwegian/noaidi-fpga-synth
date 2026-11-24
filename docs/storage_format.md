@@ -114,6 +114,11 @@ A name:
 - differs from every other name in the same folder by more than
   letter case, because FAT compares names case-insensitively.
 
+The firmware applies the rule when it saves a new preset: a name it
+refuses is not written, and the console says which rule the name broke.
+A file the storage already holds is not judged, so it is listed and
+loaded under the name it has.
+
 ## Text files
 
 Every file is [TOML v1.0.0](https://toml.io/en/v1.0.0), encoded as

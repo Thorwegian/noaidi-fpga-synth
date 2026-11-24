@@ -171,6 +171,10 @@ int cmd_save(int argc, char **argv) {
         return 1;
     }
     std::string abs = resolve(argv[1]), error;
+    if (const char *refusal = preset_file_name_refusal(fs_path(abs).c_str())) {
+        std::printf("save: %s\n", refusal);
+        return 1;
+    }
     preset_t p;
     if (!voice_alloc_get_preset(g_part, &p)) {
         std::printf("save: the synth did not answer\n");
