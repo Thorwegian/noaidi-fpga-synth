@@ -21,13 +21,13 @@ pulse_width = 50
 [filter]
 type = "lowpass"
 slope = 12
-cutoff = 18000
+cutoff = 14388
 resonance = 0.7
 key_track = 0
 
 [amp_env]
 attack = 0
-sustain = 100
+sustain = 0
 decay = 0.59
 release = 0.009
 velocity = 0
