@@ -327,9 +327,9 @@ every future pitch/cutoff amount. 7-bit resolution at full span is
 CCs; zero = off, which isolates it when testing. **Velocity scales the
 MOD envelope's depth multiplicatively** (the DX7-through-modern-VA
 convention: soft note = shallower sweep, same shape) — firmware
-scales the MOD envelope instruction's per-voice COEF word at note-on, no gateware change. The
-amp path is already multiplicative-equivalent (log-domain subtract =
-linear scaling) and just gains a sensitivity amount.
+scales the MOD envelope's per-voice velocity word at note-on, no gateware
+change. The amp path is already multiplicative-equivalent (log-domain
+subtract = linear scaling) and just gains a sensitivity amount.
 
 ## Audio outputs
 
