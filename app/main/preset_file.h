@@ -52,16 +52,12 @@ bool preset_file_save(const char *path, const preset_t *p, char *err,
 // is deleted. Returns the number of files repaired.
 int preset_file_recover(const char *dir);
 
-// Whether name is a valid preset name: UTF-8, 1-64 characters, none of
-// \ / : * ? " < > | or control characters, no leading or trailing space,
-// no trailing dot.
-bool preset_name_valid(const char *name);
-
-// Why storage_format.md's name rule refuses a new preset at path, in the
-// console's words; NULL when the save may go ahead. A file already at path
-// is not judged, and a name a letter case apart from another in the same
-// folder is refused, since FAT compares names case-insensitively.
-const char *preset_file_name_refusal(const char *path);
+// Why storage_format.md refuses name as a new preset's name in folder (a
+// filesystem path), in the console's words; NULL when it may be written. A
+// file already holding the name is the caller's to judge, and a name a
+// letter case apart from another in the folder is refused, since FAT
+// compares names case-insensitively.
+const char *preset_name_refusal(const char *folder, const char *name);
 
 // Print every key where a and b differ as the writer writes them, as
 // "table.key: <a> -> <b>". Returns the number of differences.

@@ -17,7 +17,6 @@
 
 #include <dirent.h>
 #include <strings.h>
-#include <sys/stat.h>
 
 #include "preset_units.hpp"
 #include "safe_file.hpp"
@@ -273,35 +272,15 @@ static const char *name_fault(std::string_view s) {
     return nullptr;
 }
 
-bool preset_name_valid(const char *name) {
-    return name_fault(name) == nullptr;
-}
-
-const char *preset_file_name_refusal(const char *path) {
-    struct stat st;
-    if (stat(path, &st) == 0) {
-        // A preset the storage already holds keeps the name it was given:
-        // the rule guards a new name, and refusing this one would strand
-        // the player's file under a name nothing can save over.
-        return nullptr;
-    }
-    const char *slash = std::strrchr(path, '/');
-    const char *leaf  = slash ? slash + 1 : path;
-    std::string stem(leaf);
-    if (stem.size() > 5
-        && strcasecmp(stem.c_str() + stem.size() - 5, ".toml") == 0) {
-        stem.resize(stem.size() - 5);
-    }
+// Why the storage refuses name as a new preset in folder (a filesystem
+// path); nullptr when it may be written. A file already holding the name
+// is the caller's to judge.
+const char *preset_name_refusal(const char *folder, const char *name) {
+    const std::string_view stem(name);
     if (const char *fault = name_fault(stem)) {
         return fault;
     }
-    std::string folder =
-            slash ? std::string(path, static_cast<size_t>(slash - path))
-                  : std::string(".");
-    if (folder.empty()) {
-        folder = "/";
-    }
-    DIR *d = opendir(folder.c_str());
+    DIR *d = opendir(folder);
     if (!d) {
         return nullptr; // no folder to compare with; the save reports it
     }
