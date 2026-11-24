@@ -9,7 +9,7 @@
   - `blocked_by` is for a prerequisite that several issues share, or for one that belongs under another `meta`: the sub-issue edge would file it in the wrong place.
   - GitHub allows one parent and eight levels.
   - An issue has its labels and its parent at creation; a parent with no work of its own is labelled `meta`.
-  - An issue's title says in plain words what is wrong and who notices.
+  - An issue's title gives the thing the player gets or loses, then the mechanism that decides it.
   - An undecided item belongs to the issue that settles it: a measurement in the issue that measures, an implementation detail in a sub-issue, a deferred control in its own issue blocked by the parent. A parent's Undecided list ends empty.
   - An issue's body is trimmed of what belongs to its sub-issues: the child's problem is the child's.
   - An undecided item is the agent's to settle or Thor's to answer. A technical item is the agent's: the investigation settles it, and the list holds only what his answer alone can settle.
