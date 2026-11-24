@@ -15,6 +15,9 @@
 #include <string_view>
 #include <vector>
 
+#include <dirent.h>
+#include <strings.h>
+
 #include "preset_units.hpp"
 #include "safe_file.hpp"
 #include "toml.hpp"
@@ -243,21 +246,63 @@ int preset_file_recover(const char *dir) {
     return safe_file::recover(dir);
 }
 
-bool preset_name_valid(const char *name) {
-    std::string_view s(name);
-    if (s.empty() || s.front() == ' ' || s.back() == ' ' || s.back() == '.') {
-        return false;
+// Why storage_format.md's name rule refuses a name, in the console's
+// words; nullptr when the rule allows it.
+static const char *name_fault(std::string_view s) {
+    if (s.empty()) {
+        return "a name is 1 to 64 characters";
+    }
+    if (s.front() == ' ' || s.back() == ' ' || s.back() == '.') {
+        return "a name does not start or end with a space, and does not end "
+               "with a dot";
     }
     size_t chars = 0;
     for (unsigned char c : s) {
         if (c < 0x20 || c == 0x7F || std::strchr("\\/:*?\"<>|", c)) {
-            return false;
+            return "a name holds none of \\ / : * ? \" < > | and no control "
+                   "character";
         }
         if ((c & 0xC0) != 0x80) { // count UTF-8 characters, not bytes
             chars++;
         }
     }
-    return chars <= 64;
+    if (chars > 64) {
+        return "a name is 1 to 64 characters";
+    }
+    return nullptr;
+}
+
+// Why the storage refuses name as a new preset in folder (a filesystem
+// path); nullptr when it may be written. A file already holding the name
+// is the caller's to judge.
+const char *preset_name_refusal(const char *folder, const char *name) {
+    const std::string_view stem(name);
+    if (const char *fault = name_fault(stem)) {
+        return fault;
+    }
+    DIR *d = opendir(folder);
+    if (!d) {
+        return nullptr; // no folder to compare with; the save reports it
+    }
+    while (dirent *e = readdir(d)) {
+        const size_t len = std::strlen(e->d_name);
+        if (len < 6 || strcasecmp(e->d_name + len - 5, ".toml") != 0) {
+            continue;
+        }
+        const std::string_view other(e->d_name, len - 5);
+        if (other.size() != stem.size()
+            || strncasecmp(other.data(), stem.data(), stem.size()) != 0
+            || std::memcmp(other.data(), stem.data(), stem.size()) == 0) {
+            continue;
+        }
+        closedir(d);
+        // FAT compares names case-insensitively: two names a letter case
+        // apart are one file to the storage and two to the player.
+        return "a name differs from every other in the folder by more than "
+               "letter case";
+    }
+    closedir(d);
+    return nullptr;
 }
 
 int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b) {

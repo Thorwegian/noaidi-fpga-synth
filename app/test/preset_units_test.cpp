@@ -423,7 +423,18 @@ static void check_saving(void) {
     remove(a);
     rmdir(dir);
 
-    // names
+    printf("saving and recovery: %s\n", s_failures ? "see above" : "ok");
+}
+
+// The name a save refuses (storage_format.md "Names", #523).
+static void check_name_refusals(void) {
+    const int before = s_failures;
+    char dir[]       = "/tmp/noaidi_names_XXXXXX";
+    if (!mkdtemp(dir)) {
+        fail("mkdtemp");
+        return;
+    }
+    // the rule's own cases, in a folder holding nothing
     const char *good[] = {
             "Arctic Ice", "Ærlig Gjøk", "RnB Whistle", "a",
             "1234567890123456789012345678901234567890123456789012345678901234"};
@@ -441,19 +452,50 @@ static void check_saving(void) {
             "pipe|",
             "tab\t",
             "12345678901234567890123456789012345678901234567890123456789012345"};
-    for (size_t i = 0; i < sizeof good / sizeof good[0]; i++) {
-        if (!preset_name_valid(good[i])) {
-            printf("FAIL name \"%s\" rejected\n", good[i]);
+    for (const char *name : good) {
+        if (preset_name_refusal(dir, name) != nullptr) {
+            printf("FAIL name \"%s\" refused\n", name);
             s_failures++;
         }
     }
-    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
-        if (preset_name_valid(bad[i])) {
-            printf("FAIL name \"%s\" accepted\n", bad[i]);
+    for (const char *name : bad) {
+        if (preset_name_refusal(dir, name) == nullptr) {
+            printf("FAIL name \"%s\" allowed\n", name);
             s_failures++;
         }
     }
-    printf("saving, recovery, names: %s\n", s_failures ? "see above" : "ok");
+
+    // a new name against the file already there
+    char taken[320], err[200];
+    snprintf(taken, sizeof taken, "%s/Snare.toml", dir);
+    preset_t init;
+    preset_init(&init);
+    if (!preset_file_save(taken, &init, err, sizeof err)) {
+        fail(err);
+        return;
+    }
+    struct Case {
+        const char *name;
+        bool refused;
+        const char *say; // the words the refusal must hold, or the failure
+    };
+    const Case cases[] = {
+            {"snare", true, "letter case"},
+            {"Space Tom", false, "a free name is allowed"},
+            {"Snare", false, "a file's own name is not a clash with itself"},
+    };
+    for (const Case &c : cases) {
+        const char *why = preset_name_refusal(dir, c.name);
+        if (c.refused != (why != nullptr)) {
+            fail(c.say);
+        } else if (why && strstr(why, c.say) == nullptr) {
+            fail(c.say);
+        }
+    }
+    remove(taken);
+    rmdir(dir);
+    printf("names a save refuses: %s\n",
+           s_failures == before ? "ok" : "see above");
 }
 
 int main(int argc, char **argv) {
@@ -522,6 +564,8 @@ int main(int argc, char **argv) {
     }
 
     check_saving();
+
+    check_name_refusals();
 
     printf("\n%s (%d failures)\n", s_failures ? "FAIL" : "ALL PASS",
            s_failures);

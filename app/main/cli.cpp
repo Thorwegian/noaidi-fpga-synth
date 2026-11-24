@@ -170,13 +170,32 @@ int cmd_save(int argc, char **argv) {
         std::printf("usage: save <file>\n");
         return 1;
     }
-    std::string abs = resolve(argv[1]), error;
+    std::string abs      = resolve(argv[1]), error;
+    const std::string fs = fs_path(abs);
+    const size_t slash   = fs.rfind('/');
+    const std::string folder =
+            slash == std::string::npos ? std::string(".") : fs.substr(0, slash);
+    std::string name = slash == std::string::npos ? fs : fs.substr(slash + 1);
+    if (name.size() > 5
+        && strcasecmp(name.c_str() + name.size() - 5, ".toml") == 0) {
+        name.resize(name.size() - 5);
+    }
+    struct stat st;
+    if (stat(fs.c_str(), &st) != 0) {
+        // a new name, so the rule judges it. A preset already saved keeps
+        // the name it has, or nothing could save over it again.
+        if (const char *refusal =
+                    preset_name_refusal(folder.c_str(), name.c_str())) {
+            std::printf("save: %s\n", refusal);
+            return 1;
+        }
+    }
     preset_t p;
     if (!voice_alloc_get_preset(g_part, &p)) {
         std::printf("save: the synth did not answer\n");
         return 1;
     }
-    if (!preset_file::save(fs_path(abs), p, error)) {
+    if (!preset_file::save(fs, p, error)) {
         std::printf("save: %s\n", error.c_str());
         return 1;
     }
