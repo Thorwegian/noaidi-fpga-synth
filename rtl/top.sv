@@ -213,10 +213,13 @@ module top (
     logic [synth_pkg::SINK_READ_PORTS-1:0][csp_pkg::WORD_W-1:0]      sink_read_data;
     logic [csp_pkg::WORD_W-1:0] probe_sink_word;
 
-    // the partial pipeline's pointers from the bus (sclk domain, an entry at a time), its mix out
+    // the partial pipeline's pointers from the bus (sclk domain, an entry at a time), its
+    // note-on stroke (sclk domain, {toggle, voice}; the pipeline takes it through two flops),
+    // its mix out
     logic        pointer_write_enable;
     logic [7:0]  pointer_write_index;
     logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data;
+    logic [synth_pkg::STROKE_W-1:0]        note_stroke_sclk;
     logic signed [25:0] mix_left, mix_right;         // Q4.14 + guard: the raw sum
     logic signed [23:0] sample_left, sample_right;   // Q0.24, limited and clipped
     logic [18:0] master_gain;                        // the master limiter's applied gain, UQ0.18
@@ -234,8 +237,8 @@ module top (
     );
 
     //----------------------------------------------------------------
-    // The 256-partial pipeline: its pointers from the bus, its words
-    // from the sink area, its mix out
+    // The 256-partial pipeline: its pointers and its note-on stroke from
+    // the bus, its words from the sink area, its mix out
     //----------------------------------------------------------------
     partial_pipeline u_partial_pipeline (
         .clk                  (sysclk),
@@ -247,6 +250,7 @@ module top (
         .pointer_write_enable (pointer_write_enable),
         .pointer_write_index  (pointer_write_index),
         .pointer_write_data   (pointer_write_data),
+        .note_stroke          (note_stroke_sclk),
         .sink_read_address    (sink_read_address),
         .sink_read_data       (sink_read_data),
         .probe_address        (probe_address_sync[csp_pkg::SINK_WORD_W-1:0]),
@@ -437,6 +441,7 @@ module top (
         .probe_address      (probe_address_sclk),
         .trap_address       (trap_address_sclk),
         .trap_capture       (trap_capture),
+        .note_stroke        (note_stroke_sclk),
         .status             (status),
         .fifo_write_enable  (fifo_write_enable),
         .fifo_write_dword    (fifo_write_dword),

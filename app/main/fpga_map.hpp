@@ -36,6 +36,20 @@ constexpr dword_t stream_source_dump =
         4; // the register file, a register a pass: its index and its word
 constexpr dword_t stream_source_mask = 7; // CTRL[6:4]
 
+// The note-on stroke: written at every note-on as {toggle, voice}, the
+// toggle alternating so that a second note on one voice is a different word.
+// The partial pipeline takes a change of the word as one note-on and clears
+// the struck voice's filter states and its limiter's gain, for that voice's
+// slots and no other's (#624, #623).
+constexpr uint32_t note_stroke      = 0x00001;
+constexpr dword_t stroke_voice_mask = 0x1F;
+constexpr int stroke_toggle_shift   = 5;
+
+constexpr dword_t stroke_word(int voice, bool toggle) {
+    return (static_cast<dword_t>(voice) & stroke_voice_mask)
+           | (dword_t{toggle ? 1u : 0u} << stroke_toggle_shift);
+}
+
 // The scratch dwords: read back what was written, nothing else.
 constexpr uint32_t scratch_first = 0x00003;
 constexpr uint32_t scratch_last  = 0x00006;

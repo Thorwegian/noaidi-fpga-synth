@@ -8,7 +8,8 @@
 //
 // Covers: the ID nonet every frame; the scratch dwords (write, read back,
 // burst, non-incrementing re-read); CTRL's event and levels; the probe
-// address; the status dwords reading their inputs and ignoring writes;
+// address; the note-on stroke's word and its read-back; the status dwords
+// reading their inputs and ignoring writes;
 // out-of-window drop and zero-read (no aliasing); the door's strobe with
 // its dword; IMEM's and the ROM's loads and read-backs through models that
 // answer a clock after the row, as the blocks do; a partial's pointers,
@@ -30,6 +31,7 @@ module tb_spi_bus;
     wire [1:0]  stream_source;
     wire [csp_pkg::REGISTER_W-1:0] probe_address;
     wire [csp_pkg::ADDRESS_W-1:0]  trap_address;                        // the trap's register, as written to dword 0x7
+    wire [STROKE_W-1:0]            note_stroke;                         // the note-on stroke, as written to dword 0x1
     logic [SPI_DWORD_W-1:0]        trap_capture = 36'hC_AFE0_0042;      // what dword 0x7 reads: the CSP's capture
     logic [MAP_SYSTEM_DWORDS-MAP_STORED_DWORDS-1:0][SPI_DWORD_W-1:0] status;
     initial begin
@@ -53,6 +55,7 @@ module tb_spi_bus;
         .swap(swap), .csp_held(csp_held), .test_tone_enable(test_tone_enable),
         .data_stream_enable(data_stream_enable), .stream_source(stream_source), .probe_address(probe_address),
         .trap_address(trap_address), .trap_capture(trap_capture),
+        .note_stroke(note_stroke),
         .status(status),
         .fifo_write_enable(fifo_write_enable), .fifo_write_dword(fifo_write_dword),
         .imem_load_enable(imem_load_enable), .imem_row(imem_row), .imem_upper(imem_upper),
@@ -215,7 +218,7 @@ module tb_spi_bus;
         check36("re-read a", read_dwords[0], 36'h2_2222_2222);
         check36("re-read b", read_dwords[1], 36'h2_2222_2222);
 
-        $display("--- 5. the status dwords read their inputs and ignore writes; the probe address is kept ---");
+        $display("--- 5. the status dwords read their inputs and ignore writes; the probe address and the note-on stroke are kept ---");
         write_dwords[0] = '1;
         write_burst(18'h00008, 1, 1);
         read_burst(18'h00008, 4, 1);
@@ -229,6 +232,15 @@ module tb_spi_bus;
         check36("probe address read back", read_dwords[0], 36'h2A4);
         check36("probe even (status 0xD)", read_dwords[1], 36'hA_0000_0006);
         check36("probe odd (status 0xE)", read_dwords[2], 36'hA_0000_0007);
+
+        // the note-on stroke, {toggle, voice}: the word as written, and
+        // the read-back every stored system dword has
+        checkn("stroke zero at power-up", note_stroke, '0);
+        write_dwords[0] = 36'h0_0000_0026;          // the toggle with voice 6 above it
+        write_burst(MAP_STROKE, 1, 1);
+        checkn("stroke: toggle 1, voice 6", note_stroke, 6'h26);
+        read_burst(MAP_STROKE, 1, 1);
+        check36("stroke read back", read_dwords[0], 36'h0_0000_0026);
 
         $display("--- 6. out of every window: the write dropped, the read zero, no alias ---");
         write_dwords[0] = 36'hB_AD0B_AD05;

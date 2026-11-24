@@ -89,8 +89,10 @@ CSP's memory or holds a voice number.
   once, with the parameters last committed.
 - **Voices.** The engine keeps the voices (Voice lifecycle, below): it picks
   the voice for a note, pairs a note off with its note on, gates the
-  envelopes, moves the voice's wire to its channel and points its partials at
-  that channel's sinks.
+  envelopes, moves the voice's wire to its channel, points its partials at
+  that channel's sinks, and strokes the note-on into the pipeline
+  (`STROKE`, memory_map.md) so the voice starts with no filter or limiter
+  state of the last note it carried (#623).
 - **Wiring.** The engine builds the DSP graph (`csp/dsp_graph.hpp`) with
   loops, and the synth's sizes are its: 16 channels, 32 voices of 8
   partials. A graph is wired for a set of paths (`Wiring::Paths`: what a

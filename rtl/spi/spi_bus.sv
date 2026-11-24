@@ -19,10 +19,11 @@
 //   address and turnaround slots = 0; the read slots = the dwords read.
 //
 // What the dwords address (docs/memory_map.md): the sixteen system dwords
-// at 0x00000–0x0000F — CTRL, scratch, the probe address, the status
-// dwords — the write FIFO's door at 0x06000, IMEM's rows at 0x08000 (two
-// dwords a row) and the decode ROM's at 0x09000 (one dword a row). Writes
-// outside the ranges are dropped, reads return zero: no aliasing.
+// at 0x00000–0x0000F — the note-on stroke, CTRL, scratch, the probe address,
+// the status dwords — the write FIFO's door at 0x06000, IMEM's rows at
+// 0x08000 (two dwords a row) and the decode ROM's at 0x09000 (one dword a
+// row). Writes outside the ranges are dropped, reads return zero: no
+// aliasing.
 //
 // Reads run one dword ahead: `dword_address` names the dword after the one
 // streaming, from the turnaround on, and `read_data` is sampled at the
@@ -59,6 +60,7 @@ module spi_bus #(
     output logic [csp_pkg::REGISTER_W-1:0] probe_address,   // system dword 0xC
     output logic [csp_pkg::ADDRESS_W-1:0]  trap_address,    // system dword 0x7: the register a write trap watches (#238)
     input  wire  [synth_pkg::SPI_DWORD_W-1:0] trap_capture,  //   and what it caught, read back at the same dword (the system clock's: read twice)
+    output logic [synth_pkg::STROKE_W-1:0] note_stroke,     // system dword 0x1: {toggle, voice}, the note-on stroke (#624)
 
     // ---- the status dwords (sclk domain, read-only, 0x8–0xF) --------------
     input  logic [synth_pkg::MAP_SYSTEM_DWORDS-synth_pkg::MAP_STORED_DWORDS-1:0][synth_pkg::SPI_DWORD_W-1:0] status,
@@ -273,6 +275,15 @@ module spi_bus #(
             test_tone_enable   <= dword_data[synth_pkg::CTRL_TEST_TONE];
             data_stream_enable <= dword_data[synth_pkg::CTRL_DATA_STREAM];
             stream_source      <= dword_data[synth_pkg::CTRL_SOURCE_HIGH:synth_pkg::CTRL_SOURCE_LOW];
+        end
+    end
+
+    // The note-on stroke: the word as written, held here; the partial
+    // pipeline takes a change of it, through two flops, for a note-on.
+    initial note_stroke = '0;
+    always_ff @(posedge sclk) begin
+        if (to_system && dword_address == synth_pkg::MAP_STROKE) begin
+            note_stroke <= dword_data[synth_pkg::STROKE_W-1:0];
         end
     end
 

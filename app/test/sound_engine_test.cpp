@@ -53,8 +53,9 @@ public:
     std::map<int, SoundEngine::Pointers> pointers;
     int pointings = 0;
     int loads     = 0;
-    int rows      = 0; // of the program loaded last
-    int cycles    = 0; // of its pass
+    int rows      = 0;        // of the program loaded last
+    int cycles    = 0;        // of its pass
+    std::vector<int> strokes; // the voices the note-ons stroked, in order
 
     void write(std::span<const Write> writes) override {
         swaps.emplace_back(writes.begin(), writes.end());
@@ -65,6 +66,9 @@ public:
     void point(int partial, const SoundEngine::Pointers &to) override {
         pointers[partial] = to;
         ++pointings;
+    }
+    void stroke(int voice) override {
+        strokes.push_back(voice);
     }
     void load(const csp::ProgramBuilder::Built &program,
               std::span<const Write> writes) override {
@@ -416,6 +420,7 @@ void test_notes() {
     engine.channel[0].amp_env.velocity = 100.0f;
     engine.channel[0].mod_env.velocity = 100.0f;
     engine.commit();
+    const size_t strokes_at_start = link.strokes.size();
     engine.note_on(0, 60, 1.0f);
     const int full             = played.struck_last();
     const size_t swaps_at_full = link.swaps.size();
@@ -449,6 +454,10 @@ void test_notes() {
                   && link.written(
                           played.at(soft_wires.stage[Wiring::envelope_amp])),
           "the pitch and the amounts go in with the attack, in one swap");
+    check(link.strokes.size() == strokes_at_start + 2
+                  && link.strokes[strokes_at_start] == full
+                  && link.strokes[strokes_at_start + 1] == soft,
+          "every note on strokes the voice it took, so no filter or limiter state of the last note survives");
     // the velocity's share of the ten octaves of gain, as an amplitude (#176):
     // a velocity of 64 at full sensitivity is 2^(10 × (64/127 − 1)), about
     // −30 dB
@@ -498,10 +507,13 @@ void test_notes() {
                   < 1e-3,
           "and follows it once it is");
 
+    const size_t strokes_before_release = link.strokes.size();
     engine.note_off(0, 62);
     check(engine.voices()[soft].state == Voice::State::releasing
                   && engine.voices()[full].state == Voice::State::held,
           "a note off releases the voice of its note");
+    check(link.strokes.size() == strokes_before_release,
+          "a note off strokes nothing");
     const Write *release_amp =
             link.written(played.at(soft_wires.stage[Wiring::envelope_amp]));
     const Write *release_mod =

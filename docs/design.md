@@ -161,8 +161,21 @@ one datapath, 256 partials, one per clock. 768 sysclk per sample
 period; a partial enters the pipeline on each of time slots 0–255.
 
 **Partial budget**: 32 voices of polyphony × up to 8 partials per
-keystroke = 256. The pipeline knows nothing of that grouping — 256
-interchangeable partials; unison is a firmware convention.
+keystroke = 256. The pipeline groups nothing and holds no voice state:
+the one trace of a voice is the note-on stroke's five-bit field, which
+names a run of consecutive partials (a voice's, `p[7:3]`). Unison is a
+firmware convention.
+
+**The note-on stroke** (`partial_pipeline.sv`, #624): the one event the
+pipeline takes besides its slots. The firmware writes `{toggle, voice}`
+(system word `0x001`) at a note-on; two flops bring it in and a change
+against the value last consumed is one note-on, so the SPI clock needs no
+handshake. The struck voice's slots write their filter state at zero and
+their limiter's gain at unity at each slot's next visit (#623), so a
+re-struck voice starts with nothing of the last note's tail; the stroke is
+positioned by voice, so it reaches a voice whose partials the same note-on
+re-points. A repeated value is nothing, and the toggle makes a re-strike
+on one voice a new word.
 
 **Why it looks like this**: the pipeline is a general sound engine, not
 a polysynth's voice card. Every partial is one oscillator → filter →

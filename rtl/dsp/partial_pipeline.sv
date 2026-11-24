@@ -31,7 +31,8 @@
 //   S4..S9  svf_tpt: 17 registered stages (1 input, 2 coefficient,
 //       7 per 2-pole section); its output is the partial output
 //   S10 gain multiply on registered operands                (DSP); its
-//       output is accumulated into the mix and the state written back
+//       output is accumulated into the mix and the state written back; a
+//       struck voice's filter state is cleared in its registers
 //   L1..L4  the resonance limiter's gain step from the filter's output,
 //       beside S10 and the writeback; its state written back at L4
 //
@@ -64,12 +65,26 @@
 // read at S3B and written at L4, 24 clocks later, on the other clock
 // parity: a read and a write never share a clock.
 //
+// The note-on stroke (#624): one system word, {toggle, voice}, written at
+// a note-on. It is a level the firmware holds in the SPI clock; two flops
+// bring it in and a change against the value last consumed is one
+// note-on, so the word is an event and no handshake crosses the clocks.
+// The struck voice's bit stands for one sample, a pass of the writeback
+// schedule, so every slot of that voice writes its state back once inside
+// the window whatever its position in the sample; there the two state
+// registers that reach the RAMs (S10's and L4's) take the cleared state in
+// place of the computed one (#623). The stroke is positioned by voice, not
+// by slot, so a note-on that re-points a voice's partials reaches them
+// whatever the layout.
+//
 // Reset (#309): in the pipeline stages only the *_valid registers have
 // one. A stage's datapath register is meaningful only beside its valid
 // bit, so it is a plain flip-flop with no reset and no enable: a reset
 // there costs the reset net's fanout and keeps a fixed delay out of
 // memory, and buys nothing. The mix registers keep theirs: they are
-// state. The limiter's state is block RAM content, unity at power-on.
+// state. So does the note-on stroke's: a strike nobody wrote at power-up
+// would clear an arbitrary voice. The limiter's state is block RAM
+// content, unity at power-on.
 //--------------------------------------------------------------------
 `default_nettype none
 module partial_pipeline #(
@@ -109,6 +124,10 @@ module partial_pipeline #(
     input  logic           pointer_write_enable,
     input  logic [7:0]     pointer_write_index,
     input  logic [synth_pkg::POINTER_ENTRY_W-1:0] pointer_write_data,
+
+    // The note-on stroke (#624): {toggle, voice}, a level the firmware
+    // writes in the SPI clock, taken through two flops below.
+    input  logic [synth_pkg::STROKE_W-1:0] note_stroke,
 
     // The sink area (csp_sink_area): six read ports, a word a cycle
     // after its address.
@@ -196,6 +215,58 @@ module partial_pipeline #(
             limiter_ram[i0] = LIMITER_UNITY;
         end
     end
+
+    //----------------------------------------------------------------
+    // The note-on stroke (#624)
+    //
+    // A level in the SPI clock, taken through two flops and compared with
+    // the value last consumed: a change is one note-on, and a second write
+    // of the same word is nothing. The struck voice's bit of stroke_voices
+    // stands for one sample, one pass of the writeback schedule, and the
+    // state registers that reach the RAMs take the clear from it (#623). A
+    // chord's note-ons land inside one another's windows, so each keeps its
+    // own bit: one latched voice would lose all but the last.
+    //----------------------------------------------------------------
+    localparam int VOICE_W = VW - $clog2(synth_pkg::UNISON);   // a partial's voice: idx[7:3]
+    localparam int VOICES  = NUM_PARTIALS / synth_pkg::UNISON;
+    localparam int STROKE_WINDOW = synth_pkg::CYCLES_PER_SAMPLE - 1;
+    initial begin
+        if (synth_pkg::UNISON * synth_pkg::POLYPHONY != NUM_PARTIALS
+            || VOICE_W != synth_pkg::STROKE_VOICE_W || VOICES != synth_pkg::POLYPHONY)
+            $error("partial_pipeline: the partial layout and the stroke's voice field disagree");
+        if (STROKE_WINDOW >= (1 << synth_pkg::TIMEBASE_W))
+            $error("partial_pipeline: the stroke's window does not fit its counter");
+    end
+
+    logic [synth_pkg::STROKE_W-1:0]   stroke_meta, stroke_sync, stroke_last;
+    logic [VOICES-1:0]                stroke_voices;
+    logic [synth_pkg::TIMEBASE_W-1:0] stroke_age;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            {stroke_meta, stroke_sync} <= '0;
+            stroke_last  <= '0;
+            stroke_voices <= '0;
+            stroke_age    <= '0;
+        end else begin
+            {stroke_meta, stroke_sync} <= {note_stroke, stroke_meta};
+            stroke_last <= stroke_sync;
+            if (stroke_sync != stroke_last) begin
+                stroke_voices[stroke_sync[synth_pkg::STROKE_VOICE_W-1:0]] <= 1'b1;
+                stroke_age <= synth_pkg::TIMEBASE_W'(STROKE_WINDOW);
+            end else if (stroke_age != '0) begin
+                stroke_age <= stroke_age - 1'b1;
+            end else begin
+                stroke_voices <= '0;
+            end
+        end
+    end
+
+    // A slot of a voice the stroke holds: its state registers take the
+    // cleared state instead of the computed one.
+    function automatic logic voice_struck(input logic [VW-1:0] index);
+        voice_struck = stroke_voices[index[VW-1 -: VOICE_W]];
+    endfunction
 
     //----------------------------------------------------------------
     // The pointer RAM: ten pointers a partial, 100 bits in three
@@ -766,15 +837,20 @@ module partial_pipeline #(
         if (!rst_n) s10_valid <= 1'b0;
         else        s10_valid <= s9_valid;
     end
+    // A slot of a struck voice takes the filter's state at zero in place of
+    // the computed state, here, so that the state RAM's data pins are the
+    // registers they were: the writeback below writes s10 as it stands
+    // (#623). The phase is carried as it comes.
+    wire s9_struck = voice_struck(s9_idx);
     always_ff @(posedge clk) begin
         s10_idx  <= s9_idx;
         s10_outl <= 22'(prod_l >>> 14);
         s10_outr <= 22'(prod_r >>> 14);
         s10_phase <= s9_phase;
-        s10_ic1eq1n <= s9_ic1eq1n;
-        s10_ic2eq1n <= s9_ic2eq1n;
-        s10_ic1eq2n <= s9_ic1eq2n;
-        s10_ic2eq2n <= s9_ic2eq2n;
+        s10_ic1eq1n <= s9_struck ? '0 : s9_ic1eq1n;
+        s10_ic2eq1n <= s9_struck ? '0 : s9_ic2eq1n;
+        s10_ic1eq2n <= s9_struck ? '0 : s9_ic1eq2n;
+        s10_ic2eq2n <= s9_struck ? '0 : s9_ic2eq2n;
     end
 
     //----------------------------------------------------------------
@@ -813,7 +889,9 @@ module partial_pipeline #(
 
     // State writeback — sync-only process (BSRAM write port).
     // Writeback lands 25 cycles after the read, so read and write
-    // addresses can never collide (25 < 256).
+    // addresses can never collide (25 < 256). A struck voice's slots carry
+    // the cleared state in place of the computed one (S10 above, L4 below),
+    // so what is written here is what the registers hold (#623).
     always_ff @(posedge clk) begin
         if (s10_valid) begin
             phase_ram[s10_idx]  <= s10_phase;
@@ -1032,11 +1110,14 @@ module partial_pipeline #(
 
     // L4: the new state, the gain for the next sample. The release
     // candidate is over unity when bit 32 is set with anything under it
-    // (unity is bit 32 alone) or bit 33 is set: no compare chain.
+    // (unity is bit 32 alone) or bit 33 is set: no compare chain. A slot of
+    // a struck voice takes unity in place of either, so that the state
+    // RAM's data pins stay the registers they were (#623).
     wire [LIMITER_W-1:0] l3_floor_value = l3_floor_mask & ~(l3_floor_mask << 1);   // the mask's lowest set bit
     wire attack_under_floor = l3_floored && ((l3_attack_c & l3_floor_mask) == '0);
     wire release_over_unity = l3_release_c[LIMITER_W]
                             || (l3_release_c[LIMITER_W-1] && |l3_release_c[LIMITER_W-2:0]);
+    wire l3_struck = voice_struck(l3_idx);
     logic                 l4_valid;
     logic [VW-1:0]        l4_idx;
     logic [LIMITER_W-1:0] l4_limiter_gain;
@@ -1046,7 +1127,8 @@ module partial_pipeline #(
     end
     always_ff @(posedge clk) begin
         l4_idx          <= l3_idx;
-        l4_limiter_gain <= l3_over ? (attack_under_floor ? l3_floor_value : l3_attack_c) :
+        l4_limiter_gain <= l3_struck ? LIMITER_UNITY :
+                           l3_over ? (attack_under_floor ? l3_floor_value : l3_attack_c) :
                            release_over_unity ? LIMITER_UNITY : l3_release_c[LIMITER_W-1:0];
     end
 

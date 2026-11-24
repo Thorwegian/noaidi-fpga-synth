@@ -109,6 +109,11 @@ public:
         virtual void write(std::span<const Write> writes) = 0;
         // A partial's sink pointers, which the chip takes whole.
         virtual void point(int partial, const Pointers &pointers) = 0;
+        // A note-on's stroke (memory_map.md, STROKE): the chip clears this
+        // voice's filter and limiter state, which is the one thing about a
+        // note that is not a word of the CSP's. It goes at once, not with a
+        // swap, and the toggle makes each note-on a new word.
+        virtual void stroke(int voice) = 0;
         // A program in place of the one that runs, and every word the
         // engine owns with it: a program lays its memory out for itself, so
         // no word is where the last program had it. The chip takes the two
