@@ -590,7 +590,10 @@ void test_lfo() {
             const std::string named =
                     std::string("the record's shape is the preset's: ")
                     + shape.name;
-            check(played.word(wave.shape) == shape.shape, named.c_str());
+            // the record's word is the shape's value scaled, since the
+            // program compares it against words (#599)
+            check(played.word(wave.shape) == shape.shape * csp::word_one,
+                  named.c_str());
             check(played.word(played.wires().lfo[i])
                           == played.graph().address(wave.record),
                   "and the channel's wire holds its own record's address");
@@ -702,7 +705,7 @@ void test_knobs() {
     lfo.shape = WAVE_PULSE;
     check(is_a_value()
                   && played.word(engine.wiring().lfo(0, 0).shape)
-                             == Wiring::shape_square,
+                             == Wiring::shape_square * csp::word_one,
           "an LFO's shape is a value: the record's word names it");
     lfo.depth = 0.0f;
     check(is_a_value()
@@ -734,7 +737,7 @@ void test_knobs() {
     engine.channel[0]         = preset;
     check(is_a_value()
                   && played.word(engine.wiring().lfo(0, 1).shape)
-                             == Wiring::shape_triangle
+                             == Wiring::shape_triangle * csp::word_one
                   && played.word(engine.wiring()
                                          .lfo(0, 1)
                                          .depth[Wiring::moves_pitch])
