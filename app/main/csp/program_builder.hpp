@@ -106,13 +106,10 @@ public:
     // A list of addresses for IDXs to name.
     IndexTargets targets(std::span<const int> addresses);
 
-    // A loop over `length` instructions, or an open one whose end is set
-    // later with close_loop(): at the current position, or at a given one
-    // (a forward label in the assembler). The count and the stride are
-    // immediates. A vector loop runs its body instruction by instruction
-    // across its elements, in rounds of sixteen.
-    size_t loop(IndexRegister which, size_t length, int count, int stride,
-                bool vector = false);
+    // An open loop, whose end is set later with close_loop(): at the current
+    // position, or at a given one (a forward label in the assembler). The
+    // count and the stride are immediates. A vector loop runs its body
+    // instruction by instruction across its elements, in rounds of sixteen.
     size_t open_loop(IndexRegister which, int count, int stride,
                      bool vector = false);
     void close_loop(size_t at);
