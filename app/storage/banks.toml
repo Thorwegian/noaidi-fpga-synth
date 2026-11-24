@@ -77,6 +77,7 @@ programs = [
     "Presets/Factory/Leads/BetterOffAlone.toml", # 3
     "Presets/Factory/Leads/Commodore.toml",      # 4
     "Presets/Factory/Bells/Future.toml",         # 5
+    "Presets/Factory/Drums/Snare.toml",          # 6
 ]
 
 [bank.2]

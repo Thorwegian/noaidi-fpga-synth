@@ -1,0 +1,63 @@
+# Copyright © 2026 Thor H. Linløkken <thj@thj.no>
+# License: CERN-OHL-S v2
+#
+# A snare: noise and a triangle an octave down through a low-pass at 123 Hz,
+# the body fixed there by key tracking at zero, and the mod envelope's pitch
+# amount giving the snap.
+format = 1
+
+[voice]
+structure = "1+1"
+osc_mix = 0
+unison_detune = 0
+unison_stereo = 0
+
+[[osc]]
+wave = "triangle"
+tune = -12
+pulse_width = 50
+
+[[osc]]
+wave = "noise"
+tune = 0
+pulse_width = 50
+
+[filter]
+type = "lowpass"
+slope = 12
+cutoff = 123.47084
+resonance = 0.7
+key_track = 0
+
+[amp_env]
+attack = 0
+sustain = -60.21
+decay = 0.4100244
+release = 0.4100244
+velocity = 43.307087
+
+[mod_env]
+attack = 0
+sustain = 0
+decay = 3.42956
+release = 3.7725196
+velocity = 16.535433
+depth = 103.546875
+pitch = 10.011905
+
+[[lfo]]
+shape = "triangle"
+rate = 1.2117705
+destination = "pulse_width"
+depth = 12.402344
+
+[[lfo]]
+shape = "triangle"
+rate = 1
+destination = "pulse_width"
+depth = 0
+
+[part]
+volume = 17.685513
+pan = 0
+bend_range = 2
