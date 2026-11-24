@@ -18,8 +18,8 @@
 //   MISO: nonet 0 = the ID nonet (a link check on every frame); the
 //   address and turnaround slots = 0; the read slots = the dwords read.
 //
-// What the dwords address (docs/memory_map.md): the sixteen system dwords
-// at 0x00000–0x0000F — the note-on stroke, CTRL, scratch, the probe address,
+// What the dwords address (docs/memory_map.md): the eighteen system dwords
+// at 0x00000–0x00011 — the note-on stroke, CTRL, scratch, the probe address,
 // the status dwords — the write FIFO's door at 0x06000, IMEM's rows at
 // 0x08000 (two dwords a row) and the decode ROM's at 0x09000 (one dword a
 // row). Writes outside the ranges are dropped, reads return zero: no
@@ -146,7 +146,7 @@ module spi_bus #(
         end else if (address == synth_pkg::MAP_PROBE_ADDRESS) begin
             system_at = synth_pkg::SPI_DWORD_W'(probe_register);
         end else begin
-            system_at = status[address[2:0]];
+            system_at = status[address[synth_pkg::MAP_STATUS_INDEX_W-1:0] - synth_pkg::MAP_STATUS_INDEX_W'(synth_pkg::MAP_STORED_DWORDS)];
         end
     endfunction
 
@@ -251,7 +251,7 @@ module spi_bus #(
     assign swap = to_ctrl && dword_data[synth_pkg::CTRL_SWAP];
 
     always_ff @(posedge sclk) begin
-        if (to_system && dword_address[3] == 1'b0) begin
+        if (to_system && dword_address < synth_pkg::SPI_ADDRESS_W'(synth_pkg::MAP_STORED_DWORDS)) begin
             system_dword[dword_address[2:0]] <= to_ctrl ? dword_data & ~(synth_pkg::SPI_DWORD_W'(1) << synth_pkg::CTRL_SWAP) : dword_data;
         end
         if (to_system && dword_address == synth_pkg::MAP_PROBE_ADDRESS) begin

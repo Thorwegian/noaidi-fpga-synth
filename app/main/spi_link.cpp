@@ -7,10 +7,12 @@
 
 #include <array>
 #include <cstdio>
+#include <ctime>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include "fpga_map.hpp"
 
 namespace spi_link {
 
@@ -274,6 +276,30 @@ extern "C" int spi_link_boot_check(void) {
           spi_link::read_one(0x00803) == 0);
     check("   and the scratch dword is unharmed",
           spi_link::read_one(scratch) == burst[0]);
+
+    // Which gateware this is (#596). The firmware's banner names a different
+    // file, so the machine is named only by what the FPGA answers: the
+    // synthesis's time and the commit it read, or zero for a gateware built
+    // from a modified tree, which is a gateware built without a name.
+    std::array<spi_link::dword_t, 2> build{};
+    const bool build_ok =
+            spi_link::read(fpga_map::build_time, build.data(), build.size());
+    char when[32] = "no date";
+    if (build_ok && build[0] != 0) {
+        const auto epoch = static_cast<time_t>(build[0]);
+        struct tm utc {};
+        if (gmtime_r(&epoch, &utc) != nullptr) {
+            std::strftime(when, sizeof when, "%Y-%m-%d %H:%M UTC", &utc);
+        }
+    }
+    if (build_ok && build[1] == 0) {
+        std::printf("=== gateware: no source, built %s ===\n", when);
+    } else if (build_ok) {
+        std::printf("=== gateware %08llx, built %s ===\n",
+                    static_cast<unsigned long long>(build[1]), when);
+    }
+    check("5. the gateware answers with a build identity",
+          build_ok && build[0] != 0);
 
     std::printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK",
                 fails);

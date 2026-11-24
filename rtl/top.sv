@@ -416,6 +416,16 @@ module top (
             {probe_meta, probe_sync}   <= {probe_pair, probe_meta};
         end
 
+    // The build's own name (#596): rtl/Makefile passes the synthesis's time
+    // and the source commit it read; a bench passes neither and builds as
+    // zero, which is what a take's reader must treat as unidentified.
+`ifndef BUILD_TIME
+`define BUILD_TIME 32'd0
+`endif
+`ifndef BUILD_HASH
+`define BUILD_HASH 32'd0
+`endif
+
     logic [synth_pkg::MAP_SYSTEM_DWORDS-synth_pkg::MAP_STORED_DWORDS-1:0][synth_pkg::SPI_DWORD_W-1:0] status;
     always_comb begin
         status = '0;
@@ -426,6 +436,8 @@ module top (
         status[synth_pkg::MAP_PROBE_EVEN   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::DWORD_W-1:csp_pkg::WORD_W]);
         status[synth_pkg::MAP_PROBE_ODD    - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(probe_sync[csp_pkg::WORD_W-1:0]);
         status[synth_pkg::MAP_DIAG_STREAM  - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(frames_sync);
+        status[synth_pkg::MAP_BUILD_TIME   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(`BUILD_TIME);
+        status[synth_pkg::MAP_BUILD_HASH   - synth_pkg::MAP_STORED_DWORDS] = synth_pkg::SPI_DWORD_W'(`BUILD_HASH);
     end
 
     spi_bus u_spi (
