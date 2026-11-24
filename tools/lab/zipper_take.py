@@ -25,6 +25,7 @@ import threading
 import time
 
 import capture_card
+import midi_wire
 from baselines import bank_select
 from synth_port import find_synth_port
 
@@ -60,31 +61,34 @@ def main():
             subprocess.run(["aseqsend", "-p", args.port, "FE"])
             stop.wait(0.25)
 
-    threading.Thread(target=keepalive, daemon=True).start()
-    # The first message after a silence can be lost (a DIN input's
-    # silence reset flushes the UART; tools/lab/README.md), and the keepalive
-    # thread's first FE races the first message below: send one FE now and
-    # let it land before anything that matters.
-    midi("FE")
-    time.sleep(0.3)
+    before = midi_wire.tx_bytes()
+    with midi_wire.subscribed(args.port):
+        threading.Thread(target=keepalive, daemon=True).start()
+        # The first message after a silence can be lost (a DIN input's
+        # silence reset flushes the UART; tools/lab/README.md), and the keepalive
+        # thread's first FE races the first message below: send one FE now and
+        # let it land before anything that matters.
+        midi("FE")
+        time.sleep(0.3)
 
-    midi(*bank_select(1), "C0 %02X" % args.program)
-    time.sleep(1.0)
-    midi(*("B0 %02X %02X" % (cc, value) for cc, value in CONTROLS))
-    time.sleep(0.5)
+        midi(*bank_select(1), "C0 %02X" % args.program)
+        time.sleep(1.0)
+        midi(*("B0 %02X %02X" % (cc, value) for cc, value in CONTROLS))
+        time.sleep(0.5)
 
-    recorder = subprocess.Popen(["arecord", "-q", "-D", args.device, "-f", "S16_LE", "-r", "48000", "-c", "2", args.out])
-    time.sleep(1.0)
-    for note in NOTES:
-        midi("90 %02X %02X" % (note, VELOCITY))
-        time.sleep(0.5)
-        midi("80 %02X 40" % note)
-        time.sleep(0.5)
-    time.sleep(args.tail)
-    recorder.terminate()
-    recorder.wait()
-    stop.set()
-    midi("B0 7B 00")  # all notes off, so the next take starts clean
+        recorder = subprocess.Popen(["arecord", "-q", "-D", args.device, "-f", "S16_LE", "-r", "48000", "-c", "2", args.out])
+        time.sleep(1.0)
+        for note in NOTES:
+            midi("90 %02X %02X" % (note, VELOCITY))
+            time.sleep(0.5)
+            midi("80 %02X 40" % note)
+            time.sleep(0.5)
+        time.sleep(args.tail)
+        recorder.terminate()
+        recorder.wait()
+        stop.set()
+        midi("B0 7B 00")  # all notes off, so the next take starts clean
+    midi_wire.require_moved(before, args.port)
     print("zipper take %s: program %d, %d notes" % (args.out, args.program, len(NOTES)))
 
 

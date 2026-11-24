@@ -46,6 +46,7 @@ import sys
 import time
 
 import capture_card
+import midi_wire
 import wave
 
 import numpy as np
@@ -117,13 +118,16 @@ def capture(seconds, device, port, keep):
         subprocess.run(["aseqsend", "-p", port, message], check=True)
 
     path = keep or os.path.join(os.environ.get("TMPDIR", "/tmp"), "spdif_capture.wav")
-    midi("B0 %02X 7F" % TONE_CC)
-    time.sleep(0.5)
-    capture_card.prepare(device)
-    # arecord's -d is whole seconds, and 0 records for ever: at least one
-    subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
-                    "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)
-    midi("B0 %02X 00" % TONE_CC)
+    before = midi_wire.tx_bytes()
+    with midi_wire.subscribed(port):
+        midi("B0 %02X 7F" % TONE_CC)
+        time.sleep(0.5)
+        capture_card.prepare(device)
+        # arecord's -d is whole seconds, and 0 records for ever: at least one
+        subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", str(SAMPLE_RATE), "-c", "2",
+                        "-d", str(max(1, int(math.ceil(seconds)))), path], check=True)
+        midi("B0 %02X 00" % TONE_CC)
+    midi_wire.require_moved(before, port)
     return read_wav(path)
 
 
