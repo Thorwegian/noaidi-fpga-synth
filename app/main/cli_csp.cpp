@@ -108,9 +108,8 @@ int op_diag(int, char **) {
             static_cast<unsigned long>(dwords[3] & 0xFFFF),
             static_cast<unsigned long>(
                     engine_link_status(fpga_map::diag_stream)));
-    char gateware[64];
-    if (engine_link_gateware(gateware, sizeof gateware)) {
-        std::printf("  gateware %s\n", gateware);
+    if (const auto gateware = engine_link_gateware()) {
+        std::printf("  gateware %s\n", gateware->c_str());
     }
     return 0;
 }

@@ -233,18 +233,28 @@ dword_t read_one(uint32_t address) {
 }
 
 std::string build_name(dword_t build_time, dword_t build_hash) {
-    char commit[20] = "no source";
+    // snprintf and strftime write into the string's own storage: snprintf
+    // says how long its text is before it writes, strftime how much it wrote.
+    std::string commit = "no source";
     if (build_hash != 0) {
-        std::snprintf(commit, sizeof commit, "%08llx",
-                      static_cast<unsigned long long>(build_hash));
+        const auto hash  = static_cast<unsigned long long>(build_hash);
+        const int length = std::snprintf(nullptr, 0, "%08llx", hash);
+        commit.assign(static_cast<size_t>(length), '\0');
+        std::snprintf(commit.data(), commit.size() + 1, "%08llx", hash);
     }
-    char when[40]    = "no build time";
+    std::string when = "no build time";
     const auto epoch = static_cast<time_t>(build_time);
     struct tm utc {};
     if (build_time != 0 && gmtime_r(&epoch, &utc) != nullptr) {
-        std::strftime(when, sizeof when, "built %Y-%m-%d %H:%M UTC", &utc);
+        std::string text(sizeof "built 0000-00-00 00:00 UTC", '\0');
+        const size_t written = std::strftime(text.data(), text.size(),
+                                             "built %Y-%m-%d %H:%M UTC", &utc);
+        if (written != 0) {
+            text.resize(written);
+            when = text;
+        }
     }
-    return std::string(commit) + ", " + when;
+    return commit + ", " + when;
 }
 
 } // namespace spi_link
