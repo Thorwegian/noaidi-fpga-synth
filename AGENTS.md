@@ -26,6 +26,8 @@
 
 - Every session's work, a one-line docs PR included, happens in its own worktree, *never* in a shared one. The checkouts rest on `main` and are only ever pulled.
 
+- A worktree whose branch has landed is removed at the next check, and the count is stated (#643).
+
 - The cloud box runs everything that is not a bitstream (the Verilator sims, `make csp-test` and the cosim, the firmware build, the checks) and *never* builds one. A bitstream's chain is synthesis (yosys) on the lab box, place and route (nextpnr) on the Mac, *always*, then `gowin_pack` and the board take on the lab box. An rtl PR runs the chain once, at the default seed, and posts the take and the utilisation lines that moved as a PR comment.
 
 - Every job on the Mac is started with `nice -n 20`.
