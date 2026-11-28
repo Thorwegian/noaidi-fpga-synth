@@ -8,7 +8,7 @@ ESP-IDF compiles every function into a section of its own and links with
 without a word. This gate names every such function of the main component,
 oldest first, each with the day its definition line last changed.
 
-    unused_functions.py --firmware <build folder> --host-link <executable> ...
+    unused_functions.py --firmware <build folder> --host-tool <executable>
 
 `make fw` runs it as its last step, so its lines are the last on the screen.
 It warns and does not fail: a function may be new and waiting for its
@@ -16,18 +16,16 @@ caller. One that has stood for weeks is the reader's to deal with.
 
 A function is unused when the main component's archive defines it as a
 strong global symbol in a text section (nm's T) and neither the linked
-firmware nor any of the host links has it. The host links are the programs
-that share sources with the firmware — the csp tool and every host test —
-each linked with -g and --gc-sections (the Makefile's HOST_LINK_JUDGES), so
-its linker drops what it does not reference. A function that only a host
-test calls is used by that test: the check is what keeps the invariant the
-function holds. Two kinds of function land here:
+firmware nor the host tool has it. The host tool is a program of its own
+that shares sources with the firmware, so its link counts; for that it is
+linked with -g and --gc-sections (the Makefile's HOST_LINK_JUDGES). A host
+test's link does not count. Two kinds of function land here:
 
-  - one that nothing calls;
+  - one that nothing calls, a host test aside;
   - one that only its own file calls, with every call inlined: it wants
     internal linkage (static, or an anonymous namespace).
 
-The firmware is asked by symbol name. A host link is asked by source line:
+The firmware is asked by symbol name. The host tool is asked by source line:
 it is compiled for another machine, where the same function's symbol differs
 (size_t is unsigned int on the ESP32-S3 and unsigned long on a 64-bit host).
 
@@ -93,9 +91,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--firmware", required=True, type=pathlib.Path,
                         help="the firmware's build folder (app/build)")
-    parser.add_argument("--host-link", required=True, action="append", type=pathlib.Path,
-                        help="one host link's executable, linked with -g and --gc-sections;"
-                             " repeat it for each link")
+    parser.add_argument("--host-tool", required=True, type=pathlib.Path,
+                        help="the host tool's executable, linked with -g and --gc-sections")
     arguments = parser.parse_args()
 
     project = json.loads((arguments.firmware / "project_description.json").read_text())
@@ -110,17 +107,16 @@ def main():
                  f" {sources}: the gate needs the build's debug information")
     in_firmware = {definition["name"]
                    for definition in definitions(firmware_nm, str(arguments.firmware / project["app_elf"]))}
-    in_host_links = {(source, line) for link in arguments.host_link
-                     for _, _, source, line in functions("nm", link)}
+    in_host_tool = {(source, line) for _, _, source, line in functions("nm", arguments.host_tool)}
 
     today = datetime.date.today()
     unused = sorted((last_change(source, line), source, line, readable)
                     for name, readable, source, line in ours
-                    if name not in in_firmware and (source, line) not in in_host_links)
+                    if name not in in_firmware and (source, line) not in in_host_tool)
     for changed, source, line, readable in unused:
         days = (today - changed).days
         print(f"WARN {source.relative_to(REPOSITORY)}:{line}: {readable} is neither used in the firmware"
-              f" nor a host link (unchanged since {changed}, {days} day{'s' if days != 1 else ''})")
+              f" nor the host tool (unchanged since {changed}, {days} day{'s' if days != 1 else ''})")
     if unused:
         print(f"WARN {len(unused)} unused function(s), oldest first: remove each, or give it internal"
               " linkage if its own file is its only caller")

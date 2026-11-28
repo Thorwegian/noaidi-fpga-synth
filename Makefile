@@ -9,9 +9,8 @@
 #   make sram       load pack.fs into FPGA SRAM (volatile, fast)
 #   make flash      write pack.fs to FPGA flash (persistent)
 #   make fw         build the ESP32 firmware, then warn of every function of
-#                   app/main that neither the firmware nor a host link uses,
-#                   oldest first — the csp tool and each host test
-#                   (tools/firmware/unused_functions.py)
+#                   app/main that neither the firmware nor the csp tool
+#                   links, oldest first (tools/firmware/unused_functions.py)
 #   make fw-flash   build + flash the ESP32 firmware (port must be
 #                   free — exit the monitor first)
 #   make fw-monitor attach the IDF serial monitor (Ctrl+] exits)
@@ -143,9 +142,9 @@ tools-upgrade:
 tools-upgrade-pack:
 	scripts/tools.sh upgrade pack
 
-fw: format-check $(HOST_LINKS)
+fw: format-check $(CSP_TOOL)
 	cd app && $(IDF) build
-	python3 tools/firmware/unused_functions.py --firmware app/build $(addprefix --host-link ,$(HOST_LINKS))
+	python3 tools/firmware/unused_functions.py --firmware app/build --host-tool $(CSP_TOOL)
 
 fw-flash:
 	cd app && $(IDF) flash
@@ -161,46 +160,22 @@ fw-console:
 	printf 'logfile $(CURDIR)/$(CONSOLE_LOG)\nlogfile flush 1\ndeflog on\n' > app/build/screenrc
 	screen -c app/build/screenrc $(ESPPORT) 115200
 
-# Each host test is one of the links that say whether a function of app/main
-# is used (tools/firmware/unused_functions.py), so each is a target of its
-# own, built with HOST_LINK_JUDGES, and `make fw` builds them all.
-$(HOST_DIR)/tomlc17.o: app/lib/tomlc17/src/tomlc17.c
+fw-test: format-check $(FW_TEST_C) $(FW_TEST_CXX)
 	mkdir -p $(HOST_DIR)
-	$(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $< -o $@
-
-$(HOST_DIR)/midi_parser.o: app/main/midi_parser.c
-	mkdir -p $(HOST_DIR)
-	$(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $< -o $@
-
-$(FW_TEST): $(FW_TEST_CXX) $(HOST_DIR)/tomlc17.o
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) $(HOST_LINK_JUDGES) -o $@ $(FW_TEST_CXX) \
-	    $(HOST_DIR)/tomlc17.o -lm
-
-$(BANKS_TEST): $(BANKS_TEST_CXX) $(HOST_DIR)/tomlc17.o
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) $(HOST_LINK_JUDGES) -o $@ $(BANKS_TEST_CXX) \
-	    $(HOST_DIR)/tomlc17.o
-
-$(SOUND_ENGINE_TEST): $(SOUND_ENGINE_TEST_CXX) $(CSP_GRAPH_HDR)
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) $(HOST_LINK_JUDGES) -o $@ $(SOUND_ENGINE_TEST_CXX)
-
-$(CC_MAP_TEST): $(CC_MAP_TEST_CXX) $(HOST_DIR)/tomlc17.o
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) $(HOST_LINK_JUDGES) -o $@ $(CC_MAP_TEST_CXX) \
-	    $(HOST_DIR)/tomlc17.o -lm
-
-$(PARSER_TEST): $(PARSER_TEST_CXX) $(HOST_DIR)/midi_parser.o
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) $(HOST_LINK_JUDGES) -o $@ $(PARSER_TEST_CXX) \
-	    $(HOST_DIR)/midi_parser.o
-
-fw-test: format-check $(FW_TEST) $(BANKS_TEST) $(SOUND_ENGINE_TEST) $(CC_MAP_TEST) $(PARSER_TEST)
+	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(addprefix $(CURDIR)/,$(FW_TEST_C))
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(FW_TEST) $(FW_TEST_CXX) \
+	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(FW_TEST) $(shell find app/storage/Presets -name '*.toml')
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(BANKS_TEST) $(BANKS_TEST_CXX) \
+	    $(HOST_DIR)/tomlc17.o
 	$(BANKS_TEST) app/storage/banks.toml
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(SOUND_ENGINE_TEST) $(SOUND_ENGINE_TEST_CXX)
 	$(SOUND_ENGINE_TEST)
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(CC_MAP_TEST) $(CC_MAP_TEST_CXX) \
+	    $(addprefix $(HOST_DIR)/,$(notdir $(FW_TEST_C:.c=.o))) -lm
 	$(CC_MAP_TEST) $(shell find app/storage/Presets -name '*.toml')
+	cd $(HOST_DIR) && $(HOST_CC) $(HOST_FLAGS:-I%=-I$(CURDIR)/%) -c $(CURDIR)/app/main/midi_parser.c
+	$(HOST_CXX) -std=c++20 -fno-exceptions $(HOST_FLAGS) -o $(PARSER_TEST) $(PARSER_TEST_CXX) $(HOST_DIR)/midi_parser.o
 	$(PARSER_TEST)
 
 # The format check: one script, which the ESP-IDF build runs too
@@ -212,14 +187,11 @@ format:
 format-check:
 	@tools/format_check.sh
 
-# Every link of ours that says whether a function of app/main is used
-# (tools/firmware/unused_functions.py): the csp tool and each host test.
-# Each is linked with -g and --gc-sections, so the linker drops what it does
-# not reference and the debug information names each remaining function's
-# source line.
+# The csp tool's link is one of the two that say whether a function of
+# app/main is used (tools/firmware/unused_functions.py): the linker drops
+# what the tool does not reference, and the debug information names each
+# remaining function's source line.
 HOST_LINK_JUDGES = -g -ffunction-sections -Wl,--gc-sections
-HOST_LINKS = $(CSP_TOOL) $(FW_TEST) $(BANKS_TEST) $(SOUND_ENGINE_TEST) \
-             $(CC_MAP_TEST) $(PARSER_TEST) $(CSP_TEST) $(CSP_GRAPH_TEST)
 
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/main.cpp
 	mkdir -p $(HOST_DIR)
@@ -227,19 +199,11 @@ $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/perf
 
 csp: $(CSP_TOOL)
 
-$(CSP_TEST): $(CSP_SRC) $(CSP_HDR) $(CSP_DIR)/test/csp_test.cpp
+csp-test: format-check $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) $(CSP_EVALUATOR_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/test/csp_test.cpp $(CSP_DIR)/test/dsp_graph_test.cpp $(CSP_TOOL)
 	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra $(HOST_LINK_JUDGES) -Iapp/main -o $@ $(CSP_SRC) \
-	    $(CSP_DIR)/test/csp_test.cpp
-
-$(CSP_GRAPH_TEST): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_EVALUATOR) \
-                   $(CSP_EVALUATOR_HDR) $(CSP_DIR)/test/dsp_graph_test.cpp
-	mkdir -p $(HOST_DIR)
-	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra $(HOST_LINK_JUDGES) -Iapp/main -o $@ $(CSP_SRC) $(CSP_GRAPH) \
-	    $(CSP_EVALUATOR) $(CSP_DIR)/test/dsp_graph_test.cpp
-
-csp-test: format-check $(CSP_TEST) $(CSP_GRAPH_TEST)
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_TEST) $(CSP_SRC) $(CSP_DIR)/test/csp_test.cpp
 	$(CSP_TEST)
+	$(HOST_CXX) -std=c++20 -O2 -Wall -Wextra -Iapp/main -o $(CSP_GRAPH_TEST) $(CSP_SRC) $(CSP_GRAPH) $(CSP_EVALUATOR) $(CSP_DIR)/test/dsp_graph_test.cpp
 	$(CSP_GRAPH_TEST)
 
 fw-storage-flash:
