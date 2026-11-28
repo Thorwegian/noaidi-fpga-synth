@@ -10,14 +10,17 @@
 // PRESET_FILE_FORMAT, is not read. The keys, their fields and their ranges
 // are preset_units.hpp's.
 //
-// C++ (preset_file.cpp) with a C interface; plain stdio and POSIX, so
-// the host test (app/test) uses it too. Saving goes through safe_file.hpp.
+// C++ (preset_file.cpp), with a C interface for what C calls; plain stdio
+// and POSIX, so the host test (app/test) uses it too. Saving goes through
+// safe_file.hpp (docs/storage_format.md "Saving"): write path.new ending
+// with the line "# end", flush it to the medium, delete path, rename
+// path.new to path. A power loss at any point leaves either the old preset
+// or the new one, once preset_file_recover() has run.
 
 #pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
 
 #include "preset.h"
 
@@ -31,22 +34,6 @@ extern "C" {
 // reason.
 bool preset_file_read(const char *path, preset_t *p, char *err, size_t err_len);
 
-// Read a preset file from text already in memory.
-bool preset_file_parse(const char *text, size_t len, preset_t *p, char *err,
-                       size_t err_len);
-
-// Write *p as a preset file.
-void preset_file_write(FILE *out, const preset_t *p);
-
-// Save *p to path safely (docs/storage_format.md "Saving"): write
-// path.new ending with the line "# end", flush it to the medium, delete
-// path, rename path.new to path. A power loss at any point leaves either
-// the old preset or the new one, once preset_file_recover() has run. A
-// path under Presets/Factory/ starts with the copyright notice
-// (preset_file::factory_notice): Factory presets are source files.
-bool preset_file_save(const char *path, const preset_t *p, char *err,
-                      size_t err_len);
-
 // Finish or undo interrupted saves under dir, recursively: a complete
 // .new file (it ends with "# end") replaces its preset, an incomplete one
 // is deleted. Returns the number of files repaired.
@@ -59,17 +46,12 @@ int preset_file_recover(const char *dir);
 // compares names case-insensitively.
 const char *preset_name_refusal(const char *folder, const char *name);
 
-// Print every key where a and b differ as the writer writes them, as
-// "table.key: <a> -> <b>". Returns the number of differences.
-int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b);
-
 #ifdef __cplusplus
 }
 
 #include <string>
 #include <string_view>
 
-// The same, for C++ callers.
 namespace preset_file {
 
 // The notice every source file carries (AGENTS.md). save() starts a
@@ -83,9 +65,16 @@ inline constexpr std::string_view factory_notice =
 // ignoring case).
 bool factory_path(const std::string &path);
 
+// Read a preset from text already in memory, or from a file. On failure p
+// is untouched and error holds the reason.
 bool parse(std::string_view text, preset_t &p, std::string &error);
 bool read(const std::string &path, preset_t &p, std::string &error);
-std::string to_text(const preset_t &p); // the values alone, no notice
+
+// p as a preset file's text: the values alone, no notice.
+std::string to_text(const preset_t &p);
+
+// Save p to path safely. A file under Presets/Factory/ starts with the
+// copyright notice: Factory presets are source files.
 bool save(const std::string &path, const preset_t &p, std::string &error);
 
 } // namespace preset_file

@@ -208,38 +208,14 @@ bool save(const std::string &path, const preset_t &p, std::string &error) {
 } // namespace preset_file
 
 // ── The C interface ─────────────────────────────────────────────────
-namespace {
-
-bool report(bool ok, const std::string &error, char *err, size_t err_len) {
+bool preset_file_read(const char *path, preset_t *p, char *err,
+                      size_t err_len) {
+    std::string error;
+    const bool ok = preset_file::read(path, *p, error);
     if (!ok) {
         std::snprintf(err, err_len, "%s", error.c_str());
     }
     return ok;
-}
-
-} // namespace
-
-bool preset_file_parse(const char *text, size_t len, preset_t *p, char *err,
-                       size_t err_len) {
-    std::string error;
-    return report(preset_file::parse(std::string_view(text, len), *p, error),
-                  error, err, err_len);
-}
-
-bool preset_file_read(const char *path, preset_t *p, char *err,
-                      size_t err_len) {
-    std::string error;
-    return report(preset_file::read(path, *p, error), error, err, err_len);
-}
-
-void preset_file_write(FILE *out, const preset_t *p) {
-    std::fputs(preset_file::to_text(*p).c_str(), out);
-}
-
-bool preset_file_save(const char *path, const preset_t *p, char *err,
-                      size_t err_len) {
-    std::string error;
-    return report(preset_file::save(path, *p, error), error, err, err_len);
 }
 
 int preset_file_recover(const char *dir) {
@@ -303,25 +279,4 @@ const char *preset_name_refusal(const char *folder, const char *name) {
     }
     closedir(d);
     return nullptr;
-}
-
-int preset_file_diff(FILE *out, const preset_t *a, const preset_t *b) {
-    const std::vector<Entry> before = Entries::of(*a);
-    const std::vector<Entry> after  = Entries::of(*b);
-    int diffs                       = 0;
-    for (size_t k = 0; k < before.size(); k++) {
-        if (before[k].text == after[k].text) {
-            continue;
-        }
-        const Entry &entry = before[k];
-        const std::string where =
-                entry.element < 0
-                        ? entry.table + "." + entry.key
-                        : entry.table + "[" + std::to_string(entry.element + 1)
-                                  + "]." + entry.key;
-        std::fprintf(out, "  %s: %s -> %s\n", where.c_str(),
-                     before[k].text.c_str(), after[k].text.c_str());
-        diffs++;
-    }
-    return diffs;
 }

@@ -28,6 +28,8 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <random>
 #include <span>
 #include <stdio.h>
@@ -57,6 +59,37 @@ static void check(bool ok, const char *what) {
     if (!ok) {
         fail(what);
     }
+}
+
+// The next line of text, taken off its front, without the newline.
+static std::string_view next_line(std::string_view &text) {
+    const size_t newline        = text.find('\n');
+    const std::string_view line = text.substr(0, newline);
+    text.remove_prefix(newline == std::string_view::npos ? text.size()
+                                                         : newline + 1);
+    return line;
+}
+
+// Print every line where the writer's text of a and of b differ, as
+// "[table] <a's line> -> <b's line>". Returns the number of such lines.
+static int differences(const preset_t &a, const preset_t &b) {
+    const std::string before = preset_file::to_text(a);
+    const std::string after  = preset_file::to_text(b);
+    std::string_view ours = before, theirs = after;
+    std::string table;
+    int count = 0;
+    while (!ours.empty() || !theirs.empty()) {
+        const std::string was(next_line(ours));
+        const std::string is(next_line(theirs));
+        if (was.starts_with('[')) {
+            table = was;
+        }
+        if (was != is) {
+            printf("  %s %s -> %s\n", table.c_str(), was.c_str(), is.c_str());
+            count++;
+        }
+    }
+    return count;
 }
 
 // Every field of a preset, a name as its enumerator: two presets with the
@@ -196,7 +229,7 @@ static void check_round_trips() {
             || preset_file::to_text(loaded) != text) {
             if (shown++ < 5) {
                 printf("FAIL a preset loads back different:\n");
-                preset_file_diff(stdout, &drawn, &loaded);
+                differences(drawn, loaded);
             }
             s_failures++;
         }
@@ -283,23 +316,14 @@ static void check_loading() {
            s_failures ? "see above" : "ok");
 }
 
-static bool exists(const char *path) {
-    return access(path, F_OK) == 0;
+static bool exists(const std::string &path) {
+    return std::filesystem::exists(path);
 }
 
 // The whole of a file, "" if it cannot be read.
-static std::string read_file(const char *path) {
-    std::string text;
-    FILE *in = fopen(path, "rb");
-    char buf[4096];
-    size_t n;
-    while (in && (n = fread(buf, 1, sizeof buf, in)) > 0) {
-        text.append(buf, n);
-    }
-    if (in) {
-        fclose(in);
-    }
-    return text;
+static std::string read_file(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
 }
 
 // text without its comment lines (those that start with '#').
@@ -318,10 +342,8 @@ static std::string without_comments(std::string_view text) {
     return body;
 }
 
-static void write_text(const char *path, const char *text) {
-    FILE *f = fopen(path, "w");
-    fputs(text, f);
-    fclose(f);
+static void write_text(const std::string &path, std::string_view text) {
+    std::ofstream(path, std::ios::binary) << text;
 }
 
 // Save, the four interrupted-save cases, and names.
@@ -331,11 +353,9 @@ static void check_saving(void) {
         fail("mkdtemp");
         return;
     }
-    char a[320], a_new[340], b[320], b_new[340], err[200];
-    snprintf(a, sizeof a, "%s/A.toml", dir);
-    snprintf(a_new, sizeof a_new, "%s.new", a);
-    snprintf(b, sizeof b, "%s/B.toml", dir);
-    snprintf(b_new, sizeof b_new, "%s.new", b);
+    const std::string a = std::string(dir) + "/A.toml", a_new = a + ".new";
+    const std::string b = std::string(dir) + "/B.toml", b_new = b + ".new";
+    std::string error;
 
     preset_t init, other, back;
     preset_init(&init);
@@ -343,11 +363,10 @@ static void check_saving(void) {
     other.filter.resonance = 2.0f;
 
     // a plain save: the file reads back, no .new remains
-    if (!preset_file_save(a, &init, err, sizeof err)) {
-        fail(err);
+    if (!preset_file::save(a, init, error)) {
+        fail(error.c_str());
     }
-    if (!preset_file_read(a, &back, err, sizeof err)
-        || preset_file_diff(stdout, &init, &back)) {
+    if (!preset_file::read(a, back, error) || differences(init, back)) {
         fail("saved preset does not read back");
     }
     if (exists(a_new)) {
@@ -355,42 +374,36 @@ static void check_saving(void) {
     }
 
     // a complete .new beside the old preset: the save finishes
-    char *text;
-    size_t len;
-    FILE *m = open_memstream(&text, &len);
-    preset_file_write(m, &other);
-    fputs("# end\n", m);
-    fclose(m);
-    write_text(a_new, text);
+    const std::string complete = preset_file::to_text(other) + "# end\n";
+    write_text(a_new, complete);
     preset_file_recover(dir);
-    if (exists(a_new) || !preset_file_read(a, &back, err, sizeof err)
-        || preset_file_diff(stdout, &other, &back)) {
+    if (exists(a_new) || !preset_file::read(a, back, error)
+        || differences(other, back)) {
         fail("complete .new beside the old preset was not finished");
     }
 
     // an incomplete .new beside the old preset: the old preset stays
     write_text(a_new, "format = 1\n[filter]\nresonance = 4\n");
     preset_file_recover(dir);
-    if (exists(a_new) || !preset_file_read(a, &back, err, sizeof err)
-        || preset_file_diff(stdout, &other, &back)) {
+    if (exists(a_new) || !preset_file::read(a, back, error)
+        || differences(other, back)) {
         fail("incomplete .new beside the old preset was not undone");
     }
 
     // a complete .new with no old preset: it becomes the preset
-    write_text(b_new, text);
+    write_text(b_new, complete);
     preset_file_recover(dir);
     if (exists(b_new) || !exists(b)) {
         fail("complete new .new was not renamed");
     }
 
     // an incomplete .new with no old preset: deleted, no preset appears
-    remove(b);
+    std::filesystem::remove(b);
     write_text(b_new, "format = 1\n");
     preset_file_recover(dir);
     if (exists(b_new) || exists(b)) {
         fail("incomplete new .new was not deleted");
     }
-    free(text);
 
     // a Factory save starts with the copyright notice, a User save does
     // not; both end with "# end" and read back
@@ -402,10 +415,10 @@ static void check_saving(void) {
     std::filesystem::create_directories(root + "/User/Pads", ignored);
     for (const std::string &path : {factory, user}) {
         const bool in_factory = path == factory;
-        if (!preset_file_save(path.c_str(), &other, err, sizeof err)) {
-            fail(err);
+        if (!preset_file::save(path, other, error)) {
+            fail(error.c_str());
         }
-        const std::string saved = read_file(path.c_str());
+        const std::string saved = read_file(path);
         if (saved.starts_with(preset_file::factory_notice) != in_factory) {
             fail(in_factory ? "Factory save lacks the copyright notice"
                             : "User save carries the copyright notice");
@@ -413,14 +426,13 @@ static void check_saving(void) {
         if (!saved.ends_with("# end\n")) {
             fail("save does not end with # end");
         }
-        if (!preset_file_read(path.c_str(), &back, err, sizeof err)
-            || preset_file_diff(stdout, &other, &back)) {
+        if (!preset_file::read(path, back, error) || differences(other, back)) {
             fail("saved preset does not read back");
         }
     }
     std::filesystem::remove_all(root, ignored);
 
-    remove(a);
+    std::filesystem::remove(a);
     rmdir(dir);
 
     printf("saving and recovery: %s\n", s_failures ? "see above" : "ok");
@@ -466,12 +478,12 @@ static void check_name_refusals(void) {
     }
 
     // a new name against the file already there
-    char taken[320], err[200];
-    snprintf(taken, sizeof taken, "%s/Snare.toml", dir);
+    const std::string taken = std::string(dir) + "/Snare.toml";
+    std::string error;
     preset_t init;
     preset_init(&init);
-    if (!preset_file_save(taken, &init, err, sizeof err)) {
-        fail(err);
+    if (!preset_file::save(taken, init, error)) {
+        fail(error.c_str());
         return;
     }
     struct Case {
@@ -492,7 +504,7 @@ static void check_name_refusals(void) {
             fail(c.say);
         }
     }
-    remove(taken);
+    std::filesystem::remove(taken);
     rmdir(dir);
     printf("names a save refuses: %s\n",
            s_failures == before ? "ok" : "see above");
@@ -505,41 +517,33 @@ int main(int argc, char **argv) {
     // The init preset, written and read back.
     preset_t init, back;
     preset_init(&init);
-    char *text      = NULL;
-    size_t text_len = 0;
-    FILE *mem       = open_memstream(&text, &text_len);
-    preset_file_write(mem, &init);
-    fclose(mem);
-    char err[200];
-    if (!preset_file_parse(text, text_len, &back, err, sizeof err)) {
-        printf("FAIL reading the written init preset: %s\n", err);
+    std::string error;
+    if (!preset_file::parse(preset_file::to_text(init), back, error)) {
+        printf("FAIL reading the written init preset: %s\n", error.c_str());
         s_failures++;
     } else if (Fields::of(back) != Fields::of(init)) {
-        preset_file_diff(stdout, &init, &back);
+        differences(init, back);
         printf("FAIL the written init preset reads back different (above)\n");
         s_failures++;
     }
-    free(text);
 
     // Each factory file reads, and its values read back exactly through
     // the writer. Text that differs from the writer's is a warning.
     for (int a = 1; a < argc; a++) {
         preset_t factory;
-        if (!preset_file_read(argv[a], &factory, err, sizeof err)) {
-            printf("FAIL %s: %s\n", argv[a], err);
+        if (!preset_file::read(argv[a], factory, error)) {
+            printf("FAIL %s: %s\n", argv[a], error.c_str());
             s_failures++;
             continue;
         }
-        mem = open_memstream(&text, &text_len);
-        preset_file_write(mem, &factory);
-        fclose(mem);
+        const std::string text = preset_file::to_text(factory);
         preset_t back;
-        if (!preset_file_parse(text, text_len, &back, err, sizeof err)) {
+        if (!preset_file::parse(text, back, error)) {
             printf("FAIL %s: the writer's text does not read: %s\n", argv[a],
-                   err);
+                   error.c_str());
             s_failures++;
         } else if (Fields::of(back) != Fields::of(factory)) {
-            preset_file_diff(stdout, &factory, &back);
+            differences(factory, back);
             printf("FAIL %s reads back different through the writer (above)\n",
                    argv[a]);
             s_failures++;
@@ -555,12 +559,11 @@ int main(int argc, char **argv) {
         // The file is the writer's text, comment lines aside.
         if (without_comments(file) != text) {
             printf("FAIL %s is not in the writer's form; the writer gives:\n%s",
-                   argv[a], text);
+                   argv[a], text.c_str());
             s_failures++;
         } else {
             printf("%s: reads back exactly\n", argv[a]);
         }
-        free(text);
     }
 
     check_saving();

@@ -149,18 +149,3 @@ std::optional<std::string> program_path(const BankMap &banks, int bank,
 }
 
 } // namespace banks
-
-bool banks_program_path(const char *banks_path, int bank, int program,
-                        char *path, size_t len) {
-    banks::BankMap map;
-    std::string error;
-    if (!banks::read(banks_path, map, error)) {
-        return false;
-    }
-    auto found = banks::program_path(map, bank, program);
-    if (!found) {
-        return false;
-    }
-    std::snprintf(path, len, "%s", found->c_str());
-    return true;
-}

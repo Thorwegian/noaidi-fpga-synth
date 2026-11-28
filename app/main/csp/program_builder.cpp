@@ -239,13 +239,6 @@ size_t ProgramBuilder::open_loop(IndexRegister which, int count, int stride,
     return emit(entry);
 }
 
-size_t ProgramBuilder::loop(IndexRegister which, size_t length, int count,
-                            int stride, bool vector) {
-    const size_t at = open_loop(which, count, stride, vector);
-    close_loop(at, at + 1 + length);
-    return at;
-}
-
 void ProgramBuilder::close_loop(size_t at) {
     close_loop(at, instructions_.size());
 }

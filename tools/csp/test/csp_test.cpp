@@ -163,12 +163,15 @@ void test_encoding() {
     check_equal(static_cast<int64_t>(row.high >> 28), 0x5A, "op is bits 71:64");
     check(csp::Word::decode(csp::Row{}).op == 0,
           "an all-zero row is op 0, the NOP");
-    check(Operand::decode(0x805) == Operand::indexed(csp::IndexRegister::j, 5),
+    // the operand fields, read through the row that carries them: r is bits
+    // 59:48, x bits 47:36, y bits 35:24
+    const csp::Word fields = csp::Word::decode(
+            csp::Row{(uint64_t{0x805} << 12) | 0x0FF, uint64_t{0xC00} << 24});
+    check(fields.r == Operand::indexed(csp::IndexRegister::j, 5),
           "operand 10 0000000101 is j|5");
-    check(Operand::decode(0x0FF) == Operand::direct(0xFF),
+    check(fields.x == Operand::direct(0xFF),
           "operand 00 0011111111 is direct 255");
-    check(Operand::decode(0xC00).mode == Operand::Mode::immediate,
-          "mode 3 is an immediate");
+    check(fields.y.mode == Operand::Mode::immediate, "mode 3 is an immediate");
 
     csp::Control control{csp::Unit::multiply_add,
                          csp::Writes::pair,

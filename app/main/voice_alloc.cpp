@@ -396,18 +396,23 @@ void preset_loader_task(void *) {
         while (xQueueReceive(s_program_queue, &request, 0) == pdTRUE) {
             // a storm of changes: only the last one is the sound wanted
         }
-        char rel[256], path[320], err[160];
-        if (!banks_program_path(STORAGE_ROOT "/banks.toml", request.bank,
-                                request.program, rel, sizeof rel)) {
+        banks::BankMap map;
+        std::string error;
+        const std::optional<std::string> relative =
+                banks::read(STORAGE_ROOT "/banks.toml", map, error)
+                        ? banks::program_path(map, request.bank,
+                                              request.program)
+                        : std::nullopt;
+        if (!relative) {
             ESP_LOGW(tag, "bank %d program %d: no such program", request.bank,
                      request.program);
             continue;
         }
-        snprintf(path, sizeof path, STORAGE_ROOT "/%s", rel);
         preset_t p;
-        if (!preset_file_read(path, &p, err, sizeof err)) {
+        if (!preset_file::read(std::string(STORAGE_ROOT "/") + *relative, p,
+                               error)) {
             ESP_LOGW(tag, "bank %d program %d: %s", request.bank,
-                     request.program, err);
+                     request.program, error.c_str());
             continue;
         }
         if (!preset_request(true, request.channel, &p)) {
@@ -418,9 +423,9 @@ void preset_loader_task(void *) {
             continue;
         }
         ESP_LOGI(tag, "channel %d, bank %d program %d: %s", request.channel + 1,
-                 request.bank, request.program, rel);
+                 request.bank, request.program, relative->c_str());
         if (s_preset_listener) {
-            s_preset_listener(rel);
+            s_preset_listener(relative->c_str());
         }
     }
 }
