@@ -25,6 +25,12 @@ test's link does not count. Two kinds of function land here:
   - one that only its own file calls, with every call inlined: it wants
     internal linkage (static, or an anonymous namespace).
 
+A function may be kept although neither link has it: KEPT below names each
+with what it is kept for. That makes the rule for a host test as well: a
+test of a function that is neither linked nor in KEPT tests nothing the
+instrument does, and goes with the function. The gate warns of a KEPT entry
+that a link has since taken up, and of one that names no function.
+
 The firmware is asked by symbol name. The host tool is asked by source line:
 it is compiled for another machine, where the same function's symbol differs
 (size_t is unsigned int on the ESP32-S3 and unsigned long on a 64-bit host).
@@ -49,6 +55,15 @@ import sys
 DEFINITION = re.compile(r"^[0-9a-f]+ (?P<kind>\S) (?P<name>.+?)(?:\t(?P<file>.+):(?P<line>\d+))?$")
 AUTHOR_TIME = re.compile(r"^author-time (\d+)$", re.MULTILINE)
 REPOSITORY = pathlib.Path(__file__).resolve().parents[2]
+
+# Functions kept although neither link has them, by qualified name, each with
+# what it is kept for.
+KEPT = {
+    "csp::DspGraph::minimum":
+        "the graph's node for MIN, an instruction the CSP has (docs/csp2_isa.md) and no patch wires yet",
+    "csp::DspGraph::copy_sets":
+        "the build's account of the circuits it folded into loops, which is how its tests see the fold",
+}
 
 
 def definitions(nm, *arguments):
@@ -109,17 +124,30 @@ def main():
                    for definition in definitions(firmware_nm, str(arguments.firmware / project["app_elf"]))}
     in_host_tool = {(source, line) for _, _, source, line in functions("nm", arguments.host_tool)}
 
+    unlinked = [(source, line, readable) for name, readable, source, line in ours
+                if name not in in_firmware and (source, line) not in in_host_tool]
+    qualified = {readable.partition("(")[0] for _, readable, _, _ in ours}
+    unlinked_names = {readable.partition("(")[0] for _, _, readable in unlinked}
+    for kept, reason in KEPT.items():
+        if kept in unlinked_names:
+            print(f"KEPT {kept}: {reason}")
+        elif kept in qualified:
+            print(f"WARN {kept} is in KEPT and a link has it now: take it out of the table")
+        else:
+            print(f"WARN {kept} is in KEPT and names no function of {sources.relative_to(REPOSITORY)}:"
+                  " take it out of the table")
+
     today = datetime.date.today()
     unused = sorted((last_change(source, line), source, line, readable)
-                    for name, readable, source, line in ours
-                    if name not in in_firmware and (source, line) not in in_host_tool)
+                    for source, line, readable in unlinked
+                    if readable.partition("(")[0] not in KEPT)
     for changed, source, line, readable in unused:
         days = (today - changed).days
         print(f"WARN {source.relative_to(REPOSITORY)}:{line}: {readable} is neither used in the firmware"
               f" nor the host tool (unchanged since {changed}, {days} day{'s' if days != 1 else ''})")
     if unused:
-        print(f"WARN {len(unused)} unused function(s), oldest first: remove each, or give it internal"
-              " linkage if its own file is its only caller")
+        print(f"WARN {len(unused)} unused function(s), oldest first: remove each, give it internal"
+              " linkage if its own file is its only caller, or name it in KEPT with what it is kept for")
     return 0
 
 
