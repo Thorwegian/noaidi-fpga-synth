@@ -35,7 +35,7 @@ struct Lfo : Module {
         return hertz / static_cast<float>(pass_rate);
     }
 
-    Lfo() {
+    explicit Lfo(Name name) : Module(name) {
         phase <<= step;
 
         const Signal<Control> saw      = bipolar(phase);

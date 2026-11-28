@@ -16,30 +16,42 @@
 //   module     a diagram with named pins, defined once and instanced many
 //              times; a module may hold modules
 //
-// The graph has two ends. The firmware has sources, the values it sets, and
-// a partial has sinks, its parameters. Everything between them has both.
+// The graph has two ends, and each is a module of its own, though its
+// inside is not in the graph: the firmware, whose pins are sources, the
+// values it sets, and a partial, whose pins are sinks, its parameters.
+// Everything between them has both.
 //
-// What has a name in the tree is declared, as a member of its module or in
-// the module's constructor, with that name: a pin, a component that keeps a
-// state, an instance, an end. Arithmetic is written as arithmetic. Then the
-// joins are stated. A vibrato, whole:
+// What has a name in the tree is declared with that name: a pin, a
+// component that keeps a state, a module. Arithmetic is written as
+// arithmetic. Then the joins are stated. A vibrato, whole:
+//
+//   struct Firmware : External {
+//       Source<Control> note{"note", {-5.0f, 5.0f}};
+//       Source<Control> depth{"depth", {0.0f, 2.0f}};
+//       Source<Phase> rate{"rate", {0.0f, Lfo::step_at(50.0f)}};
+//       Source<Select<Lfo::Shape>> shape{"shape"};
+//       using External::External;
+//   };
+//
+//   struct Partial : External {
+//       Sink<Control> pitch{"pitch", {-5.0f, 5.0f}};
+//       using External::External;
+//   };
 //
 //   struct Vibrato : Module {
-//       FirmwareSource<Control> note{"note", {-5.0f, 5.0f}};
-//       FirmwareSource<Control> depth{"depth", {0.0f, 2.0f}};
-//       FirmwareSource<Phase> rate{"rate", {0.0f, Lfo::step_at(50.0f)}};
-//       FirmwareSource<Select<Lfo::Shape>> shape{"shape"};
-//       PartialSink pitch{"pitch", {-5.0f, 5.0f}};
-//       Instance<Lfo> lfo{"lfo"};
+//       Firmware firmware{"firmware"};
+//       Lfo lfo{"lfo"};
+//       Partial partial{"partial"};
 //
-//       Vibrato() {
-//           lfo[&Lfo::step] <<= rate;
-//           lfo[&Lfo::shape] <<= shape;
-//           pitch <<= note + depth * lfo[&Lfo::wave];
+//       explicit Vibrato(Name name) : Module(name) {
+//           lfo.step <<= firmware.rate;
+//           lfo.shape <<= firmware.shape;
+//           partial.pitch <<= firmware.note + firmware.depth * lfo.wave;
 //       }
 //   };
 //
-//   const Graph graph = Graph::of<Vibrato>();
+//   const Vibrato vibrato{"vibrato"};
+//   const Graph graph{vibrato};
 //
 // A join is written `<<=`, read as an arrow: what is on the left is driven
 // by the signal on the right. A join states a relation, once, as a
@@ -52,10 +64,10 @@
 //
 // A signal has a unit, and the compiler joins only like to like: a control
 // value, a phase, or a select. A signal has a range too, the least and the
-// greatest value it can take. The author states a range at a source of the
-// firmware and at a sink of a partial, and nowhere else: every other range
-// follows from the components. A control value saturates at a partial's
-// sink and at a state that is kept, never on the way.
+// greatest value it can take. The author states a range at the two ends, on
+// a pin of the firmware and on a pin of a partial, and nowhere else: every
+// other range follows from the components. A control value saturates at a
+// partial's sink and at a state that is kept, never on the way.
 //
 // The graph has a namespace of its own, csp::graph, apart from the chip's
 // in csp: nothing in the model is named for a format or a field of the chip.
@@ -169,13 +181,19 @@ Signal<Control> bipolar(Signal<Phase> phase);
 
 // ---- what is declared -------------------------------------------------------
 
-// What has a name in the tree: a pin, a component that keeps a state, an
-// instance, an end. It belongs to the module whose constructor is running
-// when it is declared, and a copy of it is the same thing again, not
-// another one.
+// A name in the tree: `lfo`, or `lfo[1]` for one of several.
+struct Name {
+    Name(const char *name);
+    Name(std::string_view name, int index);
+};
+
+// What has a name in the tree: a pin, a component that keeps a state, a
+// module. It belongs to the module whose constructor is running when it is
+// declared, and one declared in no module is an outermost one. A copy of it
+// is the same thing again, not another one.
 class Named {
 protected:
-    explicit Named(std::string_view name);
+    explicit Named(Name name);
     Named(const Named &)            = default;
     Named &operator=(const Named &) = delete;
 };
@@ -190,7 +208,11 @@ protected:
 template <typename Unit>
 class Sink : public Signal<Unit>, public Named {
 public:
-    explicit Sink(std::string_view name);
+    explicit Sink(Name name);
+    // A sink of an end, with the range it takes: a control value saturates
+    // at it.
+    Sink(Name name, Range range)
+        requires Quantity<Unit>;
 
     // Join: this sink takes the signal. A sink takes one.
     void operator<<=(Signal<Unit> signal);
@@ -201,7 +223,11 @@ public:
 template <typename Unit>
 class Source : public Signal<Unit>, public Named {
 public:
-    explicit Source(std::string_view name);
+    explicit Source(Name name);
+    // A source of an end, with its range: a value set outside it is clamped
+    // here.
+    Source(Name name, Range range)
+        requires Quantity<Unit>;
 
     // Join: this source drives the signal. A source drives one.
     void operator<<=(Signal<Unit> signal);
@@ -218,7 +244,7 @@ public:
 template <typename Unit>
 class UnitDelay : public Signal<Unit>, public Named {
 public:
-    explicit UnitDelay(std::string_view name);
+    explicit UnitDelay(Name name);
 
     void operator<<=(Signal<Unit> input);
 };
@@ -227,7 +253,7 @@ public:
 template <Quantity Unit>
 class Accumulator : public Signal<Unit>, public Named {
 public:
-    explicit Accumulator(std::string_view name);
+    explicit Accumulator(Name name);
 
     void operator<<=(Signal<Unit> step);
 };
@@ -235,73 +261,45 @@ public:
 // A one-pole: y[n] = y[n−1] + rate·(target − y[n−1]).
 class OnePole : public Signal<Control>, public Named {
 public:
-    explicit OnePole(std::string_view name);
+    explicit OnePole(Name name);
 
     Sink<Control> target;
     Sink<Control> rate;
 };
 
-// ---- the two ends -----------------------------------------------------------
-
-// A source of the firmware: a value it sets, in its unit. A quantity has
-// its range, and a value set outside it is clamped here.
-template <typename Unit>
-class FirmwareSource : public Signal<Unit>, public Named {
-public:
-    FirmwareSource(std::string_view name, Range range)
-        requires Quantity<Unit>;
-    explicit FirmwareSource(std::string_view name)
-        requires(!Quantity<Unit>);
-};
-
-// A sink of a partial: one of its parameters. A control value saturates
-// here, at the range the partial takes.
-class PartialSink : public Named {
-public:
-    PartialSink(std::string_view name, Range range);
-
-    void operator<<=(Signal<Control> signal);
-};
-
 // ---- modules ----------------------------------------------------------------
 
 // A diagram with named pins. A module is a struct that derives from this:
-// what it declares, as its members and in its constructor, is the diagram.
-// The graph constructs it once, however many instances there are, and an
-// instance holds its joins and its own state, not a copy of the diagram.
-class Module {
-protected:
-    Module();
+// what it declares, as its members and in its constructor, is the diagram,
+// and declaring one of it is an instance: `Lfo lfo{"lfo"};`, with its pins
+// as its members, `lfo.step` and `lfo.wave`.
+//
+// A module is defined once. The first of a type that is declared states
+// the diagram. Each later one states the same diagram, so it adds only
+// what is its own: its name, its joins and its states.
+class Module : public Named {
+public:
+    explicit Module(Name name);
 };
 
-// One use of a module: `name`, or `name[index]`. Its pins are reached
-// through the definition's members: `lfo[&Lfo::step] <<= signal` joins a
-// sink, and `lfo[&Lfo::wave]` is the signal a source drives.
-template <std::derived_from<Module> Definition>
-class Instance : public Named {
+// A module whose inside is not in the graph: an end. The firmware is one,
+// and its sources are the values it sets. A partial is one, and its sinks
+// are the parameters it reads. A quantity's pin states its range here.
+class External : public Module {
 public:
-    explicit Instance(std::string_view name);
-    Instance(std::string_view name, int index);
-
-    template <typename Unit>
-    Sink<Unit> operator[](Sink<Unit> Definition::*pin) const;
-    template <typename Unit>
-    Signal<Unit> operator[](Source<Unit> Definition::*pin) const;
+    explicit External(Name name);
 };
 
 // ---- the graph --------------------------------------------------------------
 
-// The whole tree, from the outermost module down.
+// The whole tree, from an outermost module down.
 class Graph {
 public:
-    // The graph of a tree: it constructs the outermost module, which
-    // declares the rest.
-    template <std::derived_from<Module> Outermost>
-    static Graph of();
+    explicit Graph(const Module &outermost);
 
     // What the graph refuses, each by its name in the tree: a sink or a
-    // source joined twice or left unjoined, a loop whose range does not
-    // close.
+    // source joined twice or left unjoined, a range stated anywhere but at
+    // an end, a loop whose range does not close.
     struct Issue {
         std::string message;
     };
