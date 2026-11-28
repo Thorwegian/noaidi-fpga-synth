@@ -20,7 +20,7 @@
 #include "freertos/task.h"
 
 // The console's channel: UART0 on the CH343 bridge, the socket marked COM
-// (docs/esp32s3_hw678.md in the board's repository, noaidi-fpga-synth-kicad),
+// (docs/yd_esp32_s3.md in the board's repository, noaidi-fpga-synth-kicad),
 // at the baud sdkconfig sets. The chip's USB-Serial/JTAG controller shares
 // its PHY with USB-OTG, so nothing here and nothing in sdkconfig may keep it
 // on: the socket marked USB belongs to OTG, whose first line of code would

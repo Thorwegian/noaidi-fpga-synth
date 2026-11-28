@@ -219,7 +219,7 @@ computer keeps in its own venv, not in `/usr/bin/python3`: run the acceptance
 with `~/.noaidi-blenv/bin/python`, or the two `baseline_check` and
 `benchmark_compare` stages fail on the import and the verdict reads as audio
 failure when nothing was analysed.
-| `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md` in noaidi-fpga-synth-kicad, #292) |
+| `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/yd_esp32_s3.md` in noaidi-fpga-synth-kicad, #292) |
 | `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |
 | `parts_take.py` | a melody whose notes jump MIDI channels, each channel on its own part's preset, recorded over S/PDIF; the per-note levels and the shapes they fall on say whether the routing holds |

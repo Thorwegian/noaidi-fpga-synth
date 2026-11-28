@@ -61,7 +61,7 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
 - **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-S3
   module in the ESP32-S3-DevKitC-1's shape, with an ESP32-S3R8 (8 MB of
   PSRAM) and 16 MB of flash
-  ([docs/esp32s3_hw678.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/esp32s3_hw678.md)
+  ([docs/yd_esp32_s3.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/yd_esp32_s3.md)
   in the board's repository). The firmware's
   partition table (`app/partitions.csv`) uses the first 6 MB of the
   flash.
@@ -172,7 +172,7 @@ unnoticed.
 
 The socket marked `USB` is the chip's USB-OTG controller, its PHY assigned to
 it by eFuse
-([docs/esp32s3_hw678.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/esp32s3_hw678.md)
+([docs/yd_esp32_s3.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/yd_esp32_s3.md)
 in the board's repository), and the firmware presents the synth
 there as a MIDI 1.0 device: a computer sees **Model 1**, sends notes and
 controllers to it, and reads its parameter feedback and preset dump back on
