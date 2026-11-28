@@ -109,15 +109,6 @@ CSP_GRAPH      = app/main/csp/dsp_graph.cpp app/main/sound_engine.cpp app/main/p
 CSP_GRAPH_HDR  = app/main/csp/dsp_graph.hpp app/main/csp/dsp_graph_netlist.hpp \
                  app/main/sound_engine.hpp app/main/preset.h app/main/csp/lfo.hpp
 CSP_GRAPH_TEST = $(HOST_DIR)/dsp_graph_test
-# Every link of ours that says whether a function of app/main is used
-# (tools/firmware/unused_functions.py): the csp tool and each host test.
-# Each is linked with -g and --gc-sections, so the linker drops what it does
-# not reference and the debug information names each remaining function's
-# source line. The list stands above the rules that name it as their
-# prerequisite: make reads a rule's prerequisites when it meets the rule.
-HOST_LINK_JUDGES = -g -ffunction-sections -Wl,--gc-sections
-HOST_LINKS = $(CSP_TOOL) $(FW_TEST) $(BANKS_TEST) $(SOUND_ENGINE_TEST) \
-             $(CC_MAP_TEST) $(PARSER_TEST) $(CSP_TEST) $(CSP_GRAPH_TEST)
 # The interpreter of a built graph: the netlist's arithmetic, for the host.
 CSP_EVALUATOR     = $(CSP_DIR)/test/graph_evaluator.cpp
 CSP_EVALUATOR_HDR = $(CSP_DIR)/test/graph_evaluator.hpp
@@ -220,6 +211,15 @@ format:
 
 format-check:
 	@tools/format_check.sh
+
+# Every link of ours that says whether a function of app/main is used
+# (tools/firmware/unused_functions.py): the csp tool and each host test.
+# Each is linked with -g and --gc-sections, so the linker drops what it does
+# not reference and the debug information names each remaining function's
+# source line.
+HOST_LINK_JUDGES = -g -ffunction-sections -Wl,--gc-sections
+HOST_LINKS = $(CSP_TOOL) $(FW_TEST) $(BANKS_TEST) $(SOUND_ENGINE_TEST) \
+             $(CC_MAP_TEST) $(PARSER_TEST) $(CSP_TEST) $(CSP_GRAPH_TEST)
 
 $(CSP_TOOL): $(CSP_SRC) $(CSP_HDR) $(CSP_GRAPH) $(CSP_GRAPH_HDR) $(CSP_DIR)/performance.hpp $(CSP_DIR)/main.cpp
 	mkdir -p $(HOST_DIR)
