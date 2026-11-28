@@ -186,7 +186,6 @@ struct Operand {
     }
 
     uint16_t encode() const;
-    static Operand decode(uint16_t field);
     bool operator==(const Operand &) const = default;
 };
 

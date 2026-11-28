@@ -52,10 +52,6 @@ uint16_t Operand::encode() const {
                                  | (value & 0x3FF));
 }
 
-Operand Operand::decode(uint16_t field) {
-    return {static_cast<Mode>((field >> 10) & 3), field & 0x3FF};
-}
-
 // ---- control words --------------------------------------------------------
 
 uint32_t Control::encode() const {
@@ -198,14 +194,23 @@ Row Word::encode() const {
     return row;
 }
 
+namespace {
+
+// An operand field's mode and value: what Operand::encode() packed.
+Operand operand_of(uint16_t field) {
+    return {static_cast<Operand::Mode>((field >> 10) & 3), field & 0x3FF};
+}
+
+} // namespace
+
 Word Word::decode(const Row &row) {
     Word word;
     word.op   = static_cast<uint16_t>((row.high >> 28) & 0xFF);
     word.cond = static_cast<uint8_t>((row.high >> 24) & 0xF);
-    word.r   = Operand::decode(static_cast<uint16_t>((row.high >> 12) & 0xFFF));
-    word.x   = Operand::decode(static_cast<uint16_t>(row.high & 0xFFF));
-    word.y   = Operand::decode(static_cast<uint16_t>((row.low >> 24) & 0xFFF));
-    word.imm = static_cast<uint32_t>(row.low & 0xFFFFFF);
+    word.r    = operand_of(static_cast<uint16_t>((row.high >> 12) & 0xFFF));
+    word.x    = operand_of(static_cast<uint16_t>(row.high & 0xFFF));
+    word.y    = operand_of(static_cast<uint16_t>((row.low >> 24) & 0xFFF));
+    word.imm  = static_cast<uint32_t>(row.low & 0xFFFFFF);
     return word;
 }
 
