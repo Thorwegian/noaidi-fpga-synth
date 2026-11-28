@@ -46,10 +46,11 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace csp::graph {
@@ -63,8 +64,21 @@ struct Control {};
 // accumulator of phase wrap without the author saying so.
 struct Phase {};
 
+// A type a select can be of: bool, or an enumeration that ends in `count`,
+// the enumerator that says how many values come before it.
+template <typename Type>
+concept Enumerated = std::same_as<Type, bool>
+                     || (std::is_enum_v<Type> && requires { Type::count; });
+
+// How many values a select of this type has.
+template <Enumerated Type>
+inline constexpr std::size_t value_count =
+        static_cast<std::size_t>(Type::count);
+template <>
+inline constexpr std::size_t value_count<bool> = 2;
+
 // One of a named set of values: an enumeration's, or false and true.
-template <typename Enumeration>
+template <Enumerated Enumeration>
 struct Select {};
 
 // A select of two: what a comparison says, and what gates an envelope.
@@ -120,10 +134,12 @@ Signal<Flag> operator<(Signal<Control> a, Signal<Control> b);
 Signal<Flag> operator>(Signal<Control> a, Signal<Control> b);
 
 // A mux: one of its sinks, chosen by its select sink. The sinks are in the
-// order of the select's values: false then true, or the enumeration's.
-template <typename Enumeration>
+// order of the select's values, false then true or the enumeration's, and
+// there is one for each value: any other number does not compile.
+template <Enumerated Enumeration, std::size_t Count>
+    requires(Count == value_count<Enumeration>)
 Signal<Control> mux(Signal<Select<Enumeration>> select,
-                    std::initializer_list<Signal<Control>> sinks);
+                    const Signal<Control> (&sinks)[Count]);
 
 // A phase as a control value: −1 … +1 across the cycle, 0 at the phase's
 // zero.
@@ -227,7 +243,7 @@ public:
     template <Quantity Unit>
     Source<Unit> firmware_source(Sink<Unit> Definition::*pin,
                                  Range range) const;
-    template <typename Enumeration>
+    template <Enumerated Enumeration>
     Source<Select<Enumeration>>
     firmware_source(Sink<Select<Enumeration>> Definition::*pin) const;
 
@@ -249,7 +265,7 @@ public:
     template <Quantity Unit>
     Source<Unit> firmware_source(std::string_view name, Range range);
     // A select the firmware writes.
-    template <typename Enumeration>
+    template <Enumerated Enumeration>
     Source<Select<Enumeration>> firmware_source(std::string_view name);
 
     // A sink of a partial: one of its parameters. A control value

@@ -20,7 +20,7 @@
 namespace csp::graph {
 
 struct Lfo : Module {
-    enum class Shape { saw, square, triangle, sine };
+    enum class Shape { saw, square, triangle, sine, count };
 
     // The phase added each pass, a fraction of a cycle.
     Sink<Phase> step          = sink<Phase>("step");
