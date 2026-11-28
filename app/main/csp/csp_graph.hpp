@@ -26,7 +26,7 @@
 //   lfo.firmware_source(&Lfo::shape);
 //   const auto note  = graph.firmware_source<Control>("note", {-5, 5});
 //   const auto depth = graph.firmware_source<Control>("depth", {0, 2});
-//   graph.partial_sink("pitch", {-5, 5}) = note + depth * lfo[&Lfo::wave];
+//   graph.partial_sink("pitch", {-5, 5}) <<= note + depth * lfo[&Lfo::wave];
 //
 // A signal has a unit, and the compiler joins only like to like: a control
 // value, a phase, or a select. A signal has a range too, the least and the
@@ -35,10 +35,13 @@
 // follows from the components. A control value saturates at a partial's
 // sink and at a state that is kept, never on the way.
 //
-// A pin is joined with `=`, as a continuous assignment is in SystemVerilog:
-// it states a relation, once, and the order of the statements says nothing.
-// The pin on the left is driven by the signal on the right. A signal may be
-// on the right of any number of joins, and a pin on the left of one.
+// A pin is joined with `<<=`, read as an arrow: the pin on the left is
+// driven by the signal on the right. A join states a relation, once, as a
+// continuous assignment does in SystemVerilog, and the order of the
+// statements says nothing. A signal may be on the right of any number of
+// joins, and a pin on the left of one. The operator has assignment's
+// precedence, so all of the right-hand side is the signal. `=` keeps its
+// C++ meaning: it names a signal, and it does not compile on a pin.
 //
 // The graph has a namespace of its own, csp::graph, apart from the chip's
 // in csp: nothing in the model is named for a format or a field of the chip.
@@ -158,9 +161,9 @@ template <typename Unit>
 class Sink : public Signal<Unit> {
 public:
     // Join: this sink takes the signal. A sink takes one.
-    Sink &operator=(Signal<Unit> signal);
-    Sink &operator=(const Sink &arriving);
-    Sink(const Sink &) = default;
+    void operator<<=(Signal<Unit> signal);
+    Sink(const Sink &)            = default;
+    Sink &operator=(const Sink &) = delete;
 
 private:
     friend class Module;
@@ -173,9 +176,9 @@ template <typename Unit>
 class Source : public Signal<Unit> {
 public:
     // Join: this source drives the signal. A source drives one.
-    Source &operator=(Signal<Unit> signal);
-    Source &operator=(const Source &driving);
-    Source(const Source &) = default;
+    void operator<<=(Signal<Unit> signal);
+    Source(const Source &)            = default;
+    Source &operator=(const Source &) = delete;
 
 private:
     friend class Module;
@@ -230,7 +233,7 @@ public:
 };
 
 // One use of a module. Its pins are reached through the definition's
-// members: `lfo[&Lfo::step] = signal` joins a sink, and `lfo[&Lfo::wave]`
+// members: `lfo[&Lfo::step] <<= signal` joins a sink, and `lfo[&Lfo::wave]`
 // is the signal a source drives.
 template <typename Definition>
 class Instance {

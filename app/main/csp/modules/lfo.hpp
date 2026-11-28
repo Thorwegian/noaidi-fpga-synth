@@ -49,7 +49,7 @@ struct Lfo : Module {
                 (1.0f - correction) * parabola
                 + correction * parabola * absolute(parabola);
 
-        wave = mux(shape, {saw, square, triangle, sine});
+        wave <<= mux(shape, {saw, square, triangle, sine});
     }
 };
 
