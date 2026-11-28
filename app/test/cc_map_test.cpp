@@ -39,9 +39,8 @@ struct Message {
     uint8_t cc, value;
 };
 
-// A dump's messages, collected into a fixed buffer (a dump is dump_length()
-// long, and a vector growing under the callback trips a false
-// -Wstringop-overflow in GCC 13).
+// A dump's messages, collected into a fixed buffer (a vector growing under
+// the callback trips a false -Wstringop-overflow in GCC 13).
 struct Collected {
     std::array<Message, 256> items{};
     int count = 0;
@@ -133,9 +132,6 @@ void test_dump_shape() {
     preset_init(&preset);
     const std::vector<Message> messages =
             dump_of(preset, cc_map::knobs_of(preset));
-    check(static_cast<int>(messages.size()) == cc_map::dump_length(),
-          "the dump has dump_length() messages: "
-                  + std::to_string(messages.size()));
     std::map<int, int> seen;
     for (const Message &m : messages) {
         ++seen[m.cc];

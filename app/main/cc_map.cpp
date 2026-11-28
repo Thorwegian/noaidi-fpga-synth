@@ -453,9 +453,6 @@ Knobs knobs_of(const preset_t &preset) {
 
 namespace {
 
-// The RPN for the pitch-bend range: select 0/0, data entry, deselect.
-constexpr int rpn_messages = 5;
-
 void dump_lfo(const preset_t &preset, const Knobs &knobs, int i, Emit emit,
               void *user) {
     const lfo_t &lfo       = preset.lfo[i];
@@ -520,10 +517,6 @@ void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user) {
     // the LFOs
     dump_lfo(preset, knobs, 0, emit, user);
     dump_lfo(preset, knobs, 1, emit, user);
-}
-
-int dump_length() {
-    return 2 + rpn_messages + 2 * 4 + 4 + 6 + 5 + 7 + 2 * 5;
 }
 
 } // namespace cc_map

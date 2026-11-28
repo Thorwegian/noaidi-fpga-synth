@@ -56,7 +56,4 @@ Knobs knobs_of(const preset_t &preset);
 using Emit = void (*)(uint8_t cc, uint8_t value, void *user);
 void dump(const preset_t &preset, const Knobs &knobs, Emit emit, void *user);
 
-// The number of messages dump() emits.
-int dump_length();
-
 } // namespace cc_map
