@@ -11,7 +11,7 @@ rtl/tb/sim-*.out
 __pycache__/
 sdkconfig.old
 !tools/lab/benchmark/*.json
-.tools/
+.tools
 app/managed_components/
-.tools.*/
+.tools.*
 node_modules/
