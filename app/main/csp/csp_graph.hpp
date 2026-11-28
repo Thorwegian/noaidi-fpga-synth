@@ -37,6 +37,8 @@
 //
 // A pin is joined with `=`, as a continuous assignment is in SystemVerilog:
 // it states a relation, once, and the order of the statements says nothing.
+// The pin on the left is driven by the signal on the right. A signal may be
+// on the right of any number of joins, and a pin on the left of one.
 //
 // The graph has a namespace of its own, csp::graph, apart from the chip's
 // in csp: nothing in the model is named for a format or a field of the chip.
@@ -273,8 +275,8 @@ public:
     Sink<Control> partial_sink(std::string_view name, Range range);
 
     // What the graph refuses, each by the name of the pin or the state: a
-    // sink joined twice, a sink left unjoined, a source that drives
-    // nothing it was given, a loop whose range does not close.
+    // pin joined twice, a pin left unjoined, a loop whose range does not
+    // close.
     struct Issue {
         std::string message;
     };
