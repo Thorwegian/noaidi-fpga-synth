@@ -233,7 +233,7 @@ dword_t read_one(uint32_t address) {
 }
 
 std::string build_name(dword_t build_time, dword_t build_hash) {
-    char commit[16] = "no source";
+    char commit[20] = "no source";
     if (build_hash != 0) {
         std::snprintf(commit, sizeof commit, "%08llx",
                       static_cast<unsigned long long>(build_hash));
