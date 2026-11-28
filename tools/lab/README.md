@@ -146,6 +146,13 @@ port. The synth's own preset saves are bare TOML without the copyright header
   Active Sensing rule, #276) — so a script that sends `FE` must keep sending
   it, or stop it only after its last note-off. After any test
   that plays notes, read `csp voices`. `baseline_recording.py` is the model.
+- **A script that sends refuses to report success when the port took
+  nothing.** `midi_wire.subscribed` holds the `aconnect 14:0 <port>` for the
+  run and `midi_wire.require_moved` compares the raw MIDI transmit counters
+  (`/proc/asound/card*/midi*`) across it; when none moved the script exits
+  non-zero, because a soak that played nothing otherwise reads as a soak the
+  firmware survived (#517). It proves bytes left the port, not that they were
+  the right ones.
 - **BLE is Open Stage Control's.** The synth accepts one BLE connection; the
   BLE-era scripts in `tools/lab/ble/` (`ble_midi_fuzz.py`, `hil.py`, the
   `*_check.py` tests that import it) take it over and must disconnect *and
@@ -219,7 +226,7 @@ computer keeps in its own venv, not in `/usr/bin/python3`: run the acceptance
 with `~/.noaidi-blenv/bin/python`, or the two `baseline_check` and
 `benchmark_compare` stages fail on the import and the verdict reads as audio
 failure when nothing was analysed.
-| `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/esp32s3_hw678.md`, #292) |
+| `esp32s3_probe/` | an ESP-IDF probe for ESP32-S3 boards: chip, memory, pin scan, PSRAM speed, Wi-Fi, the RGB LED (`docs/yd_esp32_s3.md` in noaidi-fpga-synth-kicad, #292) |
 | `baselines.py` | the lab's baselines: each one's program in the Tests bank, its preset file, its transposition and its benchmark |
 | `baseline_recording.py` | the fixed scales-and-triad MIDI sequence on a chosen preset, at a chosen transposition, recorded over S/PDIF |
 | `parts_take.py` | a melody whose notes jump MIDI channels, each channel on its own part's preset, recorded over S/PDIF; the per-note levels and the shapes they fall on say whether the routing holds |

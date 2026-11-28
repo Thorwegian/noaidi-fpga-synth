@@ -106,7 +106,7 @@ Addresses are in 36-bit dwords.
 
 | Address | Section | Size |
 |---|---|---|
-| `0x00000–0x0000F` | System registers (read back) | 16 dwords |
+| `0x00000–0x00011` | System registers (read back) | 18 dwords |
 | `0x02000–0x05FFF` | Partial pointers (256 × 64) | 16K dwords |
 | `0x06000` | The CSP's write FIFO's door: a dword carries its own register or sink address | 1 dword |
 | `0x08000–0x08FFF` | IMEM: 2048 instruction rows, two dwords a row; a program loads only its own rows, which end with `END` (#271) | 4096 dwords |
@@ -115,7 +115,7 @@ Addresses are in 36-bit dwords.
 Everything else is reserved. The regions' bases are the first revision's,
 widened; the map's rule stands — firm, and landscaped where the chip asks.
 
-## System registers — `0x0000–0x000F`
+## System registers — `0x0000–0x0011`
 
 | Offset | Register | Contents |
 |---|---|---|
@@ -132,8 +132,16 @@ widened; the map's rule stands — firm, and landscaped where the chip asks.
 | `0x00D` | `DIAG_PROBE_EVEN` | read-only. `[17:0]` the even register of the probed pair, as of the last pass |
 | `0x00E` | `DIAG_PROBE_ODD` | read-only. `[17:0]` the odd register of the probed pair |
 | `0x00F` | `DIAG_STREAM` | read-only. `[15:0]` the data stream's frames sent since reset |
+| `0x010` | `BUILD_TIME` | read-only. `[31:0]` the synthesis's time, seconds since the epoch, UTC (#596) |
+| `0x011` | `BUILD_HASH` | read-only. `[31:0]` the low 32 bits of the source commit the synthesis read; 0 when the sources were modified (#596) |
 
 The diagnostic words cross from the system clock through two flip-flops and are not coherent across bits; read twice.
+
+A build's identity is the gateware's, and it travels with the bitstream: the
+firmware's banner names its own file, so a take names the machine it ran on
+by these two words, which the firmware prints at boot and `info` and
+`csp diag` repeat. A synthesis of a modified tree writes no hash, since its commit no
+longer describes what was built; the time still names the build.
 
 `STROKE` is the partial pipeline's event input (#624), and it is not a word
 of the CSP's address space: the firmware writes it outside the write queue,
@@ -153,7 +161,7 @@ the pass it is committed in. `CTRL` reads back its last value without the
 commit bit. Every `CTRL` write sets all three bits: pass the hold and the test
 tone along with a swap.
 
-## Program — IMEM `0x08000–0x08B7F`, the decode ROM `0x09000–0x090FF`
+## Program — IMEM `0x08000–0x08FFF`, the decode ROM `0x09000–0x090FF`
 
 An instruction is a qword ([csp2_isa.md](csp2_isa.md) section 2), held as
 eight nonet slices of one row in eight blocks of 2048 × 9. A row is two

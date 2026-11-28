@@ -43,6 +43,11 @@ the boot log and verdict.json, and for each baseline, as <label>.<baseline>.*, t
 recording, the tables, the plot and the limiter series; the exit
 status is 0 when all three pass. The channel's bank is put back to 0 at the
 end. Run it with the interpreter Essentia is installed in.
+
+The `csp verify` is asked twice before a run is said to have got no answer
+(#514): a chip that answered nothing and a chip whose registers differ are
+different faults. The console's whole reply is kept as <label>.verify.txt and
+in verdict.json, so a missed answer can be read afterwards.
 """
 import argparse
 import json
@@ -125,6 +130,30 @@ def listen(port, seconds):
         if data:
             chunks.append(data.decode("utf-8", "replace"))
     return ANSI.sub("", "".join(chunks))
+
+
+VERIFY_ATTEMPTS = 2
+VERIFY_WINDOW_S = 4.0
+
+
+def verify_csp(port, attempts=VERIFY_ATTEMPTS, window=VERIFY_WINDOW_S):
+    """`csp verify`, asked until it answers: (differing, attempts, reply).
+
+    `differing` is None when no attempt answered, which is a third outcome
+    beside passing and differing (#514): a chip that answered nothing and a
+    chip whose registers differ are different faults, and only one of them is
+    about the design. The reply is every attempt's console text, kept whole,
+    because a missed answer is investigated from what the console did send.
+    """
+    replies, differing = [], None
+    for _ in range(attempts):
+        reply = command(port, "csp verify", window)
+        replies.append(reply)
+        match = VERIFIED.search(reply)
+        if match:
+            differing = int(match.group(1))
+            break
+    return differing, len(replies), "\n".join(replies)
 
 
 def boot(port, seconds):
@@ -254,12 +283,18 @@ def main():
 
     # 2. csp verify, while the synth is silent
     print("== csp verify")
-    verify = command(port, "csp verify", 4.0)
-    match = VERIFIED.search(verify)
-    differing = int(match.group(1)) if match else None
-    verdict["verify"] = {"differing": differing,
-                         "lines": [line.strip() for line in verify.splitlines() if "image" in line][:24]}
-    print("verified: %s register(s) differ" % ("?" if differing is None else differing))
+    differing, attempts, reply = verify_csp(port)
+    outcome = "no answer" if differing is None else ("pass" if differing == 0 else "fail")
+    verdict["verify"] = {"verdict": outcome, "differing": differing,
+                         "attempts": attempts, "reply": reply}
+    with open(base + ".verify.txt", "w") as out:
+        out.write(reply)
+    if differing is None:
+        print("verify: no answer in %d attempt(s); the console's reply is in %s.verify.txt"
+              % (attempts, os.path.basename(base)))
+    else:
+        print("verify: %d register(s) differ after %d attempt(s); the console's reply is in %s.verify.txt"
+              % (differing, attempts, os.path.basename(base)))
 
     # 3. each baseline: its preset, its sequence, the checks
     verdict["baselines"] = {}
@@ -341,7 +376,8 @@ def main():
     with open(os.path.join(args.out, "verdict.json"), "w") as out:
         json.dump(verdict, out, indent=2)
     print("== verdict: %s (self-test %s, verify %s, %s)" % (
-        "PASS" if passed else "FAIL", word(self_test_passed), word(differing == 0),
+        "PASS" if passed else "FAIL", word(self_test_passed),
+        "no answer" if differing is None else word(differing == 0),
         ", ".join("%s %s" % (name, "not loaded" if not r["preset_loaded"] else "audio " + word(r["audio"]["passed"]))
                   for name, r in verdict["baselines"].items())))
     return 0 if passed else 1

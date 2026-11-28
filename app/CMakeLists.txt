@@ -7,14 +7,16 @@ cmake_minimum_required(VERSION 3.22)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
-# The build's name, printed by the boot banner, `system` and the status bar: the branch and
-# the short commit (`main@0572a5c`), plus -dirty for uncommitted changes. ESP-IDF's default
+# The build's name, printed by the boot banner, `info` and the status bar: the branch and
+# the commit's first eight digits (`main@0572a5c5`), plus -dirty for uncommitted changes. Eight
+# is what the gateware's status dword holds (rtl/Makefile), so one commit reads as the same
+# string from both chips; git's own default length depends on the clone. ESP-IDF's default
 # PROJECT_VER is `git describe`, which names whatever tag is nearest in the clone, and the
 # project has no releases (#201). Re-read whenever HEAD or the branch ref moves.
 execute_process(COMMAND git rev-parse --abbrev-ref HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE GIT_BRANCH
     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-execute_process(COMMAND git rev-parse --short HEAD
+execute_process(COMMAND git rev-parse --short=8 HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} OUTPUT_VARIABLE GIT_COMMIT
     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 execute_process(COMMAND git status --porcelain --untracked-files=no

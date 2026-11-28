@@ -71,6 +71,13 @@ constexpr uint32_t diag_dropped = 0x0000B;
 constexpr int diag_words        = 4;
 constexpr uint32_t diag_stream  = 0x0000F;
 
+// The gateware's own name (#596): the synthesis's time, seconds since the
+// epoch UTC, and the low 32 bits of the source commit it read — zero when
+// the sources were modified, since the commit no longer describes what was
+// built. The firmware's banner names a different file.
+constexpr uint32_t build_time = 0x00010;
+constexpr uint32_t build_hash = 0x00011;
+
 // The register probe: write the address of a CSP register pair to
 // probe_address, wait a pass or two, read the pair (even register, then odd).
 constexpr uint32_t probe_address = 0x0000C;

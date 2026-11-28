@@ -434,6 +434,15 @@ module tb_top;
         checkn("the probe's odd slot", value, dut.probe_pair[csp_pkg::WORD_W-1:0]);
         read_status(MAP_DIAG_STREAM, value);
         checkn("the stream slot", value, dut.stream_frames);
+        // The build's own name (#596): the time and hash rtl/Makefile passed.
+        read_status(MAP_BUILD_TIME, value);
+        checkn("the build time slot", value[31:0], `BUILD_TIME);
+        read_status(MAP_BUILD_HASH, value);
+        checkn("the build hash slot", value[31:0], `BUILD_HASH);
+        write_dwords[0] = 36'hF_FFFF_FFFF;
+        write_burst(18'(MAP_BUILD_HASH), 1, 1);
+        read_status(MAP_BUILD_HASH, value);
+        checkn("the build hash slot ignores a write", value[31:0], `BUILD_HASH);
 
         $display("--- 6. silence on every output: every pointer at the zero word ---");
         // the 48 kHz path first flushes the decimator's delay line, which has no reset

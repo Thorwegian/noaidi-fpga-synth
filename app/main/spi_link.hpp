@@ -21,6 +21,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace spi_link {
 
@@ -54,6 +55,11 @@ void write_repeated(uint32_t address, const dword_t *dwords, size_t count);
 // one. False when the ID nonet did not come back: the link is faulty.
 bool read(uint32_t address, dword_t *dwords, size_t count);
 dword_t read_one(uint32_t address);
+
+// The gateware's own name (#596) from its two status dwords, as the boot log
+// and the console print it: the source commit, or "no source" for a gateware
+// built from a modified tree, and the time of its synthesis.
+std::string build_name(dword_t build_time, dword_t build_hash);
 
 // Read `count` dwords from one address, without auto-increment (a status
 // dword read twice, for a value that crosses clocks).

@@ -60,7 +60,9 @@ MIDI in ──► ESP32-S3 ──SPI master──► Tang Nano 20K (GW2AR-18C)
   design: [docs/design.md](docs/design.md).
 - **Boards:** a Sipeed Tang Nano 20K (GW2AR-18C) and an ESP32-S3
   module in the ESP32-S3-DevKitC-1's shape, with an ESP32-S3R8 (8 MB of
-  PSRAM) and 16 MB of flash (`docs/esp32s3_hw678.md`). The firmware's
+  PSRAM) and 16 MB of flash
+  ([docs/yd_esp32_s3.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/yd_esp32_s3.md)
+  in the board's repository). The firmware's
   partition table (`app/partitions.csv`) uses the first 6 MB of the
   flash.
 
@@ -99,7 +101,7 @@ working that hard.
 - **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
   `bank add|insert|rm|new|del|build` edit `banks.toml` (see
   [storage_format.md](docs/storage_format.md) "Banks").
-- **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
+- **System:** `info` (firmware, gateware, chip, MAC, reset reason), `mem` (heap),
   `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
   `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
   `ble`, `sync` (send the preset as CCs to the surfaces, as a Program
@@ -169,11 +171,18 @@ unnoticed.
 ## USB
 
 The socket marked `USB` is the chip's USB-OTG controller, its PHY assigned to
-it by eFuse (`docs/esp32s3_hw678.md`), and the firmware presents the synth
+it by eFuse
+([docs/yd_esp32_s3.md](https://github.com/Thorwegian/noaidi-fpga-synth-kicad/blob/main/docs/yd_esp32_s3.md)
+in the board's repository), and the firmware presents the synth
 there as a MIDI 1.0 device: a computer sees **Model 1**, sends notes and
 controllers to it, and reads its parameter feedback and preset dump back on
 the same cable. The console and the flashing path are on the socket marked
 `COM` and do not move.
+
+The synth presents as `Model 1` under `cafe:4015`, TinyUSB's example vendor
+and a made-up product number: a prototype identity, so that nobody mistakes
+it for a registered one while the vendor ID is still being discussed. The
+product's own pair is decided before anything ships.
 
 ## Preset storage
 
