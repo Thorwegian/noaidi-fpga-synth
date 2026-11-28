@@ -18,15 +18,37 @@
 //
 // The graph has two ends. The firmware has sources, the values it sets, and
 // a partial has sinks, its parameters. Everything between them has both.
-// A vibrato, whole:
 //
-//   Graph graph;
-//   const auto lfo = graph.instance<Lfo>("lfo");
-//   lfo.firmware_source(&Lfo::step, {0.0f, Lfo::step_at(50.0f)});
-//   lfo.firmware_source(&Lfo::shape);
-//   const auto note  = graph.firmware_source<Control>("note", {-5, 5});
-//   const auto depth = graph.firmware_source<Control>("depth", {0, 2});
-//   graph.partial_sink("pitch", {-5, 5}) <<= note + depth * lfo[&Lfo::wave];
+// What has a name in the tree is declared, as a member of its module or in
+// the module's constructor, with that name: a pin, a component that keeps a
+// state, an instance, an end. Arithmetic is written as arithmetic. Then the
+// joins are stated. A vibrato, whole:
+//
+//   struct Vibrato : Module {
+//       FirmwareSource<Control> note{"note", {-5.0f, 5.0f}};
+//       FirmwareSource<Control> depth{"depth", {0.0f, 2.0f}};
+//       FirmwareSource<Phase> rate{"rate", {0.0f, Lfo::step_at(50.0f)}};
+//       FirmwareSource<Select<Lfo::Shape>> shape{"shape"};
+//       PartialSink pitch{"pitch", {-5.0f, 5.0f}};
+//       Instance<Lfo> lfo{"lfo"};
+//
+//       Vibrato() {
+//           lfo[&Lfo::step] <<= rate;
+//           lfo[&Lfo::shape] <<= shape;
+//           pitch <<= note + depth * lfo[&Lfo::wave];
+//       }
+//   };
+//
+//   const Graph graph = Graph::of<Vibrato>();
+//
+// A join is written `<<=`, read as an arrow: what is on the left is driven
+// by the signal on the right. A join states a relation, once, as a
+// continuous assignment does in SystemVerilog, and the order of the
+// statements says nothing. A signal may be on the right of any number of
+// joins, and a sink on the left of one. The operator has assignment's
+// precedence, so all of the right-hand side is the signal. `=` keeps its
+// C++ meaning: it names a signal, and it does not compile on what is
+// declared.
 //
 // A signal has a unit, and the compiler joins only like to like: a control
 // value, a phase, or a select. A signal has a range too, the least and the
@@ -34,14 +56,6 @@
 // firmware and at a sink of a partial, and nowhere else: every other range
 // follows from the components. A control value saturates at a partial's
 // sink and at a state that is kept, never on the way.
-//
-// A pin is joined with `<<=`, read as an arrow: the pin on the left is
-// driven by the signal on the right. A join states a relation, once, as a
-// continuous assignment does in SystemVerilog, and the order of the
-// statements says nothing. A signal may be on the right of any number of
-// joins, and a pin on the left of one. The operator has assignment's
-// precedence, so all of the right-hand side is the signal. `=` keeps its
-// C++ meaning: it names a signal, and it does not compile on a pin.
 //
 // The graph has a namespace of its own, csp::graph, apart from the chip's
 // in csp: nothing in the model is named for a format or a field of the chip.
@@ -110,16 +124,19 @@ public:
     Signal(float value)
         requires std::same_as<Unit, Control>;
 
+protected:
+    Signal() = default;
+
 private:
-    friend class Module;
     Module *module_ = nullptr; // the diagram the signal is in; none: a constant
     int32_t component_ = -1;   // whose source drives it
     float constant_    = 0.0f;
 };
 
-// ---- components -------------------------------------------------------------
+// ---- arithmetic -------------------------------------------------------------
 //
-// Each has one source, which it returns, and the sinks its relation needs.
+// The components that keep nothing. Each is written as the arithmetic it
+// is: its arguments are its sinks, and what it returns is its source.
 
 // A sum: any number of sinks, each with a sign.
 Signal<Control> operator+(Signal<Control> a, Signal<Control> b);
@@ -150,135 +167,140 @@ Signal<Control> mux(Signal<Select<Enumeration>> select,
 // zero.
 Signal<Control> bipolar(Signal<Phase> phase);
 
+// ---- what is declared -------------------------------------------------------
+
+// What has a name in the tree: a pin, a component that keeps a state, an
+// instance, an end. It belongs to the module whose constructor is running
+// when it is declared, and a copy of it is the same thing again, not
+// another one.
+class Named {
+protected:
+    explicit Named(std::string_view name);
+    Named(const Named &)            = default;
+    Named &operator=(const Named &) = delete;
+};
+
 // ---- pins -------------------------------------------------------------------
 //
 // A module's pins are named from outside, as a component's are: the module
 // drives its sources and takes signals in at its sinks.
 
 // A pin that takes a signal in. Whoever uses the module joins it; inside
-// the module it is the signal that arrives.
+// the module it reads as the signal that arrives.
 template <typename Unit>
-class Sink : public Signal<Unit> {
+class Sink : public Signal<Unit>, public Named {
 public:
+    explicit Sink(std::string_view name);
+
     // Join: this sink takes the signal. A sink takes one.
     void operator<<=(Signal<Unit> signal);
-    Sink(const Sink &)            = default;
-    Sink &operator=(const Sink &) = delete;
-
-private:
-    friend class Module;
-    Sink() = default;
 };
 
 // A pin the module drives. The module joins it; whoever uses the module
 // reads it as the signal it drives.
 template <typename Unit>
-class Source : public Signal<Unit> {
+class Source : public Signal<Unit>, public Named {
 public:
+    explicit Source(std::string_view name);
+
     // Join: this source drives the signal. A source drives one.
     void operator<<=(Signal<Unit> signal);
-    Source(const Source &)            = default;
-    Source &operator=(const Source &) = delete;
-
-private:
-    friend class Module;
-    Source() = default;
 };
 
+// ---- components that keep a state -------------------------------------------
+//
+// Each reads as its source. One with a single sink is joined itself, and
+// one with several is joined at each sink by its name. Every state has a
+// name, so every state of every instance can be found.
+
 // A z⁻¹: its source is last pass's value at its sink. A pass is 1/24 000 s.
-// The sink may be joined after the source is read, which is how a loop is
-// closed.
+// It may be joined after it is read, which is how a loop is closed.
 template <typename Unit>
-struct UnitDelay {
-    Sink<Unit> sink;
-    Source<Unit> source;
+class UnitDelay : public Signal<Unit>, public Named {
+public:
+    explicit UnitDelay(std::string_view name);
+
+    void operator<<=(Signal<Unit> input);
+};
+
+// An accumulator: y[n] = y[n−1] + x[n]. Its sink is x.
+template <Quantity Unit>
+class Accumulator : public Signal<Unit>, public Named {
+public:
+    explicit Accumulator(std::string_view name);
+
+    void operator<<=(Signal<Unit> step);
+};
+
+// A one-pole: y[n] = y[n−1] + rate·(target − y[n−1]).
+class OnePole : public Signal<Control>, public Named {
+public:
+    explicit OnePole(std::string_view name);
+
+    Sink<Control> target;
+    Sink<Control> rate;
+};
+
+// ---- the two ends -----------------------------------------------------------
+
+// A source of the firmware: a value it sets, in its unit. A quantity has
+// its range, and a value set outside it is clamped here.
+template <typename Unit>
+class FirmwareSource : public Signal<Unit>, public Named {
+public:
+    FirmwareSource(std::string_view name, Range range)
+        requires Quantity<Unit>;
+    explicit FirmwareSource(std::string_view name)
+        requires(!Quantity<Unit>);
+};
+
+// A sink of a partial: one of its parameters. A control value saturates
+// here, at the range the partial takes.
+class PartialSink : public Named {
+public:
+    PartialSink(std::string_view name, Range range);
+
+    void operator<<=(Signal<Control> signal);
 };
 
 // ---- modules ----------------------------------------------------------------
 
-template <typename Definition>
-class Instance;
-
 // A diagram with named pins. A module is a struct that derives from this:
-// its pins are its members, and its constructor states the diagram. The
-// graph constructs it once, however many instances there are, and an
+// what it declares, as its members and in its constructor, is the diagram.
+// The graph constructs it once, however many instances there are, and an
 // instance holds its joins and its own state, not a copy of the diagram.
 class Module {
 protected:
     Module();
-
-    // A pin, by the name it has in the tree.
-    template <typename Unit>
-    Sink<Unit> sink(std::string_view name);
-    template <typename Unit>
-    Source<Unit> source(std::string_view name);
-
-    // The components that keep a value from one pass to the next. Every
-    // state has a name, so every state of every instance can be found.
-
-    // y[n] = y[n−1] + x[n]
-    Signal<Phase> accumulator(std::string_view name, Signal<Phase> step);
-    // y[n] = y[n−1] + r·(target − y[n−1])
-    Signal<Control> one_pole(std::string_view name, Signal<Control> target,
-                             Signal<Control> rate);
-    template <typename Unit>
-    UnitDelay<Unit> unit_delay(std::string_view name);
-
-public:
-    // An instance of a module inside this one: `name`, or `name[index]`.
-    template <std::derived_from<Module> Definition>
-    Instance<Definition> instance(std::string_view name);
-    template <std::derived_from<Module> Definition>
-    Instance<Definition> instance(std::string_view name, int index);
 };
 
-// One use of a module. Its pins are reached through the definition's
-// members: `lfo[&Lfo::step] <<= signal` joins a sink, and `lfo[&Lfo::wave]`
-// is the signal a source drives.
-template <typename Definition>
-class Instance {
+// One use of a module: `name`, or `name[index]`. Its pins are reached
+// through the definition's members: `lfo[&Lfo::step] <<= signal` joins a
+// sink, and `lfo[&Lfo::wave]` is the signal a source drives.
+template <std::derived_from<Module> Definition>
+class Instance : public Named {
 public:
+    explicit Instance(std::string_view name);
+    Instance(std::string_view name, int index);
+
     template <typename Unit>
     Sink<Unit> operator[](Sink<Unit> Definition::*pin) const;
     template <typename Unit>
     Signal<Unit> operator[](Source<Unit> Definition::*pin) const;
-
-    // The firmware drives this sink: a source of the firmware, named for
-    // the pin, joined to it.
-    template <Quantity Unit>
-    Source<Unit> firmware_source(Sink<Unit> Definition::*pin,
-                                 Range range) const;
-    template <Enumerated Enumeration>
-    Source<Select<Enumeration>>
-    firmware_source(Sink<Select<Enumeration>> Definition::*pin) const;
-
-private:
-    friend class Module;
-    Module *owner_ = nullptr; // the module the instance is in
-    int32_t index_ = -1;      // which of its instances
 };
 
 // ---- the graph --------------------------------------------------------------
 
-// The whole tree: the outermost diagram, with the two ends.
-class Graph : public Module {
+// The whole tree, from the outermost module down.
+class Graph {
 public:
-    Graph();
+    // The graph of a tree: it constructs the outermost module, which
+    // declares the rest.
+    template <std::derived_from<Module> Outermost>
+    static Graph of();
 
-    // A source of the firmware: a value it sets, in its unit. A value set
-    // outside the range is clamped here.
-    template <Quantity Unit>
-    Source<Unit> firmware_source(std::string_view name, Range range);
-    // A select the firmware writes.
-    template <Enumerated Enumeration>
-    Source<Select<Enumeration>> firmware_source(std::string_view name);
-
-    // A sink of a partial: one of its parameters. A control value
-    // saturates here, at the range the partial takes.
-    Sink<Control> partial_sink(std::string_view name, Range range);
-
-    // What the graph refuses, each by the name of the pin or the state: a
-    // pin joined twice, a pin left unjoined, a loop whose range does not
+    // What the graph refuses, each by its name in the tree: a sink or a
+    // source joined twice or left unjoined, a loop whose range does not
     // close.
     struct Issue {
         std::string message;

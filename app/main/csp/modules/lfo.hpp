@@ -6,11 +6,11 @@
 // A low-frequency oscillator as its block diagram: an accumulator of phase,
 // the four waves read off that phase, and a mux on the shape.
 //
-//                                       ┌─► saw ──────┐
-//   step ──► accumulator ──► bipolar ──┼─► square ───┤
-//                                       ├─► triangle ─┼─► mux ──► wave
-//                                       └─► sine ─────┘    ▲
-//   shape ─────────────────────────────────────────────────┘
+//                                 ┌─► saw ──────┐
+//   step ──► phase ──► bipolar ──┼─► square ───┤
+//                                 ├─► triangle ─┼─► mux ──► wave
+//                                 └─► sine ─────┘    ▲
+//   shape ───────────────────────────────────────────┘
 
 #pragma once
 
@@ -23,10 +23,12 @@ struct Lfo : Module {
     enum class Shape { saw, square, triangle, sine, count };
 
     // The phase added each pass, a fraction of a cycle.
-    Sink<Phase> step          = sink<Phase>("step");
-    Sink<Select<Shape>> shape = sink<Select<Shape>>("shape");
+    Sink<Phase> step{"step"};
+    Sink<Select<Shape>> shape{"shape"};
     // −1 … +1
-    Source<Control> wave = source<Control>("wave");
+    Source<Control> wave{"wave"};
+
+    Accumulator<Phase> phase{"phase"};
 
     // The step of an LFO at this many cycles a second.
     static constexpr float step_at(float hertz) {
@@ -34,7 +36,7 @@ struct Lfo : Module {
     }
 
     Lfo() {
-        const Signal<Phase> phase = accumulator("phase", step);
+        phase <<= step;
 
         const Signal<Control> saw      = bipolar(phase);
         const Signal<Control> square   = mux(saw < 0.0f, {1.0f, -1.0f});
