@@ -17,8 +17,10 @@ a bit count follows only where a reader needs it.
 - **nonet** — 9 bits. The link's unit: a command is a nonet, an address two
   nonets, and IMEM holds a row as eight nonet slices. Never "nonad" (a
   chemistry term that Google hallucinated into an early draft).
-- **word** — 18 bits, Q4.14 in the CSP. One register, one sink word, one
-  block RAM row at its widest native width.
+- **word** — a size: 18 bits, Q4.14 in the CSP. One register holds one, one
+  sink holds one, and it is one block RAM row at its widest native width.
+  Never a place (that is a **register** or a **sink**) and never what a
+  place holds (that is a value).
 - **dword** — 36 bits. The wire's payload unit, the write FIFO's entry, and
   the CSP's register pair (an aligned pair, upper word at the even address;
   Q4.32 for a phase or an envelope level). The ISA's width suffix is `.d`
@@ -49,8 +51,8 @@ a bit count follows only where a reader needs it.
   (bend, the wheel's cutoff, volume) is a channel register that coincides
   with global scope while exactly one channel exists.
 - **preset** — a sound: the active one (`preset_t`) or a stored file
-  ([storage_format.md](storage_format.md)). Not an FPGA parameter word,
-  which are all live.
+  ([storage_format.md](storage_format.md)). Not the parameter values in the
+  FPGA, which are all live.
 - **patch** — a change to code or a tool, never a sound (#300). "Patch
   panel" survives only as the CV-routing metaphor.
 - **house sound** — the design goal: a characteristic, identifiable
@@ -64,12 +66,12 @@ a bit count follows only where a reader needs it.
 - **timebase** — 768 sysclk per 96 kHz sample; sysclk is 73.728 MHz =
   768 × 96 kHz, the audio timebase, and it never moves.
 - **S1 … S10, S3B/S3C/S3D** — the pipeline's stage names, in the header of
-  `partial_pipeline.sv`: S1 the sink words and state in registers, S2 the
+  `partial_pipeline.sv`: S1 the sinks' values and state in registers, S2 the
   pitch and cutoff sums, S3 the effective parameters and LUT reads, S3B–S3D
   the oscillator split so no stage chains an adder tree into a multiply,
   S4–S9 the filter, S10 the gain multiply.
 - **effective value** — a partial's parameter as the pipeline uses it:
-  `effective = base + dmem[ptr]`, the voice's word plus the channel's,
+  `effective = base + dmem[ptr]`, the voice's value plus the channel's,
   both read from the sink area.
 - **shadow SRAM** — the filter's carried values waiting in distributed
   RAM (RAM16SDP4 cells, `rtl/dsp/shadow_ram.sv`, #309) instead of a
@@ -102,15 +104,15 @@ control signal once a pass. The instruction set is
 - **control program** — the program the CSP runs every pass: the wiring
   between sources and sinks. The firmware generates it from the DSP graph
   and loads it, at boot and whenever a commit has other paths than the
-  wired ones; where each value's word lives is the graph's, and differs
-  from one program to the next.
+  wired ones; which register holds each value is the graph's to say, and
+  differs from one program to the next.
 - **path** — a part of the synth a control program may leave out, and then
   does not compute: what a channel's LFO moves (`SoundEngine::Wiring::Paths`).
   What a knob reaches is in every program the firmware loads, so a knob
   loads none; today that is every path.
   **rewire** — wire a graph for the committed tree's paths; **reload** —
-  load its program, with every word the firmware owns, while the CSP is
-  held.
+  load its program, with every register and sink the firmware owns, while
+  the CSP is held.
 - **DSP graph** — the classic DSP flowchart as a flat netlist
   (`app/main/csp/dsp_graph.hpp`): sources the firmware sets, constants,
   operators (sum, multiply, multiply-add, difference, absolute value,
@@ -139,10 +141,10 @@ control signal once a pass. The instruction set is
   program as one **image**.
 - **IMEM** — the instruction memory, 2048 rows of one qword, eight blocks
   of 2048 × 9. **DMEM** — the data memory, the **register file**: 2048
-  words, kept as three copies (one per read port R, X, Y), each an even
+  registers, kept as three copies (one per read port R, X, Y), each an even
   and an odd **bank** for the pairs.
-- **register** — a word of the file, at the address the graph laid out for
-  it; a **register pair** is a dword at an even address.
+- **register** — one place in the file, a word in size, at the address the
+  graph laid out for it; a **register pair** is a dword at an even address.
 - **index registers `i`, `j`** — hold the address of a block (a voice, a
   channel, an LFO record); an indexed operand is the index's high bits
   beside the offset's low bits, concatenation, not addition, so every
@@ -173,7 +175,7 @@ control signal once a pass. The instruction set is
 ## The control plane
 
 - **the door** — the write FIFO's address, `0x06000`: a dword written to
-  it queues a write of its word to the register or sink word its top 12
+  it queues a write of its 18-bit value to the register or sink its top 12
   bits name ([memory_map.md](memory_map.md)).
 - **write FIFO** — the one queue in the system: 511 dwords, crossing the
   SPI clock to sysclk; it holds the boot image while it lands 48 a pass.
@@ -183,21 +185,23 @@ control signal once a pass. The instruction set is
 - **write window** — the cycles at the end of a pass (3018–3065) in which
   up to 48 committed writes are popped into DMEM, when no instruction
   reads.
-- **pending bit** — the firmware's one bit per word saying it changed and
-  is not yet sent; the firmware keeps no queue of its own.
+- **pending bit** — the firmware's one bit for each register and sink,
+  saying it changed and is not yet sent; the firmware keeps no queue of its
+  own.
 - **probe** — one aligned pair of the register file read once a pass into
   `DIAG_PROBE_EVEN/ODD` (`PROBE_ADDRESS` names it); how `csp verify` reads
   the file back.
 - **the pipe** (also **the data stream**) — the 48 kHz S/PDIF output
-  carrying data instead of audio (`CTRL[3]`): frames of 64 words with a
-  sync word and a CRC, read by `spdif_capture.py`.
-- **sink area** — 1024 words the CSP publishes and the partials read, in
+  carrying data instead of audio (`CTRL[3]`): 32 bits a sample, in frames
+  of 64 that open with a sync pattern and close with a CRC, read by
+  `spdif_capture.py`.
+- **sink area** — 1024 sinks the CSP publishes and the partials read, in
   two **pages**, each page three blocks (the partials read six sinks a
   clock, two through each block's two ports). **active page** — the one
   the partials read; **shadow page** — the one the CSP and the firmware
   write; they **flip** at the pass boundary. (Not shadow SRAM.)
 - **source / sink** — the couple: the CSP's results are sources (an
-  envelope, an LFO, a voice's pitch); the words the partials read are
+  envelope, an LFO, a voice's pitch); what the partials read are
   sinks; the control program wires one to the other.
 - **generators / processors** — a way to read the control program: an LFO
   has no inputs and an envelope only its gate (generators); the rest take
