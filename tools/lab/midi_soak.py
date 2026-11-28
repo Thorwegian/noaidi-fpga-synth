@@ -37,6 +37,7 @@ import random
 import subprocess
 import threading
 import time
+import midi_wire
 from synth_port import find_synth_port
 
 # --- the controllers, as voice_alloc.cpp's handle_cc() reads them -------------
@@ -180,22 +181,25 @@ def main():
           flush=True)
 
     wire = Wire(args.port)
-    if args.program is not None:
-        wire.send(program_change(args.program))
-        time.sleep(2.0)                       # a Program Change reloads the preset; let it settle
-    stop = threading.Event()
-    threading.Thread(target=wire.keepalive, args=(stop,), daemon=True).start()
-    soak = Soak(wire, args.rate)
-    try:
-        soak.run(args.seconds)
-    finally:
-        soak.silence()
+    before = midi_wire.tx_bytes()
+    with midi_wire.subscribed(args.port):
         if args.program is not None:
-            wire.send(program_change(args.program))   # restore: the preset as the file has it
-            time.sleep(2.0)
-        stop.set()
-        print(f"[soak] done: {soak.notes} notes, {soak.ccs} CCs, {wire.sent} messages  (seed {seed})",
-              flush=True)
+            wire.send(program_change(args.program))
+            time.sleep(2.0)                       # a Program Change reloads the preset; let it settle
+        stop = threading.Event()
+        threading.Thread(target=wire.keepalive, args=(stop,), daemon=True).start()
+        soak = Soak(wire, args.rate)
+        try:
+            soak.run(args.seconds)
+        finally:
+            soak.silence()
+            if args.program is not None:
+                wire.send(program_change(args.program))   # restore: the preset as the file has it
+                time.sleep(2.0)
+            stop.set()
+            print(f"[soak] done: {soak.notes} notes, {soak.ccs} CCs, {wire.sent} messages  (seed {seed})",
+                  flush=True)
+    midi_wire.require_moved(before, args.port)
 
 
 if __name__ == "__main__":
