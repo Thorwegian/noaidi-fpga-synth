@@ -146,7 +146,15 @@ module spi_bus #(
         end else if (address == synth_pkg::MAP_PROBE_ADDRESS) begin
             system_at = synth_pkg::SPI_DWORD_W'(probe_register);
         end else begin
-            system_at = status[address[synth_pkg::MAP_STATUS_INDEX_W-1:0] - synth_pkg::MAP_STATUS_INDEX_W'(synth_pkg::MAP_STORED_DWORDS)];
+            // One constant select per status dword. A subscript computed from
+            // the address reaches into the packed array by bit: a multiply by
+            // the dword's width and a shift across the whole of it.
+            system_at = '0;
+            for (int slot = 0; slot < synth_pkg::MAP_SYSTEM_DWORDS - synth_pkg::MAP_STORED_DWORDS; slot++) begin
+                if (address[synth_pkg::MAP_STATUS_INDEX_W-1:0] == synth_pkg::MAP_STATUS_INDEX_W'(synth_pkg::MAP_STORED_DWORDS + slot)) begin
+                    system_at = status[slot];
+                end
+            end
         end
     endfunction
 
