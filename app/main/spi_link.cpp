@@ -232,19 +232,7 @@ dword_t read_one(uint32_t address) {
     return dword;
 }
 
-} // namespace spi_link
-
-extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin,
-                              int cs_pin, uint32_t frequency_hz) {
-    spi_link::init(mosi_pin, miso_pin, sclk_pin, cs_pin, frequency_hz);
-}
-
-extern "C" void spi_link_set_rate(uint32_t frequency_hz) {
-    spi_link::set_rate(frequency_hz);
-}
-
-extern "C" std::string spi_link::build_name(dword_t build_time,
-                                            dword_t build_hash) {
+std::string build_name(dword_t build_time, dword_t build_hash) {
     char commit[16] = "no source";
     if (build_hash != 0) {
         std::snprintf(commit, sizeof commit, "%08llx",
@@ -259,7 +247,18 @@ extern "C" std::string spi_link::build_name(dword_t build_time,
     return std::string(commit) + ", " + when;
 }
 
-int spi_link_boot_check(void) {
+} // namespace spi_link
+
+extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin,
+                              int cs_pin, uint32_t frequency_hz) {
+    spi_link::init(mosi_pin, miso_pin, sclk_pin, cs_pin, frequency_hz);
+}
+
+extern "C" void spi_link_set_rate(uint32_t frequency_hz) {
+    spi_link::set_rate(frequency_hz);
+}
+
+extern "C" int spi_link_boot_check(void) {
     using spi_link::dword_t;
     int fails  = 0;
     auto check = [&fails](const char *what, bool ok) {
