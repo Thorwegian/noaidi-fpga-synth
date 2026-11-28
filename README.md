@@ -99,7 +99,7 @@ working that hard.
 - **Banks:** `bank` lists the banks, `bank <n>` a bank's programs;
   `bank add|insert|rm|new|del|build` edit `banks.toml` (see
   [storage_format.md](docs/storage_format.md) "Banks").
-- **System:** `info` (firmware, chip, MAC, reset reason), `mem` (heap),
+- **System:** `info` (firmware, gateware, chip, MAC, reset reason), `mem` (heap),
   `tasks` (FreeRTOS tasks: state, priority, stack headroom, CPU),
   `uptime`, `df` (storage space), `log <tag|*> <level>`, `reboot`,
   `ble`, `sync` (send the preset as CCs to the surfaces, as a Program

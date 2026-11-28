@@ -4,7 +4,8 @@
 // License: CERN-OHL-S v2
 //
 // info, mem, tasks, uptime, df, log and reboot: what ESP-IDF and FreeRTOS
-// can report about the running firmware. tasks needs
+// can report about the running firmware, and with it the gateware's own
+// name, which the FPGA answers (#596). tasks needs
 // CONFIG_FREERTOS_USE_TRACE_FACILITY and CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS.
 
 #include "cli.h"
@@ -28,6 +29,7 @@
 #include "freertos/task.h"
 
 #include "console.h"
+#include "engine_link.h"
 #include "storage.h"
 
 static const char *reset_reason(esp_reset_reason_t r) {
@@ -71,6 +73,10 @@ static int cmd_info(int argc, char **argv) {
     esp_read_mac(mac, ESP_MAC_BT);
     printf("  firmware  %s, built %s %s, ESP-IDF %s\n", NOAIDI_BUILD, ad->date,
            ad->time, esp_get_idf_version());
+    char gateware[64];
+    printf("  gateware  %s\n", engine_link_gateware(gateware, sizeof gateware)
+                                       ? gateware
+                                       : "no answer");
     printf("  chip      %s rev v%d.%d, %d core%s, %" PRIu32 " MB flash\n",
            CONFIG_IDF_TARGET, chip.revision / 100, chip.revision % 100,
            chip.cores, chip.cores == 1 ? "" : "s", flash / (1024 * 1024));
@@ -188,7 +194,8 @@ static int cmd_reboot(int argc, char **argv) {
 }
 
 static const console_cmd_t s_commands[] = {
-        {"info", "", "firmware, chip, MAC and reset reason", cmd_info, NULL},
+        {"info", "", "firmware, gateware, chip, MAC and reset reason", cmd_info,
+         NULL},
         {"mem", "", "heap: free, lowest ever, largest block", cmd_mem, NULL},
         {"tasks", "", "FreeRTOS tasks: state, priority, stack, CPU", cmd_tasks,
          NULL},

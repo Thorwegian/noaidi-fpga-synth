@@ -139,8 +139,8 @@ The diagnostic words cross from the system clock through two flip-flops and are 
 
 A build's identity is the gateware's, and it travels with the bitstream: the
 firmware's banner names its own file, so a take names the machine it ran on
-by these two words, which the firmware prints at boot and `csp diag`
-repeats. A synthesis of a modified tree writes no hash, since its commit no
+by these two words, which the firmware prints at boot and `info` and
+`csp diag` repeat. A synthesis of a modified tree writes no hash, since its commit no
 longer describes what was built; the time still names the build.
 
 `STROKE` is the partial pipeline's event input (#624), and it is not a word

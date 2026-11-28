@@ -243,7 +243,23 @@ extern "C" void spi_link_set_rate(uint32_t frequency_hz) {
     spi_link::set_rate(frequency_hz);
 }
 
-extern "C" int spi_link_boot_check(void) {
+extern "C" std::string spi_link::build_name(dword_t build_time,
+                                            dword_t build_hash) {
+    char commit[16] = "no source";
+    if (build_hash != 0) {
+        std::snprintf(commit, sizeof commit, "%08llx",
+                      static_cast<unsigned long long>(build_hash));
+    }
+    char when[40]    = "no build time";
+    const auto epoch = static_cast<time_t>(build_time);
+    struct tm utc {};
+    if (build_time != 0 && gmtime_r(&epoch, &utc) != nullptr) {
+        std::strftime(when, sizeof when, "built %Y-%m-%d %H:%M UTC", &utc);
+    }
+    return std::string(commit) + ", " + when;
+}
+
+int spi_link_boot_check(void) {
     using spi_link::dword_t;
     int fails  = 0;
     auto check = [&fails](const char *what, bool ok) {
@@ -284,19 +300,9 @@ extern "C" int spi_link_boot_check(void) {
     std::array<spi_link::dword_t, 2> build{};
     const bool build_ok =
             spi_link::read(fpga_map::build_time, build.data(), build.size());
-    char when[32] = "no date";
-    if (build_ok && build[0] != 0) {
-        const auto epoch = static_cast<time_t>(build[0]);
-        struct tm utc {};
-        if (gmtime_r(&epoch, &utc) != nullptr) {
-            std::strftime(when, sizeof when, "%Y-%m-%d %H:%M UTC", &utc);
-        }
-    }
-    if (build_ok && build[1] == 0) {
-        std::printf("=== gateware: no source, built %s ===\n", when);
-    } else if (build_ok) {
-        std::printf("=== gateware %08llx, built %s ===\n",
-                    static_cast<unsigned long long>(build[1]), when);
+    if (build_ok) {
+        std::printf("=== gateware %s ===\n",
+                    spi_link::build_name(build[0], build[1]).c_str());
     }
     check("5. the gateware answers with a build identity",
           build_ok && build[0] != 0);

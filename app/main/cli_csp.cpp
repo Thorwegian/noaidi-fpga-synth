@@ -108,12 +108,9 @@ int op_diag(int, char **) {
             static_cast<unsigned long>(dwords[3] & 0xFFFF),
             static_cast<unsigned long>(
                     engine_link_status(fpga_map::diag_stream)));
-    uint64_t build[2] = {};
-    if (engine_link_raw_read(fpga_map::build_time, build, 2)) {
-        std::printf("  gateware built %llu (epoch s), commit %08llx%s\n",
-                    static_cast<unsigned long long>(build[0]),
-                    static_cast<unsigned long long>(build[1]),
-                    build[1] ? "" : " (sources were modified)");
+    char gateware[64];
+    if (engine_link_gateware(gateware, sizeof gateware)) {
+        std::printf("  gateware %s\n", gateware);
     }
     return 0;
 }

@@ -685,6 +685,16 @@ bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count) {
     return ok;
 }
 
+bool engine_link_gateware(char *text, size_t size) {
+    uint64_t build[2] = {};
+    if (!engine_link_raw_read(fpga_map::build_time, build, 2)) {
+        return false;
+    }
+    std::snprintf(text, size, "%s",
+                  spi_link::build_name(build[0], build[1]).c_str());
+    return true;
+}
+
 uint32_t engine_link_status(uint32_t address) {
     if (!running) {
         return 0;

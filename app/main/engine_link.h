@@ -13,6 +13,7 @@
 
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -48,6 +49,11 @@ bool engine_link_raw_write_burst(uint32_t address, const uint64_t *dwords,
 bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count);
 // A status dword's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
+
+// The gateware's own name (#596) as the console prints it: its source commit
+// and the time of its synthesis (spi_link::build_name). False if the link is
+// not running or the FPGA did not answer.
+bool engine_link_gateware(char *text, size_t size);
 
 // The gateware's test tone: a full-scale 1500 Hz sine on both outputs.
 void engine_link_test_tone(bool on);
