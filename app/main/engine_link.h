@@ -13,6 +13,7 @@
 
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -49,6 +50,11 @@ bool engine_link_raw_read(uint32_t address, uint64_t *dwords, int count);
 // A status dword's low 32 bits, read until two reads agree.
 uint32_t engine_link_status(uint32_t address);
 
+// The gateware's own name (#596) for the console's C commands: its source
+// commit and the time of its synthesis (spi_link::build_name). False if the
+// link is not running or the FPGA did not answer.
+bool engine_link_gateware(char *text, size_t size);
+
 // The gateware's test tone: a full-scale 1500 Hz sine on both outputs.
 void engine_link_test_tone(bool on);
 
@@ -60,7 +66,14 @@ void engine_link_data_stream(bool on, int source);
 #ifdef __cplusplus
 }
 
+#include <optional>
+#include <string>
+
 #include "sound_engine.hpp"
+
+// The gateware's own name (#596), or nothing if the link is not running or
+// the FPGA did not answer.
+std::optional<std::string> engine_link_gateware();
 
 // The link as the sound engine sends through it. A batch of writes goes into
 // the image at once, so a tick sends all of it with one swap (a batch larger

@@ -62,8 +62,9 @@ package synth_pkg;
     parameter logic [SPI_ADDRESS_W-1:0] MAP_STROKE = 18'h00001;
     parameter int STROKE_VOICE_W = VOICE_W;             // the voice, at the bottom
     parameter int STROKE_W       = STROKE_VOICE_W + 1;  // the toggle above it
-    parameter int MAP_SYSTEM_DWORDS = 16;
-    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back (0x7 reads the trap's capture); 0x8–0xF are status
+    parameter int MAP_SYSTEM_DWORDS = 18;
+    parameter int MAP_STORED_DWORDS = 8;         // 0x0–0x7 are kept and read back (0x7 reads the trap's capture); 0x8–0x11 are status
+    parameter int MAP_STATUS_INDEX_W = $clog2(MAP_SYSTEM_DWORDS);   // an address of the region, to reach a status dword
     parameter int MAP_DIAG_PASS    = 8;         // status dword: the passes since reset
     parameter int MAP_DIAG_QUEUE   = 9;         // status dword: the FIFO's Gray read pointer, [10] full
     parameter int MAP_DIAG_LIMITER = 10;        // status dword: the master limiter (with the output, #236)
@@ -74,6 +75,8 @@ package synth_pkg;
     parameter int MAP_PROBE_EVEN   = 13;        // status dword: the pair's even register
     parameter int MAP_PROBE_ODD    = 14;        //   and its odd one
     parameter int MAP_DIAG_STREAM  = 15;        // status dword: the stream's frames sent since reset
+    parameter int MAP_BUILD_TIME   = 16;        // status dword: the synthesis's time, seconds since the epoch, UTC (#596)
+    parameter int MAP_BUILD_HASH   = 17;        // status dword: the low 32 bits of the source commit's SHA-1, 0 when the sources were modified (#596)
 
     // The regions beyond the system dwords (docs/memory_map.md, the map).
     parameter logic [SPI_ADDRESS_W-1:0] MAP_PARTIAL_BASE = 18'h02000;   // a partial's pointers: four dwords at base + 64 p

@@ -7,10 +7,12 @@
 
 #include <array>
 #include <cstdio>
+#include <ctime>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_log.h"
+#include "fpga_map.hpp"
 
 namespace spi_link {
 
@@ -230,6 +232,31 @@ dword_t read_one(uint32_t address) {
     return dword;
 }
 
+std::string build_name(dword_t build_time, dword_t build_hash) {
+    // snprintf and strftime write into the string's own storage: snprintf
+    // says how long its text is before it writes, strftime how much it wrote.
+    std::string commit = "no source";
+    if (build_hash != 0) {
+        const auto hash  = static_cast<unsigned long long>(build_hash);
+        const int length = std::snprintf(nullptr, 0, "%08llx", hash);
+        commit.assign(static_cast<size_t>(length), '\0');
+        std::snprintf(commit.data(), commit.size() + 1, "%08llx", hash);
+    }
+    std::string when = "no build time";
+    const auto epoch = static_cast<time_t>(build_time);
+    struct tm utc {};
+    if (build_time != 0 && gmtime_r(&epoch, &utc) != nullptr) {
+        std::string text(sizeof "built 0000-00-00 00:00 UTC", '\0');
+        const size_t written = std::strftime(text.data(), text.size(),
+                                             "built %Y-%m-%d %H:%M UTC", &utc);
+        if (written != 0) {
+            text.resize(written);
+            when = text;
+        }
+    }
+    return commit + ", " + when;
+}
+
 } // namespace spi_link
 
 extern "C" void spi_link_init(int mosi_pin, int miso_pin, int sclk_pin,
@@ -274,6 +301,20 @@ extern "C" int spi_link_boot_check(void) {
           spi_link::read_one(0x00803) == 0);
     check("   and the scratch dword is unharmed",
           spi_link::read_one(scratch) == burst[0]);
+
+    // Which gateware this is (#596). The firmware's banner names a different
+    // file, so the machine is named only by what the FPGA answers: the
+    // synthesis's time and the commit it read, or zero for a gateware built
+    // from a modified tree, which is a gateware built without a name.
+    std::array<spi_link::dword_t, 2> build{};
+    const bool build_ok =
+            spi_link::read(fpga_map::build_time, build.data(), build.size());
+    if (build_ok) {
+        std::printf("=== gateware %s ===\n",
+                    spi_link::build_name(build[0], build[1]).c_str());
+    }
+    check("5. the gateware answers with a build identity",
+          build_ok && build[0] != 0);
 
     std::printf("=== RESULT: %s (%d fails) ===\n", fails ? "FAIL" : "ALL OK",
                 fails);

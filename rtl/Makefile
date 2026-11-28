@@ -32,6 +32,13 @@ SHELL := /bin/bash
 # pipeline and the output from the first revision (#236).
 TOP = top
 PKG = synth_pkg.sv
+# The build's own name (#596), passed into top.sv: the synthesis's time and
+# the commit the sources are. Sources modified at synthesis make the hash
+# zero, since the commit no longer describes what was built; the time still
+# names the build. A bench passes the same two, so it can check the slots.
+BUILD_TIME := $(shell date +%s)
+BUILD_HASH := $(shell sh -c 'h=$$(git rev-parse --short=8 HEAD 2>/dev/null || echo 0); [ -n "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && h=0; printf %d 0x$$h')
+BUILD_DEFINES = -DBUILD_TIME=$(BUILD_TIME) -DBUILD_HASH=$(BUILD_HASH)
 CSP = csp/csp_pkg.sv csp/csp_imem.sv csp/csp_decode_rom.sv csp/csp_write_fifo.sv csp/csp_dmem.sv csp/csp_pass.sv \
       csp/csp_multiply_add.sv csp/csp_core.sv csp/csp.sv
 SINK = csp/csp_sink_area.sv
@@ -93,7 +100,7 @@ dsp/halfband_lut.hex: ../scripts/gen_halfband.py
 # so the flag is the default again; `make WIDELUT=` builds without it.
 WIDELUT ?= -nowidelut
 yosys.json: $(SRC) $(LUTS) Makefile
-	set -o pipefail; yosys -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
+	set -o pipefail; yosys -p 'read_verilog -sv $(BUILD_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -json $@' 2>&1 | tee yosys.log
 	# every block's pins from a flip-flop of their own, none shared: the untimed routes (#238).
 	# The verdict is printed; the build goes on while the partial pipeline's own pins (its LUT
 	# ROMs' addresses, the sink area's read addresses, the pointer blocks' writes) are on the list.
@@ -157,7 +164,7 @@ report: pnr.json utilisation
 # capacity in pnr.log. Fit a block to the primitives before writing it.
 obj_dir/utilisation.json: $(SRC) $(LUTS) Makefile
 	mkdir -p obj_dir
-	set -o pipefail; yosys -q -p 'read_verilog -sv $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -noflatten; tee -q -o $@.new stat -json -top $(TOP)'
+	set -o pipefail; yosys -q -p 'read_verilog -sv $(BUILD_DEFINES) $(PKG) $(MOD); synth_gowin -family gw2a -top $(TOP) $(WIDELUT) -noflatten; tee -q -o $@.new stat -json -top $(TOP)'
 	mv $@.new $@
 
 utilisation: obj_dir/utilisation.json
@@ -342,7 +349,7 @@ sim-i2s: obj_dir/tb_i2s_tx/sim
 # status slot against the signal it packs, silence, the test tone on all three
 # outputs, the data stream. 6 ms of chip time, about a second.
 obj_dir/tb_top/sim: $(PKG) $(MOD) tb/tb_top.sv $(LUTS) Makefile
-	$(VERILATE) $(PKG) $(MOD) tb/tb_top.sv
+	$(VERILATE) $(BUILD_DEFINES) $(PKG) $(MOD) tb/tb_top.sv
 
 # The boot self-test's image for tb_top (#378), built by the host tool as
 # the firmware builds it: the rows and the decode ROM as hex for $readmemh (a
