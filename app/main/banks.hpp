@@ -6,16 +6,12 @@
 // banks.toml (docs/storage_format.md "Banks") holds numbered banks, each a
 // name and a list of preset paths whose positions are the program numbers.
 // This module reads, edits and writes it; saving goes through
-// safe_file.hpp. A C interface below lets the C modules look a program up.
+// safe_file.hpp.
 //
 // Plain C++ with stdio: the host test (app/test) uses it too.
 
 #pragma once
 
-#include <stdbool.h>
-#include <stddef.h>
-
-#ifdef __cplusplus
 #include <map>
 #include <optional>
 #include <string>
@@ -52,16 +48,3 @@ std::optional<std::string> program_path(const BankMap &banks, int bank,
                                         int program);
 
 } // namespace banks
-
-extern "C" {
-#endif
-
-// Look a program up in the banks file at banks_path: copies the preset's
-// path (from the storage root) to path. False if the file, the bank or the
-// program does not exist.
-bool banks_program_path(const char *banks_path, int bank, int program,
-                        char *path, size_t len);
-
-#ifdef __cplusplus
-}
-#endif
